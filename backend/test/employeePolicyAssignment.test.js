@@ -12,7 +12,7 @@ const EMPLOYEE_ID = '11111111-1111-4111-8111-111111111111';
 const POLICY_A = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const POLICY_B = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
 
-function policyDb(overlappingRows = []) {
+function policyDb(overlappingRows = [], { policyActive = true } = {}) {
   const calls = [];
   let replacementNumber = 0;
   return {
@@ -22,6 +22,11 @@ function policyDb(overlappingRows = []) {
       calls.push({ text, params });
       if (text.startsWith('SELECT pg_advisory_xact_lock')) {
         return { rowCount: 1, rows: [{}] };
+      }
+      if (text.startsWith('SELECT id') && text.includes('FROM attendance_policies')) {
+        return policyActive
+          ? { rowCount: 1, rows: [{ id: params[0] }] }
+          : { rowCount: 0, rows: [] };
       }
       if (text.startsWith('SELECT id, attendance_policy_id')) {
         return { rowCount: overlappingRows.length, rows: overlappingRows };
@@ -138,4 +143,24 @@ test('policy transitions reject invalid effective ranges before writing', async 
       error.message === 'effective_to must be on or after effective_from'
   );
   assert.equal(db.calls.length, 0);
+});
+
+test('inactive policies cannot be assigned to a new employee period', async () => {
+  const db = policyDb([], { policyActive: false });
+
+  await assert.rejects(
+    upsertEmployeePolicyAssignment(db, {
+      employeeId: EMPLOYEE_ID,
+      attendancePolicyId: POLICY_B,
+      effectiveFrom: '2026-07-01',
+    }),
+    (error) =>
+      error instanceof EmployeePolicyAssignmentError &&
+      error.message === 'Selected attendance policy is inactive or was not found'
+  );
+  assert.equal(
+    db.calls.some((call) => call.text.startsWith('SELECT pg_advisory_xact_lock')),
+    false
+  );
+  assert.equal(insertedRanges(db).length, 0);
 });

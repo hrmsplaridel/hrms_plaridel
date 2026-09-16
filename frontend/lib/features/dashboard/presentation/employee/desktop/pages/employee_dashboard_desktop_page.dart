@@ -3,6 +3,7 @@ import 'dart:ui' show lerpDouble;
 
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:hrms_plaridel/core/api/user_facing_api_error.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/providers/auth_provider.dart';
 import 'package:hrms_plaridel/features/dtr/assistant/presentation/widgets/dtr_assistant_fab.dart';
@@ -12,6 +13,7 @@ import 'package:hrms_plaridel/features/dtr/dtr_provider.dart';
 import 'package:hrms_plaridel/features/dtr/attendance/models/time_record.dart';
 import 'package:hrms_plaridel/features/dtr/attendance/presentation/widgets/attendance_display.dart';
 import 'package:hrms_plaridel/features/dtr/attendance/presentation/widgets/attendance_source_badge.dart';
+import 'package:hrms_plaridel/features/dtr/reports/data/official_time.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/pages/docutracker_main.dart';
 import 'package:hrms_plaridel/features/docutracker/data/providers/docutracker_provider.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/pages/docutracker_dashboard_screen.dart';
@@ -32,6 +34,7 @@ import 'package:hrms_plaridel/features/dashboard/presentation/employee/shared/wi
 import 'package:hrms_plaridel/features/dashboard/presentation/employee/shared/widgets/employee_dash_ui.dart';
 import 'package:hrms_plaridel/features/dashboard/presentation/employee/shared/widgets/employee_dashboard_layout_metrics.dart';
 import 'package:hrms_plaridel/features/dashboard/presentation/employee/shared/widgets/employee_dashboard_skeletons.dart';
+import 'package:hrms_plaridel/features/dashboard/presentation/employee/shared/utils/employee_attendance_period.dart';
 import 'package:hrms_plaridel/features/dashboard/presentation/employee/mobile/widgets/employee_attendance_mobile_list.dart';
 import 'package:hrms_plaridel/features/dashboard/presentation/employee/mobile/widgets/employee_dashboard_mobile_shell.dart';
 import 'package:hrms_plaridel/features/dashboard/presentation/employee/mobile/widgets/employee_summary_mobile_layout.dart';
@@ -106,7 +109,6 @@ class _EmployeeDashboardState extends State<EmployeeDashboardDesktopPage>
   final GlobalKey _trainingRequirementsPreKey = GlobalKey();
   final GlobalKey _trainingRequirementsPostKey = GlobalKey();
   final GlobalKey _docuTrackerHeaderKey = GlobalKey();
-  final GlobalKey _docuTrackerNavigationKey = GlobalKey();
   final GlobalKey _docuTrackerContentKey = GlobalKey();
   final GlobalKey _profileHeroKey = GlobalKey();
   final GlobalKey _profileTabsKey = GlobalKey();
@@ -246,7 +248,6 @@ class _EmployeeDashboardState extends State<EmployeeDashboardDesktopPage>
   List<EmployeeTutorialTarget> get _docuTrackerTutorialTargets =>
       EmployeeDocuTrackerTutorial.targets(
         headerKey: _docuTrackerHeaderKey,
-        navigationKey: _docuTrackerNavigationKey,
         contentKey: _docuTrackerContentKey,
       );
 
@@ -458,12 +459,11 @@ class _EmployeeDashboardState extends State<EmployeeDashboardDesktopPage>
         result != kLeaveFormResultSubmitted) {
       return;
     }
+    showLeaveFormSuccessSnackBar(context, result);
     final userId = context.read<AuthProvider>().user?.id;
     if (userId != null && userId.isNotEmpty) {
       await context.read<LeaveProvider>().loadMyLeaveData(userId);
     }
-    if (!mounted) return;
-    showLeaveFormSuccessSnackBar(context, result);
   }
 
   void _openHrmsAssistant() {
@@ -527,7 +527,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboardDesktopPage>
           documentsKey: _dashboardDocumentsKey,
         );
       case 1:
-        return _EmployeeAttendanceContent(
+        return EmployeeAttendanceContent(
           headerKey: _attendanceHeaderKey,
           filtersKey: _attendanceFiltersKey,
           recordsKey: _attendanceRecordsKey,
@@ -564,7 +564,6 @@ class _EmployeeDashboardState extends State<EmployeeDashboardDesktopPage>
         return DocuTrackerMain(
           isAdmin: false,
           tutorialHeaderKey: _docuTrackerHeaderKey,
-          tutorialNavigationKey: _docuTrackerNavigationKey,
           tutorialContentKey: _docuTrackerContentKey,
         );
       case _profileNavIndex:
@@ -868,7 +867,7 @@ class EmployeeAttendanceDetailsSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return _EmployeeAttendanceContent(showPageHeader: showPageHeader);
+    return EmployeeAttendanceContent(showPageHeader: showPageHeader);
   }
 }
 
@@ -1384,15 +1383,7 @@ class _EmployeeSummaryCards extends StatelessWidget {
   }
 }
 
-String _formatTime(DateTime? dt) {
-  if (dt == null) return '—';
-  final local = dt.toLocal();
-  final h = local.hour;
-  final m = local.minute;
-  final ampm = h >= 12 ? 'PM' : 'AM';
-  final h12 = h > 12 ? h - 12 : (h == 0 ? 12 : h);
-  return '$h12:${m.toString().padLeft(2, '0')} $ampm';
-}
+String _formatTime(DateTime? dt) => formatOfficialPhilippineTime(dt);
 
 class _BiometricAttendanceCard extends StatelessWidget {
   const _BiometricAttendanceCard({this.compact = false});
@@ -2413,8 +2404,9 @@ const List<String> _attendanceMonths = [
 ];
 
 /// My Attendance: employee's own time records.
-class _EmployeeAttendanceContent extends StatefulWidget {
-  const _EmployeeAttendanceContent({
+class EmployeeAttendanceContent extends StatefulWidget {
+  const EmployeeAttendanceContent({
+    super.key,
     this.showPageHeader = true,
     this.headerKey,
     this.filtersKey,
@@ -2428,17 +2420,26 @@ class _EmployeeAttendanceContent extends StatefulWidget {
   final GlobalKey? recordsKey;
 
   @override
-  State<_EmployeeAttendanceContent> createState() =>
+  State<EmployeeAttendanceContent> createState() =>
       _EmployeeAttendanceContentState();
 }
 
-class _EmployeeAttendanceContentState
-    extends State<_EmployeeAttendanceContent> {
-  int _selectedMonth = DateTime.now().month;
-  int _selectedYear = DateTime.now().year;
+class _EmployeeAttendanceContentState extends State<EmployeeAttendanceContent>
+    with WidgetsBindingObserver {
+  static const _dtrRefreshDebounceDuration = Duration(milliseconds: 250);
+
+  int _selectedMonth = 1;
+  int _selectedYear = 2000;
   int? _selectedDay;
   bool _didApplyMobileDefault = false;
   String _mobileAttendanceMode = 'today';
+  DateTime? _officialHrmsDate;
+  List<int> _availableAttendanceYears = const [];
+  bool _officialDateLoading = true;
+  String? _officialDateError;
+  int _officialDateRequestGeneration = 0;
+  StreamSubscription<DtrUpdateEvent>? _dtrUpdateSub;
+  Timer? _dtrRefreshDebounce;
 
   int get _lastDayOfSelectedMonth {
     final end = DateTime(_selectedYear, _selectedMonth + 1, 0);
@@ -2447,7 +2448,7 @@ class _EmployeeAttendanceContentState
 
   /// Latest day selectable in the current month/year (no future day picker values).
   int get _maxSelectableCalendarDay {
-    final now = DateTime.now();
+    final now = _todayDateOnly;
     final last = _lastDayOfSelectedMonth;
     if (_selectedYear < now.year ||
         (_selectedYear == now.year && _selectedMonth < now.month)) {
@@ -2455,20 +2456,27 @@ class _EmployeeAttendanceContentState
     }
     if (_selectedYear > now.year ||
         (_selectedYear == now.year && _selectedMonth > now.month)) {
-      return last;
+      return 0;
     }
     return now.day < last ? now.day : last;
   }
 
   DateTime get _todayDateOnly {
-    final t = DateTime.now();
-    return DateTime(t.year, t.month, t.day);
+    final date = _officialHrmsDate;
+    if (date == null) {
+      throw StateError('Official HRMS date has not loaded.');
+    }
+    return DateTime(date.year, date.month, date.day);
   }
 
   void _clampSelectedDayIfNeeded() {
     if (_selectedDay == null) return;
     final last = _lastDayOfSelectedMonth;
     final maxD = _maxSelectableCalendarDay;
+    if (maxD < 1) {
+      _selectedDay = null;
+      return;
+    }
     if (_selectedDay! > last) {
       _selectedDay = null;
       return;
@@ -2481,12 +2489,97 @@ class _EmployeeAttendanceContentState
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) => _load());
+    WidgetsBinding.instance.addObserver(this);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _dtrUpdateSub = context.read<DtrProvider>().onDtrEvent.listen(
+        _handleDtrUpdateEvent,
+      );
+      unawaited(_initializeOfficialDate(resetSelection: true));
+    });
   }
 
-  Future<void> _load() async {
-    _clampSelectedDayIfNeeded();
-    final dtr = context.read<DtrProvider>();
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && mounted) {
+      unawaited(
+        _initializeOfficialDate(
+          resetSelection: false,
+          forceAttendanceRefresh: true,
+        ),
+      );
+    }
+  }
+
+  @override
+  void dispose() {
+    ++_officialDateRequestGeneration;
+    WidgetsBinding.instance.removeObserver(this);
+    _dtrRefreshDebounce?.cancel();
+    _dtrUpdateSub?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _initializeOfficialDate({
+    required bool resetSelection,
+    bool forceAttendanceRefresh = false,
+  }) async {
+    final requestGeneration = ++_officialDateRequestGeneration;
+    if (mounted) {
+      setState(() {
+        _officialDateLoading = true;
+        _officialDateError = null;
+      });
+    }
+    try {
+      final reportPeriod = await TimeRecordRepo.instance
+          .getAttendanceReportPeriod();
+      if (!mounted || requestGeneration != _officialDateRequestGeneration) {
+        return;
+      }
+      final officialDate = reportPeriod.officialDate;
+      final isNarrow = MediaQuery.sizeOf(context).width < 520;
+      setState(() {
+        _officialHrmsDate = officialDate;
+        _availableAttendanceYears = reportPeriod.years;
+        _officialDateLoading = false;
+        if (resetSelection) {
+          _selectedMonth = officialDate.month;
+          _selectedYear = officialDate.year;
+          _selectedDay = isNarrow ? officialDate.day : null;
+          _mobileAttendanceMode = isNarrow ? 'today' : 'monthly';
+          _didApplyMobileDefault = isNarrow;
+        } else if (!reportPeriod.years.contains(_selectedYear)) {
+          _selectedMonth = officialDate.month;
+          _selectedYear = officialDate.year;
+          _selectedDay = isNarrow ? officialDate.day : null;
+          _mobileAttendanceMode = isNarrow ? 'today' : 'monthly';
+        } else if (_selectedDay != null && _mobileAttendanceMode == 'today') {
+          _selectedMonth = officialDate.month;
+          _selectedYear = officialDate.year;
+          _selectedDay = officialDate.day;
+        }
+      });
+      await _load(forceRefresh: resetSelection || forceAttendanceRefresh);
+    } catch (error) {
+      if (!mounted || requestGeneration != _officialDateRequestGeneration) {
+        return;
+      }
+      final message = userFacingApiError(error);
+      setState(() {
+        _officialDateLoading = false;
+        _officialDateError = message;
+      });
+      if (_officialHrmsDate != null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not refresh official date: $message')),
+        );
+      }
+    }
+  }
+
+  ({DateTime start, DateTime end})? _selectedAttendanceRange() {
+    if (_officialHrmsDate == null) return null;
     final lastDay = _lastDayOfSelectedMonth;
     final day =
         (_selectedDay != null && _selectedDay! >= 1 && _selectedDay! <= lastDay)
@@ -2500,21 +2593,191 @@ class _EmployeeAttendanceContentState
     } else {
       start = DateTime(_selectedYear, _selectedMonth, 1);
       final monthEnd = DateTime(_selectedYear, _selectedMonth + 1, 0);
-      // For current month, don't fetch future days.
       end = monthEnd.isAfter(_todayDateOnly) ? _todayDateOnly : monthEnd;
     }
-    await dtr.loadTimeRecordsForUser(startDate: start, endDate: end);
+    if (!isValidEmployeeAttendanceRange(
+      start: start,
+      end: end,
+      officialDate: _todayDateOnly,
+    )) {
+      return null;
+    }
+    return (start: start, end: end);
   }
 
-  static String _formatTime(DateTime? dt) {
-    if (dt == null) return '—';
-    final local = dt.toLocal();
-    final h = local.hour;
-    final m = local.minute;
-    final ampm = h >= 12 ? 'PM' : 'AM';
-    final h12 = h > 12 ? h - 12 : (h == 0 ? 12 : h);
-    return '$h12:${m.toString().padLeft(2, '0')} $ampm';
+  void _handleDtrUpdateEvent(DtrUpdateEvent event) {
+    if (!mounted) return;
+    final range = _selectedAttendanceRange();
+    if (range == null) return;
+    final dtr = context.read<DtrProvider>();
+    if (!event.affectsEmployeeRange(
+      employeeId: dtr.userId,
+      start: range.start,
+      end: range.end,
+    )) {
+      return;
+    }
+    _dtrRefreshDebounce?.cancel();
+    _dtrRefreshDebounce = Timer(_dtrRefreshDebounceDuration, () {
+      if (!mounted) return;
+      unawaited(_load(forceRefresh: true));
+    });
   }
+
+  Future<void> _load({bool forceRefresh = false}) async {
+    _clampSelectedDayIfNeeded();
+    final range = _selectedAttendanceRange();
+    if (range == null) return;
+    final dtr = context.read<DtrProvider>();
+    await dtr.loadTimeRecordsForUser(
+      startDate: range.start,
+      endDate: range.end,
+      forceRefresh: forceRefresh,
+    );
+  }
+
+  Widget _buildAttendanceLoadError(String message) {
+    final errorColor = Theme.of(context).colorScheme.error;
+    return Container(
+      key: widget.recordsKey,
+      width: double.infinity,
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: errorColor.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: errorColor.withValues(alpha: 0.65)),
+      ),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final details = Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(Icons.error_outline_rounded, color: errorColor, size: 22),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Could not load attendance',
+                      style: TextStyle(
+                        color: AppTheme.dashTextPrimaryOf(context),
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      message,
+                      style: TextStyle(
+                        color: AppTheme.dashTextSecondaryOf(context),
+                        fontSize: 13,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          );
+          final retry = TextButton.icon(
+            onPressed: () => _load(forceRefresh: true),
+            icon: const Icon(Icons.refresh_rounded, size: 18),
+            label: const Text('Retry'),
+          );
+          if (constraints.maxWidth < 520) {
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                details,
+                const SizedBox(height: 12),
+                Align(alignment: Alignment.centerRight, child: retry),
+              ],
+            );
+          }
+          return Row(
+            children: [
+              Expanded(child: details),
+              const SizedBox(width: 16),
+              retry,
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _buildOfficialDateBootstrap() {
+    final error = _officialDateError;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (widget.showPageHeader) ...[
+          Text(
+            'My Attendance',
+            style: TextStyle(
+              color: AppTheme.dashTextPrimaryOf(context),
+              fontSize: 22,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'View your time-in/out records.',
+            style: TextStyle(
+              color: AppTheme.dashTextSecondaryOf(context),
+              fontSize: 14,
+            ),
+          ),
+          const SizedBox(height: 24),
+        ],
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(24),
+          decoration: BoxDecoration(
+            color: AppTheme.dashPanelOf(context),
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: AppTheme.dashHairlineOf(context)),
+          ),
+          child: error == null
+              ? const Center(child: CircularProgressIndicator())
+              : Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      Icons.error_outline_rounded,
+                      color: Theme.of(context).colorScheme.error,
+                    ),
+                    const SizedBox(height: 10),
+                    Text(
+                      'Could not load attendance dates.',
+                      style: TextStyle(
+                        color: AppTheme.dashTextPrimaryOf(context),
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      error,
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        color: AppTheme.dashTextSecondaryOf(context),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    TextButton.icon(
+                      onPressed: () =>
+                          _initializeOfficialDate(resetSelection: true),
+                      icon: const Icon(Icons.refresh_rounded, size: 18),
+                      label: const Text('Retry'),
+                    ),
+                  ],
+                ),
+        ),
+      ],
+    );
+  }
+
+  static String _formatTime(DateTime? dt) => formatOfficialPhilippineTime(dt);
 
   static String _formatTimeWithLocator(
     TimeRecord r,
@@ -2558,14 +2821,7 @@ class _EmployeeAttendanceContentState
   }
 
   void _selectToday() {
-    final today = _todayDateOnly;
-    setState(() {
-      _mobileAttendanceMode = 'today';
-      _selectedMonth = today.month;
-      _selectedYear = today.year;
-      _selectedDay = today.day;
-    });
-    _load();
+    unawaited(_initializeOfficialDate(resetSelection: true));
   }
 
   void _applyMobileDefaultIfNeeded() {
@@ -2749,6 +3005,7 @@ class _EmployeeAttendanceContentState
   @override
   Widget build(BuildContext context) {
     final dtr = context.watch<DtrProvider>();
+    if (_officialHrmsDate == null) return _buildOfficialDateBootstrap();
     final today = _todayDateOnly;
     final visibleRecords = List.of(dtr.timeRecords)
       ..removeWhere((r) {
@@ -2801,6 +3058,11 @@ class _EmployeeAttendanceContentState
             final monthWidth = isNarrow ? 150.0 : 172.0;
             final yearWidth = isNarrow ? 100.0 : 112.0;
             final dayWidth = isNarrow ? 115.0 : 144.0;
+            final selectableMonths = selectableEmployeeAttendanceMonths(
+              _selectedYear,
+              _todayDateOnly,
+            );
+            final selectableYears = _availableAttendanceYears;
             const fieldPadding = EdgeInsets.symmetric(
               horizontal: 12,
               vertical: 8,
@@ -2822,21 +3084,22 @@ class _EmployeeAttendanceContentState
                   Icons.keyboard_arrow_down_rounded,
                   color: AppTheme.dashTextSecondaryOf(context),
                 ),
-                selectedItemBuilder: (context) => List.generate(
-                  12,
-                  (i) => Align(
-                    alignment: Alignment.centerLeft,
-                    child: Text(
-                      _attendanceMonths[i],
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: AppTheme.dashFieldTextStyle(
-                        context,
-                      ).copyWith(fontSize: 14),
-                    ),
-                  ),
-                ),
-                items: List.generate(12, (i) => i + 1)
+                selectedItemBuilder: (context) => selectableMonths
+                    .map(
+                      (month) => Align(
+                        alignment: Alignment.centerLeft,
+                        child: Text(
+                          _attendanceMonths[month - 1],
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: AppTheme.dashFieldTextStyle(
+                            context,
+                          ).copyWith(fontSize: 14),
+                        ),
+                      ),
+                    )
+                    .toList(),
+                items: selectableMonths
                     .map(
                       (m) => DropdownMenuItem(
                         value: m,
@@ -2882,27 +3145,32 @@ class _EmployeeAttendanceContentState
                   Icons.keyboard_arrow_down_rounded,
                   color: AppTheme.dashTextSecondaryOf(context),
                 ),
-                selectedItemBuilder: (context) => List.generate(
-                  11,
-                  (i) => Align(
-                    alignment: Alignment.centerLeft,
-                    child: Text(
-                      '${DateTime.now().year - 5 + i}',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: AppTheme.dashFieldTextStyle(
-                        context,
-                      ).copyWith(fontSize: 14),
-                    ),
-                  ),
-                ),
-                items: List.generate(11, (i) => DateTime.now().year - 5 + i)
+                selectedItemBuilder: (context) => selectableYears
+                    .map(
+                      (year) => Align(
+                        alignment: Alignment.centerLeft,
+                        child: Text(
+                          '$year',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: AppTheme.dashFieldTextStyle(
+                            context,
+                          ).copyWith(fontSize: 14),
+                        ),
+                      ),
+                    )
+                    .toList(),
+                items: selectableYears
                     .map((y) => DropdownMenuItem(value: y, child: Text('$y')))
                     .toList(),
                 onChanged: (v) {
                   if (v != null) {
                     setState(() {
                       _selectedYear = v;
+                      if (_selectedYear == _todayDateOnly.year &&
+                          _selectedMonth > _todayDateOnly.month) {
+                        _selectedMonth = _todayDateOnly.month;
+                      }
                       if (isNarrow && _mobileAttendanceMode == 'today') {
                         _mobileAttendanceMode = 'day';
                       }
@@ -2987,16 +3255,9 @@ class _EmployeeAttendanceContentState
             );
 
             final refreshButton = IconButton(
-              onPressed: () {
-                final now = DateTime.now();
-                setState(() {
-                  _mobileAttendanceMode = isNarrow ? 'today' : 'monthly';
-                  _selectedMonth = now.month;
-                  _selectedYear = now.year;
-                  _selectedDay = isNarrow ? now.day : null;
-                });
-                _load();
-              },
+              onPressed: _officialDateLoading
+                  ? null
+                  : () => _initializeOfficialDate(resetSelection: true),
               icon: Icon(
                 Icons.refresh_rounded,
                 size: 22,
@@ -3048,8 +3309,15 @@ class _EmployeeAttendanceContentState
           },
         ),
         const SizedBox(height: 24),
-        if (dtr.loading) const EmployeeTimeRecordsLoadingSkeleton(),
-        if (!dtr.loading && visibleRecords.isEmpty)
+        if (dtr.employeeAttendanceLoading)
+          const EmployeeTimeRecordsLoadingSkeleton(),
+        if (!dtr.employeeAttendanceLoading &&
+            dtr.employeeAttendanceError != null)
+          _buildAttendanceLoadError(dtr.employeeAttendanceError!),
+        if (!dtr.employeeAttendanceLoading &&
+            dtr.employeeAttendanceError == null &&
+            dtr.employeeAttendanceHasResult &&
+            visibleRecords.isEmpty)
           Container(
             key: widget.recordsKey,
             padding: const EdgeInsets.all(24),
@@ -3073,7 +3341,10 @@ class _EmployeeAttendanceContentState
               ),
             ),
           ),
-        if (!dtr.loading && visibleRecords.isNotEmpty)
+        if (!dtr.employeeAttendanceLoading &&
+            dtr.employeeAttendanceError == null &&
+            dtr.employeeAttendanceHasResult &&
+            visibleRecords.isNotEmpty)
           LayoutBuilder(
             key: widget.recordsKey,
             builder: (context, constraints) {
@@ -3182,10 +3453,10 @@ class _EmployeeAttendanceContentState
                           final i = entry.key;
                           final isLastRow = i == visibleRecords.length - 1;
                           final r = entry.value;
-                          final timeIn = r.timeIn?.toLocal();
-                          final breakOut = r.breakOut?.toLocal();
-                          final breakIn = r.breakIn?.toLocal();
-                          final timeOut = r.timeOut?.toLocal();
+                          final timeIn = r.timeIn;
+                          final breakOut = r.breakOut;
+                          final breakIn = r.breakIn;
+                          final timeOut = r.timeOut;
                           final remark = getAttendanceRemark(r);
                           final lateStr = formatLateMinutes(r);
                           final underStr = formatUndertimeMinutes(r);

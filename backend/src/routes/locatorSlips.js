@@ -38,7 +38,10 @@ const {
   createLocatorSubmissionService,
 } = require('../services/locatorSubmissionService');
 const {
+  currentHrmsDate,
   evaluateEmployeeLocatorDateWindow,
+  evaluateLocatorEmployeeCorrectionWindow,
+  evaluateLocatorReturnWindow,
   normalizeCorrectionReason,
 } = require('../services/locatorDatePolicy');
 const {
@@ -46,11 +49,16 @@ const {
 } = require('../services/locatorRevocationPolicy');
 const {
   parseLocatorAdminFilters,
+  parseLocatorHistoryFilters,
 } = require('../services/locatorAdminFilters');
 const {
   captureLocatorTypeSnapshot,
   resolveLocatorTypeMetadata,
 } = require('../services/locatorTypeSnapshot');
+const {
+  locatorCorrectionChanges,
+  normalizeLocatorCorrection,
+} = require('../services/locatorCorrection');
 const {
   listLocatorWorkflowEvents,
   normalizeLocatorRejectionReason,
@@ -717,6 +725,11 @@ function isValidStatus(status) {
   ].includes(status);
 }
 
+// GET /api/locator-slips/context
+router.get('/context', protect, (_req, res) => {
+  res.json({ official_date: currentHrmsDate() });
+});
+
 // GET /api/locator-slips/department-head/check
 router.get('/department-head/check', protect, async (req, res) => {
   const userId = req.user?.id;
@@ -892,10 +905,42 @@ router.get('/my', protect, async (req, res) => {
   const userId = req.user?.id;
   if (!userId) return res.status(401).json({ error: 'Not authenticated' });
   try {
-    const status = (req.query?.status || '').toString().trim() || null;
-    if (status && !isValidStatus(status)) {
-      return res.status(400).json({ error: 'Invalid status filter' });
+    const parsedFilters = parseLocatorHistoryFilters(req.query);
+    if (!parsedFilters.ok) {
+      return res.status(400).json({ error: parsedFilters.error });
     }
+    const { page, pageSize, statuses, from, to, search } =
+      parsedFilters.filters;
+    const filterParams = [userId, statuses, from, to, search];
+    const filterSql = `
+       FROM locator_slips ls
+       LEFT JOIN users u ON u.id = ls.employee_id
+       LEFT JOIN departments d ON d.id = ls.department_id
+       LEFT JOIN users dh ON dh.id = ls.dept_head_reviewer_id
+       LEFT JOIN users hr ON hr.id = ls.hr_reviewer_id
+       LEFT JOIN users corrector ON corrector.id = ls.retroactive_corrected_by
+       LEFT JOIN users revoker ON revoker.id = ls.revoked_by
+       LEFT JOIN locator_request_types lrt ON lrt.code = ls.request_type
+       WHERE ls.employee_id = $1::uuid
+         AND ($2::text[] IS NULL OR ls.status = ANY($2::text[]))
+         AND ($3::date IS NULL OR ls.slip_date >= $3::date)
+         AND ($4::date IS NULL OR ls.slip_date <= $4::date)
+         AND (
+           $5::text IS NULL
+           OR ls.office ILIKE '%' || $5::text || '%'
+           OR ls.reason ILIKE '%' || $5::text || '%'
+           OR COALESCE(ls.request_type_label_snapshot, lrt.label, '')
+              ILIKE '%' || $5::text || '%'
+           OR ls.status ILIKE '%' || $5::text || '%'
+         )`;
+    const countResult = await pool.query(
+      `SELECT COUNT(*)::integer AS total ${filterSql}`,
+      filterParams
+    );
+    const total = Number(countResult.rows[0]?.total || 0);
+    const pageCount = Math.max(1, Math.ceil(total / pageSize));
+    const effectivePage = Math.min(page, pageCount);
+    const offset = (effectivePage - 1) * pageSize;
     const rows = await pool.query(
       `SELECT ls.*,
               ls.slip_date::text AS slip_date_text,
@@ -913,21 +958,20 @@ router.get('/my', protect, async (req, res) => {
               lrt.dtr_print_label AS request_type_dtr_print_label,
               lrt.requires_attachment AS request_type_requires_attachment,
               lrt.coverage_mode AS request_type_coverage_mode
-       FROM locator_slips ls
-       LEFT JOIN users u ON u.id = ls.employee_id
-       LEFT JOIN departments d ON d.id = ls.department_id
-       LEFT JOIN users dh ON dh.id = ls.dept_head_reviewer_id
-       LEFT JOIN users hr ON hr.id = ls.hr_reviewer_id
-       LEFT JOIN users corrector ON corrector.id = ls.retroactive_corrected_by
-       LEFT JOIN users revoker ON revoker.id = ls.revoked_by
-       LEFT JOIN locator_request_types lrt ON lrt.code = ls.request_type
-       WHERE ls.employee_id = $1::uuid
-         AND ($2::text IS NULL OR ls.status = $2::text)
-       ORDER BY ls.updated_at DESC, ls.created_at DESC
-       LIMIT 500`,
-      [userId, status]
+       ${filterSql}
+       ORDER BY ls.updated_at DESC, ls.created_at DESC, ls.id DESC
+       LIMIT $6::integer OFFSET $7::integer`,
+      [...filterParams, pageSize, offset]
     );
-    res.json(rows.rows.map(mapLocatorRow));
+    res.json({
+      items: rows.rows.map(mapLocatorRow),
+      pagination: {
+        page: effectivePage,
+        page_size: pageSize,
+        total,
+        page_count: pageCount,
+      },
+    });
   } catch (err) {
     console.error('[locator GET /my]', err);
     res.status(500).json({ error: 'Failed to fetch locator slips' });
@@ -1377,13 +1421,49 @@ router.patch('/:id/resubmit', protect, async (req, res) => {
         error: `Cannot resubmit locator slip with status '${row.status}'`,
       });
     }
-    const attachmentError = locatorReviewAttachmentError(row);
+    const correctionWindow = evaluateLocatorEmployeeCorrectionWindow({
+      slipDate: row.slip_date_text,
+    });
+    if (!correctionWindow.ok) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({
+        error: correctionWindow.error,
+        code: correctionWindow.code,
+      });
+    }
+
+    const correction = normalizeLocatorCorrection(row, req.body || {});
+    const fieldValidation = validateLocatorRequiredFields({
+      slipDate: correction.slipDate,
+      requestType: correction.requestType,
+      office: correction.office,
+      reason: correction.reason,
+      slots: correction,
+    });
+    if (!fieldValidation.valid) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: fieldValidation.error });
+    }
+    const locatorType = await getLocatorTypeByCode(
+      client,
+      correction.requestType,
+      { activeOnly: true }
+    );
+    if (!locatorType) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'Invalid request_type' });
+    }
+    const attachmentError = validateLocatorAttachmentForReview({
+      locatorType,
+      attachmentPath: row.attachment_path,
+      attachmentFileExists: locatorAttachmentFileExists(row.attachment_path),
+    });
     if (attachmentError) {
       await client.query('ROLLBACK');
       return res.status(409).json({ error: attachmentError });
     }
     const resubmitWindow = evaluateEmployeeLocatorDateWindow({
-      slipDate: row.slip_date_text,
+      slipDate: correction.slipDate,
     });
     if (!resubmitWindow.ok) {
       await client.query('ROLLBACK');
@@ -1395,7 +1475,7 @@ router.patch('/:id/resubmit', protect, async (req, res) => {
     const workingDayCheck = await validateLocatorWorkingDayForEmployee(
       client,
       userId,
-      parseLocatorDateOnly(row.slip_date_text)
+      parseLocatorDateOnly(correction.slipDate)
     );
     if (!workingDayCheck.ok) {
       await client.query('ROLLBACK');
@@ -1403,8 +1483,8 @@ router.patch('/:id/resubmit', protect, async (req, res) => {
     }
     const conflictCheck = await findLocatorRequestConflicts(client, {
       employeeId: userId,
-      slipDate: row.slip_date_text,
-      slots: row,
+      slipDate: correction.slipDate,
+      slots: correction,
       excludeSlipId: id,
       phase: 'submission',
     });
@@ -1416,23 +1496,64 @@ router.patch('/:id/resubmit', protect, async (req, res) => {
     const reviewSnapshot = await getDepartmentReviewSnapshotForDate(
       client,
       userId,
-      row.slip_date_text
+      correction.slipDate
     );
     const departmentHeadUserId =
       reviewSnapshot?.departmentHeadUserId || null;
     const submitStatus = departmentHeadUserId
       ? 'pending_department_head'
       : 'pending_hr';
+    const typeSnapshot = captureLocatorTypeSnapshot(locatorType);
+    const changes = locatorCorrectionChanges(row, correction);
 
     await client.query(
       `UPDATE locator_slips
-       SET status = $2::text,
-           department_id = $3::uuid,
-           assigned_department_head_id = $4::uuid,
+       SET slip_date = $2::date,
+           request_type = $3::text,
+           office = $4::text,
+           reason = $5::text,
+           am_in = $6::boolean,
+           am_out = $7::boolean,
+           pm_in = $8::boolean,
+           pm_out = $9::boolean,
+           request_type_label_snapshot = $10::text,
+           request_type_short_label_snapshot = $11::text,
+           request_type_location_label_snapshot = $12::text,
+           request_type_location_hint_snapshot = $13::text,
+           request_type_dtr_slot_label_snapshot = $14::text,
+           request_type_dtr_print_label_snapshot = $15::text,
+           request_type_requires_attachment_snapshot = $16::boolean,
+           request_type_coverage_mode_snapshot = $17::text,
+           request_type_snapshot_at = now(),
+           status = $18::text,
+           department_id = $19::uuid,
+           assigned_department_head_id = $20::uuid,
+           dept_head_reviewer_id = NULL,
+           dept_head_reviewed_at = NULL,
+           dept_head_remarks = NULL,
+           hr_reviewer_id = NULL,
+           hr_reviewed_at = NULL,
+           hr_remarks = NULL,
            updated_at = now()
        WHERE id = $1::uuid`,
       [
         id,
+        correction.slipDate,
+        correction.requestType,
+        correction.office,
+        correction.reason,
+        correction.amIn,
+        correction.amOut,
+        correction.pmIn,
+        correction.pmOut,
+        typeSnapshot.label,
+        typeSnapshot.shortLabel,
+        typeSnapshot.locationLabel,
+        typeSnapshot.locationHint,
+        typeSnapshot.dtrSlotLabel,
+        typeSnapshot.dtrPrintLabel,
+        typeSnapshot.requiresAttachment,
+        typeSnapshot.coverageMode,
         submitStatus,
         reviewSnapshot?.departmentId || null,
         departmentHeadUserId,
@@ -1451,6 +1572,7 @@ router.patch('/:id/resubmit', protect, async (req, res) => {
       toStatus: submitStatus,
       actorId: userId,
       actorRole: 'employee',
+      metadata: { changes },
     });
     await client.query('COMMIT');
 
@@ -1460,12 +1582,12 @@ router.patch('/:id/resubmit', protect, async (req, res) => {
         status: submitStatus,
         employeeUserId: userId,
         employeeName: row.employee_name,
-        slipDate: row.slip_date_text,
-        amIn: row.am_in,
-        amOut: row.am_out,
-        pmIn: row.pm_in,
-        pmOut: row.pm_out,
-        requestType: row.request_type,
+        slipDate: correction.slipDate,
+        amIn: correction.amIn,
+        amOut: correction.amOut,
+        pmIn: correction.pmIn,
+        pmOut: correction.pmOut,
+        requestType: correction.requestType,
         departmentHeadUserId,
         departmentReviewerUserIds: reviewSnapshot?.reviewerUserIds || [],
       })
@@ -1711,26 +1833,23 @@ router.get('/department-head', protect, async (req, res) => {
   const client = await pool.connect();
   try {
     const deptInfo = await isDepartmentHead(client, userId);
-    const status = (req.query?.status || '').toString().trim() || null;
-    if (status && !isValidStatus(status)) {
-      return res.status(400).json({ error: 'Invalid status filter' });
+    const parsedFilters = parseLocatorHistoryFilters(req.query, {
+      departmentHead: true,
+    });
+    if (!parsedFilters.ok) {
+      return res.status(400).json({ error: parsedFilters.error });
     }
-    const rows = await client.query(
-      `SELECT ls.*,
-              ls.slip_date::text AS slip_date_text,
-              u.full_name AS employee_name,
-              d.name AS department_name,
-              assigned_dh.full_name AS assigned_department_head_name,
-              dh.full_name AS dept_head_reviewer_name,
-              hr.full_name AS hr_reviewer_name,
-              lrt.label AS request_type_label,
-              lrt.short_label AS request_type_short_label,
-              lrt.location_label AS request_type_location_label,
-              lrt.location_hint AS request_type_location_hint,
-              lrt.dtr_slot_label AS request_type_dtr_slot_label,
-              lrt.dtr_print_label AS request_type_dtr_print_label,
-              lrt.requires_attachment AS request_type_requires_attachment,
-              lrt.coverage_mode AS request_type_coverage_mode
+    const { page, pageSize, statuses, from, to, search } =
+      parsedFilters.filters;
+    const filterParams = [
+      userId,
+      deptInfo.departmentId,
+      statuses,
+      from,
+      to,
+      search,
+    ];
+    const filterSql = `
        FROM locator_slips ls
        LEFT JOIN users u ON u.id = ls.employee_id
        LEFT JOIN departments d ON d.id = ls.department_id
@@ -1756,12 +1875,56 @@ router.get('/department-head', protect, async (req, res) => {
            )
            OR ls.dept_head_reviewer_id = $1::uuid
          )
-         AND ($3::text IS NULL OR ls.status = $3::text)
-       ORDER BY ls.updated_at DESC, ls.created_at DESC
-       LIMIT 500`,
-      [userId, deptInfo.departmentId, status]
+         AND ($3::text[] IS NULL OR ls.status = ANY($3::text[]))
+         AND ($4::date IS NULL OR ls.slip_date >= $4::date)
+         AND ($5::date IS NULL OR ls.slip_date <= $5::date)
+         AND (
+           $6::text IS NULL
+           OR u.full_name ILIKE '%' || $6::text || '%'
+           OR d.name ILIKE '%' || $6::text || '%'
+           OR ls.office ILIKE '%' || $6::text || '%'
+           OR ls.reason ILIKE '%' || $6::text || '%'
+           OR COALESCE(ls.request_type_label_snapshot, lrt.label, '')
+              ILIKE '%' || $6::text || '%'
+         )`;
+    const countResult = await client.query(
+      `SELECT COUNT(*)::integer AS total ${filterSql}`,
+      filterParams
     );
-    res.json(rows.rows.map(mapLocatorRow));
+    const total = Number(countResult.rows[0]?.total || 0);
+    const pageCount = Math.max(1, Math.ceil(total / pageSize));
+    const effectivePage = Math.min(page, pageCount);
+    const offset = (effectivePage - 1) * pageSize;
+    const rows = await client.query(
+      `SELECT ls.*,
+              ls.slip_date::text AS slip_date_text,
+              u.full_name AS employee_name,
+              d.name AS department_name,
+              assigned_dh.full_name AS assigned_department_head_name,
+              dh.full_name AS dept_head_reviewer_name,
+              hr.full_name AS hr_reviewer_name,
+              lrt.label AS request_type_label,
+              lrt.short_label AS request_type_short_label,
+              lrt.location_label AS request_type_location_label,
+              lrt.location_hint AS request_type_location_hint,
+              lrt.dtr_slot_label AS request_type_dtr_slot_label,
+              lrt.dtr_print_label AS request_type_dtr_print_label,
+              lrt.requires_attachment AS request_type_requires_attachment,
+              lrt.coverage_mode AS request_type_coverage_mode
+       ${filterSql}
+       ORDER BY ls.updated_at DESC, ls.created_at DESC, ls.id DESC
+       LIMIT $7::integer OFFSET $8::integer`,
+      [...filterParams, pageSize, offset]
+    );
+    res.json({
+      items: rows.rows.map(mapLocatorRow),
+      pagination: {
+        page: effectivePage,
+        page_size: pageSize,
+        total,
+        page_count: pageCount,
+      },
+    });
   } catch (err) {
     console.error('[locator GET /department-head]', err);
     res.status(500).json({ error: 'Failed to fetch department-head locator slips' });
@@ -2022,7 +2185,7 @@ router.patch('/:id/department-head-return', protect, async (req, res) => {
     await client.query('BEGIN');
     const deptInfo = await isDepartmentHead(client, reviewerId);
     const current = await client.query(
-      `SELECT id, status, employee_id
+      `SELECT id, status, employee_id, slip_date::text AS slip_date_text
        FROM locator_slips
        WHERE id = $1::uuid
          AND (
@@ -2049,6 +2212,16 @@ router.patch('/:id/department-head-return', protect, async (req, res) => {
       await client.query('ROLLBACK');
       return res.status(409).json({
         error: `Cannot return locator slip with status '${row.status}'`,
+      });
+    }
+    const returnWindow = evaluateLocatorReturnWindow({
+      slipDate: row.slip_date_text,
+    });
+    if (!returnWindow.ok) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({
+        error: returnWindow.error,
+        code: returnWindow.code,
       });
     }
 
@@ -2252,7 +2425,7 @@ router.patch('/:id/return-for-correction', protect, requireAdminOrHr, async (req
   try {
     await client.query('BEGIN');
     const current = await client.query(
-      `SELECT id, status, employee_id
+      `SELECT id, status, employee_id, slip_date::text AS slip_date_text
        FROM locator_slips
        WHERE id = $1::uuid
        FOR UPDATE`,
@@ -2267,6 +2440,16 @@ router.patch('/:id/return-for-correction', protect, requireAdminOrHr, async (req
       await client.query('ROLLBACK');
       return res.status(409).json({
         error: `Cannot return locator slip with status '${row.status}'`,
+      });
+    }
+    const returnWindow = evaluateLocatorReturnWindow({
+      slipDate: row.slip_date_text,
+    });
+    if (!returnWindow.ok) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({
+        error: returnWindow.error,
+        code: returnWindow.code,
       });
     }
 

@@ -14,17 +14,50 @@ const {
   listDocuments,
   canUserPerformDocumentAction,
   isDraftOrWipDocument,
+  updateDocumentMetadata,
+  recoverDocumentAssignment,
 } = require('../services/docutrackerWorkflowService');
 const {
   ACTIVE_WORKFLOW_STATUSES_FOR_OVERDUE,
 } = require('../services/docutrackerStatusSemantics');
-const {
-  generateAiSummary,
-  getLatestAiSummary,
-} = require('../services/docutrackerAiSummaryService');
-
 const { coalesceDocumentTitle } = require('../utils/docutrackerDisplayTitle');
 const { sameEntityId } = require('../utils/sameEntityId');
+const { writeGovernanceAudit } = require('../services/docutrackerGovernanceAudit');
+const {
+  OfficialSignatoryError,
+  configureOfficialSignatory,
+  listOfficialSignatories,
+  resolveActiveMayor,
+} = require('../services/officialSignatoryService');
+const { todayInHrmsTimezone } = require('../utils/dateRangeParser');
+const {
+  getDocumentBuilder,
+  saveDocumentBuilder,
+  createSignatureAsset,
+  listSavedSignatureAssets,
+  renameSavedSignatureAsset,
+  removeSavedSignatureAsset,
+  signDocumentField,
+  moveSignedDocumentField,
+} = require('../services/docutrackerDocumentBuilderService');
+const {
+  getLeaveSourceSignatures,
+  signLeaveSourceApplicant,
+  signLeaveSourceDepartmentHead,
+  signLeaveSourceHrApprover,
+} = require('../services/docutrackerLeaveSignatureService');
+const {
+  getLinkedSourceDocument,
+} = require('../services/docutrackerSourceDocumentService');
+const {
+  PermissionAdminError,
+  getPermissionPolicy,
+  listPermissionRecords,
+  resetPermissionRules,
+  savePermissionChanges,
+  saveSinglePermission,
+  validateDocumentType,
+} = require('../services/docutrackerPermissionAdminService');
 
 const router = express.Router();
 const protect = [authMiddleware];
@@ -112,6 +145,76 @@ async function canDownloadDocumentFile(client, docRow, user) {
   return canUserPerformDocumentAction(client, { user, document: docRow, action: 'view' });
 }
 
+let docutrackerDocumentFilesTableReady = null;
+
+async function hasDocutrackerDocumentFilesTable(client) {
+  if (docutrackerDocumentFilesTableReady !== null) return docutrackerDocumentFilesTableReady;
+  const result = await client.query(
+    `SELECT 1
+     FROM information_schema.tables
+     WHERE table_schema = 'public'
+       AND table_name = 'docutracker_document_files'
+     LIMIT 1`
+  );
+  docutrackerDocumentFilesTableReady = result.rowCount > 0;
+  return docutrackerDocumentFilesTableReady;
+}
+
+async function recordCurrentDocumentFile(client, {
+  documentId,
+  fileName,
+  filePath,
+  mimeType,
+  fileSize,
+  uploadedBy,
+}) {
+  if (!(await hasDocutrackerDocumentFilesTable(client))) return null;
+
+  await client.query(
+    `UPDATE docutracker_document_files
+     SET is_current = false
+     WHERE document_id = $1
+       AND is_current = true`,
+    [documentId]
+  );
+
+  const nextVersion = await client.query(
+    `SELECT COALESCE(MAX(version), 0) + 1 AS version
+     FROM docutracker_document_files
+     WHERE document_id = $1`,
+    [documentId]
+  );
+  const version = Number(nextVersion.rows[0]?.version || 1);
+
+  const inserted = await client.query(
+    `INSERT INTO docutracker_document_files
+       (document_id, file_name, file_path, mime_type, file_size, version, uploaded_by, is_current)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, true)
+     RETURNING *`,
+    [
+      documentId,
+      fileName,
+      filePath,
+      mimeType || null,
+      Number.isFinite(fileSize) ? fileSize : null,
+      version,
+      uploadedBy || null,
+    ]
+  );
+  return inserted.rows[0] || null;
+}
+
+async function clearCurrentDocumentFiles(client, documentId) {
+  if (!(await hasDocutrackerDocumentFilesTable(client))) return;
+  await client.query(
+    `UPDATE docutracker_document_files
+     SET is_current = false
+     WHERE document_id = $1
+       AND is_current = true`,
+    [documentId]
+  );
+}
+
 // Role/user permission rows cover baseline access and draft-start capability.
 // Runtime workflow actions (approve/forward/reject/return) are enforced by
 // current holder / step-assignee logic.
@@ -135,6 +238,13 @@ function generalPermissionActionVariants(action) {
   if (!normalized) return [];
   if (normalized === 'create_draft') return ['create_draft', 'create'];
   return [normalized];
+}
+
+function permissionAdminErrorResponse(res, error, fallback) {
+  if (error instanceof PermissionAdminError || Number.isInteger(error?.status)) {
+    return res.status(error.status || 400).json({ error: error.message });
+  }
+  return res.status(500).json({ error: fallback });
 }
 
 /** Fields that must not be changed via PUT by non-admins (use transitions or admin tools). */
@@ -243,22 +353,11 @@ function mapDocumentRow(row) {
     workflow_version: row.workflow_version,
     escalation_level: row.escalation_level,
     needs_admin_intervention: row.needs_admin_intervention,
+    signature_signer_ids: Array.isArray(row.signature_signer_ids)
+      ? row.signature_signer_ids.map(String)
+      : [],
     created_at: row.created_at,
     updated_at: row.updated_at,
-  };
-}
-
-function mapAiSummaryRow(row) {
-  if (!row) return null;
-  return {
-    id: row.id,
-    document_id: row.document_id,
-    summary: row.summary_json || {},
-    generated_by: row.generated_by,
-    generated_by_name: row.generated_by_name || null,
-    provider: row.provider,
-    model: row.model,
-    generated_at: row.generated_at,
   };
 }
 
@@ -380,6 +479,238 @@ router.post('/documents', protect, async (req, res) => {
   }
 });
 
+/** GET /api/docutracker/signature-assets - current user's saved signatures. */
+router.get('/signature-assets', protect, async (req, res) => {
+  try {
+    res.json(await listSavedSignatureAssets(pool, req.user));
+  } catch (err) {
+    console.error('[docutracker GET /signature-assets]', err);
+    const mapped = mapWorkflowServiceError(err);
+    res.status(mapped.status).json({ error: mapped.error });
+  }
+});
+
+/** POST /api/docutracker/signature-assets - draw/upload a signature owned by current user. */
+router.post('/signature-assets', protect, async (req, res) => {
+  try {
+    const created = await createSignatureAsset(pool, req.user, req.body || {});
+    res.status(201).json(created);
+  } catch (err) {
+    console.error('[docutracker POST /signature-assets]', err);
+    const mapped = mapWorkflowServiceError(err);
+    res.status(mapped.status).json({ error: mapped.error });
+  }
+});
+
+/** Rename a saved signature owned by the current user. */
+router.patch('/signature-assets/:assetId', protect, async (req, res) => {
+  try {
+    res.json(
+      await renameSavedSignatureAsset(
+        pool,
+        req.user,
+        req.params.assetId,
+        req.body?.display_name
+      )
+    );
+  } catch (err) {
+    console.error('[docutracker PATCH /signature-assets/:assetId]', err);
+    const mapped = mapWorkflowServiceError(err);
+    res.status(mapped.status).json({ error: mapped.error });
+  }
+});
+
+/** Remove a signature from the current user's library without altering signed documents. */
+router.delete('/signature-assets/:assetId', protect, async (req, res) => {
+  try {
+    await removeSavedSignatureAsset(pool, req.user, req.params.assetId);
+    res.status(204).send();
+  } catch (err) {
+    console.error('[docutracker DELETE /signature-assets/:assetId]', err);
+    const mapped = mapWorkflowServiceError(err);
+    res.status(mapped.status).json({ error: mapped.error });
+  }
+});
+
+/** Load a server-authorized view of an L&D or RSP source document. */
+router.get(
+  '/sources/:sourceModule/:sourceTable/:sourceRecordId',
+  protect,
+  async (req, res) => {
+    try {
+      const { sourceModule, sourceTable, sourceRecordId } = req.params;
+      res.json(
+        await getLinkedSourceDocument(
+          pool,
+          req.user,
+          sourceModule,
+          sourceTable,
+          sourceRecordId
+        )
+      );
+    } catch (err) {
+      console.error('[docutracker GET linked source document]', err);
+      const mapped = mapWorkflowServiceError(err);
+      res.status(mapped.status).json({ error: mapped.error });
+    }
+  }
+);
+
+/** GET linked DTR leave-form signatures without copying the leave request. */
+router.get(
+  '/sources/:sourceModule/:sourceTable/:sourceRecordId/signatures',
+  protect,
+  async (req, res) => {
+    try {
+      res.json(
+        await getLeaveSourceSignatures(
+          pool,
+          req.user,
+          req.params.sourceModule,
+          req.params.sourceTable,
+          req.params.sourceRecordId
+        )
+      );
+    } catch (err) {
+      console.error('[docutracker GET /sources/:source/signatures]', err);
+      const mapped = mapWorkflowServiceError(err);
+      res.status(mapped.status).json({ error: mapped.error });
+    }
+  }
+);
+
+/** Sign or replace the authenticated applicant's linked leave-form signature. */
+router.post(
+  '/sources/:sourceModule/:sourceTable/:sourceRecordId/signatures/applicant/sign',
+  protect,
+  async (req, res) => {
+    try {
+      res.json(
+        await signLeaveSourceApplicant(
+          pool,
+          req.user,
+          req.params.sourceModule,
+          req.params.sourceTable,
+          req.params.sourceRecordId,
+          req.body || {}
+        )
+      );
+    } catch (err) {
+      console.error('[docutracker POST /sources/:source/signatures/applicant/sign]', err);
+      const mapped = mapWorkflowServiceError(err);
+      res.status(mapped.status).json({ error: mapped.error });
+    }
+  }
+);
+
+/** Sign or replace the authenticated department head's leave endorsement. */
+router.post(
+  '/sources/:sourceModule/:sourceTable/:sourceRecordId/signatures/department_head/sign',
+  protect,
+  async (req, res) => {
+    try {
+      res.json(
+        await signLeaveSourceDepartmentHead(
+          pool,
+          req.user,
+          req.params.sourceModule,
+          req.params.sourceTable,
+          req.params.sourceRecordId,
+          req.body || {}
+        )
+      );
+    } catch (err) {
+      console.error('[docutracker POST /sources/:source/signatures/department_head/sign]', err);
+      const mapped = mapWorkflowServiceError(err);
+      res.status(mapped.status).json({ error: mapped.error });
+    }
+  }
+);
+
+/** Sign or replace the authenticated HR reviewer's final approval signature. */
+router.post(
+  '/sources/:sourceModule/:sourceTable/:sourceRecordId/signatures/hr_approver/sign',
+  protect,
+  async (req, res) => {
+    try {
+      res.json(
+        await signLeaveSourceHrApprover(
+          pool,
+          req.user,
+          req.params.sourceModule,
+          req.params.sourceTable,
+          req.params.sourceRecordId,
+          req.body || {}
+        )
+      );
+    } catch (err) {
+      console.error('[docutracker POST /sources/:source/signatures/hr_approver/sign]', err);
+      const mapped = mapWorkflowServiceError(err);
+      res.status(mapped.status).json({ error: mapped.error });
+    }
+  }
+);
+
+/** GET /api/docutracker/documents/:id/builder - A4 content and signature fields. */
+router.get('/documents/:id/builder', protect, async (req, res) => {
+  try {
+    res.json(await getDocumentBuilder(pool, req.user, req.params.id));
+  } catch (err) {
+    console.error('[docutracker GET /documents/:id/builder]', err);
+    const mapped = mapWorkflowServiceError(err);
+    res.status(mapped.status).json({ error: mapped.error });
+  }
+});
+
+/** PUT /api/docutracker/documents/:id/builder - save pages and unsigned field layout. */
+router.put('/documents/:id/builder', protect, async (req, res) => {
+  try {
+    res.json(await saveDocumentBuilder(pool, req.user, req.params.id, req.body || {}));
+  } catch (err) {
+    console.error('[docutracker PUT /documents/:id/builder]', err);
+    const mapped = mapWorkflowServiceError(err);
+    res.status(mapped.status).json({ error: mapped.error });
+  }
+});
+
+/** POST /api/docutracker/documents/:id/signature-fields/:fieldId/sign. */
+router.post('/documents/:id/signature-fields/:fieldId/sign', protect, async (req, res) => {
+  try {
+    res.json(
+      await signDocumentField(
+        pool,
+        req.user,
+        req.params.id,
+        req.params.fieldId,
+        req.body || {}
+      )
+    );
+  } catch (err) {
+    console.error('[docutracker POST /documents/:id/signature-fields/:fieldId/sign]', err);
+    const mapped = mapWorkflowServiceError(err);
+    res.status(mapped.status).json({ error: mapped.error });
+  }
+});
+
+/** PATCH /api/docutracker/documents/:id/signature-fields/:fieldId/position. */
+router.patch('/documents/:id/signature-fields/:fieldId/position', protect, async (req, res) => {
+  try {
+    res.json(
+      await moveSignedDocumentField(
+        pool,
+        req.user,
+        req.params.id,
+        req.params.fieldId,
+        req.body || {}
+      )
+    );
+  } catch (err) {
+    console.error('[docutracker PATCH /documents/:id/signature-fields/:fieldId/position]', err);
+    const mapped = mapWorkflowServiceError(err);
+    res.status(mapped.status).json({ error: mapped.error });
+  }
+});
+
 /**
  * GET /api/docutracker/next-document-number
  */
@@ -408,7 +739,7 @@ router.get('/next-document-number', protect, async (_req, res) => {
 });
 
 /**
- * GET /api/docutracker/documents-overdue (admin — escalation worker)
+ * GET /api/docutracker/documents-overdue (admin Ã¢â‚¬â€ escalation worker)
  */
 router.get('/documents-overdue', protect, requireAdmin, async (_req, res) => {
   try {
@@ -457,7 +788,8 @@ router.post('/notifications/mark-all-read', protect, async (req, res) => {
   try {
     const result = await pool.query(
       `UPDATE docutracker_notifications
-       SET read = true
+       SET read = true,
+           read_at = COALESCE(read_at, now())
        WHERE user_id = $1 AND read = false`,
       [req.user.id]
     );
@@ -501,7 +833,8 @@ router.patch('/notifications/:id/read', protect, async (req, res) => {
     const { id } = req.params;
     const result = await pool.query(
       `UPDATE docutracker_notifications
-       SET read = true
+       SET read = true,
+           read_at = COALESCE(read_at, now())
        WHERE id = $1 AND user_id = $2
        RETURNING *`,
       [id, req.user.id]
@@ -518,8 +851,9 @@ router.patch('/notifications/:id/read', protect, async (req, res) => {
 
 /**
  * GET /api/docutracker/escalation-configs
+ * Admin-only.
  */
-router.get('/escalation-configs', protect, async (req, res) => {
+router.get('/escalation-configs', protect, requireAdmin, async (req, res) => {
   try {
     const { document_type, department_id } = req.query;
     const params = [];
@@ -543,6 +877,41 @@ router.get('/escalation-configs', protect, async (req, res) => {
   } catch (err) {
     console.error('[docutracker GET /escalation-configs]', err);
     res.status(500).json({ error: 'Failed to fetch escalation configs' });
+  }
+});
+
+/**
+ * GET /api/docutracker/governance-audit
+ * Admin-only immutable configuration audit trail.
+ */
+router.get('/governance-audit', protect, requireAdmin, async (req, res) => {
+  try {
+    const limit = Math.min(Math.max(Number(req.query.limit) || 50, 1), 200);
+    const offset = Math.max(Number(req.query.offset) || 0, 0);
+    const params = [];
+    const where = [];
+    const add = (sql, value) => {
+      params.push(value);
+      where.push(sql.replace('?', `$${params.length}`));
+    };
+    if (req.query.document_type) add('a.document_type = ?', String(req.query.document_type));
+    if (req.query.event_type) add('a.event_type = ?', String(req.query.event_type));
+    if (req.query.actor_id) add('a.actor_id = ?::uuid', String(req.query.actor_id));
+    const filter = where.length ? `WHERE ${where.join(' AND ')}` : '';
+    params.push(limit, offset);
+    const result = await pool.query(
+      `SELECT a.*, u.full_name AS actor_name
+       FROM docutracker_governance_audit a
+       JOIN users u ON u.id = a.actor_id
+       ${filter}
+       ORDER BY a.created_at DESC
+       LIMIT $${params.length - 1} OFFSET $${params.length}`,
+      params
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error('[docutracker GET /governance-audit]', err);
+    res.status(500).json({ error: 'Failed to fetch governance audit log' });
   }
 });
 
@@ -589,6 +958,14 @@ router.post('/escalation-configs', protect, requireAdmin, async (req, res) => {
         notifyOriginal,
       ]
     );
+    await writeGovernanceAudit(pool, {
+      actorId: req.user.id,
+      eventType: 'escalation_created',
+      entityType: 'escalation_config',
+      entityId: result.rows[0].id,
+      documentType: result.rows[0].document_type,
+      afterState: result.rows[0],
+    });
     return res.status(201).json(result.rows[0]);
   } catch (err) {
     console.error('[docutracker POST /escalation-configs]', err);
@@ -662,6 +1039,14 @@ router.patch('/escalation-configs/:id', protect, requireAdmin, async (req, res) 
     if (!result.rows.length) {
       return res.status(404).json({ error: 'Escalation config not found' });
     }
+    await writeGovernanceAudit(pool, {
+      actorId: req.user.id,
+      eventType: 'escalation_updated',
+      entityType: 'escalation_config',
+      entityId: result.rows[0].id,
+      documentType: result.rows[0].document_type,
+      afterState: result.rows[0],
+    });
     return res.json(result.rows[0]);
   } catch (err) {
     console.error('[docutracker PATCH /escalation-configs/:id]', err);
@@ -674,33 +1059,123 @@ router.patch('/escalation-configs/:id', protect, requireAdmin, async (req, res) 
  */
 router.get('/permission-records', protect, requireAdmin, async (req, res) => {
   try {
-    const { role_id, user_id, document_type } = req.query;
-    const params = [];
-    const where = [];
-    let i = 1;
-    if (role_id) {
-      where.push(`role_id = $${i++}`);
-      params.push(role_id);
-    }
-    if (user_id) {
-      where.push(`user_id = $${i++}::uuid`);
-      params.push(user_id);
-    }
-    if (document_type != null && document_type !== '') {
-      where.push(`document_type = $${i++}`);
-      params.push(document_type);
-    }
-    const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
-    const result = await pool.query(
-      `SELECT * FROM docutracker_permissions ${whereSql} ORDER BY document_type, action`,
-      params
-    );
-    res.json(result.rows);
+    const rows = await listPermissionRecords(pool, {
+      roleId: req.query.role_id,
+      userId: req.query.user_id,
+      documentType: req.query.document_type,
+    });
+    return res.json(rows);
   } catch (err) {
     console.error('[docutracker GET /permission-records]', err);
-    res.status(500).json({ error: 'Failed to list permission records' });
+    return permissionAdminErrorResponse(res, err, 'Failed to list permission records');
   }
 });
+
+/**
+ * GET /api/docutracker/permission-policy
+ * Returns role defaults and, when user_id is supplied, employee exceptions and
+ * server-calculated effective decisions in one response.
+ */
+router.get('/permission-policy', protect, requireAdmin, async (req, res) => {
+  try {
+    const policy = await getPermissionPolicy(pool, {
+      documentType: req.query.document_type,
+      userId: req.query.user_id,
+    });
+    return res.json(policy);
+  } catch (err) {
+    console.error('[docutracker GET /permission-policy]', err);
+    return permissionAdminErrorResponse(res, err, 'Failed to load system access settings');
+  }
+});
+
+/**
+ * PUT /api/docutracker/permission-policy
+ * Atomically applies up to 100 role defaults and employee exceptions. A null
+ * granted value removes the explicit rule so the employee inherits again.
+ */
+router.put('/permission-policy', protect, requireAdmin, async (req, res) => {
+  try {
+    const result = await savePermissionChanges(pool, {
+      actorId: req.user.id,
+      documentType: req.body?.document_type,
+      changes: req.body?.changes,
+    });
+    return res.json(result);
+  } catch (err) {
+    console.error('[docutracker PUT /permission-policy]', err);
+    return permissionAdminErrorResponse(res, err, 'Failed to save system access settings');
+  }
+});
+
+function officialSignatoryErrorResponse(res, error, fallback) {
+  if (error instanceof OfficialSignatoryError) {
+    return res.status(error.status).json({ error: error.message });
+  }
+  if (error?.code === '42P01') {
+    console.error(`[docutracker official signatories] ${fallback}`, error);
+    return res.status(503).json({
+      error: 'A required DocuTracker table is not initialized. Apply all DocuTracker migrations.',
+    });
+  }
+  console.error(`[docutracker official signatories] ${fallback}`, error);
+  return res.status(500).json({ error: fallback });
+}
+
+router.get('/official-signatories', protect, requireAdmin, async (req, res) => {
+  try {
+    const effectiveDate =
+      String(req.query?.effective_date || '').trim() || todayInHrmsTimezone();
+    const items = await listOfficialSignatories(pool, { effectiveDate });
+    return res.json({ effective_date: effectiveDate, items });
+  } catch (error) {
+    return officialSignatoryErrorResponse(
+      res,
+      error,
+      'Failed to load official signatories.'
+    );
+  }
+});
+
+router.get('/official-signatories/automatic-mayor', protect, requireAdmin, async (req, res) => {
+  try {
+    const effectiveDate =
+      String(req.query?.effective_date || '').trim() || todayInHrmsTimezone();
+    const mayor = await resolveActiveMayor(pool, effectiveDate);
+    return res.json({ effective_date: effectiveDate, mayor });
+  } catch (error) {
+    return officialSignatoryErrorResponse(
+      res,
+      error,
+      'Failed to load the active Mayor.'
+    );
+  }
+});
+
+router.put(
+  '/official-signatories/:roleKey',
+  protect,
+  requireAdmin,
+  async (req, res) => {
+    try {
+      const saved = await configureOfficialSignatory(pool, {
+        roleKey: req.params.roleKey,
+        employeeId: req.body?.employee_id,
+        effectiveFrom: req.body?.effective_from,
+        effectiveTo: req.body?.effective_to,
+        remarks: req.body?.remarks,
+        actorId: req.user.id,
+      });
+      return res.json(saved);
+    } catch (error) {
+      return officialSignatoryErrorResponse(
+        res,
+        error,
+        'Failed to configure official signatory.'
+      );
+    }
+  }
+);
 
 /**
  * GET /api/docutracker/documents/:id/history
@@ -730,154 +1205,30 @@ router.get('/documents/:id/history', protect, async (req, res) => {
 /**
  * POST /api/docutracker/documents/:id/history
  */
-router.post('/documents/:id/history', protect, async (req, res) => {
-  const { id } = req.params;
-  try {
-    if (!(await assertDocumentReadable(req, id))) {
-      return res.status(403).json({ error: 'Forbidden' });
-    }
-    const b = req.body || {};
-    const result = await pool.query(
-      `INSERT INTO docutracker_document_history
-       (document_id, action, actor_id, actor_name, from_step, to_step, from_status, to_status, remarks,
-        is_overdue_log, is_escalation_log, escalation_level)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-       RETURNING *`,
-      [
-        id,
-        b.action || null,
-        req.user.id,
-        b.actor_name || req.user.full_name || req.user.name || null,
-        b.from_step ?? null,
-        b.to_step ?? null,
-        b.from_status != null ? normalizeDocStatus(b.from_status) : null,
-        b.to_status != null ? normalizeDocStatus(b.to_status) : null,
-        b.remarks || null,
-        !!b.is_overdue_log,
-        !!b.is_escalation_log,
-        b.escalation_level ?? null,
-      ]
-    );
-    res.status(201).json(result.rows[0]);
-  } catch (err) {
-    console.error('[docutracker POST /documents/:id/history]', err);
-    res.status(500).json({ error: 'Failed to add history' });
-  }
+router.post('/documents/:id/history', protect, async (_req, res) => {
+  return res.status(405).json({
+    error: 'Document history is generated by server-side workflow operations.',
+  });
 });
 
 /**
- * GET /api/docutracker/documents/:id/ai-summary
- * Returns the latest saved AI summary for a readable document.
- */
-router.get('/documents/:id/ai-summary', protect, async (req, res) => {
-  const { id } = req.params;
-  try {
-    if (!(await assertDocumentReadable(req, id))) {
-      return res.status(403).json({ error: 'Forbidden' });
-    }
-    const row = await getLatestAiSummary(pool, id);
-    if (!row) return res.status(404).json({ error: 'AI summary not found' });
-    return res.json(mapAiSummaryRow(row));
-  } catch (err) {
-    console.error('[docutracker GET /documents/:id/ai-summary]', err);
-    return res.status(500).json({ error: 'Failed to fetch AI summary' });
-  }
-});
-
-/**
- * POST /api/docutracker/documents/:id/ai-summary
- * Generates and saves a metadata-only AI summary for a readable document.
- */
-router.post('/documents/:id/ai-summary', protect, async (req, res) => {
-  const { id } = req.params;
-  try {
-    if (!(await assertDocumentReadable(req, id))) {
-      return res.status(403).json({ error: 'Forbidden' });
-    }
-    const row = await generateAiSummary(pool, {
-      documentId: id,
-      userId: req.user?.id,
-    });
-    return res.status(201).json(mapAiSummaryRow(row));
-  } catch (err) {
-    console.error('[docutracker POST /documents/:id/ai-summary]', err);
-    if (err?.code === 'NOT_FOUND') {
-      return res.status(404).json({ error: 'Document not found' });
-    }
-    if (err?.code === 'AI_LOCAL_UNAVAILABLE') {
-      return res.status(503).json({
-        error:
-          'Local AI is not available. Start Ollama and pull the configured model.',
-      });
-    }
-    if (err?.code === 'AI_PROVIDER_FAILED') {
-      return res.status(err.status === 404 ? 503 : 502).json({
-        error: err.providerMessage || 'Local AI provider failed.',
-      });
-    }
-    return res.status(500).json({ error: 'Failed to generate AI summary' });
-  }
-});
-
-/**
- * PUT /api/docutracker/documents/:id — full update (Flutter client)
+ * PUT /api/docutracker/documents/:id Ã¢â‚¬â€ full update (Flutter client)
  */
 router.put('/documents/:id', protect, async (req, res) => {
   const { id } = req.params;
   const b = req.body || {};
   try {
-    if (!(await assertDocumentReadable(req, id))) {
-      return res.status(403).json({ error: 'Forbidden' });
-    }
-    if (req.user?.role !== 'admin' && putBodyTouchesWorkflowFields(b)) {
-      return res.status(403).json({
-        error: 'Only administrators can change workflow fields on a document; use the transition API for routing.',
+    if (putBodyTouchesWorkflowFields(b)) {
+      return res.status(400).json({
+        error: 'Workflow fields cannot be changed here; use the workflow transition or recovery operation.',
       });
     }
-    const result = await pool.query(
-      `UPDATE docutracker_documents SET
-        document_number = COALESCE($1, document_number),
-        document_type = COALESCE($2, document_type),
-        title = COALESCE($3, title),
-        description = $4,
-        file_path = $5,
-        file_name = $6,
-        current_holder_id = $7,
-        current_step = COALESCE($8, current_step),
-        status = COALESCE($9, status),
-        sent_time = $10,
-        deadline_time = $11,
-        reviewed_time = $12,
-        escalation_level = COALESCE($13, escalation_level),
-        needs_admin_intervention = COALESCE($14, needs_admin_intervention),
-        updated_at = now()
-       WHERE id = $15
-       RETURNING *`,
-      [
-        b.document_number ?? null,
-        b.document_type ?? null,
-        b.title ?? null,
-        b.description !== undefined ? b.description : null,
-        b.file_path !== undefined ? b.file_path : null,
-        b.file_name !== undefined ? b.file_name : null,
-        b.current_holder_id !== undefined ? b.current_holder_id : null,
-        b.current_step ?? null,
-        b.status != null ? normalizeDocStatus(b.status) : null,
-        b.sent_time ?? null,
-        b.deadline_time ?? null,
-        b.reviewed_time ?? null,
-        b.escalation_level ?? null,
-        b.needs_admin_intervention !== undefined ? !!b.needs_admin_intervention : null,
-        id,
-      ]
-    );
-    if (!result.rows[0]) {
-      return res.status(404).json({ error: 'Document not found' });
-    }
-    res.json(mapDocumentRow(result.rows[0]));
+    const updated = await updateDocumentMetadata(pool, req.user, id, b);
+    return res.json(updated);
   } catch (err) {
     console.error('[docutracker PUT /documents/:id]', err);
-    res.status(500).json({ error: 'Failed to update document' });
+    const mapped = mapWorkflowServiceError(err);
+    return res.status(mapped.status).json({ error: mapped.error });
   }
 });
 
@@ -990,99 +1341,27 @@ router.get('/permission-explain', protect, async (req, res) => {
 
 /**
  * PATCH /api/docutracker/documents/:id
- * Allows updating status, current_holder_id, current_step and optional remarks.
- * Body: { status?, current_holder_id?, current_step?, remarks?, needs_admin_intervention? }
- * Admin-only (same fields are workflow-sensitive).
+ * Admin-only recovery reassignment for the document's current workflow step.
+ * Body: { current_holder_id, remarks }
  */
 router.patch('/documents/:id', protect, requireAdmin, async (req, res) => {
   const { id } = req.params;
-  const {
-    status,
-    current_holder_id,
-    current_step,
-    remarks,
-    needs_admin_intervention,
-  } = req.body || {};
-
-  if (
-    status === undefined &&
-    current_holder_id === undefined &&
-    current_step === undefined &&
-    needs_admin_intervention === undefined
-  ) {
-    return res.status(400).json({ error: 'No fields to update' });
+  const b = req.body || {};
+  const allowedFields = new Set(['current_holder_id', 'remarks']);
+  const unsupportedFields = Object.keys(b).filter((field) => !allowedFields.has(field));
+  if (unsupportedFields.length) {
+    return res.status(400).json({
+      error: 'Recovery accepts only current_holder_id and remarks.',
+    });
   }
 
   try {
-    // fetch current values for history
-    const existingResult = await pool.query(
-      'SELECT status, current_step FROM docutracker_documents WHERE id = $1',
-      [id]
-    );
-    const existing = existingResult.rows[0];
-    if (!existing) {
-      return res.status(404).json({ error: 'Document not found' });
-    }
-
-    const updates = [];
-    const values = [];
-    let i = 1;
-
-    if (status !== undefined) {
-      updates.push(`status = $${i++}`);
-      values.push(normalizeDocStatus(status));
-    }
-    if (current_holder_id !== undefined) {
-      updates.push(`current_holder_id = $${i++}`);
-      values.push(current_holder_id || null);
-    }
-    if (current_step !== undefined) {
-      updates.push(`current_step = $${i++}`);
-      values.push(current_step);
-    }
-    if (needs_admin_intervention !== undefined) {
-      updates.push(`needs_admin_intervention = $${i++}`);
-      values.push(!!needs_admin_intervention);
-    }
-
-    if (!updates.length) {
-      return res.status(400).json({ error: 'No valid fields to update' });
-    }
-
-    updates.push('updated_at = now()');
-
-    values.push(id);
-
-    const updateResult = await pool.query(
-      `UPDATE docutracker_documents
-       SET ${updates.join(', ')}
-       WHERE id = $${i}
-       RETURNING *`,
-      values
-    );
-
-    const updated = updateResult.rows[0];
-
-    await pool.query(
-      `INSERT INTO docutracker_document_history
-       (document_id, action, actor_id, from_step, to_step, from_status, to_status, remarks)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-      [
-        id,
-        'update',
-        req.user.id,
-        existing.current_step,
-        updated.current_step,
-        existing.status,
-        updated.status,
-        remarks || null,
-      ]
-    );
-
-    res.json(mapDocumentRow(updated));
+    const updated = await recoverDocumentAssignment(pool, req.user, id, b);
+    return res.json(updated);
   } catch (err) {
     console.error('[docutracker PATCH /documents/:id]', err);
-    res.status(500).json({ error: 'Failed to update document' });
+    const mapped = mapWorkflowServiceError(err);
+    return res.status(mapped.status).json({ error: mapped.error });
   }
 });
 
@@ -1147,7 +1426,12 @@ router.post('/routing-configs', protect, requireAdmin, async (req, res) => {
         ).trim().toLowerCase(),
         role_id: s.role_id ?? s.roleId ?? null,
         department_id: s.department_id ?? s.departmentId ?? null,
-        user_ids: Array.isArray(s.user_ids) ? s.user_ids : Array.isArray(s.userIds) ? s.userIds : null,
+        user_ids: (Array.isArray(s.user_ids)
+          ? s.user_ids
+          : Array.isArray(s.userIds)
+            ? s.userIds
+            : null
+        )?.map((id) => String(id).trim()).filter(Boolean) ?? null,
         label: s.label ?? null,
         enabled: s.enabled !== false,
         deadline_hours:
@@ -1156,6 +1440,11 @@ router.post('/routing-configs', protect, requireAdmin, async (req, res) => {
             : s.deadlineHours != null
               ? Number(s.deadlineHours)
               : null,
+        allowed_actions: Array.isArray(s.allowed_actions)
+          ? s.allowed_actions.map((action) => String(action).trim().toLowerCase())
+          : Array.isArray(s.allowedActions)
+            ? s.allowedActions.map((action) => String(action).trim().toLowerCase())
+            : null,
       }))
       .filter((s) => Number.isFinite(s.step_order) && s.step_order > 0)
       .sort((a, b) => a.step_order - b.step_order);
@@ -1197,10 +1486,25 @@ router.post('/routing-configs', protect, requireAdmin, async (req, res) => {
       if (s.deadline_hours != null && (!Number.isFinite(s.deadline_hours) || s.deadline_hours <= 0)) {
         return res.status(400).json({ error: `Invalid deadline_hours for step ${s.step_order}.` });
       }
+      const allowedActionSet = new Set(['approve', 'forward', 'return', 'reject']);
+      if (s.allowed_actions != null) {
+        const deduped = Array.from(new Set(s.allowed_actions.filter(Boolean)));
+        if (!deduped.length || deduped.some((action) => !allowedActionSet.has(action))) {
+          return res.status(400).json({
+            error: `Step ${s.step_order} must include one or more valid allowed actions.`,
+          });
+        }
+        s.allowed_actions = deduped;
+      }
       if (s.assignee_type === 'user' && s.assignee_source === 'specific_users') {
         const ids = Array.isArray(s.user_ids) ? s.user_ids.filter(Boolean) : [];
         if (ids.length === 0) {
           return res.status(400).json({ error: `User step ${s.step_order} must include user_ids.` });
+        }
+        if (new Set(ids).size !== ids.length) {
+          return res.status(400).json({
+            error: `Step ${s.step_order} cannot use the same user as both primary and backup assignee.`,
+          });
         }
       }
       if (s.assignee_type === 'role' && !s.role_id) {
@@ -1364,9 +1668,11 @@ router.post('/routing-configs', protect, requireAdmin, async (req, res) => {
           const preserveKey = `${s.step_order}:${uid}`;
           const preserved = preservedActionsByStepUser.get(preserveKey);
           const allowedActions =
-            Array.isArray(preserved) && preserved.length
-              ? preserved
-              : ['approve', 'forward', 'reject', 'return'];
+            Array.isArray(s.allowed_actions) && s.allowed_actions.length
+              ? s.allowed_actions
+              : Array.isArray(preserved) && preserved.length
+                ? preserved
+                : ['approve', 'forward', 'return', 'reject'];
           await client.query(
             `INSERT INTO docutracker_workflow_step_assignees
              (step_id, user_id, is_primary, backup_rank, is_enabled, allowed_actions)
@@ -1376,6 +1682,15 @@ router.post('/routing-configs', protect, requireAdmin, async (req, res) => {
         }
       }
 
+      await writeGovernanceAudit(client, {
+        actorId: req.user.id,
+        eventType: 'workflow_published',
+        entityType: 'workflow_version',
+        entityId: `${document_type}:${nextVersion}`,
+        documentType: document_type,
+        workflowVersion: nextVersion,
+        afterState: vRes.rows[0],
+      });
       await client.query('COMMIT');
       res.status(201).json(vRes.rows[0]);
     } catch (e) {
@@ -1482,7 +1797,8 @@ router.get('/workflow-steps', protect, requireAdmin, async (req, res) => {
  *   ]
  * }
  *
- * Replaces the assignee set for the step.
+ * Replaces the assignee set for the step. An empty list leaves the step
+ * unassigned; workflow execution remains blocked until an assignee is added.
  */
 router.put('/workflow-steps/:stepId/assignees', protect, requireAdmin, async (req, res) => {
   const stepId = String(req.params.stepId || '').trim();
@@ -1512,12 +1828,10 @@ router.put('/workflow-steps/:stepId/assignees', protect, requireAdmin, async (re
       }))
       .filter((a) => typeof a.user_id === 'string' && a.user_id.trim().length > 0);
 
-    // Basic validation: at most one primary; ranks unique; actions whitelisted.
-    if (normalized.length === 0) {
-      return res.status(400).json({ error: 'Each step must have at least one assigned user.' });
-    }
+    // Basic validation: assigned steps have one primary; ranks are unique;
+    // actions are whitelisted. An empty list intentionally leaves the step unassigned.
     const primaries = normalized.filter((a) => a.is_primary);
-    if (primaries.length !== 1) {
+    if (normalized.length > 0 && primaries.length !== 1) {
       return res.status(400).json({ error: 'Each step must have exactly one primary assignee.' });
     }
     const seenRanks = new Set();
@@ -1631,6 +1945,13 @@ router.put('/workflow-steps/:stepId/assignees', protect, requireAdmin, async (re
         );
       }
 
+      await writeGovernanceAudit(client, {
+        actorId: req.user.id,
+        eventType: 'step_assignees_updated',
+        entityType: 'workflow_step',
+        entityId: stepId,
+        afterState: { assignees: normalized },
+      });
       await client.query('COMMIT');
       return res.json({ ok: true, step_id: stepId, updated: normalized.length });
     } catch (e) {
@@ -1672,17 +1993,22 @@ router.get('/permissions', protect, requireAdmin, async (req, res) => {
         ).join(', ')}`,
       });
     }
+    const validatedDocumentType = await validateDocumentType(pool, document_type);
+    const normalizedSearch = String(search || '').trim();
+    if (normalizedSearch.length > 100) {
+      return res.status(400).json({ error: 'Search text is too long.' });
+    }
 
-    const params = [document_type, actionVariants, normalizedAction];
+    const params = [validatedDocumentType, actionVariants, normalizedAction];
     const where = [];
     let i = 4;
 
     // only active employees by default
     where.push('(u.is_active IS NULL OR u.is_active = true)');
 
-    if (search) {
+    if (normalizedSearch) {
       where.push(`(u.full_name ILIKE $${i} OR u.email ILIKE $${i})`);
-      params.push(`%${search}%`);
+      params.push(`%${normalizedSearch}%`);
       i += 1;
     }
 
@@ -1730,7 +2056,7 @@ router.get('/permissions', protect, requireAdmin, async (req, res) => {
     );
   } catch (err) {
     console.error('[docutracker GET /permissions]', err);
-    res.status(500).json({ error: 'Failed to fetch permissions' });
+    return permissionAdminErrorResponse(res, err, 'Failed to fetch permissions');
   }
 });
 
@@ -1750,69 +2076,22 @@ router.get('/permissions', protect, requireAdmin, async (req, res) => {
  */
 router.post('/permissions', protect, requireAdmin, async (req, res) => {
   try {
-    const { user_id, role_id, document_type, action, granted } = req.body || {};
-
-    if ((!user_id && !role_id) || !document_type || !action) {
-      return res.status(400).json({
-        error: 'document_type and action are required, plus user_id or role_id',
-      });
-    }
-    const normalizedAction = normalizeGeneralPermissionAction(action);
-    const actionVariants = generalPermissionActionVariants(normalizedAction);
-    if (!GENERAL_PERMISSION_ACTIONS.has(String(normalizedAction))) {
-      return res.status(400).json({
-        error: `Invalid action '${action}'. Role-based permissions only support: ${Array.from(
-          GENERAL_PERMISSION_ACTIONS
-        ).join(', ')}`,
-      });
-    }
-
-    const grantedBool = !!granted;
-
-    const existing = await pool.query(
-      user_id
-        ? `SELECT id FROM docutracker_permissions
-           WHERE user_id = $1 AND document_type = $2 AND action = ANY($3::text[])`
-        : `SELECT id FROM docutracker_permissions
-           WHERE role_id = $1 AND user_id IS NULL AND document_type = $2 AND action = ANY($3::text[])`,
-      user_id ? [user_id, document_type, actionVariants] : [role_id, document_type, actionVariants]
-    );
-
-    let row;
-    if (existing.rowCount > 0) {
-      const permId = existing.rows[0].id;
-      const update = await pool.query(
-        `UPDATE docutracker_permissions
-         SET granted = $1,
-             action = $3,
-             updated_at = now()
-         WHERE id = $2
-         RETURNING *`,
-        [grantedBool, permId, normalizedAction]
-      );
-      row = update.rows[0];
-    } else {
-      const insert = await pool.query(
-        `INSERT INTO docutracker_permissions
-           (user_id, role_id, document_type, action, granted)
-         VALUES ($1, $2, $3, $4, $5)
-         RETURNING *`,
-        [user_id || null, role_id || null, document_type, normalizedAction, grantedBool]
-      );
-      row = insert.rows[0];
-    }
-
-    res.status(201).json({
+    const row = await saveSinglePermission(pool, {
+      actorId: req.user.id,
+      body: req.body || {},
+    });
+    return res.status(201).json({
       id: row.id,
       user_id: row.user_id,
       role_id: row.role_id,
       document_type: row.document_type,
       action: row.action,
       granted: row.granted,
+      updated_at: row.updated_at,
     });
   } catch (err) {
     console.error('[docutracker POST /permissions]', err);
-    res.status(500).json({ error: 'Failed to update permission' });
+    return permissionAdminErrorResponse(res, err, 'Failed to update permission');
   }
 });
 
@@ -1832,53 +2111,14 @@ router.post('/permissions', protect, requireAdmin, async (req, res) => {
  */
 router.delete('/permissions', protect, requireAdmin, async (req, res) => {
   try {
-    const { user_id, role_id, document_type, action } = req.body || {};
-    if ((!user_id && !role_id) || !document_type) {
-      return res.status(400).json({
-        error: 'document_type is required, plus user_id or role_id',
-      });
-    }
-    if (user_id && role_id) {
-      return res.status(400).json({
-        error: 'Provide only one scope: user_id OR role_id',
-      });
-    }
-
-    const params = [];
-    const where = [];
-    let i = 1;
-
-    if (user_id) {
-      where.push(`user_id = $${i++}::uuid`);
-      params.push(user_id);
-    } else {
-      where.push(`role_id = $${i++}`);
-      params.push(role_id);
-      where.push(`user_id IS NULL`);
-    }
-
-    where.push(`document_type = $${i++}`);
-    params.push(document_type);
-
-    if (action) {
-      const normalizedAction = normalizeGeneralPermissionAction(action);
-      if (!GENERAL_PERMISSION_ACTIONS.has(String(normalizedAction))) {
-        return res.status(400).json({
-          error: `Invalid action '${action}'. Role-based permissions only support: ${Array.from(
-            GENERAL_PERMISSION_ACTIONS
-          ).join(', ')}`,
-        });
-      }
-      where.push(`action = $${i++}`);
-      params.push(normalizedAction);
-    }
-
-    const sql = `DELETE FROM docutracker_permissions WHERE ${where.join(' AND ')}`;
-    const result = await pool.query(sql, params);
-    res.json({ deleted: result.rowCount || 0 });
+    const result = await resetPermissionRules(pool, {
+      actorId: req.user.id,
+      body: req.body || {},
+    });
+    return res.json(result);
   } catch (err) {
     console.error('[docutracker DELETE /permissions]', err);
-    res.status(500).json({ error: 'Failed to reset permissions' });
+    return permissionAdminErrorResponse(res, err, 'Failed to reset permissions');
   }
 });
 
@@ -1886,6 +2126,10 @@ function mapWorkflowServiceError(err) {
   const code = err?.code;
   if (code === 'FORBIDDEN') return { status: 403, error: err.message || 'Forbidden' };
   if (code === 'NOT_FOUND') return { status: 404, error: err.message || 'Not found' };
+  if (code === 'CONFLICT') return { status: 409, error: err.message || 'Conflict' };
+  if (code === 'UNAVAILABLE') {
+    return { status: 503, error: err.message || 'Service unavailable' };
+  }
   if (code === 'VALIDATION') {
     return { status: 400, error: err.message || 'Request could not be completed.' };
   }
@@ -1962,6 +2206,7 @@ router.post('/documents/:id/remark', protect, async (req, res) => {
  */
 router.post('/documents/:id/attachment', protect, uploadDocutrackerAttachmentMw, async (req, res) => {
   const { id } = req.params;
+  let uploadedRelPath = null;
   try {
     if (isSourceOnlyDocumentId(id)) return sourceOnlyDocumentResponse(res);
     if (!req.file) {
@@ -1979,21 +2224,40 @@ router.post('/documents/:id/attachment', protect, uploadDocutrackerAttachmentMw,
     }
 
     const relPath = `${DOCUTRACKER_ATTACHMENT_SUBDIR}/${req.file.filename}`;
-    if (docRow.file_path) {
-      const oldPath = path.join(UPLOAD_DIR, docRow.file_path);
-      if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath);
+    uploadedRelPath = relPath;
+    const fileName = req.file.originalname || req.file.filename;
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const updated = await client.query(
+        `UPDATE docutracker_documents
+         SET file_path = $1, file_name = $2, updated_at = NOW()
+         WHERE id = $3
+         RETURNING *`,
+        [relPath, fileName, id]
+      );
+      await recordCurrentDocumentFile(client, {
+        documentId: id,
+        fileName,
+        filePath: relPath,
+        mimeType: req.file.mimetype || null,
+        fileSize: req.file.size,
+        uploadedBy: req.user.id,
+      });
+      await client.query('COMMIT');
+      uploadedRelPath = null;
+      return res.json(mapDocumentRow(updated.rows[0]));
+    } catch (e) {
+      await client.query('ROLLBACK');
+      throw e;
+    } finally {
+      client.release();
     }
-
-    const updated = await pool.query(
-      `UPDATE docutracker_documents
-       SET file_path = $1, file_name = $2, updated_at = NOW()
-       WHERE id = $3
-       RETURNING *`,
-      [relPath, req.file.originalname || req.file.filename, id]
-    );
-
-    return res.json(mapDocumentRow(updated.rows[0]));
   } catch (err) {
+    if (uploadedRelPath) {
+      const filePath = path.join(UPLOAD_DIR, uploadedRelPath);
+      if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+    }
     console.error('[docutracker POST /documents/:id/attachment]', err);
     res.status(500).json({ error: 'Failed to upload attachment' });
   }
@@ -2014,18 +2278,25 @@ router.delete('/documents/:id/attachment', protect, async (req, res) => {
     if (!(await canModifyDocumentAttachment(pool, docRow, req.user))) {
       return res.status(403).json({ error: 'You do not have permission to remove the file.' });
     }
-    if (docRow.file_path) {
-      const filePath = path.join(UPLOAD_DIR, docRow.file_path);
-      if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      await clearCurrentDocumentFiles(client, id);
+      const updated = await client.query(
+        `UPDATE docutracker_documents
+         SET file_path = NULL, file_name = NULL, updated_at = NOW()
+         WHERE id = $1
+         RETURNING *`,
+        [id]
+      );
+      await client.query('COMMIT');
+      return res.json(mapDocumentRow(updated.rows[0]));
+    } catch (e) {
+      await client.query('ROLLBACK');
+      throw e;
+    } finally {
+      client.release();
     }
-    const updated = await pool.query(
-      `UPDATE docutracker_documents
-       SET file_path = NULL, file_name = NULL, updated_at = NOW()
-       WHERE id = $1
-       RETURNING *`,
-      [id]
-    );
-    return res.json(mapDocumentRow(updated.rows[0]));
   } catch (err) {
     console.error('[docutracker DELETE /documents/:id/attachment]', err);
     res.status(500).json({ error: 'Failed to remove attachment' });

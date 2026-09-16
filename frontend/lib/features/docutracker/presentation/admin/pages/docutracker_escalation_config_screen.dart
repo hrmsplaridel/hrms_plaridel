@@ -51,7 +51,19 @@ class _DocuTrackerEscalationConfigScreenState
           map[id] = m['name']?.toString() ?? id;
         }
       }
-      final configs = await _repo.listEscalationConfigs();
+      final configsResult = await _repo.listEscalationConfigs();
+      late final List<EscalationConfig> configs;
+      switch (configsResult) {
+        case DocuTrackerSuccess<List<EscalationConfig>>(:final value):
+          configs = value;
+        case DocuTrackerFailure<List<EscalationConfig>>(:final message):
+          if (!mounted) return;
+          setState(() {
+            _error = message;
+            _loading = false;
+          });
+          return;
+      }
       if (!mounted) return;
       setState(() {
         _departmentNameById
@@ -88,6 +100,14 @@ class _DocuTrackerEscalationConfigScreenState
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            Align(
+              alignment: Alignment.centerLeft,
+              child: IconButton(
+                tooltip: 'Back',
+                onPressed: () => Navigator.of(context).maybePop(),
+                icon: const Icon(Icons.arrow_back_rounded),
+              ),
+            ),
             DocuTrackerModuleHeader(
               title: 'Escalation rules',
               subtitle:
@@ -111,7 +131,8 @@ class _DocuTrackerEscalationConfigScreenState
             const SizedBox(height: 12),
             Text(
               'When a review passes its deadline, the escalation worker reassigns the document '
-              'using these rules. Department-specific rows take priority over global (no department).',
+              'using these rules. Department-specific rows take priority over global (no department). '
+              'The target role must have an active user or the document will require admin intervention.',
               style: TextStyle(
                 color: AppTheme.textSecondary,
                 fontSize: 13,

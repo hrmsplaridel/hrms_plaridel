@@ -3,10 +3,12 @@ import 'dart:convert';
 import 'package:dio/dio.dart';
 
 import 'package:hrms_plaridel/core/api/client.dart';
+import 'package:hrms_plaridel/core/api/user_facing_api_error.dart';
 import 'leave_repository.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_balance.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_balance_ledger.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_request.dart';
+import 'package:hrms_plaridel/features/dtr/leave/models/leave_request_history.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_type.dart';
 
 class ApiLeaveRepository implements LeaveRepository {
@@ -47,12 +49,43 @@ class ApiLeaveRepository implements LeaveRepository {
       Map<String, dynamic>.from(v as Map);
 
   /// Extract backend error message from DioException for user-facing feedback.
-  static String _messageFromDio(DioException e) {
-    final data = e.response?.data;
+  static String _messageFromDio(
+    DioException e, {
+    bool submissionMayHaveCompleted = false,
+  }) {
+    var data = e.response?.data;
+    if (data is List<int>) {
+      try {
+        data = jsonDecode(utf8.decode(data));
+      } catch (_) {}
+    }
     if (data is Map && data['error'] != null) {
       return data['error'].toString();
     }
-    return e.message ?? 'Request failed';
+    return userFacingApiError(
+      e,
+      operationMayHaveCompleted: submissionMayHaveCompleted,
+    );
+  }
+
+  static String _employeeReadMessageFromDio(
+    DioException error,
+    String fallback,
+  ) {
+    final data = error.response?.data;
+    if (data is Map && data['error'] != null) {
+      return data['error'].toString();
+    }
+    final statusCode = error.response?.statusCode;
+    if (statusCode != null && statusCode >= 500) {
+      return 'The leave service is temporarily unavailable. Please try again.';
+    }
+    return switch (statusCode) {
+      401 => 'Your session has expired. Please sign in again.',
+      403 => 'You do not have permission to view this information.',
+      429 => 'Too many requests. Please wait a moment and try again.',
+      _ => fallback,
+    };
   }
 
   static Map<String, dynamic> _toApiPayload(LeaveRequest request) {
@@ -104,7 +137,7 @@ class ApiLeaveRepository implements LeaveRepository {
       if (data == null) throw Exception('No data returned');
       return LeaveRequest.fromJson(data);
     } on DioException catch (e) {
-      throw Exception(_messageFromDio(e));
+      throw Exception(_messageFromDio(e, submissionMayHaveCompleted: true));
     }
   }
 
@@ -126,7 +159,7 @@ class ApiLeaveRepository implements LeaveRepository {
       if (data == null) throw Exception('No data returned');
       return LeaveRequest.fromJson(data);
     } on DioException catch (e) {
-      throw Exception(_messageFromDio(e));
+      throw Exception(_messageFromDio(e, submissionMayHaveCompleted: true));
     }
   }
 
@@ -145,7 +178,13 @@ class ApiLeaveRepository implements LeaveRepository {
       if (data == null) throw Exception('No data returned');
       return LeaveRequest.fromJson(data);
     } on DioException catch (e) {
-      throw Exception(_messageFromDio(e));
+      throw Exception(
+        _messageFromDio(
+          e,
+          submissionMayHaveCompleted:
+              request.status == LeaveRequestStatus.pending,
+        ),
+      );
     }
   }
 
@@ -161,7 +200,29 @@ class ApiLeaveRepository implements LeaveRepository {
       return LeaveRequest.fromJson(data);
     } on DioException catch (e) {
       if (e.response?.statusCode == 404) return null;
-      rethrow;
+      throw Exception(_messageFromDio(e));
+    }
+  }
+
+  @override
+  Future<List<LeaveRequestHistoryEntry>> listMyRequestHistory(
+    String requestId,
+  ) async {
+    try {
+      final safeId = Uri.encodeComponent(requestId.trim());
+      final res = await ApiClient.instance.get<List<dynamic>>(
+        '/api/leave/my/$safeId/history',
+      );
+      return (res.data ?? const [])
+          .map((item) => LeaveRequestHistoryEntry.fromJson(_asMap(item)))
+          .toList();
+    } on DioException catch (e) {
+      throw Exception(
+        _employeeReadMessageFromDio(
+          e,
+          'Unable to load leave request history. Please try again.',
+        ),
+      );
     }
   }
 
@@ -172,15 +233,81 @@ class ApiLeaveRepository implements LeaveRepository {
     int? limit, // #13: pagination
   }) async {
     // userId is inferred from JWT on backend; we keep signature for compatibility.
-    final res = await ApiClient.instance.get<List<dynamic>>(
-      '/api/leave/my',
-      queryParameters: {
-        if (status != null) 'status': status.value,
-        if (limit != null) 'limit': limit,
-      },
-    );
-    final data = res.data ?? const [];
-    return data.map((e) => LeaveRequest.fromJson(_asMap(e))).toList();
+    try {
+      final res = await ApiClient.instance.get<List<dynamic>>(
+        '/api/leave/my',
+        queryParameters: {
+          if (status != null) 'status': status.value,
+          if (limit != null) 'limit': limit,
+        },
+      );
+      final data = res.data ?? const [];
+      return data.map((e) => LeaveRequest.fromJson(_asMap(e))).toList();
+    } on DioException catch (e) {
+      throw Exception(
+        _employeeReadMessageFromDio(
+          e,
+          'Unable to load leave requests. Please try again.',
+        ),
+      );
+    }
+  }
+
+  @override
+  Future<LeaveRequestPage> listMyRequestPage(
+    String userId, {
+    required int limit,
+    required int offset,
+  }) async {
+    try {
+      final res = await ApiClient.instance.get<Map<String, dynamic>>(
+        '/api/leave/my',
+        queryParameters: {
+          'paginated': 'true',
+          'limit': limit,
+          'offset': offset,
+        },
+      );
+      final data = res.data ?? const <String, dynamic>{};
+      final rawItems = data['items'] as List<dynamic>? ?? const [];
+      return LeaveRequestPage(
+        items: rawItems
+            .map((item) => LeaveRequest.fromJson(_asMap(item)))
+            .toList(),
+        total: (data['total'] as num?)?.toInt() ?? 0,
+        limit: (data['limit'] as num?)?.toInt() ?? limit,
+        offset: (data['offset'] as num?)?.toInt() ?? offset,
+      );
+    } on DioException catch (e) {
+      throw Exception(
+        _employeeReadMessageFromDio(
+          e,
+          'Unable to load leave requests. Please try again.',
+        ),
+      );
+    }
+  }
+
+  @override
+  Future<DateTime> getOfficialDate() async {
+    try {
+      final res = await ApiClient.instance.get<Map<String, dynamic>>(
+        '/api/leave/my/context',
+      );
+      final raw = res.data?['official_date']?.toString();
+      final parsed = raw == null ? null : DateTime.tryParse(raw);
+      if (parsed == null) {
+        throw Exception('The leave service returned an invalid official date.');
+      }
+      return DateTime(parsed.year, parsed.month, parsed.day);
+    } on DioException catch (e) {
+      throw Exception(
+        _employeeReadMessageFromDio(
+          e,
+          'Unable to load the official HRMS date. Please try again.',
+        ),
+      );
+    }
   }
 
   @override
@@ -207,11 +334,20 @@ class ApiLeaveRepository implements LeaveRepository {
 
   @override
   Future<List<LeaveBalance>> getBalancesForUser(String userId) async {
-    final res = await ApiClient.instance.get<List<dynamic>>(
-      '/api/leave/balances/$userId',
-    );
-    final data = res.data ?? const [];
-    return data.map((e) => LeaveBalance.fromJson(_asMap(e))).toList();
+    try {
+      final res = await ApiClient.instance.get<List<dynamic>>(
+        '/api/leave/balances/$userId',
+      );
+      final data = res.data ?? const [];
+      return data.map((e) => LeaveBalance.fromJson(_asMap(e))).toList();
+    } on DioException catch (e) {
+      throw Exception(
+        _employeeReadMessageFromDio(
+          e,
+          'Unable to load leave credits. Please try again.',
+        ),
+      );
+    }
   }
 
   @override
@@ -387,8 +523,7 @@ class ApiLeaveRepository implements LeaveRepository {
       );
       return res.data;
     } on DioException catch (e) {
-      if (e.response?.statusCode == 404) return null;
-      rethrow;
+      throw Exception(_messageFromDio(e));
     }
   }
 

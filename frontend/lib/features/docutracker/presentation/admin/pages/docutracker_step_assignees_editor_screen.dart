@@ -9,7 +9,6 @@ import 'package:hrms_plaridel/features/docutracker/data/repositories/docutracker
 import 'package:hrms_plaridel/features/docutracker/data/styles/docutracker_styles.dart';
 import 'package:hrms_plaridel/features/docutracker/theme/docutracker_tokens.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document_routing_config.dart';
-import 'package:hrms_plaridel/features/docutracker/models/document_type.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_error_banner.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_module_header.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_responsive_body.dart';
@@ -110,6 +109,7 @@ class _DocuTrackerStepAssigneesEditorScreenState
   int? _workflowVersion;
   bool _loading = true;
   String? _error;
+  List<String> _availableDocumentTypes = const [];
 
   final List<_DocStep> _steps = [];
   final Map<String, String> _departmentNameById = {};
@@ -148,7 +148,22 @@ class _DocuTrackerStepAssigneesEditorScreenState
             : DocumentRoutingConfig.defaults.first.documentType.value);
     _workflowVersion = widget.initialWorkflowVersion;
     _empSearchController.addListener(_scheduleEmpSearch);
+    _loadAvailableDocumentTypes();
     _load();
+  }
+
+  Future<void> _loadAvailableDocumentTypes() async {
+    try {
+      final configs = await _repo.getRoutingConfigs();
+      final types = <String>{
+        for (final config in configs) config.documentType.value,
+        if (_documentType != null && _documentType!.trim().isNotEmpty)
+          _documentType!.trim(),
+      }.toList()..sort();
+      if (mounted) setState(() => _availableDocumentTypes = types);
+    } catch (_) {
+      // Keep the current selection available while the normal step load reports errors.
+    }
   }
 
   @override
@@ -376,6 +391,14 @@ class _DocuTrackerStepAssigneesEditorScreenState
           }
         }
       }
+      if (list.isNotEmpty && !list.any((a) => a.isPrimary)) {
+        final enabledIndex = list.indexWhere((a) => a.isEnabled);
+        final replacementIndex = enabledIndex < 0 ? 0 : enabledIndex;
+        list[replacementIndex] = list[replacementIndex].copyWith(
+          isPrimary: true,
+          isEnabled: true,
+        );
+      }
       final backups = list.where((a) => !a.isPrimary).toList();
       for (var i = 0; i < backups.length; i++) {
         final b = backups[i];
@@ -393,7 +416,7 @@ class _DocuTrackerStepAssigneesEditorScreenState
       builder: (ctx) {
         return StatefulBuilder(
           builder: (ctx, setModalState) {
-            final canSave = draft.isNotEmpty && draft.any((a) => a.isPrimary);
+            final canSave = draft.isEmpty || draft.any((a) => a.isPrimary);
             final youMustHavePrimary =
                 draft.isNotEmpty && !draft.any((a) => a.isPrimary);
             return Padding(
@@ -575,7 +598,7 @@ class _DocuTrackerStepAssigneesEditorScreenState
                             Padding(
                               padding: const EdgeInsets.symmetric(vertical: 12),
                               child: Text(
-                                'No assignees yet.',
+                                'No assignees. Save to leave this workflow step unassigned.',
                                 style: TextStyle(color: AppTheme.textSecondary),
                               ),
                             )
@@ -670,6 +693,29 @@ class _DocuTrackerStepAssigneesEditorScreenState
     );
 
     if (saved != true) return;
+    if (!mounted) return;
+    if (draft.isEmpty) {
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('Leave this step unassigned?'),
+          content: const Text(
+            'Documents cannot enter this workflow step until an assignee is added.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              child: const Text('Remove assignee'),
+            ),
+          ],
+        ),
+      );
+      if (confirmed != true || !mounted) return;
+    }
 
     final payload = <Map<String, dynamic>>[];
     for (final a in draft) {
@@ -690,7 +736,9 @@ class _DocuTrackerStepAssigneesEditorScreenState
     await _load();
     if (!mounted) return;
     final msg = saveResult is DocuTrackerSuccess<bool>
-        ? 'Saved step assignees.'
+        ? draft.isEmpty
+              ? 'Removed all step assignees.'
+              : 'Saved step assignees.'
         : saveResult is DocuTrackerFailure<bool>
         ? saveResult.message
         : 'Failed to save step assignees.';
@@ -701,6 +749,9 @@ class _DocuTrackerStepAssigneesEditorScreenState
   Widget build(BuildContext context) {
     final typeOptions = {
       for (final c in DocumentRoutingConfig.defaults) c.documentType.value,
+      ..._availableDocumentTypes,
+      if (_documentType != null && _documentType!.trim().isNotEmpty)
+        _documentType!.trim(),
     }.toList()..sort();
 
     return Scaffold(
@@ -709,6 +760,14 @@ class _DocuTrackerStepAssigneesEditorScreenState
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            Align(
+              alignment: Alignment.centerLeft,
+              child: IconButton(
+                tooltip: 'Back',
+                onPressed: () => Navigator.of(context).maybePop(),
+                icon: const Icon(Icons.arrow_back_rounded),
+              ),
+            ),
             DocuTrackerModuleHeader(
               title: 'Workflow step assignees',
               subtitle:
@@ -980,11 +1039,13 @@ class _DocuTrackerStepAssigneesEditorScreenState
                                       ],
                                     ),
                                   ),
-                                  Icon(
-                                    Icons.chevron_right_rounded,
-                                    color: AppTheme.textSecondary.withValues(
-                                      alpha: 0.5,
+                                  OutlinedButton.icon(
+                                    onPressed: () => _editAssignees(s),
+                                    icon: const Icon(
+                                      Icons.edit_outlined,
+                                      size: 16,
                                     ),
+                                    label: const Text('Edit'),
                                   ),
                                 ],
                               ),

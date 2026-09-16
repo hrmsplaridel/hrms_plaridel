@@ -169,6 +169,30 @@ test('custom leave answers enforce required fields, types, and select options', 
   );
 });
 
+test('draft custom answers may omit required fields but validate supplied values', () => {
+  const schema = normalizeEmployeeDetailSchema([
+    { key: 'provider', label: 'Provider', type: 'text', required: true },
+    { key: 'hours', label: 'Hours', type: 'number', required: true },
+  ], { strict: true });
+
+  assert.deepEqual(
+    employeeLeaveDetailsFromPayload({
+      details: {},
+      customFieldSchema: schema,
+      requireCustomFields: false,
+    }),
+    {}
+  );
+  assert.throws(
+    () => employeeLeaveDetailsFromPayload({
+      details: { hours: 'many' },
+      customFieldSchema: schema,
+      requireCustomFields: false,
+    }),
+    /Hours must be a number/
+  );
+});
+
 test('official leave snapshot comes only from server employee and assignment records', async () => {
   let capturedSql = '';
   const db = {

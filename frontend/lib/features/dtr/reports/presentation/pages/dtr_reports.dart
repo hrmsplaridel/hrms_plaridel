@@ -277,7 +277,7 @@ class _DtrReportsState extends State<DtrReports> {
 
     final params = <String, dynamic>{
       'status': employeeStatus,
-      'role': 'User',
+      'role': 'All',
       'start_date': dateKey(startDate),
       'end_date': dateKey(endDate),
     };

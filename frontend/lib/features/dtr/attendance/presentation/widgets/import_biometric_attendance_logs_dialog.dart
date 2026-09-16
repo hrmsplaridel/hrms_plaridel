@@ -299,6 +299,8 @@ class _ImportBiometricAttendanceLogsDialogState
         matchedRowsAttempted: matchedRows.length,
         inserted: apiResponse.inserted,
         duplicatesSkipped: apiResponse.duplicatesSkipped,
+        skippedUnmatched: apiResponse.skippedUnmatched,
+        skippedIdentityMismatch: apiResponse.skippedIdentityMismatch,
         skippedNoSchedule: apiResponse.skippedNoSchedule,
         skippedHoliday: apiResponse.skippedHoliday,
         skippedLeave: apiResponse.skippedLeave,
@@ -369,6 +371,16 @@ class _ImportBiometricAttendanceLogsDialogState
               _PreviewRow(
                 label: 'Duplicates skipped',
                 value: '${result.duplicatesSkipped}',
+              ),
+              const SizedBox(height: 6),
+              _PreviewRow(
+                label: 'Skipped: no current employee mapping',
+                value: '${result.skippedUnmatched}',
+              ),
+              const SizedBox(height: 6),
+              _PreviewRow(
+                label: 'Skipped: employee mapping changed',
+                value: '${result.skippedIdentityMismatch}',
               ),
               const SizedBox(height: 6),
               _PreviewRow(

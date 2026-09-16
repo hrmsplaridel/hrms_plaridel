@@ -15,7 +15,15 @@ class _PhilippineHolidayDefaultsDialogState
   _HolidayDefaultsPreview? _preview;
   bool _loading = true;
   bool _importing = false;
+  int _previewGeneration = 0;
   String? _error;
+
+  bool get _canImport =>
+      !_loading &&
+      !_importing &&
+      _preview != null &&
+      _preview!.year == _selectedYear &&
+      _preview!.readyCount > 0;
 
   @override
   void initState() {
@@ -26,8 +34,11 @@ class _PhilippineHolidayDefaultsDialogState
   }
 
   Future<void> _loadPreview(int year) async {
+    if (!mounted || _importing) return;
+    final generation = ++_previewGeneration;
     setState(() {
       _selectedYear = year;
+      _preview = null;
       _loading = true;
       _error = null;
     });
@@ -36,14 +47,19 @@ class _PhilippineHolidayDefaultsDialogState
         '/api/holidays/ph-defaults?year=$year',
       );
       final preview = _HolidayDefaultsPreview.fromJson(res.data ?? const {});
-      if (!mounted) return;
+      if (!mounted || generation != _previewGeneration) return;
+      if (preview.year != year) {
+        throw const FormatException(
+          'Holiday preview year does not match the selected year.',
+        );
+      }
       setState(() {
         _preview = preview;
         _supportedYears = preview.supportedYears;
-        _selectedYear = preview.year;
         _loading = false;
       });
     } on DioException catch (e) {
+      if (!mounted || generation != _previewGeneration) return;
       final supported = _readSupportedYears(e.response?.data);
       if (supported.isNotEmpty && !supported.contains(year)) {
         final fallbackYear = supported.contains(DateTime.now().year)
@@ -65,7 +81,7 @@ class _PhilippineHolidayDefaultsDialogState
         _error = _apiError(e, 'Could not load Philippine holiday defaults.');
       });
     } catch (e) {
-      if (!mounted) return;
+      if (!mounted || generation != _previewGeneration) return;
       setState(() {
         _preview = null;
         _loading = false;
@@ -75,8 +91,8 @@ class _PhilippineHolidayDefaultsDialogState
   }
 
   Future<void> _importDefaults() async {
-    final preview = _preview;
-    if (preview == null || preview.readyCount == 0) return;
+    if (!mounted || !_canImport) return;
+    final preview = _preview!;
     setState(() {
       _importing = true;
       _error = null;
@@ -126,8 +142,7 @@ class _PhilippineHolidayDefaultsDialogState
     final years = _preview?.supportedYears.isNotEmpty == true
         ? _preview!.supportedYears
         : _supportedYears;
-    if (years.isEmpty) return [_selectedYear];
-    return years;
+    return {...years, _selectedYear}.toList()..sort();
   }
 
   static List<int> _readSupportedYears(dynamic data) {
@@ -164,7 +179,7 @@ class _PhilippineHolidayDefaultsDialogState
   @override
   Widget build(BuildContext context) {
     final preview = _preview;
-    final canImport = preview != null && preview.readyCount > 0 && !_importing;
+    final canImport = _canImport;
     final headingColor = AppTheme.dashTextPrimaryOf(context);
     final mutedColor = AppTheme.dashTextSecondaryOf(context);
 

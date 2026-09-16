@@ -1,9 +1,8 @@
 /// DocuTracker section identifiers and metadata.
-enum DocuTrackerSection { dashboard, documents, admin }
+enum DocuTrackerSection { documents, admin }
 
 extension DocuTrackerSectionExtension on DocuTrackerSection {
   String get title => switch (this) {
-    DocuTrackerSection.dashboard => 'Dashboard',
     DocuTrackerSection.documents => 'Documents',
     DocuTrackerSection.admin => 'Admin',
   };

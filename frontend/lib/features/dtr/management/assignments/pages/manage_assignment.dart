@@ -58,6 +58,25 @@ class _ManageAssignmentState extends State<ManageAssignment> {
   String _assignmentStatusFilter = 'Current';
   String? _selectedEmployeeId;
   String? _selectedEmployeeName;
+  bool _selectedEmployeeCanAddAssignments = false;
+
+  static bool _employeeCanAddAssignments(Map<String, dynamic> employee) =>
+      employee['is_active'] == true &&
+      (employee['employment_status'] as String? ?? 'active')
+              .trim()
+              .toLowerCase() ==
+          'active';
+
+  bool _checkEmployeeCanAddAssignments() {
+    if (_selectedEmployeeCanAddAssignments) return true;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Reactivate this employee before adding assignments.'),
+      ),
+    );
+    return false;
+  }
+
   DateTime? _officialHrmsDate;
   DateTime? _assignmentPickerFirstDate;
   DateTime? _assignmentPickerLastDate;
@@ -76,8 +95,6 @@ class _ManageAssignmentState extends State<ManageAssignment> {
 
   List<_AssignmentRecord> _assignments = [];
   bool _loadingAssignments = false;
-  List<_PolicyAssignmentRecord> _policyAssignments = [];
-  bool _loadingPolicyAssignments = false;
   List<_DesignationRecord> _designations = [];
   bool _loadingDesignations = false;
 
@@ -96,11 +113,6 @@ class _ManageAssignmentState extends State<ManageAssignment> {
   final _remarksController = TextEditingController();
   _AssignmentRecord? _selectedAssignment;
   StateSetter? _drawerSetState;
-  String? _policyPeriodPolicyId;
-  DateTime? _policyPeriodEffectiveFrom;
-  DateTime? _policyPeriodEffectiveTo;
-  _PolicyAssignmentRecord? _selectedPolicyPeriod;
-  StateSetter? _policyDrawerSetState;
   String? _designationDeptId;
   String? _designationPositionId;
   DateTime? _designationEffectiveFrom;
@@ -140,17 +152,6 @@ class _ManageAssignmentState extends State<ManageAssignment> {
       drawerSetState(() {});
     } catch (_) {
       _drawerSetState = null;
-    }
-  }
-
-  void _updatePolicyFormState(VoidCallback update) {
-    if (mounted) setState(update);
-    final drawerSetState = _policyDrawerSetState;
-    if (!mounted || drawerSetState == null) return;
-    try {
-      drawerSetState(() {});
-    } catch (_) {
-      _policyDrawerSetState = null;
     }
   }
 
@@ -260,6 +261,7 @@ class _ManageAssignmentState extends State<ManageAssignment> {
           return _EmployeeSummary(
             id: m['id'] as String,
             fullName: m['full_name'] as String? ?? 'Unknown',
+            canAddAssignments: _employeeCanAddAssignments(m),
             employeeNumber: empNum is int
                 ? empNum
                 : (empNum != null ? int.tryParse(empNum.toString()) : null),
@@ -272,6 +274,7 @@ class _ManageAssignmentState extends State<ManageAssignment> {
           return _EmployeeSummary(
             id: m['id'] as String,
             fullName: m['full_name'] as String? ?? 'Unknown',
+            canAddAssignments: _employeeCanAddAssignments(m),
             employeeNumber: empNum is int
                 ? empNum
                 : (empNum != null ? int.tryParse(empNum.toString()) : null),
@@ -309,6 +312,7 @@ class _ManageAssignmentState extends State<ManageAssignment> {
           final match = next.where((e) => e.id == selectedId);
           if (match.isNotEmpty) {
             _selectedEmployeeName = match.first.fullName;
+            _selectedEmployeeCanAddAssignments = match.first.canAddAssignments;
           }
         }
       });
@@ -409,6 +413,7 @@ class _ManageAssignmentState extends State<ManageAssignment> {
           _EmployeeSummary(
             id: id,
             fullName: data['full_name'] as String? ?? 'Unknown',
+            canAddAssignments: _employeeCanAddAssignments(data),
             employeeNumber: employeeNumber is int
                 ? employeeNumber
                 : (employeeNumber != null
@@ -509,9 +514,7 @@ class _ManageAssignmentState extends State<ManageAssignment> {
       _assignmentRequestGuard.invalidate();
       _updateAssignmentFormState(() {
         _assignments = [];
-        _policyAssignments = [];
         _loadingAssignments = false;
-        _loadingPolicyAssignments = false;
       });
       return;
     }
@@ -519,10 +522,7 @@ class _ManageAssignmentState extends State<ManageAssignment> {
       _assignmentQueryContext(),
     );
     final request = _assignmentRequestGuard.begin(context);
-    _updateAssignmentFormState(() {
-      _loadingAssignments = true;
-      _loadingPolicyAssignments = true;
-    });
+    _updateAssignmentFormState(() => _loadingAssignments = true);
     try {
       final contextRes = await ApiClient.instance.get<Map<String, dynamic>>(
         '/api/assignments/context',
@@ -551,40 +551,6 @@ class _ManageAssignmentState extends State<ManageAssignment> {
         throw const FormatException('Invalid assignment date context');
       }
 
-      final policyRes = await ApiClient.instance.get<List<dynamic>>(
-        '/api/policy-assignments',
-        queryParameters: {
-          'employee_id': employeeId,
-          'status': context['status'],
-        },
-      );
-      if (!mounted ||
-          !_assignmentRequestGuard.accepts(
-            request,
-            _assignmentQueryContext(),
-          )) {
-        return;
-      }
-      final policyRows = (policyRes.data ?? [])
-          .whereType<Map>()
-          .map((e) => Map<String, dynamic>.from(e))
-          .toList();
-      final policyAssignments = policyRows.map((m) {
-        final fromDate = m['effective_from'];
-        final toDate = m['effective_to'];
-        return _PolicyAssignmentRecord(
-          id: m['id'].toString(),
-          policyId: m['attendance_policy_id'].toString(),
-          policyName: m['policy_name']?.toString() ?? 'Attendance policy',
-          effectiveFrom: DateTime.parse(fromDate.toString()),
-          effectiveTo: toDate != null && toDate.toString().isNotEmpty
-              ? DateTime.tryParse(toDate.toString())
-              : null,
-          isActive: m['is_active'] as bool? ?? true,
-          computedStatus: m['computed_status']?.toString() ?? 'Current',
-        );
-      }).toList();
-
       final res = await ApiClient.instance.get<List<dynamic>>(
         '/api/assignments',
         queryParameters: {
@@ -611,9 +577,12 @@ class _ManageAssignmentState extends State<ManageAssignment> {
           departmentId: m['department_id'] as String?,
           positionId: m['position_id'] as String?,
           shiftId: m['shift_id'] as String?,
+          attendancePolicyId: m['attendance_policy_id'] as String?,
           departmentName: m['department_name'] as String? ?? '—',
           positionName: m['position_name'] as String? ?? '—',
           shiftName: m['shift_name'] as String? ?? '—',
+          attendancePolicyName:
+              m['attendance_policy_name'] as String? ?? 'Fallback policy',
           startTime: _parseTime(st) ?? const TimeOfDay(hour: 0, minute: 0),
           endTime: _parseTime(et) ?? const TimeOfDay(hour: 0, minute: 0),
           effectiveFrom: fromDate != null
@@ -630,9 +599,7 @@ class _ManageAssignmentState extends State<ManageAssignment> {
       }).toList();
       _updateAssignmentFormState(() {
         _assignments = assignments;
-        _policyAssignments = policyAssignments;
         _loadingAssignments = false;
-        _loadingPolicyAssignments = false;
         _selectedAssignment = null;
         _officialHrmsDate = officialDate;
         _assignmentPickerFirstDate = pickerFirstDate;
@@ -649,9 +616,7 @@ class _ManageAssignmentState extends State<ManageAssignment> {
       }
       _updateAssignmentFormState(() {
         _assignments = [];
-        _policyAssignments = [];
         _loadingAssignments = false;
-        _loadingPolicyAssignments = false;
         _selectedAssignment = null;
       });
     }
@@ -765,16 +730,6 @@ class _ManageAssignmentState extends State<ManageAssignment> {
     return to == null ? from : '$from → ${_dateStr(to)}';
   }
 
-  String _policyEffectivePeriodStr(_PolicyAssignmentRecord policy) {
-    final from = _dateStr(policy.effectiveFrom);
-    final to = policy.effectiveTo;
-    return to == null ? '$from onward' : '$from → ${_dateStr(to)}';
-  }
-
-  String _policyPeriodStatus(_PolicyAssignmentRecord policy) {
-    return policy.computedStatus;
-  }
-
   String _designationTitle(_DesignationRecord designation) {
     final position = designation.positionName?.trim();
     if (position != null && position.isNotEmpty) return position;
@@ -852,6 +807,7 @@ class _ManageAssignmentState extends State<ManageAssignment> {
     _updateAssignmentFormState(() {
       _selectedEmployeeId = employee.id;
       _selectedEmployeeName = employee.fullName;
+      _selectedEmployeeCanAddAssignments = employee.canAddAssignments;
       _officialHrmsDate = null;
       _assignmentPickerFirstDate = null;
       _assignmentPickerLastDate = null;
@@ -880,14 +836,13 @@ class _ManageAssignmentState extends State<ManageAssignment> {
     _designationRequestGuard.invalidate();
     _selectedEmployeeId = null;
     _selectedEmployeeName = null;
+    _selectedEmployeeCanAddAssignments = false;
     _officialHrmsDate = null;
     _assignmentPickerFirstDate = null;
     _assignmentPickerLastDate = null;
     _assignments = [];
-    _policyAssignments = [];
     _designations = [];
     _loadingAssignments = false;
-    _loadingPolicyAssignments = false;
     _loadingDesignations = false;
     _selectedAssignment = null;
     _selectedDesignation = null;
@@ -895,10 +850,6 @@ class _ManageAssignmentState extends State<ManageAssignment> {
     _selectedPositionId = null;
     _selectedShiftId = null;
     _selectedPolicyId = null;
-    _policyPeriodPolicyId = null;
-    _policyPeriodEffectiveFrom = null;
-    _policyPeriodEffectiveTo = null;
-    _selectedPolicyPeriod = null;
     _effectiveFrom = null;
     _effectiveTo = null;
     _designationDeptId = null;
@@ -927,7 +878,7 @@ class _ManageAssignmentState extends State<ManageAssignment> {
           ? a.positionId
           : null;
       _selectedShiftId = a.shiftId;
-      _selectedPolicyId = null;
+      _selectedPolicyId = a.attendancePolicyId;
       _effectiveFrom = a.effectiveFrom;
       _effectiveTo = a.effectiveTo;
       _remarksController.text = a.remarks ?? '';
@@ -999,12 +950,16 @@ class _ManageAssignmentState extends State<ManageAssignment> {
 
   Future<bool> _addAssignment() async {
     if (_selectedEmployeeId == null) return false;
+    if (!_checkEmployeeCanAddAssignments()) return false;
     if (_selectedDeptId == null ||
         _selectedPositionId == null ||
-        _selectedShiftId == null) {
+        _selectedShiftId == null ||
+        _selectedPolicyId == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Please select Department, Position, and Shift.'),
+          content: Text(
+            'Please select Department, Position, Shift, and Attendance Policy.',
+          ),
         ),
       );
       return false;
@@ -1033,8 +988,7 @@ class _ManageAssignmentState extends State<ManageAssignment> {
         if (_effectiveTo != null)
           'effective_to': _effectiveTo!.toIso8601String().split('T')[0],
         'is_active': true,
-        if (_selectedPolicyId != null)
-          'attendance_policy_id': _selectedPolicyId,
+        'attendance_policy_id': _selectedPolicyId,
         'remarks': _remarksController.text.trim().isEmpty
             ? null
             : _remarksController.text.trim(),
@@ -1068,81 +1022,6 @@ class _ManageAssignmentState extends State<ManageAssignment> {
     }
   }
 
-  void _clearPolicyPeriodForm() {
-    _updatePolicyFormState(() {
-      _selectedPolicyPeriod = null;
-      _policyPeriodPolicyId = null;
-      _policyPeriodEffectiveFrom = null;
-      _policyPeriodEffectiveTo = null;
-    });
-  }
-
-  void _selectPolicyPeriod(_PolicyAssignmentRecord policy) {
-    _updatePolicyFormState(() {
-      _selectedPolicyPeriod = policy;
-      _policyPeriodPolicyId = policy.policyId;
-      _policyPeriodEffectiveFrom = policy.effectiveFrom;
-      _policyPeriodEffectiveTo = policy.effectiveTo;
-    });
-  }
-
-  Future<bool> _savePolicyPeriod() async {
-    if (_selectedEmployeeId == null || _policyPeriodEffectiveFrom == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Select an employee and effective date.')),
-      );
-      return false;
-    }
-    if (!_isEffectiveRangeValid(
-      _policyPeriodEffectiveFrom!,
-      _policyPeriodEffectiveTo,
-    )) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Effective to must be on or after effective from.'),
-        ),
-      );
-      return false;
-    }
-
-    try {
-      final response = await ApiClient.instance.post<Map<String, dynamic>>(
-        '/api/policy-assignments/employee-upsert',
-        data: {
-          'employee_id': _selectedEmployeeId,
-          'attendance_policy_id': _policyPeriodPolicyId,
-          'effective_from': _dateStr(_policyPeriodEffectiveFrom!),
-          'effective_to': _policyPeriodEffectiveTo == null
-              ? null
-              : _dateStr(_policyPeriodEffectiveTo!),
-          'is_active': true,
-        },
-      );
-      if (mounted) {
-        final message = _policyPeriodPolicyId == null
-            ? 'Employee policy removed for the selected period.'
-            : 'Attendance policy period saved.';
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              _saveMessageWithReconciliation(message, response.data),
-            ),
-          ),
-        );
-        _clearPolicyPeriodForm();
-        await _loadAssignments();
-      }
-      return true;
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text(_userFacingApiError(e))));
-      }
-      return false;
-    }
-  }
-
   Future<bool> _updateAssignment() async {
     final a = _selectedAssignment;
     if (a == null) {
@@ -1153,10 +1032,13 @@ class _ManageAssignmentState extends State<ManageAssignment> {
     }
     if (_selectedDeptId == null ||
         _selectedPositionId == null ||
-        _selectedShiftId == null) {
+        _selectedShiftId == null ||
+        _selectedPolicyId == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Please select Department, Position, and Shift.'),
+          content: Text(
+            'Please select Department, Position, Shift, and Attendance Policy.',
+          ),
         ),
       );
       return false;
@@ -1184,6 +1066,7 @@ class _ManageAssignmentState extends State<ManageAssignment> {
         'effective_to': _effectiveTo != null
             ? _effectiveTo!.toIso8601String().split('T')[0]
             : null,
+        'attendance_policy_id': _selectedPolicyId,
         'remarks': _remarksController.text.trim().isEmpty
             ? null
             : _remarksController.text.trim(),
@@ -1223,8 +1106,8 @@ class _ManageAssignmentState extends State<ManageAssignment> {
     String actionLabel = 'Deactivate',
     String hintText = 'Why is this assignment being deactivated?',
   }) async {
-    final controller = TextEditingController();
     final formKey = GlobalKey<FormState>();
+    var reasonText = '';
     final reason = await showDialog<String>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -1238,10 +1121,10 @@ class _ManageAssignmentState extends State<ManageAssignment> {
               Text(description),
               const SizedBox(height: 16),
               TextFormField(
-                controller: controller,
                 autofocus: true,
                 maxLength: 1000,
                 maxLines: 3,
+                onChanged: (value) => reasonText = value,
                 decoration: InputDecoration(
                   labelText: 'Reason',
                   hintText: hintText,
@@ -1261,7 +1144,7 @@ class _ManageAssignmentState extends State<ManageAssignment> {
           FilledButton(
             onPressed: () {
               if (formKey.currentState?.validate() != true) return;
-              Navigator.of(ctx).pop(controller.text.trim());
+              Navigator.of(ctx).pop(reasonText.trim());
             },
             style: FilledButton.styleFrom(backgroundColor: Colors.red),
             child: Text(actionLabel),
@@ -1269,7 +1152,6 @@ class _ManageAssignmentState extends State<ManageAssignment> {
         ],
       ),
     );
-    controller.dispose();
     return reason;
   }
 
@@ -1330,11 +1212,11 @@ class _ManageAssignmentState extends State<ManageAssignment> {
       return false;
     }
     final reason = await _requestDeactivationReason(
-      title: 'Delete mistaken assignment?',
+      title: 'Delete unused assignment?',
       description:
-          'This permanently removes the unused future assignment. Its deletion is still recorded in the audit log.',
+          'This permanently removes an unused assignment created today or scheduled for today or later. Its deletion is still recorded in the audit log.',
       actionLabel: 'Delete permanently',
-      hintText: 'Why was this assignment created by mistake?',
+      hintText: 'Why should this unused assignment be removed?',
     );
     if (reason == null || !mounted) return false;
     try {
@@ -1346,8 +1228,6 @@ class _ManageAssignmentState extends State<ManageAssignment> {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Mistaken assignment deleted.')),
         );
-        _clearForm();
-        _loadAssignments();
       }
       return true;
     } catch (e) {
@@ -1403,6 +1283,7 @@ class _ManageAssignmentState extends State<ManageAssignment> {
   }
 
   Future<bool> _addDesignation() async {
+    if (!_checkEmployeeCanAddAssignments()) return false;
     final data = _designationPayload();
     if (data == null) return false;
     try {
@@ -1552,58 +1433,66 @@ class _ManageAssignmentState extends State<ManageAssignment> {
     }
 
     if (assignment == null) {
+      if (!_checkEmployeeCanAddAssignments()) return;
       _clearForm();
     } else {
       _selectAssignment(assignment);
     }
 
+    var refreshAfterClose = false;
     try {
-      await showGeneralDialog<void>(
-        context: context,
-        barrierDismissible: true,
-        barrierLabel: MaterialLocalizations.of(
-          context,
-        ).modalBarrierDismissLabel,
-        barrierColor: Colors.black.withValues(alpha: 0.32),
-        transitionDuration: const Duration(milliseconds: 220),
-        pageBuilder: (dialogContext, _, __) {
-          final screenWidth = MediaQuery.of(dialogContext).size.width;
-          final drawerWidth = screenWidth < 760 ? screenWidth : 620.0;
-          return Align(
-            alignment: Alignment.centerRight,
-            child: SizedBox(
-              width: drawerWidth,
-              height: double.infinity,
-              child: Material(
-                color: AppTheme.dashPanelOf(dialogContext),
-                elevation: 18,
-                child: StatefulBuilder(
-                  builder: (context, drawerSetState) {
-                    _drawerSetState = drawerSetState;
-                    return _buildAssignmentDrawer(dialogContext);
-                  },
+      refreshAfterClose =
+          await showGeneralDialog<bool>(
+            context: context,
+            barrierDismissible: true,
+            barrierLabel: MaterialLocalizations.of(
+              context,
+            ).modalBarrierDismissLabel,
+            barrierColor: Colors.black.withValues(alpha: 0.32),
+            transitionDuration: const Duration(milliseconds: 220),
+            pageBuilder: (dialogContext, _, __) {
+              final screenWidth = MediaQuery.of(dialogContext).size.width;
+              final drawerWidth = screenWidth < 760 ? screenWidth : 620.0;
+              return Align(
+                alignment: Alignment.centerRight,
+                child: SizedBox(
+                  width: drawerWidth,
+                  height: double.infinity,
+                  child: Material(
+                    color: AppTheme.dashPanelOf(dialogContext),
+                    elevation: 18,
+                    child: StatefulBuilder(
+                      builder: (context, drawerSetState) {
+                        _drawerSetState = drawerSetState;
+                        return _buildAssignmentDrawer(dialogContext);
+                      },
+                    ),
+                  ),
                 ),
-              ),
-            ),
-          );
-        },
-        transitionBuilder: (context, animation, _, child) {
-          final curved = CurvedAnimation(
-            parent: animation,
-            curve: Curves.easeOutCubic,
-            reverseCurve: Curves.easeInCubic,
-          );
-          return SlideTransition(
-            position: Tween<Offset>(
-              begin: const Offset(1, 0),
-              end: Offset.zero,
-            ).animate(curved),
-            child: child,
-          );
-        },
-      );
+              );
+            },
+            transitionBuilder: (context, animation, _, child) {
+              final curved = CurvedAnimation(
+                parent: animation,
+                curve: Curves.easeOutCubic,
+                reverseCurve: Curves.easeInCubic,
+              );
+              return SlideTransition(
+                position: Tween<Offset>(
+                  begin: const Offset(1, 0),
+                  end: Offset.zero,
+                ).animate(curved),
+                child: child,
+              );
+            },
+          ) ??
+          false;
     } finally {
       _drawerSetState = null;
+    }
+    if (refreshAfterClose && mounted) {
+      _clearForm();
+      await _loadAssignments();
     }
   }
 
@@ -1617,6 +1506,7 @@ class _ManageAssignmentState extends State<ManageAssignment> {
     }
 
     if (designation == null) {
+      if (!_checkEmployeeCanAddAssignments()) return;
       _clearDesignationForm();
     } else {
       _selectDesignation(designation);
@@ -1669,73 +1559,6 @@ class _ManageAssignmentState extends State<ManageAssignment> {
       );
     } finally {
       _designationDrawerSetState = null;
-    }
-  }
-
-  Future<void> _openPolicyPeriodDrawer({
-    _PolicyAssignmentRecord? policyPeriod,
-  }) async {
-    _policyDrawerSetState = null;
-    if (_selectedEmployeeId == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Select an employee first.')),
-      );
-      return;
-    }
-
-    if (policyPeriod == null) {
-      _clearPolicyPeriodForm();
-    } else {
-      _selectPolicyPeriod(policyPeriod);
-    }
-
-    try {
-      await showGeneralDialog<void>(
-        context: context,
-        barrierDismissible: true,
-        barrierLabel: MaterialLocalizations.of(
-          context,
-        ).modalBarrierDismissLabel,
-        barrierColor: Colors.black.withValues(alpha: 0.32),
-        transitionDuration: const Duration(milliseconds: 220),
-        pageBuilder: (dialogContext, _, __) {
-          final screenWidth = MediaQuery.of(dialogContext).size.width;
-          final drawerWidth = screenWidth < 760 ? screenWidth : 560.0;
-          return Align(
-            alignment: Alignment.centerRight,
-            child: SizedBox(
-              width: drawerWidth,
-              height: double.infinity,
-              child: Material(
-                color: AppTheme.dashPanelOf(dialogContext),
-                elevation: 18,
-                child: StatefulBuilder(
-                  builder: (context, drawerSetState) {
-                    _policyDrawerSetState = drawerSetState;
-                    return _buildPolicyPeriodDrawer(dialogContext);
-                  },
-                ),
-              ),
-            ),
-          );
-        },
-        transitionBuilder: (context, animation, _, child) {
-          final curved = CurvedAnimation(
-            parent: animation,
-            curve: Curves.easeOutCubic,
-            reverseCurve: Curves.easeInCubic,
-          );
-          return SlideTransition(
-            position: Tween<Offset>(
-              begin: const Offset(1, 0),
-              end: Offset.zero,
-            ).animate(curved),
-            child: child,
-          );
-        },
-      );
-    } finally {
-      _policyDrawerSetState = null;
     }
   }
 

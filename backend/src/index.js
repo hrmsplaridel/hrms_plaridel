@@ -13,7 +13,10 @@ const { scheduleYearEndForcedLeaveCron } = require('./jobs/leaveYearEndForcedLea
 const {
   scheduleAuthRefreshTokenCleanupCron,
 } = require('./jobs/authRefreshTokenCleanupScheduler');
-const { generalApiLimiter } = require('./middleware/rateLimiters');
+const {
+  generalApiReadLimiter,
+  generalApiLimiter,
+} = require('./middleware/rateLimiters');
 const { registerLongBondPaperForm } = require('./utils/registerLongBondPaper');
 
 const authRoutes = require('./routes/auth');
@@ -61,6 +64,7 @@ const { isUniSmsConfigured } = require('./utils/uniSmsSms');
 const { startDocutrackerEscalationWorker } = require('./services/docutrackerEscalationWorker');
 const { validateEmployeeSchema } = require('./services/employeeSchemaValidation');
 const { validateAssignmentSchema } = require('./services/assignmentSchemaValidation');
+const { validateHolidayTemplateSchema } = require('./services/holidayTemplateSchemaValidation');
 
 const app = express();
 app.disable('x-powered-by');
@@ -96,6 +100,7 @@ if (!process.env.JWT_REFRESH_SECRET) {
 
 // Middleware (large limit: RSP/L&D forms e.g. turn-around tables with many JSON rows)
 const corsOrigins = process.env.CORS_ORIGINS?.split(',').map((s) => s.trim()).filter(Boolean);
+const isLocalDevelopment = process.env.NODE_ENV !== 'production';
 
 function isLocalBrowserOrigin(origin) {
   try {
@@ -110,11 +115,15 @@ function isLocalBrowserOrigin(origin) {
 }
 
 // Flutter web debug uses a random localhost port (not only :5000 / :5050).
-// Allow those, plus CORS_ORIGINS. Native / curl have no Origin.
+// Allow those in development, plus CORS_ORIGINS. Native / curl have no Origin.
 app.use(
   cors({
     origin(origin, callback) {
-      if (!origin || corsOrigins.includes(origin) || isLocalBrowserOrigin(origin)) {
+      if (
+        !origin ||
+        corsOrigins?.includes(origin) ||
+        (isLocalDevelopment && isLocalBrowserOrigin(origin))
+      ) {
         callback(null, true);
         return;
       }
@@ -157,7 +166,7 @@ app.get('/health/db', async (_req, res) => {
 });
 
 // API routes
-app.use('/api', generalApiLimiter);
+app.use('/api', generalApiReadLimiter, generalApiLimiter);
 app.use('/auth', authRoutes);
 app.use('/api/departments', departmentsRoutes);
 app.use('/api/offices', officesRoutes);
@@ -201,6 +210,8 @@ async function startServer() {
   console.log('[startup] Employee database schema validated.');
   await validateAssignmentSchema(pool);
   console.log('[startup] Assignment database schema validated.');
+  await validateHolidayTemplateSchema(pool);
+  console.log('[startup] Holiday template database schema validated.');
   registerLongBondPaperForm();
 
   const server = app.listen(PORT, HOST, () => {

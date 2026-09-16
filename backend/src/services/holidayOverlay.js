@@ -46,7 +46,8 @@ async function queryActiveHolidays(client, startStr, endStr) {
 
 /**
  * Resolve the active holiday configuration for every date in a window.
- * Non-recurring records take precedence over recurring templates.
+ * Non-recurring records take precedence for display metadata, but coverage is
+ * the union of all active records, including recurring templates.
  */
 async function loadHolidayOverlayMap(client, startDate, endDate) {
   const startStr = dateOnly(startDate);
@@ -72,13 +73,19 @@ async function loadHolidayOverlayMap(client, startDate, endDate) {
         );
 
     for (const dateStr of dates) {
-      if (byDate.has(dateStr)) continue;
+      const coverage = row.coverage || 'whole_day';
+      const existing = byDate.get(dateStr);
+      if (existing) {
+        // Distinct half-day coverages together exempt the whole day.
+        if (existing.coverage !== coverage) existing.coverage = 'whole_day';
+        continue;
+      }
       byDate.set(dateStr, {
         dateStr,
         id: row.id,
         name: row.name,
         holiday_type: row.holiday_type || 'regular',
-        coverage: row.coverage || 'whole_day',
+        coverage,
       });
     }
   }

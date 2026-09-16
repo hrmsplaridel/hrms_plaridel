@@ -56,7 +56,10 @@ firebase-debug.log
 docs/private/
 docs/weekly_progress/
 /bugs/
-/Capstone Research/
+/Capstone_research/
+/tmp_figure_review/
+accomplishment_reports
+
 
 # IntelliJ related
 *.iml

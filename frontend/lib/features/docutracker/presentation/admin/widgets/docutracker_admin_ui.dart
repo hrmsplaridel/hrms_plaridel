@@ -521,15 +521,13 @@ class DocuTrackerActiveWorkflowCard extends StatelessWidget {
     super.key,
     required this.config,
     required this.onEdit,
-    required this.onMenu,
   });
 
   final DocumentRoutingConfig config;
   final VoidCallback onEdit;
-  final VoidCallback onMenu;
 
   static IconData _iconForType(DocumentRoutingConfig config) {
-    return switch (config.documentType.name) {
+    return switch (config.documentType.value) {
       'purchaseRequest' => Icons.shopping_cart_outlined,
       _ => Icons.description_outlined,
     };
@@ -571,10 +569,10 @@ class DocuTrackerActiveWorkflowCard extends StatelessWidget {
               ? DocuTrackerWorkflowStepper(steps: steps, activeStepOrder: 1)
               : _emptyRouteState(context),
         ),
-        IconButton(
-          onPressed: onMenu,
-          icon: const Icon(Icons.more_vert_rounded),
-          color: DocuTrackerTokens.textMuted,
+        TextButton.icon(
+          onPressed: onEdit,
+          icon: const Icon(Icons.edit_outlined, size: 18),
+          label: const Text('Edit'),
         ),
       ],
     );
@@ -592,10 +590,10 @@ class DocuTrackerActiveWorkflowCard extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Expanded(child: _buildTitleBlock(context, steps, hasSteps)),
-            IconButton(
-              onPressed: onMenu,
-              icon: const Icon(Icons.more_vert_rounded),
-              color: DocuTrackerTokens.textMuted,
+            TextButton.icon(
+              onPressed: onEdit,
+              icon: const Icon(Icons.edit_outlined, size: 18),
+              label: const Text('Edit'),
             ),
           ],
         ),
@@ -644,8 +642,10 @@ class DocuTrackerActiveWorkflowCard extends StatelessWidget {
                 runSpacing: 4,
                 children: [
                   _metaPill('v${config.version}'),
-                  _metaPill('${config.reviewDeadlineHours}h SLA'),
-                  _metaPill(hasSteps ? '${steps.length} steps' : 'Draft route'),
+                  _metaPill('Default deadline: ${config.reviewDeadlineHours}h'),
+                  _metaPill(
+                    hasSteps ? '${steps.length} steps' : 'No steps yet',
+                  ),
                 ],
               ),
             ],

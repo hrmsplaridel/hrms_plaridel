@@ -12,6 +12,12 @@ class WorkflowStep {
     this.label,
     this.enabled = true,
     this.deadlineHours,
+    this.allowedActions = const <String>[
+      'approve',
+      'forward',
+      'return',
+      'reject',
+    ],
   });
 
   /// 1-based step order in the workflow.
@@ -44,6 +50,9 @@ class WorkflowStep {
   /// Optional per-step deadline in hours. If null, workflow default applies.
   final int? deadlineHours;
 
+  /// Workflow actions available to both primary and backup assignees.
+  final List<String> allowedActions;
+
   factory WorkflowStep.fromJson(Map<String, dynamic> json) {
     final userIdsRaw = json['user_ids'];
     return WorkflowStep(
@@ -59,6 +68,11 @@ class WorkflowStep {
       label: json['label']?.toString(),
       enabled: json['enabled'] != false,
       deadlineHours: (json['deadline_hours'] as num?)?.toInt(),
+      allowedActions:
+          (json['allowed_actions'] as List<dynamic>?)
+              ?.map((value) => value.toString())
+              .toList(growable: false) ??
+          const <String>[],
     );
   }
 
@@ -73,5 +87,6 @@ class WorkflowStep {
     if (label != null) 'label': label,
     'enabled': enabled,
     if (deadlineHours != null) 'deadline_hours': deadlineHours,
+    'allowed_actions': allowedActions,
   };
 }

@@ -60,6 +60,23 @@ async function upsertEmployeePolicyAssignment(
     ? null
     : String(attendancePolicyId).trim() || null;
 
+  if (policyId) {
+    const policyResult = await db.query(
+      `SELECT id
+       FROM attendance_policies
+       WHERE id = $1::uuid
+         AND is_active = true
+       LIMIT 1
+       FOR SHARE`,
+      [policyId]
+    );
+    if (policyResult.rowCount === 0) {
+      throw new EmployeePolicyAssignmentError(
+        'Selected attendance policy is inactive or was not found'
+      );
+    }
+  }
+
   // Serialize transitions for one employee even when no policy row exists yet.
   await db.query(
     `SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0))`,

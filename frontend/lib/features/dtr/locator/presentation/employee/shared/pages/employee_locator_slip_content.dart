@@ -72,25 +72,72 @@ class EmployeeLocatorSlipContent extends StatefulWidget {
 
 class EmployeeLocatorSlipContentState
     extends State<EmployeeLocatorSlipContent> {
+  static const int _historyPageSize = 50;
   final List<_LocatorSlipDraft> _slips = [];
   final List<_LocatorSlipDraft> _deptHeadQueue = [];
   final ScrollController _myRequestsScrollController = ScrollController();
   final ScrollController _approvalItemsScrollController = ScrollController();
-  List<LocatorRequestType> _locatorTypes = LocatorRequestType.values;
+  List<LocatorRequestType> _locatorTypes = const [];
+  bool _loadingLocatorTypes = false;
+  bool _locatorTypesLoaded = false;
+  String? _locatorTypesError;
   Future<bool>? _isDeptHeadFuture;
   _LocatorSection _currentSection = _LocatorSection.requests;
   bool _appliedDeptHeadDefaultSection = false;
   bool _loadingMy = false;
   bool _loadingApprovals = false;
+  bool _myHistoryLoaded = false;
+  bool _approvalHistoryLoaded = false;
+  bool _loadingMoreMy = false;
+  bool _loadingMoreApprovals = false;
   String? _error;
+  String? _myLoadMoreError;
+  String? _approvalLoadMoreError;
   String? _selectedStatusFilter;
   String? _selectedApprovalStatusFilter;
   DateTime? _fromDate;
   DateTime? _toDate;
   String _searchQuery = '';
+  DateTime? _approvalFromDate;
+  DateTime? _approvalToDate;
+  String _approvalSearchQuery = '';
+  int _myPage = 1;
+  int _myPageCount = 1;
+  int _myTotal = 0;
+  int _approvalPage = 1;
+  int _approvalPageCount = 1;
+  int _approvalTotal = 0;
+  Timer? _myFilterDebounce;
+  Timer? _approvalFilterDebounce;
   String? _selectedSlipId;
   String? _selectedApprovalSlipId;
   StreamSubscription<AppRealtimeEvent>? _locatorRealtimeSub;
+  String? _authenticatedUserId;
+  String? _authenticatedUserRole;
+  DateTime? _officialHrmsDate;
+  bool _loadingOfficialDate = false;
+  String? _officialDateError;
+  int _authGeneration = 0;
+  int _myRequestsLoadGeneration = 0;
+  int _approvalsLoadGeneration = 0;
+  int _officialDateLoadGeneration = 0;
+  int _locatorTypesLoadGeneration = 0;
+
+  bool get _locatorTypesReady =>
+      _locatorTypesLoaded &&
+      !_loadingLocatorTypes &&
+      _locatorTypesError == null &&
+      _locatorTypes.isNotEmpty;
+  bool get _hasMyFilters =>
+      _selectedStatusFilter != null ||
+      _fromDate != null ||
+      _toDate != null ||
+      _searchQuery.trim().isNotEmpty;
+  bool get _hasApprovalFilters =>
+      _selectedApprovalStatusFilter != null ||
+      _approvalFromDate != null ||
+      _approvalToDate != null ||
+      _approvalSearchQuery.trim().isNotEmpty;
 
   bool _isDark(BuildContext context) => AppTheme.dashIsDark(context);
 
@@ -113,18 +160,30 @@ class EmployeeLocatorSlipContentState
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    _isDeptHeadFuture ??= _checkIsDepartmentHead();
-    if (_locatorTypes.length == LocatorRequestType.values.length) {
-      unawaited(_loadLocatorTypes());
+    final authProvider = context.watch<AuthProvider>();
+    _synchronizeAuthenticatedUser(authProvider);
+    if (_authenticatedUserId != null &&
+        !_locatorTypesLoaded &&
+        !_loadingLocatorTypes &&
+        _locatorTypesError == null) {
+      unawaited(_loadLocatorTypes(forceRefresh: true));
     }
-    if (!_loadingMy && _slips.isEmpty) {
-      _loadMyRequests();
+    if (_authenticatedUserId != null &&
+        !_loadingMy &&
+        !_myHistoryLoaded &&
+        _error == null) {
+      unawaited(_loadMyRequests());
+    }
+    if (_authenticatedUserId != null &&
+        _officialHrmsDate == null &&
+        !_loadingOfficialDate &&
+        _officialDateError == null) {
+      unawaited(_loadOfficialDate());
     }
     final realtimeProvider = context.read<AppRealtimeProvider>();
-    final authProvider = context.read<AuthProvider>();
     _locatorRealtimeSub ??= realtimeProvider.events.listen((event) {
       if (event.name != 'locator_updated') return;
-      final userId = authProvider.user?.id;
+      final userId = _authenticatedUserId;
       if (event.affectsUser(userId)) {
         unawaited(_loadMyRequests(forceRefresh: true));
       }
@@ -134,9 +193,124 @@ class EmployeeLocatorSlipContentState
     });
   }
 
+  void _synchronizeAuthenticatedUser(AuthProvider authProvider) {
+    final normalizedUserId = (authProvider.user?.id ?? '').trim();
+    final userId = normalizedUserId.isEmpty ? null : normalizedUserId;
+    final normalizedRole = (authProvider.user?.role ?? '').trim().toLowerCase();
+    final role = normalizedRole.isEmpty ? null : normalizedRole;
+    if (_authenticatedUserId == userId && _authenticatedUserRole == role) {
+      return;
+    }
+
+    _authenticatedUserId = userId;
+    _authenticatedUserRole = role;
+    _authGeneration += 1;
+    _myRequestsLoadGeneration += 1;
+    _approvalsLoadGeneration += 1;
+    _officialDateLoadGeneration += 1;
+    _locatorTypesLoadGeneration += 1;
+    _slips.clear();
+    _deptHeadQueue.clear();
+    _currentSection = _LocatorSection.requests;
+    _appliedDeptHeadDefaultSection = false;
+    _loadingMy = false;
+    _loadingApprovals = false;
+    _myHistoryLoaded = false;
+    _approvalHistoryLoaded = false;
+    _loadingMoreMy = false;
+    _loadingMoreApprovals = false;
+    _myLoadMoreError = null;
+    _approvalLoadMoreError = null;
+    _officialHrmsDate = null;
+    _loadingOfficialDate = false;
+    _officialDateError = null;
+    _locatorTypes = const [];
+    _loadingLocatorTypes = false;
+    _locatorTypesLoaded = false;
+    _locatorTypesError = null;
+    _error = null;
+    _selectedStatusFilter = null;
+    _selectedApprovalStatusFilter = null;
+    _fromDate = null;
+    _toDate = null;
+    _searchQuery = '';
+    _approvalFromDate = null;
+    _approvalToDate = null;
+    _approvalSearchQuery = '';
+    _myPage = 1;
+    _myPageCount = 1;
+    _myTotal = 0;
+    _approvalPage = 1;
+    _approvalPageCount = 1;
+    _approvalTotal = 0;
+    _myFilterDebounce?.cancel();
+    _approvalFilterDebounce?.cancel();
+    _selectedSlipId = null;
+    _selectedApprovalSlipId = null;
+
+    final generation = _authGeneration;
+    _isDeptHeadFuture = userId == null
+        ? Future<bool>.value(false)
+        : _checkIsDepartmentHead(
+            userId: userId,
+            role: role,
+            authGeneration: generation,
+          );
+  }
+
+  bool _isCurrentAuthSession(String userId, int authGeneration) {
+    return mounted &&
+        _authenticatedUserId == userId &&
+        _authGeneration == authGeneration;
+  }
+
+  Future<void> _loadOfficialDate({bool forceRefresh = false}) async {
+    final userId = _authenticatedUserId;
+    if (userId == null) return;
+    if (_loadingOfficialDate && !forceRefresh) return;
+    final authGeneration = _authGeneration;
+    final loadGeneration = ++_officialDateLoadGeneration;
+    setState(() {
+      _loadingOfficialDate = true;
+      _officialDateError = null;
+    });
+    try {
+      final response = await ApiClient.instance.get<Map<String, dynamic>>(
+        '/api/locator-slips/context',
+      );
+      final officialDate = _parseDateOnly(response.data?['official_date']);
+      if (officialDate == null) {
+        throw const FormatException('Missing official HRMS date');
+      }
+      if (!_isCurrentAuthSession(userId, authGeneration) ||
+          loadGeneration != _officialDateLoadGeneration) {
+        return;
+      }
+      setState(() => _officialHrmsDate = officialDate);
+    } catch (error) {
+      if (!_isCurrentAuthSession(userId, authGeneration) ||
+          loadGeneration != _officialDateLoadGeneration) {
+        return;
+      }
+      setState(() {
+        _officialDateError = _apiErrorMessage(
+          error,
+          fallback: 'Could not load the official HRMS date.',
+        );
+      });
+    } finally {
+      if (_isCurrentAuthSession(userId, authGeneration) &&
+          loadGeneration == _officialDateLoadGeneration) {
+        setState(() => _loadingOfficialDate = false);
+      }
+    }
+  }
+
   @override
   void dispose() {
     _locatorRealtimeSub?.cancel();
+    _myFilterDebounce?.cancel();
+    _approvalFilterDebounce?.cancel();
     _myRequestsScrollController.dispose();
     _approvalItemsScrollController.dispose();
     super.dispose();
@@ -185,21 +359,31 @@ class EmployeeLocatorSlipContentState
 
   List<_LocatorSlipDraft> get _filteredDeptHeadQueue {
     return _deptHeadQueue.where((item) {
-      switch (_selectedApprovalStatusFilter) {
-        case 'pending':
-          return item.status == _LocatorSlipStatus.pendingDepartmentHead;
-        case 'forwarded':
-          return item.status == _LocatorSlipStatus.pendingHr;
-        case 'returned':
-          return item.status == _LocatorSlipStatus.returnedForCorrection;
-        case 'approved':
-          return item.status == _LocatorSlipStatus.approved;
-        case 'revoked':
-          return item.status == _LocatorSlipStatus.revoked;
-        case 'rejected':
-          return item.status == _LocatorSlipStatus.rejected;
-        case 'cancelled':
-          return item.status == _LocatorSlipStatus.cancelled;
+      if (_approvalSearchQuery.trim().isNotEmpty) {
+        final query = _approvalSearchQuery.trim().toLowerCase();
+        final searchable =
+            '${item.employeeName} ${item.requestType.label} ${item.office} ${item.remarks} ${item.status.label}'
+                .toLowerCase();
+        if (!searchable.contains(query)) return false;
+      }
+      final matchesStatus = switch (_selectedApprovalStatusFilter) {
+        'pending' => item.status == _LocatorSlipStatus.pendingDepartmentHead,
+        'forwarded' => item.status == _LocatorSlipStatus.pendingHr,
+        'returned' => item.status == _LocatorSlipStatus.returnedForCorrection,
+        'approved' => item.status == _LocatorSlipStatus.approved,
+        'revoked' => item.status == _LocatorSlipStatus.revoked,
+        'rejected' => item.status == _LocatorSlipStatus.rejected,
+        'cancelled' => item.status == _LocatorSlipStatus.cancelled,
+        _ => true,
+      };
+      if (!matchesStatus) return false;
+      if (_approvalFromDate != null &&
+          _dateOnly(item.date).isBefore(_dateOnly(_approvalFromDate!))) {
+        return false;
+      }
+      if (_approvalToDate != null &&
+          _dateOnly(item.date).isAfter(_dateOnly(_approvalToDate!))) {
+        return false;
       }
       return true;
     }).toList();
@@ -236,15 +420,41 @@ class EmployeeLocatorSlipContentState
                 employeeName: displayName,
                 onCreatePressed: () => _openCreateForm(context, displayName),
                 showCreateAction: width >= 1024,
+                createEnabled:
+                    _officialHrmsDate != null &&
+                    !_loadingOfficialDate &&
+                    _locatorTypesReady,
               ),
             ),
+            if (_loadingLocatorTypes && !_locatorTypesLoaded) ...[
+              const SizedBox(height: 12),
+              const _ReferenceDataLoadingState(
+                message: 'Loading locator request types...',
+              ),
+            ],
+            if (_locatorTypesError != null) ...[
+              const SizedBox(height: 12),
+              _ErrorState(
+                message: _locatorTypesError!,
+                onRetry: () => _loadLocatorTypes(forceRefresh: true),
+              ),
+            ],
+            if (_officialDateError != null) ...[
+              const SizedBox(height: 12),
+              _ErrorState(
+                message:
+                    'Official HRMS date is unavailable. Filing is temporarily disabled.',
+                onRetry: () => _loadOfficialDate(forceRefresh: true),
+              ),
+            ],
             if (isDepartmentHead) ...[
               const SizedBox(height: 16),
               _LocatorSectionTabs(
                 current: _currentSection,
                 onChanged: (section) {
                   setState(() => _currentSection = section);
-                  if (section == _LocatorSection.approvals) {
+                  if (section == _LocatorSection.approvals &&
+                      !_approvalHistoryLoaded) {
                     _loadDepartmentHeadRequests();
                   }
                 },
@@ -291,11 +501,10 @@ class EmployeeLocatorSlipContentState
             fromDate: _fromDate,
             toDate: _toDate,
             searchQuery: _searchQuery,
-            visibleCount: _filteredSlips.length,
-            totalCount: _slips.length,
-            onStatusChanged: (status) =>
-                setState(() => _selectedStatusFilter = status),
-            onSearchChanged: (value) => setState(() => _searchQuery = value),
+            visibleCount: visibleSlips.length,
+            totalCount: _myTotal,
+            onStatusChanged: _onMyStatusChanged,
+            onSearchChanged: _onMySearchChanged,
             onPickFromDate: () => _pickFilterDate(isFrom: true),
             onPickToDate: () => _pickFilterDate(isFrom: false),
             onClearFilters: _clearFilters,
@@ -307,22 +516,33 @@ class EmployeeLocatorSlipContentState
               padding: const EdgeInsets.only(bottom: 12),
               child: _ErrorState(message: _error!),
             ),
-          _loadingMy
-              ? const _CenteredLoading(message: 'Loading locator requests...')
-              : _slips.isEmpty
-              ? const _EmptyState(
-                  message:
-                      'No locator requests yet. Click "File Request" to create one.',
-                )
-              : _filteredSlips.isEmpty
-              ? const _EmptyState(
-                  message: 'No locator requests match the current filters.',
-                )
-              : _myRequestsTable(
-                  items: visibleSlips,
-                  maxHeight: maxListHeight,
-                  useScrollableList: useScrollableList,
-                ),
+          if (_loadingMy)
+            const _CenteredLoading(message: 'Loading locator requests...')
+          else if (_slips.isEmpty)
+            _EmptyState(
+              message: _hasMyFilters
+                  ? 'No locator requests match the current filters.'
+                  : 'No locator requests yet. Click "File Request" to create one.',
+            )
+          else ...[
+            _myRequestsTable(
+              items: visibleSlips,
+              maxHeight: maxListHeight,
+              useScrollableList: useScrollableList,
+            ),
+            if (_myPage < _myPageCount ||
+                _loadingMoreMy ||
+                _myLoadMoreError != null) ...[
+              const SizedBox(height: 14),
+              _LoadMoreHistoryControl(
+                loaded: _slips.length,
+                total: _myTotal,
+                loading: _loadingMoreMy,
+                error: _myLoadMoreError,
+                onPressed: () => _loadMyRequests(loadMore: true),
+              ),
+            ],
+          ],
         ],
       ),
     );
@@ -364,8 +584,26 @@ class EmployeeLocatorSlipContentState
         : 'Current workflow status';
     final canReview =
         reviewMode && item.status == _LocatorSlipStatus.pendingDepartmentHead;
-    final canCorrect =
+    final officialDate = _officialHrmsDate;
+    final requestIsPast =
+        officialDate != null &&
+        _dateOnly(item.date).isBefore(_dateOnly(officialDate));
+    final returnBlockedByPastDate = canReview && requestIsPast;
+    final canReturnForCorrection =
+        canReview && officialDate != null && !returnBlockedByPastDate;
+    final isReturnedForCorrection =
         !reviewMode && item.status == _LocatorSlipStatus.returnedForCorrection;
+    final correctionBlockedByPastDate =
+        isReturnedForCorrection && requestIsPast;
+    final canCorrect =
+        isReturnedForCorrection &&
+        officialDate != null &&
+        _locatorTypesReady &&
+        !correctionBlockedByPastDate;
+    final datePolicyUnavailable =
+        (canReview || isReturnedForCorrection) && officialDate == null;
+    final typeConfigurationUnavailable =
+        isReturnedForCorrection && !_locatorTypesReady;
     final correctionRemarks = item.hrReviewedAt != null
         ? item.hrRemarks
         : item.departmentHeadRemarks;
@@ -452,6 +690,66 @@ class EmployeeLocatorSlipContentState
                   ? 'No reason provided.'
                   : item.remarks.trim(),
             ),
+            if (returnBlockedByPastDate) ...[
+              const SizedBox(height: 12),
+              const EmployeeLocatorMobileDetailSection(
+                title: 'Correction unavailable',
+                icon: Icons.event_busy_rounded,
+                children: [
+                  EmployeeLocatorMobileDetailTile(
+                    icon: Icons.info_outline_rounded,
+                    label: 'Past-dated request',
+                    value:
+                        'This request can no longer be returned to the employee. Approve or reject it, or ask HR to use Record Correction.',
+                  ),
+                ],
+              ),
+            ],
+            if (correctionBlockedByPastDate) ...[
+              const SizedBox(height: 12),
+              const EmployeeLocatorMobileDetailSection(
+                title: 'Correction unavailable',
+                icon: Icons.event_busy_rounded,
+                children: [
+                  EmployeeLocatorMobileDetailTile(
+                    icon: Icons.info_outline_rounded,
+                    label: 'Past-dated request',
+                    value:
+                        'This returned request can no longer be corrected or moved to another date. Cancel it or contact HR for Record Correction.',
+                  ),
+                ],
+              ),
+            ],
+            if (datePolicyUnavailable) ...[
+              const SizedBox(height: 12),
+              const EmployeeLocatorMobileDetailSection(
+                title: 'Return temporarily unavailable',
+                icon: Icons.sync_problem_rounded,
+                children: [
+                  EmployeeLocatorMobileDetailTile(
+                    icon: Icons.info_outline_rounded,
+                    label: 'Official date unavailable',
+                    value:
+                        'Reload the page before returning this request for correction.',
+                  ),
+                ],
+              ),
+            ],
+            if (typeConfigurationUnavailable) ...[
+              const SizedBox(height: 12),
+              const EmployeeLocatorMobileDetailSection(
+                title: 'Correction temporarily unavailable',
+                icon: Icons.sync_problem_rounded,
+                children: [
+                  EmployeeLocatorMobileDetailTile(
+                    icon: Icons.info_outline_rounded,
+                    label: 'Request types unavailable',
+                    value:
+                        'Reload the page and retry loading locator request types before correcting this request.',
+                  ),
+                ],
+              ),
+            ],
             if (canCorrect) ...[
               const SizedBox(height: 12),
               EmployeeLocatorMobileDetailSection(
@@ -515,7 +813,7 @@ class EmployeeLocatorSlipContentState
               item.attachmentName?.trim().isNotEmpty == true,
           canReject: canReview,
           canApprove: canReview,
-          canReturn: canReview,
+          canReturn: canReturnForCorrection,
           canCorrect: canCorrect,
           onHistory: () {
             Navigator.of(dialogContext).pop();
@@ -552,6 +850,9 @@ class EmployeeLocatorSlipContentState
     BuildContext context,
     _LocatorSlipDraft item,
   ) async {
+    final userId = _authenticatedUserId;
+    if (userId == null) return;
+    final authGeneration = _authGeneration;
     final rawStatus = item.rawStatus;
     final history = <_LocatorWorkflowStep>[
       (
@@ -688,7 +989,9 @@ class EmployeeLocatorSlipContentState
         // Legacy reconstruction remains available if history cannot be loaded.
       }
     }
-    if (!context.mounted) return;
+    if (!context.mounted || !_isCurrentAuthSession(userId, authGeneration)) {
+      return;
+    }
     final accent = AppTheme.primaryNavy;
 
     showDialog<void>(
@@ -879,16 +1182,19 @@ class EmployeeLocatorSlipContentState
                 RequestFiltersBar<String>(
                   options: _locatorApprovalFilterOptions,
                   selectedValue: _selectedApprovalStatusFilter,
+                  fromDate: _approvalFromDate,
+                  toDate: _approvalToDate,
+                  searchQuery: _approvalSearchQuery,
                   visibleCount: visibleItems.length,
-                  totalCount: _deptHeadQueue.length,
-                  showSearch: false,
-                  showDateRange: false,
-                  onStatusChanged: (value) {
-                    setState(() {
-                      _selectedApprovalStatusFilter = value;
-                      _selectedApprovalSlipId = null;
-                    });
-                  },
+                  totalCount: _approvalTotal,
+                  onStatusChanged: _onApprovalStatusChanged,
+                  onSearchChanged: _onApprovalSearchChanged,
+                  onPickFromDate: () =>
+                      _pickFilterDate(isFrom: true, approval: true),
+                  onPickToDate: () =>
+                      _pickFilterDate(isFrom: false, approval: true),
+                  onClearFilters: _clearApprovalFilters,
+                  formatDate: _formatDate,
                 ),
                 const SizedBox(height: 16),
                 if (_error != null)
@@ -897,19 +1203,35 @@ class EmployeeLocatorSlipContentState
                     child: _ErrorState(message: _error!),
                   ),
                 if (_deptHeadQueue.isEmpty)
-                  const _EmptyState(
-                    message: 'No locator requests or history yet.',
+                  _EmptyState(
+                    message: _hasApprovalFilters
+                        ? 'No locator requests match the current filters.'
+                        : 'No locator requests or history yet.',
                   )
                 else if (visibleItems.isEmpty)
                   const _EmptyState(
                     message: 'No locator requests match the current filter.',
                   )
-                else
+                else ...[
                   _approvalItemsTable(
                     items: visibleItems,
                     maxHeight: maxListHeight,
                     useScrollableList: useScrollableList,
                   ),
+                  if (_approvalPage < _approvalPageCount ||
+                      _loadingMoreApprovals ||
+                      _approvalLoadMoreError != null) ...[
+                    const SizedBox(height: 14),
+                    _LoadMoreHistoryControl(
+                      loaded: _deptHeadQueue.length,
+                      total: _approvalTotal,
+                      loading: _loadingMoreApprovals,
+                      error: _approvalLoadMoreError,
+                      onPressed: () =>
+                          _loadDepartmentHeadRequests(loadMore: true),
+                    ),
+                  ],
+                ],
               ],
             ),
     );
@@ -1431,9 +1753,33 @@ class EmployeeLocatorSlipContentState
     String employeeName, {
     LocatorSlipFormInitialValues? initialValues,
   }) async {
+    final userId = _authenticatedUserId;
+    if (userId == null) return;
+    final authGeneration = _authGeneration;
+    final typesReady = await _refreshLocatorTypesForForm(
+      context,
+      userId: userId,
+      authGeneration: authGeneration,
+    );
+    if (!typesReady || !context.mounted) {
+      return;
+    }
+    final officialDate = _officialHrmsDate;
+    if (officialDate == null) {
+      if (!_loadingOfficialDate) {
+        unawaited(_loadOfficialDate(forceRefresh: true));
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Wait for the official HRMS date, then try again.'),
+        ),
+      );
+      return;
+    }
     final form = _LocatorSlipFormDialog(
       employeeName: employeeName,
       requestTypes: _locatorTypes,
+      officialDate: officialDate,
       initialValues: initialValues,
     );
     final created = await openResponsiveRightSidePanel<_LocatorSlipDraft>(
@@ -1444,7 +1790,9 @@ class EmployeeLocatorSlipContentState
       builder: (_) =>
           EmployeeHrmsAssistantOverlay(initialBottom: 92, child: form),
     );
-    if (!mounted || created == null) return;
+    if (created == null || !_isCurrentAuthSession(userId, authGeneration)) {
+      return;
+    }
     setState(() {
       _error = null;
       _loadingMy = true;
@@ -1491,7 +1839,7 @@ class EmployeeLocatorSlipContentState
         );
       }
       if ((res.statusCode ?? 500) >= 400) {
-        if (!mounted) return;
+        if (!_isCurrentAuthSession(userId, authGeneration)) return;
         final message = _apiResponseMessage(
           res.data,
           fallback: 'Failed to submit request.',
@@ -1500,6 +1848,7 @@ class EmployeeLocatorSlipContentState
         await _showLocatorErrorDialog(message);
         return;
       }
+      if (!_isCurrentAuthSession(userId, authGeneration)) return;
       final data = res.data;
       LocatorSlipDataCache.instance.invalidateRequests();
       _LocatorSlipDraft? inserted;
@@ -1507,7 +1856,6 @@ class EmployeeLocatorSlipContentState
         inserted = _LocatorSlipDraft.fromApi(data);
         setState(() => _slips.insert(0, inserted!));
       }
-      if (!mounted) return;
       final msg = inserted != null
           ? (inserted.status == _LocatorSlipStatus.pendingHr
                 ? 'Request submitted. Awaiting HR approval.'
@@ -1515,7 +1863,7 @@ class EmployeeLocatorSlipContentState
           : 'Request submitted successfully.';
       _showLocatorSnack(msg);
     } catch (e) {
-      if (!mounted) return;
+      if (!_isCurrentAuthSession(userId, authGeneration)) return;
       final message = _apiErrorMessage(
         e,
         fallback: 'Failed to submit request.',
@@ -1523,12 +1871,17 @@ class EmployeeLocatorSlipContentState
       setState(() => _loadingMy = false);
       await _showLocatorErrorDialog(message);
     } finally {
-      if (mounted) setState(() => _loadingMy = false);
+      if (_isCurrentAuthSession(userId, authGeneration)) {
+        setState(() => _loadingMy = false);
+      }
     }
   }
 
   Future<void> _cancelSlip(_LocatorSlipDraft item) async {
     if (!_canCancelSlip(item)) return;
+    final userId = _authenticatedUserId;
+    if (userId == null) return;
+    final authGeneration = _authGeneration;
     final id = item.id!.trim();
     final ok = await showDialog<bool>(
       context: context,
@@ -1549,7 +1902,7 @@ class EmployeeLocatorSlipContentState
         ],
       ),
     );
-    if (ok != true) return;
+    if (ok != true || !_isCurrentAuthSession(userId, authGeneration)) return;
 
     setState(() {
       _error = null;
@@ -1560,9 +1913,9 @@ class EmployeeLocatorSlipContentState
         '/api/locator-slips/$id/cancel',
         data: const {},
       );
+      if (!_isCurrentAuthSession(userId, authGeneration)) return;
       LocatorSlipDataCache.instance.invalidateRequests();
       final data = res.data;
-      if (!mounted) return;
       setState(() {
         _selectedSlipId = null;
         if (data != null) {
@@ -1574,28 +1927,32 @@ class EmployeeLocatorSlipContentState
         }
       });
       await _loadMyRequests(forceRefresh: true);
-      if (!mounted) return;
+      if (!_isCurrentAuthSession(userId, authGeneration)) return;
       _showLocatorSnack('Request cancelled.');
     } catch (e) {
-      if (!mounted) return;
+      if (!_isCurrentAuthSession(userId, authGeneration)) return;
       setState(
         () =>
             _error = _apiErrorMessage(e, fallback: 'Failed to cancel request.'),
       );
     } finally {
-      if (mounted) setState(() => _loadingMy = false);
+      if (_isCurrentAuthSession(userId, authGeneration)) {
+        setState(() => _loadingMy = false);
+      }
     }
   }
 
-  Future<bool> _checkIsDepartmentHead() async {
+  Future<bool> _checkIsDepartmentHead({
+    required String userId,
+    required String? role,
+    required int authGeneration,
+  }) async {
     try {
-      final user = context.read<AuthProvider>().user;
-      final userId = (user?.id ?? '').trim();
-      if (userId.isEmpty) return false;
       final isDeptHead = await LocatorSlipDataCache.instance
-          .checkIsDepartmentHead(userId: userId, role: user?.role);
+          .checkIsDepartmentHead(userId: userId, role: role);
+      if (!_isCurrentAuthSession(userId, authGeneration)) return false;
       if (isDeptHead) {
-        _loadDepartmentHeadRequests();
+        unawaited(_loadDepartmentHeadRequests());
       }
       return isDeptHead;
     } catch (_) {
@@ -1604,116 +1961,361 @@ class EmployeeLocatorSlipContentState
   }
 
   Future<void> _loadLocatorTypes({bool forceRefresh = false}) async {
+    final userId = _authenticatedUserId;
+    if (userId == null) return;
+    if (_loadingLocatorTypes && !forceRefresh) return;
+    final authGeneration = _authGeneration;
+    final loadGeneration = ++_locatorTypesLoadGeneration;
+    setState(() {
+      _loadingLocatorTypes = true;
+      _locatorTypesError = null;
+    });
     try {
       final items = (await LocatorSlipDataCache.instance.listTypes(
         forceRefresh: forceRefresh,
       )).where((type) => type.isActive).toList();
-      if (!mounted || items.isEmpty) return;
-      setState(() => _locatorTypes = items);
-    } catch (_) {
-      // Keep built-in fallback types when configuration cannot be loaded.
+      if (!_isCurrentAuthSession(userId, authGeneration) ||
+          loadGeneration != _locatorTypesLoadGeneration) {
+        return;
+      }
+      setState(() {
+        _locatorTypes = items;
+        _locatorTypesLoaded = true;
+        if (items.isEmpty) {
+          _locatorTypesError =
+              'No active locator request types are configured. Contact HR before filing.';
+        }
+      });
+    } catch (error) {
+      if (!_isCurrentAuthSession(userId, authGeneration) ||
+          loadGeneration != _locatorTypesLoadGeneration) {
+        return;
+      }
+      setState(() {
+        _locatorTypes = const [];
+        _locatorTypesLoaded = false;
+        _locatorTypesError = _apiErrorMessage(
+          error,
+          fallback: 'Could not load locator request types.',
+        );
+      });
+    } finally {
+      if (_isCurrentAuthSession(userId, authGeneration) &&
+          loadGeneration == _locatorTypesLoadGeneration) {
+        setState(() => _loadingLocatorTypes = false);
+      }
     }
   }
 
-  Future<void> _loadMyRequests({bool forceRefresh = false}) async {
-    setState(() {
-      _loadingMy = true;
-      _error = null;
-    });
-    try {
-      final user = context.read<AuthProvider>().user;
-      final userId = (user?.id ?? '').trim();
-      if (userId.isEmpty) {
-        throw StateError('No authenticated user is available.');
-      }
-      final items = (await LocatorSlipDataCache.instance.listMyRequests(
-        userId: userId,
-        role: user?.role,
-        forceRefresh: forceRefresh,
-      )).map((e) => _LocatorSlipDraft.fromApi(e)).toList();
-      if (!mounted) return;
-      setState(() {
-        _slips
-          ..clear()
-          ..addAll(items);
-      });
-    } catch (e) {
-      if (!mounted) return;
-      setState(
-        () => _error = _apiErrorMessage(
-          e,
-          fallback: 'Failed to load locator requests.',
+  Future<bool> _refreshLocatorTypesForForm(
+    BuildContext context, {
+    required String userId,
+    required int authGeneration,
+  }) async {
+    if (_loadingLocatorTypes) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Wait for locator request types, then try again.'),
         ),
       );
-    } finally {
-      if (mounted) setState(() => _loadingMy = false);
+      return false;
+    }
+    await _loadLocatorTypes(forceRefresh: true);
+    if (!_isCurrentAuthSession(userId, authGeneration)) return false;
+    if (_locatorTypesReady) return true;
+    if (!context.mounted) return false;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          _locatorTypesError ?? 'Locator request types are unavailable.',
+        ),
+      ),
+    );
+    return false;
+  }
+
+  Map<String, String> _myHistoryQuery(int page) => {
+    'page': '$page',
+    'page_size': '$_historyPageSize',
+    if (_selectedStatusFilter != null) 'status': _selectedStatusFilter!,
+    if (_fromDate != null) 'from': _toIsoDate(_fromDate!),
+    if (_toDate != null) 'to': _toIsoDate(_toDate!),
+    if (_searchQuery.trim().isNotEmpty) 'search': _searchQuery.trim(),
+  };
+
+  Map<String, String> _approvalHistoryQuery(int page) => {
+    'page': '$page',
+    'page_size': '$_historyPageSize',
+    if (_selectedApprovalStatusFilter != null)
+      'status': _selectedApprovalStatusFilter!,
+    if (_approvalFromDate != null) 'from': _toIsoDate(_approvalFromDate!),
+    if (_approvalToDate != null) 'to': _toIsoDate(_approvalToDate!),
+    if (_approvalSearchQuery.trim().isNotEmpty)
+      'search': _approvalSearchQuery.trim(),
+  };
+
+  void _mergeLocatorPage(
+    List<_LocatorSlipDraft> target,
+    List<_LocatorSlipDraft> incoming, {
+    required bool append,
+  }) {
+    if (!append) {
+      target
+        ..clear()
+        ..addAll(incoming);
+      return;
+    }
+    final existingIds = target
+        .map((item) => item.id?.trim())
+        .whereType<String>()
+        .where((id) => id.isNotEmpty)
+        .toSet();
+    for (final item in incoming) {
+      final id = item.id?.trim();
+      if (id == null || id.isEmpty || existingIds.add(id)) {
+        target.add(item);
+      }
     }
   }
 
-  Future<void> _loadDepartmentHeadRequests({bool forceRefresh = false}) async {
-    setState(() => _loadingApprovals = true);
-    try {
-      final user = context.read<AuthProvider>().user;
-      final userId = (user?.id ?? '').trim();
-      if (userId.isEmpty) {
-        throw StateError('No authenticated user is available.');
+  void _onMyStatusChanged(String? value) {
+    setState(() {
+      _selectedStatusFilter = value;
+      _selectedSlipId = null;
+    });
+    unawaited(_loadMyRequests(forceRefresh: true));
+  }
+
+  void _onMySearchChanged(String value) {
+    final normalized = value.length > 100 ? value.substring(0, 100) : value;
+    setState(() => _searchQuery = normalized);
+    _myFilterDebounce?.cancel();
+    _myFilterDebounce = Timer(const Duration(milliseconds: 350), () {
+      if (mounted) unawaited(_loadMyRequests(forceRefresh: true));
+    });
+  }
+
+  void _onApprovalStatusChanged(String? value) {
+    setState(() {
+      _selectedApprovalStatusFilter = value;
+      _selectedApprovalSlipId = null;
+    });
+    unawaited(_loadDepartmentHeadRequests(forceRefresh: true));
+  }
+
+  void _onApprovalSearchChanged(String value) {
+    final normalized = value.length > 100 ? value.substring(0, 100) : value;
+    setState(() => _approvalSearchQuery = normalized);
+    _approvalFilterDebounce?.cancel();
+    _approvalFilterDebounce = Timer(const Duration(milliseconds: 350), () {
+      if (mounted) {
+        unawaited(_loadDepartmentHeadRequests(forceRefresh: true));
       }
-      final items =
-          (await LocatorSlipDataCache.instance.listDepartmentHeadRequests(
-            userId: userId,
-            role: user?.role,
-            forceRefresh: forceRefresh,
-          )).map((e) => _LocatorSlipDraft.fromApi(e)).toList();
-      if (!mounted) return;
+    });
+  }
+
+  Future<void> _loadMyRequests({
+    bool forceRefresh = false,
+    bool loadMore = false,
+  }) async {
+    final userId = _authenticatedUserId;
+    if (userId == null) return;
+    if (loadMore && (_loadingMoreMy || _loadingMy || _myPage >= _myPageCount)) {
+      return;
+    }
+    final role = _authenticatedUserRole;
+    final authGeneration = _authGeneration;
+    final loadGeneration = ++_myRequestsLoadGeneration;
+    final requestedPage = loadMore ? _myPage + 1 : 1;
+    setState(() {
+      if (loadMore) {
+        _loadingMoreMy = true;
+        _myLoadMoreError = null;
+      } else {
+        _loadingMy = true;
+        _loadingMoreMy = false;
+        _myLoadMoreError = null;
+        _error = null;
+      }
+    });
+    try {
+      final page = await LocatorSlipDataCache.instance.listMyRequests(
+        userId: userId,
+        role: role,
+        query: _myHistoryQuery(requestedPage),
+        forceRefresh: forceRefresh,
+      );
+      final items = page.items
+          .map((item) => _LocatorSlipDraft.fromApi(item))
+          .toList();
+      if (!_isCurrentAuthSession(userId, authGeneration) ||
+          loadGeneration != _myRequestsLoadGeneration) {
+        return;
+      }
       setState(() {
-        _deptHeadQueue
-          ..clear()
-          ..addAll(items);
+        _mergeLocatorPage(_slips, items, append: loadMore);
+        _myPage = page.page;
+        _myPageCount = page.pageCount;
+        _myTotal = page.total;
+        _myHistoryLoaded = true;
       });
-    } catch (_) {
-      if (!mounted) return;
+    } catch (e) {
+      if (!_isCurrentAuthSession(userId, authGeneration) ||
+          loadGeneration != _myRequestsLoadGeneration) {
+        return;
+      }
+      final message = _apiErrorMessage(
+        e,
+        fallback: loadMore
+            ? 'Failed to load more locator requests.'
+            : 'Failed to load locator requests.',
+      );
       setState(() {
-        _deptHeadQueue.clear();
+        if (loadMore) {
+          _myLoadMoreError = message;
+        } else {
+          _error = message;
+        }
       });
     } finally {
-      if (mounted) setState(() => _loadingApprovals = false);
+      if (_isCurrentAuthSession(userId, authGeneration) &&
+          loadGeneration == _myRequestsLoadGeneration) {
+        setState(() {
+          if (loadMore) {
+            _loadingMoreMy = false;
+          } else {
+            _loadingMy = false;
+          }
+        });
+      }
+    }
+  }
+
+  Future<void> _loadDepartmentHeadRequests({
+    bool forceRefresh = false,
+    bool loadMore = false,
+  }) async {
+    final userId = _authenticatedUserId;
+    if (userId == null) return;
+    if (loadMore &&
+        (_loadingMoreApprovals ||
+            _loadingApprovals ||
+            _approvalPage >= _approvalPageCount)) {
+      return;
+    }
+    final role = _authenticatedUserRole;
+    final authGeneration = _authGeneration;
+    final loadGeneration = ++_approvalsLoadGeneration;
+    final requestedPage = loadMore ? _approvalPage + 1 : 1;
+    setState(() {
+      if (loadMore) {
+        _loadingMoreApprovals = true;
+        _approvalLoadMoreError = null;
+      } else {
+        _loadingApprovals = true;
+        _loadingMoreApprovals = false;
+        _approvalLoadMoreError = null;
+        _error = null;
+      }
+    });
+    try {
+      final page = await LocatorSlipDataCache.instance
+          .listDepartmentHeadRequests(
+            userId: userId,
+            role: role,
+            query: _approvalHistoryQuery(requestedPage),
+            forceRefresh: forceRefresh,
+          );
+      final items = page.items
+          .map((item) => _LocatorSlipDraft.fromApi(item))
+          .toList();
+      if (!_isCurrentAuthSession(userId, authGeneration) ||
+          loadGeneration != _approvalsLoadGeneration) {
+        return;
+      }
+      setState(() {
+        _mergeLocatorPage(_deptHeadQueue, items, append: loadMore);
+        _approvalPage = page.page;
+        _approvalPageCount = page.pageCount;
+        _approvalTotal = page.total;
+        _approvalHistoryLoaded = true;
+      });
+    } catch (error) {
+      if (!_isCurrentAuthSession(userId, authGeneration) ||
+          loadGeneration != _approvalsLoadGeneration) {
+        return;
+      }
+      final message = _apiErrorMessage(
+        error,
+        fallback: loadMore
+            ? 'Failed to load more approval history.'
+            : 'Failed to load approval history.',
+      );
+      setState(() {
+        if (loadMore) {
+          _approvalLoadMoreError = message;
+        } else {
+          _error = message;
+        }
+      });
+    } finally {
+      if (_isCurrentAuthSession(userId, authGeneration) &&
+          loadGeneration == _approvalsLoadGeneration) {
+        setState(() {
+          if (loadMore) {
+            _loadingMoreApprovals = false;
+          } else {
+            _loadingApprovals = false;
+          }
+        });
+      }
     }
   }
 
   Future<void> _departmentHeadApprove(_LocatorSlipDraft item) async {
     if (item.id == null || item.id!.isEmpty) return;
+    final userId = _authenticatedUserId;
+    if (userId == null) return;
+    final authGeneration = _authGeneration;
     try {
       await ApiClient.instance.patch<Map<String, dynamic>>(
         '/api/locator-slips/${item.id}/department-head-approve',
         data: const {},
       );
+      if (!_isCurrentAuthSession(userId, authGeneration)) return;
       LocatorSlipDataCache.instance.invalidateRequests();
       await _loadDepartmentHeadRequests(forceRefresh: true);
       await _loadMyRequests(forceRefresh: true);
-      if (!mounted) return;
+      if (!_isCurrentAuthSession(userId, authGeneration)) return;
       _showLocatorSnack('Approved and sent to HR for final approval.');
     } catch (e) {
-      if (!mounted) return;
+      if (!_isCurrentAuthSession(userId, authGeneration)) return;
       setState(() => _error = _apiErrorMessage(e, fallback: 'Approve failed.'));
     }
   }
 
   Future<void> _departmentHeadReject(_LocatorSlipDraft item) async {
     if (item.id == null || item.id!.isEmpty) return;
+    final userId = _authenticatedUserId;
+    if (userId == null) return;
+    final authGeneration = _authGeneration;
     final reason = await _promptRejectionReason('Department Head');
-    if (reason == null || !mounted) return;
+    if (reason == null || !_isCurrentAuthSession(userId, authGeneration)) {
+      return;
+    }
     try {
       await ApiClient.instance.patch<Map<String, dynamic>>(
         '/api/locator-slips/${item.id}/department-head-reject',
         data: {'reviewer_remarks': reason},
       );
+      if (!_isCurrentAuthSession(userId, authGeneration)) return;
       LocatorSlipDataCache.instance.invalidateRequests();
       await _loadDepartmentHeadRequests(forceRefresh: true);
       await _loadMyRequests(forceRefresh: true);
-      if (!mounted) return;
+      if (!_isCurrentAuthSession(userId, authGeneration)) return;
       _showLocatorSnack('Request rejected.');
     } catch (e) {
-      if (!mounted) return;
+      if (!_isCurrentAuthSession(userId, authGeneration)) return;
       setState(() => _error = _apiErrorMessage(e, fallback: 'Reject failed.'));
     }
   }
@@ -1809,20 +2411,26 @@ class EmployeeLocatorSlipContentState
   Future<void> _departmentHeadReturn(_LocatorSlipDraft item) async {
     final id = item.id?.trim();
     if (id == null || id.isEmpty) return;
+    final userId = _authenticatedUserId;
+    if (userId == null) return;
+    final authGeneration = _authGeneration;
     final remarks = await _promptCorrectionRemarks();
-    if (remarks == null || !mounted) return;
+    if (remarks == null || !_isCurrentAuthSession(userId, authGeneration)) {
+      return;
+    }
     try {
       await ApiClient.instance.patch<Map<String, dynamic>>(
         '/api/locator-slips/$id/department-head-return',
         data: {'reviewer_remarks': remarks},
       );
+      if (!_isCurrentAuthSession(userId, authGeneration)) return;
       LocatorSlipDataCache.instance.invalidateRequests();
       await _loadDepartmentHeadRequests(forceRefresh: true);
       await _loadMyRequests(forceRefresh: true);
-      if (!mounted) return;
+      if (!_isCurrentAuthSession(userId, authGeneration)) return;
       _showLocatorSnack('Request returned to the employee for correction.');
     } catch (e) {
-      if (!mounted) return;
+      if (!_isCurrentAuthSession(userId, authGeneration)) return;
       await _showLocatorErrorDialog(
         _apiErrorMessage(e, fallback: 'Failed to return the request.'),
       );
@@ -1832,73 +2440,109 @@ class EmployeeLocatorSlipContentState
   Future<void> _correctAndResubmit(_LocatorSlipDraft item) async {
     final id = item.id?.trim();
     if (id == null || id.isEmpty) return;
-    final hasCurrentAttachment = (item.attachmentName ?? '').trim().isNotEmpty;
-    final action = await showDialog<String>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('Correct locator request'),
-        content: Text(
-          hasCurrentAttachment
-              ? 'Replace the supporting document if needed, then resubmit the request for review.'
-              : 'Add the required supporting document before resubmitting the request.',
+    final userId = _authenticatedUserId;
+    if (userId == null) return;
+    final authGeneration = _authGeneration;
+    final typesReady = await _refreshLocatorTypesForForm(
+      context,
+      userId: userId,
+      authGeneration: authGeneration,
+    );
+    if (!typesReady || !mounted) {
+      return;
+    }
+    final officialDate = _officialHrmsDate;
+    if (officialDate == null) {
+      if (!_loadingOfficialDate) {
+        unawaited(_loadOfficialDate(forceRefresh: true));
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Wait for the official HRMS date, then try again.'),
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(),
-            child: const Text('Cancel'),
+      );
+      return;
+    }
+    final corrected = await openResponsiveRightSidePanel<_LocatorSlipDraft>(
+      context: context,
+      barrierLabel: 'Close locator request correction form',
+      minWidth: 520,
+      initialWidthFraction: 0.38,
+      builder: (_) => EmployeeHrmsAssistantOverlay(
+        initialBottom: 92,
+        child: _LocatorSlipFormDialog(
+          employeeName: item.employeeName,
+          requestTypes: _locatorTypes,
+          officialDate: officialDate,
+          title: 'Correct Locator Request',
+          submitLabel: 'Save & Resubmit',
+          initialValues: LocatorSlipFormInitialValues(
+            slipDate: item.date,
+            requestTypeCode: item.requestType.code,
+            office: item.office,
+            reason: item.remarks,
+            amIn: item.amIn,
+            amOut: item.amOut,
+            pmIn: item.pmIn,
+            pmOut: item.pmOut,
+            existingAttachmentName: item.attachmentName,
           ),
-          if (hasCurrentAttachment || !item.requestType.requiresAttachment)
-            OutlinedButton(
-              onPressed: () => Navigator.of(dialogContext).pop('resubmit'),
-              child: const Text('Resubmit Current'),
-            ),
-          FilledButton.icon(
-            onPressed: () => Navigator.of(dialogContext).pop('replace'),
-            icon: const Icon(Icons.upload_file_rounded, size: 18),
-            label: const Text('Replace & Resubmit'),
-          ),
-        ],
+        ),
       ),
     );
-    if (action == null || !mounted) return;
+    if (corrected == null || !_isCurrentAuthSession(userId, authGeneration)) {
+      return;
+    }
 
+    setState(() {
+      _error = null;
+      _loadingMy = true;
+    });
     try {
-      if (action == 'replace') {
-        final result = await FilePicker.platform.pickFiles(
-          type: FileType.custom,
-          allowedExtensions: const ['pdf', 'jpg', 'jpeg', 'png'],
-          withData: true,
-        );
-        if (result == null || result.files.isEmpty || !mounted) return;
-        final file = result.files.single;
-        final bytes = file.bytes;
-        if (bytes == null) {
-          await _showLocatorErrorDialog('The selected file could not be read.');
-          return;
-        }
+      final attachmentBytes = corrected.pendingAttachmentBytes;
+      final attachmentName = corrected.pendingAttachmentName?.trim();
+      if (attachmentBytes != null &&
+          attachmentName != null &&
+          attachmentName.isNotEmpty) {
         await ApiClient.instance.dio.post<Map<String, dynamic>>(
           '/api/locator-slips/$id/attachment',
           data: FormData.fromMap({
-            'file': MultipartFile.fromBytes(bytes, filename: file.name),
+            'file': MultipartFile.fromBytes(
+              attachmentBytes,
+              filename: attachmentName,
+            ),
           }),
         );
+        if (!_isCurrentAuthSession(userId, authGeneration)) return;
       }
 
       await ApiClient.instance.patch<Map<String, dynamic>>(
         '/api/locator-slips/$id/resubmit',
-        data: const {},
+        data: {
+          'slip_date': _toIsoDate(corrected.date),
+          'request_type': corrected.requestType.code,
+          'office': corrected.office,
+          'reason': corrected.remarks,
+          'am_in': corrected.amIn,
+          'am_out': corrected.amOut,
+          'pm_in': corrected.pmIn,
+          'pm_out': corrected.pmOut,
+        },
       );
+      if (!_isCurrentAuthSession(userId, authGeneration)) return;
       LocatorSlipDataCache.instance.invalidateRequests();
       await _loadMyRequests(forceRefresh: true);
-      if (!mounted) return;
-      _showLocatorSnack(
-        'Corrections submitted. The attachment is locked again.',
-      );
+      if (!_isCurrentAuthSession(userId, authGeneration)) return;
+      _showLocatorSnack('Corrected request resubmitted for approval.');
     } catch (e) {
-      if (!mounted) return;
+      if (!_isCurrentAuthSession(userId, authGeneration)) return;
       await _showLocatorErrorDialog(
         _apiErrorMessage(e, fallback: 'Failed to resubmit the request.'),
       );
+    } finally {
+      if (_isCurrentAuthSession(userId, authGeneration)) {
+        setState(() => _loadingMy = false);
+      }
     }
   }
 
@@ -1908,6 +2552,9 @@ class EmployeeLocatorSlipContentState
     if (id == null || id.isEmpty || filename == null || filename.isEmpty) {
       return;
     }
+    final userId = _authenticatedUserId;
+    if (userId == null) return;
+    final authGeneration = _authGeneration;
     final messenger = ScaffoldMessenger.of(context);
     try {
       messenger.clearSnackBars();
@@ -1919,7 +2566,7 @@ class EmployeeLocatorSlipContentState
         options: Options(responseType: ResponseType.bytes),
       );
       final bytes = response.data;
-      if (!mounted) return;
+      if (!_isCurrentAuthSession(userId, authGeneration)) return;
       if (bytes == null || bytes.isEmpty) {
         messenger.showSnackBar(
           const SnackBar(content: Text('Attachment could not be loaded.')),
@@ -1929,7 +2576,7 @@ class EmployeeLocatorSlipContentState
       messenger.clearSnackBars();
       await locator_attachment.openLocatorAttachmentBytes(bytes, filename);
     } catch (e) {
-      if (!mounted) return;
+      if (!_isCurrentAuthSession(userId, authGeneration)) return;
       messenger.clearSnackBars();
       messenger.showSnackBar(
         SnackBar(
@@ -1941,10 +2588,15 @@ class EmployeeLocatorSlipContentState
     }
   }
 
-  Future<void> _pickFilterDate({required bool isFrom}) async {
+  Future<void> _pickFilterDate({
+    required bool isFrom,
+    bool approval = false,
+  }) async {
+    final currentFrom = approval ? _approvalFromDate : _fromDate;
+    final currentTo = approval ? _approvalToDate : _toDate;
     final initial = isFrom
-        ? (_fromDate ?? DateTime.now())
-        : (_toDate ?? _fromDate ?? DateTime.now());
+        ? (currentFrom ?? DateTime.now())
+        : (currentTo ?? currentFrom ?? DateTime.now());
     final picked = await showHrmsDatePicker(
       context: context,
       initialDate: initial,
@@ -1954,27 +2606,62 @@ class EmployeeLocatorSlipContentState
     );
     if (picked == null) return;
     setState(() {
-      if (isFrom) {
-        _fromDate = picked;
-        if (_toDate != null && _toDate!.isBefore(_fromDate!)) {
-          _toDate = _fromDate;
+      if (approval) {
+        if (isFrom) {
+          _approvalFromDate = picked;
+          if (_approvalToDate != null &&
+              _approvalToDate!.isBefore(_approvalFromDate!)) {
+            _approvalToDate = _approvalFromDate;
+          }
+        } else {
+          _approvalToDate = picked;
+          if (_approvalFromDate != null &&
+              _approvalFromDate!.isAfter(_approvalToDate!)) {
+            _approvalFromDate = _approvalToDate;
+          }
         }
       } else {
-        _toDate = picked;
-        if (_fromDate != null && _fromDate!.isAfter(_toDate!)) {
-          _fromDate = _toDate;
+        if (isFrom) {
+          _fromDate = picked;
+          if (_toDate != null && _toDate!.isBefore(_fromDate!)) {
+            _toDate = _fromDate;
+          }
+        } else {
+          _toDate = picked;
+          if (_fromDate != null && _fromDate!.isAfter(_toDate!)) {
+            _fromDate = _toDate;
+          }
         }
       }
     });
+    if (approval) {
+      await _loadDepartmentHeadRequests(forceRefresh: true);
+    } else {
+      await _loadMyRequests(forceRefresh: true);
+    }
   }
 
   void _clearFilters() {
+    _myFilterDebounce?.cancel();
     setState(() {
       _searchQuery = '';
       _selectedStatusFilter = null;
       _fromDate = null;
       _toDate = null;
     });
+    unawaited(_loadMyRequests(forceRefresh: true));
+  }
+
+  void _clearApprovalFilters() {
+    _approvalFilterDebounce?.cancel();
+    setState(() {
+      _approvalSearchQuery = '';
+      _selectedApprovalStatusFilter = null;
+      _approvalFromDate = null;
+      _approvalToDate = null;
+      _selectedApprovalSlipId = null;
+    });
+    unawaited(_loadDepartmentHeadRequests(forceRefresh: true));
   }
 
   DateTime _dateOnly(DateTime value) =>
@@ -2022,11 +2709,13 @@ class _LocatorHeader extends StatelessWidget {
     required this.employeeName,
     required this.onCreatePressed,
     required this.showCreateAction,
+    required this.createEnabled,
   });
 
   final String employeeName;
   final VoidCallback onCreatePressed;
   final bool showCreateAction;
+  final bool createEnabled;
 
   @override
   Widget build(BuildContext context) {
@@ -2063,7 +2752,7 @@ class _LocatorHeader extends StatelessWidget {
           ),
           if (showCreateAction)
             FilledButton.icon(
-              onPressed: onCreatePressed,
+              onPressed: createEnabled ? onCreatePressed : null,
               icon: const Icon(Icons.add_rounded),
               label: const Text('File Request'),
             ),
@@ -2086,12 +2775,18 @@ class _LocatorSlipFormDialog extends StatefulWidget {
   const _LocatorSlipFormDialog({
     required this.employeeName,
     required this.requestTypes,
+    required this.officialDate,
     this.initialValues,
+    this.title = 'File Request',
+    this.submitLabel = 'Submit',
   });
 
   final String employeeName;
   final List<LocatorRequestType> requestTypes;
+  final DateTime officialDate;
   final LocatorSlipFormInitialValues? initialValues;
+  final String title;
+  final String submitLabel;
 
   @override
   State<_LocatorSlipFormDialog> createState() => _LocatorSlipFormDialogState();
@@ -2099,7 +2794,7 @@ class _LocatorSlipFormDialog extends StatefulWidget {
 
 class _LocatorSlipFormDialogState extends State<_LocatorSlipFormDialog> {
   final _formKey = GlobalKey<FormState>();
-  DateTime _date = DateTime.now();
+  late DateTime _date;
   LocatorRequestType _requestType = LocatorRequestType.locator;
   _WfhCoverage _wfhCoverage = _WfhCoverage.wholeDay;
   final _officeController = TextEditingController();
@@ -2120,6 +2815,15 @@ class _LocatorSlipFormDialogState extends State<_LocatorSlipFormDialog> {
 
   bool get _isWfhRequest => _requestType.usesWfhCoverage;
   bool get _requiresAttachment => _requestType.requiresAttachment;
+  String? get _existingAttachmentName {
+    final value = widget.initialValues?.existingAttachmentName?.trim();
+    return value == null || value.isEmpty ? null : value;
+  }
+
+  String? get _effectiveAttachmentName =>
+      (_pendingAttachmentName ?? '').trim().isNotEmpty
+      ? _pendingAttachmentName!.trim()
+      : _existingAttachmentName;
 
   void _applyWfhCoverage(_WfhCoverage coverage) {
     _amIn =
@@ -2173,6 +2877,12 @@ class _LocatorSlipFormDialogState extends State<_LocatorSlipFormDialog> {
   @override
   void initState() {
     super.initState();
+    final today = DateTime(
+      widget.officialDate.year,
+      widget.officialDate.month,
+      widget.officialDate.day,
+    );
+    _date = today;
     final initial = widget.initialValues;
     if (widget.requestTypes.isNotEmpty) {
       if (initial?.requestTypeCode != null &&
@@ -2192,8 +2902,6 @@ class _LocatorSlipFormDialogState extends State<_LocatorSlipFormDialog> {
     if (initial?.slipDate != null) {
       final date = initial!.slipDate!;
       final requested = DateTime(date.year, date.month, date.day);
-      final now = DateTime.now();
-      final today = DateTime(now.year, now.month, now.day);
       _date = requested.isBefore(today) ? today : requested;
     }
     if (initial?.office != null && initial!.office!.trim().isNotEmpty) {
@@ -2256,7 +2964,7 @@ class _LocatorSlipFormDialogState extends State<_LocatorSlipFormDialog> {
         surfaceTintColor: Colors.transparent,
         elevation: 0,
         title: Text(
-          'File Request',
+          widget.title,
           style: TextStyle(
             color: AppTheme.dashTextPrimaryOf(context),
             fontSize: 18,
@@ -2286,6 +2994,7 @@ class _LocatorSlipFormDialogState extends State<_LocatorSlipFormDialog> {
             accent: accent,
             onCancel: () => Navigator.of(context).pop(),
             onSubmit: _save,
+            submitLabel: widget.submitLabel,
           ),
         ),
       ),
@@ -2361,8 +3070,11 @@ class _LocatorSlipFormDialogState extends State<_LocatorSlipFormDialog> {
   }
 
   Widget _datePicker() {
-    final today = DateTime.now();
-    final firstAllowedDate = DateTime(today.year, today.month, today.day);
+    final firstAllowedDate = DateTime(
+      widget.officialDate.year,
+      widget.officialDate.month,
+      widget.officialDate.day,
+    );
     return EmployeeLocatorMobileDateField(
       labelColor: AppTheme.dashTextSecondaryOf(context),
       dateLabel: _formatDate(_date),
@@ -2441,7 +3153,9 @@ class _LocatorSlipFormDialogState extends State<_LocatorSlipFormDialog> {
   }
 
   Widget _attachmentPicker() {
-    final hasAttachment = (_pendingAttachmentName ?? '').trim().isNotEmpty;
+    final attachmentName = _effectiveAttachmentName;
+    final hasAttachment = attachmentName != null;
+    final hasReplacement = (_pendingAttachmentName ?? '').trim().isNotEmpty;
     final showError = _showAttachmentError && !hasAttachment;
     final borderColor = showError
         ? Colors.redAccent
@@ -2472,9 +3186,7 @@ class _LocatorSlipFormDialogState extends State<_LocatorSlipFormDialog> {
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
-                  hasAttachment
-                      ? _pendingAttachmentName!
-                      : 'PDF, JPG, or PNG required',
+                  hasAttachment ? attachmentName : 'PDF, JPG, or PNG required',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
@@ -2493,9 +3205,9 @@ class _LocatorSlipFormDialogState extends State<_LocatorSlipFormDialog> {
                 icon: const Icon(Icons.upload_file_rounded, size: 18),
                 label: Text(hasAttachment ? 'Change' : 'Upload'),
               ),
-              if (hasAttachment)
+              if (hasReplacement)
                 IconButton(
-                  tooltip: 'Remove attachment',
+                  tooltip: 'Keep current attachment',
                   onPressed: () {
                     setState(() {
                       _pendingAttachmentBytes = null;
@@ -2604,9 +3316,12 @@ class _LocatorSlipFormDialogState extends State<_LocatorSlipFormDialog> {
       return;
     }
     if (!_formKey.currentState!.validate()) return;
-    final now = DateTime.now();
     final requestDate = DateTime(_date.year, _date.month, _date.day);
-    final today = DateTime(now.year, now.month, now.day);
+    final today = DateTime(
+      widget.officialDate.year,
+      widget.officialDate.month,
+      widget.officialDate.day,
+    );
     if (requestDate.isBefore(today)) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -2617,7 +3332,7 @@ class _LocatorSlipFormDialogState extends State<_LocatorSlipFormDialog> {
       );
       return;
     }
-    if (_requiresAttachment && _pendingAttachmentBytes == null) {
+    if (_requiresAttachment && _effectiveAttachmentName == null) {
       setState(() => _showAttachmentError = true);
       return;
     }
@@ -3073,10 +3788,64 @@ class _CenteredLoading extends StatelessWidget {
   }
 }
 
+class _LoadMoreHistoryControl extends StatelessWidget {
+  const _LoadMoreHistoryControl({
+    required this.loaded,
+    required this.total,
+    required this.loading,
+    required this.error,
+    required this.onPressed,
+  });
+
+  final int loaded;
+  final int total;
+  final bool loading;
+  final String? error;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        Text(
+          'Showing $loaded of $total requests',
+          style: TextStyle(
+            color: AppTheme.dashTextSecondaryOf(context),
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        if (error != null) ...[
+          const SizedBox(height: 6),
+          Text(
+            error!,
+            textAlign: TextAlign.center,
+            style: TextStyle(color: Colors.red.shade700, fontSize: 12),
+          ),
+        ],
+        const SizedBox(height: 8),
+        OutlinedButton.icon(
+          onPressed: loading ? null : onPressed,
+          icon: loading
+              ? const SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Icon(Icons.expand_more_rounded, size: 18),
+          label: Text(loading ? 'Loading...' : 'Load More'),
+        ),
+      ],
+    );
+  }
+}
+
 class _ErrorState extends StatelessWidget {
-  const _ErrorState({required this.message});
+  const _ErrorState({required this.message, this.onRetry});
 
   final String message;
+  final VoidCallback? onRetry;
 
   @override
   Widget build(BuildContext context) {
@@ -3088,10 +3857,52 @@ class _ErrorState extends StatelessWidget {
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: Colors.red.shade200),
       ),
-      child: Text(
-        message,
-        style: TextStyle(color: Colors.red.shade900, fontSize: 12),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(
+              message,
+              style: TextStyle(color: Colors.red.shade900, fontSize: 12),
+            ),
+          ),
+          if (onRetry != null) ...[
+            const SizedBox(width: 12),
+            TextButton.icon(
+              onPressed: onRetry,
+              icon: const Icon(Icons.refresh_rounded, size: 18),
+              label: const Text('Retry'),
+            ),
+          ],
+        ],
       ),
+    );
+  }
+}
+
+class _ReferenceDataLoadingState extends StatelessWidget {
+  const _ReferenceDataLoadingState({required this.message});
+
+  final String message;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        const SizedBox(
+          width: 16,
+          height: 16,
+          child: CircularProgressIndicator(strokeWidth: 2),
+        ),
+        const SizedBox(width: 10),
+        Text(
+          message,
+          style: TextStyle(
+            color: AppTheme.dashTextSecondaryOf(context),
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ],
     );
   }
 }

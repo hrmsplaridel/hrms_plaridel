@@ -6,6 +6,8 @@ class BiometricImportApiResponse {
   const BiometricImportApiResponse({
     required this.inserted,
     required this.duplicatesSkipped,
+    required this.skippedUnmatched,
+    required this.skippedIdentityMismatch,
     required this.skippedNoSchedule,
     required this.skippedHoliday,
     required this.skippedLeave,
@@ -17,6 +19,8 @@ class BiometricImportApiResponse {
 
   final int inserted;
   final int duplicatesSkipped;
+  final int skippedUnmatched;
+  final int skippedIdentityMismatch;
   final int skippedNoSchedule;
   final int skippedHoliday;
   final int skippedLeave;
@@ -29,6 +33,9 @@ class BiometricImportApiResponse {
     return BiometricImportApiResponse(
       inserted: (json['inserted'] as num?)?.toInt() ?? 0,
       duplicatesSkipped: (json['duplicates_skipped'] as num?)?.toInt() ?? 0,
+      skippedUnmatched: (json['skipped_unmatched'] as num?)?.toInt() ?? 0,
+      skippedIdentityMismatch:
+          (json['skipped_identity_mismatch'] as num?)?.toInt() ?? 0,
       skippedNoSchedule: (json['skipped_no_schedule'] as num?)?.toInt() ?? 0,
       skippedHoliday: (json['skipped_holiday'] as num?)?.toInt() ?? 0,
       skippedLeave: (json['skipped_leave'] as num?)?.toInt() ?? 0,
@@ -78,6 +85,8 @@ class BiometricImportRepository {
       return const BiometricImportApiResponse(
         inserted: 0,
         duplicatesSkipped: 0,
+        skippedUnmatched: 0,
+        skippedIdentityMismatch: 0,
         skippedNoSchedule: 0,
         skippedHoliday: 0,
         skippedLeave: 0,

@@ -53,7 +53,6 @@ function resolveApprovalAllocation({
     requestedDays: requested,
     approvedDaysWithPay: withPay,
     approvedDaysWithoutPay: withoutPay,
-    pendingDaysToRelease: requested,
     usedDaysToDeduct: withPay,
   };
 }

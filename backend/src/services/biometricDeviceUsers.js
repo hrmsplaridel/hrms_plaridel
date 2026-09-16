@@ -23,13 +23,23 @@ async function getDeviceUserBiometricIds(deviceId) {
   }
 
   const result = await pool.query(
-    'SELECT ip_address FROM biometric_devices WHERE id = $1::uuid',
+    'SELECT ip_address, vendor FROM biometric_devices WHERE id = $1::uuid',
     [deviceId]
   );
   if (result.rowCount === 0) {
     return { ok: false, statusCode: 404, message: 'Biometric device not found' };
   }
-  const ip = result.rows[0].ip_address;
+  const device = result.rows[0];
+  const vendor = String(device.vendor || 'zkteco').trim().toLowerCase();
+  if (vendor !== 'zkteco') {
+    return {
+      ok: false,
+      statusCode: 422,
+      code: 'BIOMETRIC_VENDOR_USER_MANAGEMENT_UNSUPPORTED',
+      message: 'Employee management is currently supported only for ZKTeco devices.',
+    };
+  }
+  const ip = device.ip_address;
   if (!ip || !String(ip).trim()) {
     return { ok: false, statusCode: 400, message: 'Device has no IP address configured' };
   }

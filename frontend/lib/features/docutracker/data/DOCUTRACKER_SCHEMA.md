@@ -9,10 +9,17 @@ Complete database schema for the DocuTracker module. Run migrations in order.
 | docutracker_documents | Main document records |
 | docutracker_routing_records | Per-step routing tracking |
 | docutracker_document_history | Audit trail, overdue/escalation logs |
-| docutracker_permissions | Role/user action permissions |
+| docutracker_permissions | System-level role/user security permissions; not workflow routing |
+| docutracker_official_signatories | Effective-dated Leave Credit Certifier assignments; the Mayor is resolved automatically from active accounts |
 | docutracker_routing_configs | Workflow definitions per document type |
+| docutracker_workflow_steps | Normalized workflow steps per type and version |
+| docutracker_workflow_step_assignees | Selected users assigned to each workflow step |
 | docutracker_escalation_configs | Escalation rules per type/department |
 | docutracker_notifications | User notifications |
+| docutracker_document_contents | Versioned A4 page content stored as Quill Delta JSON |
+| docutracker_signature_assets | Private drawn/uploaded signature images owned by users |
+| docutracker_signature_fields | Page placement, assigned signer, signed date, and lock state |
+| docutracker_leave_signatures | Fixed signature slots linked to authoritative DTR leave requests |
 
 ## docutracker_documents
 
@@ -43,7 +50,7 @@ Complete database schema for the DocuTracker module. Run migrations in order.
 |--------|------|-------------|
 | id | UUID | Primary key |
 | document_id | UUID | FK to documents |
-| action | TEXT | created, assigned, approved, rejected, returned, forwarded, escalated, remark |
+| action | TEXT | created, assigned, approved, rejected, returned, forwarded, escalated, signed, remark |
 | actor_id | UUID | Who performed action |
 | actor_name | TEXT | Joined display name |
 | from_step | INT | Previous step |
@@ -80,7 +87,99 @@ Complete database schema for the DocuTracker module. Run migrations in order.
 | body | TEXT | Notification body |
 | read | BOOLEAN | Read status |
 
+## docutracker_document_contents
+
+| Column | Type | Description |
+|--------|------|-------------|
+| document_id | UUID | Primary key and FK to DocuTracker document |
+| format_version | INT | Stored builder format version; version 2 uses the official printable `assets/forms/a4_letter.pdf` full-page Municipality/HRMD letterhead |
+| pages | JSONB | Array of A4 pages; each page contains Quill Delta operations |
+| page_size | TEXT | Fixed to A4 |
+| margins | JSONB | Normalized page margins |
+| revision | INT | Optimistic concurrency revision |
+| updated_by | UUID | Last authenticated editor |
+| created_at | TIMESTAMPTZ | Creation time |
+| updated_at | TIMESTAMPTZ | Last confirmed save time |
+
+## docutracker_signature_assets
+
+| Column | Type | Description |
+|--------|------|-------------|
+| id | UUID | Primary key |
+| owner_user_id | UUID | User who owns and may reuse the signature |
+| image_bytes | BYTEA | Validated PNG or JPEG data, maximum 2 MB |
+| mime_type | TEXT | image/png or image/jpeg |
+| source_type | TEXT | drawn or uploaded |
+| display_name | TEXT | Optional owner-visible label |
+| is_saved | BOOLEAN | Whether it appears in the owner's saved signatures |
+| created_at | TIMESTAMPTZ | Creation time |
+| updated_at | TIMESTAMPTZ | Last update |
+
+Setting `is_saved` to false removes an asset from the owner's reusable library.
+The asset row remains available to existing signed document and leave-form
+records, so historical signatures never disappear when a user removes a
+library entry.
+
+## docutracker_signature_fields
+
+| Column | Type | Description |
+|--------|------|-------------|
+| id | UUID | Primary key |
+| document_id | UUID | Document containing the signature field |
+| page_number | INT | One-based A4 page number |
+| position_x | DOUBLE PRECISION | Normalized horizontal position |
+| position_y | DOUBLE PRECISION | Normalized vertical position |
+| width | DOUBLE PRECISION | Normalized field width |
+| height | DOUBLE PRECISION | Normalized field height |
+| assigned_signer_id | UUID | Existing active user assigned to sign |
+| label | TEXT | Placeholder label, normally Sign Here |
+| signature_asset_id | UUID | Signature image used after signing |
+| signed_by | UUID | Authenticated signer |
+| signer_name_snapshot | TEXT | Printed signer name retained with the event |
+| signed_at | TIMESTAMPTZ | Backend-authoritative signed time |
+| locked_at | TIMESTAMPTZ | Non-null when signed; the assigned signer may reposition the field or replace its image, but cannot resize, reassign, or delete it |
+| created_by | UUID | User who prepared the field |
+| created_at | TIMESTAMPTZ | Creation time |
+| updated_at | TIMESTAMPTZ | Last update |
+
+## docutracker_leave_signatures
+
+| Column | Type | Description |
+|--------|------|-------------|
+| id | UUID | Primary key |
+| leave_request_id | UUID | DTR leave request; one signature per slot |
+| slot_key | TEXT | applicant, department_head, or hr_approver |
+| assigned_signer_id | UUID | Existing active user assigned to the fixed form slot |
+| signature_asset_id | UUID | Private DocuTracker signature asset selected by the signer |
+| signed_by | UUID | Authenticated signer; must equal assigned_signer_id |
+| signer_name_snapshot | TEXT | Printed signer name retained with the signing event |
+| signed_at | TIMESTAMPTZ | Backend-authoritative signing time |
+| created_by | UUID | User who first signed the slot |
+| created_at | TIMESTAMPTZ | Creation time |
+| updated_at | TIMESTAMPTZ | Latest replacement time |
+
+The leave request remains the source of truth for form data, status, reviewers,
+balances, and DTR effects. Signature creation or replacement also appends an
+entry to `leave_request_history`.
+
+L&D training reports and RSP recruitment applications are linked by their
+existing source table and record ID. They are not copied into DocuTracker
+tables; their source modules remain authoritative for content, attachments,
+and status.
+
 ## docutracker_permissions
+
+This table stays in place for system-level security and explicit user
+overrides. Primary/backup workflow routing and workflow action availability are
+configured on workflow steps instead of being duplicated here.
+
+Permission rows target exactly one active employee or one supported canonical
+role. System Access edits only `view`, `create_draft`, `submit`, and `download`.
+Employee-and-role scope constraints and partial unique indexes prevent
+ambiguous or duplicate rows. Permission saves and resets are transactionally
+paired with `docutracker_governance_audit` entries containing the previous and
+new values. Removing an employee override restores inheritance rather than
+creating another allow/deny rule.
 
 | Column | Type | Description |
 |--------|------|-------------|
@@ -97,5 +196,45 @@ Complete database schema for the DocuTracker module. Run migrations in order.
 |--------|------|-------------|
 | id | UUID | Primary key |
 | document_type | TEXT | memo, purchaseRequest |
-| steps | JSONB | Array of {step_order, assignee_type, role_id, department_id, label} |
+| steps | JSONB | Versioned steps including label, ordered user_ids, allowed_actions, and legacy routing fields |
 | review_deadline_hours | INT | Default deadline in hours |
+
+## docutracker_workflow_steps
+
+| Column | Type | Description |
+|--------|------|-------------|
+| id | UUID | Primary key |
+| document_type | TEXT | Workflow document type |
+| workflow_version | INT | Published workflow version |
+| step_order | INT | One-based workflow position |
+| department_id | UUID | Optional department scope |
+| label | TEXT | Step display label |
+| enabled | BOOLEAN | Whether the step participates in routing |
+
+## docutracker_workflow_step_assignees
+
+| Column | Type | Description |
+|--------|------|-------------|
+| id | UUID | Primary key |
+| step_id | UUID | FK to docutracker_workflow_steps |
+| user_id | UUID | Selected assignee |
+| is_primary | BOOLEAN | Primary reviewer marker |
+| backup_rank | INT | Backup order; null for the primary |
+| is_enabled | BOOLEAN | Whether this assignment can receive work |
+| allowed_actions | TEXT[] | Step actions shared by the primary and enabled backups |
+
+A workflow step may have zero assignee rows while it is being configured. When
+one or more assignees exist, at least one must be enabled and exactly one enabled
+assignee must be primary. Runtime routing rejects entry into an unassigned step.
+
+The first configured `user_id` is normalized as the primary assignee; later
+entries are backups. Existing workflows with multiple backups remain valid even
+though the normal editor presents one optional backup. No table or column is
+removed by the simplified UI.
+
+Document visibility is derived from relationships and immutable routing
+snapshots: creator, active-step assignees, assignees from reached steps,
+signature assignees, and admins may view as applicable. Assignment to an
+unreached future step alone does not grant access. Workflow actions additionally
+require an enabled assignment on the document's current step and a matching
+`allowed_actions` value.

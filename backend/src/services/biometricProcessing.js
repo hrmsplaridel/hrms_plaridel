@@ -2,7 +2,6 @@ const { pool } = require('../config/db');
 const { loadHolidayOverlayMap } = require('./holidayOverlay');
 const { broadcastBiometricUpdate } = require('../websockets/biometricStream');
 const {
-  ensureShiftPunchModeColumn,
   getShiftType: resolveShiftType,
   getExpectedAmEndMinutes,
   getExpectedPmStartMinutes,
@@ -11,68 +10,43 @@ const {
   computeTotalHours: computeShiftTotalHours,
 } = require('./shiftAttendance');
 const { dtrDeletionKey, getDeletedDtrDateKeys } = require('./dtrDeletionAudit');
-const { calculateAttendancePolicyPenalties } = require('./attendancePolicyResolver');
+const {
+  calculateAttendancePolicyPenalties,
+  normalizeAttendancePolicy,
+} = require('./attendancePolicyResolver');
+const {
+  getAttendancePolicyCache,
+  setAttendancePolicyCache,
+} = require('./attendancePolicyCache');
 
 const HRMS_TIMEZONE = process.env.HRMS_TIMEZONE || 'Asia/Manila';
 const NOON_MINUTES = 12 * 60;
 const ONE_PM_MINUTES = 13 * 60;
-const ATTENDANCE_POLICY_CACHE_TTL_MS = 60 * 1000;
-let _cachedAttendancePolicy = null;
-let _cachedAttendancePolicyAt = 0;
-const _policyByEmployeeDateCache = new Map();
-
-function clearBiometricAttendancePolicyCache({ employeeId = null, dateFrom = null, dateTo = null } = {}) {
-  const employee = employeeId == null ? null : String(employeeId);
-  for (const key of _policyByEmployeeDateCache.keys()) {
-    const separator = key.indexOf('|');
-    const cachedEmployee = separator < 0 ? key : key.slice(0, separator);
-    const cachedDate = separator < 0 ? '' : key.slice(separator + 1);
-    if (employee && cachedEmployee !== employee) continue;
-    if (dateFrom && cachedDate < dateFrom) continue;
-    if (dateTo && cachedDate > dateTo) continue;
-    _policyByEmployeeDateCache.delete(key);
-  }
-}
-
-function _normalizePolicy(row) {
-  return {
-    id: row?.id || null,
-    workHoursPerDay: row?.work_hours_per_day != null ? parseFloat(row.work_hours_per_day) : 8,
-    deductLate: row?.deduct_late ?? true,
-    convertLateToEquivalentDay: row?.convert_late_to_equivalent_day ?? false,
-    deductUndertime: row?.deduct_undertime ?? true,
-    convertUndertimeToEquivalentDay: row?.convert_undertime_to_equivalent_day ?? false,
-    absentEqualsFullDayDeduction: row?.absent_equals_full_day_deduction ?? true,
-    combineLateAndUndertime: row?.combine_late_and_undertime ?? false,
-    deductionMultiplier: row?.deduction_multiplier != null ? parseFloat(row.deduction_multiplier) : 1,
-  };
-}
-
 async function getActiveDefaultAttendancePolicy() {
-  const now = Date.now();
-  if (_cachedAttendancePolicy && now - _cachedAttendancePolicyAt < ATTENDANCE_POLICY_CACHE_TTL_MS) {
-    return _cachedAttendancePolicy;
-  }
+  const cached = getAttendancePolicyCache('biometric', 'default');
+  if (cached.found) return cached.value;
   const result = await pool.query(
-    `SELECT id, work_hours_per_day, deduct_late,
+    `SELECT id, work_hours_per_day, use_equivalent_day_conversion, deduct_late,
             convert_late_to_equivalent_day, deduct_undertime, convert_undertime_to_equivalent_day,
             absent_equals_full_day_deduction, combine_late_and_undertime, deduction_multiplier
      FROM attendance_policies
-     WHERE (is_active IS NULL OR is_active = true)
-     ORDER BY is_default DESC, updated_at DESC, created_at DESC
+     WHERE is_default = true
+       AND (is_active IS NULL OR is_active = true)
      LIMIT 1`
   );
-  _cachedAttendancePolicy = _normalizePolicy(result.rows[0]);
-  _cachedAttendancePolicyAt = now;
-  return _cachedAttendancePolicy;
+  return setAttendancePolicyCache(
+    'biometric',
+    'default',
+    normalizeAttendancePolicy(result.rows[0]),
+    { isDefault: true }
+  );
 }
 
 async function getAttendancePolicyForEmployeeDate(employeeId, dateStr) {
   if (!employeeId || !dateStr) return getActiveDefaultAttendancePolicy();
   const cacheKey = `${employeeId}|${dateStr}`;
-  const now = Date.now();
-  const cached = _policyByEmployeeDateCache.get(cacheKey);
-  if (cached && now - cached.at < ATTENDANCE_POLICY_CACHE_TTL_MS) return cached.value;
+  const cached = getAttendancePolicyCache('biometric', cacheKey);
+  if (cached.found) return cached.value;
 
   const result = await pool.query(
     `WITH eff AS (
@@ -85,14 +59,13 @@ async function getAttendancePolicyForEmployeeDate(employeeId, dateStr) {
        ORDER BY a.effective_from DESC, a.created_at DESC, a.id DESC
        LIMIT 1
      )
-     SELECT p.id, p.work_hours_per_day, p.deduct_late,
+     SELECT p.id, p.work_hours_per_day, p.use_equivalent_day_conversion, p.deduct_late,
             p.convert_late_to_equivalent_day, p.deduct_undertime, p.convert_undertime_to_equivalent_day,
             p.absent_equals_full_day_deduction, p.combine_late_and_undertime, p.deduction_multiplier
      FROM policy_assignments pa
      JOIN attendance_policies p ON p.id = pa.attendance_policy_id
      LEFT JOIN eff e ON true
      WHERE (pa.is_active IS NULL OR pa.is_active = true)
-       AND (p.is_active IS NULL OR p.is_active = true)
        AND pa.effective_from <= $2::date
        AND (pa.effective_to IS NULL OR pa.effective_to >= $2::date)
        AND (
@@ -111,9 +84,13 @@ async function getAttendancePolicyForEmployeeDate(employeeId, dateStr) {
      LIMIT 1`,
     [employeeId, dateStr]
   );
-  const resolved = result.rows[0] ? _normalizePolicy(result.rows[0]) : await getActiveDefaultAttendancePolicy();
-  _policyByEmployeeDateCache.set(cacheKey, { at: now, value: resolved });
-  return resolved;
+  const resolved = result.rows[0]
+    ? normalizeAttendancePolicy(result.rows[0])
+    : await getActiveDefaultAttendancePolicy();
+  return setAttendancePolicyCache('biometric', cacheKey, resolved, {
+    employeeId,
+    date: dateStr,
+  });
 }
 
 async function applyAttendancePolicyPenalties(employeeId, dateStr, rawLateMinutes, rawUndertimeMinutes) {
@@ -136,7 +113,6 @@ function timeToMinutes(timeStr) {
 }
 
 async function getAssignmentShiftForDate(employeeId, dateStr) {
-  await ensureShiftPunchModeColumn(pool);
   const result = await pool.query(
     `SELECT a.override_start_time::text AS override_start_time,
             a.override_end_time::text AS override_end_time,
@@ -214,7 +190,7 @@ async function employeeHasBlockingApprovedLeave(employeeId, dateStr) {
 }
 
 /**
- * Gate biometric storage/processing: shift required; whole-day holidays block; approved full-day (or multi-day) leave blocks.
+ * Gate biometric summary processing: shift required; whole-day holidays block; approved full-day (or multi-day) leave blocks.
  * Partial-day holidays (am_only/pm_only) do not block — late/undertime logic still applies.
  * @returns {{ allowed: boolean, reason: null|'no_schedule'|'holiday'|'leave', shiftInfo: object|null }}
  */
@@ -303,6 +279,18 @@ async function computeLateMinutes(employeeId, dateStr, timeInIso, breakInIso, st
   let total = 0;
   const evalAm = !isHolidayOrSuspension || coverage !== 'am_only';
   const evalPm = !isHolidayOrSuspension || coverage !== 'pm_only';
+  if (type === 'single_session') {
+    const sessionIn = timeInIso || breakInIso;
+    const evaluateSession = shiftInfo.startMinutes >= NOON_MINUTES ? evalPm : evalAm;
+    if (evaluateSession && sessionIn) {
+      const localMins = minutesFromMidnightInTimeZone(sessionIn);
+      if (localMins != null) {
+        const cutoff = startMinutes + graceMinutes;
+        if (localMins > cutoff) total += localMins - cutoff;
+      }
+    }
+    return total;
+  }
   if (evalAm && timeInIso && type !== 'pm_only') {
     const localMins = minutesFromMidnightInTimeZone(timeInIso);
     if (localMins != null) {
@@ -347,8 +335,11 @@ async function computeUndertimeMinutes(employeeId, dateStr, timeOutIso, breakOut
   const breakOutMins = breakOutIso
     ? minutesFromMidnightInTimeZone(breakOutIso)
     : null;
-  const timeOutMins = timeOutIso
-    ? minutesFromMidnightInTimeZone(timeOutIso)
+  const effectiveTimeOut = type === 'single_session'
+    ? (timeOutIso || breakOutIso)
+    : timeOutIso;
+  const timeOutMins = effectiveTimeOut
+    ? minutesFromMidnightInTimeZone(effectiveTimeOut)
     : null;
   const completedSegmentUndertime = computeClockOutUndertimeMinutes({
     shiftInfo,
@@ -898,7 +889,6 @@ async function processBiometricLogsToSummary(userIds, dateFrom, dateTo) {
 }
 
 module.exports = {
-  clearBiometricAttendancePolicyCache,
   processBiometricLogsToSummary,
   interpretPunchesForDay,
   hasBiometricSummaryChanged,

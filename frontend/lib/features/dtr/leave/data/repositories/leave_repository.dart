@@ -1,6 +1,7 @@
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_balance.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_balance_ledger.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_request.dart';
+import 'package:hrms_plaridel/features/dtr/leave/models/leave_request_history.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_type.dart';
 
 /// Query options for listing leave requests.
@@ -47,6 +48,22 @@ class LeaveRequestQuery {
     if (raw != null && raw.isNotEmpty) return raw;
     return leaveType?.value;
   }
+}
+
+class LeaveRequestPage {
+  const LeaveRequestPage({
+    required this.items,
+    required this.total,
+    required this.limit,
+    required this.offset,
+  });
+
+  final List<LeaveRequest> items;
+  final int total;
+  final int limit;
+  final int offset;
+
+  bool get hasMore => offset + items.length < total;
 }
 
 /// Approval payload used by HR/admin actions.
@@ -701,6 +718,11 @@ abstract class LeaveRepository {
   /// Get one request by id.
   Future<LeaveRequest?> getRequestById(String requestId);
 
+  /// Actual workflow events for an employee-owned leave request.
+  Future<List<LeaveRequestHistoryEntry>> listMyRequestHistory(
+    String requestId,
+  ) => throw UnsupportedError('Request history is not supported');
+
   /// Employee-facing request list.
   Future<List<LeaveRequest>> listMyRequests(
     String userId, {
@@ -724,6 +746,16 @@ abstract class LeaveRepository {
     String userId,
     LeaveType leaveType,
   );
+
+  /// One page of the authenticated employee's request history.
+  Future<LeaveRequestPage> listMyRequestPage(
+    String userId, {
+    required int limit,
+    required int offset,
+  });
+
+  /// Current calendar date in the configured HRMS timezone.
+  Future<DateTime> getOfficialDate();
 
   /// Apply an audited positive or negative correction without replacing
   /// workflow-derived earned, used, or pending buckets.

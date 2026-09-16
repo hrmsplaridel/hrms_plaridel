@@ -8,7 +8,6 @@ const {
 } = require('../services/holidayOverlay');
 const { broadcastBiometricUpdate } = require('../websockets/biometricStream');
 const {
-  ensureShiftPunchModeColumn,
   getShiftType: resolveShiftType,
   getExpectedWorkMinutes: resolveExpectedWorkMinutes,
   getExpectedWorkMinutesForCoverage,
@@ -17,6 +16,7 @@ const {
   computeClockOutUndertimeMinutes,
   getExpectedLogsForDay: resolveExpectedLogsForDay,
   computeTotalHoursFromRecord,
+  resolveSingleSessionPunches,
 } = require('../services/shiftAttendance');
 const {
   evaluateLocatorCoverage,
@@ -185,40 +185,40 @@ function nowMinutesInHrmsTimezone() {
   return minutesFromMidnightInTimeZone(new Date(), HRMS_TIMEZONE) ?? 0;
 }
 
-const ATTENDANCE_POLICY_CACHE_TTL_MS = 60 * 1000;
-let _cachedAttendancePolicy = null;
-let _cachedAttendancePolicyAt = 0;
-const _policyByEmployeeDateCache = new Map();
+const {
+  getAttendancePolicyCache,
+  setAttendancePolicyCache,
+} = require('../services/attendancePolicyCache');
 
 function _normalizePolicy(row) {
   return normalizeAttendancePolicy(row);
 }
 
 async function getActiveDefaultAttendancePolicy() {
-  const now = Date.now();
-  if (_cachedAttendancePolicy && now - _cachedAttendancePolicyAt < ATTENDANCE_POLICY_CACHE_TTL_MS) {
-    return _cachedAttendancePolicy;
-  }
+  const cached = getAttendancePolicyCache('dtr', 'default');
+  if (cached.found) return cached.value;
   const result = await pool.query(
-    `SELECT id, work_hours_per_day, deduct_late,
+    `SELECT id, work_hours_per_day, use_equivalent_day_conversion, deduct_late,
             convert_late_to_equivalent_day, deduct_undertime, convert_undertime_to_equivalent_day,
             absent_equals_full_day_deduction, combine_late_and_undertime, deduction_multiplier
      FROM attendance_policies
-     WHERE (is_active IS NULL OR is_active = true)
-     ORDER BY is_default DESC, updated_at DESC, created_at DESC
+     WHERE is_default = true
+       AND (is_active IS NULL OR is_active = true)
      LIMIT 1`
   );
-  _cachedAttendancePolicy = _normalizePolicy(result.rows[0]);
-  _cachedAttendancePolicyAt = now;
-  return _cachedAttendancePolicy;
+  return setAttendancePolicyCache(
+    'dtr',
+    'default',
+    _normalizePolicy(result.rows[0]),
+    { isDefault: true }
+  );
 }
 
 async function getAttendancePolicyForEmployeeDate(employeeId, dateStr) {
   if (!employeeId || !dateStr) return getActiveDefaultAttendancePolicy();
   const cacheKey = `${employeeId}|${dateStr}`;
-  const now = Date.now();
-  const cached = _policyByEmployeeDateCache.get(cacheKey);
-  if (cached && now - cached.at < ATTENDANCE_POLICY_CACHE_TTL_MS) return cached.value;
+  const cached = getAttendancePolicyCache('dtr', cacheKey);
+  if (cached.found) return cached.value;
 
   const result = await pool.query(
     `WITH eff AS (
@@ -230,14 +230,13 @@ async function getAttendancePolicyForEmployeeDate(employeeId, dateStr) {
        ORDER BY a.effective_from DESC, a.created_at DESC, a.id DESC
        LIMIT 1
      )
-     SELECT p.id, p.work_hours_per_day, p.deduct_late,
+     SELECT p.id, p.work_hours_per_day, p.use_equivalent_day_conversion, p.deduct_late,
             p.convert_late_to_equivalent_day, p.deduct_undertime, p.convert_undertime_to_equivalent_day,
             p.absent_equals_full_day_deduction, p.combine_late_and_undertime, p.deduction_multiplier
      FROM policy_assignments pa
      JOIN attendance_policies p ON p.id = pa.attendance_policy_id
      LEFT JOIN eff e ON true
      WHERE (pa.is_active IS NULL OR pa.is_active = true)
-       AND (p.is_active IS NULL OR p.is_active = true)
        AND pa.effective_from <= $2::date
        AND (pa.effective_to IS NULL OR pa.effective_to >= $2::date)
        AND (
@@ -257,8 +256,10 @@ async function getAttendancePolicyForEmployeeDate(employeeId, dateStr) {
     [employeeId, dateStr]
   );
   const resolved = result.rows[0] ? _normalizePolicy(result.rows[0]) : await getActiveDefaultAttendancePolicy();
-  _policyByEmployeeDateCache.set(cacheKey, { at: now, value: resolved });
-  return resolved;
+  return setAttendancePolicyCache('dtr', cacheKey, resolved, {
+    employeeId,
+    date: dateStr,
+  });
 }
 
 async function applyAttendancePolicyPenalties(employeeId, dateStr, rawLateMinutes, rawUndertimeMinutes) {
@@ -349,7 +350,6 @@ function getExpectedLogsForDay(shiftInfo, holidayInfo) {
  * endMinutes: shift end time in minutes from midnight (for validating clock-in outside shift).
  */
 async function getAssignmentShiftForDate(employeeId, dateStr) {
-  await ensureShiftPunchModeColumn(pool);
   const result = await pool.query(
     `SELECT a.override_start_time::text AS override_start_time,
             a.override_end_time::text AS override_end_time,
@@ -452,6 +452,18 @@ async function computeLateMinutes(
   let total = 0;
   const evalAm = !isHolidayOrSuspension || coverage !== 'am_only';
   const evalPm = !isHolidayOrSuspension || coverage !== 'pm_only';
+  if (type === 'single_session') {
+    const sessionIn = timeInIso || breakInIso;
+    const evaluateSession = shiftInfo.startMinutes >= NOON_MINUTES ? evalPm : evalAm;
+    if (evaluateSession && sessionIn) {
+      const localMins = minutesFromMidnightInTimeZone(sessionIn);
+      if (localMins != null) {
+        const cutoff = startMinutes + graceMinutes;
+        if (localMins > cutoff) total += localMins - cutoff;
+      }
+    }
+    return total;
+  }
   if (evalAm && timeInIso && type !== 'pm_only') {
     const localMins = minutesFromMidnightInTimeZone(timeInIso);
     if (localMins == null) return total;
@@ -529,8 +541,11 @@ async function computeUndertimeMinutes(
   const breakOutMins = breakOutIso
     ? minutesFromMidnightInTimeZone(breakOutIso)
     : null;
-  const timeOutMins = timeOutIso
-    ? minutesFromMidnightInTimeZone(timeOutIso)
+  const effectiveTimeOut = type === 'single_session'
+    ? (timeOutIso || breakOutIso)
+    : timeOutIso;
+  const timeOutMins = effectiveTimeOut
+    ? minutesFromMidnightInTimeZone(effectiveTimeOut)
     : null;
   const completedSegmentUndertime = computeClockOutUndertimeMinutes({
     shiftInfo,
@@ -641,9 +656,16 @@ async function computeAttendanceRemark(
   const hasPm =
     (record.break_in != null || locatorSegSet.has('PM IN')) &&
     (record.time_out != null || locatorSegSet.has('PM OUT'));
-  const hasInOut =
-    (record.time_in != null || locatorSegSet.has('AM IN')) &&
-    (record.time_out != null || locatorSegSet.has('PM OUT'));
+  const sessionPunches = resolveSingleSessionPunches(record);
+  const hasInOut = resolveShiftType(shiftInfo) === 'single_session'
+    ? (
+        (sessionPunches.timeIn != null || locatorSegSet.has('AM IN') || locatorSegSet.has('PM IN')) &&
+        (sessionPunches.timeOut != null || locatorSegSet.has('AM OUT') || locatorSegSet.has('PM OUT'))
+      )
+    : (
+        (record.time_in != null || locatorSegSet.has('AM IN')) &&
+        (record.time_out != null || locatorSegSet.has('PM OUT'))
+      );
   const missingRequired =
     (expected.needsAm && !hasAm) ||
     (expected.needsPm && !hasPm) ||
@@ -811,7 +833,6 @@ async function getAssignmentsForEmployeesInRange(employeeIds, startStr, endStr) 
   const map = new Map();
   if (!employeeIds || employeeIds.length === 0) return map;
   if (!startStr || !endStr) return map;
-  await ensureShiftPunchModeColumn(pool);
   const res = await pool.query(
     `SELECT a.id,
             a.employee_id,
@@ -1798,9 +1819,10 @@ router.get('/report-years', protect, async (req, res) => {
       req.user,
       req.query
     );
+    const officialDate = todayInHrmsTimezone();
     const result = await pool.query(
       `WITH official_clock AS (
-         SELECT (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Manila')::date AS today
+         SELECT $2::date AS today
        ),
        report_dates AS (
          SELECT employee_id, attendance_date AS report_date
@@ -1867,10 +1889,11 @@ router.get('/report-years', protect, async (req, res) => {
         AND rd.report_date <= c.today
         AND ($1::uuid IS NULL OR rd.employee_id = $1::uuid)
        GROUP BY c.today`,
-      [scopedEmployeeId]
+      [scopedEmployeeId, officialDate]
     );
     const row = result.rows[0] || {};
-    const currentYear = Number(row.current_year) || new Date().getUTCFullYear();
+    const currentYear =
+      Number(row.current_year) || Number(officialDate.slice(0, 4));
     const minYear = Math.max(
       1900,
       Math.min(Number(row.min_year) || currentYear, currentYear)
@@ -1884,7 +1907,12 @@ router.get('/report-years', protect, async (req, res) => {
       (_, index) => minYear + index
     );
 
-    res.json({ min_year: minYear, max_year: maxYear, years });
+    res.json({
+      min_year: minYear,
+      max_year: maxYear,
+      years,
+      official_date: officialDate,
+    });
   } catch (err) {
     console.error('[dtr-daily-summary GET /report-years]', err);
     res.status(500).json({ error: 'Failed to load available DTR report years' });
@@ -2714,12 +2742,16 @@ router.post('/:id/recalculate', protect, requireAdminOrHr, async (req, res) => {
     const coverage = holidayInfo?.coverage || null;
     const shiftInfo = await getAssignmentShiftForDate(employeeId, dateStr);
 
+    const shiftType = resolveShiftType(shiftInfo);
+    const statusTimeIn = shiftType === 'single_session'
+      ? (existing.time_in || existing.break_in)
+      : existing.time_in;
     let status = existing.status;
     if (holidayId != null && coverage === 'whole_day') {
       status = 'holiday';
     } else if (status !== 'on_leave') {
-      status = existing.time_in
-        ? await computeStatusFromShift(employeeId, dateStr, existing.time_in)
+      status = statusTimeIn
+        ? await computeStatusFromShift(employeeId, dateStr, statusTimeIn)
         : (existing.status === 'holiday' ? 'absent' : existing.status);
     }
 

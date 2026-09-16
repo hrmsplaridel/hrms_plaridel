@@ -42,6 +42,24 @@ function getRouteHandler(router, method, path) {
   return layer.route.stack[layer.route.stack.length - 1].handle;
 }
 
+function workflowServiceMock(overrides = {}) {
+  return {
+    DOC_ACTIONS: new Set(['view', 'approve', 'submit']),
+    hasPermission: async () => null,
+    canUserPerformTypeAction: async () => false,
+    canUserPerformDocumentAction: async () => true,
+    listDocuments: async () => [],
+    getDocumentBundle: async () => null,
+    createDocument: async () => ({}),
+    transitionDocument: async () => ({}),
+    updateDocumentMetadata: async () => ({}),
+    recoverDocumentAssignment: async () => ({}),
+    addDocumentRemark: async () => true,
+    getEffectivePermissionExplanation: async () => ({}),
+    ...overrides,
+  };
+}
+
 test('GET /permission-explain returns explanation payload', async () => {
   const workflowService = {
     DOC_ACTIONS: new Set(['view', 'approve', 'submit']),
@@ -141,7 +159,7 @@ test('POST /documents/:id/transition forwards idempotency key in body', async ()
   const handler = getRouteHandler(router, 'post', '/documents/:id/transition');
 
   const req = {
-    params: { id: 'doc-99' },
+    params: { id: '00000000-0000-4000-8000-000000000099' },
     body: { action: 'approve', remarks: 'ok', idempotency_key: 'idem-99' },
     headers: {},
     user: { id: 'user-2', role: 'admin' },
@@ -163,6 +181,8 @@ test('POST /documents/:id/transition forwards idempotency key in body', async ()
 
 test('POST /permissions normalizes create to create_draft', async () => {
   const queries = [];
+  const userId = '00000000-0000-4000-8000-000000000002';
+  const adminId = '00000000-0000-4000-8000-000000000001';
   const restoreWorkflow = withMockedModule('../src/services/docutrackerWorkflowService', {
     DOC_ACTIONS: new Set(['view', 'approve', 'submit']),
     hasPermission: async () => null,
@@ -176,30 +196,48 @@ test('POST /permissions normalizes create to create_draft', async () => {
     addDocumentRemark: async () => true,
     getEffectivePermissionExplanation: async () => ({}),
   });
+  const client = {
+    query: async (sql, params = []) => {
+      queries.push({ sql, params });
+      if (sql.includes('FROM users')) {
+        return {
+          rowCount: 1,
+          rows: [
+            {
+              id: userId,
+              full_name: 'Test User',
+              role: 'employee',
+              is_active: true,
+            },
+          ],
+        };
+      }
+      if (sql.includes('SELECT * FROM docutracker_permissions')) {
+        return { rowCount: 0, rows: [] };
+      }
+      if (sql.includes('INSERT INTO docutracker_permissions')) {
+        return {
+          rowCount: 1,
+          rows: [
+            {
+              id: '00000000-0000-4000-8000-000000000003',
+              user_id: userId,
+              role_id: null,
+              document_type: 'memo',
+              action: 'create_draft',
+              granted: true,
+            },
+          ],
+        };
+      }
+      return { rowCount: 0, rows: [] };
+    },
+    release() {},
+  };
   const restoreDb = withMockedModule('../src/config/db', {
     pool: {
-      query: async (sql, params = []) => {
-        queries.push({ sql, params });
-        if (sql.includes('SELECT id FROM docutracker_permissions')) {
-          return { rowCount: 0, rows: [] };
-        }
-        if (sql.includes('INSERT INTO docutracker_permissions')) {
-          return {
-            rowCount: 1,
-            rows: [
-              {
-                id: 'perm-1',
-                user_id: 'user-1',
-                role_id: null,
-                document_type: 'memo',
-                action: 'create_draft',
-                granted: true,
-              },
-            ],
-          };
-        }
-        return { rowCount: 0, rows: [] };
-      },
+      query: client.query,
+      connect: async () => client,
     },
   });
   const restoreAuth = withMockedModule('../src/middleware/auth', {
@@ -216,13 +254,13 @@ test('POST /permissions normalizes create to create_draft', async () => {
 
   const req = {
     body: {
-      user_id: 'user-1',
+      user_id: userId,
       document_type: 'memo',
       action: 'create',
       granted: true,
     },
     headers: {},
-    user: { id: 'admin-1', role: 'admin' },
+    user: { id: adminId, role: 'admin' },
   };
   const res = createMockResponse();
   await handler(req, res);
@@ -240,41 +278,34 @@ test('POST /permissions normalizes create to create_draft', async () => {
   delete require.cache[routePath];
 });
 
-test('GET /documents/:id/ai-summary returns saved summary for readable document', async () => {
+test('PUT /workflow-steps/:stepId/assignees accepts an empty replacement set', async () => {
+  const queries = [];
+  let auditedAfterState = null;
+  const client = {
+    async query(sql, params = []) {
+      queries.push({ sql, params });
+      if (sql.includes('SELECT id, department_id')) {
+        return {
+          rowCount: 1,
+          rows: [{ id: 'step-1', department_id: null }],
+        };
+      }
+      return { rowCount: 0, rows: [] };
+    },
+    release() {},
+  };
   const restoreWorkflow = withMockedModule('../src/services/docutrackerWorkflowService', {
-    DOC_ACTIONS: new Set(['view']),
-    hasPermission: async () => null,
-    canUserPerformTypeAction: async () => true,
-    canUserPerformDocumentAction: async () => true,
-    listDocuments: async () => [],
-    getDocumentBundle: async () => null,
-    createDocument: async () => ({}),
-    transitionDocument: async () => ({}),
-    updateDocumentMetadata: async () => ({}),
-    addDocumentRemark: async () => true,
-    getEffectivePermissionExplanation: async () => ({}),
+    DOC_ACTIONS: new Set(['view', 'approve', 'submit']),
   });
-  const restoreAi = withMockedModule('../src/services/docutrackerAiSummaryService', {
-    getLatestAiSummary: async () => ({
-      id: 'sum-1',
-      document_id: 'doc-1',
-      summary_json: { purpose: 'Review request' },
-      generated_by: 'user-1',
-      generated_by_name: 'User One',
-      provider: 'ollama',
-      model: 'qwen2.5:7b',
-      generated_at: '2026-05-27T10:00:00.000Z',
-    }),
-    generateAiSummary: async () => ({}),
+  const restoreAudit = withMockedModule('../src/services/docutrackerGovernanceAudit', {
+    writeGovernanceAudit: async (_client, entry) => {
+      auditedAfterState = entry.afterState;
+    },
   });
   const restoreDb = withMockedModule('../src/config/db', {
     pool: {
-      query: async (sql) => {
-        if (sql.includes('SELECT * FROM docutracker_documents')) {
-          return { rowCount: 1, rows: [{ id: 'doc-1', document_type: 'memo' }] };
-        }
-        return { rowCount: 0, rows: [] };
-      },
+      connect: async () => client,
+      query: async () => ({ rowCount: 0, rows: [] }),
     },
   });
   const restoreAuth = withMockedModule('../src/middleware/auth', {
@@ -287,59 +318,43 @@ test('GET /documents/:id/ai-summary returns saved summary for readable document'
   const routePath = require.resolve('../src/routes/docutracker');
   delete require.cache[routePath];
   const router = require('../src/routes/docutracker');
-  const handler = getRouteHandler(router, 'get', '/documents/:id/ai-summary');
+  const handler = getRouteHandler(router, 'put', '/workflow-steps/:stepId/assignees');
 
   const req = {
-    params: { id: 'doc-1' },
+    params: { stepId: 'step-1' },
+    body: { assignees: [] },
     headers: {},
-    user: { id: 'user-1', role: 'employee' },
+    user: { id: 'admin-1', role: 'admin' },
   };
   const res = createMockResponse();
   await handler(req, res);
 
   assert.equal(res.statusCode, 200);
-  assert.equal(res.payload?.summary?.purpose, 'Review request');
-  assert.equal(res.payload?.generated_by_name, 'User One');
+  assert.equal(res.payload?.updated, 0);
+  assert.deepEqual(auditedAfterState, { assignees: [] });
+  assert.ok(
+    queries.some((q) => q.sql.includes('DELETE FROM docutracker_workflow_step_assignees'))
+  );
+  assert.equal(
+    queries.some((q) => q.sql.includes('INSERT INTO docutracker_workflow_step_assignees')),
+    false
+  );
+  assert.ok(queries.some((q) => q.sql === 'COMMIT'));
 
   restoreWorkflow();
-  restoreAi();
+  restoreAudit();
   restoreDb();
   restoreAuth();
   restoreRbac();
   delete require.cache[routePath];
 });
 
-test('POST /documents/:id/ai-summary reports unavailable local AI', async () => {
-  const restoreWorkflow = withMockedModule('../src/services/docutrackerWorkflowService', {
-    DOC_ACTIONS: new Set(['view']),
-    hasPermission: async () => null,
-    canUserPerformTypeAction: async () => true,
-    canUserPerformDocumentAction: async () => true,
-    listDocuments: async () => [],
-    getDocumentBundle: async () => null,
-    createDocument: async () => ({}),
-    transitionDocument: async () => ({}),
-    updateDocumentMetadata: async () => ({}),
-    addDocumentRemark: async () => true,
-    getEffectivePermissionExplanation: async () => ({}),
-  });
-  const restoreAi = withMockedModule('../src/services/docutrackerAiSummaryService', {
-    getLatestAiSummary: async () => null,
-    generateAiSummary: async () => {
-      const err = new Error('local unavailable');
-      err.code = 'AI_LOCAL_UNAVAILABLE';
-      throw err;
-    },
-  });
+test('POST /documents/:id/history rejects client-authored audit entries', async () => {
+  const restoreWorkflow = withMockedModule(
+    '../src/services/docutrackerWorkflowService', workflowServiceMock()
+  );
   const restoreDb = withMockedModule('../src/config/db', {
-    pool: {
-      query: async (sql) => {
-        if (sql.includes('SELECT * FROM docutracker_documents')) {
-          return { rowCount: 1, rows: [{ id: 'doc-1', document_type: 'memo' }] };
-        }
-        return { rowCount: 0, rows: [] };
-      },
-    },
+    pool: { query: async () => { throw new Error('history route must not query'); } },
   });
   const restoreAuth = withMockedModule('../src/middleware/auth', {
     authMiddleware: (_req, _res, next) => next?.(),
@@ -347,31 +362,162 @@ test('POST /documents/:id/ai-summary reports unavailable local AI', async () => 
   const restoreRbac = withMockedModule('../src/middleware/rbac', {
     requireAdmin: (_req, _res, next) => next?.(),
   });
-
   const routePath = require.resolve('../src/routes/docutracker');
   delete require.cache[routePath];
   const router = require('../src/routes/docutracker');
-  const handler = getRouteHandler(router, 'post', '/documents/:id/ai-summary');
+  const handler = getRouteHandler(router, 'post', '/documents/:id/history');
+  const res = createMockResponse();
 
+  await handler({ params: { id: 'doc-1' }, body: { action: 'approved' } }, res);
+
+  assert.equal(res.statusCode, 405);
+  assert.match(res.payload?.error, /server-side workflow operations/i);
+  restoreWorkflow(); restoreDb(); restoreAuth(); restoreRbac();
+  delete require.cache[routePath];
+});
+
+test('PUT /documents/:id sends metadata through the transactional service', async () => {
+  let captured = null;
+  const restoreWorkflow = withMockedModule(
+    '../src/services/docutrackerWorkflowService',
+    workflowServiceMock({
+      updateDocumentMetadata: async (_pool, user, id, payload) => {
+        captured = { user, id, payload };
+        return { id, title: payload.title };
+      },
+    })
+  );
+  const restoreDb = withMockedModule('../src/config/db', { pool: {} });
+  const restoreAuth = withMockedModule('../src/middleware/auth', {
+    authMiddleware: (_req, _res, next) => next?.(),
+  });
+  const restoreRbac = withMockedModule('../src/middleware/rbac', {
+    requireAdmin: (_req, _res, next) => next?.(),
+  });
+  const routePath = require.resolve('../src/routes/docutracker');
+  delete require.cache[routePath];
+  const router = require('../src/routes/docutracker');
+  const handler = getRouteHandler(router, 'put', '/documents/:id');
   const req = {
-    params: { id: 'doc-1' },
-    body: {},
-    headers: {},
-    user: { id: 'user-1', role: 'employee' },
+    params: { id: 'doc-2' }, body: { title: 'Revised memo' },
+    user: { id: 'creator-1', role: 'employee' },
   };
   const res = createMockResponse();
+
   await handler(req, res);
 
-  assert.equal(res.statusCode, 503);
-  assert.equal(
-    res.payload?.error,
-    'Local AI is not available. Start Ollama and pull the configured model.'
-  );
+  assert.equal(res.statusCode, 200);
+  assert.equal(captured?.id, 'doc-2');
+  assert.deepEqual(captured?.payload, { title: 'Revised memo' });
+  restoreWorkflow(); restoreDb(); restoreAuth(); restoreRbac();
+  delete require.cache[routePath];
+});
 
-  restoreWorkflow();
-  restoreAi();
-  restoreDb();
-  restoreAuth();
-  restoreRbac();
+test('PUT /documents/:id rejects workflow fields even for administrators', async () => {
+  let called = false;
+  const restoreWorkflow = withMockedModule(
+    '../src/services/docutrackerWorkflowService',
+    workflowServiceMock({ updateDocumentMetadata: async () => { called = true; } })
+  );
+  const restoreDb = withMockedModule('../src/config/db', { pool: {} });
+  const restoreAuth = withMockedModule('../src/middleware/auth', {
+    authMiddleware: (_req, _res, next) => next?.(),
+  });
+  const restoreRbac = withMockedModule('../src/middleware/rbac', {
+    requireAdmin: (_req, _res, next) => next?.(),
+  });
+  const routePath = require.resolve('../src/routes/docutracker');
+  delete require.cache[routePath];
+  const router = require('../src/routes/docutracker');
+  const handler = getRouteHandler(router, 'put', '/documents/:id');
+  const res = createMockResponse();
+
+  await handler({
+    params: { id: 'doc-3' }, body: { status: 'approved' },
+    user: { id: 'admin-1', role: 'admin' },
+  }, res);
+
+  assert.equal(res.statusCode, 400);
+  assert.equal(called, false);
+  restoreWorkflow(); restoreDb(); restoreAuth(); restoreRbac();
+  delete require.cache[routePath];
+});
+
+test('PATCH /documents/:id only forwards recovery reassignment fields', async () => {
+  let captured = null;
+  const restoreWorkflow = withMockedModule(
+    '../src/services/docutrackerWorkflowService',
+    workflowServiceMock({
+      recoverDocumentAssignment: async (_pool, user, id, payload) => {
+        captured = { user, id, payload };
+        return { id, current_holder_id: payload.current_holder_id, status: 'returned' };
+      },
+    })
+  );
+  const restoreDb = withMockedModule('../src/config/db', { pool: {} });
+  const restoreAuth = withMockedModule('../src/middleware/auth', {
+    authMiddleware: (_req, _res, next) => next?.(),
+  });
+  const restoreRbac = withMockedModule('../src/middleware/rbac', {
+    requireAdmin: (_req, _res, next) => next?.(),
+  });
+  const routePath = require.resolve('../src/routes/docutracker');
+  delete require.cache[routePath];
+  const router = require('../src/routes/docutracker');
+  const handler = getRouteHandler(router, 'patch', '/documents/:id');
+  const req = {
+    params: { id: 'doc-4' },
+    body: { current_holder_id: 'backup-1', remarks: 'Primary unavailable' },
+    user: { id: 'admin-1', role: 'admin' },
+  };
+  const res = createMockResponse();
+
+  await handler(req, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(captured?.id, 'doc-4');
+  assert.deepEqual(captured?.payload, req.body);
+  const rejected = createMockResponse();
+  await handler({ ...req, body: { ...req.body, current_step: 2 } }, rejected);
+  assert.equal(rejected.statusCode, 400);
+  restoreWorkflow(); restoreDb(); restoreAuth(); restoreRbac();
+  delete require.cache[routePath];
+});
+
+test('POST /routing-configs rejects duplicate primary and backup IDs before saving', async () => {
+  let connected = false;
+  const restoreWorkflow = withMockedModule(
+    '../src/services/docutrackerWorkflowService', workflowServiceMock()
+  );
+  const restoreDb = withMockedModule('../src/config/db', {
+    pool: { connect: async () => { connected = true; throw new Error('must not connect'); } },
+  });
+  const restoreAuth = withMockedModule('../src/middleware/auth', {
+    authMiddleware: (_req, _res, next) => next?.(),
+  });
+  const restoreRbac = withMockedModule('../src/middleware/rbac', {
+    requireAdmin: (_req, _res, next) => next?.(),
+  });
+  const routePath = require.resolve('../src/routes/docutracker');
+  delete require.cache[routePath];
+  const router = require('../src/routes/docutracker');
+  const handler = getRouteHandler(router, 'post', '/routing-configs');
+  const res = createMockResponse();
+
+  await handler({
+    body: {
+      document_type: 'memo',
+      steps: [{
+        step_order: 1, assignee_type: 'user', assignee_source: 'specific_users',
+        user_ids: ['same-user', 'same-user'], allowed_actions: ['approve'],
+      }],
+    },
+    user: { id: 'admin-1', role: 'admin' },
+  }, res);
+
+  assert.equal(res.statusCode, 400);
+  assert.match(res.payload?.error, /same user as both primary and backup/i);
+  assert.equal(connected, false);
+  restoreWorkflow(); restoreDb(); restoreAuth(); restoreRbac();
   delete require.cache[routePath];
 });

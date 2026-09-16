@@ -1,18 +1,25 @@
+import 'dart:convert';
+import 'dart:typed_data';
+
 import 'package:dio/dio.dart';
 
 import 'package:hrms_plaridel/core/api/client.dart';
 import 'package:hrms_plaridel/features/docutracker/data/dto/docutracker_api_result.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document.dart';
+import 'package:hrms_plaridel/features/docutracker/models/document_builder.dart';
 import 'package:hrms_plaridel/features/docutracker/models/escalation_config.dart';
-import 'package:hrms_plaridel/features/docutracker/models/document_ai_summary.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document_history.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document_notification.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document_action.dart';
+import 'package:hrms_plaridel/features/docutracker/models/docutracker_governance_audit_entry.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document_permission.dart';
+import 'package:hrms_plaridel/features/docutracker/models/docutracker_permission_policy.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document_routing_config.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document_routing_record.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document_status.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document_type.dart';
+import 'package:hrms_plaridel/features/docutracker/models/linked_source_document.dart';
+import 'package:hrms_plaridel/features/docutracker/models/official_signatory.dart';
 import 'package:hrms_plaridel/features/docutracker/services/docutracker_document_visibility.dart';
 import 'package:hrms_plaridel/features/docutracker/services/docutracker_permission_service.dart';
 import 'package:hrms_plaridel/features/docutracker/services/docutracker_permissions_datasource.dart';
@@ -31,6 +38,11 @@ String _apiErrorMessage(Object e) {
   return e.toString();
 }
 
+String _isoDate(DateTime value) =>
+    '${value.year.toString().padLeft(4, '0')}-'
+    '${value.month.toString().padLeft(2, '0')}-'
+    '${value.day.toString().padLeft(2, '0')}';
+
 /// DocuTracker data via HRMS PostgreSQL API (replaces Supabase client).
 class DocuTrackerRepository implements DocuTrackerPermissionsDataSource {
   DocuTrackerRepository._() {
@@ -41,6 +53,121 @@ class DocuTrackerRepository implements DocuTrackerPermissionsDataSource {
   static const _base = '/api/docutracker';
 
   late final DocuTrackerPermissionService _permissionService;
+
+  Future<List<OfficialSignatoryPeriod>> listOfficialSignatories() async {
+    try {
+      final response = await ApiClient.instance.get<Map<String, dynamic>>(
+        '$_base/official-signatories',
+      );
+      final items = response.data?['items'];
+      if (items is! List) return const [];
+      return items
+          .whereType<Map>()
+          .map(
+            (item) => OfficialSignatoryPeriod.fromJson(
+              Map<String, dynamic>.from(item),
+            ),
+          )
+          .toList(growable: false);
+    } catch (error) {
+      throw Exception(_apiErrorMessage(error));
+    }
+  }
+
+  Future<AutomaticMayorSignatory?> getAutomaticMayorSignatory() async {
+    try {
+      final response = await ApiClient.instance.get<Map<String, dynamic>>(
+        '$_base/official-signatories/automatic-mayor',
+      );
+      final mayor = response.data?['mayor'];
+      if (mayor is! Map) return null;
+      return AutomaticMayorSignatory.fromJson(Map<String, dynamic>.from(mayor));
+    } catch (error) {
+      throw Exception(_apiErrorMessage(error));
+    }
+  }
+
+  Future<OfficialSignatoryPeriod> configureOfficialSignatory({
+    required String roleKey,
+    required String employeeId,
+    required DateTime effectiveFrom,
+    DateTime? effectiveTo,
+    String? remarks,
+  }) async {
+    try {
+      final response = await ApiClient.instance.put<Map<String, dynamic>>(
+        '$_base/official-signatories/${Uri.encodeComponent(roleKey)}',
+        data: {
+          'employee_id': employeeId,
+          'effective_from': _isoDate(effectiveFrom),
+          if (effectiveTo != null) 'effective_to': _isoDate(effectiveTo),
+          if (remarks != null && remarks.trim().isNotEmpty)
+            'remarks': remarks.trim(),
+        },
+      );
+      final data = response.data;
+      if (data == null) throw Exception('The saved official is unavailable.');
+      return OfficialSignatoryPeriod.fromJson(data);
+    } catch (error) {
+      throw Exception(_apiErrorMessage(error));
+    }
+  }
+
+  Future<DocuTrackerResult<DocuTrackerLinkedSourceDocument>>
+  getLinkedSourceDocument({
+    required String sourceModule,
+    required String sourceTable,
+    required String sourceRecordId,
+  }) async {
+    try {
+      final response = await ApiClient.instance.get<Map<String, dynamic>>(
+        '$_base/sources/${Uri.encodeComponent(sourceModule)}/'
+        '${Uri.encodeComponent(sourceTable)}/'
+        '${Uri.encodeComponent(sourceRecordId)}',
+      );
+      final data = response.data;
+      if (data == null) {
+        return const DocuTrackerFailure('The source document is unavailable');
+      }
+      return DocuTrackerSuccess(DocuTrackerLinkedSourceDocument.fromJson(data));
+    } catch (error) {
+      return DocuTrackerFailure(_apiErrorMessage(error));
+    }
+  }
+
+  Future<List<DocuTrackerGovernanceAuditEntry>> listGovernanceAudit({
+    String? documentType,
+    String? eventType,
+    String? actorId,
+    int limit = 50,
+    int offset = 0,
+  }) async {
+    try {
+      final res = await ApiClient.instance.get<List<dynamic>>(
+        '$_base/governance-audit',
+        queryParameters: {
+          if (documentType != null && documentType.trim().isNotEmpty)
+            'document_type': documentType.trim(),
+          if (eventType != null && eventType.trim().isNotEmpty)
+            'event_type': eventType.trim(),
+          if (actorId != null && actorId.trim().isNotEmpty)
+            'actor_id': actorId.trim(),
+          'limit': limit.clamp(1, 200),
+          'offset': offset < 0 ? 0 : offset,
+        },
+      );
+      return (res.data ?? const [])
+          .whereType<Map>()
+          .map(
+            (row) => DocuTrackerGovernanceAuditEntry.fromJson(
+              Map<String, dynamic>.from(row),
+            ),
+          )
+          .toList();
+    } catch (e) {
+      throw Exception(_apiErrorMessage(e));
+    }
+  }
 
   Future<List<DocumentRoutingConfig>> getRoutingConfigs() async {
     try {
@@ -77,7 +204,7 @@ class DocuTrackerRepository implements DocuTrackerPermissionsDataSource {
     }
   }
 
-  Future<List<EscalationConfig>> listEscalationConfigs({
+  Future<DocuTrackerResult<List<EscalationConfig>>> listEscalationConfigs({
     String? documentType,
     String? departmentId,
   }) async {
@@ -92,14 +219,17 @@ class DocuTrackerRepository implements DocuTrackerPermissionsDataSource {
         },
       );
       final list = res.data ?? [];
-      return list
-          .map(
-            (e) =>
-                EscalationConfig.fromJson(Map<String, dynamic>.from(e as Map)),
-          )
-          .toList();
-    } catch (_) {
-      return const [];
+      return DocuTrackerSuccess(
+        list
+            .map(
+              (e) => EscalationConfig.fromJson(
+                Map<String, dynamic>.from(e as Map),
+              ),
+            )
+            .toList(),
+      );
+    } catch (e) {
+      return DocuTrackerFailure(_apiErrorMessage(e));
     }
   }
 
@@ -277,6 +407,288 @@ class DocuTrackerRepository implements DocuTrackerPermissionsDataSource {
     }
   }
 
+  Future<DocuTrackerResult<DocuTrackerDocumentBuilderData>> getDocumentBuilder(
+    String documentId,
+  ) async {
+    try {
+      final response = await ApiClient.instance.get<Map<String, dynamic>>(
+        '$_base/documents/$documentId/builder',
+      );
+      final data = response.data;
+      if (data == null) {
+        return const DocuTrackerFailure('Document builder data is unavailable');
+      }
+      return DocuTrackerSuccess(DocuTrackerDocumentBuilderData.fromJson(data));
+    } catch (error) {
+      return DocuTrackerFailure(_apiErrorMessage(error));
+    }
+  }
+
+  Future<DocuTrackerResult<DocuTrackerDocumentBuilderData>>
+  saveDocumentBuilder({
+    required String documentId,
+    required List<DocuTrackerDocumentPage> pages,
+    required List<DocuTrackerSignatureField> signatureFields,
+    required int revision,
+  }) async {
+    try {
+      final response = await ApiClient.instance.put<Map<String, dynamic>>(
+        '$_base/documents/$documentId/builder',
+        data: <String, dynamic>{
+          'pages': pages.map((page) => page.toJson()).toList(growable: false),
+          'signature_fields': signatureFields
+              .map((field) => field.toLayoutJson())
+              .toList(growable: false),
+          'revision': revision,
+        },
+      );
+      final data = response.data;
+      if (data == null) {
+        return const DocuTrackerFailure('The document layout was not saved');
+      }
+      return DocuTrackerSuccess(DocuTrackerDocumentBuilderData.fromJson(data));
+    } catch (error) {
+      return DocuTrackerFailure(_apiErrorMessage(error));
+    }
+  }
+
+  Future<DocuTrackerResult<List<DocuTrackerSignatureAsset>>>
+  listSavedSignatureAssets() async {
+    try {
+      final response = await ApiClient.instance.get<List<dynamic>>(
+        '$_base/signature-assets',
+      );
+      final assets = (response.data ?? const <dynamic>[])
+          .whereType<Map>()
+          .map(
+            (item) => DocuTrackerSignatureAsset.fromJson(
+              Map<String, dynamic>.from(item),
+            ),
+          )
+          .toList(growable: false);
+      return DocuTrackerSuccess(assets);
+    } catch (error) {
+      return DocuTrackerFailure(_apiErrorMessage(error));
+    }
+  }
+
+  Future<DocuTrackerResult<DocuTrackerSignatureAsset>> createSignatureAsset({
+    required Uint8List imageBytes,
+    required String mimeType,
+    required String sourceType,
+    String? displayName,
+    bool saveForReuse = false,
+  }) async {
+    try {
+      final response = await ApiClient.instance.post<Map<String, dynamic>>(
+        '$_base/signature-assets',
+        data: <String, dynamic>{
+          'image_base64': base64Encode(imageBytes),
+          'mime_type': mimeType,
+          'source_type': sourceType,
+          if (displayName != null) 'display_name': displayName,
+          'is_saved': saveForReuse,
+        },
+      );
+      final data = response.data;
+      if (data == null) {
+        return const DocuTrackerFailure('The signature was not saved');
+      }
+      return DocuTrackerSuccess(DocuTrackerSignatureAsset.fromJson(data));
+    } catch (error) {
+      return DocuTrackerFailure(_apiErrorMessage(error));
+    }
+  }
+
+  Future<DocuTrackerResult<DocuTrackerSignatureAsset>>
+  renameSavedSignatureAsset({
+    required String assetId,
+    required String displayName,
+  }) async {
+    try {
+      final response = await ApiClient.instance.patch<Map<String, dynamic>>(
+        '$_base/signature-assets/${Uri.encodeComponent(assetId)}',
+        data: <String, dynamic>{'display_name': displayName},
+      );
+      final data = response.data;
+      if (data == null) {
+        return const DocuTrackerFailure('The signature was not renamed');
+      }
+      return DocuTrackerSuccess(DocuTrackerSignatureAsset.fromJson(data));
+    } catch (error) {
+      return DocuTrackerFailure(_apiErrorMessage(error));
+    }
+  }
+
+  Future<DocuTrackerResult<void>> removeSavedSignatureAsset(
+    String assetId,
+  ) async {
+    try {
+      await ApiClient.instance.delete(
+        '$_base/signature-assets/${Uri.encodeComponent(assetId)}',
+      );
+      return const DocuTrackerSuccess<void>(null);
+    } catch (error) {
+      return DocuTrackerFailure(_apiErrorMessage(error));
+    }
+  }
+
+  String _sourceSignaturePath({
+    required String sourceModule,
+    required String sourceTable,
+    required String sourceRecordId,
+  }) {
+    final module = Uri.encodeComponent(sourceModule);
+    final table = Uri.encodeComponent(sourceTable);
+    final recordId = Uri.encodeComponent(sourceRecordId);
+    return '$_base/sources/$module/$table/$recordId/signatures';
+  }
+
+  Future<DocuTrackerResult<DocuTrackerSourceSignatureBundle>>
+  getSourceSignatures({
+    required String sourceModule,
+    required String sourceTable,
+    required String sourceRecordId,
+  }) async {
+    try {
+      final response = await ApiClient.instance.get<Map<String, dynamic>>(
+        _sourceSignaturePath(
+          sourceModule: sourceModule,
+          sourceTable: sourceTable,
+          sourceRecordId: sourceRecordId,
+        ),
+      );
+      final data = response.data;
+      if (data == null) {
+        return const DocuTrackerFailure(
+          'The linked document signatures could not be loaded',
+        );
+      }
+      return DocuTrackerSuccess(
+        DocuTrackerSourceSignatureBundle.fromJson(data),
+      );
+    } catch (error) {
+      return DocuTrackerFailure(_apiErrorMessage(error));
+    }
+  }
+
+  Future<DocuTrackerResult<DocuTrackerSourceSignatureBundle>>
+  signSourceSignature({
+    required String sourceModule,
+    required String sourceTable,
+    required String sourceRecordId,
+    required String slotKey,
+    String? signatureAssetId,
+    Uint8List? imageBytes,
+    String mimeType = 'image/png',
+    String sourceType = 'drawn',
+    bool saveForReuse = false,
+  }) async {
+    try {
+      final response = await ApiClient.instance.post<Map<String, dynamic>>(
+        '${_sourceSignaturePath(sourceModule: sourceModule, sourceTable: sourceTable, sourceRecordId: sourceRecordId)}/${Uri.encodeComponent(slotKey)}/sign',
+        data: <String, dynamic>{
+          if (signatureAssetId != null)
+            'signature_asset_id': signatureAssetId
+          else ...<String, dynamic>{
+            'image_base64': base64Encode(imageBytes ?? Uint8List(0)),
+            'mime_type': mimeType,
+            'source_type': sourceType,
+            'is_saved': saveForReuse,
+          },
+        },
+      );
+      final data = response.data;
+      if (data == null) {
+        return const DocuTrackerFailure('The leave form was not signed');
+      }
+      return DocuTrackerSuccess(
+        DocuTrackerSourceSignatureBundle.fromJson(data),
+      );
+    } catch (error) {
+      return DocuTrackerFailure(_apiErrorMessage(error));
+    }
+  }
+
+  Future<DocuTrackerResult<DocuTrackerSourceSignatureBundle>>
+  signSourceApplicant({
+    required String sourceModule,
+    required String sourceTable,
+    required String sourceRecordId,
+    String? signatureAssetId,
+    Uint8List? imageBytes,
+    String mimeType = 'image/png',
+    String sourceType = 'drawn',
+    bool saveForReuse = false,
+  }) {
+    return signSourceSignature(
+      sourceModule: sourceModule,
+      sourceTable: sourceTable,
+      sourceRecordId: sourceRecordId,
+      slotKey: 'applicant',
+      signatureAssetId: signatureAssetId,
+      imageBytes: imageBytes,
+      mimeType: mimeType,
+      sourceType: sourceType,
+      saveForReuse: saveForReuse,
+    );
+  }
+
+  Future<DocuTrackerResult<DocuTrackerDocumentBuilderData>> signDocumentField({
+    required String documentId,
+    required String fieldId,
+    String? signatureAssetId,
+    Uint8List? imageBytes,
+    String mimeType = 'image/png',
+    String sourceType = 'drawn',
+    bool saveForReuse = false,
+  }) async {
+    try {
+      final response = await ApiClient.instance.post<Map<String, dynamic>>(
+        '$_base/documents/$documentId/signature-fields/$fieldId/sign',
+        data: <String, dynamic>{
+          if (signatureAssetId != null)
+            'signature_asset_id': signatureAssetId
+          else ...<String, dynamic>{
+            'image_base64': base64Encode(imageBytes ?? Uint8List(0)),
+            'mime_type': mimeType,
+            'source_type': sourceType,
+            'is_saved': saveForReuse,
+          },
+        },
+      );
+      final data = response.data;
+      if (data == null) {
+        return const DocuTrackerFailure('The document was not signed');
+      }
+      return DocuTrackerSuccess(DocuTrackerDocumentBuilderData.fromJson(data));
+    } catch (error) {
+      return DocuTrackerFailure(_apiErrorMessage(error));
+    }
+  }
+
+  Future<DocuTrackerResult<DocuTrackerDocumentBuilderData>>
+  moveSignedDocumentField({
+    required String documentId,
+    required String fieldId,
+    required double x,
+    required double y,
+  }) async {
+    try {
+      final response = await ApiClient.instance.patch<Map<String, dynamic>>(
+        '$_base/documents/$documentId/signature-fields/$fieldId/position',
+        data: <String, dynamic>{'position_x': x, 'position_y': y},
+      );
+      final data = response.data;
+      if (data == null) {
+        return const DocuTrackerFailure('The signature position was not saved');
+      }
+      return DocuTrackerSuccess(DocuTrackerDocumentBuilderData.fromJson(data));
+    } catch (error) {
+      return DocuTrackerFailure(_apiErrorMessage(error));
+    }
+  }
+
   Future<List<DocumentHistoryEntry>> listDocumentHistory(
     String documentId,
   ) async {
@@ -338,46 +750,6 @@ class DocuTrackerRepository implements DocuTrackerPermissionsDataSource {
       return true;
     } catch (_) {
       return false;
-    }
-  }
-
-  Future<DocuTrackerResult<DocumentAiSummary?>> getAiSummary(
-    String documentId,
-  ) async {
-    try {
-      final res = await ApiClient.instance.get<Map<String, dynamic>>(
-        '$_base/documents/$documentId/ai-summary',
-      );
-      final row = res.data;
-      if (row == null) return const DocuTrackerSuccess(null);
-      return DocuTrackerSuccess(DocumentAiSummary.fromJson(row));
-    } on DioException catch (e) {
-      if (e.response?.statusCode == 404) {
-        return const DocuTrackerSuccess(null);
-      }
-      return DocuTrackerFailure(_apiErrorMessage(e));
-    } catch (e) {
-      return DocuTrackerFailure(_apiErrorMessage(e));
-    }
-  }
-
-  Future<DocuTrackerResult<DocumentAiSummary>> generateAiSummary(
-    String documentId,
-  ) async {
-    try {
-      final res = await ApiClient.instance.post<Map<String, dynamic>>(
-        '$_base/documents/$documentId/ai-summary',
-        data: const <String, dynamic>{},
-      );
-      final row = res.data;
-      if (row == null) {
-        return DocuTrackerFailure<DocumentAiSummary>(
-          'Empty response from server',
-        );
-      }
-      return DocuTrackerSuccess(DocumentAiSummary.fromJson(row));
-    } catch (e) {
-      return DocuTrackerFailure(_apiErrorMessage(e));
     }
   }
 
@@ -518,6 +890,47 @@ class DocuTrackerRepository implements DocuTrackerPermissionsDataSource {
     }
   }
 
+  Future<DocuTrackerPermissionPolicy> getPermissionPolicy({
+    required String documentType,
+    String? userId,
+  }) async {
+    try {
+      final response = await ApiClient.instance.get<Map<String, dynamic>>(
+        '$_base/permission-policy',
+        queryParameters: {
+          'document_type': documentType,
+          if (userId != null && userId.isNotEmpty) 'user_id': userId,
+        },
+      );
+      final data = response.data;
+      if (data == null) {
+        throw Exception('System access settings are unavailable.');
+      }
+      return DocuTrackerPermissionPolicy.fromJson(data);
+    } catch (error) {
+      throw Exception(_apiErrorMessage(error));
+    }
+  }
+
+  Future<DateTime?> savePermissionPolicy({
+    required String documentType,
+    required List<DocuTrackerPermissionPolicyChange> changes,
+  }) async {
+    try {
+      final response = await ApiClient.instance.put<Map<String, dynamic>>(
+        '$_base/permission-policy',
+        data: {
+          'document_type': documentType,
+          'changes': changes.map((change) => change.toJson()).toList(),
+        },
+      );
+      _permissionService.clearCache();
+      return DateTime.tryParse(response.data?['updated_at']?.toString() ?? '');
+    } catch (error) {
+      throw Exception(_apiErrorMessage(error));
+    }
+  }
+
   Future<int> resetPermissions({
     String? userId,
     String? roleId,
@@ -538,8 +951,8 @@ class DocuTrackerRepository implements DocuTrackerPermissionsDataSource {
       final deleted = res.data?['deleted'];
       if (deleted is num) return deleted.toInt();
       return 0;
-    } catch (_) {
-      return 0;
+    } catch (e) {
+      throw Exception(_apiErrorMessage(e));
     }
   }
 
@@ -606,7 +1019,21 @@ class DocuTrackerRepository implements DocuTrackerPermissionsDataSource {
   }
 
   Future<List<DocumentType>> creatableDocumentTypes() async {
-    const allTypes = DocumentType.values;
+    List<DocumentType> allTypes;
+    try {
+      final configs = await getRoutingConfigs();
+      allTypes = configs.map((config) => config.documentType).toSet().toList()
+        ..sort(
+          (a, b) => a.displayName.toLowerCase().compareTo(
+            b.displayName.toLowerCase(),
+          ),
+        );
+    } catch (_) {
+      allTypes = List<DocumentType>.from(DocumentType.values);
+    }
+    if (allTypes.isEmpty) {
+      allTypes = List<DocumentType>.from(DocumentType.values);
+    }
     final action = DocumentAction.createDraft.value;
     final wildcardAllowed = await hasCurrentUserPermission(
       documentType: '*',
@@ -635,7 +1062,7 @@ class DocuTrackerRepository implements DocuTrackerPermissionsDataSource {
   }) async {
     // When a concrete document is provided, always delegate to backend explanation
     // because document-level rules include creator/holder/step-assignee context.
-    if (!isAdmin && documentId != null && documentId.trim().isNotEmpty) {
+    if (documentId != null && documentId.trim().isNotEmpty) {
       try {
         final res = await ApiClient.instance.get<Map<String, dynamic>>(
           '$_base/permission-explain',

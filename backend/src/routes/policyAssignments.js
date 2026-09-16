@@ -22,6 +22,9 @@ const {
   assignmentStatusWhereSql,
   computedAssignmentStatusSql,
 } = require('../services/assignmentStatus');
+const {
+  invalidateAttendancePolicyCache,
+} = require('../services/attendancePolicyCache');
 
 const router = express.Router();
 const protect = [authMiddleware];
@@ -106,6 +109,9 @@ router.post('/employee-upsert', protect, requireAdmin, async (req, res) => {
     if (!employee_id || !effective_from) {
       return res.status(400).json({ error: 'employee_id and effective_from are required' });
     }
+    if (typeof is_active !== 'boolean') {
+      return res.status(400).json({ error: 'is_active must be a boolean.' });
+    }
     const ef = parseDate(effective_from);
     if (!ef) return res.status(400).json({ error: 'Invalid effective_from' });
     const et = effective_to != null && effective_to !== '' ? parseDate(effective_to) : null;
@@ -124,7 +130,7 @@ router.post('/employee-upsert', protect, requireAdmin, async (req, res) => {
         attendancePolicyId: attendance_policy_id,
         effectiveFrom: ef,
         effectiveTo: et,
-        isActive: !!is_active,
+        isActive: is_active,
         includeTransition: true,
       });
       const policyAssignment = transition.assignment;
@@ -147,6 +153,11 @@ router.post('/employee-upsert', protect, requireAdmin, async (req, res) => {
         metadata: { policy_assignment_id: policyAssignment?.id || null },
       });
       await client.query('COMMIT');
+      invalidateAttendancePolicyCache({
+        employeeId: employee_id,
+        dateFrom: ef,
+        dateTo: et,
+      });
       const reconciliation = await rebuildAfterAssignmentCommit(employee_id, queued);
       res.status(policyAssignment ? 201 : 200).json({
         policy_assignment: policyAssignment,

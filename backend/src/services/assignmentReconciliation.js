@@ -5,9 +5,11 @@ const {
   enqueueEmployeeRangeReconciliation,
 } = require('./dtrMonthEndReconciliation');
 const {
-  clearBiometricAttendancePolicyCache,
   processBiometricLogsToSummary,
 } = require('./biometricProcessing');
+const {
+  invalidateAttendancePolicyCache,
+} = require('./attendancePolicyCache');
 
 const HRMS_TIMEZONE = process.env.HRMS_TIMEZONE || 'Asia/Manila';
 
@@ -59,7 +61,7 @@ async function rebuildAssignmentDtr(employeeId, range) {
   if (!employeeId || !range?.dateFrom || !range?.dateTo) {
     return { inserted: 0, updated: 0 };
   }
-  clearBiometricAttendancePolicyCache({
+  invalidateAttendancePolicyCache({
     employeeId,
     dateFrom: range.dateFrom,
     dateTo: range.dateTo,

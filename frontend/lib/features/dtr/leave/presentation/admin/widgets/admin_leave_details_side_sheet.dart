@@ -53,7 +53,7 @@ class AdminLeaveDetailsSideSheet extends StatelessWidget {
                 children: [
                   Expanded(
                     child: Text(
-                      'Request details',
+                      'Request Details',
                       style: TextStyle(
                         color: AppTheme.dashTextPrimaryOf(context),
                         fontSize: 16,
@@ -154,135 +154,131 @@ class _AdminLeaveRequestDetailsPanel extends StatelessWidget {
       );
     }
 
-    return AdminLeaveSectionCard(
-      title: 'Request Details',
-      subtitle: 'Review the employee application before taking action.',
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      request!.employeeName ?? 'Unknown employee',
-                      style: TextStyle(
-                        color: AppTheme.dashTextPrimaryOf(context),
-                        fontSize: 20,
-                        fontWeight: FontWeight.w700,
-                      ),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    request!.employeeName ?? 'Unknown employee',
+                    style: TextStyle(
+                      color: AppTheme.dashTextPrimaryOf(context),
+                      fontSize: 20,
+                      fontWeight: FontWeight.w700,
                     ),
-                    const SizedBox(height: 6),
-                    Text(
-                      request!.leaveTypeLabel,
-                      style: TextStyle(
-                        color: AppTheme.dashIsDark(context)
-                            ? AppTheme.primaryNavyLight
-                            : AppTheme.primaryNavyDark,
-                        fontSize: 14,
-                        fontWeight: FontWeight.w600,
-                      ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    request!.leaveTypeLabel,
+                    style: TextStyle(
+                      color: AppTheme.dashIsDark(context)
+                          ? AppTheme.primaryNavyLight
+                          : AppTheme.primaryNavyDark,
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
                     ),
-                  ],
-                ),
+                  ),
+                ],
               ),
-              LeaveStatusChip(
-                status: request!.status,
-                label: adminLeaveStatusLabel(
-                  request!.status,
-                  isDepartmentHead: isDepartmentHead,
-                ),
+            ),
+            LeaveStatusChip(
+              status: request!.status,
+              label: adminLeaveStatusLabel(
+                request!.status,
+                isDepartmentHead: isDepartmentHead,
               ),
-            ],
-          ),
-          const SizedBox(height: 18),
-          Wrap(
-            spacing: 12,
-            runSpacing: 12,
-            children: [
-              AdminLeaveDetailPill(
-                label: 'Date Filed',
-                value: request!.dateFiled != null
-                    ? formatAdminLeaveDate(request!.dateFiled!)
-                    : '—',
-              ),
-              AdminLeaveDetailPill(
-                label: 'Inclusive Dates',
-                value: _formatRange(request!),
-              ),
-              AdminLeaveDetailPill(
-                label: 'Working Days',
-                value: request!.workingDaysApplied?.toStringAsFixed(1) ?? '—',
-              ),
-              AdminLeaveDetailPill(
-                label: 'Commutation',
-                value: request!.commutation.displayName,
-              ),
-            ],
-          ),
-          const SizedBox(height: 20),
-          _AdminLeaveDetailGrid(request: request!),
-          const SizedBox(height: 20),
-          if ((request!.reason ?? '').trim().isNotEmpty) ...[
-            AdminLeaveSubsectionTitle(title: 'Reason / Details'),
-            AdminLeaveBodyCard(content: request!.reason!.trim()),
-            const SizedBox(height: 16),
+            ),
           ],
-          AdminLeaveSubsectionTitle(title: 'Approval History'),
-          const SizedBox(height: 8),
-          HistoryTimeline(events: _buildHistoryEvents(request!)),
-          const SizedBox(height: 10),
-          AdminLeaveSubsectionTitle(title: 'Review Actions'),
-          const SizedBox(height: 10),
-          Wrap(
-            spacing: 12,
-            runSpacing: 12,
-            children: [
-              if (onApprove != null)
-                FilledButton.icon(
-                  onPressed: reviewing ? null : onApprove,
-                  icon: const Icon(Icons.check_circle_rounded),
-                  label: const Text('Approve'),
-                ),
-              if (onReturn != null)
-                OutlinedButton.icon(
-                  onPressed: reviewing ? null : onReturn,
-                  icon: const Icon(Icons.reply_rounded),
-                  label: const Text('Return'),
-                ),
-              if (onReject != null)
-                OutlinedButton.icon(
-                  onPressed: reviewing ? null : onReject,
-                  icon: const Icon(Icons.cancel_rounded),
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: Colors.red.shade700,
-                    side: BorderSide(color: Colors.red.shade300),
-                  ),
-                  label: const Text('Reject'),
-                ),
-              if (onRevoke != null)
-                OutlinedButton.icon(
-                  onPressed: reviewing ? null : onRevoke,
-                  icon: const Icon(Icons.undo_rounded),
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: Colors.orange.shade800,
-                    side: BorderSide(color: Colors.orange.shade300),
-                  ),
-                  label: const Text('Revoke Approval'),
-                ),
-              if (onPrint != null)
-                OutlinedButton.icon(
-                  onPressed: reviewing ? null : onPrint,
-                  icon: const Icon(Icons.print_rounded),
-                  label: const Text('Print Form'),
-                ),
-            ],
-          ),
+        ),
+        const SizedBox(height: 18),
+        Wrap(
+          spacing: 12,
+          runSpacing: 12,
+          children: [
+            AdminLeaveDetailPill(
+              label: 'Date Filed',
+              value: request!.dateFiled != null
+                  ? formatAdminLeaveDate(request!.dateFiled!)
+                  : '—',
+            ),
+            AdminLeaveDetailPill(
+              label: 'Inclusive Dates',
+              value: _formatRange(request!),
+            ),
+            AdminLeaveDetailPill(
+              label: 'Working Days',
+              value: request!.workingDaysApplied?.toStringAsFixed(1) ?? '—',
+            ),
+            AdminLeaveDetailPill(
+              label: 'Commutation',
+              value: request!.commutation.displayName,
+            ),
+          ],
+        ),
+        const SizedBox(height: 20),
+        _AdminLeaveDetailGrid(request: request!),
+        const SizedBox(height: 20),
+        if ((request!.reason ?? '').trim().isNotEmpty) ...[
+          AdminLeaveSubsectionTitle(title: 'Reason / Details'),
+          AdminLeaveBodyCard(content: request!.reason!.trim()),
+          const SizedBox(height: 16),
         ],
-      ),
+        AdminLeaveSubsectionTitle(title: 'Approval History'),
+        const SizedBox(height: 8),
+        HistoryTimeline(events: _buildHistoryEvents(request!)),
+        const SizedBox(height: 10),
+        AdminLeaveSubsectionTitle(title: 'Review Actions'),
+        const SizedBox(height: 10),
+        Wrap(
+          spacing: 12,
+          runSpacing: 12,
+          children: [
+            if (onApprove != null)
+              FilledButton.icon(
+                onPressed: reviewing ? null : onApprove,
+                icon: const Icon(Icons.check_circle_rounded),
+                label: const Text('Approve'),
+              ),
+            if (onReturn != null)
+              OutlinedButton.icon(
+                onPressed: reviewing ? null : onReturn,
+                icon: const Icon(Icons.reply_rounded),
+                label: const Text('Return'),
+              ),
+            if (onReject != null)
+              OutlinedButton.icon(
+                onPressed: reviewing ? null : onReject,
+                icon: const Icon(Icons.cancel_rounded),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: Colors.red.shade700,
+                  side: BorderSide(color: Colors.red.shade300),
+                ),
+                label: const Text('Reject'),
+              ),
+            if (onRevoke != null)
+              OutlinedButton.icon(
+                onPressed: reviewing ? null : onRevoke,
+                icon: const Icon(Icons.undo_rounded),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: Colors.orange.shade800,
+                  side: BorderSide(color: Colors.orange.shade300),
+                ),
+                label: const Text('Revoke Approval'),
+              ),
+            if (onPrint != null)
+              OutlinedButton.icon(
+                onPressed: reviewing ? null : onPrint,
+                icon: const Icon(Icons.print_rounded),
+                label: const Text('Print Form'),
+              ),
+          ],
+        ),
+      ],
     );
   }
 
@@ -451,14 +447,15 @@ class _AdminLeaveDetailGrid extends StatelessWidget {
                 child: AdminLeaveInfoTile(label: item.label, value: item.value),
               ),
             ),
-        SizedBox(
-          width: 260,
-          child: _AdminLeaveAttachmentTile(
-            requestId: requestId,
-            attachmentName: attachmentName,
-            hasAttachment: hasAttachment,
+        if (hasAttachment)
+          SizedBox(
+            width: 260,
+            child: _AdminLeaveAttachmentTile(
+              requestId: requestId,
+              attachmentName: attachmentName,
+              hasAttachment: true,
+            ),
           ),
-        ),
       ],
     );
   }

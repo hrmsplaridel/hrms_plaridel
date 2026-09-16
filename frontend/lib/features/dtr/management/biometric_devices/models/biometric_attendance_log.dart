@@ -11,6 +11,9 @@ class BiometricAttendanceLog {
     this.punchCode,
     this.workCode,
     this.sourceName,
+    this.deviceRefId,
+    this.deviceName,
+    this.registeredDeviceId,
   });
 
   final String id;
@@ -24,6 +27,9 @@ class BiometricAttendanceLog {
   final String? punchCode;
   final String? workCode;
   final String? sourceName;
+  final String? deviceRefId;
+  final String? deviceName;
+  final String? registeredDeviceId;
 
   factory BiometricAttendanceLog.fromJson(Map<String, dynamic> json) {
     return BiometricAttendanceLog(
@@ -38,6 +44,9 @@ class BiometricAttendanceLog {
       punchCode: json['punch_code']?.toString(),
       workCode: json['work_code']?.toString(),
       sourceName: json['source_file_name']?.toString(),
+      deviceRefId: json['device_ref_id']?.toString(),
+      deviceName: json['device_name']?.toString(),
+      registeredDeviceId: json['registered_device_id']?.toString(),
     );
   }
 }

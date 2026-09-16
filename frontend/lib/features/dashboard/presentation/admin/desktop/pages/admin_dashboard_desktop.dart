@@ -511,12 +511,11 @@ class _AdminDashboardState extends State<AdminDashboard>
         result != kLeaveFormResultSubmitted) {
       return;
     }
+    showLeaveFormSuccessSnackBar(context, result);
     final userId = context.read<AuthProvider>().user?.id;
     if (userId != null && userId.isNotEmpty) {
       await context.read<LeaveProvider>().loadMyLeaveData(userId);
     }
-    if (!mounted) return;
-    showLeaveFormSuccessSnackBar(context, result);
   }
 
   Widget _buildAdminLeaveRequestForm() {

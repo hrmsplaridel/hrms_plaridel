@@ -1,27 +1,80 @@
-/// Document types with predefined workflows (Step 1 & 3).
-enum DocumentType {
-  memo,
-  purchaseRequest,
-  // Extensible: add more types as needed
-}
+/// A document category used to select routing, permissions, and escalation.
+///
+/// Built-in types remain available for compatibility, while administrators can
+/// create additional types by publishing a workflow for a new value.
+class DocumentType {
+  const DocumentType._(this.value, this.displayName);
 
-extension DocumentTypeExtension on DocumentType {
-  String get value => name;
+  static const memo = DocumentType._('memo', 'Memo');
+  static const purchaseRequest = DocumentType._(
+    'purchaseRequest',
+    'Purchase Request',
+  );
 
-  String get displayName => switch (this) {
-    DocumentType.memo => 'Memo',
-    DocumentType.purchaseRequest => 'Purchase Request',
-  };
-}
+  static const values = <DocumentType>[memo, purchaseRequest];
 
-DocumentType documentTypeFromString(String? s) {
-  if (s == null || s.isEmpty) return DocumentType.memo;
-  // API may send snake_case (purchase_request) or display strings.
-  final normalized = s.toLowerCase().replaceAll(RegExp(r'[\s_-]'), '');
-  for (final e in DocumentType.values) {
-    if (e.name.toLowerCase().replaceAll(RegExp(r'[\s_-]'), '') == normalized) {
-      return e;
+  final String value;
+  final String displayName;
+
+  factory DocumentType.fromValue(String? raw) {
+    final value = raw?.trim() ?? '';
+    if (value.isEmpty) return memo;
+
+    for (final type in values) {
+      if (_comparisonKey(type.value) == _comparisonKey(value)) return type;
     }
+    return DocumentType._(value, _displayNameFor(value));
   }
-  return DocumentType.memo;
+
+  /// Builds a stable machine value from an admin-entered display name.
+  factory DocumentType.fromDisplayName(String name) {
+    final displayName = name.trim().replaceAll(RegExp(r'\s+'), ' ');
+    if (displayName.isEmpty) {
+      throw ArgumentError.value(
+        name,
+        'name',
+        'Document type name is required.',
+      );
+    }
+    final value = displayName
+        .toLowerCase()
+        .replaceAll(RegExp(r'[^a-z0-9]+'), '_')
+        .replaceAll(RegExp(r'^_+|_+$'), '');
+    if (value.isEmpty) {
+      throw ArgumentError.value(
+        name,
+        'name',
+        'Document type name is invalid.',
+      );
+    }
+    return DocumentType.fromValue(value);
+  }
+
+  static String _comparisonKey(String value) =>
+      value.toLowerCase().replaceAll(RegExp(r'[\s_-]'), '');
+
+  static String _displayNameFor(String value) => value
+      .replaceAllMapped(
+        RegExp(r'([a-z0-9])([A-Z])'),
+        (match) => '${match.group(1)} ${match.group(2)}',
+      )
+      .split(RegExp(r'[\s_-]+'))
+      .where((part) => part.isNotEmpty)
+      .map(
+        (part) => part.length == 1
+            ? part.toUpperCase()
+            : '${part[0].toUpperCase()}${part.substring(1).toLowerCase()}',
+      )
+      .join(' ');
+
+  @override
+  bool operator ==(Object other) =>
+      other is DocumentType &&
+      _comparisonKey(other.value) == _comparisonKey(value);
+
+  @override
+  int get hashCode => _comparisonKey(value).hashCode;
 }
+
+DocumentType documentTypeFromString(String? value) =>
+    DocumentType.fromValue(value);

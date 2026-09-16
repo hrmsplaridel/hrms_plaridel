@@ -29,6 +29,9 @@ const {
 } = require('../services/employeeAccountSecurity');
 const { todayInHrmsTimezone } = require('../utils/dateRangeParser');
 const { csvEscape } = require('../utils/csv');
+const {
+  invalidateAttendancePolicyCache,
+} = require('../services/attendancePolicyCache');
 
 const router = express.Router();
 const protect = [authMiddleware];
@@ -1211,6 +1214,7 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
       client.release();
     }
     if (result.rowCount === 0) return res.status(404).json({ error: 'Employee not found' });
+    invalidateAttendancePolicyCache({ employeeId: id });
     res.json({ ...result.rows[0], updated_setup: updatedSetup });
   } catch (err) {
     if (err instanceof EmployeeAccountSecurityError) {

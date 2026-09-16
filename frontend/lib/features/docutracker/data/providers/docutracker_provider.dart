@@ -1,8 +1,10 @@
 import 'package:flutter/foundation.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document.dart';
+import 'package:hrms_plaridel/features/docutracker/models/document_builder.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document_history.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document_notification.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document_permission.dart';
+import 'package:hrms_plaridel/features/docutracker/models/linked_source_document.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document_routing_config.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document_status.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document_type.dart';
@@ -38,6 +40,11 @@ class DocuTrackerProvider extends ChangeNotifier {
   List<DocumentNotification> _notifications = [];
   bool _loading = false;
   String? _error;
+  DocuTrackerDocumentBuilderData? _builderData;
+  bool _builderLoading = false;
+  String? _builderError;
+  bool _sourceSignatureLoading = false;
+  String? _sourceSignatureError;
 
   // Prevent duplicate transitions due to double taps / retries.
   final Set<String> _transitionInFlight = <String>{};
@@ -274,6 +281,9 @@ class DocuTrackerProvider extends ChangeNotifier {
   List<DocumentPermission> get permissions => List.unmodifiable(_permissions);
   bool get loading => _loading;
   String? get error => _error;
+  DocuTrackerDocumentBuilderData? get builderData => _builderData;
+  bool get builderLoading => _builderLoading;
+  String? get builderError => _builderError;
 
   /// Load routing configs (Step 1 & 3).
   Future<void> loadRoutingConfigs() async {
@@ -564,6 +574,281 @@ class DocuTrackerProvider extends ChangeNotifier {
       _loading = false;
       notifyListeners();
       return null;
+    }
+  }
+
+  Future<DocuTrackerDocumentBuilderData?> loadDocumentBuilder(
+    String documentId,
+  ) async {
+    _builderLoading = true;
+    _builderError = null;
+    notifyListeners();
+    final result = await _repo.getDocumentBuilder(documentId);
+    _builderLoading = false;
+    switch (result) {
+      case DocuTrackerSuccess<DocuTrackerDocumentBuilderData>(:final value):
+        _builderData = value;
+        notifyListeners();
+        return value;
+      case DocuTrackerFailure<DocuTrackerDocumentBuilderData>(:final message):
+        _builderError = message;
+        notifyListeners();
+        return null;
+    }
+  }
+
+  Future<DocuTrackerDocumentBuilderData?> saveDocumentBuilder({
+    required String documentId,
+    required List<DocuTrackerDocumentPage> pages,
+    required List<DocuTrackerSignatureField> signatureFields,
+    required int revision,
+  }) async {
+    if (_builderLoading) return null;
+    _builderLoading = true;
+    _builderError = null;
+    notifyListeners();
+    final result = await _repo.saveDocumentBuilder(
+      documentId: documentId,
+      pages: pages,
+      signatureFields: signatureFields,
+      revision: revision,
+    );
+    _builderLoading = false;
+    switch (result) {
+      case DocuTrackerSuccess<DocuTrackerDocumentBuilderData>(:final value):
+        _builderData = value;
+        notifyListeners();
+        return value;
+      case DocuTrackerFailure<DocuTrackerDocumentBuilderData>(:final message):
+        _builderError = message;
+        notifyListeners();
+        return null;
+    }
+  }
+
+  Future<List<DocuTrackerSignatureAsset>> listSavedSignatures() async {
+    final result = await _repo.listSavedSignatureAssets();
+    return switch (result) {
+      DocuTrackerSuccess<List<DocuTrackerSignatureAsset>>(:final value) =>
+        value,
+      DocuTrackerFailure<List<DocuTrackerSignatureAsset>>(:final message) =>
+        throw Exception(message),
+    };
+  }
+
+  Future<DocuTrackerLinkedSourceDocument> loadLinkedSourceDocument({
+    required String sourceModule,
+    required String sourceTable,
+    required String sourceRecordId,
+  }) async {
+    final result = await _repo.getLinkedSourceDocument(
+      sourceModule: sourceModule,
+      sourceTable: sourceTable,
+      sourceRecordId: sourceRecordId,
+    );
+    return switch (result) {
+      DocuTrackerSuccess<DocuTrackerLinkedSourceDocument>(:final value) =>
+        value,
+      DocuTrackerFailure<DocuTrackerLinkedSourceDocument>(:final message) =>
+        throw Exception(message),
+    };
+  }
+
+  Future<DocuTrackerSignatureAsset> createSavedSignature({
+    required Uint8List imageBytes,
+    required String mimeType,
+    required String sourceType,
+    required String displayName,
+  }) async {
+    final result = await _repo.createSignatureAsset(
+      imageBytes: imageBytes,
+      mimeType: mimeType,
+      sourceType: sourceType,
+      displayName: displayName,
+      saveForReuse: true,
+    );
+    return switch (result) {
+      DocuTrackerSuccess<DocuTrackerSignatureAsset>(:final value) => value,
+      DocuTrackerFailure<DocuTrackerSignatureAsset>(:final message) =>
+        throw Exception(message),
+    };
+  }
+
+  Future<DocuTrackerSignatureAsset> renameSavedSignature({
+    required String assetId,
+    required String displayName,
+  }) async {
+    final result = await _repo.renameSavedSignatureAsset(
+      assetId: assetId,
+      displayName: displayName,
+    );
+    return switch (result) {
+      DocuTrackerSuccess<DocuTrackerSignatureAsset>(:final value) => value,
+      DocuTrackerFailure<DocuTrackerSignatureAsset>(:final message) =>
+        throw Exception(message),
+    };
+  }
+
+  Future<void> removeSavedSignature(String assetId) async {
+    final result = await _repo.removeSavedSignatureAsset(assetId);
+    switch (result) {
+      case DocuTrackerSuccess<void>():
+        return;
+      case DocuTrackerFailure<void>(:final message):
+        throw Exception(message);
+    }
+  }
+
+  bool get sourceSignatureLoading => _sourceSignatureLoading;
+  String? get sourceSignatureError => _sourceSignatureError;
+
+  Future<DocuTrackerSourceSignatureBundle?> loadSourceSignatures({
+    required String sourceModule,
+    required String sourceTable,
+    required String sourceRecordId,
+  }) async {
+    _sourceSignatureLoading = true;
+    _sourceSignatureError = null;
+    notifyListeners();
+    final result = await _repo.getSourceSignatures(
+      sourceModule: sourceModule,
+      sourceTable: sourceTable,
+      sourceRecordId: sourceRecordId,
+    );
+    _sourceSignatureLoading = false;
+    switch (result) {
+      case DocuTrackerSuccess<DocuTrackerSourceSignatureBundle>(:final value):
+        notifyListeners();
+        return value;
+      case DocuTrackerFailure<DocuTrackerSourceSignatureBundle>(:final message):
+        _sourceSignatureError = message;
+        notifyListeners();
+        return null;
+    }
+  }
+
+  Future<DocuTrackerSourceSignatureBundle?> signSourceApplicant({
+    required String sourceModule,
+    required String sourceTable,
+    required String sourceRecordId,
+    String? signatureAssetId,
+    Uint8List? imageBytes,
+    String mimeType = 'image/png',
+    String sourceType = 'drawn',
+    bool saveForReuse = false,
+  }) async {
+    return signSourceSignature(
+      sourceModule: sourceModule,
+      sourceTable: sourceTable,
+      sourceRecordId: sourceRecordId,
+      slotKey: 'applicant',
+      signatureAssetId: signatureAssetId,
+      imageBytes: imageBytes,
+      mimeType: mimeType,
+      sourceType: sourceType,
+      saveForReuse: saveForReuse,
+    );
+  }
+
+  Future<DocuTrackerSourceSignatureBundle?> signSourceSignature({
+    required String sourceModule,
+    required String sourceTable,
+    required String sourceRecordId,
+    required String slotKey,
+    String? signatureAssetId,
+    Uint8List? imageBytes,
+    String mimeType = 'image/png',
+    String sourceType = 'drawn',
+    bool saveForReuse = false,
+  }) async {
+    if (_sourceSignatureLoading) return null;
+    _sourceSignatureLoading = true;
+    _sourceSignatureError = null;
+    notifyListeners();
+    final result = await _repo.signSourceSignature(
+      sourceModule: sourceModule,
+      sourceTable: sourceTable,
+      sourceRecordId: sourceRecordId,
+      slotKey: slotKey,
+      signatureAssetId: signatureAssetId,
+      imageBytes: imageBytes,
+      mimeType: mimeType,
+      sourceType: sourceType,
+      saveForReuse: saveForReuse,
+    );
+    _sourceSignatureLoading = false;
+    switch (result) {
+      case DocuTrackerSuccess<DocuTrackerSourceSignatureBundle>(:final value):
+        notifyListeners();
+        return value;
+      case DocuTrackerFailure<DocuTrackerSourceSignatureBundle>(:final message):
+        _sourceSignatureError = message;
+        notifyListeners();
+        return null;
+    }
+  }
+
+  Future<DocuTrackerDocumentBuilderData?> signDocumentField({
+    required String documentId,
+    required String fieldId,
+    String? signatureAssetId,
+    Uint8List? imageBytes,
+    String mimeType = 'image/png',
+    String sourceType = 'drawn',
+    bool saveForReuse = false,
+  }) async {
+    if (_builderLoading) return null;
+    _builderLoading = true;
+    _builderError = null;
+    notifyListeners();
+    final result = await _repo.signDocumentField(
+      documentId: documentId,
+      fieldId: fieldId,
+      signatureAssetId: signatureAssetId,
+      imageBytes: imageBytes,
+      mimeType: mimeType,
+      sourceType: sourceType,
+      saveForReuse: saveForReuse,
+    );
+    _builderLoading = false;
+    switch (result) {
+      case DocuTrackerSuccess<DocuTrackerDocumentBuilderData>(:final value):
+        _builderData = value;
+        notifyListeners();
+        return value;
+      case DocuTrackerFailure<DocuTrackerDocumentBuilderData>(:final message):
+        _builderError = message;
+        notifyListeners();
+        return null;
+    }
+  }
+
+  Future<DocuTrackerDocumentBuilderData?> moveSignedDocumentField({
+    required String documentId,
+    required String fieldId,
+    required double x,
+    required double y,
+  }) async {
+    if (_builderLoading) return null;
+    _builderLoading = true;
+    _builderError = null;
+    notifyListeners();
+    final result = await _repo.moveSignedDocumentField(
+      documentId: documentId,
+      fieldId: fieldId,
+      x: x,
+      y: y,
+    );
+    _builderLoading = false;
+    switch (result) {
+      case DocuTrackerSuccess<DocuTrackerDocumentBuilderData>(:final value):
+        _builderData = value;
+        notifyListeners();
+        return value;
+      case DocuTrackerFailure<DocuTrackerDocumentBuilderData>(:final message):
+        _builderError = message;
+        notifyListeners();
+        return null;
     }
   }
 

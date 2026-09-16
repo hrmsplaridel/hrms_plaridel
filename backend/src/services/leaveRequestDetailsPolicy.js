@@ -314,7 +314,11 @@ function isIsoDate(value) {
   );
 }
 
-function customLeaveDetailValues(details, schema, { validate = false } = {}) {
+function customLeaveDetailValues(
+  details,
+  schema,
+  { validate = false, validateRequired = validate } = {}
+) {
   const source = isPlainObject(details) ? details : {};
   const fields = normalizeEmployeeDetailSchema(schema);
   const output = {};
@@ -323,7 +327,7 @@ function customLeaveDetailValues(details, schema, { validate = false } = {}) {
     const raw = source[field.key];
     const blank = raw == null || (typeof raw === 'string' && raw.trim() === '');
     if (blank) {
-      if (validate && field.required) {
+      if (validateRequired && field.required) {
         throw leaveDetailsPolicyError(`${field.label} is required.`);
       }
       continue;
@@ -409,13 +413,21 @@ function sanitizeEmployeeLeaveDetails(value, customFieldSchema = []) {
   };
 }
 
-function employeeLeaveDetailsFromPayload({ details, rest, customFieldSchema } = {}) {
+function employeeLeaveDetailsFromPayload({
+  details,
+  rest,
+  customFieldSchema,
+  requireCustomFields = true,
+} = {}) {
   const topLevel = isPlainObject(rest) ? rest : {};
   const nested = isPlainObject(details) ? details : {};
   const merged = { ...topLevel, ...nested };
   return {
     ...sanitizeEmployeeLeaveDetails(merged),
-    ...customLeaveDetailValues(merged, customFieldSchema, { validate: true }),
+    ...customLeaveDetailValues(merged, customFieldSchema, {
+      validate: true,
+      validateRequired: requireCustomFields,
+    }),
   };
 }
 

@@ -500,10 +500,79 @@ class TimeRecordPage {
   final DateTime? reportableThrough;
 }
 
+class AttendanceReportPeriod {
+  AttendanceReportPeriod({required this.officialDate, required List<int> years})
+    : years = List.unmodifiable(years);
+
+  factory AttendanceReportPeriod.fromJson(Map<String, dynamic> json) {
+    final rawDate = json['official_date']?.toString();
+    final parsedDate = rawDate == null ? null : DateTime.tryParse(rawDate);
+    if (parsedDate == null) {
+      throw const FormatException(
+        'The server returned an invalid official HRMS date.',
+      );
+    }
+    final officialDate = DateTime(
+      parsedDate.year,
+      parsedDate.month,
+      parsedDate.day,
+    );
+
+    final rawYears = json['years'];
+    if (rawYears is! List) {
+      throw const FormatException(
+        'The server returned invalid attendance report years.',
+      );
+    }
+    final years = <int>{};
+    for (final value in rawYears) {
+      final year = value is int ? value : int.tryParse(value.toString());
+      if (year == null || year < 1900 || year > officialDate.year) {
+        throw const FormatException(
+          'The server returned invalid attendance report years.',
+        );
+      }
+      years.add(year);
+    }
+    if (!years.contains(officialDate.year)) {
+      throw const FormatException(
+        'The attendance report years do not include the official HRMS year.',
+      );
+    }
+
+    return AttendanceReportPeriod(
+      officialDate: officialDate,
+      years: years.toList()..sort(),
+    );
+  }
+
+  final DateTime officialDate;
+  final List<int> years;
+}
+
 /// Repository for DTR time records. Uses backend API (dtr_daily_summary); Supabase logic commented out.
 class TimeRecordRepo {
   TimeRecordRepo._();
   static final TimeRecordRepo instance = TimeRecordRepo._();
+
+  /// Employee-scoped report years and official HRMS calendar date.
+  Future<AttendanceReportPeriod> getAttendanceReportPeriod() async {
+    final response = await ApiClient.instance.get<Map<String, dynamic>>(
+      '/api/dtr-daily-summary/report-years',
+    );
+    final data = response.data;
+    if (data == null) {
+      throw const FormatException(
+        'The server returned invalid attendance report dates.',
+      );
+    }
+    return AttendanceReportPeriod.fromJson(data);
+  }
+
+  /// Official HRMS calendar date, resolved by the backend in HRMS_TIMEZONE.
+  Future<DateTime> getOfficialHrmsDate() async {
+    return (await getAttendanceReportPeriod()).officialDate;
+  }
 
   /// List time records for admin (all users). Uses GET /api/dtr-daily-summary.
   ///

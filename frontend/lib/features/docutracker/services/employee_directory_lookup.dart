@@ -8,13 +8,17 @@ class EmployeeDirectoryEntry {
     required this.id,
     required this.fullName,
     this.departmentName,
+    this.departmentId,
     this.positionName,
+    this.roleId,
   });
 
   final String id;
   final String fullName;
   final String? departmentName;
+  final String? departmentId;
   final String? positionName;
+  final String? roleId;
 
   /// "Full Name · Department" (department omitted if unknown).
   String get nameAndDepartment {
@@ -31,6 +35,11 @@ class EmployeeDirectoryLookup {
   bool isLoaded = false;
 
   EmployeeDirectoryEntry? operator [](String id) => _byId[id];
+  List<EmployeeDirectoryEntry> get entries {
+    final values = _byId.values.toList(growable: false);
+    values.sort((a, b) => a.fullName.compareTo(b.fullName));
+    return values;
+  }
 
   /// One batched request (paged). Safe for typical org sizes; extend with backend `ids=` if needed.
   Future<void> load({int limit = 4000}) async {
@@ -64,7 +73,9 @@ class EmployeeDirectoryLookup {
           id: id,
           fullName: m['full_name']?.toString() ?? 'Unknown',
           departmentName: m['current_department_name']?.toString(),
+          departmentId: m['current_department_id']?.toString(),
           positionName: m['current_position_name']?.toString(),
+          roleId: m['role']?.toString(),
         );
       }
       isLoaded = true;
@@ -93,7 +104,9 @@ class EmployeeDirectoryLookup {
           id: id,
           fullName: m['full_name']?.toString() ?? 'Unknown',
           departmentName: m['current_department_name']?.toString(),
+          departmentId: m['current_department_id']?.toString(),
           positionName: m['current_position_name']?.toString(),
+          roleId: m['role']?.toString(),
         );
       } catch (_) {}
     }

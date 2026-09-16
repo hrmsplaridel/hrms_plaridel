@@ -192,6 +192,169 @@ test('unused future primary assignment can be deleted and its predecessor is res
   assert.ok(calls.some(({ sql }) => /^\s*DELETE FROM assignments/i.test(sql)));
 });
 
+test('unused same-day primary assignment can be permanently deleted', async () => {
+  const calls = [];
+  const target = {
+    id: RECORD_ID,
+    employee_id: '33333333-3333-4333-8333-333333333333',
+    effective_from: '2026-09-09',
+    effective_to: null,
+    is_active: true,
+  };
+  const db = {
+    async query(sql, params) {
+      const text = String(sql);
+      calls.push({ sql: text, params });
+      if (/SELECT \* FROM assignments WHERE id/i.test(text)) {
+        return { rowCount: 1, rows: [target] };
+      }
+      if (/AS is_future/i.test(text)) {
+        assert.match(text, /\$1::date >= \$2::date/);
+        return { rowCount: 1, rows: [{ is_future: true }] };
+      }
+      if (/AS has_dtr/i.test(text)) {
+        assert.match(text, /AS has_biometric/i);
+        return {
+          rowCount: 1,
+          rows: [{
+            has_dtr: false,
+            has_biometric: false,
+            has_leave: false,
+            has_locator: false,
+          }],
+        };
+      }
+      if (/^\s*DELETE FROM assignments/i.test(text)) {
+        return { rowCount: 1, rows: [] };
+      }
+      if (/effective_to = \(\$3::date - INTERVAL/i.test(text)) {
+        return { rowCount: 0, rows: [] };
+      }
+      if (/^\s*INSERT INTO audit_logs/i.test(text)) {
+        return { rowCount: 1, rows: [] };
+      }
+      throw new Error(`Unexpected SQL: ${text}`);
+    },
+  };
+
+  const result = await permanentlyDeleteFutureAssignment(db, {
+    actorId: ACTOR_ID,
+    recordType: 'primary',
+    recordId: RECORD_ID,
+    reason: 'Created for the wrong employee.',
+  });
+
+  assert.equal(result.deleted.id, RECORD_ID);
+  assert.equal(result.restoredPredecessor, null);
+  assert.ok(calls.some(({ sql }) => /^\s*DELETE FROM assignments/i.test(sql)));
+});
+
+test('unused backdated primary assignment created today can be permanently deleted', async () => {
+  const calls = [];
+  const target = {
+    id: RECORD_ID,
+    employee_id: '33333333-3333-4333-8333-333333333333',
+    effective_from: new Date(2026, 8, 8),
+    effective_to: null,
+    created_at: '2026-09-09T02:00:00.000Z',
+    is_active: true,
+  };
+  const db = {
+    async query(sql, params) {
+      const text = String(sql);
+      calls.push({ sql: text, params });
+      if (/SELECT \* FROM assignments WHERE id/i.test(text)) {
+        return { rowCount: 1, rows: [target] };
+      }
+      if (/AS is_future/i.test(text)) {
+        assert.match(text, /created_at|\$3::timestamptz/i);
+        assert.equal(params[2], target.created_at);
+        assert.equal(params[3], 'Asia/Manila');
+        return { rowCount: 1, rows: [{ is_future: true }] };
+      }
+      if (/AS has_dtr/i.test(text)) {
+        return {
+          rowCount: 1,
+          rows: [{
+            has_dtr: false,
+            has_biometric: false,
+            has_leave: false,
+            has_locator: false,
+          }],
+        };
+      }
+      if (/^\s*DELETE FROM assignments/i.test(text)) {
+        return { rowCount: 1, rows: [] };
+      }
+      if (/effective_to = \(\$3::date - INTERVAL/i.test(text)) {
+        return { rowCount: 0, rows: [] };
+      }
+      if (/^\s*INSERT INTO audit_logs/i.test(text)) {
+        return { rowCount: 1, rows: [] };
+      }
+      throw new Error(`Unexpected SQL: ${text}`);
+    },
+  };
+
+  const result = await permanentlyDeleteFutureAssignment(db, {
+    actorId: ACTOR_ID,
+    recordType: 'primary',
+    recordId: RECORD_ID,
+    reason: 'Backdated assignment was created for the wrong employee.',
+  });
+
+  assert.equal(result.deleted.id, RECORD_ID);
+  assert.equal(result.deleted.effective_from, '2026-09-08');
+  assert.equal(result.restoredPredecessor, null);
+  assert.ok(calls.some(({ sql }) => /^\s*DELETE FROM assignments/i.test(sql)));
+});
+
+test('same-day primary assignment with a biometric punch cannot be deleted', async () => {
+  const target = {
+    id: RECORD_ID,
+    employee_id: '33333333-3333-4333-8333-333333333333',
+    effective_from: '2026-09-09',
+    effective_to: null,
+    is_active: true,
+  };
+  const db = {
+    async query(sql) {
+      const text = String(sql);
+      if (/SELECT \* FROM assignments WHERE id/i.test(text)) {
+        return { rowCount: 1, rows: [target] };
+      }
+      if (/AS is_future/i.test(text)) {
+        return { rowCount: 1, rows: [{ is_future: true }] };
+      }
+      if (/AS has_dtr/i.test(text)) {
+        return {
+          rowCount: 1,
+          rows: [{
+            has_dtr: false,
+            has_biometric: true,
+            has_leave: false,
+            has_locator: false,
+          }],
+        };
+      }
+      throw new Error(`Unexpected SQL: ${text}`);
+    },
+  };
+
+  await assert.rejects(
+    permanentlyDeleteFutureAssignment(db, {
+      actorId: ACTOR_ID,
+      recordType: 'primary',
+      recordId: RECORD_ID,
+      reason: 'Created for the wrong employee.',
+    }),
+    (error) =>
+      error instanceof AssignmentHistoryError &&
+      error.statusCode === 409 &&
+      /biometric punches/i.test(error.message)
+  );
+});
+
 test('future primary assignment with dependent leave is not permanently deleted', async () => {
   const calls = [];
   const target = {

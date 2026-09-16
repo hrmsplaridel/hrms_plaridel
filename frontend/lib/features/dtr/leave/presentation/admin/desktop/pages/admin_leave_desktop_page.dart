@@ -27,6 +27,9 @@ import 'package:hrms_plaridel/features/dtr/leave/presentation/admin/widgets/admi
 import 'package:hrms_plaridel/features/dtr/leave/presentation/admin/widgets/admin_leave_review_dialogs.dart';
 import 'package:hrms_plaridel/features/dtr/leave/presentation/admin/widgets/admin_leave_screen_utils.dart';
 import 'package:hrms_plaridel/features/dtr/leave/presentation/admin/widgets/admin_leave_shared_widgets.dart';
+import 'package:hrms_plaridel/features/docutracker/data/providers/docutracker_provider.dart';
+import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_source_signature_card.dart';
+import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_signature_library_dialog.dart';
 
 typedef LeaveApproveAction = Future<bool> Function(LeaveApprovalInput input);
 typedef LeaveDecisionAction =
@@ -143,7 +146,7 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    final isScreenActive = TickerMode.of(context);
+    final isScreenActive = TickerMode.valuesOf(context).enabled;
     if (_initialized) {
       if (_isScreenActive == isScreenActive) return;
       _isScreenActive = isScreenActive;
@@ -372,10 +375,13 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
       'sickLeave' => 'Sick Leave',
       _ => request.leaveTypeLabel,
     };
+    final reservedDays = request.reservedCreditDays ?? 0;
     if (balance == null) {
-      return '$bucketLabel credits: no balance row is available yet.';
+      return '$bucketLabel credits: no paid credits are available. The request may be allocated without pay.';
     }
-    return '$bucketLabel credits: ${balance.availableDays.toStringAsFixed(1)} available (${balance.remainingDays.toStringAsFixed(1)} remaining excl. pending).';
+    final availableForThisRequest = (balance.availableDays + reservedDays)
+        .clamp(0, double.infinity);
+    return '$bucketLabel credits: ${availableForThisRequest.toStringAsFixed(1)} available for this request, including ${reservedDays.toStringAsFixed(1)} already reserved.';
   }
 
   Future<void> _safeAutoRefresh({bool forceRefresh = false}) async {
@@ -513,6 +519,7 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
               .length,
           reviewing: provider.reviewing,
           onRefresh: () => _loadRequests(forceRefresh: true),
+          onManageSignatures: _openSignatureLibrary,
           onForcedLeaveDeduction: widget.isDepartmentHead
               ? null
               : _applyForcedLeaveDeduction,
@@ -730,6 +737,14 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
         recommendationOfficerName: formSignatories.recommendationOfficer?.name,
         recommendationOfficerTitle:
             formSignatories.recommendationOfficer?.title,
+        approvingAuthorityName: formSignatories.approvingAuthority?.name,
+        approvingAuthorityTitle: formSignatories.approvingAuthority?.title,
+        applicantSignatureBytes:
+            formSignatories.applicantSignature?.signatureImageBytes,
+        departmentHeadSignatureBytes:
+            formSignatories.departmentHeadSignature?.signatureImageBytes,
+        hrApproverSignatureBytes:
+            formSignatories.hrApproverSignature?.signatureImageBytes,
         name: 'Leave_Application_${target.id ?? target.userId}.pdf',
       );
     } catch (e) {
@@ -784,6 +799,20 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
     }
     final reviewerInfo = await _loadReviewerSignatureInfo(auth);
     if (!mounted) return;
+    final signed = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => _LeaveApprovalSignatureDialog(
+        request: request,
+        slotKey: 'hr_approver',
+        title: 'Confirm Final Approval Signature',
+        signatureTitle: 'HR/Admin E-Signature',
+        unsignedMessage: 'No final approver signature selected',
+        waitingMessage: 'Only an authorized HR reviewer can sign here.',
+        confirmLabel: 'Sign and Approve',
+      ),
+    );
+    if (!mounted || signed != true) return;
 
     final finalInput = LeaveApprovalInput(
       requestId: request.id ?? '',
@@ -1074,6 +1103,13 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
     );
   }
 
+  Future<void> _openSignatureLibrary() {
+    return showDocuTrackerSignatureLibraryDialog(
+      context,
+      provider: context.read<DocuTrackerProvider>(),
+    );
+  }
+
   // ---- Department Head actions ----
 
   Future<void> _deptHeadApprove(LeaveRequest request) async {
@@ -1084,6 +1120,20 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
       _showMessage('No logged-in reviewer found.');
       return;
     }
+    final signed = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => _LeaveApprovalSignatureDialog(
+        request: request,
+        slotKey: 'department_head',
+        title: 'Confirm Department Recommendation',
+        signatureTitle: 'Department Head E-Signature',
+        unsignedMessage: 'No department reviewer signature selected',
+        waitingMessage: 'Only the assigned department reviewer can sign here.',
+        confirmLabel: 'Sign and Forward to HR',
+      ),
+    );
+    if (!mounted || signed != true) return;
     final input = LeaveReviewDecisionInput(
       requestId: request.id ?? '',
       reviewerId: reviewerId,
@@ -1201,6 +1251,7 @@ class _AdminHeaderCard extends StatelessWidget {
     required this.pendingCount,
     required this.reviewing,
     required this.onRefresh,
+    required this.onManageSignatures,
     this.onForcedLeaveDeduction,
     this.onYearEndForcedLeave,
     this.onMonthlyAccrual,
@@ -1214,6 +1265,7 @@ class _AdminHeaderCard extends StatelessWidget {
   final int pendingCount;
   final bool reviewing;
   final Future<void> Function() onRefresh;
+  final Future<void> Function() onManageSignatures;
   final Future<void> Function()? onForcedLeaveDeduction;
   final Future<void> Function()? onYearEndForcedLeave;
   final Future<void> Function()? onMonthlyAccrual;
@@ -1225,6 +1277,11 @@ class _AdminHeaderCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final menuActions = <_HeaderMenuAction>[
+      _HeaderMenuAction(
+        label: 'My Signatures',
+        icon: Icons.draw_outlined,
+        onSelected: onManageSignatures,
+      ),
       if (onLeaveTypeRules != null)
         _HeaderMenuAction(
           label: 'Leave Type Rules',
@@ -2949,6 +3006,93 @@ class _BalanceMetric extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+class _LeaveApprovalSignatureDialog extends StatefulWidget {
+  const _LeaveApprovalSignatureDialog({
+    required this.request,
+    required this.slotKey,
+    required this.title,
+    required this.signatureTitle,
+    required this.unsignedMessage,
+    required this.waitingMessage,
+    required this.confirmLabel,
+  });
+
+  final LeaveRequest request;
+  final String slotKey;
+  final String title;
+  final String signatureTitle;
+  final String unsignedMessage;
+  final String waitingMessage;
+  final String confirmLabel;
+
+  @override
+  State<_LeaveApprovalSignatureDialog> createState() =>
+      _LeaveApprovalSignatureDialogState();
+}
+
+class _LeaveApprovalSignatureDialogState
+    extends State<_LeaveApprovalSignatureDialog> {
+  bool _hasSignature = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final requestId = widget.request.id ?? '';
+    return AlertDialog(
+      title: Text(widget.title),
+      content: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 540),
+        child: SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                'Applicant: ${widget.request.employeeName ?? 'Employee'}',
+                style: const TextStyle(fontWeight: FontWeight.w600),
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                'Choose a saved signature, or draw and save one for future approvals.',
+              ),
+              const SizedBox(height: 16),
+              DocuTrackerSourceSignatureCard(
+                sourceModule: 'dtr',
+                sourceTable: 'leave_requests',
+                sourceRecordId: requestId,
+                slotKey: widget.slotKey,
+                title: widget.signatureTitle,
+                unsignedMessage: widget.unsignedMessage,
+                waitingMessage: widget.waitingMessage,
+                savedMessage: 'Signature selected.',
+                onChanged: (bundle) {
+                  final signed =
+                      bundle.signatureFor(widget.slotKey)?.isSigned == true;
+                  if (mounted && signed != _hasSignature) {
+                    setState(() => _hasSignature = signed);
+                  }
+                },
+              ),
+            ],
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(false),
+          child: const Text('Cancel'),
+        ),
+        FilledButton.icon(
+          onPressed: _hasSignature
+              ? () => Navigator.of(context).pop(true)
+              : null,
+          icon: const Icon(Icons.approval_rounded),
+          label: Text(widget.confirmLabel),
+        ),
+      ],
     );
   }
 }

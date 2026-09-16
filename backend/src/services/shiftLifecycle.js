@@ -9,6 +9,8 @@ class ShiftLifecycleError extends Error {
   }
 }
 
+const MAX_SHIFT_GRACE_PERIOD_MINUTES = 240;
+
 const SHIFT_SCHEDULE_FIELDS = Object.freeze([
   'start_time',
   'end_time',
@@ -84,6 +86,111 @@ function parseShiftTimeInput(
     );
   }
   return `${match[1]}:${match[2]}:${match[3] || '00'}`;
+}
+
+function shiftFieldValidationError(field, message) {
+  return new ShiftLifecycleError(message, 400, {
+    fields: { [field]: message },
+  });
+}
+
+function parseShiftWorkingDaysInput(value) {
+  if (!Array.isArray(value)) {
+    throw shiftFieldValidationError(
+      'working_days',
+      'Working Days must be an array of ISO weekdays from 1 (Monday) to 7 (Sunday).'
+    );
+  }
+  if (value.length < 1 || value.length > 7) {
+    throw shiftFieldValidationError(
+      'working_days',
+      'Select between one and seven Working Days.'
+    );
+  }
+  if (!value.every((day) => Number.isInteger(day) && day >= 1 && day <= 7)) {
+    throw shiftFieldValidationError(
+      'working_days',
+      'Every Working Day must be an integer from 1 (Monday) to 7 (Sunday).'
+    );
+  }
+  if (new Set(value).size !== value.length) {
+    throw shiftFieldValidationError(
+      'working_days',
+      'Working Days must not contain duplicates.'
+    );
+  }
+  return [...value].sort((a, b) => a - b);
+}
+
+function parseShiftGracePeriodInput(value) {
+  if (!Number.isInteger(value)) {
+    throw shiftFieldValidationError(
+      'grace_period_minutes',
+      'Grace Period must be a whole number of minutes.'
+    );
+  }
+  if (value < 0 || value > MAX_SHIFT_GRACE_PERIOD_MINUTES) {
+    throw shiftFieldValidationError(
+      'grace_period_minutes',
+      `Grace Period must be between 0 and ${MAX_SHIFT_GRACE_PERIOD_MINUTES} minutes.`
+    );
+  }
+  return value;
+}
+
+function parseShiftActiveInput(value) {
+  if (typeof value !== 'boolean') {
+    throw shiftFieldValidationError(
+      'is_active',
+      'Active status must be a JSON boolean.'
+    );
+  }
+  return value;
+}
+
+function shiftAuditSnapshot(shift) {
+  if (!shift) return null;
+  return {
+    id: shift.id,
+    shift_number: shift.shift_number ?? null,
+    name: shift.name,
+    start_time: normalizedTime(shift.start_time),
+    end_time: normalizedTime(shift.end_time),
+    break_end: normalizedTime(shift.break_end),
+    punch_mode: shift.punch_mode ?? 'auto',
+    grace_period_minutes: Number(shift.grace_period_minutes ?? 0),
+    working_days: Array.isArray(shift.working_days)
+      ? shift.working_days.map(Number).sort((a, b) => a - b)
+      : [],
+    is_active: shift.is_active !== false,
+  };
+}
+
+function shiftAuditAction(before, after) {
+  if (before?.is_active !== false && after?.is_active === false) {
+    return 'shift_deactivated';
+  }
+  if (before?.is_active === false && after?.is_active !== false) {
+    return 'shift_reactivated';
+  }
+  return 'shift_updated';
+}
+
+async function writeShiftAudit(
+  db,
+  { actorId, action, shiftId, before = null, after = null }
+) {
+  await db.query(
+    `INSERT INTO audit_logs (
+       user_id, action, entity_type, entity_id, details
+     ) VALUES ($1::uuid, $2, 'shift', $3::uuid, $4)`,
+    [
+      actorId || null,
+      action,
+      shiftId,
+      JSON.stringify({ before, after }),
+    ]
+  );
 }
 
 function timeMinutes(value) {
@@ -391,13 +498,16 @@ async function ensureShiftScheduleChangeAllowed(
   const changedFields = changedShiftScheduleFields(shift, changes);
   if (changedFields.length === 0) return shift;
 
-  const assignmentHistoryCount = await shiftAssignmentHistoryCount(db, shiftId);
-  if (assignmentHistoryCount > 0) {
+  const dependencies = await shiftDependencyCounts(db, shiftId);
+  const blockers = shiftDependencyBlockers(dependencies);
+  if (blockers.length > 0) {
     throw new ShiftLifecycleError(
-      'This shift has assignment history, so its schedule cannot be changed. Create a new shift and use Assignment Management to start it on the required effective date.',
+      'This shift has assignment, attendance, or policy history, so its schedule cannot be changed. Create a new shift and use Assignment Management to start it on the required effective date.',
       409,
       {
-        assignment_history_count: assignmentHistoryCount,
+        assignment_history_count: dependencies.assignments,
+        dependencies,
+        blockers,
         changed_fields: changedFields,
       }
     );
@@ -406,6 +516,7 @@ async function ensureShiftScheduleChangeAllowed(
 }
 
 module.exports = {
+  MAX_SHIFT_GRACE_PERIOD_MINUTES,
   SHIFT_DEACTIVATION_DEPENDENCIES,
   SHIFT_DELETE_DEPENDENCIES,
   SHIFT_SCHEDULE_FIELDS,
@@ -417,8 +528,13 @@ module.exports = {
   ensureCompatiblePunchModeSchedule,
   ensureSupportedShiftRange,
   lockShiftForUpdate,
+  parseShiftActiveInput,
+  parseShiftGracePeriodInput,
   parseShiftTimeInput,
+  parseShiftWorkingDaysInput,
   resolvedPunchModeForSchedule,
+  shiftAuditAction,
+  shiftAuditSnapshot,
   shiftAssignmentHistoryCount,
   shiftDeactivationBlockers,
   shiftDeactivationCountsFromRow,
@@ -427,4 +543,5 @@ module.exports = {
   shiftDependencyCounts,
   shiftDependencyCountsFromRow,
   shiftDependencyCountsSql,
+  writeShiftAudit,
 };

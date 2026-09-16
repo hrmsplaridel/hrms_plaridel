@@ -3,6 +3,7 @@ import 'package:hrms_plaridel/features/dtr/leave/models/leave_balance.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_balance_ledger.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_entitlement_basis.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_request.dart';
+import 'package:hrms_plaridel/features/dtr/leave/models/leave_request_history.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_type.dart';
 
 /// Temporary in-memory repository for local UI integration.
@@ -13,6 +14,35 @@ class MockLeaveRepository implements LeaveRepository {
   final List<LeaveRequest> _requests = [];
   final Map<String, List<LeaveBalance>> _balancesByUser = {};
   int _requestCounter = 0;
+
+  @override
+  Future<DateTime> getOfficialDate() async {
+    final now = DateTime.now();
+    return DateTime(now.year, now.month, now.day);
+  }
+
+  @override
+  Future<List<LeaveRequestHistoryEntry>> listMyRequestHistory(
+    String requestId,
+  ) async {
+    final request = _getRequestByIdInternal(requestId);
+    if (request == null) return const [];
+    final actedAt = request.updatedAt ?? request.createdAt ?? DateTime.now();
+    return [
+      LeaveRequestHistoryEntry(
+        id: 'history_$requestId',
+        requestId: requestId,
+        action: request.status == LeaveRequestStatus.draft
+            ? 'saved_draft'
+            : 'submitted',
+        toStatus: request.status.value,
+        actorId: request.userId,
+        actorName: request.employeeName,
+        actedAt: actedAt,
+        remarks: request.reason,
+      ),
+    ];
+  }
 
   @override
   Future<LeaveRequest> saveDraft(LeaveRequest request) async {
@@ -94,6 +124,23 @@ class MockLeaveRepository implements LeaveRepository {
       results = results.take(limit).toList();
     }
     return results;
+  }
+
+  @override
+  Future<LeaveRequestPage> listMyRequestPage(
+    String userId, {
+    required int limit,
+    required int offset,
+  }) async {
+    final all = await listMyRequests(userId);
+    final safeOffset = offset.clamp(0, all.length);
+    final end = (safeOffset + limit).clamp(safeOffset, all.length);
+    return LeaveRequestPage(
+      items: all.sublist(safeOffset, end),
+      total: all.length,
+      limit: limit,
+      offset: safeOffset,
+    );
   }
 
   @override

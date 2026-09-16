@@ -10,8 +10,7 @@ class LocatorSlipDataCache {
   static const Duration _typeCacheTtl = Duration(minutes: 5);
   static const Duration _referenceCacheTtl = Duration(minutes: 5);
 
-  final Map<String, _LocatorCacheEntry<List<Map<String, dynamic>>>>
-  _requestCache = {};
+  final Map<String, _LocatorCacheEntry<LocatorRequestPage>> _requestCache = {};
   final Map<String, _LocatorCacheEntry<LocatorAdminRequestPage>>
   _adminRequestCache = {};
   final Map<bool, _LocatorCacheEntry<List<LocatorRequestType>>> _typeCache = {};
@@ -67,30 +66,34 @@ class LocatorSlipDataCache {
     return value;
   }
 
-  Future<List<Map<String, dynamic>>> listMyRequests({
+  Future<LocatorRequestPage> listMyRequests({
     required String userId,
     String? role,
+    Map<String, String> query = const {},
     bool forceRefresh = false,
   }) {
-    return _listRequestRows(
-      key: requestCacheKeyForUser(scope: 'my', userId: userId, role: role),
+    return _listRequestPage(
+      scope: 'my',
+      userId: userId,
+      role: role,
       path: '/api/locator-slips/my',
+      query: query,
       forceRefresh: forceRefresh,
     );
   }
 
-  Future<List<Map<String, dynamic>>> listDepartmentHeadRequests({
+  Future<LocatorRequestPage> listDepartmentHeadRequests({
     required String userId,
     String? role,
+    Map<String, String> query = const {},
     bool forceRefresh = false,
   }) {
-    return _listRequestRows(
-      key: requestCacheKeyForUser(
-        scope: 'department-head',
-        userId: userId,
-        role: role,
-      ),
+    return _listRequestPage(
+      scope: 'department-head',
+      userId: userId,
+      role: role,
       path: '/api/locator-slips/department-head',
+      query: query,
       forceRefresh: forceRefresh,
     );
   }
@@ -140,30 +143,36 @@ class LocatorSlipDataCache {
     invalidateReferenceData();
   }
 
-  Future<List<Map<String, dynamic>>> _listRequestRows({
-    required String key,
+  Future<LocatorRequestPage> _listRequestPage({
+    required String scope,
+    required String userId,
+    required String? role,
     required String path,
+    required Map<String, String> query,
     required bool forceRefresh,
   }) async {
+    final requestPath = Uri(
+      path: path,
+      queryParameters: query.isEmpty ? null : query,
+    ).toString();
+    final key = requestCacheKeyForUser(
+      scope: scope,
+      userId: userId,
+      role: role,
+      query: query,
+    );
     final cached = _requestCache[key];
     if (!forceRefresh && cached != null && cached.isFresh(_requestCacheTtl)) {
-      return _copyRows(cached.value);
+      return cached.value.copy();
     }
 
-    final res = await ApiClient.instance.get<List<dynamic>>(path);
-    final rows = (res.data ?? const [])
-        .whereType<Map>()
-        .map((e) => Map<String, dynamic>.from(e))
-        .toList();
-    _requestCache[key] = _LocatorCacheEntry<List<Map<String, dynamic>>>(
-      _copyRows(rows),
+    final res = await ApiClient.instance.get<dynamic>(requestPath);
+    final page = LocatorRequestPage.fromData(res.data);
+    _requestCache[key] = _LocatorCacheEntry<LocatorRequestPage>(
+      page.copy(),
       DateTime.now(),
     );
-    return rows;
-  }
-
-  static List<Map<String, dynamic>> _copyRows(List<Map<String, dynamic>> rows) {
-    return rows.map((row) => Map<String, dynamic>.from(row)).toList();
+    return page;
   }
 
   static String requestCacheKeyForUser({
@@ -190,6 +199,88 @@ class LocatorSlipDataCache {
         .join('&');
     return '$baseKey?$queryText';
   }
+}
+
+class LocatorRequestPage {
+  const LocatorRequestPage({
+    required this.items,
+    required this.page,
+    required this.pageSize,
+    required this.total,
+    required this.pageCount,
+  });
+
+  final List<Map<String, dynamic>> items;
+  final int page;
+  final int pageSize;
+  final int total;
+  final int pageCount;
+
+  bool get hasMore => page < pageCount;
+
+  factory LocatorRequestPage.fromData(dynamic data) {
+    if (data is List) {
+      final items = _locatorRowsFrom(data);
+      return LocatorRequestPage(
+        items: items,
+        page: 1,
+        pageSize: items.isEmpty ? 50 : items.length,
+        total: items.length,
+        pageCount: 1,
+      );
+    }
+    final body = data is Map
+        ? Map<String, dynamic>.from(data)
+        : const <String, dynamic>{};
+    final pagination = body['pagination'] is Map
+        ? Map<String, dynamic>.from(body['pagination'] as Map)
+        : const <String, dynamic>{};
+    final items = _locatorRowsFrom(body['items']);
+    final pageSize = _positivePageInt(
+      pagination['page_size'],
+      fallback: items.isEmpty ? 50 : items.length,
+    );
+    final total = _nonnegativePageInt(
+      pagination['total'],
+      fallback: items.length,
+    );
+    return LocatorRequestPage(
+      items: items,
+      page: _positivePageInt(pagination['page'], fallback: 1),
+      pageSize: pageSize,
+      total: total,
+      pageCount: _positivePageInt(
+        pagination['page_count'],
+        fallback: total == 0 ? 1 : (total / pageSize).ceil(),
+      ),
+    );
+  }
+
+  LocatorRequestPage copy() => LocatorRequestPage(
+    items: items.map((item) => Map<String, dynamic>.from(item)).toList(),
+    page: page,
+    pageSize: pageSize,
+    total: total,
+    pageCount: pageCount,
+  );
+}
+
+List<Map<String, dynamic>> _locatorRowsFrom(dynamic value) {
+  if (value is! List) return [];
+  return value
+      .whereType<Map>()
+      .map((item) => Map<String, dynamic>.from(item))
+      .toList();
+}
+
+int _positivePageInt(dynamic value, {required int fallback}) {
+  final parsed = int.tryParse(value?.toString() ?? '');
+  return parsed != null && parsed > 0 ? parsed : fallback;
+}
+
+int _nonnegativePageInt(dynamic value, {required int fallback}) {
+  final parsed = int.tryParse(value?.toString() ?? '');
+  return parsed != null && parsed >= 0 ? parsed : fallback;
 }
 
 class LocatorAdminRequestPage {

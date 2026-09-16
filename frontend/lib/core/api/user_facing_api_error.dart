@@ -1,8 +1,23 @@
 import 'package:dio/dio.dart';
 
 /// Short, human-readable text for snackbars and dialogs (not developer dumps).
-String userFacingApiError(Object error) {
+String userFacingApiError(
+  Object error, {
+  bool operationMayHaveCompleted = false,
+}) {
   if (error is DioException) {
+    if (operationMayHaveCompleted && _hasUnconfirmedOutcome(error)) {
+      return switch (error.type) {
+        DioExceptionType.connectionTimeout ||
+        DioExceptionType.sendTimeout ||
+        DioExceptionType.receiveTimeout =>
+          'Submission timed out and was not confirmed. Refresh My Leave before submitting again.',
+        DioExceptionType.connectionError =>
+          'No internet connection or the server is unreachable. Submission was not confirmed. Refresh My Leave before submitting again.',
+        _ =>
+          'A network error prevented confirmation. Refresh My Leave before submitting again.',
+      };
+    }
     return _dioMessage(error);
   }
   if (error is Exception) {
@@ -19,6 +34,19 @@ String userFacingApiError(Object error) {
     return '${s.substring(0, 197)}…';
   }
   return s;
+}
+
+bool _hasUnconfirmedOutcome(DioException error) {
+  if (error.response != null) return false;
+  return switch (error.type) {
+    DioExceptionType.connectionTimeout ||
+    DioExceptionType.sendTimeout ||
+    DioExceptionType.receiveTimeout ||
+    DioExceptionType.connectionError => true,
+    // Flutter Web can surface browser-level network failures as `unknown`.
+    DioExceptionType.unknown => true,
+    _ => false,
+  };
 }
 
 String _dioMessage(DioException e) {

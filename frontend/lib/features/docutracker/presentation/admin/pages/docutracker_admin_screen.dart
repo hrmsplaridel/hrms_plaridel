@@ -1,3 +1,7 @@
+// Legacy admin panels remain in this file for route compatibility while the
+// primary admin experience is simplified to Workflows + More.
+// ignore_for_file: unused_element
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:hrms_plaridel/core/api/client.dart';
@@ -18,7 +22,8 @@ import 'package:hrms_plaridel/features/docutracker/presentation/admin/widgets/do
 import 'docutracker_escalation_config_screen.dart';
 import 'docutracker_workflow_editor_screen.dart';
 import 'docutracker_permission_editor_screen.dart';
-import 'docutracker_step_assignees_editor_screen.dart';
+import 'docutracker_governance_audit_screen.dart';
+import 'docutracker_official_signatories_screen.dart';
 
 /// Groups list rows by role/user only (one row per person, all document types combined).
 String _permissionGroupKey(DocumentPermission p) =>
@@ -212,12 +217,44 @@ class _DocuTrackerAdminScreenState extends State<DocuTrackerAdminScreen> {
     BuildContext context,
     DocuTrackerProvider provider,
   ) async {
+    final typeNameController = TextEditingController();
+    final configuredTypes =
+        <DocumentType>{
+          ...DocumentType.values,
+          ...provider.routingConfigs.map((config) => config.documentType),
+        }.toList()..sort(
+          (a, b) => a.displayName.toLowerCase().compareTo(
+            b.displayName.toLowerCase(),
+          ),
+        );
     final type = await showDialog<DocumentType>(
       context: context,
       builder: (ctx) {
-        var selected = DocumentType.values.first;
+        var selected = configuredTypes.first;
+        var query = '';
         return StatefulBuilder(
           builder: (ctx, setModal) {
+            final filteredTypes = configuredTypes
+                .where(
+                  (type) =>
+                      type.displayName.toLowerCase().contains(
+                        query.toLowerCase(),
+                      ) ||
+                      type.value.toLowerCase().contains(query.toLowerCase()),
+                )
+                .toList();
+            DocumentType? customType;
+            if (query.trim().isNotEmpty) {
+              try {
+                customType = DocumentType.fromDisplayName(query);
+              } on ArgumentError {
+                customType = null;
+              }
+            }
+            final customTypeToAdd =
+                customType != null && !configuredTypes.contains(customType)
+                ? customType
+                : null;
             return AlertDialog(
               title: const Text('New workflow'),
               content: Column(
@@ -225,7 +262,7 @@ class _DocuTrackerAdminScreenState extends State<DocuTrackerAdminScreen> {
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   Text(
-                    'Pick a document type. Add steps in the editor; saving publishes the next workflow version for that type.',
+                    'Select a type or enter a new one. Publishing makes the type available for future documents.',
                     style: TextStyle(
                       color: AppTheme.textSecondary,
                       fontSize: 13,
@@ -233,21 +270,77 @@ class _DocuTrackerAdminScreenState extends State<DocuTrackerAdminScreen> {
                     ),
                   ),
                   const SizedBox(height: 12),
-                  DropdownButtonFormField<DocumentType>(
-                    key: ValueKey<DocumentType>(selected),
-                    initialValue: selected,
-                    decoration: DocuTrackerStyles.dropdownDecoration(
+                  TextField(
+                    controller: typeNameController,
+                    autofocus: true,
+                    decoration: DocuTrackerStyles.inputDecoration(
                       context,
-                      'Document type',
+                      'Search or enter document type',
+                      Icons.search_rounded,
                     ),
-                    items: [
-                      for (final t in DocumentType.values)
-                        DropdownMenuItem(value: t, child: Text(t.displayName)),
-                    ],
-                    onChanged: (v) {
-                      if (v == null) return;
-                      setModal(() => selected = v);
+                    textInputAction: TextInputAction.done,
+                    onChanged: (value) => setModal(() => query = value),
+                    onSubmitted: (_) {
+                      if (customTypeToAdd != null) {
+                        Navigator.pop(ctx, customTypeToAdd);
+                      }
                     },
+                  ),
+                  const SizedBox(height: 12),
+                  SizedBox(
+                    width: 520,
+                    height: 248,
+                    child: Material(
+                      color: Theme.of(ctx).colorScheme.surfaceContainerHighest,
+                      borderRadius: BorderRadius.circular(8),
+                      child: RadioGroup<DocumentType>(
+                        groupValue: selected,
+                        onChanged: (value) {
+                          if (value == null) return;
+                          setModal(() {
+                            selected = value;
+                            typeNameController.clear();
+                            query = '';
+                          });
+                        },
+                        child: ListView(
+                          shrinkWrap: true,
+                          children: [
+                            for (final option in filteredTypes)
+                              RadioListTile<DocumentType>(
+                                value: option,
+                                dense: true,
+                                contentPadding: const EdgeInsets.symmetric(
+                                  horizontal: 12,
+                                ),
+                                title: Text(option.displayName),
+                                subtitle: Text(
+                                  option.value,
+                                  style: Theme.of(ctx).textTheme.bodySmall,
+                                ),
+                              ),
+                            if (customTypeToAdd != null)
+                              ListTile(
+                                leading: const Icon(Icons.add_circle_outline),
+                                title: Text(
+                                  'Create "${customTypeToAdd.displayName}"',
+                                ),
+                                subtitle: Text(customTypeToAdd.value),
+                                onTap: () =>
+                                    Navigator.pop(ctx, customTypeToAdd),
+                              ),
+                            if (filteredTypes.isEmpty &&
+                                customTypeToAdd == null)
+                              const Padding(
+                                padding: EdgeInsets.all(16),
+                                child: Text(
+                                  'Enter letters or numbers for a new type.',
+                                ),
+                              ),
+                          ],
+                        ),
+                      ),
+                    ),
                   ),
                 ],
               ),
@@ -258,7 +351,7 @@ class _DocuTrackerAdminScreenState extends State<DocuTrackerAdminScreen> {
                 ),
                 FilledButton(
                   onPressed: () => Navigator.pop(ctx, selected),
-                  child: const Text('Continue'),
+                  child: const Text('Continue with selected type'),
                 ),
               ],
             );
@@ -266,6 +359,7 @@ class _DocuTrackerAdminScreenState extends State<DocuTrackerAdminScreen> {
         );
       },
     );
+    typeNameController.dispose();
     if (type == null || !context.mounted) return;
     final configs = _routingConfigsForDisplay(provider);
     DocumentRoutingConfig? existing;
@@ -296,7 +390,6 @@ class _DocuTrackerAdminScreenState extends State<DocuTrackerAdminScreen> {
     final provider = context.watch<DocuTrackerProvider>();
     return LayoutBuilder(
       builder: (context, constraints) {
-        final isNarrow = constraints.maxWidth < 640;
         return Padding(
           padding: widget.contentPadding,
           child: Column(
@@ -305,17 +398,11 @@ class _DocuTrackerAdminScreenState extends State<DocuTrackerAdminScreen> {
               if (widget.showHeader) ...[
                 const DocuTrackerModuleHeader(
                   title: 'Admin',
-                  subtitle:
-                      'Workflows define who routes each step; permissions control view / create / download by document type. '
-                      'Use the toggle below to switch between the two.',
+                  subtitle: 'Configure document approval routes.',
                 ),
                 const SizedBox(height: 16),
               ],
-              _buildAdminSectionToggle(),
-              const SizedBox(height: 16),
-              isNarrow
-                  ? _buildNarrowLayout(context, provider)
-                  : _buildWideLayout(context, provider),
+              _buildWorkflowsManagementCard(context, provider),
             ],
           ),
         );
@@ -325,47 +412,62 @@ class _DocuTrackerAdminScreenState extends State<DocuTrackerAdminScreen> {
 
   /// Switch between workflow routing UI and document permission matrix (single focus area).
   Widget _buildAdminSectionToggle() {
-    return DocuTrackerWarmSurfaceCard(
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
-      child: SizedBox(
-        width: double.infinity,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Admin controls',
-              style: TextStyle(
-                color: DocuTrackerTokens.textPrimaryOf(context),
-                fontSize: 13,
-                fontWeight: FontWeight.w800,
+    return Wrap(
+      spacing: 12,
+      runSpacing: 8,
+      children: [
+        _adminNavButton(
+          label: 'Workflows',
+          icon: Icons.account_tree_outlined,
+          selected: _adminTab == 0,
+          onTap: () => setState(() => _adminTab = 0),
+        ),
+        _adminNavButton(
+          label: 'Advanced Security',
+          icon: Icons.lock_outline_rounded,
+          selected: _adminTab == 1,
+          onTap: () => setState(() => _adminTab = 1),
+        ),
+      ],
+    );
+  }
+
+  Widget _adminNavButton({
+    required String label,
+    required IconData icon,
+    required bool selected,
+    required VoidCallback onTap,
+  }) {
+    final dark = AppTheme.dashIsDark(context);
+    final foreground = selected
+        ? (dark ? Colors.white : AppTheme.primaryNavy)
+        : AppTheme.dashTextPrimaryOf(context);
+    return Material(
+      color: selected
+          ? AppTheme.primaryNavy.withValues(alpha: dark ? 0.38 : 0.12)
+          : (dark ? AppTheme.dashMutedSurfaceOf(context) : AppTheme.lightGray),
+      borderRadius: BorderRadius.circular(8),
+      child: InkWell(
+        key: ValueKey('docutracker-admin-${label.toLowerCase()}'),
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(8),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, size: 20, color: foreground),
+              const SizedBox(width: 8),
+              Text(
+                label,
+                style: TextStyle(
+                  color: foreground,
+                  fontSize: 14,
+                  fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
+                ),
               ),
-            ),
-            const SizedBox(height: 3),
-            Text(
-              'Switch between routing workflows and access permissions.',
-              style: DocuTrackerTokens.subtitleStyle(
-                context,
-              ).copyWith(fontSize: 11.5),
-            ),
-            const SizedBox(height: 12),
-            Wrap(
-              spacing: 8,
-              children: [
-                DocuTrackerWarmFilterChip(
-                  label: 'Workflows',
-                  icon: Icons.account_tree_outlined,
-                  selected: _adminTab == 0,
-                  onTap: () => setState(() => _adminTab = 0),
-                ),
-                DocuTrackerWarmFilterChip(
-                  label: 'Permissions',
-                  icon: Icons.lock_outline_rounded,
-                  selected: _adminTab == 1,
-                  onTap: () => setState(() => _adminTab = 1),
-                ),
-              ],
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
@@ -442,12 +544,19 @@ class _DocuTrackerAdminScreenState extends State<DocuTrackerAdminScreen> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         DocuTrackerAdminSectionHeader(
-          title: 'Active Workflows',
-          subtitle: 'Manage enterprise routing and approval cycles.',
-          trailing: DocuTrackerAdminPrimaryButton(
-            label: 'New workflow',
-            enabled: !provider.loading,
-            onPressed: () => _createNewWorkflow(context, provider),
+          title: 'Workflows',
+          subtitle: 'Document approval routes.',
+          trailing: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _buildAdminMoreMenu(provider),
+              const SizedBox(width: 8),
+              DocuTrackerAdminPrimaryButton(
+                label: 'New workflow',
+                enabled: !provider.loading,
+                onPressed: () => _createNewWorkflow(context, provider),
+              ),
+            ],
           ),
         ),
         const SizedBox(height: 20),
@@ -480,12 +589,71 @@ class _DocuTrackerAdminScreenState extends State<DocuTrackerAdminScreen> {
                     );
                     if (saved == true && mounted) await _load();
                   },
-                  onMenu: () => _showWorkflowCardMenu(context, config),
                 ),
               ),
             ),
           ),
       ],
+    );
+  }
+
+  Widget _buildAdminMoreMenu(DocuTrackerProvider provider) {
+    return PopupMenuButton<String>(
+      tooltip: 'More admin tools',
+      enabled: !_panelBusy,
+      onSelected: (value) => _openAdminTool(() async {
+        switch (value) {
+          case 'access':
+            await Navigator.of(context).push(
+              MaterialPageRoute<void>(
+                builder: (_) => const DocuTrackerPermissionEditorScreen(),
+              ),
+            );
+            if (mounted) await _load();
+          case 'audit':
+            await Navigator.of(context).push(
+              MaterialPageRoute<void>(
+                builder: (_) => const DocuTrackerGovernanceAuditScreen(),
+              ),
+            );
+          case 'escalation':
+            await Navigator.of(context).push(
+              MaterialPageRoute<void>(
+                builder: (_) => const DocuTrackerEscalationConfigScreen(),
+              ),
+            );
+          case 'signatories':
+            await Navigator.of(context).push(
+              MaterialPageRoute<void>(
+                builder: (_) => const DocuTrackerOfficialSignatoriesScreen(),
+              ),
+            );
+          case 'refresh':
+            await _load();
+        }
+      }),
+      itemBuilder: (_) => const [
+        PopupMenuItem(value: 'access', child: Text('System access')),
+        PopupMenuItem(value: 'audit', child: Text('Audit log')),
+        PopupMenuItem(value: 'escalation', child: Text('Escalation rules')),
+        PopupMenuItem(
+          value: 'signatories',
+          child: Text('Official signatories'),
+        ),
+        PopupMenuDivider(),
+        PopupMenuItem(value: 'refresh', child: Text('Refresh')),
+      ],
+      child: const Padding(
+        padding: EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.more_horiz_rounded),
+            SizedBox(width: 6),
+            Text('More'),
+          ],
+        ),
+      ),
     );
   }
 
@@ -512,19 +680,6 @@ class _DocuTrackerAdminScreenState extends State<DocuTrackerAdminScreen> {
                 );
               },
             ),
-            ListTile(
-              leading: const Icon(Icons.group_outlined),
-              title: const Text('Step assignees'),
-              onTap: () {
-                Navigator.pop(ctx);
-                Navigator.of(context).push(
-                  MaterialPageRoute<void>(
-                    builder: (_) =>
-                        const DocuTrackerStepAssigneesEditorScreen(),
-                  ),
-                );
-              },
-            ),
           ],
         ),
       ),
@@ -534,6 +689,14 @@ class _DocuTrackerAdminScreenState extends State<DocuTrackerAdminScreen> {
   Widget _buildPermissionsManagementCard(DocuTrackerProvider provider) {
     final search = _searchController.text.toLowerCase();
     var filtered = provider.permissions.where((p) {
+      if (const {
+        DocumentAction.approve,
+        DocumentAction.forward,
+        DocumentAction.returnDoc,
+        DocumentAction.reject,
+      }.contains(p.action)) {
+        return false;
+      }
       if (_permissionsRoleFilter != null) {
         if (p.roleId != null && p.roleId != _permissionsRoleFilter) {
           return false;
@@ -566,8 +729,9 @@ class _DocuTrackerAdminScreenState extends State<DocuTrackerAdminScreen> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         DocuTrackerAdminSectionHeader(
-          title: 'Document Permissions',
-          subtitle: 'One row per person; columns show access by document type.',
+          title: 'System Security Permissions',
+          subtitle:
+              'Advanced system access only. Workflow visibility and actions come from each step\'s assignees.',
           trailing: DocuTrackerAdminFilterPill(
             label: 'Filter by Role:',
             value: _permissionsRoleFilter,
@@ -597,7 +761,7 @@ class _DocuTrackerAdminScreenState extends State<DocuTrackerAdminScreen> {
               }),
             );
             final manageBtn = DocuTrackerAdminPrimaryButton(
-              label: 'Manage Permissions',
+              label: 'Manage System Access',
               icon: Icons.shield_outlined,
               enabled: !_panelBusy,
               onPressed: () => _openAdminTool(() async {
@@ -924,19 +1088,6 @@ class _DocuTrackerAdminScreenState extends State<DocuTrackerAdminScreen> {
           backgroundColor: DocuTrackerTokens.highlightPeach,
           child: Column(
             children: [
-              DocuTrackerAdminToolRow(
-                icon: Icons.group_outlined,
-                label: 'Step Assignees',
-                onTap: () => _openAdminTool(() async {
-                  await Navigator.of(context).push(
-                    MaterialPageRoute<void>(
-                      builder: (_) =>
-                          const DocuTrackerStepAssigneesEditorScreen(),
-                    ),
-                  );
-                  if (mounted) await _load();
-                }),
-              ),
               DocuTrackerAdminToolRow(
                 icon: Icons.trending_up_rounded,
                 label: 'Escalation rules',

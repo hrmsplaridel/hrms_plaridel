@@ -2,43 +2,99 @@ const express = require('express');
 const { pool } = require('../config/db');
 const { authMiddleware } = require('../middleware/auth');
 const { requireAdmin } = require('../middleware/rbac');
+const {
+  invalidateAttendancePolicyCache,
+} = require('../services/attendancePolicyCache');
+const { todayInHrmsTimezone } = require('../utils/dateRangeParser');
 
 const router = express.Router();
 const protect = [authMiddleware];
 
-function toBool(v, fallback = false) {
-  if (v === undefined) return fallback;
-  if (v === null) return false;
-  if (typeof v === 'boolean') return v;
-  const s = String(v).trim().toLowerCase();
-  if (s === 'true' || s === '1' || s === 'yes') return true;
-  if (s === 'false' || s === '0' || s === 'no') return false;
-  return fallback;
-}
+const COMPUTATION_FIELDS = [
+  'work_hours_per_day',
+  'use_equivalent_day_conversion',
+  'deduct_late',
+  'convert_late_to_equivalent_day',
+  'deduct_undertime',
+  'convert_undertime_to_equivalent_day',
+  'absent_equals_full_day_deduction',
+  'combine_late_and_undertime',
+  'deduction_multiplier',
+];
 
-function toIntOrDefault(v, def) {
-  if (v === undefined) return undefined;
-  const n = parseInt(v, 10);
-  return Number.isFinite(n) ? n : def;
-}
+const BOOLEAN_COMPUTATION_FIELDS = new Set([
+  'use_equivalent_day_conversion',
+  'deduct_late',
+  'convert_late_to_equivalent_day',
+  'deduct_undertime',
+  'convert_undertime_to_equivalent_day',
+  'absent_equals_full_day_deduction',
+  'combine_late_and_undertime',
+]);
 
-function toNumberOrDefault(v, def) {
-  if (v === undefined) return undefined;
-  const n = parseFloat(v);
-  return Number.isFinite(n) ? n : def;
-}
+const BOOLEAN_POLICY_FIELDS = [
+  ...BOOLEAN_COMPUTATION_FIELDS,
+  'is_default',
+  'is_active',
+];
 
-function validatePolicyPayload(p) {
-  const workHoursPerDay = p.work_hours_per_day;
-  if (workHoursPerDay != null && !(parseFloat(workHoursPerDay) > 0)) {
-    return 'Work hours per day must be greater than 0.';
+function validatePolicyPayload(body) {
+  for (const field of BOOLEAN_POLICY_FIELDS) {
+    if (body[field] !== undefined && typeof body[field] !== 'boolean') {
+      return `${field} must be a boolean.`;
+    }
   }
-  const mult = p.deduction_multiplier;
-  if (mult != null && !(parseFloat(mult) > 0)) {
-    return 'Deduction multiplier must be greater than 0.';
+
+  if (body.work_hours_per_day !== undefined) {
+    if (
+      typeof body.work_hours_per_day !== 'number' ||
+      !Number.isFinite(body.work_hours_per_day)
+    ) {
+      return 'work_hours_per_day must be a finite number.';
+    }
+    if (body.work_hours_per_day <= 0 || body.work_hours_per_day > 24) {
+      return 'work_hours_per_day must be greater than 0 and at most 24.';
+    }
+  }
+
+  if (body.deduction_multiplier !== undefined) {
+    if (
+      typeof body.deduction_multiplier !== 'number' ||
+      !Number.isFinite(body.deduction_multiplier)
+    ) {
+      return 'deduction_multiplier must be a finite number.';
+    }
+    if (body.deduction_multiplier <= 0 || body.deduction_multiplier > 999.999) {
+      return 'deduction_multiplier must be greater than 0 and at most 999.999.';
+    }
   }
   return null;
 }
+
+function normalizedComputationValue(field, value) {
+  return BOOLEAN_COMPUTATION_FIELDS.has(field) ? value : Number(value);
+}
+
+function changedLockedComputationFields(body, current) {
+  return COMPUTATION_FIELDS.filter((field) => {
+    if (body[field] === undefined) return false;
+    const requested = normalizedComputationValue(field, body[field]);
+    const stored = BOOLEAN_COMPUTATION_FIELDS.has(field)
+      ? current[field] === true
+      : Number(current[field]);
+    return requested !== stored;
+  });
+}
+
+const policyUsageSql = `(
+  EXISTS (
+    SELECT 1 FROM policy_assignments pa
+    WHERE pa.attendance_policy_id = attendance_policies.id
+  ) OR EXISTS (
+    SELECT 1 FROM dtr_daily_summary dtr
+    WHERE dtr.attendance_policy_id = attendance_policies.id
+  )
+)`;
 
 // GET /api/attendance-policies - list (?status=Active|Inactive|All)
 router.get('/', protect, async (req, res) => {
@@ -55,7 +111,8 @@ router.get('/', protect, async (req, res) => {
               deduct_undertime, convert_undertime_to_equivalent_day,
               absent_equals_full_day_deduction,
               combine_late_and_undertime, deduction_multiplier,
-              is_default, is_active, created_at
+              is_default, is_active, created_at,
+              ${policyUsageSql} AS is_used
        FROM attendance_policies ${where}
        ORDER BY is_default DESC, name`
     );
@@ -77,6 +134,7 @@ router.get('/', protect, async (req, res) => {
       deduction_multiplier: r.deduction_multiplier != null ? parseFloat(r.deduction_multiplier) : 1.0,
       is_default: r.is_default ?? false,
       is_active: r.is_active ?? true,
+      is_used: r.is_used === true,
       created_at: r.created_at,
     })));
   } catch (err) {
@@ -87,30 +145,49 @@ router.get('/', protect, async (req, res) => {
 
 // POST /api/attendance-policies - create (admin only)
 router.post('/', protect, requireAdmin, async (req, res) => {
+  let client;
   try {
     const body = req.body || {};
     const policyName = (body.policy_name ?? body.name ?? '').toString().trim();
     if (!policyName) return res.status(400).json({ error: 'Policy name is required' });
+    const errMsg = validatePolicyPayload(body);
+    if (errMsg) return res.status(400).json({ error: errMsg });
 
     const payload = {
       policy_name: policyName,
       description: body.description?.toString().trim() || null,
-      is_default: toBool(body.is_default, false),
-      is_active: toBool(body.is_active, true),
-      work_hours_per_day: toNumberOrDefault(body.work_hours_per_day, 8),
-      use_equivalent_day_conversion: toBool(body.use_equivalent_day_conversion, true),
-      deduct_late: toBool(body.deduct_late, false),
-      convert_late_to_equivalent_day: toBool(body.convert_late_to_equivalent_day, true),
-      deduct_undertime: toBool(body.deduct_undertime, true),
-      convert_undertime_to_equivalent_day: toBool(body.convert_undertime_to_equivalent_day, true),
-      absent_equals_full_day_deduction: toBool(body.absent_equals_full_day_deduction, true),
-      combine_late_and_undertime: toBool(body.combine_late_and_undertime, false),
-      deduction_multiplier: toNumberOrDefault(body.deduction_multiplier, 1.0),
+      is_default: body.is_default ?? false,
+      is_active: body.is_active ?? true,
+      work_hours_per_day: body.work_hours_per_day ?? 8,
+      use_equivalent_day_conversion: body.use_equivalent_day_conversion ?? true,
+      deduct_late: body.deduct_late ?? false,
+      convert_late_to_equivalent_day: body.convert_late_to_equivalent_day ?? true,
+      deduct_undertime: body.deduct_undertime ?? true,
+      convert_undertime_to_equivalent_day:
+        body.convert_undertime_to_equivalent_day ?? true,
+      absent_equals_full_day_deduction:
+        body.absent_equals_full_day_deduction ?? true,
+      combine_late_and_undertime: body.combine_late_and_undertime ?? false,
+      deduction_multiplier: body.deduction_multiplier ?? 1.0,
     };
-    const errMsg = validatePolicyPayload(payload);
-    if (errMsg) return res.status(400).json({ error: errMsg });
+    if (payload.is_default && !payload.is_active) {
+      return res.status(400).json({ error: 'Only an active policy can be the default policy.' });
+    }
 
-    const result = await pool.query(
+    client = await pool.connect();
+    await client.query('BEGIN');
+    if (payload.is_default) {
+      await client.query(
+        `SELECT pg_advisory_xact_lock(hashtext('attendance_policy_default'))`
+      );
+      await client.query(
+        `UPDATE attendance_policies
+         SET is_default = false, updated_at = now()
+         WHERE is_default = true`
+      );
+    }
+
+    const result = await client.query(
       `INSERT INTO attendance_policies (name, description,
         work_hours_per_day, use_equivalent_day_conversion,
         deduct_late, convert_late_to_equivalent_day,
@@ -142,7 +219,9 @@ router.post('/', protect, requireAdmin, async (req, res) => {
         payload.is_active,
       ]
     );
+    await client.query('COMMIT');
     const r = result.rows[0];
+    invalidateAttendancePolicyCache();
     res.status(201).json({
       id: r.id,
       policy_name: r.name,
@@ -159,58 +238,160 @@ router.post('/', protect, requireAdmin, async (req, res) => {
       deduction_multiplier: r.deduction_multiplier != null ? parseFloat(r.deduction_multiplier) : 1.0,
       is_default: r.is_default ?? false,
       is_active: r.is_active ?? true,
+      is_used: false,
       created_at: r.created_at,
     });
   } catch (err) {
+    if (client) await client.query('ROLLBACK').catch(() => {});
     console.error('[attendance-policies POST]', err);
-    res.status(500).json({ error: 'Failed to create attendance policy' });
+    const status = err?.code === '23505' ? 409 : 500;
+    res.status(status).json({
+      error: status === 409
+        ? 'Another default-policy change was completed first. Reload and try again.'
+        : 'Failed to create attendance policy',
+    });
+  } finally {
+    client?.release();
   }
 });
 
 // PUT /api/attendance-policies/:id - update (admin only)
 router.put('/:id', protect, requireAdmin, async (req, res) => {
+  let client;
   try {
     const { id } = req.params;
     const body = req.body || {};
+    const validationError = validatePolicyPayload(body);
+    if (validationError) {
+      return res.status(400).json({ error: validationError });
+    }
+
+    client = await pool.connect();
+    await client.query('BEGIN');
+    await client.query(
+      `SELECT pg_advisory_xact_lock(hashtext('attendance_policy_default'))`
+    );
+
+    const currentResult = await client.query(
+      `SELECT work_hours_per_day, use_equivalent_day_conversion,
+              deduct_late, convert_late_to_equivalent_day,
+              deduct_undertime, convert_undertime_to_equivalent_day,
+              absent_equals_full_day_deduction,
+              combine_late_and_undertime, deduction_multiplier,
+              is_default, is_active,
+              ${policyUsageSql} AS is_used
+       FROM attendance_policies
+       WHERE id = $1
+       FOR UPDATE`,
+      [id]
+    );
+    if (currentResult.rowCount === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Attendance policy not found' });
+    }
+    const current = currentResult.rows[0];
+    const changedComputationFields = current.is_used === true
+      ? changedLockedComputationFields(body, current)
+      : [];
+    if (changedComputationFields.length > 0) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({
+        error:
+          'This policy has already been used. Create a new policy to change computation settings.',
+        locked_fields: changedComputationFields,
+      });
+    }
+
+    const nextIsActive = body.is_active === undefined
+      ? current.is_active !== false
+      : body.is_active;
+    if (current.is_active !== false && !nextIsActive) {
+      const officialDate = todayInHrmsTimezone();
+      const assignmentResult = await client.query(
+        `SELECT COUNT(*)::int AS assignment_count
+         FROM policy_assignments
+         WHERE attendance_policy_id = $1
+           AND (is_active IS NULL OR is_active = true)
+           AND (effective_to IS NULL OR effective_to >= $2::date)`,
+        [id, officialDate]
+      );
+      const assignmentCount = Number(
+        assignmentResult.rows[0]?.assignment_count || 0
+      );
+      if (assignmentCount > 0) {
+        await client.query('ROLLBACK');
+        return res.status(409).json({
+          error:
+            `This policy cannot be deactivated because it has ${assignmentCount} ` +
+            `current or upcoming assignment ${assignmentCount === 1 ? 'period' : 'periods'}. ` +
+            'End or replace those assignments first.',
+          code: 'POLICY_DEACTIVATION_BLOCKED',
+          assignment_count: assignmentCount,
+          official_date: officialDate,
+        });
+      }
+    }
+    let nextIsDefault = body.is_default === undefined
+      ? current.is_default === true
+      : body.is_default;
+    if (nextIsDefault && !nextIsActive) {
+      if (current.is_default === true) {
+        nextIsDefault = false;
+      } else {
+        await client.query('ROLLBACK');
+        return res.status(400).json({ error: 'Only an active policy can be the default policy.' });
+      }
+    }
 
     const updates = [];
     const values = [];
     let i = 1;
     if (body.policy_name !== undefined || body.name !== undefined) {
       const policyName = (body.policy_name ?? body.name ?? '').toString().trim();
-      if (!policyName) return res.status(400).json({ error: 'Policy name is required' });
+      if (!policyName) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({ error: 'Policy name is required' });
+      }
       updates.push(`name = $${i++}`); values.push(policyName);
     }
     if (body.description !== undefined) { updates.push(`description = $${i++}`); values.push(body.description?.toString().trim() || null); }
 
-    if (body.work_hours_per_day !== undefined) { updates.push(`work_hours_per_day = $${i++}`); values.push(toNumberOrDefault(body.work_hours_per_day, 8)); }
-    if (body.use_equivalent_day_conversion !== undefined) { updates.push(`use_equivalent_day_conversion = $${i++}`); values.push(toBool(body.use_equivalent_day_conversion, true)); }
+    if (body.work_hours_per_day !== undefined) { updates.push(`work_hours_per_day = $${i++}`); values.push(body.work_hours_per_day); }
+    if (body.use_equivalent_day_conversion !== undefined) { updates.push(`use_equivalent_day_conversion = $${i++}`); values.push(body.use_equivalent_day_conversion); }
 
-    if (body.deduct_late !== undefined) { updates.push(`deduct_late = $${i++}`); values.push(toBool(body.deduct_late, false)); }
-    if (body.convert_late_to_equivalent_day !== undefined) { updates.push(`convert_late_to_equivalent_day = $${i++}`); values.push(toBool(body.convert_late_to_equivalent_day, true)); }
+    if (body.deduct_late !== undefined) { updates.push(`deduct_late = $${i++}`); values.push(body.deduct_late); }
+    if (body.convert_late_to_equivalent_day !== undefined) { updates.push(`convert_late_to_equivalent_day = $${i++}`); values.push(body.convert_late_to_equivalent_day); }
 
-    if (body.deduct_undertime !== undefined) { updates.push(`deduct_undertime = $${i++}`); values.push(toBool(body.deduct_undertime, true)); }
-    if (body.convert_undertime_to_equivalent_day !== undefined) { updates.push(`convert_undertime_to_equivalent_day = $${i++}`); values.push(toBool(body.convert_undertime_to_equivalent_day, true)); }
+    if (body.deduct_undertime !== undefined) { updates.push(`deduct_undertime = $${i++}`); values.push(body.deduct_undertime); }
+    if (body.convert_undertime_to_equivalent_day !== undefined) { updates.push(`convert_undertime_to_equivalent_day = $${i++}`); values.push(body.convert_undertime_to_equivalent_day); }
 
-    if (body.absent_equals_full_day_deduction !== undefined) { updates.push(`absent_equals_full_day_deduction = $${i++}`); values.push(toBool(body.absent_equals_full_day_deduction, true)); }
-    if (body.combine_late_and_undertime !== undefined) { updates.push(`combine_late_and_undertime = $${i++}`); values.push(toBool(body.combine_late_and_undertime, false)); }
-    if (body.deduction_multiplier !== undefined) { updates.push(`deduction_multiplier = $${i++}`); values.push(toNumberOrDefault(body.deduction_multiplier, 1.0)); }
+    if (body.absent_equals_full_day_deduction !== undefined) { updates.push(`absent_equals_full_day_deduction = $${i++}`); values.push(body.absent_equals_full_day_deduction); }
+    if (body.combine_late_and_undertime !== undefined) { updates.push(`combine_late_and_undertime = $${i++}`); values.push(body.combine_late_and_undertime); }
+    if (body.deduction_multiplier !== undefined) { updates.push(`deduction_multiplier = $${i++}`); values.push(body.deduction_multiplier); }
 
-    if (body.is_default !== undefined) { updates.push(`is_default = $${i++}`); values.push(toBool(body.is_default, false)); }
-    if (body.is_active !== undefined) { updates.push(`is_active = $${i++}`); values.push(toBool(body.is_active, true)); }
+    if (body.is_default !== undefined || (current.is_default === true && !nextIsActive)) {
+      updates.push(`is_default = $${i++}`); values.push(nextIsDefault);
+    }
+    if (body.is_active !== undefined) { updates.push(`is_active = $${i++}`); values.push(body.is_active); }
 
-    if (updates.length === 0) return res.status(400).json({ error: 'No fields to update' });
+    if (updates.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'No fields to update' });
+    }
 
-    const validateErr = validatePolicyPayload({
-      work_hours_per_day: body.work_hours_per_day,
-      deduction_multiplier: body.deduction_multiplier,
-    });
-    if (validateErr) return res.status(400).json({ error: validateErr });
+    if (nextIsDefault) {
+      await client.query(
+        `UPDATE attendance_policies
+         SET is_default = false, updated_at = now()
+         WHERE is_default = true AND id <> $1`,
+        [id]
+      );
+    }
 
     updates.push('updated_at = now()');
     values.push(id);
 
-    const result = await pool.query(
+    const result = await client.query(
       `UPDATE attendance_policies SET ${updates.join(', ')} WHERE id = $${i}
        RETURNING id, name, description,
         work_hours_per_day, use_equivalent_day_conversion,
@@ -221,8 +402,13 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
         is_default, is_active, created_at`,
       values
     );
-    if (result.rowCount === 0) return res.status(404).json({ error: 'Attendance policy not found' });
+    if (result.rowCount === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Attendance policy not found' });
+    }
+    await client.query('COMMIT');
     const r = result.rows[0];
+    invalidateAttendancePolicyCache();
     res.json({
       id: r.id,
       policy_name: r.name,
@@ -239,22 +425,65 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
       deduction_multiplier: r.deduction_multiplier != null ? parseFloat(r.deduction_multiplier) : 1.0,
       is_default: r.is_default ?? false,
       is_active: r.is_active ?? true,
+      is_used: current.is_used === true,
       created_at: r.created_at,
     });
   } catch (err) {
+    if (client) await client.query('ROLLBACK').catch(() => {});
     console.error('[attendance-policies PUT]', err);
-    res.status(500).json({ error: 'Failed to update attendance policy' });
+    const status = err?.code === '23505' ? 409 : 500;
+    res.status(status).json({
+      error: status === 409
+        ? 'Another default-policy change was completed first. Reload and try again.'
+        : 'Failed to update attendance policy',
+    });
+  } finally {
+    client?.release();
   }
 });
 
 // DELETE /api/attendance-policies/:id (admin only)
 router.delete('/:id', protect, requireAdmin, async (req, res) => {
   try {
-    const result = await pool.query('DELETE FROM attendance_policies WHERE id = $1 RETURNING id', [req.params.id]);
-    if (result.rowCount === 0) return res.status(404).json({ error: 'Attendance policy not found' });
+    const result = await pool.query(
+      `DELETE FROM attendance_policies p
+       WHERE p.id = $1
+         AND NOT EXISTS (
+           SELECT 1 FROM policy_assignments pa
+           WHERE pa.attendance_policy_id = p.id
+         )
+         AND NOT EXISTS (
+           SELECT 1 FROM dtr_daily_summary dtr
+           WHERE dtr.attendance_policy_id = p.id
+         )
+       RETURNING p.id`,
+      [req.params.id]
+    );
+    if (result.rowCount === 0) {
+      const policy = await pool.query(
+        `SELECT id, ${policyUsageSql} AS is_used
+         FROM attendance_policies
+         WHERE id = $1`,
+        [req.params.id]
+      );
+      if (policy.rowCount === 0) {
+        return res.status(404).json({ error: 'Attendance policy not found' });
+      }
+      return res.status(409).json({
+        error:
+          'This policy has assignment or attendance history. Deactivate it instead of deleting it.',
+      });
+    }
+    invalidateAttendancePolicyCache();
     res.status(204).send();
   } catch (err) {
     console.error('[attendance-policies DELETE]', err);
+    if (err?.code === '23503') {
+      return res.status(409).json({
+        error:
+          'This policy has assignment or attendance history. Deactivate it instead of deleting it.',
+      });
+    }
     res.status(500).json({ error: 'Failed to delete attendance policy' });
   }
 });

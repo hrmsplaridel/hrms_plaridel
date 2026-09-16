@@ -82,7 +82,9 @@ class _EditEmployeeDialogState extends State<_EditEmployeeDialog> {
         queryParameters: const {'status': 'Active', 'probe_online': '0'},
       );
       if (!mounted) return;
-      final list = res.data ?? [];
+      final list = (res.data ?? [])
+          .where(_supportsBiometricUserManagement)
+          .toList();
       setState(() {
         _bioDevices = list;
         _selectedPushDeviceId = list.isNotEmpty
@@ -574,7 +576,7 @@ class _EditEmployeeDialogState extends State<_EditEmployeeDialog> {
             )
           else if (_bioDevices.isEmpty)
             Text(
-              'No biometric devices registered. Add one under DTR / devices to push users to the clock.',
+              'No active ZKTeco devices are available for employee push.',
               style: TextStyle(fontSize: 12, color: AppTheme.textSecondary),
             )
           else

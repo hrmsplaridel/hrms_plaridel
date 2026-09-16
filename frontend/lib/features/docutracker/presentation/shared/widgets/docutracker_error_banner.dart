@@ -3,6 +3,19 @@ import 'package:flutter/material.dart';
 import 'package:hrms_plaridel/features/docutracker/data/providers/docutracker_provider.dart';
 import 'package:hrms_plaridel/features/docutracker/theme/docutracker_tokens.dart';
 
+String docuTrackerDisplayError(String message) {
+  final cleaned = message.trim().replaceFirst(
+    RegExp(r'^Exception:\s*', caseSensitive: false),
+    '',
+  );
+  if (cleaned.contains('DioException') ||
+      cleaned.contains('SocketException') ||
+      cleaned.contains('ClientException')) {
+    return 'Could not complete the request. Check your connection and try again.';
+  }
+  return cleaned.isEmpty ? 'Something went wrong. Please try again.' : cleaned;
+}
+
 /// Inline error banner matching the documents screen pattern.
 class DocuTrackerErrorBanner extends StatelessWidget {
   const DocuTrackerErrorBanner({
@@ -29,7 +42,7 @@ class DocuTrackerErrorBanner extends StatelessWidget {
           const SizedBox(width: 8),
           Expanded(
             child: Text(
-              message,
+              docuTrackerDisplayError(message),
               style: TextStyle(
                 color: DocuTrackerTokens.errorBannerForeground(context),
                 fontSize: 13,
@@ -58,6 +71,10 @@ void showDocuTrackerProviderError(
   if (!context.mounted) return;
   final msg = provider.error?.trim();
   ScaffoldMessenger.of(context).showSnackBar(
-    SnackBar(content: Text(msg != null && msg.isNotEmpty ? msg : fallback)),
+    SnackBar(
+      content: Text(
+        msg != null && msg.isNotEmpty ? docuTrackerDisplayError(msg) : fallback,
+      ),
+    ),
   );
 }

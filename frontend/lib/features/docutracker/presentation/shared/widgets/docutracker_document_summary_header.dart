@@ -27,7 +27,7 @@ class DocuTrackerDocumentSummaryHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final deadline = document.deadlineTime;
-    final holder = document.assigneeName ?? document.currentHolderId ?? '—';
+    final holder = document.assigneeName ?? 'Unassigned';
 
     return Container(
       padding: const EdgeInsets.all(16),
@@ -149,7 +149,7 @@ class DocuTrackerDocumentSummaryHeader extends StatelessWidget {
             children: [
               _MetaChip(
                 icon: Icons.person_outline_rounded,
-                label: 'Current holder',
+                label: 'Current assignee',
                 value: holder,
               ),
               _MetaChip(

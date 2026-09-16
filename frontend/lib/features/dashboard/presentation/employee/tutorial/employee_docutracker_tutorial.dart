@@ -7,7 +7,6 @@ class EmployeeDocuTrackerTutorial {
 
   static List<EmployeeTutorialTarget> targets({
     required GlobalKey headerKey,
-    required GlobalKey navigationKey,
     required GlobalKey contentKey,
   }) => [
     EmployeeTutorialTarget(
@@ -17,16 +16,10 @@ class EmployeeDocuTrackerTutorial {
           'Create, receive, and follow documents as they move through the configured routing workflow.',
     ),
     EmployeeTutorialTarget(
-      key: navigationKey,
-      title: 'Choose a document view',
-      body:
-          'Switch between the dashboard summary and your documents to find the information you need.',
-    ),
-    EmployeeTutorialTarget(
       key: contentKey,
-      title: 'Track routing progress',
+      title: 'Find and track documents',
       body:
-          'Open a document to review its current office, status, assignees, deadlines, and complete audit history.',
+          'Search or filter your documents, then open one to review its routing status, assignees, deadlines, and complete audit history.',
     ),
   ];
 }

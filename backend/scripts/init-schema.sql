@@ -4,7 +4,7 @@
 -- Run: psql -d hrms_plaridel -f scripts/init-schema.sql
 --
 -- DocuTracker tables, constraints, functions, and seeds are included below.
--- For existing databases that predate this file, use backend/scripts/docutracker-install-*.sql instead.
+-- For existing databases that predate this file, use backend/scripts/migrations/docutracker/docutracker-install-*.sql instead.
 
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 CREATE EXTENSION IF NOT EXISTS btree_gist;
@@ -215,6 +215,20 @@ CREATE INDEX IF NOT EXISTS idx_position_department_head_periods_effective
 -- =========================================
 -- SHIFTS / SCHEDULES
 -- =========================================
+CREATE OR REPLACE FUNCTION public.is_valid_shift_working_days(days INTEGER[])
+RETURNS BOOLEAN
+LANGUAGE SQL
+IMMUTABLE
+STRICT
+AS $$
+  SELECT cardinality(days) BETWEEN 1 AND 7
+     AND days <@ ARRAY[1,2,3,4,5,6,7]::INTEGER[]
+     AND cardinality(days) = (
+       SELECT COUNT(DISTINCT day)::INTEGER
+       FROM unnest(days) AS day
+     );
+$$;
+
 CREATE TABLE IF NOT EXISTS shifts (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   shift_number INT UNIQUE DEFAULT nextval('shifts_shift_number_seq'),
@@ -227,9 +241,13 @@ CREATE TABLE IF NOT EXISTS shifts (
     CONSTRAINT shifts_punch_mode_check
     CHECK (punch_mode IN ('auto', 'full_day', 'am_only', 'pm_only', 'single_session')),
 
-  grace_period_minutes INT NOT NULL DEFAULT 0 CHECK (grace_period_minutes >= 0),
+  grace_period_minutes INT NOT NULL DEFAULT 0
+    CONSTRAINT shifts_grace_period_range_check
+    CHECK (grace_period_minutes BETWEEN 0 AND 240),
 
-  working_days INT[] NOT NULL DEFAULT ARRAY[1,2,3,4,5],
+  working_days INT[] NOT NULL DEFAULT ARRAY[1,2,3,4,5]
+    CONSTRAINT shifts_working_days_check
+    CHECK (public.is_valid_shift_working_days(working_days)),
   is_active BOOLEAN NOT NULL DEFAULT true,
 
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -423,7 +441,7 @@ CREATE INDEX IF NOT EXISTS idx_employee_other_positions_duplicate_lookup
 -- =========================================
 CREATE TABLE IF NOT EXISTS policy_assignments (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  attendance_policy_id UUID NOT NULL REFERENCES attendance_policies(id) ON DELETE CASCADE,
+  attendance_policy_id UUID NOT NULL REFERENCES attendance_policies(id) ON DELETE RESTRICT,
 
   employee_id UUID REFERENCES users(id) ON DELETE CASCADE,
   department_id UUID REFERENCES departments(id) ON DELETE CASCADE,
@@ -661,8 +679,10 @@ CREATE TABLE IF NOT EXISTS leave_requests (
   user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   leave_type_id UUID REFERENCES leave_types(id) ON DELETE SET NULL,
 
-  start_date DATE NOT NULL,
-  end_date DATE NOT NULL,
+  -- Drafts may be saved before the employee knows the complete date range.
+  -- Submission routes still require and validate both dates.
+  start_date DATE,
+  end_date DATE,
   total_days NUMERIC(5,2),
   number_of_days NUMERIC(5,2),
 
@@ -706,14 +726,22 @@ CREATE TABLE IF NOT EXISTS leave_requests (
   approved_days_with_pay NUMERIC(5,2),
   approved_days_without_pay NUMERIC(5,2),
   approved_other_details TEXT,
+  -- Exact amount held in leave_balances.pending_days while this request is pending.
+  -- NULL means the leave type does not use a credit balance.
+  reserved_credit_days NUMERIC(10,3),
 
   approved_by UUID REFERENCES users(id) ON DELETE SET NULL,
   approved_at TIMESTAMPTZ,
+  -- Mayor identity frozen at final approval so historical forms remain stable.
+  approving_authority_snapshot JSONB NOT NULL DEFAULT '{}'::jsonb,
 
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
 
   CONSTRAINT chk_leave_dates CHECK (end_date >= start_date),
+  CONSTRAINT chk_leave_submission_dates CHECK (
+    status = 'draft' OR (start_date IS NOT NULL AND end_date IS NOT NULL)
+  ),
   CONSTRAINT chk_leave_total_days CHECK (
     (total_days IS NULL OR total_days >= 0)
     AND (number_of_days IS NULL OR number_of_days >= 0)
@@ -727,6 +755,12 @@ CREATE TABLE IF NOT EXISTS leave_requests (
   CONSTRAINT chk_leave_approved_days_nonnegative CHECK (
     (approved_days_with_pay IS NULL OR approved_days_with_pay >= 0)
     AND (approved_days_without_pay IS NULL OR approved_days_without_pay >= 0)
+  ),
+  CONSTRAINT chk_leave_reserved_credit_days_nonnegative CHECK (
+    reserved_credit_days IS NULL OR reserved_credit_days >= 0
+  ),
+  CONSTRAINT chk_leave_approving_authority_snapshot_object CHECK (
+    jsonb_typeof(approving_authority_snapshot) = 'object'
   )
 );
 CREATE INDEX IF NOT EXISTS idx_leave_requests_review_department
@@ -1244,6 +1278,7 @@ CREATE INDEX IF NOT EXISTS idx_dtr_assistant_feedback_intent_source_created
 CREATE TABLE IF NOT EXISTS biometric_attendance_logs (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  device_ref_id UUID REFERENCES biometric_devices(id) ON DELETE RESTRICT,
   biometric_user_id TEXT NOT NULL,
   logged_at TIMESTAMPTZ NOT NULL,
   verify_code TEXT,
@@ -1292,7 +1327,7 @@ CREATE TABLE IF NOT EXISTS dtr_daily_summary (
 
   assignment_id UUID REFERENCES assignments(id) ON DELETE SET NULL,
   shift_id UUID REFERENCES shifts(id) ON DELETE SET NULL,
-  attendance_policy_id UUID REFERENCES attendance_policies(id) ON DELETE SET NULL,
+  attendance_policy_id UUID REFERENCES attendance_policies(id) ON DELETE RESTRICT,
   holiday_id UUID REFERENCES holidays(id) ON DELETE SET NULL,
   leave_request_id UUID REFERENCES leave_requests(id) ON DELETE SET NULL,
 
@@ -2135,7 +2170,12 @@ CREATE TABLE IF NOT EXISTS docutracker_document_history (
   is_overdue_log BOOLEAN DEFAULT false,
   is_escalation_log BOOLEAN DEFAULT false,
   escalation_level INT,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT chk_docutracker_history_action
+    CHECK (action IS NULL OR action IN (
+      'created', 'submitted', 'forwarded', 'approved', 'rejected', 'returned',
+      'metadata_updated', 'remark', 'escalated', 'overdue', 'assigned', 'signed'
+    ))
 );
 
 CREATE TABLE IF NOT EXISTS docutracker_routing_records (
@@ -2213,6 +2253,59 @@ CREATE TABLE IF NOT EXISTS docutracker_escalation_configs (
     CHECK (max_escalation_level >= 1)
 );
 
+CREATE TABLE IF NOT EXISTS docutracker_document_contents (
+  document_id UUID PRIMARY KEY REFERENCES docutracker_documents(id) ON DELETE CASCADE,
+  format_version INT NOT NULL DEFAULT 1 CHECK (format_version > 0),
+  pages JSONB NOT NULL DEFAULT '[]'::jsonb CHECK (jsonb_typeof(pages) = 'array'),
+  page_size TEXT NOT NULL DEFAULT 'A4' CHECK (page_size = 'A4'),
+  margins JSONB NOT NULL DEFAULT
+    '{"top":0.08,"right":0.08,"bottom":0.08,"left":0.08}'::jsonb
+    CHECK (jsonb_typeof(margins) = 'object'),
+  revision INT NOT NULL DEFAULT 1 CHECK (revision > 0),
+  updated_by UUID REFERENCES users(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS docutracker_signature_assets (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  owner_user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  image_bytes BYTEA NOT NULL CHECK (octet_length(image_bytes) BETWEEN 1 AND 2097152),
+  mime_type TEXT NOT NULL CHECK (mime_type IN ('image/png', 'image/jpeg')),
+  source_type TEXT NOT NULL CHECK (source_type IN ('drawn', 'uploaded')),
+  display_name TEXT,
+  is_saved BOOLEAN NOT NULL DEFAULT false,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS docutracker_signature_fields (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  document_id UUID NOT NULL REFERENCES docutracker_documents(id) ON DELETE CASCADE,
+  page_number INT NOT NULL CHECK (page_number > 0),
+  position_x DOUBLE PRECISION NOT NULL CHECK (position_x >= 0 AND position_x <= 1),
+  position_y DOUBLE PRECISION NOT NULL CHECK (position_y >= 0 AND position_y <= 1),
+  width DOUBLE PRECISION NOT NULL CHECK (width > 0 AND width <= 1 AND position_x + width <= 1),
+  height DOUBLE PRECISION NOT NULL CHECK (height > 0 AND height <= 1 AND position_y + height <= 1),
+  assigned_signer_id UUID NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+  label TEXT NOT NULL DEFAULT 'Sign Here' CHECK (length(btrim(label)) BETWEEN 1 AND 80),
+  signature_asset_id UUID REFERENCES docutracker_signature_assets(id) ON DELETE RESTRICT,
+  signed_by UUID REFERENCES users(id) ON DELETE RESTRICT,
+  signer_name_snapshot TEXT,
+  signed_at TIMESTAMPTZ,
+  locked_at TIMESTAMPTZ,
+  created_by UUID REFERENCES users(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CHECK (
+    (signature_asset_id IS NULL AND signed_by IS NULL AND signed_at IS NULL
+      AND locked_at IS NULL AND signer_name_snapshot IS NULL)
+    OR
+    (signature_asset_id IS NOT NULL AND signed_by IS NOT NULL AND signed_at IS NOT NULL
+      AND locked_at IS NOT NULL AND signer_name_snapshot IS NOT NULL)
+  )
+);
+
 CREATE TABLE IF NOT EXISTS docutracker_transition_requests (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   document_id UUID NOT NULL REFERENCES docutracker_documents(id) ON DELETE CASCADE,
@@ -2241,6 +2334,82 @@ CREATE INDEX IF NOT EXISTS idx_docutracker_documents_holder_status_deadline
 CREATE INDEX IF NOT EXISTS idx_docutracker_documents_deadline_active
   ON docutracker_documents(deadline_time)
   WHERE status IN ('pending', 'in_review', 'escalated', 'overdue');
+
+CREATE INDEX IF NOT EXISTS idx_docutracker_signature_assets_owner_saved
+  ON docutracker_signature_assets(owner_user_id, is_saved, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS docutracker_governance_audit (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  actor_id UUID NOT NULL REFERENCES users(id),
+  event_type TEXT NOT NULL,
+  entity_type TEXT NOT NULL,
+  entity_id TEXT,
+  document_type TEXT,
+  workflow_version INT,
+  target_user_id UUID REFERENCES users(id),
+  target_role_id TEXT,
+  before_state JSONB,
+  after_state JSONB,
+  reason TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_docutracker_governance_audit_created_at
+  ON docutracker_governance_audit(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_docutracker_governance_audit_document_type
+  ON docutracker_governance_audit(document_type, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_docutracker_governance_audit_event_type
+  ON docutracker_governance_audit(event_type, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS docutracker_official_signatories (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  role_key TEXT NOT NULL,
+  employee_id UUID NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+  employee_name_snapshot TEXT NOT NULL,
+  position_title_snapshot TEXT,
+  department_name_snapshot TEXT,
+  effective_from DATE NOT NULL,
+  effective_to DATE,
+  remarks TEXT,
+  created_by UUID REFERENCES users(id) ON DELETE SET NULL,
+  updated_by UUID REFERENCES users(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT docutracker_official_signatories_role_check
+    CHECK (role_key IN ('leave_credit_certifier')),
+  CONSTRAINT docutracker_official_signatories_period_check
+    CHECK (effective_to IS NULL OR effective_to >= effective_from),
+  CONSTRAINT docutracker_official_signatories_name_check
+    CHECK (length(btrim(employee_name_snapshot)) BETWEEN 1 AND 200),
+  CONSTRAINT docutracker_official_signatories_role_start_unique
+    UNIQUE (role_key, effective_from)
+);
+
+CREATE INDEX IF NOT EXISTS idx_docutracker_official_signatories_effective
+  ON docutracker_official_signatories(role_key, effective_from DESC, effective_to);
+CREATE INDEX IF NOT EXISTS idx_docutracker_official_signatories_employee
+  ON docutracker_official_signatories(employee_id, effective_from DESC);
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conname = 'docutracker_official_signatories_no_overlap'
+      AND conrelid = 'docutracker_official_signatories'::regclass
+  ) THEN
+    ALTER TABLE docutracker_official_signatories
+      ADD CONSTRAINT docutracker_official_signatories_no_overlap
+      EXCLUDE USING gist (
+        role_key WITH =,
+        daterange(effective_from, COALESCE(effective_to, 'infinity'::date), '[]') WITH &&
+      );
+  END IF;
+END $$;
+CREATE INDEX IF NOT EXISTS idx_docutracker_signature_fields_document_page
+  ON docutracker_signature_fields(document_id, page_number, created_at);
+CREATE INDEX IF NOT EXISTS idx_docutracker_signature_fields_signer_pending
+  ON docutracker_signature_fields(assigned_signer_id, document_id)
+  WHERE signed_at IS NULL;
 
 CREATE INDEX IF NOT EXISTS idx_docutracker_routing_config_versions_type_version_desc
   ON docutracker_routing_config_versions(document_type, version DESC);
@@ -2468,6 +2637,7 @@ LANGUAGE plpgsql
 AS $$
 DECLARE
   sid uuid;
+  assignee_count int;
   enabled_count int;
   enabled_primary_count int;
 BEGIN
@@ -2481,11 +2651,16 @@ BEGIN
   END IF;
 
   SELECT
+    COUNT(*),
     COUNT(*) FILTER (WHERE a.is_enabled = true),
     COUNT(*) FILTER (WHERE a.is_enabled = true AND a.is_primary = true)
-  INTO enabled_count, enabled_primary_count
+  INTO assignee_count, enabled_count, enabled_primary_count
   FROM docutracker_workflow_step_assignees a
   WHERE a.step_id = sid;
+
+  IF assignee_count = 0 THEN
+    RETURN NULL;
+  END IF;
 
   IF enabled_count < 1 THEN
     RAISE EXCEPTION 'Workflow step % must have at least one enabled assignee', sid
@@ -2695,6 +2870,7 @@ WHERE status IN ('pending', 'pending_department_head', 'pending_hr', 'approved')
 CREATE INDEX IF NOT EXISTS idx_biometric_attendance_logs_user_id ON biometric_attendance_logs(user_id);
 CREATE INDEX IF NOT EXISTS idx_biometric_attendance_logs_logged_at ON biometric_attendance_logs(logged_at);
 CREATE INDEX IF NOT EXISTS idx_biometric_attendance_logs_biometric_user_id ON biometric_attendance_logs(biometric_user_id);
+CREATE INDEX IF NOT EXISTS idx_biometric_attendance_logs_device_ref_id ON biometric_attendance_logs(device_ref_id);
 CREATE INDEX IF NOT EXISTS idx_biometric_logs_user_logged
 ON biometric_attendance_logs(user_id, logged_at);
 

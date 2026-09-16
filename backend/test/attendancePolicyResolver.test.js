@@ -6,6 +6,7 @@ const assert = require('node:assert/strict');
 const {
   calculateAttendanceReportDeduction,
   calculateAttendancePolicyPenalties,
+  DEFAULT_ATTENDANCE_POLICY,
   loadAttendancePolicyContext,
   resolveAttendancePolicy,
 } = require('../src/services/attendancePolicyResolver');
@@ -175,21 +176,19 @@ test('report deduction exempts whole-day holidays but keeps partial-day penaltie
   assert.equal(pmOnly.total_minutes, 135);
 });
 
-test('attendance penalties preserve late and undertime as separate source buckets', () => {
+test('attendance penalties use deduction switches and multiplier only', () => {
   const policy = {
     deductLate: true,
     maxLateMinutesPerMonth: 60,
     deductUndertime: true,
     combineLateAndUndertime: true,
-    convertLateToEquivalentDay: false,
-    convertUndertimeToEquivalentDay: false,
     workHoursPerDay: 8,
-    deductionMultiplier: 1,
+    deductionMultiplier: 1.5,
   };
 
   assert.deepEqual(calculateAttendancePolicyPenalties(policy, 90, 15), {
-    lateMinutes: 90,
-    undertimeMinutes: 15,
+    lateMinutes: 135,
+    undertimeMinutes: 23,
   });
 });
 
@@ -288,10 +287,17 @@ test('batch policy context preserves employee, department, shift, and default pr
 
 test('batch policy query receives all range targets in one call', async () => {
   let assignedParams;
+  let assignedSql;
+  let defaultSql;
   const secondEmployeeId = '44444444-4444-4444-8444-444444444444';
   const db = {
     async query(sql, params) {
-      if (String(sql).includes('FROM policy_assignments')) assignedParams = params;
+      if (String(sql).includes('FROM policy_assignments')) {
+        assignedParams = params;
+        assignedSql = String(sql);
+      } else {
+        defaultSql = String(sql);
+      }
       return { rows: [] };
     },
   };
@@ -315,4 +321,84 @@ test('batch policy query receives all range targets in one call', async () => {
     '2026-08-01',
     '2026-08-31',
   ]);
+  assert.doesNotMatch(assignedSql, /p\.is_active/);
+  assert.match(defaultSql, /p\.is_active/);
+  assert.match(defaultSql, /p\.is_default\s*=\s*true/);
+  assert.doesNotMatch(defaultSql, /ORDER BY p\.is_default/);
+});
+
+test('canonical fallback matches attendance policy schema and API defaults', () => {
+  assert.deepEqual(DEFAULT_ATTENDANCE_POLICY, {
+    id: null,
+    workHoursPerDay: 8,
+    useEquivalentDayConversion: true,
+    deductLate: false,
+    convertLateToEquivalentDay: true,
+    deductUndertime: true,
+    convertUndertimeToEquivalentDay: true,
+    absentEqualsFullDayDeduction: true,
+    combineLateAndUndertime: false,
+    deductionMultiplier: 1,
+  });
+});
+
+test('missing explicit default uses the documented internal fallback', async () => {
+  const db = {
+    async query() {
+      return { rows: [] };
+    },
+  };
+
+  const context = await loadAttendancePolicyContext(
+    db,
+    [],
+    '2026-09-01',
+    '2026-09-30',
+    new Map()
+  );
+  const policy = resolveAttendancePolicy(
+    context,
+    employeeId,
+    '2026-09-10',
+    null
+  );
+
+  assert.equal(policy.id, null);
+  assert.equal(policy.workHoursPerDay, 8);
+  assert.equal(policy.useEquivalentDayConversion, true);
+  assert.equal(policy.deductLate, false);
+  assert.equal(policy.convertLateToEquivalentDay, true);
+  assert.equal(policy.deductUndertime, true);
+  assert.equal(policy.convertUndertimeToEquivalentDay, true);
+  assert.equal(policy.deductionMultiplier, 1);
+});
+
+test('global conversion switch preserves DTR facts but disables official deduction', () => {
+  const policy = {
+    ...DEFAULT_ATTENDANCE_POLICY,
+    useEquivalentDayConversion: false,
+    deductLate: true,
+    deductUndertime: true,
+  };
+
+  assert.deepEqual(calculateAttendancePolicyPenalties(policy, 30, 15), {
+    lateMinutes: 30,
+    undertimeMinutes: 15,
+  });
+  assert.deepEqual(
+    calculateAttendanceReportDeduction({
+      policy,
+      lateMinutes: 30,
+      undertimeMinutes: 15,
+      status: 'late',
+      expectedWorkMinutes: 480,
+    }),
+    {
+      late_minutes: 0,
+      undertime_minutes: 0,
+      absence_minutes: 0,
+      total_minutes: 0,
+      equivalent_day: 0,
+    }
+  );
 });

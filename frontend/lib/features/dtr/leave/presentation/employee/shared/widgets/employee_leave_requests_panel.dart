@@ -1,16 +1,28 @@
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
+import 'package:printing/printing.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
+import 'package:hrms_plaridel/core/utils/responsive_right_side_panel.dart';
+import 'package:hrms_plaridel/features/dtr/leave/data/providers/leave_provider.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_request.dart';
+import 'package:hrms_plaridel/features/dtr/leave/models/leave_request_history.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_type.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_type_definition.dart';
 import 'package:hrms_plaridel/features/dtr/leave/presentation/employee/desktop/widgets/employee_leave_desktop_requests_content.dart';
 import 'package:hrms_plaridel/features/dtr/leave/presentation/employee/mobile/widgets/employee_leave_mobile_requests_content.dart';
+import 'package:hrms_plaridel/features/dtr/leave/presentation/employee/shared/utils/leave_request_date_filter.dart';
+import 'package:hrms_plaridel/features/dtr/leave/utils/open_attachment_io.dart'
+    if (dart.library.html) 'package:hrms_plaridel/features/dtr/leave/utils/open_attachment_web.dart'
+    as open_attachment;
 import 'package:hrms_plaridel/features/dtr/leave/presentation/shared/widgets/history_timeline.dart';
 import 'package:hrms_plaridel/features/dtr/leave/presentation/shared/widgets/leave_status_chip.dart';
 import 'package:hrms_plaridel/shared/widgets/request_filters_bar.dart';
+import 'package:provider/provider.dart';
 
 const _leaveRequestFilterOptions = <RequestFilterOption<LeaveRequestStatus>>[
   RequestFilterOption(label: 'All'),
+  RequestFilterOption(value: LeaveRequestStatus.draft, label: 'Drafts'),
   RequestFilterOption(value: LeaveRequestStatus.pending, label: 'Pending'),
   RequestFilterOption(value: LeaveRequestStatus.approved, label: 'Approved'),
   RequestFilterOption(value: LeaveRequestStatus.rejected, label: 'Rejected'),
@@ -22,6 +34,13 @@ class EmployeeLeaveRequestsPanel extends StatefulWidget {
     super.key,
     required this.requests,
     required this.loading,
+    required this.error,
+    required this.onRetry,
+    required this.totalRequests,
+    required this.hasMore,
+    required this.loadingMore,
+    required this.loadMoreError,
+    required this.onLoadMore,
     required this.onEdit,
     required this.onCancel,
     required this.onPrint,
@@ -29,6 +48,13 @@ class EmployeeLeaveRequestsPanel extends StatefulWidget {
 
   final List<LeaveRequest> requests;
   final bool loading;
+  final String? error;
+  final VoidCallback onRetry;
+  final int totalRequests;
+  final bool hasMore;
+  final bool loadingMore;
+  final String? loadMoreError;
+  final VoidCallback onLoadMore;
   final ValueChanged<LeaveRequest> onEdit;
   final ValueChanged<LeaveRequest> onCancel;
   final ValueChanged<LeaveRequest> onPrint;
@@ -113,27 +139,74 @@ class _RequestsPanelState extends State<EmployeeLeaveRequestsPanel> {
     required double maxListHeight,
     required bool isMobile,
   }) {
-    final filters = _buildRequestFiltersBar(filteredRequests.length);
-    if (!isMobile) {
-      return EmployeeLeaveDesktopRequestsContent(
-        filters: filters,
-        requests: filteredRequests,
-        allRequests: widget.requests,
-        loading: widget.loading,
-        maxListHeight: maxListHeight,
-        scrollController: _requestsScrollController,
-        onOpenRequest: (request) => _showDetails(context, request),
+    if (widget.error != null && widget.requests.isEmpty) {
+      return _EmployeeSectionLoadError(
+        message: widget.error!,
+        onRetry: widget.onRetry,
       );
     }
-    return EmployeeLeaveMobileRequestsContent(
-      filters: filters,
-      requests: filteredRequests,
-      allRequests: widget.requests,
-      loading: widget.loading,
-      useScrollableList: useScrollableList,
-      maxListHeight: maxListHeight,
-      scrollController: _requestsScrollController,
-      onOpenRequest: (request) => _showDetails(context, request),
+
+    final filters = _buildRequestFiltersBar(filteredRequests.length);
+    final content = !isMobile
+        ? EmployeeLeaveDesktopRequestsContent(
+            filters: filters,
+            requests: filteredRequests,
+            allRequests: widget.requests,
+            loading: widget.loading,
+            maxListHeight: maxListHeight,
+            scrollController: _requestsScrollController,
+            onOpenRequest: (request) => _showDetails(context, request),
+          )
+        : EmployeeLeaveMobileRequestsContent(
+            filters: filters,
+            requests: filteredRequests,
+            allRequests: widget.requests,
+            loading: widget.loading,
+            useScrollableList: useScrollableList,
+            maxListHeight: maxListHeight,
+            scrollController: _requestsScrollController,
+            onOpenRequest: (request) => _showDetails(context, request),
+          );
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (widget.error != null) ...[
+          _EmployeeSectionLoadError(
+            message: widget.error!,
+            onRetry: widget.onRetry,
+          ),
+          const SizedBox(height: 12),
+        ],
+        content,
+        if (widget.loadMoreError != null) ...[
+          const SizedBox(height: 12),
+          _EmployeeSectionLoadError(
+            message: widget.loadMoreError!,
+            onRetry: widget.onLoadMore,
+          ),
+        ],
+        if (widget.loadMoreError == null &&
+            (widget.hasMore || widget.loadingMore)) ...[
+          const SizedBox(height: 16),
+          Center(
+            child: OutlinedButton.icon(
+              onPressed: widget.loadingMore ? null : widget.onLoadMore,
+              icon: widget.loadingMore
+                  ? const SizedBox.square(
+                      dimension: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.expand_more_rounded, size: 18),
+              label: Text(
+                widget.loadingMore
+                    ? 'Loading...'
+                    : 'Load More (${widget.requests.length} of ${widget.totalRequests})',
+              ),
+            ),
+          ),
+        ],
+      ],
     );
   }
 
@@ -156,20 +229,17 @@ class _RequestsPanelState extends State<EmployeeLeaveRequestsPanel> {
           return false;
         }
       }
-      if (_fromDate != null && request.startDate != null) {
-        final d = _dateOnly(request.startDate!);
-        if (d.isBefore(_dateOnly(_fromDate!))) return false;
-      }
-      if (_toDate != null && request.endDate != null) {
-        final d = _dateOnly(request.endDate!);
-        if (d.isAfter(_dateOnly(_toDate!))) return false;
+      if (!leaveRequestOverlapsDateFilter(
+        requestStart: request.startDate,
+        requestEnd: request.endDate,
+        filterStart: _fromDate,
+        filterEnd: _toDate,
+      )) {
+        return false;
       }
       return true;
     }).toList();
   }
-
-  DateTime _dateOnly(DateTime value) =>
-      DateTime(value.year, value.month, value.day);
 
   Future<void> _pickFilterDate({required bool isFrom}) async {
     final initial = isFrom
@@ -206,16 +276,19 @@ class _RequestsPanelState extends State<EmployeeLeaveRequestsPanel> {
     });
   }
 
-  void _showDetails(BuildContext context, LeaveRequest request) {
+  Future<void> _showDetails(BuildContext context, LeaveRequest request) async {
     final canEdit =
         request.status == LeaveRequestStatus.draft ||
         request.status == LeaveRequestStatus.returned ||
         request.status == LeaveRequestStatus.rejectedByDepartmentHead ||
         request.status == LeaveRequestStatus.rejectedByHr;
 
-    showDialog<void>(
+    await openResponsiveRightSidePanel<void>(
       context: context,
-      builder: (_) => _EmployeeLeaveDetailsDialog(
+      barrierLabel: 'Close leave details',
+      minWidth: 400,
+      initialWidthFraction: 0.34,
+      builder: (_) => _EmployeeLeaveDetailsPanel(
         request: request,
         canEdit: canEdit,
         canCancel: _canEmployeeCancel(request),
@@ -224,107 +297,271 @@ class _RequestsPanelState extends State<EmployeeLeaveRequestsPanel> {
         onHistory: () => _showHistory(context, request),
         onCancel: () => widget.onCancel(request),
         onPrint: () => widget.onPrint(request),
+        onPreviewAttachment: () => _previewAttachment(request),
+        onDownloadAttachment: () => _downloadAttachment(request),
       ),
     );
   }
 
-  void _showHistory(BuildContext context, LeaveRequest request) {
-    final reviewed = request.reviewedAt;
-    final reviewer = (request.reviewerName ?? '').trim().isNotEmpty
-        ? request.reviewerName!.trim()
-        : 'HR/Admin';
-    final departmentHeadReviewer =
-        (request.departmentHeadReviewerName ?? '').trim().isNotEmpty
-        ? request.departmentHeadReviewerName!.trim()
-        : 'Department Head';
-    final departmentHeadReviewedAt =
-        request.departmentHeadReviewedAt ?? reviewed;
+  Future<List<int>?> _loadAttachment(LeaveRequest request) async {
+    final requestId = request.id?.trim() ?? '';
+    if (requestId.isEmpty) return null;
+    final messenger = ScaffoldMessenger.of(context);
+    messenger.showSnackBar(
+      const SnackBar(content: Text('Loading attachment...')),
+    );
+    try {
+      final bytes = await context.read<LeaveProvider>().getAttachmentBytes(
+        requestId,
+      );
+      if (!mounted) return null;
+      messenger.clearSnackBars();
+      if (bytes == null || bytes.isEmpty) {
+        messenger.showSnackBar(
+          const SnackBar(content: Text('Attachment file is unavailable.')),
+        );
+        return null;
+      }
+      return bytes;
+    } catch (error) {
+      if (!mounted) return null;
+      messenger.clearSnackBars();
+      final message = error.toString().replaceFirst('Exception: ', '').trim();
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(
+            message.isEmpty ? 'Could not load attachment.' : message,
+          ),
+        ),
+      );
+      return null;
+    }
+  }
 
-    final events = [
-      LeaveHistoryEvent(
-        label: 'Submitted',
-        dateTime: request.dateFiled ?? request.createdAt,
-        actor: request.employeeName ?? 'Employee',
-        remarks: request.reason,
+  Future<void> _previewAttachment(LeaveRequest request) async {
+    final bytes = await _loadAttachment(request);
+    if (!mounted || bytes == null) return;
+    await showDialog<void>(
+      context: context,
+      builder: (_) => _EmployeeAttachmentPreviewDialog(
+        bytes: Uint8List.fromList(bytes),
+        filename: _attachmentFilename(request),
       ),
-      LeaveHistoryEvent(
-        label: 'Approved by Department Head',
-        dateTime:
-            request.status == LeaveRequestStatus.pendingHr ||
-                request.status == LeaveRequestStatus.approved
-            ? departmentHeadReviewedAt
-            : null,
-        actor: departmentHeadReviewer,
-        completed:
-            request.status == LeaveRequestStatus.pendingHr ||
-            request.status == LeaveRequestStatus.approved,
-      ),
-      LeaveHistoryEvent(
-        label: 'Forwarded to HR',
-        dateTime:
-            request.status == LeaveRequestStatus.pendingHr ||
-                request.status == LeaveRequestStatus.approved
-            ? departmentHeadReviewedAt
-            : null,
-        actor: departmentHeadReviewer,
-        completed:
-            request.status == LeaveRequestStatus.pendingHr ||
-            request.status == LeaveRequestStatus.approved,
-      ),
-      LeaveHistoryEvent(
-        label: 'Approved by HR',
-        dateTime: request.status == LeaveRequestStatus.approved
-            ? reviewed
-            : null,
-        actor: reviewer,
-        remarks: request.hrRemarks,
-        completed: request.status == LeaveRequestStatus.approved,
-      ),
-    ];
+    );
+  }
+
+  Future<void> _downloadAttachment(LeaveRequest request) async {
+    final bytes = await _loadAttachment(request);
+    if (!mounted || bytes == null) return;
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      final destination = await open_attachment.downloadAttachmentBytes(
+        bytes,
+        _attachmentFilename(request),
+      );
+      if (!mounted) return;
+      messenger.showSnackBar(
+        SnackBar(content: Text('Attachment downloaded: $destination')),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      messenger.showSnackBar(
+        SnackBar(content: Text('Could not download attachment: $error')),
+      );
+    }
+  }
+
+  void _showHistory(BuildContext context, LeaveRequest request) {
+    final requestId = request.id;
+    if (requestId == null || requestId.isEmpty) return;
 
     showDialog<void>(
       context: context,
-      builder: (dialogContext) => Dialog(
-        backgroundColor: AppTheme.dashPanelOf(dialogContext),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 560),
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(20, 18, 20, 12),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Text(
-                  'Leave Request History',
-                  style: TextStyle(
-                    color: AppTheme.dashTextPrimaryOf(dialogContext),
-                    fontSize: 18,
-                    fontWeight: FontWeight.w700,
+      builder: (_) => _EmployeeLeaveHistoryDialog(requestId: requestId),
+    );
+  }
+}
+
+class _EmployeeLeaveHistoryDialog extends StatefulWidget {
+  const _EmployeeLeaveHistoryDialog({required this.requestId});
+
+  final String requestId;
+
+  @override
+  State<_EmployeeLeaveHistoryDialog> createState() =>
+      _EmployeeLeaveHistoryDialogState();
+}
+
+class _EmployeeLeaveHistoryDialogState
+    extends State<_EmployeeLeaveHistoryDialog> {
+  late Future<List<LeaveRequestHistoryEntry>> _historyFuture;
+
+  @override
+  void initState() {
+    super.initState();
+    _historyFuture = _loadHistory();
+  }
+
+  Future<List<LeaveRequestHistoryEntry>> _loadHistory() {
+    return context.read<LeaveProvider>().loadMyRequestHistory(widget.requestId);
+  }
+
+  void _retry() {
+    setState(() => _historyFuture = _loadHistory());
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      backgroundColor: AppTheme.dashPanelOf(context),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 560, maxHeight: 640),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 14, 10, 10),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      'Leave Request History',
+                      style: TextStyle(
+                        color: AppTheme.dashTextPrimaryOf(context),
+                        fontSize: 18,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
                   ),
-                ),
-                const SizedBox(height: 14),
-                HistoryTimeline(events: events),
-                const SizedBox(height: 8),
-                Align(
-                  alignment: Alignment.centerRight,
-                  child: TextButton(
-                    onPressed: () => Navigator.of(dialogContext).pop(),
-                    child: const Text('Close'),
+                  IconButton(
+                    tooltip: 'Close',
+                    onPressed: () => Navigator.of(context).pop(),
+                    icon: const Icon(Icons.close_rounded),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
-          ),
+            Divider(height: 1, color: AppTheme.dashHairlineOf(context)),
+            Flexible(
+              child: FutureBuilder<List<LeaveRequestHistoryEntry>>(
+                future: _historyFuture,
+                builder: (context, snapshot) {
+                  if (snapshot.connectionState == ConnectionState.waiting) {
+                    return const SizedBox(
+                      height: 180,
+                      child: Center(child: CircularProgressIndicator()),
+                    );
+                  }
+                  if (snapshot.hasError) {
+                    final message = snapshot.error.toString().replaceFirst(
+                      'Exception: ',
+                      '',
+                    );
+                    return Padding(
+                      padding: const EdgeInsets.all(20),
+                      child: _EmployeeSectionLoadError(
+                        message: message,
+                        onRetry: _retry,
+                      ),
+                    );
+                  }
+
+                  final history = snapshot.data ?? const [];
+                  if (history.isEmpty) {
+                    return SizedBox(
+                      height: 180,
+                      child: Center(
+                        child: Text(
+                          'No workflow history has been recorded.',
+                          style: TextStyle(
+                            color: AppTheme.dashTextSecondaryOf(context),
+                          ),
+                        ),
+                      ),
+                    );
+                  }
+
+                  final events = history
+                      .map(
+                        (entry) => LeaveHistoryEvent(
+                          label: entry.actionLabel,
+                          dateTime: entry.actedAt,
+                          actor: entry.actorLabel,
+                          remarks: entry.remarks,
+                        ),
+                      )
+                      .toList();
+                  return SingleChildScrollView(
+                    padding: const EdgeInsets.fromLTRB(20, 18, 20, 8),
+                    child: HistoryTimeline(events: events),
+                  );
+                },
+              ),
+            ),
+            Divider(height: 1, color: AppTheme.dashHairlineOf(context)),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 8, 12, 10),
+              child: Align(
+                alignment: Alignment.centerRight,
+                child: TextButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  child: const Text('Close'),
+                ),
+              ),
+            ),
+          ],
         ),
       ),
     );
   }
 }
 
-/// Employee “view details” dialog — compact width, status chip, scrollable body.
-class _EmployeeLeaveDetailsDialog extends StatelessWidget {
-  const _EmployeeLeaveDetailsDialog({
+class _EmployeeSectionLoadError extends StatelessWidget {
+  const _EmployeeSectionLoadError({
+    required this.message,
+    required this.onRetry,
+  });
+
+  final String message;
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Colors.red.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.red.withValues(alpha: 0.35)),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.error_outline_rounded, color: Colors.redAccent),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              message,
+              style: TextStyle(color: AppTheme.dashTextPrimaryOf(context)),
+            ),
+          ),
+          const SizedBox(width: 10),
+          OutlinedButton.icon(
+            onPressed: onRetry,
+            icon: const Icon(Icons.refresh_rounded, size: 18),
+            label: const Text('Retry'),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Employee request details shown as a right sheet or a full-screen route.
+class _EmployeeLeaveDetailsPanel extends StatelessWidget {
+  const _EmployeeLeaveDetailsPanel({
     required this.request,
     required this.canEdit,
     required this.canCancel,
@@ -333,6 +570,8 @@ class _EmployeeLeaveDetailsDialog extends StatelessWidget {
     required this.onHistory,
     required this.onCancel,
     required this.onPrint,
+    required this.onPreviewAttachment,
+    required this.onDownloadAttachment,
   });
 
   final LeaveRequest request;
@@ -343,6 +582,12 @@ class _EmployeeLeaveDetailsDialog extends StatelessWidget {
   final VoidCallback onHistory;
   final VoidCallback onCancel;
   final VoidCallback onPrint;
+  final VoidCallback onPreviewAttachment;
+  final VoidCallback onDownloadAttachment;
+
+  bool get _hasAttachment =>
+      (request.attachmentName ?? '').trim().isNotEmpty ||
+      (request.attachmentPath ?? '').trim().isNotEmpty;
 
   String get _leaveTypeText {
     return request.leaveTypeLabel;
@@ -350,22 +595,14 @@ class _EmployeeLeaveDetailsDialog extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final screen = MediaQuery.sizeOf(context);
-    final maxW = (screen.width - 40).clamp(300.0, 420.0);
-    final bodyMaxH = (screen.height * 0.52).clamp(220.0, 420.0);
-
-    return Dialog(
+    return Scaffold(
+      key: const Key('employee-leave-details-panel'),
       backgroundColor: AppTheme.dashPanelOf(context),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-      insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 22),
-      clipBehavior: Clip.antiAlias,
-      child: ConstrainedBox(
-        constraints: BoxConstraints(maxWidth: maxW),
+      body: SafeArea(
         child: Column(
-          mainAxisSize: MainAxisSize.min,
           children: [
             Padding(
-              padding: const EdgeInsets.fromLTRB(16, 14, 8, 10),
+              padding: const EdgeInsets.fromLTRB(24, 20, 14, 16),
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -390,9 +627,8 @@ class _EmployeeLeaveDetailsDialog extends StatelessWidget {
                           'Leave details',
                           style: TextStyle(
                             color: AppTheme.dashTextPrimaryOf(context),
-                            fontSize: 18,
+                            fontSize: 20,
                             fontWeight: FontWeight.w800,
-                            letterSpacing: -0.2,
                           ),
                         ),
                         const SizedBox(height: 8),
@@ -409,10 +645,9 @@ class _EmployeeLeaveDetailsDialog extends StatelessWidget {
               ),
             ),
             Divider(height: 1, color: AppTheme.dashHairlineOf(context)),
-            ConstrainedBox(
-              constraints: BoxConstraints(maxHeight: bodyMaxH),
+            Expanded(
               child: SingleChildScrollView(
-                padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
+                padding: const EdgeInsets.fromLTRB(24, 20, 24, 16),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
@@ -545,6 +780,12 @@ class _EmployeeLeaveDetailsDialog extends StatelessWidget {
                     ),
                     if ((request.reason ?? '').trim().isNotEmpty)
                       _LeaveDetailReasonCard(text: request.reason!.trim()),
+                    if (_hasAttachment)
+                      _EmployeeAttachmentCard(
+                        filename: _attachmentFilename(request),
+                        onPreview: onPreviewAttachment,
+                        onDownload: onDownloadAttachment,
+                      ),
                     if ((request.disapprovalReason ?? '').trim().isNotEmpty)
                       _LeaveDetailNotice(
                         icon: Icons.info_outline_rounded,
@@ -566,7 +807,7 @@ class _EmployeeLeaveDetailsDialog extends StatelessWidget {
             ),
             Divider(height: 1, color: AppTheme.dashHairlineOf(context)),
             Padding(
-              padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
+              padding: const EdgeInsets.fromLTRB(20, 12, 20, 16),
               child: Wrap(
                 alignment: WrapAlignment.end,
                 spacing: 8,
@@ -615,6 +856,175 @@ class _EmployeeLeaveDetailsDialog extends StatelessWidget {
               ),
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+String _attachmentFilename(LeaveRequest request) {
+  final name = request.attachmentName?.trim() ?? '';
+  return name.isEmpty ? 'Supporting attachment' : name;
+}
+
+class _EmployeeAttachmentCard extends StatelessWidget {
+  const _EmployeeAttachmentCard({
+    required this.filename,
+    required this.onPreview,
+    required this.onDownload,
+  });
+
+  final String filename;
+  final VoidCallback onPreview;
+  final VoidCallback onDownload;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      key: const Key('employee-leave-attachment'),
+      margin: const EdgeInsets.only(top: 10),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: AppTheme.dashMutedSurfaceOf(context),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: AppTheme.dashHairlineOf(context)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.attach_file_rounded, size: 20),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  filename,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: AppTheme.dashTextPrimaryOf(context),
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Wrap(
+            alignment: WrapAlignment.end,
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              OutlinedButton.icon(
+                key: const Key('employee-leave-attachment-preview'),
+                onPressed: onPreview,
+                icon: const Icon(Icons.visibility_outlined, size: 18),
+                label: const Text('Preview'),
+              ),
+              OutlinedButton.icon(
+                key: const Key('employee-leave-attachment-download'),
+                onPressed: onDownload,
+                icon: const Icon(Icons.download_rounded, size: 18),
+                label: const Text('Download'),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _EmployeeAttachmentPreviewDialog extends StatelessWidget {
+  const _EmployeeAttachmentPreviewDialog({
+    required this.bytes,
+    required this.filename,
+  });
+
+  final Uint8List bytes;
+  final String filename;
+
+  bool get _isPdf => filename.toLowerCase().endsWith('.pdf');
+  bool get _isImage {
+    final lower = filename.toLowerCase();
+    return lower.endsWith('.jpg') ||
+        lower.endsWith('.jpeg') ||
+        lower.endsWith('.png');
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final size = MediaQuery.sizeOf(context);
+    return Dialog(
+      insetPadding: const EdgeInsets.all(20),
+      clipBehavior: Clip.antiAlias,
+      child: SizedBox(
+        width: size.width.clamp(320, 1000).toDouble(),
+        height: size.height.clamp(420, 760).toDouble(),
+        child: Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(18, 10, 8, 10),
+              child: Row(
+                children: [
+                  const Icon(Icons.description_outlined, size: 20),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      filename,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontWeight: FontWeight.w700),
+                    ),
+                  ),
+                  IconButton(
+                    tooltip: 'Close preview',
+                    onPressed: () => Navigator.of(context).pop(),
+                    icon: const Icon(Icons.close_rounded),
+                  ),
+                ],
+              ),
+            ),
+            Divider(height: 1, color: AppTheme.dashHairlineOf(context)),
+            Expanded(child: _buildPreview(context)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildPreview(BuildContext context) {
+    if (_isPdf) {
+      return PdfPreview(
+        build: (_) async => bytes,
+        pdfFileName: filename,
+        allowPrinting: false,
+        allowSharing: false,
+        canChangeOrientation: false,
+        canChangePageFormat: false,
+        canDebug: false,
+      );
+    }
+    if (_isImage) {
+      return InteractiveViewer(
+        minScale: 0.5,
+        maxScale: 5,
+        child: Center(
+          child: Image.memory(
+            bytes,
+            fit: BoxFit.contain,
+            errorBuilder: (_, _, _) =>
+                const Center(child: Text('This image could not be displayed.')),
+          ),
+        ),
+      );
+    }
+    return const Center(
+      child: Padding(
+        padding: EdgeInsets.all(24),
+        child: Text(
+          'Preview is unavailable for this file type. Use Download instead.',
+          textAlign: TextAlign.center,
         ),
       ),
     );
@@ -925,12 +1335,12 @@ bool _canEmployeeCancel(LeaveRequest request) {
     LeaveRequestStatus.draft ||
     LeaveRequestStatus.pending ||
     LeaveRequestStatus.pendingDepartmentHead ||
-    LeaveRequestStatus.pendingHr => true,
+    LeaveRequestStatus.pendingHr ||
+    LeaveRequestStatus.returned => true,
     LeaveRequestStatus.approved ||
     LeaveRequestStatus.rejected ||
     LeaveRequestStatus.rejectedByDepartmentHead ||
     LeaveRequestStatus.rejectedByHr ||
-    LeaveRequestStatus.returned ||
     LeaveRequestStatus.cancelled => false,
   };
 }

@@ -11,6 +11,19 @@ part '../models/holiday_models.dart';
 part '../widgets/philippine_holiday_defaults_dialog.dart';
 part '../widgets/holiday_template_upload_dialog.dart';
 
+String holidayApiErrorMessage(DioException exception, String fallback) {
+  final data = exception.response?.data;
+  if (data is Map) {
+    final value = data['error'] ?? data['message'];
+    if (value != null && value.toString().trim().isNotEmpty) {
+      return value.toString();
+    }
+  }
+
+  final dioMessage = exception.message?.trim();
+  return dioMessage == null || dioMessage.isEmpty ? fallback : dioMessage;
+}
+
 class ManageHoliday extends StatefulWidget {
   const ManageHoliday({super.key});
 
@@ -35,6 +48,8 @@ class _ManageHolidayState extends State<ManageHoliday> {
 
   List<_HolidayRecord> _holidays = [];
   bool _loading = false;
+  String? _loadError;
+  int _loadGeneration = 0;
   _HolidayRecord? _selectedHoliday;
   StateSetter? _drawerSetState;
 
@@ -79,14 +94,17 @@ class _ManageHolidayState extends State<ManageHoliday> {
   }
 
   Future<void> _loadHolidays() async {
+    final generation = ++_loadGeneration;
+    if (!mounted) return;
     setState(() {
       _loading = true;
+      _loadError = null;
       _page = 0;
     });
     try {
       final res = await ApiClient.instance.get<List<dynamic>>('/api/holidays');
       final data = res.data ?? [];
-      _holidays = (data).map((e) {
+      final holidays = data.map((e) {
         final m = e as Map<String, dynamic>;
         final fromRaw = m['date_from'] ?? m['holiday_date'];
         final toRaw = m['date_to'] ?? m['holiday_date'];
@@ -102,11 +120,20 @@ class _ManageHolidayState extends State<ManageHoliday> {
           coverage: m['coverage'] as String? ?? 'whole_day',
         );
       }).toList();
-    } on DioException catch (e) {
-      debugPrint('Load holidays failed: ${e.response?.data ?? e.message}');
-      _holidays = [];
+      if (!mounted || generation != _loadGeneration) return;
+      setState(() {
+        _holidays = holidays;
+        _loading = false;
+        _loadError = null;
+      });
+    } catch (error) {
+      debugPrint('Load holidays failed: $error');
+      if (!mounted || generation != _loadGeneration) return;
+      setState(() {
+        _loading = false;
+        _loadError = 'Unable to load holidays. Please try again.';
+      });
     }
-    if (mounted) setState(() => _loading = false);
   }
 
   void _selectHoliday(_HolidayRecord h) {
@@ -283,7 +310,8 @@ class _ManageHolidayState extends State<ManageHoliday> {
               : _descriptionController.text.trim(),
           'is_active': _isActive,
           'recurring': _isRecurring,
-          if (_holidayType == 'work_suspension') 'coverage': _coverage,
+          if (_holidayType == 'work_suspension' || _holidayType == 'special')
+            'coverage': _coverage,
         },
       );
       if (mounted) {
@@ -296,10 +324,7 @@ class _ManageHolidayState extends State<ManageHoliday> {
       return true;
     } on DioException catch (e) {
       if (mounted) {
-        final msg =
-            (e.response?.data as Map?)?['error'] ??
-            e.message ??
-            'Failed to add';
+        final msg = holidayApiErrorMessage(e, 'Unable to add holiday.');
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text('Failed to add: $msg')));
@@ -345,7 +370,8 @@ class _ManageHolidayState extends State<ManageHoliday> {
           'date_to': _dateToYyyyMmDd(_dateTo!),
           'name': name,
           'holiday_type': _holidayType,
-          'coverage': _holidayType == 'work_suspension'
+          'coverage':
+              _holidayType == 'work_suspension' || _holidayType == 'special'
               ? _coverage
               : 'whole_day',
           'description': _descriptionController.text.trim().isEmpty
@@ -365,10 +391,7 @@ class _ManageHolidayState extends State<ManageHoliday> {
       return true;
     } on DioException catch (e) {
       if (mounted) {
-        final msg =
-            (e.response?.data as Map?)?['error'] ??
-            e.message ??
-            'Failed to update';
+        final msg = holidayApiErrorMessage(e, 'Unable to update holiday.');
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text('Failed to update: $msg')));
@@ -411,10 +434,7 @@ class _ManageHolidayState extends State<ManageHoliday> {
       return true;
     } on DioException catch (e) {
       if (mounted) {
-        final msg =
-            (e.response?.data as Map?)?['error'] ??
-            e.message ??
-            'Failed to delete';
+        final msg = holidayApiErrorMessage(e, 'Unable to delete holiday.');
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text('Failed to delete: $msg')));
@@ -834,9 +854,18 @@ class _ManageHolidayState extends State<ManageHoliday> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           _buildHolidayToolbar(total),
+          if (_loading && _holidays.isNotEmpty)
+            const LinearProgressIndicator(minHeight: 2),
           Divider(height: 1, color: AppTheme.dashHairlineOf(context)),
-          if (_loading)
+          if (_loadError != null) ...[
+            _buildLoadError(),
+            if (_holidays.isNotEmpty)
+              Divider(height: 1, color: AppTheme.dashHairlineOf(context)),
+          ],
+          if (_loading && _holidays.isEmpty)
             _buildLoadingState()
+          else if (_loadError != null && _holidays.isEmpty)
+            const SizedBox.shrink()
           else if (filtered.isEmpty)
             _buildEmptyState()
           else
@@ -1088,7 +1117,8 @@ class _ManageHolidayState extends State<ManageHoliday> {
                             Icons.repeat_rounded,
                             const Color(0xFF2563EB),
                           ),
-                        if (holiday.holidayType == 'work_suspension')
+                        if (holiday.holidayType == 'work_suspension' ||
+                            holiday.holidayType == 'special')
                           _buildMetaPill(
                             _coverageLabel(holiday.coverage),
                             Icons.schedule_rounded,
@@ -1220,6 +1250,51 @@ class _ManageHolidayState extends State<ManageHoliday> {
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _buildLoadError() {
+    final colors = Theme.of(context).colorScheme;
+    return Container(
+      key: const Key('holiday-load-error'),
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+      color: colors.errorContainer.withValues(
+        alpha: _isDark(context) ? 0.22 : 0.55,
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.error_outline_rounded, color: colors.error, size: 21),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Holiday list unavailable',
+                  style: TextStyle(
+                    color: _headingColor(context),
+                    fontSize: 13,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  _loadError!,
+                  style: TextStyle(color: _mutedColor(context), fontSize: 12),
+                ),
+              ],
+            ),
+          ),
+          IconButton(
+            key: const Key('holiday-load-retry'),
+            onPressed: _loadHolidays,
+            tooltip: 'Retry',
+            icon: const Icon(Icons.refresh_rounded),
+            color: colors.error,
+          ),
+        ],
       ),
     );
   }
@@ -1478,11 +1553,14 @@ class _ManageHolidayState extends State<ManageHoliday> {
           onChanged: (v) {
             _updateHolidayFormState(() {
               _holidayType = v ?? 'regular';
-              if (_holidayType != 'work_suspension') _coverage = 'whole_day';
+              if (_holidayType != 'work_suspension' &&
+                  _holidayType != 'special') {
+                _coverage = 'whole_day';
+              }
             });
           },
         ),
-        if (_holidayType == 'work_suspension') ...[
+        if (_holidayType == 'work_suspension' || _holidayType == 'special') ...[
           const SizedBox(height: 16),
           Text(
             'Coverage',

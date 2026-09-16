@@ -118,6 +118,14 @@ class DtrUpdateEvent {
     if (single != null) return overlaps(single, single);
     return true;
   }
+
+  bool affectsEmployeeRange({
+    required String? employeeId,
+    required DateTime start,
+    required DateTime end,
+  }) {
+    return affectsUser(employeeId) && affectsDateRange(start, end);
+  }
 }
 
 /// Summary counts for DTR dashboard.
@@ -331,18 +339,32 @@ class DtrProvider extends ChangeNotifier {
   Stream<void> get onDtrUpdate => _dtrUpdateController.stream;
   Stream<DtrUpdateEvent> get onDtrEvent => _dtrEventController.stream;
 
-  DtrProvider() {
-    _initWebSocket();
-  }
+  DtrProvider();
+
+  int _authGeneration = 0;
+  int _employeeAttendanceLoadGeneration = 0;
+
+  bool _isCurrentAuthGeneration(int generation) =>
+      !_disposed && generation == _authGeneration;
+
+  bool _isCurrentEmployeeAttendanceLoad({
+    required int authGeneration,
+    required int loadGeneration,
+    required String userId,
+  }) =>
+      _isCurrentAuthGeneration(authGeneration) &&
+      loadGeneration == _employeeAttendanceLoadGeneration &&
+      _userId == userId;
 
   Future<void> _initWebSocket() async {
-    if (_disposed) return;
+    final authGeneration = _authGeneration;
+    if (_disposed || _userId == null) return;
     _wsReconnectTimer?.cancel();
     try {
       final token = await TokenStorage.instance.getToken();
-      if (_disposed) return;
+      if (!_isCurrentAuthGeneration(authGeneration) || _userId == null) return;
       if (token == null || token.isEmpty) {
-        _scheduleWebSocketReconnect();
+        _scheduleWebSocketReconnect(authGeneration);
         return;
       }
       final base = Uri.parse(ApiConfig.baseUrl);
@@ -359,37 +381,53 @@ class DtrProvider extends ChangeNotifier {
       _wsChannel = channel;
       _wsSubscription = channel.stream.listen(
         (message) {
+          if (!_isCurrentAuthGeneration(authGeneration)) return;
           try {
             final data = jsonDecode(message);
             if (data is Map && data['event'] == 'dtr_refresh') {
               final event = DtrUpdateEvent.fromJson(
                 Map<String, dynamic>.from(data),
               );
-              invalidateCachedDtrData();
-              _dtrEventController.add(event);
-              _dtrUpdateController.add(null);
+              _publishDtrUpdate(event);
             }
           } catch (_) {}
         },
-        onDone: _scheduleWebSocketReconnect,
-        onError: (_) => _scheduleWebSocketReconnect(),
+        onDone: () => _scheduleWebSocketReconnect(authGeneration),
+        onError: (_) => _scheduleWebSocketReconnect(authGeneration),
       );
       unawaited(
         channel.ready.catchError((_) {
-          if (!_disposed && identical(_wsChannel, channel)) {
-            _scheduleWebSocketReconnect();
+          if (_isCurrentAuthGeneration(authGeneration) &&
+              identical(_wsChannel, channel)) {
+            _scheduleWebSocketReconnect(authGeneration);
           }
         }),
       );
     } catch (_) {
-      _scheduleWebSocketReconnect();
+      _scheduleWebSocketReconnect(authGeneration);
     }
   }
 
-  void _scheduleWebSocketReconnect() {
-    if (_disposed) return;
+  void _scheduleWebSocketReconnect([int? expectedAuthGeneration]) {
+    if (_disposed || _userId == null) return;
+    if (expectedAuthGeneration != null &&
+        expectedAuthGeneration != _authGeneration) {
+      return;
+    }
     _wsReconnectTimer?.cancel();
     _wsReconnectTimer = Timer(const Duration(seconds: 5), _initWebSocket);
+  }
+
+  void _publishDtrUpdate(DtrUpdateEvent event) {
+    if (_disposed) return;
+    invalidateCachedDtrData();
+    _dtrEventController.add(event);
+    _dtrUpdateController.add(null);
+  }
+
+  @visibleForTesting
+  void debugPublishDtrUpdate(DtrUpdateEvent event) {
+    _publishDtrUpdate(event);
   }
 
   @override
@@ -469,6 +507,15 @@ class DtrProvider extends ChangeNotifier {
 
   String? _error;
   String? get error => _error;
+
+  bool _employeeAttendanceLoading = false;
+  bool get employeeAttendanceLoading => _employeeAttendanceLoading;
+
+  String? _employeeAttendanceError;
+  String? get employeeAttendanceError => _employeeAttendanceError;
+
+  bool _employeeAttendanceHasResult = false;
+  bool get employeeAttendanceHasResult => _employeeAttendanceHasResult;
 
   /// True when Supabase returns PGRST205 (table not found) - time_records not created yet.
   bool _tableMissing = false;
@@ -550,13 +597,53 @@ class DtrProvider extends ChangeNotifier {
     return '$h12:${m.toString().padLeft(2, '0')} ${isPm ? 'PM' : 'AM'}';
   }
 
-  /// Set current user id from API auth (e.g. AuthProvider.user?.id). Call after login or when restoring session.
-  void setUserFromApi(String? id) {
-    if (_userId == id) return;
-    _userId = id;
-    _todayRecord = null;
-    invalidateCachedDtrData(includeReferenceData: true);
+  /// Clears all DTR state whenever the authenticated identity changes.
+  void onAuthUserChanged(String? id) {
+    final normalizedId = _normalizeOptional(id);
+    if (_userId == normalizedId) return;
+
+    _authGeneration += 1;
+    _userId = normalizedId;
+    _wsReconnectTimer?.cancel();
+    _closeWebSocket();
+    _resetSessionState();
     notifyListeners();
+
+    if (normalizedId != null) unawaited(_initWebSocket());
+  }
+
+  /// Backward-compatible alias for dashboard callers.
+  void setUserFromApi(String? id) => onAuthUserChanged(id);
+
+  void _resetSessionState() {
+    _employeeAttendanceLoadGeneration += 1;
+    invalidateCachedDtrData(includeReferenceData: true);
+    _timeRecords = [];
+    _timeRecordTotal = 0;
+    _timeRecordLimit = 0;
+    _timeRecordOffset = 0;
+    _dashboardAnalyticsRecords = [];
+    _dashboardAnalyticsLoading = false;
+    _analyticsSnapshot = null;
+    _analyticsDepartmentName = null;
+    _summary = const DtrSummary();
+    _employees = [];
+    _departments = [];
+    _loading = false;
+    _error = null;
+    _employeeAttendanceLoading = false;
+    _employeeAttendanceError = null;
+    _employeeAttendanceHasResult = false;
+    _tableMissing = false;
+    _filterStart = null;
+    _filterEnd = null;
+    _filterUserId = null;
+    _filterDepartmentId = null;
+    _todayRecord = null;
+    _myShiftStartMinutes = null;
+    _myShiftEndMinutes = null;
+    _dashboardLeaveByType = {};
+    _dashboardLeaveFetchOk = false;
   }
 
   static String? _normalizeOptional(String? value) {
@@ -627,6 +714,7 @@ class DtrProvider extends ChangeNotifier {
 
   /// Load summary for admin dashboard (present, late, on leave, pending — from `/summary`).
   Future<void> loadSummary({bool forceRefresh = false}) async {
+    final authGeneration = _authGeneration;
     final cached =
         !forceRefresh && _summaryCache?.isFresh(_summaryCacheTtl) == true
         ? _summaryCache!.value
@@ -640,6 +728,7 @@ class DtrProvider extends ChangeNotifier {
       _error = null;
       _tableMissing = false;
       final c = await TimeRecordRepo.instance.fetchSummaryCounts();
+      if (!_isCurrentAuthGeneration(authGeneration)) return;
       _summary = DtrSummary(
         presentToday: c.presentToday,
         lateToday: c.lateToday,
@@ -649,6 +738,7 @@ class DtrProvider extends ChangeNotifier {
       _summaryCache = _DtrCacheEntry<DtrSummary>(_summary, DateTime.now());
       notifyListeners();
     } catch (e) {
+      if (!_isCurrentAuthGeneration(authGeneration)) return;
       if (_isTableNotFoundError(e)) {
         _tableMissing = true;
         _error = null;
@@ -677,6 +767,7 @@ class DtrProvider extends ChangeNotifier {
     bool forceRefresh = false,
     bool recompute = false,
   }) async {
+    final authGeneration = _authGeneration;
     if (forDashboardAnalytics) {
       await _loadDashboardAnalyticsData(forceRefresh: forceRefresh);
       return;
@@ -728,6 +819,7 @@ class DtrProvider extends ChangeNotifier {
         offset: offset,
         recompute: recompute,
       );
+      if (!_isCurrentAuthGeneration(authGeneration)) return;
       _writeRecordsCache(cacheKey, page.items, total: page.total);
       _timeRecords = List<TimeRecord>.from(page.items);
       _timeRecordTotal = page.total;
@@ -736,6 +828,7 @@ class DtrProvider extends ChangeNotifier {
       if (!silent) _loading = false;
       notifyListeners();
     } catch (e) {
+      if (!_isCurrentAuthGeneration(authGeneration)) return;
       if (_isTableNotFoundError(e)) {
         _tableMissing = true;
         _error = null;
@@ -756,6 +849,7 @@ class DtrProvider extends ChangeNotifier {
   bool _dashboardLeaveFetchOk = false;
 
   Future<void> _loadDashboardAnalyticsData({bool forceRefresh = false}) async {
+    final authGeneration = _authGeneration;
     if (_dashboardAnalyticsLoading) return;
     final now = DateTime.now();
     final endDay = DateTime(now.year, now.month, now.day);
@@ -767,9 +861,11 @@ class DtrProvider extends ChangeNotifier {
       _dashboardAnalyticsRecords = cached;
       if (_employees.isEmpty) {
         await loadEmployees(includePrivileged: true);
+        if (!_isCurrentAuthGeneration(authGeneration)) return;
       }
       if (_departments.isEmpty) {
         await loadDepartments();
+        if (!_isCurrentAuthGeneration(authGeneration)) return;
       }
       _dashboardLeaveByType = {};
       _dashboardLeaveFetchOk = false;
@@ -779,6 +875,7 @@ class DtrProvider extends ChangeNotifier {
           endDay,
           forceRefresh: forceRefresh,
         );
+        if (!_isCurrentAuthGeneration(authGeneration)) return;
         _dashboardLeaveFetchOk = true;
       } catch (_) {
         _dashboardLeaveByType = {};
@@ -795,13 +892,16 @@ class DtrProvider extends ChangeNotifier {
         startDate: startDay,
         endDate: endDay,
       );
+      if (!_isCurrentAuthGeneration(authGeneration)) return;
       _writeRecordsCache(cacheKey, list);
       _dashboardAnalyticsRecords = List<TimeRecord>.from(list);
       if (_employees.isEmpty) {
         await loadEmployees(includePrivileged: true);
+        if (!_isCurrentAuthGeneration(authGeneration)) return;
       }
       if (_departments.isEmpty) {
         await loadDepartments();
+        if (!_isCurrentAuthGeneration(authGeneration)) return;
       }
       _dashboardLeaveByType = {};
       _dashboardLeaveFetchOk = false;
@@ -811,20 +911,24 @@ class DtrProvider extends ChangeNotifier {
           endDay,
           forceRefresh: forceRefresh,
         );
+        if (!_isCurrentAuthGeneration(authGeneration)) return;
         _dashboardLeaveFetchOk = true;
       } catch (_) {
         _dashboardLeaveByType = {};
       }
       _recomputeAnalyticsSnapshot();
     } catch (e) {
+      if (!_isCurrentAuthGeneration(authGeneration)) return;
       if (_isTableNotFoundError(e)) {
         _tableMissing = true;
         _dashboardAnalyticsRecords = [];
         _analyticsSnapshot = null;
       }
     } finally {
-      _dashboardAnalyticsLoading = false;
-      notifyListeners();
+      if (_isCurrentAuthGeneration(authGeneration)) {
+        _dashboardAnalyticsLoading = false;
+        notifyListeners();
+      }
     }
   }
 
@@ -858,6 +962,7 @@ class DtrProvider extends ChangeNotifier {
     DateTime end, {
     bool forceRefresh = false,
   }) async {
+    final authGeneration = _authGeneration;
     final startKey = _dateKey(start)!;
     final endKey = _dateKey(end)!;
     final cacheKey = _DateRangeCacheKey(startDate: startKey, endDate: endKey);
@@ -871,6 +976,9 @@ class DtrProvider extends ChangeNotifier {
         limit: 500,
       ),
     );
+    if (!_isCurrentAuthGeneration(authGeneration)) {
+      return const <String, double>{};
+    }
     final map = <String, double>{};
     for (final r in list) {
       if (r.startDate == null || r.endDate == null) continue;
@@ -934,8 +1042,10 @@ class DtrProvider extends ChangeNotifier {
     DateTime? endDate,
     bool forceRefresh = false,
   }) async {
+    final authGeneration = _authGeneration;
     final uid = _userId;
     if (uid == null) return;
+    final loadGeneration = ++_employeeAttendanceLoadGeneration;
     final cacheKey = _recordsKey(
       startDate: startDate,
       endDate: endDate,
@@ -946,6 +1056,9 @@ class DtrProvider extends ChangeNotifier {
     if (cached != null) {
       _tableMissing = false;
       _error = null;
+      _employeeAttendanceError = null;
+      _employeeAttendanceLoading = false;
+      _employeeAttendanceHasResult = true;
       _filterStart = startDate;
       _filterEnd = endDate;
       _filterUserId = uid;
@@ -957,6 +1070,10 @@ class DtrProvider extends ChangeNotifier {
     }
     _loading = true;
     _error = null;
+    _employeeAttendanceLoading = true;
+    _employeeAttendanceError = null;
+    _employeeAttendanceHasResult = false;
+    _timeRecords = [];
     notifyListeners();
     try {
       final list = await TimeRecordRepo.instance.listForUser(
@@ -964,6 +1081,13 @@ class DtrProvider extends ChangeNotifier {
         startDate: startDate,
         endDate: endDate,
       );
+      if (!_isCurrentEmployeeAttendanceLoad(
+        authGeneration: authGeneration,
+        loadGeneration: loadGeneration,
+        userId: uid,
+      )) {
+        return;
+      }
       _writeRecordsCache(cacheKey, list);
       _filterStart = startDate;
       _filterEnd = endDate;
@@ -971,23 +1095,40 @@ class DtrProvider extends ChangeNotifier {
       _filterDepartmentId = null;
       _timeRecords = List<TimeRecord>.from(list);
       _loading = false;
+      _employeeAttendanceLoading = false;
+      _employeeAttendanceHasResult = true;
       notifyListeners();
     } catch (e) {
-      _error = e.toString();
+      if (!_isCurrentEmployeeAttendanceLoad(
+        authGeneration: authGeneration,
+        loadGeneration: loadGeneration,
+        userId: uid,
+      )) {
+        return;
+      }
+      final message = userFacingApiError(e);
+      _error = message;
+      _employeeAttendanceError = message;
       _loading = false;
+      _employeeAttendanceLoading = false;
+      _employeeAttendanceHasResult = false;
+      _timeRecords = [];
       notifyListeners();
     }
   }
 
   /// Load today's biometric attendance record for the current user.
   Future<void> loadTodayRecord() async {
+    final authGeneration = _authGeneration;
     final uid = _userId;
     if (uid == null) return;
     try {
       final rec = await TimeRecordRepo.instance.getTodayForUser(uid);
+      if (!_isCurrentAuthGeneration(authGeneration) || _userId != uid) return;
       _todayRecord = rec;
       notifyListeners();
     } catch (_) {
+      if (!_isCurrentAuthGeneration(authGeneration) || _userId != uid) return;
       _todayRecord = null;
       notifyListeners();
     }
@@ -995,15 +1136,19 @@ class DtrProvider extends ChangeNotifier {
 
   /// Load current user's shift start/end time for today (for clock-in validation).
   Future<void> loadMyShiftToday() async {
+    final authGeneration = _authGeneration;
+    if (_userId == null) return;
     try {
       final res = await ApiClient.instance.get<Map<String, dynamic>>(
         '/api/dtr-daily-summary/my-shift-today',
       );
+      if (!_isCurrentAuthGeneration(authGeneration)) return;
       final data = res.data;
       _myShiftStartMinutes = data?['start_minutes'] as int?;
       _myShiftEndMinutes = data?['end_minutes'] as int?;
       notifyListeners();
     } catch (_) {
+      if (!_isCurrentAuthGeneration(authGeneration)) return;
       _myShiftStartMinutes = null;
       _myShiftEndMinutes = null;
       notifyListeners();
@@ -1035,6 +1180,7 @@ class DtrProvider extends ChangeNotifier {
     bool includePrivileged = false,
     bool forceRefresh = false,
   }) async {
+    final authGeneration = _authGeneration;
     final normalizedDepartmentId = _normalizeOptional(departmentId);
     final normalizedStartDate = _dateKey(startDate);
     final normalizedEndDate = _dateKey(endDate);
@@ -1066,6 +1212,7 @@ class DtrProvider extends ChangeNotifier {
         '/api/employees',
         queryParameters: params,
       );
+      if (!_isCurrentAuthGeneration(authGeneration)) return;
       final data = res.data ?? [];
       final employees = data.map((e) {
         final m = e as Map;
@@ -1089,6 +1236,7 @@ class DtrProvider extends ChangeNotifier {
       _employees = List<EmployeeOption>.from(employees);
       notifyListeners();
     } catch (_) {
+      if (!_isCurrentAuthGeneration(authGeneration)) return;
       _employees = [];
       notifyListeners();
     }
@@ -1096,6 +1244,7 @@ class DtrProvider extends ChangeNotifier {
 
   /// Load department list for admin filter.
   Future<void> loadDepartments({bool forceRefresh = false}) async {
+    final authGeneration = _authGeneration;
     if (!forceRefresh &&
         _departmentsCache != null &&
         _departmentsCache!.isFresh(_referenceCacheTtl)) {
@@ -1107,6 +1256,7 @@ class DtrProvider extends ChangeNotifier {
       final res = await ApiClient.instance.get<List<dynamic>>(
         '/api/departments',
       );
+      if (!_isCurrentAuthGeneration(authGeneration)) return;
       final data = res.data ?? [];
       final departments = data
           .map((e) {
@@ -1124,6 +1274,7 @@ class DtrProvider extends ChangeNotifier {
       _departments = List<DepartmentOption>.from(departments);
       notifyListeners();
     } catch (_) {
+      if (!_isCurrentAuthGeneration(authGeneration)) return;
       _departments = [];
       notifyListeners();
     }
@@ -1131,11 +1282,13 @@ class DtrProvider extends ChangeNotifier {
 
   /// Add manual entry (admin).
   Future<bool> addManualEntry(TimeRecord record) async {
+    final authGeneration = _authGeneration;
     _loading = true;
     _error = null;
     notifyListeners();
     try {
       await TimeRecordRepo.instance.upsert(record);
+      if (!_isCurrentAuthGeneration(authGeneration)) return false;
       invalidateCachedDtrData();
       await loadTimeRecordsForAdmin(
         startDate: _filterStart,
@@ -1144,11 +1297,14 @@ class DtrProvider extends ChangeNotifier {
         departmentId: _filterDepartmentId,
         forceRefresh: true,
       );
+      if (!_isCurrentAuthGeneration(authGeneration)) return false;
       await loadSummary(forceRefresh: true);
+      if (!_isCurrentAuthGeneration(authGeneration)) return false;
       _loading = false;
       notifyListeners();
       return true;
     } catch (e) {
+      if (!_isCurrentAuthGeneration(authGeneration)) return false;
       _error = userFacingApiError(e);
       _loading = false;
       notifyListeners();
@@ -1162,6 +1318,7 @@ class DtrProvider extends ChangeNotifier {
     bool editUnderlyingAttendance = false,
   }) async {
     if (record.id == null) return false;
+    final authGeneration = _authGeneration;
     _loading = true;
     _error = null;
     notifyListeners();
@@ -1170,6 +1327,7 @@ class DtrProvider extends ChangeNotifier {
         record,
         editUnderlyingAttendance: editUnderlyingAttendance,
       );
+      if (!_isCurrentAuthGeneration(authGeneration)) return false;
       invalidateCachedDtrData();
       await loadTimeRecordsForAdmin(
         startDate: _filterStart,
@@ -1178,11 +1336,14 @@ class DtrProvider extends ChangeNotifier {
         departmentId: _filterDepartmentId,
         forceRefresh: true,
       );
+      if (!_isCurrentAuthGeneration(authGeneration)) return false;
       await loadSummary(forceRefresh: true);
+      if (!_isCurrentAuthGeneration(authGeneration)) return false;
       _loading = false;
       notifyListeners();
       return true;
     } catch (e) {
+      if (!_isCurrentAuthGeneration(authGeneration)) return false;
       _error = userFacingApiError(e);
       _loading = false;
       notifyListeners();
@@ -1192,11 +1353,13 @@ class DtrProvider extends ChangeNotifier {
 
   /// Recalculate one saved DTR entry with the current shift and attendance policy.
   Future<bool> recalculateEntry(String id) async {
+    final authGeneration = _authGeneration;
     _loading = true;
     _error = null;
     notifyListeners();
     try {
       await TimeRecordRepo.instance.recalculate(id);
+      if (!_isCurrentAuthGeneration(authGeneration)) return false;
       invalidateCachedDtrData();
       await loadTimeRecordsForAdmin(
         startDate: _filterStart,
@@ -1205,11 +1368,14 @@ class DtrProvider extends ChangeNotifier {
         departmentId: _filterDepartmentId,
         forceRefresh: true,
       );
+      if (!_isCurrentAuthGeneration(authGeneration)) return false;
       await loadSummary(forceRefresh: true);
+      if (!_isCurrentAuthGeneration(authGeneration)) return false;
       _loading = false;
       notifyListeners();
       return true;
     } catch (e) {
+      if (!_isCurrentAuthGeneration(authGeneration)) return false;
       _error = userFacingApiError(e);
       _loading = false;
       notifyListeners();
@@ -1219,11 +1385,13 @@ class DtrProvider extends ChangeNotifier {
 
   /// Delete a processed entry with an administrator-provided audit reason.
   Future<bool> deleteEntry(String id, {required String reason}) async {
+    final authGeneration = _authGeneration;
     _loading = true;
     _error = null;
     notifyListeners();
     try {
       await TimeRecordRepo.instance.delete(id, reason: reason);
+      if (!_isCurrentAuthGeneration(authGeneration)) return false;
       invalidateCachedDtrData();
       await loadTimeRecordsForAdmin(
         startDate: _filterStart,
@@ -1232,11 +1400,14 @@ class DtrProvider extends ChangeNotifier {
         departmentId: _filterDepartmentId,
         forceRefresh: true,
       );
+      if (!_isCurrentAuthGeneration(authGeneration)) return false;
       await loadSummary(forceRefresh: true);
+      if (!_isCurrentAuthGeneration(authGeneration)) return false;
       _loading = false;
       notifyListeners();
       return true;
     } catch (e) {
+      if (!_isCurrentAuthGeneration(authGeneration)) return false;
       _error = e.toString();
       _loading = false;
       notifyListeners();
@@ -1249,11 +1420,13 @@ class DtrProvider extends ChangeNotifier {
     String deletionId, {
     required String reason,
   }) async {
+    final authGeneration = _authGeneration;
     _loading = true;
     _error = null;
     notifyListeners();
     try {
       await TimeRecordRepo.instance.restoreDeleted(deletionId, reason: reason);
+      if (!_isCurrentAuthGeneration(authGeneration)) return false;
       invalidateCachedDtrData();
       await loadTimeRecordsForAdmin(
         startDate: _filterStart,
@@ -1262,11 +1435,14 @@ class DtrProvider extends ChangeNotifier {
         departmentId: _filterDepartmentId,
         forceRefresh: true,
       );
+      if (!_isCurrentAuthGeneration(authGeneration)) return false;
       await loadSummary(forceRefresh: true);
+      if (!_isCurrentAuthGeneration(authGeneration)) return false;
       _loading = false;
       notifyListeners();
       return true;
     } catch (e) {
+      if (!_isCurrentAuthGeneration(authGeneration)) return false;
       _error = userFacingApiError(e);
       _loading = false;
       notifyListeners();

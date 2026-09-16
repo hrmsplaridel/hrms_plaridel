@@ -773,9 +773,8 @@ class _EmployeeDtrAssistantPageState extends State<EmployeeDtrAssistantPage> {
         result != kLeaveFormResultSubmitted) {
       return;
     }
-    await context.read<LeaveProvider>().loadMyLeaveData(userId);
-    if (!mounted) return;
     showLeaveFormSuccessSnackBar(context, result);
+    await context.read<LeaveProvider>().loadMyLeaveData(userId);
   }
 
   @override

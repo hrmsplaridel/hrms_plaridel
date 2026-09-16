@@ -7,10 +7,12 @@ import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/providers/auth_provider.dart';
 import 'package:hrms_plaridel/features/dtr/leave/data/providers/leave_provider.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_balance.dart';
+import 'package:hrms_plaridel/features/dtr/leave/utils/leave_certification_balance.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_request.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_type.dart';
 import 'package:hrms_plaridel/features/dtr/leave/utils/leave_form_signatories.dart';
 import 'package:hrms_plaridel/features/dtr/leave/utils/leave_request_pdf.dart';
+import 'package:hrms_plaridel/features/docutracker/models/document_builder.dart';
 
 typedef LeaveRequestAction = Future<bool> Function(LeaveRequest request);
 
@@ -52,6 +54,7 @@ class _LeaveRequestPrintLayoutState extends State<LeaveRequestPrintLayout> {
   LeaveRequest? _savedRequest;
   bool _attachmentUploading = false;
   List<LeaveBalance> _employeeBalances = []; // #Section7A
+  DocuTrackerSourceSignature? _applicantSignature;
 
   late final TextEditingController _officeDepartmentController;
   late final TextEditingController _lastNameController;
@@ -122,7 +125,16 @@ class _LeaveRequestPrintLayoutState extends State<LeaveRequestPrintLayout> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _loadEmployeeAssignmentPrefill();
       _loadEmployeeBalances(); // #Section7A: Fetch credits for table 7.A
+      _loadApplicantSignature();
     });
+  }
+
+  Future<void> _loadApplicantSignature() async {
+    final request = _savedRequest ?? widget.initialRequest;
+    if (request?.id == null || request!.id!.isEmpty) return;
+    final signatories = await loadLeaveFormSignatories(request: request);
+    if (!mounted) return;
+    setState(() => _applicantSignature = signatories.applicantSignature);
   }
 
   Future<void> _loadEmployeeBalances() async {
@@ -1166,7 +1178,17 @@ class _LeaveRequestPrintLayoutState extends State<LeaveRequestPrintLayout> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.center,
       children: [
-        const SizedBox(height: 20),
+        if (_applicantSignature?.isSigned == true)
+          SizedBox(
+            height: 44,
+            child: Image.memory(
+              _applicantSignature!.signatureImageBytes!,
+              fit: BoxFit.contain,
+              filterQuality: FilterQuality.high,
+            ),
+          )
+        else
+          const SizedBox(height: 20),
         Container(height: 1, color: Colors.black54),
         const SizedBox(height: 6),
         Text(
@@ -1177,6 +1199,11 @@ class _LeaveRequestPrintLayoutState extends State<LeaveRequestPrintLayout> {
             fontStyle: FontStyle.italic,
           ),
         ),
+        if (_applicantSignature?.signerName?.isNotEmpty == true)
+          Text(
+            _applicantSignature!.signerName!,
+            style: TextStyle(color: AppTheme.textSecondary, fontSize: 10),
+          ),
       ],
     );
   }
@@ -1239,10 +1266,24 @@ class _LeaveRequestPrintLayoutState extends State<LeaveRequestPrintLayout> {
                 children: [
                   const _TableCell(text: 'Total Earned'),
                   _TableCell(
-                    text: formatDays(vlBal.earnedDays + vlBal.adjustedDays),
+                    text: formatDays(
+                      leaveCertificationBalanceBeforeApplication(
+                        balance: vlBal,
+                        requestStatus:
+                            currentRequest?.status ?? LeaveRequestStatus.draft,
+                        applicationDays: vlDeduction,
+                      ),
+                    ),
                   ),
                   _TableCell(
-                    text: formatDays(slBal.earnedDays + slBal.adjustedDays),
+                    text: formatDays(
+                      leaveCertificationBalanceBeforeApplication(
+                        balance: slBal,
+                        requestStatus:
+                            currentRequest?.status ?? LeaveRequestStatus.draft,
+                        applicationDays: slDeduction,
+                      ),
+                    ),
                   ),
                 ],
               ),
@@ -1257,10 +1298,24 @@ class _LeaveRequestPrintLayoutState extends State<LeaveRequestPrintLayout> {
                 children: [
                   const _TableCell(text: 'Balance'),
                   _TableCell(
-                    text: formatBalance(vlBal.remainingDays - vlDeduction),
+                    text: formatBalance(
+                      leaveCertificationBalanceAfterApplication(
+                        balance: vlBal,
+                        requestStatus:
+                            currentRequest?.status ?? LeaveRequestStatus.draft,
+                        applicationDays: vlDeduction,
+                      ),
+                    ),
                   ),
                   _TableCell(
-                    text: formatBalance(slBal.remainingDays - slDeduction),
+                    text: formatBalance(
+                      leaveCertificationBalanceAfterApplication(
+                        balance: slBal,
+                        requestStatus:
+                            currentRequest?.status ?? LeaveRequestStatus.draft,
+                        applicationDays: slDeduction,
+                      ),
+                    ),
                   ),
                 ],
               ),
@@ -1774,6 +1829,14 @@ class _LeaveRequestPrintLayoutState extends State<LeaveRequestPrintLayout> {
         recommendationOfficerName: formSignatories.recommendationOfficer?.name,
         recommendationOfficerTitle:
             formSignatories.recommendationOfficer?.title,
+        approvingAuthorityName: formSignatories.approvingAuthority?.name,
+        approvingAuthorityTitle: formSignatories.approvingAuthority?.title,
+        applicantSignatureBytes:
+            formSignatories.applicantSignature?.signatureImageBytes,
+        departmentHeadSignatureBytes:
+            formSignatories.departmentHeadSignature?.signatureImageBytes,
+        hrApproverSignatureBytes:
+            formSignatories.hrApproverSignature?.signatureImageBytes,
         name: 'Leave_Application_${request.id ?? request.userId}.pdf',
       );
     } catch (e) {

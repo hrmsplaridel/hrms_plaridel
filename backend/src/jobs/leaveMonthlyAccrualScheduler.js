@@ -25,9 +25,11 @@ const {
   recordReconciliationFailure,
 } = require('../services/dtrMonthEndReconciliation');
 const {
-  clearBiometricAttendancePolicyCache,
   processBiometricLogsToSummary,
 } = require('../services/biometricProcessing');
+const {
+  invalidateAttendancePolicyCache,
+} = require('../services/attendancePolicyCache');
 const { broadcastAppEvent } = require('../websockets/appEvents');
 
 /** Stable key for pg_try_advisory_lock (must not collide with other app locks). */
@@ -229,7 +231,7 @@ async function runScheduledCompletedMonthEnd(
     queueEmployeeLoader = listPendingReconciliationEmployees,
     queueFailureRecorder = recordReconciliationFailure,
     dtrRebuilder = processBiometricLogsToSummary,
-    policyCacheInvalidator = clearBiometricAttendancePolicyCache,
+    policyCacheInvalidator = invalidateAttendancePolicyCache,
     queuedMonthLimit = Math.max(
       1,
       Math.min(

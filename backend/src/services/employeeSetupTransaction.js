@@ -64,6 +64,9 @@ function normalizeEmployeeSetup(setup, defaults = {}) {
   const hasAssignmentChange = hasOwn(setup, 'assignment');
   const hasPolicyChange = hasOwn(setup, 'policy_assignment');
   if (!hasAssignmentChange && !hasPolicyChange) return null;
+  if (hasOwn(setup, 'is_active') && typeof setup.is_active !== 'boolean') {
+    throw new EmployeeSetupValidationError('is_active must be a boolean.');
+  }
 
   let assignment;
   if (hasAssignmentChange) {
@@ -144,12 +147,13 @@ async function validateSetupReferences(db, setup) {
       `SELECT 1
        FROM attendance_policies
        WHERE id = $1::uuid
+         AND is_active = true
        LIMIT 1`,
       [setup.policyAssignment.attendancePolicyId]
     );
     if (result.rowCount === 0) {
       throw new EmployeeSetupValidationError(
-        'Selected attendance policy was not found'
+        'Selected attendance policy is inactive or was not found'
       );
     }
   }

@@ -1,32 +1,41 @@
-/* Builds DocuTracker SQL rollups from individual scripts under backend/scripts/. */
+/* Builds DocuTracker SQL rollups from its dedicated migration directory. */
 const fs = require("fs");
 const path = require("path");
 
-const base = __dirname;
+const sqlDir = path.join(__dirname, "migrations", "docutracker");
 
 const APPLY_ONCE_FILE = "migrate-docutracker-production-hardening-apply-once.sql";
 
 const coreSections = [
-  ["01 — BASE SCHEMA (tables, indexes)", "init-schema-docutracker.sql"],
-  ["02 — MVP CONSTRAINTS (status checks, permissions, routing indexes)", "migrate-docutracker-mvp-constraints.sql"],
-  ["03 — SUPABASE / STANDALONE PARITY (columns, nullable assignee)", "migrate-docutracker-supabase-parity.sql"],
-  ["04 — WORKFLOW VERSIONING (routing_config_versions, workflow_version on documents)", "migrate-docutracker-workflow-versioning.sql"],
-  ["05 — WORKFLOW STEPS + STEP ASSIGNEES (normalized selected-person)", "migrate-docutracker-workflow-step-assignees-v1.sql"],
-  ["06 — STEP ASSIGNEE CONSTRAINT TRIGGER (primary + enabled rules)", "migrate-docutracker-workflow-step-assignees-constraints-v1.sql"],
-  ["07 — ROUTING RECORD ASSIGNEES (junction + backfill)", "migrate-docutracker-routing-record-assignees-v1.sql"],
-  ["08 — HARDENING V2 (numeric guards, notifications event_key, permissions uniqueness, transition_requests)", "migrate-docutracker-hardening-v2.sql"],
+  ["01 - BASE SCHEMA (tables, indexes)", "init-schema-docutracker.sql"],
+  ["02 - MVP CONSTRAINTS (status checks, permissions, routing indexes)", "migrate-docutracker-mvp-constraints.sql"],
+  ["03 - SUPABASE / STANDALONE PARITY (columns, nullable assignee)", "migrate-docutracker-supabase-parity.sql"],
+  ["04 - WORKFLOW VERSIONING (routing_config_versions, workflow_version on documents)", "migrate-docutracker-workflow-versioning.sql"],
+  ["05 - WORKFLOW STEPS + STEP ASSIGNEES (normalized selected-person)", "migrate-docutracker-workflow-step-assignees-v1.sql"],
+  ["06 - STEP ASSIGNEE CONSTRAINT TRIGGER (primary + enabled rules)", "migrate-docutracker-workflow-step-assignees-constraints-v1.sql"],
+  ["07 - ROUTING RECORD ASSIGNEES (junction + backfill)", "migrate-docutracker-routing-record-assignees-v1.sql"],
+  ["08 - HARDENING V2 (numeric guards, notifications event_key, permissions uniqueness, transition_requests)", "migrate-docutracker-hardening-v2.sql"],
 ];
 
 const postSections = [
-  ["10 — STATUS SEMANTICS V2 (drop forwarded as document status)", "migrate-docutracker-status-semantics-v2.sql"],
-  ["11 — ACTIVE ROUTING STEP INDEX (one active row per document)", "migrate-docutracker-active-step-index-v1.sql"],
-  ["12 — SEED PERMISSION BASELINE (role rows)", "seed-docutracker-permission-baseline.sql"],
-  ["13 — OPTIONAL VERIFY (checks source tables exist)", "verify-docutracker-source-parity.sql"],
-  ["14 — AI SUMMARIES (saved metadata-only summaries)", "migrate-docutracker-ai-summaries-v1.sql"],
+  ["10 - STATUS SEMANTICS V2 (drop forwarded as document status)", "migrate-docutracker-status-semantics-v2.sql"],
+  ["11 - ACTIVE ROUTING STEP INDEX (one active row per document)", "migrate-docutracker-active-step-index-v1.sql"],
+  ["12 - SEED PERMISSION BASELINE (role rows)", "seed-docutracker-permission-baseline.sql"],
+  ["13 - OPTIONAL VERIFY (checks source tables exist)", "verify-docutracker-source-parity.sql"],
+  ["14 - SAFE SCHEMA IMPROVEMENTS (metadata, files, notifications)", "migrate-docutracker-safe-improvements-v1.sql"],
+  ["15 - ALLOW UNASSIGNED WORKFLOW STEPS", "migrate-docutracker-allow-unassigned-workflow-steps-v2.sql"],
+  ["16 - DOCUMENT BUILDER + E-SIGNATURES", "migrate-docutracker-document-builder-esign-v1.sql"],
+  ["17 - E-SIGNATURE HISTORY ACTION", "migrate-docutracker-history-signed-action-v1.sql"],
+  ["18 - LINKED DTR LEAVE E-SIGNATURES", "migrate-docutracker-leave-signatures-v1.sql"],
+  ["19 - DEPARTMENT HEAD LEAVE E-SIGNATURE", "migrate-docutracker-leave-signatures-v2.sql"],
+  ["20 - HR APPROVER LEAVE E-SIGNATURE", "migrate-docutracker-leave-signatures-v3.sql"],
+  ["21 - GOVERNANCE AUDIT TRAIL", "migrate-docutracker-governance-audit-v1.sql"],
+  ["22 - EFFECTIVE-DATED OFFICIAL SIGNATORIES", "migrate-docutracker-official-signatories-v1.sql"],
+  ["23 - AUTOMATIC MAYOR LEAVE SIGNATORY", "migrate-docutracker-automatic-mayor-signatory-v2.sql"],
 ];
 
 function readBody(file) {
-  const p = path.join(base, file);
+  const p = path.join(sqlDir, file);
   if (!fs.existsSync(p)) {
     throw new Error(`Missing: ${p}`);
   }
@@ -57,10 +66,10 @@ ${toc}
   return out;
 }
 
-// --- Phase 1: core (01–08)
+// --- Phase 1: core (01-08)
 const coreToc = coreSections.map(([t]) => t);
 const coreOut = buildRollup({
-  title: "HRMS Plaridel — DocuTracker: INSTALL PHASE 1 (core, 01–08)",
+  title: "HRMS Plaridel - DocuTracker: INSTALL PHASE 1 (core, 01-08)",
   descriptionLines: [
     "PREREQUISITE: psql -d YOUR_DB -f scripts/init-schema.sql",
     "Requires: uuid-ossp, users, departments (and related core HR tables).",
@@ -70,10 +79,10 @@ const coreOut = buildRollup({
   sections: coreSections,
 });
 
-// --- Phase 2: production hardening apply-once (09) — standalone by design
+// --- Phase 2: production hardening apply-once (09) - standalone by design
 const applyOnceBody = readBody(APPLY_ONCE_FILE);
 const applyOnceOut = `-- =============================================================================
--- HRMS Plaridel — DocuTracker: PRODUCTION HARDENING (apply once)
+-- HRMS Plaridel - DocuTracker: PRODUCTION HARDENING (apply once)
 -- =============================================================================
 -- Source: ${APPLY_ONCE_FILE}
 -- Run AFTER phase 1 (docutracker-install-core.sql) completes successfully.
@@ -83,21 +92,27 @@ const applyOnceOut = `-- =======================================================
 -- then re-run with ON_ERROR_STOP.
 --
 -- USAGE:
---   psql -d hrms_plaridel -v ON_ERROR_STOP=1 -f scripts/docutracker-install-production-hardening-apply-once.sql
+--   psql -d hrms_plaridel -v ON_ERROR_STOP=1 -f backend/scripts/migrations/docutracker/docutracker-install-production-hardening-apply-once.sql
 -- =============================================================================
 
 ${applyOnceBody}
 `;
 
-// --- Phase 3: post production hardening (10–13)
+// --- Phase 3: post production hardening (10-21)
 const postToc = postSections.map(([t]) => t);
 const postOut = buildRollup({
-  title: "HRMS Plaridel — DocuTracker: INSTALL PHASE 3 (post production hardening, 10–13)",
+  title: "HRMS Plaridel - DocuTracker: INSTALL PHASE 3 (post production hardening, 10-21)",
   descriptionLines: [
     "PREREQUISITE: phase 1 complete AND docutracker-install-production-hardening-apply-once.sql applied.",
     "Section 10 drops/replaces *_prod_v1 status constraints created in production hardening.",
     "Section 11 fails if multiple active routing rows exist per document; fix data then re-run.",
     "Section 13 raises if optional source-module tables are missing; comment it out for DocuTracker-only DBs.",
+    "Section 14 is additive and keeps existing app-facing table/column names stable.",
+    "Section 15 allows configuration steps with zero assignees while preserving assigned-step invariants.",
+    "Section 16 adds A4 document content and server-locked e-signature persistence.",
+    "Section 17 allows the server-audited signed history action.",
+    "Section 18 links audited applicant signatures to DTR leave requests without copying leave data.",
+    "Section 21 assigns effective-dated officials used by generated leave forms.",
   ],
   tocLines: postToc,
   sections: postSections,
@@ -105,29 +120,29 @@ const postOut = buildRollup({
 
 // --- Orchestrator: one psql command, same order (\ir is relative to this file's directory)
 const orchestratorOut = `-- =============================================================================
--- HRMS Plaridel — DocuTracker: FULL INSTALL (orchestrator — runs phases in order)
+-- HRMS Plaridel - DocuTracker: FULL INSTALL (orchestrator - runs phases in order)
 -- =============================================================================
 -- PREREQUISITE:
 --   psql -d YOUR_DB -f scripts/init-schema.sql
 --
 -- This file uses psql \\ir (include relative to this file) to run, in order:
---   1) docutracker-install-core.sql                    (sections 01–08)
+--   1) docutracker-install-core.sql                    (sections 01-08)
 --   2) docutracker-install-production-hardening-apply-once.sql
---   3) docutracker-install-post-production-hardening.sql (sections 10–13)
+--   3) docutracker-install-post-production-hardening.sql (sections 10-21)
 --
--- USAGE (from repo root; path must point at this file — \\ir resolves next to it):
---   psql -d hrms_plaridel -v ON_ERROR_STOP=1 -f backend/scripts/docutracker-install-all-in-order.sql
+-- USAGE (from repo root; path must point at this file - \\ir resolves next to it):
+--   psql -d hrms_plaridel -v ON_ERROR_STOP=1 -f backend/scripts/migrations/docutracker/docutracker-install-all-in-order.sql
 --
 -- To run phases separately, execute those three -f files in order (see each file's header).
 --
 -- Regenerate rollups: node backend/scripts/build-docutracker-all.js
 -- =============================================================================
 
-\\echo 'DocuTracker phase 1/3: core (01–08)...'
+\\echo 'DocuTracker phase 1/3: core (01-08)...'
 \\ir docutracker-install-core.sql
 \\echo 'DocuTracker phase 2/3: production hardening (apply once)...'
 \\ir docutracker-install-production-hardening-apply-once.sql
-\\echo 'DocuTracker phase 3/3: post production hardening (10–13)...'
+\\echo 'DocuTracker phase 3/3: post production hardening (10-21)...'
 \\ir docutracker-install-post-production-hardening.sql
 \\echo 'DocuTracker install finished.'
 `;
@@ -140,7 +155,7 @@ const writes = [
 ];
 
 for (const [name, content] of writes) {
-  const dest = path.join(base, name);
+  const dest = path.join(sqlDir, name);
   fs.writeFileSync(dest, content, "utf8");
   console.log(`Wrote ${dest} (${content.length} bytes)`);
 }

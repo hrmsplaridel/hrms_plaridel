@@ -1,27 +1,61 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/providers/auth_provider.dart';
 import 'package:hrms_plaridel/features/docutracker/data/providers/docutracker_provider.dart';
-import 'package:hrms_plaridel/features/docutracker/data/styles/docutracker_styles.dart';
 import 'package:hrms_plaridel/features/docutracker/data/repositories/docutracker_repository.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document_status.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document_type.dart';
+import 'package:hrms_plaridel/features/docutracker/services/docutracker_document_visibility.dart';
 import 'package:hrms_plaridel/features/docutracker/theme/docutracker_tokens.dart';
 import 'package:hrms_plaridel/features/docutracker/data/navigation/docutracker_document_navigation.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_create_document_dialog.dart';
+import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_signature_library_dialog.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_error_banner.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_module_header.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_status_badge.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_status_theme.dart';
-import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_warm_widgets.dart';
+
+String _statusLabel(
+  DocuTrackerDocument document,
+  DocumentStatus effectiveStatus,
+) {
+  if (effectiveStatus == DocumentStatus.pending &&
+      DocuTrackerDocumentVisibility.isWorkInProgressDraft(document)) {
+    return 'Draft';
+  }
+  return effectiveStatus.displayName;
+}
+
+String _assigneeLabel(DocuTrackerDocument document) {
+  final name = document.assigneeName?.trim();
+  if (name != null && name.isNotEmpty) return name;
+  if (document.sourceOnly && document.sourceModule == 'dtr') {
+    return 'Managed in DTR';
+  }
+  if (document.status == DocumentStatus.approved ||
+      document.status == DocumentStatus.rejected ||
+      document.status == DocumentStatus.cancelled) {
+    return 'Workflow complete';
+  }
+  if (DocuTrackerDocumentVisibility.isWorkInProgressDraft(document)) {
+    return 'Not submitted';
+  }
+  return 'Unassigned';
+}
 
 /// Document list screen. Step 2: Role-Based Visibility - shows only
 /// documents assigned to user, their office, or department.
 class DocuTrackerDocumentsScreen extends StatefulWidget {
-  const DocuTrackerDocumentsScreen({super.key, this.isAdmin = false});
+  const DocuTrackerDocumentsScreen({
+    super.key,
+    this.isAdmin = false,
+    this.showHeader = true,
+  });
 
   final bool isAdmin;
+  final bool showHeader;
 
   @override
   State<DocuTrackerDocumentsScreen> createState() =>
@@ -34,6 +68,7 @@ class _DocuTrackerDocumentsScreenState
   DocumentStatus? _filterStatus;
   String _searchQuery = '';
   bool _sortByDeadline = false;
+  bool _showMobileFilters = false;
   bool? _canCreateDocuments;
   List<DocumentType> _creatableDocumentTypes = const [];
 
@@ -75,216 +110,282 @@ class _DocuTrackerDocumentsScreenState
       userId: userId,
     );
 
-    final showFab = _canCreateDocuments == true;
-
-    return Stack(
-      clipBehavior: Clip.none,
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            DocuTrackerModuleHeader(
-              title: 'Documents',
-              subtitle: widget.isAdmin
-                  ? 'All routed documents in the organization.'
-                  : 'Documents you created, hold, or are assigned to review.',
+        if (widget.showHeader) ...[
+          DocuTrackerModuleHeader(
+            title: 'Documents',
+            subtitle: widget.isAdmin
+                ? 'All routed documents in the organization.'
+                : 'Documents you created, hold, or are assigned to review.',
+          ),
+          const SizedBox(height: 16),
+        ],
+        _buildDocumentToolbar(provider, auth),
+        if (provider.error != null) ...[
+          const SizedBox(height: 12),
+          DocuTrackerErrorBanner(
+            message: provider.error!,
+            onDismiss: () => provider.clearError(),
+          ),
+        ],
+        const SizedBox(height: 20),
+        if (provider.loading)
+          const Center(
+            child: Padding(
+              padding: EdgeInsets.all(32),
+              child: CircularProgressIndicator(color: AppTheme.primaryNavy),
             ),
-            const SizedBox(height: 16),
-            DocuTrackerWarmSurfaceCard(
-              padding: const EdgeInsets.all(14),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Icon(
-                        Icons.tune_rounded,
-                        size: 18,
-                        color: DocuTrackerTokens.terracotta,
-                      ),
-                      const SizedBox(width: 8),
-                      Text(
-                        'Filters',
-                        style: DocuTrackerTokens.titleStyle(
-                          context,
-                        ).copyWith(fontSize: 13),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 10),
-                  TextField(
-                    onChanged: (val) {
-                      setState(() => _searchQuery = val.toLowerCase());
-                    },
-                    decoration: DocuTrackerTokens.warmSearchDecoration(
-                      context,
-                      'Search documents by title, number, or sender...',
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.center,
-                    children: [
-                      Expanded(
-                        child: Wrap(
-                          spacing: 8,
-                          runSpacing: 8,
-                          crossAxisAlignment: WrapCrossAlignment.center,
-                          children: [
-                            _warmDropdown(
-                              context,
-                              DropdownButton<String?>(
-                                value: _filterType,
-                                hint: const Text('Type'),
-                                underline: const SizedBox.shrink(),
-                                isDense: true,
-                                iconSize: 18,
-                                items: [
-                                  const DropdownMenuItem(
-                                    value: null,
-                                    child: Text('All types'),
-                                  ),
-                                  ...DocumentType.values.map(
-                                    (t) => DropdownMenuItem(
-                                      value: t.value,
-                                      child: Text(t.displayName),
-                                    ),
-                                  ),
-                                ],
-                                onChanged: (v) {
-                                  setState(() => _filterType = v);
-                                  _load();
-                                },
-                              ),
-                            ),
-                            _warmDropdown(
-                              context,
-                              DropdownButton<DocumentStatus?>(
-                                value: _filterStatus,
-                                hint: const Text('Status'),
-                                underline: const SizedBox.shrink(),
-                                isDense: true,
-                                iconSize: 18,
-                                items: [
-                                  const DropdownMenuItem(
-                                    value: null,
-                                    child: Text('All statuses'),
-                                  ),
-                                  ...DocumentStatus.values.map(
-                                    (s) => DropdownMenuItem(
-                                      value: s,
-                                      child: Text(s.displayName),
-                                    ),
-                                  ),
-                                ],
-                                onChanged: (v) {
-                                  setState(() => _filterStatus = v);
-                                  _load();
-                                },
-                              ),
-                            ),
-                            _warmDropdown(
-                              context,
-                              DropdownButton<bool>(
-                                value: _sortByDeadline,
-                                underline: const SizedBox.shrink(),
-                                isDense: true,
-                                iconSize: 18,
-                                items: const [
-                                  DropdownMenuItem(
-                                    value: false,
-                                    child: Text('Sort by newest'),
-                                  ),
-                                  DropdownMenuItem(
-                                    value: true,
-                                    child: Text('Sort by deadline'),
-                                  ),
-                                ],
-                                onChanged: (v) {
-                                  if (v != null) {
-                                    setState(() => _sortByDeadline = v);
-                                  }
-                                },
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      DocuTrackerUtilityIconButton(
-                        icon: Icons.refresh_rounded,
-                        tooltip: 'Refresh',
-                        onPressed: provider.loading ? null : _load,
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-            if (provider.error != null) ...[
-              const SizedBox(height: 12),
-              DocuTrackerErrorBanner(
-                message: provider.error!,
-                onDismiss: () => provider.clearError(),
-              ),
-            ],
-            const SizedBox(height: 20),
-            if (provider.loading)
-              const Center(
-                child: Padding(
-                  padding: EdgeInsets.all(32),
-                  child: CircularProgressIndicator(
-                    color: DocuTrackerTokens.terracotta,
-                  ),
-                ),
-              )
-            else if (visibleDocuments.isEmpty)
-              _EmptyState(
-                onCreateTap: _canCreateDocuments == true
-                    ? () => showDocuTrackerCreateDocumentDialog(
-                        context,
-                        auth: auth,
-                        provider: provider,
-                        allowedDocumentTypes: _creatableDocumentTypes,
-                        onCreated: _load,
-                      )
-                    : null,
-              )
-            else
-              _DocumentList(
-                documents: visibleDocuments,
-                isAdmin: widget.isAdmin,
-                userId: userId,
-                onRefresh: _load,
-                searchQuery: _searchQuery,
-                sortByDeadline: _sortByDeadline,
-              ),
-          ],
-        ),
-        if (showFab)
-          Positioned(
-            right: 0,
-            bottom: 0,
-            child: DocuTrackerCreateFab(
-              enabled: !provider.loading,
-              onPressed: () => showDocuTrackerCreateDocumentDialog(
-                context,
-                auth: auth,
-                provider: provider,
-                allowedDocumentTypes: _creatableDocumentTypes,
-                onCreated: _load,
-              ),
-            ),
+          )
+        else if (visibleDocuments.isEmpty)
+          _EmptyState(
+            onCreateTap: _canCreateDocuments == true
+                ? () => _openCreateDialog(auth, provider)
+                : null,
+          )
+        else
+          _DocumentList(
+            documents: visibleDocuments,
+            isAdmin: widget.isAdmin,
+            userId: userId,
+            onRefresh: _load,
+            searchQuery: _searchQuery,
+            sortByDeadline: _sortByDeadline,
           ),
       ],
     );
   }
 
-  Widget _warmDropdown(BuildContext context, Widget child) {
+  Future<void> _openCreateDialog(
+    AuthProvider auth,
+    DocuTrackerProvider provider,
+  ) => showDocuTrackerCreateDocumentDialog(
+    context,
+    auth: auth,
+    provider: provider,
+    allowedDocumentTypes: _creatableDocumentTypes,
+    onCreated: _load,
+  );
+
+  Widget _buildDocumentToolbar(
+    DocuTrackerProvider provider,
+    AuthProvider auth,
+  ) {
+    final filterControls = <Widget>[
+      _warmDropdown(
+        context,
+        DropdownButton<String?>(
+          value: _filterType,
+          hint: const Text('Type'),
+          underline: const SizedBox.shrink(),
+          isDense: true,
+          isExpanded: true,
+          items: [
+            const DropdownMenuItem(value: null, child: Text('All types')),
+            ...DocumentType.values.map(
+              (type) => DropdownMenuItem(
+                value: type.value,
+                child: Text(type.displayName),
+              ),
+            ),
+          ],
+          onChanged: (value) {
+            setState(() => _filterType = value);
+            _load();
+          },
+        ),
+      ),
+      _warmDropdown(
+        context,
+        DropdownButton<DocumentStatus?>(
+          value: _filterStatus,
+          hint: const Text('Status'),
+          underline: const SizedBox.shrink(),
+          isDense: true,
+          isExpanded: true,
+          items: [
+            const DropdownMenuItem(value: null, child: Text('All statuses')),
+            ...DocumentStatus.values.map(
+              (status) => DropdownMenuItem(
+                value: status,
+                child: Text(status.displayName),
+              ),
+            ),
+          ],
+          onChanged: (value) {
+            setState(() => _filterStatus = value);
+            _load();
+          },
+        ),
+      ),
+      _warmDropdown(
+        context,
+        DropdownButton<bool>(
+          value: _sortByDeadline,
+          underline: const SizedBox.shrink(),
+          isDense: true,
+          isExpanded: true,
+          items: const [
+            DropdownMenuItem(value: false, child: Text('Newest first')),
+            DropdownMenuItem(value: true, child: Text('Deadline first')),
+          ],
+          onChanged: (value) {
+            if (value != null) setState(() => _sortByDeadline = value);
+          },
+        ),
+      ),
+    ];
+
+    final createButton = _canCreateDocuments == true
+        ? FilledButton.icon(
+            key: const ValueKey('docutracker-create-document'),
+            onPressed: provider.loading
+                ? null
+                : () => _openCreateDialog(auth, provider),
+            icon: const Icon(Icons.add_rounded, size: 18),
+            label: const Text('Create Draft'),
+          )
+        : null;
+
+    final refreshButton = IconButton.outlined(
+      tooltip: 'Refresh documents',
+      onPressed: provider.loading ? null : _load,
+      icon: const Icon(Icons.refresh_rounded),
+    );
+    final signaturesButton = OutlinedButton.icon(
+      key: const ValueKey('docutracker-my-signatures'),
+      onPressed: provider.loading
+          ? null
+          : () => showDocuTrackerSignatureLibraryDialog(
+              context,
+              provider: provider,
+            ),
+      icon: const Icon(Icons.draw_outlined, size: 18),
+      label: const Text('My Signatures'),
+    );
+
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-      decoration: DocuTrackerTokens.warmDropdownDecoration(context),
-      child: DocuTrackerStyles.filterDropdownWrapper(child),
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: AppTheme.dashSurfaceCard(context, radius: 12),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final search = TextField(
+            key: const ValueKey('docutracker-document-search'),
+            onChanged: (value) =>
+                setState(() => _searchQuery = value.toLowerCase()),
+            decoration: AppTheme.dashInputDecoration(
+              context,
+              hintText: 'Search title, number, or sender',
+              prefixIcon: const Icon(Icons.search_rounded),
+              contentPadding: const EdgeInsets.symmetric(
+                horizontal: 14,
+                vertical: 12,
+              ),
+            ),
+          );
+          if (constraints.maxWidth < 820) {
+            final hasFilters =
+                _filterType != null || _filterStatus != null || _sortByDeadline;
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                search,
+                const SizedBox(height: 10),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    OutlinedButton.icon(
+                      key: const ValueKey('docutracker-mobile-filters'),
+                      onPressed: () => setState(
+                        () => _showMobileFilters = !_showMobileFilters,
+                      ),
+                      icon: Icon(
+                        _showMobileFilters
+                            ? Icons.expand_less_rounded
+                            : Icons.tune_rounded,
+                      ),
+                      label: Text(hasFilters ? 'Filters active' : 'Filters'),
+                    ),
+                    refreshButton,
+                    signaturesButton,
+                    if (createButton != null) createButton,
+                  ],
+                ),
+                if (_showMobileFilters) ...[
+                  const SizedBox(height: 10),
+                  Wrap(spacing: 8, runSpacing: 8, children: filterControls),
+                ],
+                if (hasFilters) ...[
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 6,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    children: [
+                      if (_filterType != null)
+                        Chip(
+                          label: Text(
+                            documentTypeFromString(_filterType).displayName,
+                          ),
+                        ),
+                      if (_filterStatus != null)
+                        Chip(label: Text(_filterStatus!.displayName)),
+                      if (_sortByDeadline)
+                        const Chip(label: Text('Deadline first')),
+                      TextButton(
+                        onPressed: () {
+                          setState(() {
+                            _filterType = null;
+                            _filterStatus = null;
+                            _sortByDeadline = false;
+                          });
+                          _load();
+                        },
+                        child: const Text('Clear filters'),
+                      ),
+                    ],
+                  ),
+                ],
+              ],
+            );
+          }
+          return Row(
+            children: [
+              Expanded(child: search),
+              const SizedBox(width: 10),
+              ...filterControls.expand(
+                (control) => [control, const SizedBox(width: 8)],
+              ),
+              refreshButton,
+              const SizedBox(width: 8),
+              signaturesButton,
+              if (createButton != null) ...[
+                const SizedBox(width: 8),
+                createButton,
+              ],
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _warmDropdown(BuildContext context, Widget child) {
+    return SizedBox(
+      width: 132,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+        decoration: BoxDecoration(
+          color: AppTheme.dashInputFillOf(context),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: AppTheme.dashInputBorderOf(context)),
+        ),
+        child: child,
+      ),
     );
   }
 }
@@ -531,7 +632,7 @@ class _DocumentDataTable extends StatelessWidget {
   final VoidCallback onRefresh;
 
   String _deadlineLabel(DateTime? date) {
-    if (date == null) return '—';
+    if (date == null) return 'No deadline';
     final local = date.toLocal();
     return '${local.year}-${local.month.toString().padLeft(2, '0')}-${local.day.toString().padLeft(2, '0')}';
   }
@@ -543,80 +644,88 @@ class _DocumentDataTable extends StatelessWidget {
     final dataRowMinHeight = compactRows ? 52.0 : 56.0;
     final dataRowMaxHeight = compactRows ? 72.0 : 80.0;
 
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(minWidth: 980),
-        child: DataTable(
-          columnSpacing: 18,
-          headingRowHeight: 44,
-          dataRowMinHeight: dataRowMinHeight,
-          // Keep row constraints normalized across screen sizes to prevent
-          // BoxConstraints assertion failures.
-          dataRowMaxHeight: dataRowMaxHeight,
-          columns: const [
-            DataColumn(label: Text('Document')),
-            DataColumn(label: Text('Type')),
-            DataColumn(label: Text('Status')),
-            DataColumn(label: Text('Deadline')),
-            DataColumn(label: Text('Holder')),
-          ],
-          rows: documents.map((doc) {
-            final isOverdue =
-                doc.status == DocumentStatus.overdue ||
-                (doc.deadlineTime != null &&
-                    DateTime.now().isAfter(doc.deadlineTime!));
-            final statusForUi = isOverdue ? DocumentStatus.overdue : doc.status;
-            final title = doc.title;
-            return DataRow(
-              onSelectChanged: (_) async {
-                await openDocuTrackerDocumentDetail(
-                  context,
-                  document: doc,
-                  isAdmin: isAdmin,
-                  userId: userId,
-                  onReturned: onRefresh,
-                );
-              },
-              color: WidgetStateProperty.resolveWith<Color?>((states) {
-                if (isOverdue) return const Color(0xFFFEF2F2);
-                if (doc.status == DocumentStatus.escalated) {
-                  return const Color(0xFFF5F3FF);
-                }
-                return null;
-              }),
-              cells: [
-                DataCell(
-                  ConstrainedBox(
-                    constraints: const BoxConstraints(maxWidth: 260),
-                    child: Text(
-                      title,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontWeight: FontWeight.w600),
+    return LayoutBuilder(
+      builder: (context, constraints) => SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: ConstrainedBox(
+          constraints: BoxConstraints(minWidth: constraints.maxWidth),
+          child: DataTable(
+            columnSpacing: 18,
+            headingRowHeight: 44,
+            dataRowMinHeight: dataRowMinHeight,
+            // Keep row constraints normalized across screen sizes to prevent
+            // BoxConstraints assertion failures.
+            dataRowMaxHeight: dataRowMaxHeight,
+            columns: const [
+              DataColumn(label: Text('Document')),
+              DataColumn(label: Text('Type')),
+              DataColumn(label: Text('Status')),
+              DataColumn(label: Text('Deadline')),
+              DataColumn(label: Text('Current assignee')),
+            ],
+            rows: documents.map((doc) {
+              final isOverdue =
+                  doc.status == DocumentStatus.overdue ||
+                  (doc.deadlineTime != null &&
+                      DateTime.now().isAfter(doc.deadlineTime!));
+              final statusForUi = isOverdue
+                  ? DocumentStatus.overdue
+                  : doc.status;
+              final title = doc.title;
+              return DataRow(
+                onSelectChanged: (_) async {
+                  await openDocuTrackerDocumentDetail(
+                    context,
+                    document: doc,
+                    isAdmin: isAdmin,
+                    userId: userId,
+                    onReturned: onRefresh,
+                  );
+                },
+                color: WidgetStateProperty.resolveWith<Color?>((states) {
+                  if (isOverdue) return const Color(0xFFFEF2F2);
+                  if (doc.status == DocumentStatus.escalated) {
+                    return const Color(0xFFF5F3FF);
+                  }
+                  return null;
+                }),
+                cells: [
+                  DataCell(
+                    ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 260),
+                      child: Text(
+                        title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontWeight: FontWeight.w600),
+                      ),
                     ),
                   ),
-                ),
-                DataCell(
-                  Text(documentTypeFromString(doc.documentType).displayName),
-                ),
-                DataCell(
-                  DocuTrackerStatusBadge(status: statusForUi, compact: true),
-                ),
-                DataCell(Text(_deadlineLabel(doc.deadlineTime))),
-                DataCell(
-                  ConstrainedBox(
-                    constraints: const BoxConstraints(maxWidth: 220),
-                    child: Text(
-                      doc.assigneeName ?? '—',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
+                  DataCell(
+                    Text(documentTypeFromString(doc.documentType).displayName),
+                  ),
+                  DataCell(
+                    DocuTrackerStatusBadge(
+                      status: statusForUi,
+                      compact: true,
+                      label: _statusLabel(doc, statusForUi),
                     ),
                   ),
-                ),
-              ],
-            );
-          }).toList(),
+                  DataCell(Text(_deadlineLabel(doc.deadlineTime))),
+                  DataCell(
+                    ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 220),
+                      child: Text(
+                        _assigneeLabel(doc),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ),
+                ],
+              );
+            }).toList(),
+          ),
         ),
       ),
     );
@@ -802,6 +911,7 @@ class _DocumentRowCardState extends State<_DocumentRowCard> {
                               compact: true,
                               showIcon: false,
                               dotStyle: true,
+                              label: _statusLabel(doc, widget.statusForUi),
                             ),
                           ],
                         ),
@@ -840,21 +950,16 @@ class _DocumentRowCardState extends State<_DocumentRowCard> {
                               ),
                           ],
                         ),
-                        if (doc.assigneeName != null ||
-                            doc.creatorName != null) ...[
-                          const SizedBox(height: 8),
-                          Text(
-                            doc.assigneeName != null
-                                ? 'Holder: ${doc.assigneeName}'
-                                : 'From ${doc.creatorName}',
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                              fontSize: 12.5,
-                              color: DocuTrackerTokens.textSecondaryOf(context),
-                            ),
+                        const SizedBox(height: 8),
+                        Text(
+                          'Current assignee: ${_assigneeLabel(doc)}',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: 12.5,
+                            color: DocuTrackerTokens.textSecondaryOf(context),
                           ),
-                        ],
+                        ),
                       ],
                     ),
                   );
@@ -955,50 +1060,27 @@ class _DocumentRowCardState extends State<_DocumentRowCard> {
                               ),
                               const SizedBox(height: 4),
                             ],
-                            if (doc.assigneeName != null)
-                              Row(
-                                children: [
-                                  const Icon(
-                                    Icons.person_rounded,
-                                    size: 13,
-                                    color: Color(0xFF9CA3AF),
-                                  ),
-                                  const SizedBox(width: 4),
-                                  Flexible(
-                                    child: Text(
-                                      doc.assigneeName!,
-                                      style: const TextStyle(
-                                        fontSize: 13,
-                                        color: Color(0xFF4B5563),
-                                      ),
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
+                            Row(
+                              children: [
+                                const Icon(
+                                  Icons.person_rounded,
+                                  size: 13,
+                                  color: Color(0xFF9CA3AF),
+                                ),
+                                const SizedBox(width: 4),
+                                Flexible(
+                                  child: Text(
+                                    _assigneeLabel(doc),
+                                    style: const TextStyle(
+                                      fontSize: 13,
+                                      color: Color(0xFF4B5563),
                                     ),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
                                   ),
-                                ],
-                              )
-                            else if (doc.creatorName != null)
-                              Row(
-                                children: [
-                                  const Icon(
-                                    Icons.send_rounded,
-                                    size: 12,
-                                    color: Color(0xFF9CA3AF),
-                                  ),
-                                  const SizedBox(width: 4),
-                                  Flexible(
-                                    child: Text(
-                                      'From ${doc.creatorName}',
-                                      style: const TextStyle(
-                                        fontSize: 13,
-                                        color: Color(0xFF4B5563),
-                                      ),
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                    ),
-                                  ),
-                                ],
-                              ),
+                                ),
+                              ],
+                            ),
                           ],
                         ),
                       ),
@@ -1066,6 +1148,7 @@ class _DocumentRowCardState extends State<_DocumentRowCard> {
                               compact: true,
                               showIcon: false,
                               dotStyle: true,
+                              label: _statusLabel(doc, widget.statusForUi),
                             ),
                             const SizedBox(width: 8),
                             Icon(

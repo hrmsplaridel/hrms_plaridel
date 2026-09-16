@@ -1,3 +1,7 @@
+// Legacy workflow presentation widgets remain available for compatibility;
+// the active editor intentionally uses the simplified single-list layout.
+// ignore_for_file: unused_element, unused_element_parameter
+
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
@@ -18,7 +22,6 @@ import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/d
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_responsive_body.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_section_header.dart';
 import 'docutracker_escalation_config_screen.dart';
-import 'docutracker_step_assignees_editor_screen.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/admin/widgets/workflow_step_editor_panel.dart';
 
 class DocuTrackerWorkflowEditorScreen extends StatefulWidget {
@@ -38,12 +41,6 @@ class _DocuTrackerWorkflowEditorScreenState
     extends State<DocuTrackerWorkflowEditorScreen> {
   final _validator = const DocuTrackerWorkflowConfigValidator();
   final _defaultDeadlineController = TextEditingController();
-  static const _defaultWorkflowActions = <String>[
-    'approve',
-    'forward',
-    'reject',
-    'return',
-  ];
 
   late List<WorkflowStep> _steps;
 
@@ -81,6 +78,7 @@ class _DocuTrackerWorkflowEditorScreenState
                 label: s.label,
                 enabled: s.enabled,
                 deadlineHours: s.deadlineHours,
+                allowedActions: List<String>.from(s.allowedActions),
               ),
             )
             .toList()
@@ -132,6 +130,8 @@ class _DocuTrackerWorkflowEditorScreenState
         workflowVersion: widget.initialConfig.version,
       );
       final snapshots = <String, _WorkflowStepAssigneeSnapshot>{};
+      final legacyActionsByOrder = <int, List<String>>{};
+      final assigneeIdsByOrder = <int, List<String>>{};
       for (final row in rows) {
         final order =
             (row['step_order'] as num?)?.toInt() ??
@@ -142,7 +142,9 @@ class _DocuTrackerWorkflowEditorScreenState
         final rawAssignees = row['assignees'];
         final names = <String>[];
         final backupNames = <String>[];
-        final actions = <String>{};
+        final primaryActions = <String>{};
+        final primaryIds = <String>[];
+        final backupIds = <String>[];
 
         if (rawAssignees is List) {
           final assignees = rawAssignees
@@ -158,31 +160,58 @@ class _DocuTrackerWorkflowEditorScreenState
             if (label.isEmpty) continue;
             if (a['is_primary'] == true) {
               names.add(label);
+              if (fallback.isNotEmpty) primaryIds.add(fallback);
             } else {
               backupNames.add(label);
+              if (fallback.isNotEmpty) backupIds.add(fallback);
             }
 
             final rawActions = a['allowed_actions'];
             if (rawActions is List) {
               for (final x in rawActions) {
                 final action = x?.toString().trim();
-                if (action != null && action.isNotEmpty) actions.add(action);
+                if (action != null && action.isNotEmpty) {
+                  if (a['is_primary'] == true) primaryActions.add(action);
+                }
               }
             }
           }
         }
 
+        final resolvedActions = primaryActions.toList()..sort();
+        assigneeIdsByOrder[order] = [...primaryIds, ...backupIds];
         snapshots[key] = _WorkflowStepAssigneeSnapshot(
           primaryUserName: names.isEmpty ? null : names.first,
           backupUserNames: backupNames,
-          allowedActions: actions.isEmpty
-              ? _defaultWorkflowActions
-              : (actions.toList()..sort()),
+          allowedActions: resolvedActions,
         );
+        legacyActionsByOrder[order] = resolvedActions;
       }
 
       if (!mounted) return;
       setState(() {
+        if (!_hasUnsavedChanges) {
+          _steps = [
+            for (final step in _steps)
+              WorkflowStep(
+                stepOrder: step.stepOrder,
+                assigneeType: step.assigneeType,
+                assigneeSource: step.assigneeSource,
+                roleId: step.roleId,
+                departmentId: step.departmentId,
+                officeId: step.officeId,
+                userIds: step.assigneeSource == 'department_reviewers'
+                    ? step.userIds
+                    : assigneeIdsByOrder[step.stepOrder] ?? step.userIds,
+                label: step.label,
+                enabled: step.enabled,
+                deadlineHours: step.deadlineHours,
+                allowedActions: step.allowedActions.isNotEmpty
+                    ? step.allowedActions
+                    : legacyActionsByOrder[step.stepOrder] ?? const [],
+              ),
+          ];
+        }
         _assigneeSnapshotsByStepId
           ..clear()
           ..addAll(snapshots);
@@ -340,10 +369,6 @@ class _DocuTrackerWorkflowEditorScreenState
       }
 
       if (!s.enabled) continue;
-      final stepId = i < _stepIds.length ? _stepIds[i] : null;
-      final snapshot = stepId == null
-          ? null
-          : _assigneeSnapshotsByStepId[stepId];
 
       if (s.assigneeType.trim().toLowerCase() == 'user') {
         final usesDepartmentReviewers =
@@ -367,7 +392,8 @@ class _DocuTrackerWorkflowEditorScreenState
           }
         }
 
-        if ((s.departmentId ?? '').trim().isEmpty) {
+        if (s.assigneeSource == 'department_reviewers' &&
+            (s.departmentId ?? '').trim().isEmpty) {
           errors.add(
             '$stepLabel must include a department scope for selected users.',
           );
@@ -381,7 +407,7 @@ class _DocuTrackerWorkflowEditorScreenState
         );
       }
 
-      final stepActions = snapshot?.allowedActions ?? _defaultWorkflowActions;
+      final stepActions = s.allowedActions;
       if (stepActions.isEmpty) {
         errors.add(
           '$stepLabel must include at least one allowed workflow action.',
@@ -440,8 +466,8 @@ class _DocuTrackerWorkflowEditorScreenState
       if (!usesDepartmentReviewers && userIds.isEmpty) {
         return 'Active selected-user steps need at least one user.';
       }
-      if ((step.departmentId ?? '').trim().isEmpty) {
-        return 'Selected-user steps require a department scope.';
+      if (usesDepartmentReviewers && (step.departmentId ?? '').trim().isEmpty) {
+        return 'Automatic department-reviewer steps require a department.';
       }
       if (!usesDepartmentReviewers) {
         final primary = userIds.first;
@@ -472,6 +498,7 @@ class _DocuTrackerWorkflowEditorScreenState
           label: _steps[i].label,
           enabled: _steps[i].enabled,
           deadlineHours: _steps[i].deadlineHours,
+          allowedActions: List<String>.from(_steps[i].allowedActions),
         ),
     ];
   }
@@ -617,7 +644,6 @@ class _DocuTrackerWorkflowEditorScreenState
     if (newIndex < 0 || newIndex > _steps.length) return;
 
     setState(() {
-      if (newIndex > oldIndex) newIndex -= 1;
       if (newIndex == oldIndex) return;
 
       final movedStep = _steps.removeAt(oldIndex);
@@ -641,7 +667,7 @@ class _DocuTrackerWorkflowEditorScreenState
         builder: (ctx) => AlertDialog(
           title: const Text('Publish workflow version?'),
           content: const Text(
-            'Publishing will make this workflow active for new document routing.',
+            'This will become the active workflow for new documents. Documents already in progress will keep their current version.',
           ),
           actions: [
             TextButton(
@@ -697,8 +723,6 @@ class _DocuTrackerWorkflowEditorScreenState
         return;
       }
 
-      final publishedVersion = saveResult.value;
-
       if (!mounted) return;
       await context.read<DocuTrackerProvider>().loadRoutingConfigs();
       if (!mounted) return;
@@ -707,42 +731,13 @@ class _DocuTrackerWorkflowEditorScreenState
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Workflow version published.')),
         );
-        final openAssignees = await showDialog<bool>(
-          context: context,
-          builder: (ctx) => AlertDialog(
-            title: const Text('Configure step assignees?'),
-            content: const Text(
-              'Review primary/backup reviewers and which actions each person may use '
-              'for this workflow version.',
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.of(ctx).pop(false),
-                child: const Text('Later'),
-              ),
-              FilledButton(
-                onPressed: () => Navigator.of(ctx).pop(true),
-                child: const Text('Open assignees'),
-              ),
-            ],
-          ),
-        );
-        if (openAssignees == true && mounted) {
-          await Navigator.of(context).push(
-            MaterialPageRoute<void>(
-              builder: (_) => DocuTrackerStepAssigneesEditorScreen(
-                initialDocumentType: widget.initialConfig.documentType.value,
-                initialWorkflowVersion: publishedVersion,
-              ),
-            ),
-          );
-        }
       }
       if (!mounted) return;
       Navigator.of(context).pop(true);
     } catch (e) {
       setState(() {
-        _error = 'Save failed: $e';
+        _error =
+            'Could not publish workflow: ${docuTrackerDisplayError(e.toString())}';
         _saving = false;
       });
     }
@@ -753,14 +748,6 @@ class _DocuTrackerWorkflowEditorScreenState
     final isAdminUser = _isAdminUser();
     final blocking = _issues.where((i) => !i.isWarning).toList();
     final warnings = _issues.where((i) => i.isWarning).toList();
-    final restrictionErrors = _restrictionErrors();
-    final selectedIndex = _selectedStepId == null
-        ? -1
-        : _stepIds.indexOf(_selectedStepId!);
-    final selectedStep = selectedIndex >= 0 && selectedIndex < _steps.length
-        ? _steps[selectedIndex]
-        : null;
-
     if (!isAdminUser) {
       return Scaffold(
         appBar: AppBar(title: const Text('Workflow Editor')),
@@ -804,18 +791,6 @@ class _DocuTrackerWorkflowEditorScreenState
       );
     }
 
-    Future<void> openAssignees() async {
-      await Navigator.of(context).push(
-        MaterialPageRoute<void>(
-          builder: (_) => DocuTrackerStepAssigneesEditorScreen(
-            initialDocumentType: widget.initialConfig.documentType.value,
-            initialWorkflowVersion: widget.initialConfig.version,
-          ),
-        ),
-      );
-      if (mounted) await _loadStepAssigneeSnapshots();
-    }
-
     void openEscalationRules() {
       Navigator.of(context).push(
         MaterialPageRoute<void>(
@@ -824,83 +799,46 @@ class _DocuTrackerWorkflowEditorScreenState
       );
     }
 
-    void openAuditTrail() {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Audit log export will be available soon.'),
-        ),
-      );
-    }
-
-    Widget toolsPanel() {
-      return _WorkflowToolsPanel(
-        enabledStepCount: _steps.where((s) => s.enabled).length,
-        stepCount: _steps.length,
-        onManageAssignees: openAssignees,
-        onEscalationRules: openEscalationRules,
-        onAuditTrail: openAuditTrail,
-      );
-    }
-
-    Widget workflowHeaderBlock({required bool includeToolsPanel}) {
-      final defaultDeadlineHours =
-          int.tryParse(_defaultDeadlineController.text.trim()) ?? 1;
+    Widget workflowHeaderBlock() {
       return Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         mainAxisSize: MainAxisSize.min,
         children: [
-          _WorkflowEditorHeader(
-            documentType: widget.initialConfig.documentType,
-            version: widget.initialConfig.version,
-            hasUnsavedChanges: _hasUnsavedChanges,
-          ),
-          const SizedBox(height: 14),
           LayoutBuilder(
             builder: (context, constraints) {
-              final wide = constraints.maxWidth >= 760;
-              final info = _InfoBanner(version: widget.initialConfig.version);
-              final assignees = _AssigneesReminderBanner(
-                onManageAssignees: openAssignees,
+              final deadline = TextField(
+                controller: _defaultDeadlineController,
+                keyboardType: TextInputType.number,
+                decoration: DocuTrackerStyles.inputDecoration(
+                  context,
+                  'Default deadline (hours)',
+                  Icons.timer_outlined,
+                ),
+                onChanged: (_) {
+                  _markUnsaved();
+                  _revalidate();
+                },
               );
-              if (!wide) {
+              final add = FilledButton.icon(
+                onPressed: _saving ? null : () => _addStep(),
+                icon: const Icon(Icons.add_rounded),
+                label: const Text('Add step'),
+              );
+              if (constraints.maxWidth < 520) {
                 return Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [info, const SizedBox(height: 12), assignees],
+                  children: [deadline, const SizedBox(height: 10), add],
                 );
               }
               return Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Expanded(child: info),
-                  const SizedBox(width: 16),
-                  Expanded(child: assignees),
+                  Expanded(child: deadline),
+                  const SizedBox(width: 12),
+                  add,
                 ],
               );
             },
           ),
-          const SizedBox(height: 16),
-          _WorkflowBuilderOverview(
-            documentType: widget.initialConfig.documentType,
-            stepCount: _steps.length,
-            enabledStepCount: _steps.where((s) => s.enabled).length,
-            selectedStep: selectedStep,
-            defaultDeadlineHours: defaultDeadlineHours,
-            defaultDeadlineController: _defaultDeadlineController,
-            onDeadlineChanged: () {
-              _markUnsaved();
-              _revalidate();
-            },
-          ),
-          const SizedBox(height: 16),
-          _WorkflowPathPreviewStrip(
-            steps: _steps,
-            rowKeys: _stepIds,
-            departmentNameById: _departmentNameById,
-            assigneeSnapshotsByKey: _assigneeSnapshotsByStepId,
-            selectedIndex: selectedIndex,
-            onSelectIndex: _saving ? null : _onPreviewSelectStep,
-          ),
-          if (includeToolsPanel) ...[const SizedBox(height: 16), toolsPanel()],
           const SizedBox(height: 16),
           if (_issues.isNotEmpty)
             _ValidationPanel(blocking: blocking, warnings: warnings),
@@ -912,21 +850,6 @@ class _DocuTrackerWorkflowEditorScreenState
             ),
           ],
           const SizedBox(height: 8),
-          _WorkflowBuilderToolbar(
-            stepCount: _steps.length,
-            selectedStepOrder: selectedStep?.stepOrder,
-          ),
-          const SizedBox(height: 4),
-          Text(
-            'Read from top to bottom — each card is one stop in the route. '
-            'Use the ⋮⋮ handle on the right: press, hold, and drag to reorder. '
-            'Tap a card to highlight it, or tap a chip in the route preview to jump to that step in the list. '
-            'Then use Edit to change people or deadlines.',
-            style: DocuTrackerTokens.subtitleStyle(
-              context,
-            ).copyWith(fontSize: 12.5),
-          ),
-          const SizedBox(height: 10),
         ],
       );
     }
@@ -948,20 +871,38 @@ class _DocuTrackerWorkflowEditorScreenState
           elevation: 0,
           shadowColor: Colors.black.withValues(alpha: 0.06),
           title: Text(
-            'Workflow • ${widget.initialConfig.documentType.displayName}',
+            '${widget.initialConfig.documentType.displayName} workflow',
           ),
           actions: [
-            Padding(
-              padding: const EdgeInsets.only(right: 8),
-              child: Center(
-                child: Text(
-                  'v${widget.initialConfig.version} → new',
-                  style: TextStyle(
-                    color: AppTheme.textSecondary,
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                  ),
+            Center(
+              child: Text(
+                _hasUnsavedChanges
+                    ? 'Unsaved changes'
+                    : 'Version ${widget.initialConfig.version}',
+                style: TextStyle(
+                  color: AppTheme.textSecondary,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
                 ),
+              ),
+            ),
+            PopupMenuButton<String>(
+              tooltip: 'More workflow settings',
+              onSelected: (value) {
+                if (value == 'escalation') openEscalationRules();
+              },
+              itemBuilder: (_) => const [
+                PopupMenuItem(
+                  value: 'escalation',
+                  child: Text('Escalation rules'),
+                ),
+              ],
+            ),
+            Padding(
+              padding: const EdgeInsets.only(right: 12),
+              child: FilledButton(
+                onPressed: _canPublish ? () => _save(publish: true) : null,
+                child: Text(_saving ? 'Publishing…' : 'Publish workflow'),
               ),
             ),
           ],
@@ -971,17 +912,12 @@ class _DocuTrackerWorkflowEditorScreenState
           padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
           child: LayoutBuilder(
             builder: (context, constraints) {
-              final wide = constraints.maxWidth >= 1180;
-              Widget workflowScroll({required bool includeToolsPanel}) {
+              Widget workflowScroll() {
                 return CustomScrollView(
                   controller: _listScrollController,
                   physics: const AlwaysScrollableScrollPhysics(),
                   slivers: [
-                    SliverToBoxAdapter(
-                      child: workflowHeaderBlock(
-                        includeToolsPanel: includeToolsPanel,
-                      ),
-                    ),
+                    SliverToBoxAdapter(child: workflowHeaderBlock()),
                     if (_steps.isEmpty)
                       SliverFillRemaining(
                         hasScrollBody: true,
@@ -994,7 +930,7 @@ class _DocuTrackerWorkflowEditorScreenState
                         padding: const EdgeInsets.only(bottom: 8),
                         sliver: SliverReorderableList(
                           itemCount: _steps.length,
-                          onReorder: _onReorderSteps,
+                          onReorderItem: _onReorderSteps,
                           proxyDecorator: (child, index, animation) {
                             return AnimatedBuilder(
                               animation: animation,
@@ -1045,9 +981,10 @@ class _DocuTrackerWorkflowEditorScreenState
                               hasWarning: warnings.any(
                                 (i) => i.stepOrder == s.stepOrder,
                               ),
-                              onSelect: () => setState(() {
-                                _selectedStepId = stepId;
-                              }),
+                              onSelect: () {
+                                setState(() => _selectedStepId = stepId);
+                                _editStep(idx);
+                              },
                               onEdit: () => _editStep(idx),
                               onDelete: canDeleteStep
                                   ? () => _removeStep(idx)
@@ -1063,33 +1000,9 @@ class _DocuTrackerWorkflowEditorScreenState
                 );
               }
 
-              if (!wide) return workflowScroll(includeToolsPanel: true);
-
-              return Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Expanded(child: workflowScroll(includeToolsPanel: false)),
-                  const SizedBox(width: 20),
-                  SizedBox(
-                    width: 310,
-                    child: SingleChildScrollView(child: toolsPanel()),
-                  ),
-                ],
-              );
+              return workflowScroll();
             },
           ),
-        ),
-        bottomNavigationBar: _WorkflowEditorBottomActions(
-          saving: _saving,
-          canSave: _canSave,
-          canPublish: _canPublish,
-          hasUnsavedChanges: _hasUnsavedChanges,
-          restrictionErrors: restrictionErrors,
-          onAddStep: () => _addStep(),
-          onAddAfter: () => _addStepAfterSelected(),
-          onDiscard: () => _discardAndClose(),
-          onSave: () => _save(publish: false),
-          onPublish: () => _save(publish: true),
         ),
       ),
     );
@@ -1186,22 +1099,18 @@ class _WorkflowToolsPanel extends StatelessWidget {
   const _WorkflowToolsPanel({
     required this.enabledStepCount,
     required this.stepCount,
-    required this.onManageAssignees,
     required this.onEscalationRules,
-    required this.onAuditTrail,
   });
 
   final int enabledStepCount;
   final int stepCount;
-  final VoidCallback onManageAssignees;
   final VoidCallback onEscalationRules;
-  final VoidCallback onAuditTrail;
 
   @override
   Widget build(BuildContext context) {
     final insight = stepCount == 0
         ? 'Add the first route step before publishing this workflow.'
-        : 'Steps typically complete faster when multiple backups are assigned.';
+        : '$enabledStepCount of $stepCount steps are enabled.';
     return DecoratedBox(
       decoration: _workflowPanelDecoration(fill: DocuTrackerTokens.canvas),
       child: Padding(
@@ -1217,31 +1126,22 @@ class _WorkflowToolsPanel extends StatelessWidget {
                   size: 18,
                 ),
                 const SizedBox(width: 8),
-                Text(
-                  'Workflow Tools',
-                  style: DocuTrackerTokens.titleStyle(
-                    context,
-                  ).copyWith(fontSize: 15, fontWeight: FontWeight.w900),
+                Expanded(
+                  child: Text(
+                    'Additional Settings',
+                    overflow: TextOverflow.ellipsis,
+                    style: DocuTrackerTokens.titleStyle(
+                      context,
+                    ).copyWith(fontSize: 15, fontWeight: FontWeight.w900),
+                  ),
                 ),
               ],
             ),
             const SizedBox(height: 14),
             _WorkflowToolTile(
-              icon: Icons.groups_rounded,
-              label: 'Global Assignees',
-              onTap: onManageAssignees,
-            ),
-            const SizedBox(height: 10),
-            _WorkflowToolTile(
               icon: Icons.notifications_active_outlined,
               label: 'Escalation Rules',
               onTap: onEscalationRules,
-            ),
-            const SizedBox(height: 10),
-            _WorkflowToolTile(
-              icon: Icons.history_edu_rounded,
-              label: 'Audit Trail',
-              onTap: onAuditTrail,
             ),
             const SizedBox(height: 18),
             _WorkflowInsightPanel(
@@ -1515,9 +1415,7 @@ class _InfoBanner extends StatelessWidget {
 }
 
 class _AssigneesReminderBanner extends StatelessWidget {
-  const _AssigneesReminderBanner({required this.onManageAssignees});
-
-  final VoidCallback onManageAssignees;
+  const _AssigneesReminderBanner();
 
   @override
   Widget build(BuildContext context) {
@@ -1539,9 +1437,9 @@ class _AssigneesReminderBanner extends StatelessWidget {
                 const SizedBox(width: 10),
                 Expanded(
                   child: Text(
-                    'Set who is primary vs backup on each step and which workflow actions '
-                    'they may use. Saving the workflow keeps existing action permissions when '
-                    'the same people remain on a step.',
+                    'Each step now contains its primary assignee, optional backup, and '
+                    'allowed actions. Document visibility follows the active workflow '
+                    'automatically; no separate visibility setup is needed.',
                     style: TextStyle(
                       color: AppTheme.textSecondary,
                       fontSize: 12,
@@ -1550,15 +1448,6 @@ class _AssigneesReminderBanner extends StatelessWidget {
                   ),
                 ),
               ],
-            ),
-            const SizedBox(height: 10),
-            Align(
-              alignment: Alignment.centerLeft,
-              child: OutlinedButton.icon(
-                onPressed: onManageAssignees,
-                icon: const Icon(Icons.group_rounded, size: 18),
-                label: const Text('Manage step assignees'),
-              ),
             ),
           ],
         ),
@@ -2486,8 +2375,13 @@ List<String> _backupUserLabels(
   return ids.skip(1).map((id) => 'User ${_shortId(id)}').toList();
 }
 
-List<String> _allowedActionLabels(_WorkflowStepAssigneeSnapshot? snapshot) {
-  final actions = snapshot?.allowedActions;
+List<String> _allowedActionLabels(
+  WorkflowStep step,
+  _WorkflowStepAssigneeSnapshot? snapshot,
+) {
+  final actions = step.allowedActions.isNotEmpty
+      ? step.allowedActions
+      : snapshot?.allowedActions;
   final raw = actions == null || actions.isEmpty
       ? const <String>['approve', 'forward', 'reject', 'return']
       : actions;
@@ -2495,9 +2389,15 @@ List<String> _allowedActionLabels(_WorkflowStepAssigneeSnapshot? snapshot) {
 }
 
 String _workflowActionLabel(String raw) {
-  final normalized = raw.trim();
-  if (normalized.isEmpty) return raw;
-  return normalized[0].toUpperCase() + normalized.substring(1);
+  return switch (raw.trim().toLowerCase()) {
+    'approve' => 'Approve and continue',
+    'forward' => 'Forward without approval',
+    'return' => 'Return for changes',
+    'reject' => 'Reject and stop',
+    final value when value.isNotEmpty =>
+      '${value[0].toUpperCase()}${value.substring(1)}',
+    _ => raw,
+  };
 }
 
 String _deadlineLabel(WorkflowStep step, int defaultDeadlineHours) {
@@ -2560,7 +2460,7 @@ class _WorkflowStepFlowCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final accent = _stepAccentColor(step, hasBlockingIssue, hasWarning);
     final backupUsers = _backupUserLabels(step, assigneeSnapshot);
-    final actionLabels = _allowedActionLabels(assigneeSnapshot);
+    final actionLabels = _allowedActionLabels(step, assigneeSnapshot);
     final borderColor = isSelected
         ? accent
         : hasBlockingIssue
@@ -2740,41 +2640,32 @@ class _WorkflowStepFlowCard extends StatelessWidget {
                         ],
                       ),
                       const SizedBox(height: 12),
-                      Wrap(
-                        spacing: 8,
-                        runSpacing: 8,
+                      Row(
                         children: [
                           OutlinedButton.icon(
                             onPressed: onEdit,
                             icon: const Icon(Icons.edit_rounded, size: 18),
                             label: const Text('Edit'),
                           ),
-                          OutlinedButton.icon(
-                            onPressed: onAddAfter,
-                            icon: const Icon(Icons.add_rounded, size: 18),
-                            label: const Text('Add after'),
-                          ),
-                          OutlinedButton.icon(
-                            onPressed: onDelete,
-                            icon: Icon(
-                              Icons.delete_outline_rounded,
-                              size: 18,
-                              color: onDelete == null
-                                  ? AppTheme.textSecondary.withValues(
-                                      alpha: 0.55,
-                                    )
-                                  : Colors.red.shade700,
-                            ),
-                            label: Text(
-                              'Delete',
-                              style: TextStyle(
-                                color: onDelete == null
-                                    ? AppTheme.textSecondary.withValues(
-                                        alpha: 0.65,
-                                      )
-                                    : Colors.red.shade700,
+                          const Spacer(),
+                          PopupMenuButton<String>(
+                            tooltip: 'More step actions',
+                            onSelected: (value) {
+                              if (value == 'add') onAddAfter?.call();
+                              if (value == 'delete') onDelete?.call();
+                            },
+                            itemBuilder: (_) => [
+                              PopupMenuItem<String>(
+                                value: 'add',
+                                enabled: onAddAfter != null,
+                                child: const Text('Add step after'),
                               ),
-                            ),
+                              PopupMenuItem<String>(
+                                value: 'delete',
+                                enabled: onDelete != null,
+                                child: const Text('Delete step'),
+                              ),
+                            ],
                           ),
                         ],
                       ),

@@ -1,4 +1,7 @@
 import 'package:hrms_plaridel/core/api/client.dart';
+import 'package:hrms_plaridel/features/docutracker/data/dto/docutracker_api_result.dart';
+import 'package:hrms_plaridel/features/docutracker/data/repositories/docutracker_repository.dart';
+import 'package:hrms_plaridel/features/docutracker/models/document_builder.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_request.dart';
 
 class LeaveFormSignatoryInfo {
@@ -27,10 +30,18 @@ class LeaveFormSignatories {
   const LeaveFormSignatories({
     this.certificationOfficer,
     this.recommendationOfficer,
+    this.approvingAuthority,
+    this.applicantSignature,
+    this.departmentHeadSignature,
+    this.hrApproverSignature,
   });
 
   final LeaveFormSignatoryInfo? certificationOfficer;
   final LeaveFormSignatoryInfo? recommendationOfficer;
+  final LeaveFormSignatoryInfo? approvingAuthority;
+  final DocuTrackerSourceSignature? applicantSignature;
+  final DocuTrackerSourceSignature? departmentHeadSignature;
+  final DocuTrackerSourceSignature? hrApproverSignature;
 }
 
 Future<LeaveFormSignatories> loadLeaveFormSignatories({
@@ -38,6 +49,10 @@ Future<LeaveFormSignatories> loadLeaveFormSignatories({
 }) async {
   LeaveFormSignatoryInfo? certification;
   LeaveFormSignatoryInfo? recommendation;
+  LeaveFormSignatoryInfo? approvingAuthority;
+  DocuTrackerSourceSignature? applicantSignature;
+  DocuTrackerSourceSignature? departmentHeadSignature;
+  DocuTrackerSourceSignature? hrApproverSignature;
 
   try {
     final res = await ApiClient.instance.get<Map<String, dynamic>>(
@@ -55,21 +70,44 @@ Future<LeaveFormSignatories> loadLeaveFormSignatories({
     recommendation = LeaveFormSignatoryInfo.fromJson(
       data['recommendation_officer'],
     );
+    approvingAuthority = LeaveFormSignatoryInfo.fromJson(
+      data['approving_authority'],
+    );
   } catch (_) {
     // Printing should still work even if the optional signatory lookup fails.
   }
 
-  final departmentHeadName = _nonBlank(request.departmentHeadReviewerName);
-  if (recommendation == null && departmentHeadName != null) {
+  final requestId = request.id;
+  if (requestId != null && requestId.isNotEmpty) {
+    final result = await DocuTrackerRepository.instance.getSourceSignatures(
+      sourceModule: 'dtr',
+      sourceTable: 'leave_requests',
+      sourceRecordId: requestId,
+    );
+    if (result is DocuTrackerSuccess<DocuTrackerSourceSignatureBundle>) {
+      applicantSignature = result.value.signatureFor('applicant');
+      departmentHeadSignature = result.value.signatureFor('department_head');
+      hrApproverSignature = result.value.signatureFor('hr_approver');
+    }
+  }
+
+  final departmentHeadName =
+      _nonBlank(departmentHeadSignature?.signerName) ??
+      _nonBlank(request.departmentHeadReviewerName);
+  if (departmentHeadName != null) {
     recommendation = LeaveFormSignatoryInfo(
       name: departmentHeadName,
-      title: 'Department Head',
+      title: recommendation?.title ?? 'Department Head',
     );
   }
 
   return LeaveFormSignatories(
     certificationOfficer: certification?.hasName == true ? certification : null,
     recommendationOfficer: recommendation,
+    approvingAuthority: approvingAuthority,
+    applicantSignature: applicantSignature,
+    departmentHeadSignature: departmentHeadSignature,
+    hrApproverSignature: hrApproverSignature,
   );
 }
 

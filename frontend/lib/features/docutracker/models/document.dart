@@ -30,6 +30,8 @@ class DocuTrackerDocument {
     this.sourceRecordId,
     this.sourceTitle,
     this.sourceOnly = false,
+    this.signatureSignerIds = const <String>[],
+    this.viewerIsRoutingAssignee = false,
   });
 
   final String? id;
@@ -85,6 +87,13 @@ class DocuTrackerDocument {
   final String? sourceRecordId;
   final String? sourceTitle;
   final bool sourceOnly;
+
+  /// Existing users assigned to e-signature placeholders on this document.
+  final List<String> signatureSignerIds;
+
+  /// Whether the signed-in viewer is assigned to this document's routing.
+  /// This is computed by the backend without exposing other assignees' IDs.
+  final bool viewerIsRoutingAssignee;
 
   static const String tableName = 'docutracker_documents';
 
@@ -148,6 +157,12 @@ class DocuTrackerDocument {
       sourceOnly:
           json['source_only'] == true ||
           (json['id']?.toString().startsWith('source:') == true),
+      signatureSignerIds:
+          (json['signature_signer_ids'] as List<dynamic>?)
+              ?.map((value) => value.toString())
+              .toList(growable: false) ??
+          const <String>[],
+      viewerIsRoutingAssignee: json['viewer_is_routing_assignee'] == true,
     );
   }
 
@@ -174,6 +189,8 @@ class DocuTrackerDocument {
     if (sourceRecordId != null) 'source_record_id': sourceRecordId,
     if (sourceTitle != null) 'source_title': sourceTitle,
     'source_only': sourceOnly,
+    'signature_signer_ids': signatureSignerIds,
+    'viewer_is_routing_assignee': viewerIsRoutingAssignee,
     'updated_at': DateTime.now().toIso8601String(),
   };
 
@@ -204,6 +221,8 @@ class DocuTrackerDocument {
     String? sourceRecordId,
     String? sourceTitle,
     bool? sourceOnly,
+    List<String>? signatureSignerIds,
+    bool? viewerIsRoutingAssignee,
   }) {
     return DocuTrackerDocument(
       id: id ?? this.id,
@@ -233,6 +252,9 @@ class DocuTrackerDocument {
       sourceRecordId: sourceRecordId ?? this.sourceRecordId,
       sourceTitle: sourceTitle ?? this.sourceTitle,
       sourceOnly: sourceOnly ?? this.sourceOnly,
+      signatureSignerIds: signatureSignerIds ?? this.signatureSignerIds,
+      viewerIsRoutingAssignee:
+          viewerIsRoutingAssignee ?? this.viewerIsRoutingAssignee,
     );
   }
 }

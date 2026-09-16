@@ -104,6 +104,30 @@ class _EmployeeLeaveScreenState extends State<EmployeeLeaveScreen>
     );
   }
 
+  Future<void> _retryRequests() async {
+    final userId = _currentUserId;
+    if (userId == null || userId.isEmpty) return;
+    await context.read<LeaveProvider>().loadMyLeaveRequests(
+      userId,
+      forceRefresh: true,
+    );
+  }
+
+  Future<void> _loadMoreRequests() async {
+    final userId = _currentUserId;
+    if (userId == null || userId.isEmpty) return;
+    await context.read<LeaveProvider>().loadMoreMyLeaveRequests(userId);
+  }
+
+  Future<void> _retryBalances() async {
+    final userId = _currentUserId;
+    if (userId == null || userId.isEmpty) return;
+    await context.read<LeaveProvider>().loadMyLeaveBalances(
+      userId,
+      forceRefresh: true,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final provider = context.watch<LeaveProvider>();
@@ -115,19 +139,24 @@ class _EmployeeLeaveScreenState extends State<EmployeeLeaveScreen>
     final mobile = width < 600;
     final compact = width < 820;
     final showLeaveSkeleton =
-        provider.loading &&
-        provider.balances.isEmpty &&
-        provider.requests.isEmpty;
+        provider.myRequestsLoading &&
+        provider.myBalancesLoading &&
+        !provider.myRequestsLoaded &&
+        !provider.myBalancesLoaded;
 
     // Only count accrual-based leaves (Sick + Vacation) for the credits summary.
     const creditTypes = {'vacationLeave', 'sickLeave'};
-    final totalAvailable = provider.balances
-        .where((b) => creditTypes.contains(b.effectiveLeaveTypeName))
-        .fold<double>(0, (sum, item) => sum + item.availableDays);
-    final totalPendingDays = provider.pendingRequests.fold<double>(
-      0,
-      (sum, item) => sum + (item.workingDaysApplied ?? 0),
-    );
+    final totalAvailable = provider.myBalancesLoaded
+        ? provider.balances
+              .where((b) => creditTypes.contains(b.effectiveLeaveTypeName))
+              .fold<double>(0, (sum, item) => sum + item.availableDays)
+        : null;
+    final totalPendingDays = provider.myRequestsLoaded
+        ? provider.pendingRequests.fold<double>(
+            0,
+            (sum, item) => sum + (item.workingDaysApplied ?? 0),
+          )
+        : null;
     final nextApproved = provider.upcomingApprovedRequests.isNotEmpty
         ? provider.upcomingApprovedRequests.first
         : null;
@@ -168,23 +197,34 @@ class _EmployeeLeaveScreenState extends State<EmployeeLeaveScreen>
                   children: [
                     _SummaryCard(
                       title: 'Available Credits',
-                      value: totalAvailable.toStringAsFixed(1),
+                      value: totalAvailable?.toStringAsFixed(1) ?? '--',
                       subtitle: 'Across tracked leave balances',
                       icon: Icons.account_balance_wallet_rounded,
                     ),
                     const SizedBox(height: 16),
                     _SummaryCard(
                       title: 'Pending Requests',
-                      value: '${provider.pendingCount}',
-                      subtitle:
-                          '${totalPendingDays.toStringAsFixed(1)} day(s) awaiting review',
+                      value: provider.myRequestsLoaded
+                          ? '${provider.pendingCount}'
+                          : '--',
+                      subtitle: provider.myRequestsLoaded
+                          ? '${totalPendingDays!.toStringAsFixed(1)} day(s) awaiting review'
+                          : 'Request information unavailable',
                       icon: Icons.pending_actions_rounded,
                     ),
                     const SizedBox(height: 16),
                     _SummaryCard(
                       title: 'Next Approved Leave',
-                      value: nextApproved?.leaveTypeLabel ?? 'None',
-                      subtitle: _approvedLeaveSubtitle(nextApproved),
+                      value:
+                          provider.myRequestsLoaded &&
+                              provider.officialDate != null
+                          ? nextApproved?.leaveTypeLabel ?? 'None'
+                          : 'Unavailable',
+                      subtitle:
+                          provider.myRequestsLoaded &&
+                              provider.officialDate != null
+                          ? _approvedLeaveSubtitle(nextApproved)
+                          : 'Official date unavailable',
                       icon: Icons.event_available_rounded,
                     ),
                   ],
@@ -194,7 +234,7 @@ class _EmployeeLeaveScreenState extends State<EmployeeLeaveScreen>
                     Expanded(
                       child: _SummaryCard(
                         title: 'Available Credits',
-                        value: totalAvailable.toStringAsFixed(1),
+                        value: totalAvailable?.toStringAsFixed(1) ?? '--',
                         subtitle: 'Across tracked leave balances',
                         icon: Icons.account_balance_wallet_rounded,
                       ),
@@ -203,9 +243,12 @@ class _EmployeeLeaveScreenState extends State<EmployeeLeaveScreen>
                     Expanded(
                       child: _SummaryCard(
                         title: 'Pending Requests',
-                        value: '${provider.pendingCount}',
-                        subtitle:
-                            '${totalPendingDays.toStringAsFixed(1)} day(s) awaiting review',
+                        value: provider.myRequestsLoaded
+                            ? '${provider.pendingCount}'
+                            : '--',
+                        subtitle: provider.myRequestsLoaded
+                            ? '${totalPendingDays!.toStringAsFixed(1)} day(s) awaiting review'
+                            : 'Request information unavailable',
                         icon: Icons.pending_actions_rounded,
                       ),
                     ),
@@ -213,8 +256,16 @@ class _EmployeeLeaveScreenState extends State<EmployeeLeaveScreen>
                     Expanded(
                       child: _SummaryCard(
                         title: 'Next Approved Leave',
-                        value: nextApproved?.leaveTypeLabel ?? 'None',
-                        subtitle: _approvedLeaveSubtitle(nextApproved),
+                        value:
+                            provider.myRequestsLoaded &&
+                                provider.officialDate != null
+                            ? nextApproved?.leaveTypeLabel ?? 'None'
+                            : 'Unavailable',
+                        subtitle:
+                            provider.myRequestsLoaded &&
+                                provider.officialDate != null
+                            ? _approvedLeaveSubtitle(nextApproved)
+                            : 'Official date unavailable',
                         icon: Icons.event_available_rounded,
                       ),
                     ),
@@ -231,7 +282,9 @@ class _EmployeeLeaveScreenState extends State<EmployeeLeaveScreen>
                           b.effectiveLeaveTypeName == 'sickLeave',
                     )
                     .toList(),
-                loading: provider.loading,
+                loading: provider.myBalancesLoading,
+                error: provider.myBalancesError,
+                onRetry: _retryBalances,
                 onBalanceHistory: () {
                   Navigator.of(context).push(
                     MaterialPageRoute<void>(
@@ -244,12 +297,19 @@ class _EmployeeLeaveScreenState extends State<EmployeeLeaveScreen>
               const SizedBox(height: 16),
               _LeaveDaysPanel(
                 balances: provider.balances,
-                loading: provider.loading,
+                loading: provider.myBalancesLoading,
               ),
               const SizedBox(height: 16),
               EmployeeLeaveRequestsPanel(
                 requests: provider.requests,
-                loading: provider.loading,
+                loading: provider.myRequestsLoading,
+                error: provider.myRequestsError,
+                onRetry: _retryRequests,
+                totalRequests: provider.myRequestsTotal,
+                hasMore: provider.myRequestsHasMore,
+                loadingMore: provider.myRequestsLoadingMore,
+                loadMoreError: provider.myRequestsLoadMoreError,
+                onLoadMore: _loadMoreRequests,
                 onEdit: _leaveActions.editRequest,
                 onCancel: _leaveActions.cancelRequest,
                 onPrint: _leaveActions.printLeaveForm,
@@ -264,8 +324,8 @@ class _EmployeeLeaveScreenState extends State<EmployeeLeaveScreen>
   Widget _buildMobileLayout({
     required LeaveProvider provider,
     required bool showLeaveSkeleton,
-    required double totalAvailable,
-    required double totalPendingDays,
+    required double? totalAvailable,
+    required double? totalPendingDays,
     required LeaveRequest? nextApproved,
   }) {
     return EmployeeLeaveMobileLayout(
@@ -279,13 +339,17 @@ class _EmployeeLeaveScreenState extends State<EmployeeLeaveScreen>
       loadingSkeleton: const MyLeaveLoadingSkeleton(compact: true),
       summaryStrip: EmployeeLeaveMobileSummaryStrip(
         totalAvailable: totalAvailable,
-        pendingCount: provider.pendingCount,
+        pendingCount: provider.myRequestsLoaded ? provider.pendingCount : null,
         totalPendingDays: totalPendingDays,
         nextApproved: nextApproved,
+        nextApprovedAvailable:
+            provider.myRequestsLoaded && provider.officialDate != null,
       ),
       balancesPanel: EmployeeLeaveMobileBalancesPanel(
         balances: provider.balances,
-        loading: provider.loading,
+        loading: provider.myBalancesLoading,
+        error: provider.myBalancesError,
+        onRetry: _retryBalances,
         onBalanceHistory: () {
           Navigator.of(context).push(
             MaterialPageRoute<void>(
@@ -296,7 +360,14 @@ class _EmployeeLeaveScreenState extends State<EmployeeLeaveScreen>
       ),
       requestsPanel: EmployeeLeaveRequestsPanel(
         requests: provider.requests,
-        loading: provider.loading,
+        loading: provider.myRequestsLoading,
+        error: provider.myRequestsError,
+        onRetry: _retryRequests,
+        totalRequests: provider.myRequestsTotal,
+        hasMore: provider.myRequestsHasMore,
+        loadingMore: provider.myRequestsLoadingMore,
+        loadMoreError: provider.myRequestsLoadMoreError,
+        onLoadMore: _loadMoreRequests,
         onEdit: _leaveActions.editRequest,
         onCancel: _leaveActions.cancelRequest,
         onPrint: _leaveActions.printLeaveForm,
@@ -448,11 +519,15 @@ class _BalancesPanel extends StatelessWidget {
   const _BalancesPanel({
     required this.balances,
     required this.loading,
+    required this.error,
+    required this.onRetry,
     required this.onBalanceHistory,
   });
 
   final List<LeaveBalance> balances;
   final bool loading;
+  final String? error;
+  final VoidCallback onRetry;
   final VoidCallback onBalanceHistory;
 
   @override
@@ -466,31 +541,42 @@ class _BalancesPanel extends StatelessWidget {
         icon: const Icon(Icons.receipt_long_outlined, size: 18),
         label: const Text('Credit History'),
       ),
-      child: loading && balances.isEmpty
+      child: error != null && balances.isEmpty
+          ? _SectionLoadError(message: error!, onRetry: onRetry)
+          : loading && balances.isEmpty
           ? const _CenteredState(message: 'Loading leave credits...')
           : balances.isEmpty
           ? const _CenteredState(message: 'No leave credits available yet.')
-          : LayoutBuilder(
-              builder: (context, constraints) {
-                final crossAxisCount = constraints.maxWidth < 600
-                    ? 1
-                    : (constraints.maxWidth < 960 ? 2 : 3);
-                final cardWidth =
-                    (constraints.maxWidth - (crossAxisCount - 1) * 12) /
-                    crossAxisCount;
-                return Wrap(
-                  spacing: 12,
-                  runSpacing: 12,
-                  children: balances
-                      .map(
-                        (balance) => SizedBox(
-                          width: cardWidth,
-                          child: LeaveBalanceCard(balance: balance),
-                        ),
-                      )
-                      .toList(),
-                );
-              },
+          : Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                if (error != null) ...[
+                  _SectionLoadError(message: error!, onRetry: onRetry),
+                  const SizedBox(height: 12),
+                ],
+                LayoutBuilder(
+                  builder: (context, constraints) {
+                    final crossAxisCount = constraints.maxWidth < 600
+                        ? 1
+                        : (constraints.maxWidth < 960 ? 2 : 3);
+                    final cardWidth =
+                        (constraints.maxWidth - (crossAxisCount - 1) * 12) /
+                        crossAxisCount;
+                    return Wrap(
+                      spacing: 12,
+                      runSpacing: 12,
+                      children: balances
+                          .map(
+                            (balance) => SizedBox(
+                              width: cardWidth,
+                              child: LeaveBalanceCard(balance: balance),
+                            ),
+                          )
+                          .toList(),
+                    );
+                  },
+                ),
+              ],
             ),
     );
   }
@@ -656,6 +742,44 @@ class _CenteredState extends StatelessWidget {
           color: AppTheme.dashTextSecondaryOf(context),
           fontSize: 14,
         ),
+      ),
+    );
+  }
+}
+
+class _SectionLoadError extends StatelessWidget {
+  const _SectionLoadError({required this.message, required this.onRetry});
+
+  final String message;
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Colors.red.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.red.withValues(alpha: 0.35)),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.error_outline_rounded, color: Colors.redAccent),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              message,
+              style: TextStyle(color: AppTheme.dashTextPrimaryOf(context)),
+            ),
+          ),
+          const SizedBox(width: 10),
+          OutlinedButton.icon(
+            onPressed: onRetry,
+            icon: const Icon(Icons.refresh_rounded, size: 18),
+            label: const Text('Retry'),
+          ),
+        ],
       ),
     );
   }

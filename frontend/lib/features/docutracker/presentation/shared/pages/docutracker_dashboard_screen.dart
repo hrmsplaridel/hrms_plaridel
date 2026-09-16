@@ -1006,7 +1006,7 @@ class _DocumentTileState extends State<_DocumentTile> {
               Padding(
                 padding: const EdgeInsets.only(top: 2),
                 child: Text(
-                  'Holder: ${widget.document.assigneeName}',
+                  'Current assignee: ${widget.document.assigneeName}',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: DocuTrackerTokens.metaStyle(context),

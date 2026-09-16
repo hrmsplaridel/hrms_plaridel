@@ -92,11 +92,13 @@ class EmployeeLocatorMobileFormActions extends StatelessWidget {
     required this.onCancel,
     required this.onSubmit,
     this.accent = const Color(0xFFF57C00),
+    this.submitLabel = 'Submit',
   });
 
   final VoidCallback onCancel;
   final VoidCallback onSubmit;
   final Color accent;
+  final String submitLabel;
 
   @override
   Widget build(BuildContext context) {
@@ -124,7 +126,7 @@ class EmployeeLocatorMobileFormActions extends StatelessWidget {
                 borderRadius: BorderRadius.circular(10),
               ),
             ),
-            child: const Text('Submit'),
+            child: Text(submitLabel),
           ),
         ),
       ],

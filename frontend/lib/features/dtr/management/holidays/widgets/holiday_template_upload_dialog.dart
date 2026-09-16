@@ -188,7 +188,8 @@ class _HolidayTemplateUploadDialogState
       }
 
       final holidayType = _normalizeHolidayType(cell(row, typeIndex));
-      final coverage = holidayType == 'work_suspension'
+      final coverage =
+          holidayType == 'work_suspension' || holidayType == 'special'
           ? _normalizeCoverage(cell(row, coverageIndex))
           : 'whole_day';
 

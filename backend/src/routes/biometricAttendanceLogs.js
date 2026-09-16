@@ -11,6 +11,7 @@ const {
 
 const router = express.Router();
 const protect = [authMiddleware];
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 /** Middleware: allow if X-Api-Key matches BIO_SYNC_API_KEY, else require JWT auth. */
 function pushAuth(req, res, next) {
@@ -23,13 +24,6 @@ function pushAuth(req, res, next) {
     if (err) return next(err);
     requireAdmin(req, res, next);
   });
-}
-
-function toIsoDate(val) {
-  if (!val) return null;
-  const d = val instanceof Date ? val : new Date(val);
-  if (isNaN(d.getTime())) return null;
-  return d.toISOString().slice(0, 10);
 }
 
 async function hasStoredBiometricPunchForDay(userId, dateStr, cache) {
@@ -51,6 +45,68 @@ async function hasStoredBiometricPunchForDay(userId, dateStr, cache) {
 
 function markStoredBiometricPunchForDay(userId, dateStr, cache) {
   cache.set(`${userId}|${dateStr}`, true);
+}
+
+function addBiometricProcessingScope(scopes, userId, attendanceDate) {
+  let userIds = scopes.get(attendanceDate);
+  if (!userIds) {
+    userIds = new Set();
+    scopes.set(attendanceDate, userIds);
+  }
+  userIds.add(userId);
+}
+
+async function processBiometricScopes(scopes) {
+  let inserted = 0;
+  let updated = 0;
+  const sortedScopes = [...scopes.entries()].sort(([left], [right]) =>
+    left.localeCompare(right)
+  );
+  for (const [attendanceDate, userIds] of sortedScopes) {
+    const result = await processBiometricLogsToSummary(
+      [...userIds],
+      attendanceDate,
+      attendanceDate
+    );
+    inserted += Number(result?.inserted || 0);
+    updated += Number(result?.updated || 0);
+  }
+  return { inserted, updated };
+}
+
+async function loadActiveSyncDevice(rawDeviceId) {
+  const deviceId = String(rawDeviceId || '').trim();
+  if (!deviceId) {
+    return { ok: false, statusCode: 400, error: 'biometric_device_id is required' };
+  }
+  if (!UUID_PATTERN.test(deviceId)) {
+    return { ok: false, statusCode: 400, error: 'biometric_device_id must be a valid UUID' };
+  }
+  const result = await pool.query(
+    `SELECT id, is_active
+     FROM biometric_devices
+     WHERE id = $1::uuid`,
+    [deviceId]
+  );
+  if (result.rowCount === 0) {
+    return { ok: false, statusCode: 404, error: 'Biometric device not found' };
+  }
+  if (result.rows[0].is_active === false) {
+    return { ok: false, statusCode: 409, error: 'Biometric device is inactive' };
+  }
+  return { ok: true, deviceId };
+}
+
+async function markBiometricDeviceSynchronized(deviceId) {
+  if (!deviceId) return null;
+  const result = await pool.query(
+    `UPDATE biometric_devices
+     SET last_sync_at = now(), updated_at = now()
+     WHERE id = $1::uuid
+     RETURNING last_sync_at`,
+    [deviceId]
+  );
+  return result.rows[0]?.last_sync_at || null;
 }
 
 function sortByLoggedAtAsc(items, getLoggedAt) {
@@ -135,11 +191,14 @@ router.get('/', protect, requireAdmin, async (req, res) => {
     const rowsResult = await pool.query(
       `SELECT l.id, l.user_id, l.biometric_user_id, l.logged_at,
               l.verify_code, l.punch_code, l.work_code,
-              l.source_file_name, l.imported_at,
+              l.source_file_name, l.imported_at, l.device_ref_id,
+              d.name AS device_name,
+              d.device_id AS registered_device_id,
               u.full_name AS employee_name,
               u.employee_number
        FROM biometric_attendance_logs l
        JOIN users u ON u.id = l.user_id
+       LEFT JOIN biometric_devices d ON d.id = l.device_ref_id
        ${where}
        ORDER BY l.logged_at DESC, l.id DESC
        LIMIT ${limitParam} OFFSET ${offsetParam}`,
@@ -191,10 +250,14 @@ router.get('/export', protect, requireAdmin, async (req, res) => {
               to_char(l.logged_at AT TIME ZONE $3, 'YYYY-MM-DD HH24:MI:SS') AS logged_at_local,
               l.verify_code, l.punch_code, l.work_code,
               l.source_file_name,
+              l.device_ref_id,
+              d.name AS device_name,
+              d.device_id AS registered_device_id,
               u.employee_number,
               u.full_name AS employee_name
        FROM biometric_attendance_logs l
        JOIN users u ON u.id = l.user_id
+       LEFT JOIN biometric_devices d ON d.id = l.device_ref_id
        WHERE (l.logged_at AT TIME ZONE $3)::date BETWEEN $1::date AND $2::date
        ORDER BY l.logged_at ASC, l.id ASC
        LIMIT 100001`,
@@ -236,6 +299,9 @@ router.get('/export', protect, requireAdmin, async (req, res) => {
       'verify_code',
       'punch_code',
       'work_code',
+      'device_ref_id',
+      'device_name',
+      'registered_device_id',
       'source',
     ];
     const lines = result.rows.map((row) => [
@@ -246,6 +312,9 @@ router.get('/export', protect, requireAdmin, async (req, res) => {
       row.verify_code,
       row.punch_code,
       row.work_code,
+      row.device_ref_id,
+      row.device_name,
+      row.registered_device_id,
       row.source_file_name,
     ].map(csvCell).join(','));
     const filename = `biometric_attendance_${compactFrom}_${compactTo}.csv`;
@@ -283,19 +352,40 @@ router.get('/devices', pushAuth, async (req, res) => {
  * POST /api/biometric-attendance-logs/push
  * Push raw punches from a biometric device (e.g. ZKTeco sync service).
  * Auth: X-Api-Key header (BIO_SYNC_API_KEY) or JWT + admin.
- * Body: { punches: [{ biometric_user_id, logged_at }], device_id?, source_name? }
+ * Body: { punches: [{ biometric_user_id, logged_at }], biometric_device_id, device_id?, source_name? }
  * - Looks up user_id from users WHERE biometric_user_id = ?
  * - Skips punches for unmatched biometric_user_id (logged)
- * - Skips punches when not allowed for that Manila calendar day: no shift, whole-day holiday, or blocking approved leave
+ * - Preserves valid matched raw punches even when attendance processing is blocked
  * - Uses ON CONFLICT to skip duplicates
  * - Processes to dtr_daily_summary after insert
  */
 router.post('/push', pushAuth, async (req, res) => {
   try {
-    const { punches = [], device_id, source_name } = req.body;
+    const {
+      punches = [],
+      device_id,
+      biometric_device_id,
+      source_name,
+      sync_heartbeat = false,
+    } = req.body || {};
     const sourceFileName = source_name || device_id || 'zk-sync';
 
+    const syncDevice = await loadActiveSyncDevice(biometric_device_id);
+    if (!syncDevice.ok) {
+      return res.status(syncDevice.statusCode).json({ error: syncDevice.error });
+    }
+
     if (!Array.isArray(punches) || punches.length === 0) {
+      if (sync_heartbeat === true && syncDevice.deviceId) {
+        const lastSyncAt = await markBiometricDeviceSynchronized(syncDevice.deviceId);
+        return res.json({
+          inserted: 0,
+          duplicates_skipped: 0,
+          sync_heartbeat: true,
+          biometric_device_id: syncDevice.deviceId,
+          last_sync_at: lastSyncAt,
+        });
+      }
       return res.status(400).json({
         error: 'No punches to push',
         inserted: 0,
@@ -328,7 +418,7 @@ router.post('/push', pushAuth, async (req, res) => {
     let skippedLeave = 0;
     let skippedAfterShiftFirstPunch = 0;
     let skippedInvalidTimestamp = 0;
-    const userIds = new Set();
+    const processingScopes = new Map();
     const biometricGateCache = new Map();
     const existingDayPunchCache = new Map();
 
@@ -354,6 +444,34 @@ router.post('/push', pushAuth, async (req, res) => {
         skippedInvalidTimestamp++;
         continue;
       }
+      const hadStoredPunchForDay = await hasStoredBiometricPunchForDay(
+        userId,
+        manilaDate,
+        existingDayPunchCache
+      );
+
+      const rawLine = `${biometricUserId}\t${loggedAt}`;
+
+      const result = await pool.query(
+        `INSERT INTO biometric_attendance_logs
+          (user_id, biometric_user_id, logged_at, raw_line, source_file_name, device_ref_id)
+         VALUES ($1::uuid, $2, $3::timestamptz, $4, $5, $6::uuid)
+         ON CONFLICT (biometric_user_id, logged_at) DO NOTHING
+         RETURNING id`,
+        [userId, biometricUserId, loggedAt, rawLine, sourceFileName, syncDevice.deviceId]
+      );
+
+      if (result.rowCount > 0) {
+        inserted++;
+        markStoredBiometricPunchForDay(userId, manilaDate, existingDayPunchCache);
+      } else {
+        duplicatesSkipped++;
+        markStoredBiometricPunchForDay(userId, manilaDate, existingDayPunchCache);
+      }
+      // A duplicate can be a retry after raw storage succeeded but summary
+      // processing failed. Keep it in scope so the retry repairs the DTR row.
+      addBiometricProcessingScope(processingScopes, userId, manilaDate);
+
       const gateKey = `${userId}|${manilaDate}`;
       let gate = biometricGateCache.get(gateKey);
       if (gate === undefined) {
@@ -366,65 +484,22 @@ router.post('/push', pushAuth, async (req, res) => {
         else if (gate.reason === 'leave') skippedLeave++;
         continue;
       }
-
-      const hasExistingPunchForDay = await hasStoredBiometricPunchForDay(
-        userId,
-        manilaDate,
-        existingDayPunchCache
-      );
-      if (!hasExistingPunchForDay && isPunchAfterShiftEnd(loggedAt, gate.shiftInfo)) {
+      if (!hadStoredPunchForDay && isPunchAfterShiftEnd(loggedAt, gate.shiftInfo)) {
         skippedAfterShiftFirstPunch++;
-        console.warn('[biometric-attendance-logs push] Skipped first punch after shift end', {
+        console.warn('[biometric-attendance-logs push] Preserved first punch after shift end', {
           biometric_user_id: biometricUserId,
           user_id: userId,
           logged_at: loggedAt,
           attendance_date: manilaDate,
           shift_end_minutes: gate.shiftInfo?.endMinutes,
         });
-        continue;
-      }
-
-      const rawLine = `${biometricUserId}\t${loggedAt}`;
-
-      const result = await pool.query(
-        `INSERT INTO biometric_attendance_logs
-          (user_id, biometric_user_id, logged_at, raw_line, source_file_name)
-         VALUES ($1::uuid, $2, $3::timestamptz, $4, $5)
-         ON CONFLICT (biometric_user_id, logged_at) DO NOTHING
-         RETURNING id`,
-        [userId, biometricUserId, loggedAt, rawLine, sourceFileName]
-      );
-
-      if (result.rowCount > 0) {
-        inserted++;
-        userIds.add(userId);
-        markStoredBiometricPunchForDay(userId, manilaDate, existingDayPunchCache);
-      } else {
-        duplicatesSkipped++;
-        markStoredBiometricPunchForDay(userId, manilaDate, existingDayPunchCache);
       }
     }
 
-    let summariesInserted = 0;
-    let summariesUpdated = 0;
-    if (userIds.size > 0) {
-      const tz = process.env.HRMS_TIMEZONE || 'Asia/Manila';
-      const scopeRes = await pool.query(
-        `SELECT
-           MIN((logged_at AT TIME ZONE $2)::date)::text AS min_date,
-           MAX((logged_at AT TIME ZONE $2)::date)::text AS max_date
-         FROM biometric_attendance_logs
-         WHERE user_id = ANY($1::uuid[])`,
-        [[...userIds], tz]
-      );
-      const dateFrom = scopeRes.rows[0]?.min_date?.slice(0, 10);
-      const dateTo = scopeRes.rows[0]?.max_date?.slice(0, 10);
-      if (dateFrom && dateTo) {
-        const proc = await processBiometricLogsToSummary([...userIds], dateFrom, dateTo);
-        summariesInserted = proc.inserted;
-        summariesUpdated = proc.updated;
-      }
-    }
+    const processed = await processBiometricScopes(processingScopes);
+    const summariesInserted = processed.inserted;
+    const summariesUpdated = processed.updated;
+    const lastSyncAt = await markBiometricDeviceSynchronized(syncDevice.deviceId);
 
     res.json({
       inserted,
@@ -437,6 +512,8 @@ router.post('/push', pushAuth, async (req, res) => {
       duplicates_skipped: duplicatesSkipped,
       summaries_inserted: summariesInserted,
       summaries_updated: summariesUpdated,
+      biometric_device_id: syncDevice.deviceId,
+      last_sync_at: lastSyncAt,
     });
   } catch (err) {
     console.error('[biometric-attendance-logs push]', err);
@@ -449,9 +526,10 @@ router.post('/push', pushAuth, async (req, res) => {
 /**
  * POST /api/biometric-attendance-logs/import
  * Import matched biometric logs into biometric_attendance_logs, then process into dtr_daily_summary.
- * Body: { rows: [{ user_id, biometric_user_id, logged_at, raw_line, verify_code?, punch_code?, work_code? }], source_file_name }
+ * Body: { rows: [{ user_id?, biometric_user_id, logged_at, raw_line, verify_code?, punch_code?, work_code? }], source_file_name }
+ * Resolves the authoritative user_id from the current biometric_user_id mapping.
  * Uses ON CONFLICT (biometric_user_id, logged_at) DO NOTHING to skip duplicates.
- * Skips rows when not allowed for that Manila calendar day: no shift, whole-day holiday, or blocking approved leave.
+ * Preserves valid raw rows even when attendance processing is blocked for the day.
  * Admin only.
  */
 router.post('/import', protect, requireAdmin, async (req, res) => {
@@ -462,6 +540,8 @@ router.post('/import', protect, requireAdmin, async (req, res) => {
         error: 'No rows to import',
         inserted: 0,
         duplicates_skipped: 0,
+        skipped_unmatched: 0,
+        skipped_identity_mismatch: 0,
         skipped_no_schedule: 0,
         skipped_holiday: 0,
         skipped_leave: 0,
@@ -472,26 +552,51 @@ router.post('/import', protect, requireAdmin, async (req, res) => {
       });
     }
 
+    const uniqueBiometricIds = [...new Set(
+      rows
+        .map((row) => String(row?.biometric_user_id || '').trim())
+        .filter(Boolean)
+    )];
+    const userLookup = uniqueBiometricIds.length > 0
+      ? await pool.query(
+        `SELECT id, biometric_user_id FROM users WHERE biometric_user_id = ANY($1::text[])`,
+        [uniqueBiometricIds]
+      )
+      : { rows: [] };
+    const biometricToUserId = new Map(
+      userLookup.rows.map((row) => [String(row.biometric_user_id).trim(), row.id])
+    );
+
     let inserted = 0;
     let duplicatesSkipped = 0;
+    let skippedUnmatched = 0;
+    let skippedIdentityMismatch = 0;
     let skippedNoSchedule = 0;
     let skippedHoliday = 0;
     let skippedLeave = 0;
     let skippedAfterShiftFirstPunch = 0;
     let skippedInvalidTimestamp = 0;
-    const userIds = new Set();
-    let dateMin = null;
-    let dateMax = null;
+    const processingScopes = new Map();
     const biometricGateCache = new Map();
     const existingDayPunchCache = new Map();
 
     for (const row of sortByLoggedAtAsc(rows, (item) => item?.logged_at)) {
-      const userId = row.user_id;
-      const biometricUserId = row.biometric_user_id;
+      const suppliedUserId = String(row.user_id || '').trim();
+      const biometricUserId = String(row.biometric_user_id || '').trim();
       const loggedAt = row.logged_at;
       const rawLine = row.raw_line;
 
-      if (!userId || !biometricUserId || !loggedAt || !rawLine) {
+      if (!biometricUserId || !loggedAt || !rawLine) {
+        continue;
+      }
+
+      const userId = biometricToUserId.get(biometricUserId);
+      if (!userId) {
+        skippedUnmatched++;
+        continue;
+      }
+      if (suppliedUserId && suppliedUserId.toLowerCase() !== String(userId).toLowerCase()) {
+        skippedIdentityMismatch++;
         continue;
       }
 
@@ -500,35 +605,11 @@ router.post('/import', protect, requireAdmin, async (req, res) => {
         skippedInvalidTimestamp++;
         continue;
       }
-      const gateKey = `${userId}|${manilaDate}`;
-      let gate = biometricGateCache.get(gateKey);
-      if (gate === undefined) {
-        gate = await evaluateBiometricDayGate(userId, manilaDate);
-        biometricGateCache.set(gateKey, gate);
-      }
-      if (!gate.allowed) {
-        if (gate.reason === 'no_schedule') skippedNoSchedule++;
-        else if (gate.reason === 'holiday') skippedHoliday++;
-        else if (gate.reason === 'leave') skippedLeave++;
-        continue;
-      }
-
-      const hasExistingPunchForDay = await hasStoredBiometricPunchForDay(
+      const hadStoredPunchForDay = await hasStoredBiometricPunchForDay(
         userId,
         manilaDate,
         existingDayPunchCache
       );
-      if (!hasExistingPunchForDay && isPunchAfterShiftEnd(loggedAt, gate.shiftInfo)) {
-        skippedAfterShiftFirstPunch++;
-        console.warn('[biometric-attendance-logs import] Skipped first punch after shift end', {
-          biometric_user_id: biometricUserId,
-          user_id: userId,
-          logged_at: loggedAt,
-          attendance_date: manilaDate,
-          shift_end_minutes: gate.shiftInfo?.endMinutes,
-        });
-        continue;
-      }
 
       const verifyCode = row.verify_code?.trim() || null;
       const punchCode = row.punch_code?.trim() || null;
@@ -551,45 +632,41 @@ router.post('/import', protect, requireAdmin, async (req, res) => {
         markStoredBiometricPunchForDay(userId, manilaDate, existingDayPunchCache);
       }
 
-      userIds.add(userId);
-      const d = toIsoDate(loggedAt);
-      if (d) {
-        if (!dateMin || d < dateMin) dateMin = d;
-        if (!dateMax || d > dateMax) dateMax = d;
+      addBiometricProcessingScope(processingScopes, userId, manilaDate);
+
+      const gateKey = `${userId}|${manilaDate}`;
+      let gate = biometricGateCache.get(gateKey);
+      if (gate === undefined) {
+        gate = await evaluateBiometricDayGate(userId, manilaDate);
+        biometricGateCache.set(gateKey, gate);
+      }
+      if (!gate.allowed) {
+        if (gate.reason === 'no_schedule') skippedNoSchedule++;
+        else if (gate.reason === 'holiday') skippedHoliday++;
+        else if (gate.reason === 'leave') skippedLeave++;
+        continue;
+      }
+      if (!hadStoredPunchForDay && isPunchAfterShiftEnd(loggedAt, gate.shiftInfo)) {
+        skippedAfterShiftFirstPunch++;
+        console.warn('[biometric-attendance-logs import] Preserved first punch after shift end', {
+          biometric_user_id: biometricUserId,
+          user_id: userId,
+          logged_at: loggedAt,
+          attendance_date: manilaDate,
+          shift_end_minutes: gate.shiftInfo?.endMinutes,
+        });
       }
     }
 
-    let summariesInserted = 0;
-    let summariesUpdated = 0;
-    if (userIds.size > 0) {
-      const tz = process.env.HRMS_TIMEZONE || 'Asia/Manila';
-      const scopeRes = await pool.query(
-        `SELECT
-           MIN((logged_at AT TIME ZONE $2)::date)::text AS min_date,
-           MAX((logged_at AT TIME ZONE $2)::date)::text AS max_date
-         FROM biometric_attendance_logs
-         WHERE user_id = ANY($1::uuid[])`,
-        [[...userIds], tz]
-      );
-      const dateFrom = scopeRes.rows[0]?.min_date?.slice(0, 10);
-      const dateTo = scopeRes.rows[0]?.max_date?.slice(0, 10);
-      if (dateFrom && dateTo) {
-        console.log('[biometric-attendance-logs import] Calling processBiometricLogsToSummary', {
-          userIdCount: userIds.size,
-          dateFrom,
-          dateTo,
-        });
-        const proc = await processBiometricLogsToSummary([...userIds], dateFrom, dateTo);
-        summariesInserted = proc.inserted;
-        summariesUpdated = proc.updated;
-      } else {
-        console.log('[biometric-attendance-logs import] Skipping processing: no date range from DB');
-      }
-    }
+    const processed = await processBiometricScopes(processingScopes);
+    const summariesInserted = processed.inserted;
+    const summariesUpdated = processed.updated;
 
     res.json({
       inserted,
       duplicates_skipped: duplicatesSkipped,
+      skipped_unmatched: skippedUnmatched,
+      skipped_identity_mismatch: skippedIdentityMismatch,
       skipped_no_schedule: skippedNoSchedule,
       skipped_holiday: skippedHoliday,
       skipped_leave: skippedLeave,

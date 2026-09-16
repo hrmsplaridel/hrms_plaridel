@@ -114,6 +114,29 @@ test('active additional position rejects an inactive organizational reference', 
   );
 });
 
+for (const isActive of [true, false]) {
+  for (const employeeState of [
+    { employee_is_active: false },
+    { employee_status: 'resigned' },
+  ]) {
+    test(`new additional position rejects inactive employee: ${JSON.stringify(employeeState)}, position active=${isActive}`, async () => {
+      const db = createDb({ selection: activeSelection(employeeState) });
+      await assert.rejects(
+        createAdditionalPositionTransition(db, {
+          employeeId: IDS.employee,
+          departmentId: IDS.department,
+          positionId: IDS.position,
+          effectiveFrom: '2026-08-01',
+          isActive,
+        }),
+        (error) => error instanceof AdditionalPositionTransitionError &&
+          error.statusCode === 409 && /active employee account/.test(error.message)
+      );
+      assert.equal(db.calls.some((call) => /INSERT|UPDATE/.test(call.sql)), false);
+    });
+  }
+}
+
 test('additional position rejects duplicate overlapping active coverage', async () => {
   const db = createDb({ overlap: true });
 

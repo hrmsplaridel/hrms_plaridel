@@ -7,4 +7,4 @@
 -- one-off migrations under scripts/migrate-*.sql if a column is missing.
 --
 -- DocuTracker tables are NOT in init-schema.sql. Use:
---   psql -d hrms_plaridel -f scripts/init-schema-docutracker.sql
+--   psql -d hrms_plaridel -f scripts/migrations/docutracker/init-schema-docutracker.sql

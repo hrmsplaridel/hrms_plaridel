@@ -23,4 +23,31 @@ Future<void> openAttachmentBytes(List<int> bytes, String filename) async {
   final blob = Blob(blobParts, BlobPropertyBag(type: mimeType));
   final url = URL.createObjectURL(blob);
   window.open(url, '_blank');
+  Future<void>.delayed(const Duration(minutes: 1), () {
+    URL.revokeObjectURL(url);
+  });
+}
+
+/// Downloads attachment bytes through the browser.
+Future<String> downloadAttachmentBytes(List<int> bytes, String filename) async {
+  final data = Uint8List.fromList(bytes);
+  final jsBytes = JSUint8Array(
+    data.buffer.toJS,
+    data.offsetInBytes,
+    data.lengthInBytes,
+  );
+  final blob = Blob(
+    <JSAny>[jsBytes].toJS,
+    BlobPropertyBag(type: _mimeTypeFromFilename(filename)),
+  );
+  final url = URL.createObjectURL(blob);
+  final anchor = HTMLAnchorElement()
+    ..href = url
+    ..download = filename
+    ..style.display = 'none';
+  document.body?.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
+  return filename;
 }
