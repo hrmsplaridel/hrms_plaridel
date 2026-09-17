@@ -50,9 +50,66 @@ class DocuTrackerProvider extends ChangeNotifier {
   List<DocuTrackerRspSignatureRequest> _sourceSignatureRequests = const [];
   bool _sourceSignatureRequestsLoading = false;
   String? _sourceSignatureRequestsError;
+  String? _authenticatedUserId;
+  int _authGeneration = 0;
+  bool _disposed = false;
 
   // Prevent duplicate transitions due to double taps / retries.
   final Set<String> _transitionInFlight = <String>{};
+
+  /// Clears every user-bound value when the authenticated account changes.
+  ///
+  /// [_authGeneration] also prevents requests started by the previous account
+  /// from restoring stale data after logout or an account switch.
+  void onAuthUserChanged(String? userId) {
+    if (_disposed) return;
+    final normalizedUserId = _normalizeOptional(userId);
+    if (_authenticatedUserId == normalizedUserId) return;
+
+    _authenticatedUserId = normalizedUserId;
+    _authGeneration += 1;
+    _resetSessionState();
+    notifyListeners();
+  }
+
+  void _resetSessionState() {
+    _documents = [];
+    _routingConfigs = [];
+    _permissions = [];
+    _documentHistory = [];
+    _notifications = [];
+    _permissionsLoadKey = null;
+    _documentHistoryLoadDocumentId = null;
+    _loading = false;
+    _error = null;
+    _builderData = null;
+    _builderLoading = false;
+    _builderError = null;
+    _sourceSignatureLoading = false;
+    _sourceSignatureError = null;
+    _sourceSignatureRequests = const [];
+    _sourceSignatureRequestsLoading = false;
+    _sourceSignatureRequestsError = null;
+    _documentsLoadScopeKey = null;
+    _documentsLoadUserId = null;
+    _documentsLoadRoleId = null;
+    _documentsLoadDepartmentId = null;
+    _documentsLoadOfficeId = null;
+    _documentsLoadDocumentType = null;
+    _documentsLoadStatus = null;
+    _documentsLoadIsAdmin = false;
+    _documentsLoadMobileRestricted = false;
+    _transitionInFlight.clear();
+    _notificationService.clearCache();
+  }
+
+  bool _isCurrentAuthGeneration(int generation) =>
+      !_disposed && generation == _authGeneration;
+
+  static String? _normalizeOptional(String? value) {
+    final text = value?.trim();
+    return text == null || text.isEmpty ? null : text;
+  }
 
   // ---------------------------
   // Workflow engine helpers
@@ -106,6 +163,7 @@ class DocuTrackerProvider extends ChangeNotifier {
     String? targetHolderId,
   }) async {
     if (doc.id == null) return false;
+    final authGeneration = _authGeneration;
     final documentId = doc.id!;
     final fromStep = doc.currentStep ?? 1;
 
@@ -130,6 +188,7 @@ class DocuTrackerProvider extends ChangeNotifier {
           targetHolderId: targetHolderId,
           idempotencyKey: idempotencyKey,
         );
+        if (!_isCurrentAuthGeneration(authGeneration)) return false;
         if (result is DocuTrackerFailure<DocuTrackerDocument>) {
           _error = result.message.isNotEmpty ? result.message : failureMessage;
           return false;
@@ -137,9 +196,11 @@ class DocuTrackerProvider extends ChangeNotifier {
         if (result is DocuTrackerSuccess<DocuTrackerDocument>) {
           _upsertLocalDocument(result.value);
           await refreshDocument(documentId, reloadHistory: true);
+          if (!_isCurrentAuthGeneration(authGeneration)) return false;
           await loadNotifications(forceRefresh: true);
+          if (!_isCurrentAuthGeneration(authGeneration)) return false;
           await _reloadDocumentsIfCached();
-          return true;
+          return _isCurrentAuthGeneration(authGeneration);
         }
         _error = failureMessage;
         return false;
@@ -157,6 +218,7 @@ class DocuTrackerProvider extends ChangeNotifier {
     required int fromStep,
     required Future<bool> Function() run,
   }) async {
+    final authGeneration = _authGeneration;
     if (!_beginTransition(documentId, action, fromStep)) {
       _error = 'This action is already in progress. Please wait.';
       notifyListeners();
@@ -168,12 +230,15 @@ class DocuTrackerProvider extends ChangeNotifier {
     try {
       return await run();
     } catch (e) {
+      if (!_isCurrentAuthGeneration(authGeneration)) return false;
       _error = e.toString();
       return false;
     } finally {
-      _loading = false;
-      notifyListeners();
       _endTransition(documentId, action, fromStep);
+      if (_isCurrentAuthGeneration(authGeneration)) {
+        _loading = false;
+        notifyListeners();
+      }
     }
   }
 
@@ -190,11 +255,34 @@ class DocuTrackerProvider extends ChangeNotifier {
   }
 
   String? _documentsLoadUserId;
+  String? _documentsLoadScopeKey;
   bool _documentsLoadIsAdmin = false;
   String? _documentsLoadRoleId;
   String? _documentsLoadDepartmentId;
   String? _documentsLoadOfficeId;
+  String? _documentsLoadDocumentType;
+  DocumentStatus? _documentsLoadStatus;
   bool _documentsLoadMobileRestricted = false;
+
+  String _documentsScopeKey({
+    required String userId,
+    String? roleId,
+    String? departmentId,
+    String? officeId,
+    String? documentType,
+    DocumentStatus? status,
+    required bool isAdmin,
+    required bool mobileRestricted,
+  }) => [
+    _normalizeOptional(userId) ?? '',
+    _normalizeOptional(roleId) ?? '',
+    _normalizeOptional(departmentId) ?? '',
+    _normalizeOptional(officeId) ?? '',
+    _normalizeOptional(documentType) ?? '',
+    status?.value ?? '',
+    isAdmin,
+    mobileRestricted,
+  ].join('|');
 
   List<DocuTrackerDocument> get documents => List.unmodifiable(_documents);
   List<DocumentHistoryEntry> get documentHistory =>
@@ -292,17 +380,22 @@ class DocuTrackerProvider extends ChangeNotifier {
 
   /// Load routing configs (Step 1 & 3).
   Future<void> loadRoutingConfigs() async {
+    final authGeneration = _authGeneration;
     _loading = true;
     _error = null;
     notifyListeners();
     try {
-      _routingConfigs = await _repo.getRoutingConfigs();
+      final routingConfigs = await _repo.getRoutingConfigs();
+      if (!_isCurrentAuthGeneration(authGeneration)) return;
+      _routingConfigs = routingConfigs;
       if (_routingConfigs.isEmpty) {
         _routingConfigs = DocumentRoutingConfig.defaults;
       }
     } catch (e) {
+      if (!_isCurrentAuthGeneration(authGeneration)) return;
       _error = e.toString();
     }
+    if (!_isCurrentAuthGeneration(authGeneration)) return;
     _loading = false;
     notifyListeners();
   }
@@ -315,6 +408,8 @@ class DocuTrackerProvider extends ChangeNotifier {
       roleId: _documentsLoadRoleId,
       departmentId: _documentsLoadDepartmentId,
       officeId: _documentsLoadOfficeId,
+      documentType: _documentsLoadDocumentType,
+      status: _documentsLoadStatus,
       isAdmin: _documentsLoadIsAdmin,
       mobileRestricted: _documentsLoadMobileRestricted,
       showLoading: false,
@@ -333,12 +428,26 @@ class DocuTrackerProvider extends ChangeNotifier {
     bool mobileRestricted = false,
     bool showLoading = true,
   }) async {
-    final preservePreviousDocuments = _documentsLoadUserId == userId;
+    final authGeneration = _authGeneration;
+    final scopeKey = _documentsScopeKey(
+      userId: userId,
+      roleId: roleId,
+      departmentId: departmentId,
+      officeId: officeId,
+      documentType: documentType,
+      status: status,
+      isAdmin: isAdmin,
+      mobileRestricted: mobileRestricted,
+    );
+    final preservePreviousDocuments = _documentsLoadScopeKey == scopeKey;
+    _documentsLoadScopeKey = scopeKey;
     _documentsLoadUserId = userId;
     _documentsLoadIsAdmin = isAdmin;
     _documentsLoadRoleId = roleId;
     _documentsLoadDepartmentId = departmentId;
     _documentsLoadOfficeId = officeId;
+    _documentsLoadDocumentType = documentType;
+    _documentsLoadStatus = status;
     _documentsLoadMobileRestricted = mobileRestricted;
     if (showLoading) {
       _loading = true;
@@ -353,6 +462,7 @@ class DocuTrackerProvider extends ChangeNotifier {
           status: status,
           limit: 100,
         );
+        if (!_isCurrentDocumentRequest(authGeneration, scopeKey)) return;
         if (r is DocuTrackerFailure<List<DocuTrackerDocument>>) {
           if (!preservePreviousDocuments) _documents = [];
           _error = r.message;
@@ -373,6 +483,7 @@ class DocuTrackerProvider extends ChangeNotifier {
           status: status,
           limit: 100,
         );
+        if (!_isCurrentDocumentRequest(authGeneration, scopeKey)) return;
         if (r is DocuTrackerFailure<List<DocuTrackerDocument>>) {
           if (!preservePreviousDocuments) _documents = [];
           _error = r.message;
@@ -393,12 +504,18 @@ class DocuTrackerProvider extends ChangeNotifier {
         );
       }
     } catch (e) {
+      if (!_isCurrentDocumentRequest(authGeneration, scopeKey)) return;
       if (!preservePreviousDocuments) _documents = [];
       _error = e.toString();
     }
+    if (!_isCurrentDocumentRequest(authGeneration, scopeKey)) return;
     _loading = false;
     notifyListeners();
   }
+
+  bool _isCurrentDocumentRequest(int authGeneration, String scopeKey) =>
+      _isCurrentAuthGeneration(authGeneration) &&
+      _documentsLoadScopeKey == scopeKey;
 
   /// Load permissions (Step 4: Admin Privilege Management).
   Future<void> loadPermissions({
@@ -408,21 +525,26 @@ class DocuTrackerProvider extends ChangeNotifier {
     bool userOnly = false,
   }) async {
     final loadKey = [roleId, userId, documentType, userOnly].join('|');
+    final authGeneration = _authGeneration;
     _loading = true;
     _error = null;
     notifyListeners();
     try {
-      _permissions = await _repo.listPermissions(
+      final permissions = await _repo.listPermissions(
         roleId: roleId,
         userId: userId,
         documentType: documentType,
         userOnly: userOnly,
       );
+      if (!_isCurrentAuthGeneration(authGeneration)) return;
+      _permissions = permissions;
       _permissionsLoadKey = loadKey;
     } catch (e) {
+      if (!_isCurrentAuthGeneration(authGeneration)) return;
       if (_permissionsLoadKey != loadKey) _permissions = [];
       _error = e.toString();
     }
+    if (!_isCurrentAuthGeneration(authGeneration)) return;
     _loading = false;
     notifyListeners();
   }
@@ -461,12 +583,16 @@ class DocuTrackerProvider extends ChangeNotifier {
 
   /// Load document history for audit trail (Step 9).
   Future<void> loadDocumentHistory(String documentId) async {
+    final authGeneration = _authGeneration;
     try {
-      _documentHistory = await _repo.listDocumentHistory(documentId);
+      final history = await _repo.listDocumentHistory(documentId);
+      if (!_isCurrentAuthGeneration(authGeneration)) return;
+      _documentHistory = history;
       _documentHistoryLoadDocumentId = documentId;
       _error = null;
       notifyListeners();
     } catch (e) {
+      if (!_isCurrentAuthGeneration(authGeneration)) return;
       if (_documentHistoryLoadDocumentId != documentId) {
         _documentHistory = [];
       }
@@ -479,13 +605,17 @@ class DocuTrackerProvider extends ChangeNotifier {
 
   /// Load notifications for user (Step 7).
   Future<void> loadNotifications({bool forceRefresh = false}) async {
+    final authGeneration = _authGeneration;
     try {
-      _notifications = await _notificationService.fetchMyNotifications(
+      final notifications = await _notificationService.fetchMyNotifications(
         forceRefresh: forceRefresh,
       );
+      if (!_isCurrentAuthGeneration(authGeneration)) return;
+      _notifications = notifications;
       _error = null;
       notifyListeners();
     } catch (e) {
+      if (!_isCurrentAuthGeneration(authGeneration)) return;
       _error = e.toString().trim().isEmpty
           ? 'Could not load notifications.'
           : e.toString();
@@ -495,8 +625,11 @@ class DocuTrackerProvider extends ChangeNotifier {
 
   /// Persists read state and updates in-memory list.
   Future<bool> markNotificationRead(String notificationId) async {
+    final authGeneration = _authGeneration;
     final updated = await _repo.markNotificationRead(notificationId);
-    if (updated == null) return false;
+    if (updated == null || !_isCurrentAuthGeneration(authGeneration)) {
+      return false;
+    }
     _notifications = [
       for (final n in _notifications)
         if (n.id == notificationId) updated else n,
@@ -508,11 +641,14 @@ class DocuTrackerProvider extends ChangeNotifier {
 
   /// Marks all notifications read for the current user (server + refresh list).
   Future<bool> markAllNotificationsRead() async {
+    final authGeneration = _authGeneration;
     final updated = await _repo.markAllNotificationsRead();
-    if (updated == null) return false;
+    if (updated == null || !_isCurrentAuthGeneration(authGeneration)) {
+      return false;
+    }
     _notificationService.clearCache();
     await loadNotifications(forceRefresh: true);
-    return true;
+    return _isCurrentAuthGeneration(authGeneration);
   }
 
   /// Refresh a single document from backend and update local state.
@@ -521,8 +657,10 @@ class DocuTrackerProvider extends ChangeNotifier {
     String documentId, {
     bool reloadHistory = false,
   }) async {
+    final authGeneration = _authGeneration;
     try {
       final res = await _repo.getDocument(documentId);
+      if (!_isCurrentAuthGeneration(authGeneration)) return;
       if (res is DocuTrackerFailure<DocuTrackerDocument>) {
         _error = res.message.isNotEmpty
             ? res.message
@@ -534,9 +672,11 @@ class DocuTrackerProvider extends ChangeNotifier {
       _upsertLocalDocument(res.value);
       if (reloadHistory) {
         await loadDocumentHistory(documentId);
+        if (!_isCurrentAuthGeneration(authGeneration)) return;
       }
       notifyListeners();
     } catch (e) {
+      if (!_isCurrentAuthGeneration(authGeneration)) return;
       _error = e.toString();
       notifyListeners();
     }
@@ -551,6 +691,7 @@ class DocuTrackerProvider extends ChangeNotifier {
     String? fileName,
     required String createdBy,
   }) async {
+    final authGeneration = _authGeneration;
     _loading = true;
     _error = null;
     notifyListeners();
@@ -567,6 +708,7 @@ class DocuTrackerProvider extends ChangeNotifier {
       // Delegate to backend workflow engine so creation is transactional:
       // doc insert + routing_record step 1 + history + notification.
       final created = await _repo.createDocument(doc);
+      if (!_isCurrentAuthGeneration(authGeneration)) return null;
       if (created is DocuTrackerFailure<DocuTrackerDocument>) {
         _error = created.message.isNotEmpty
             ? created.message
@@ -587,6 +729,7 @@ class DocuTrackerProvider extends ChangeNotifier {
       notifyListeners();
       return created.value;
     } catch (e) {
+      if (!_isCurrentAuthGeneration(authGeneration)) return null;
       _error = e.toString();
       _loading = false;
       notifyListeners();
@@ -597,10 +740,12 @@ class DocuTrackerProvider extends ChangeNotifier {
   Future<DocuTrackerDocumentBuilderData?> loadDocumentBuilder(
     String documentId,
   ) async {
+    final authGeneration = _authGeneration;
     _builderLoading = true;
     _builderError = null;
     notifyListeners();
     final result = await _repo.getDocumentBuilder(documentId);
+    if (!_isCurrentAuthGeneration(authGeneration)) return null;
     _builderLoading = false;
     switch (result) {
       case DocuTrackerSuccess<DocuTrackerDocumentBuilderData>(:final value):
@@ -621,6 +766,7 @@ class DocuTrackerProvider extends ChangeNotifier {
     required int revision,
   }) async {
     if (_builderLoading) return null;
+    final authGeneration = _authGeneration;
     _builderLoading = true;
     _builderError = null;
     notifyListeners();
@@ -630,6 +776,7 @@ class DocuTrackerProvider extends ChangeNotifier {
       signatureFields: signatureFields,
       revision: revision,
     );
+    if (!_isCurrentAuthGeneration(authGeneration)) return null;
     _builderLoading = false;
     switch (result) {
       case DocuTrackerSuccess<DocuTrackerDocumentBuilderData>(:final value):
@@ -732,6 +879,7 @@ class DocuTrackerProvider extends ChangeNotifier {
 
   Future<void> loadSourceSignatureRequests() async {
     if (_sourceSignatureRequestsLoading) return;
+    final authGeneration = _authGeneration;
     _sourceSignatureRequestsLoading = true;
     _sourceSignatureRequestsError = null;
     notifyListeners();
@@ -739,6 +887,7 @@ class DocuTrackerProvider extends ChangeNotifier {
       _repo.getSourceSignatureRequests(sourceModule: 'rsp'),
       _repo.getSourceSignatureRequests(sourceModule: 'ld'),
     ]);
+    if (!_isCurrentAuthGeneration(authGeneration)) return;
     _sourceSignatureRequestsLoading = false;
     final requests = <DocuTrackerRspSignatureRequest>[];
     final errors = <String>[];
@@ -766,6 +915,7 @@ class DocuTrackerProvider extends ChangeNotifier {
     required String sourceTable,
     required String sourceRecordId,
   }) async {
+    final authGeneration = _authGeneration;
     _sourceSignatureLoading = true;
     _sourceSignatureError = null;
     notifyListeners();
@@ -774,6 +924,7 @@ class DocuTrackerProvider extends ChangeNotifier {
       sourceTable: sourceTable,
       sourceRecordId: sourceRecordId,
     );
+    if (!_isCurrentAuthGeneration(authGeneration)) return null;
     _sourceSignatureLoading = false;
     switch (result) {
       case DocuTrackerSuccess<DocuTrackerSourceSignatureBundle>(:final value):
@@ -821,6 +972,7 @@ class DocuTrackerProvider extends ChangeNotifier {
     bool saveForReuse = false,
   }) async {
     if (_sourceSignatureLoading) return null;
+    final authGeneration = _authGeneration;
     _sourceSignatureLoading = true;
     _sourceSignatureError = null;
     notifyListeners();
@@ -835,6 +987,7 @@ class DocuTrackerProvider extends ChangeNotifier {
       sourceType: sourceType,
       saveForReuse: saveForReuse,
     );
+    if (!_isCurrentAuthGeneration(authGeneration)) return null;
     _sourceSignatureLoading = false;
     switch (result) {
       case DocuTrackerSuccess<DocuTrackerSourceSignatureBundle>(:final value):
@@ -855,6 +1008,7 @@ class DocuTrackerProvider extends ChangeNotifier {
     required String assignedSignerId,
   }) async {
     if (_sourceSignatureLoading) return null;
+    final authGeneration = _authGeneration;
     _sourceSignatureLoading = true;
     _sourceSignatureError = null;
     notifyListeners();
@@ -865,6 +1019,7 @@ class DocuTrackerProvider extends ChangeNotifier {
       slotKey: slotKey,
       assignedSignerId: assignedSignerId,
     );
+    if (!_isCurrentAuthGeneration(authGeneration)) return null;
     _sourceSignatureLoading = false;
     switch (result) {
       case DocuTrackerSuccess<DocuTrackerSourceSignatureBundle>(:final value):
@@ -887,6 +1042,7 @@ class DocuTrackerProvider extends ChangeNotifier {
     bool saveForReuse = false,
   }) async {
     if (_builderLoading) return null;
+    final authGeneration = _authGeneration;
     _builderLoading = true;
     _builderError = null;
     notifyListeners();
@@ -899,6 +1055,7 @@ class DocuTrackerProvider extends ChangeNotifier {
       sourceType: sourceType,
       saveForReuse: saveForReuse,
     );
+    if (!_isCurrentAuthGeneration(authGeneration)) return null;
     _builderLoading = false;
     switch (result) {
       case DocuTrackerSuccess<DocuTrackerDocumentBuilderData>(:final value):
@@ -919,6 +1076,7 @@ class DocuTrackerProvider extends ChangeNotifier {
     required double y,
   }) async {
     if (_builderLoading) return null;
+    final authGeneration = _authGeneration;
     _builderLoading = true;
     _builderError = null;
     notifyListeners();
@@ -928,6 +1086,7 @@ class DocuTrackerProvider extends ChangeNotifier {
       x: x,
       y: y,
     );
+    if (!_isCurrentAuthGeneration(authGeneration)) return null;
     _builderLoading = false;
     switch (result) {
       case DocuTrackerSuccess<DocuTrackerDocumentBuilderData>(:final value):
@@ -1023,10 +1182,12 @@ class DocuTrackerProvider extends ChangeNotifier {
     required String remarks,
   }) async {
     if (doc.id == null || remarks.trim().isEmpty) return false;
+    final authGeneration = _authGeneration;
     final ok = await _workflowService.addDocumentRemark(
       documentId: doc.id!,
       remarks: remarks.trim(),
     );
+    if (!_isCurrentAuthGeneration(authGeneration)) return false;
     if (!ok) {
       _error = 'Failed to add remark.';
       notifyListeners();
@@ -1036,10 +1197,13 @@ class DocuTrackerProvider extends ChangeNotifier {
 
   /// Save permission (Step 4: Admin Privilege Management).
   Future<void> savePermission(DocumentPermission perm) async {
+    final authGeneration = _authGeneration;
     try {
       await _repo.savePermission(perm);
+      if (!_isCurrentAuthGeneration(authGeneration)) return;
       await loadPermissions();
     } catch (e) {
+      if (!_isCurrentAuthGeneration(authGeneration)) return;
       _error = e.toString();
       notifyListeners();
     }
@@ -1055,12 +1219,14 @@ class DocuTrackerProvider extends ChangeNotifier {
     required List<int> fileBytes,
     required String fileName,
   }) async {
+    final authGeneration = _authGeneration;
     _error = null;
     final res = await _repo.uploadAttachment(
       documentId: documentId,
       fileBytes: fileBytes,
       fileName: fileName,
     );
+    if (!_isCurrentAuthGeneration(authGeneration)) return null;
     if (res is DocuTrackerFailure<DocuTrackerDocument>) {
       _error = res.message.isNotEmpty ? res.message : 'Upload failed.';
       notifyListeners();
@@ -1073,8 +1239,10 @@ class DocuTrackerProvider extends ChangeNotifier {
   }
 
   Future<DocuTrackerDocument?> removeAttachment(String documentId) async {
+    final authGeneration = _authGeneration;
     _error = null;
     final res = await _repo.removeAttachment(documentId);
+    if (!_isCurrentAuthGeneration(authGeneration)) return null;
     if (res is DocuTrackerFailure<DocuTrackerDocument>) {
       _error = res.message.isNotEmpty ? res.message : 'Could not remove file.';
       notifyListeners();
@@ -1087,12 +1255,23 @@ class DocuTrackerProvider extends ChangeNotifier {
   }
 
   Future<List<int>?> getAttachmentBytes(String documentId) async {
+    final authGeneration = _authGeneration;
     try {
-      return await _repo.getAttachmentBytes(documentId);
+      final bytes = await _repo.getAttachmentBytes(documentId);
+      return _isCurrentAuthGeneration(authGeneration) ? bytes : null;
     } catch (e) {
+      if (!_isCurrentAuthGeneration(authGeneration)) return null;
       _error = e.toString();
       notifyListeners();
       rethrow;
     }
+  }
+
+  @override
+  void dispose() {
+    _disposed = true;
+    _authGeneration += 1;
+    _notificationService.clearCache();
+    super.dispose();
   }
 }
