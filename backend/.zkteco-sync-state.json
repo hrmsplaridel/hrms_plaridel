@@ -21,5 +21,10 @@
     "lastRecordTime": "2026-08-14T17:37:42.000+08:00",
     "identityFingerprint": "868d809d209b9e66a99b4c21a7596bdbb3c5ae2c9493f45f63fd1c56fa2eeb17",
     "updatedAt": "2026-09-13T12:31:11.000Z"
+  },
+  "device:54d9edf2-8ea8-4978-a587-fcd76313df8e": {
+    "lastRecordTime": "2026-09-17T12:10:19.000+08:00",
+    "identityFingerprint": "0b60d6fd8afffcef397be1642a3c9b4073b55687c555b17a1c7c1ddb8d2bd6c1",
+    "updatedAt": "2026-09-17T09:44:25.000Z"
   }
 }

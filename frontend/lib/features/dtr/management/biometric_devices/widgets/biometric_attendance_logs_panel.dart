@@ -135,16 +135,17 @@ class _BiometricAttendanceLogsPanelState
       final fallbackName = selection.format == 'dat'
           ? 'attlog_${selection.fileRange}.$extension'
           : 'biometric_attendance_${selection.fileRange}.$extension';
-      await shareOrDownloadFile(
+      final saved = await saveOrDownloadFile(
         result.bytes,
         result.filename ?? fallbackName,
         selection.format == 'dat' ? 'text/plain' : 'text/csv',
       );
       if (!mounted) return;
+      if (!saved) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            '${result.rowCount} biometric punch${result.rowCount == 1 ? '' : 'es'} downloaded.',
+            '${result.rowCount} biometric punch${result.rowCount == 1 ? '' : 'es'} saved.',
           ),
         ),
       );
