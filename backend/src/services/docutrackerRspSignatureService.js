@@ -50,6 +50,13 @@ const SOURCE_SIGNATURE_CONFIGS = Object.freeze({
 
 const RSP_SIGNATURE_SLOTS = SOURCE_SIGNATURE_CONFIGS.rsp.slots;
 const LD_SIGNATURE_SLOTS = SOURCE_SIGNATURE_CONFIGS.ld.slots;
+const CREATOR_OWNED_SOURCE_SLOTS = Object.freeze({
+  applicants_profile_entries: Object.freeze(['prepared_by']),
+  selection_lineup_entries: Object.freeze(['prepared_by']),
+  computation_of_points_entries: Object.freeze(['prepared_by']),
+  turn_around_time_entries: Object.freeze(['prepared_by']),
+  idp_entries: Object.freeze(['prepared_by']),
+});
 
 function serviceError(code, message) {
   const error = new Error(message);
@@ -77,10 +84,62 @@ function sourceConfig(sourceModule, sourceTable, sourceRecordId, slotKey = null)
   };
 }
 
+function sourceModuleForTable(sourceTable) {
+  return Object.keys(SOURCE_SIGNATURE_CONFIGS).find((sourceModule) =>
+    Object.hasOwn(SOURCE_SIGNATURE_CONFIGS[sourceModule].slots, sourceTable)
+  ) || null;
+}
+
+function creatorOwnedSlotKeys(sourceTable) {
+  return CREATOR_OWNED_SOURCE_SLOTS[sourceTable] || [];
+}
+
+function isCreatorOwnedSlot(sourceTable, slotKey) {
+  return creatorOwnedSlotKeys(sourceTable).includes(slotKey);
+}
+
+async function initializeCreatorSourceSignatures(db, user, sourceTable, sourceRecordId) {
+  const sourceModule = sourceModuleForTable(sourceTable);
+  const slotKeys = creatorOwnedSlotKeys(sourceTable);
+  if (!sourceModule || !slotKeys.length) return false;
+  if (!UUID_RE.test(String(user?.id || ''))) {
+    throw serviceError('FORBIDDEN', 'An authenticated form creator is required');
+  }
+  const config = sourceConfig(sourceModule, sourceTable, sourceRecordId);
+  for (const slotKey of slotKeys) {
+    const inserted = await db.query(
+      `INSERT INTO docutracker_rsp_source_signatures
+         (source_table, source_record_id, slot_key, label, assigned_signer_id, created_by)
+       VALUES ($1, $2::uuid, $3, $4, $5::uuid, $5::uuid)
+       ON CONFLICT (source_table, source_record_id, slot_key) DO NOTHING
+       RETURNING id`,
+      [sourceTable, sourceRecordId, slotKey, config.slots[slotKey], user.id]
+    );
+    if (inserted.rowCount) {
+      await writeGovernanceAudit(db, {
+        actorId: user.id,
+        eventType: 'source_signer_assigned',
+        entityType: `${sourceModule}_source_signature`,
+        entityId: sourceRecordId,
+        documentType: sourceModule,
+        targetUserId: user.id,
+        afterState: {
+          source_table: sourceTable,
+          slot_key: slotKey,
+          assigned_signer_id: user.id,
+          assignment_source: 'creator',
+        },
+      });
+    }
+  }
+  return true;
+}
+
 async function loadContext(db, user, sourceModule, sourceTable, sourceRecordId, { forUpdate = false } = {}) {
   const config = sourceConfig(sourceModule, sourceTable, sourceRecordId);
+  const creatorColumn = creatorOwnedSlotKeys(sourceTable).length ? ', created_by' : '';
   const source = await db.query(
-    `SELECT id FROM "${sourceTable}" WHERE id = $1::uuid${forUpdate ? ' FOR UPDATE' : ''}`,
+    `SELECT id${creatorColumn} FROM "${sourceTable}" WHERE id = $1::uuid${forUpdate ? ' FOR UPDATE' : ''}`,
     [sourceRecordId]
   );
   if (!source.rowCount) throw serviceError('NOT_FOUND', `${config.moduleConfig.label} form was not found`);
@@ -104,7 +163,12 @@ async function loadContext(db, user, sourceModule, sourceTable, sourceRecordId, 
   if (!isAdmin && !isAssigned) {
     throw serviceError('FORBIDDEN', 'Only an assigned signer can open these signature fields');
   }
-  return { ...config, rows: rows.rows, isAdmin };
+  return {
+    ...config,
+    rows: rows.rows,
+    isAdmin,
+    sourceCreatorId: source.rows[0].created_by || null,
+  };
 }
 
 function serialize(context, user, sourceTable, sourceRecordId) {
@@ -116,12 +180,25 @@ function serialize(context, user, sourceTable, sourceRecordId) {
     can_assign: context.isAdmin,
     signatures: Object.entries(context.slots).map(([slotKey, label]) => {
       const row = context.rows.find((candidate) => candidate.slot_key === slotKey);
+      const creatorOwned =
+        isCreatorOwnedSlot(sourceTable, slotKey) &&
+        Boolean(context.sourceCreatorId);
+      const creatorAssigned =
+        creatorOwned &&
+        String(row?.assigned_signer_id || '') ===
+          String(context.sourceCreatorId);
       return {
         id: row?.id || null,
         slot_key: slotKey,
         label,
         assigned_signer_id: row?.assigned_signer_id || '',
         assigned_signer_name: row?.assigned_signer_name || null,
+        assignment_source: creatorAssigned
+          ? 'creator'
+          : creatorOwned
+            ? 'admin_recovery'
+            : 'manual',
+        can_assign: context.isAdmin && !creatorOwned,
         can_sign: String(row?.assigned_signer_id || '') === String(user.id),
         signature_asset_id: row?.signature_asset_id || null,
         signature_image_base64: row?.signature_image_base64 || null,
@@ -139,7 +216,7 @@ async function getSourceSignatures(pool, user, sourceModule, sourceTable, source
     const context = await loadContext(pool, user, sourceModule, sourceTable, sourceRecordId);
     return serialize(context, user, sourceTable, sourceRecordId);
   } catch (error) {
-    if (error?.code === '42P01') {
+    if (error?.code === '42P01' || error?.code === '42703') {
       throw serviceError('UNAVAILABLE', 'Source form e-signatures are not initialized');
     }
     throw error;
@@ -225,7 +302,9 @@ async function listSourceSignatureRequests(pool, user, sourceModule) {
       );
       const requiresSetup =
         context.isAdmin &&
-        signatureBundle.signatures.some((signature) => !signature.assigned_signer_id);
+        signatureBundle.signatures.some(
+          (signature) => signature.can_assign && !signature.assigned_signer_id
+        );
       const hasPendingSignature = signatureBundle.signatures.some(
         (signature) =>
           signature.can_sign &&
@@ -245,7 +324,7 @@ async function listSourceSignatureRequests(pool, user, sourceModule) {
     }
     return requests;
   } catch (error) {
-    if (error?.code === '42P01') {
+    if (error?.code === '42P01' || error?.code === '42703') {
       throw serviceError(
         'UNAVAILABLE',
         'Source form e-signatures are not initialized'
@@ -266,6 +345,20 @@ async function assignSourceSigner(pool, user, sourceModule, sourceTable, sourceR
   try {
     await client.query('BEGIN');
     const context = await loadContext(client, user, sourceModule, sourceTable, sourceRecordId, { forUpdate: true });
+    const creatorOwned =
+      isCreatorOwnedSlot(sourceTable, slotKey) &&
+      Boolean(context.sourceCreatorId);
+    const recoveryRemarks = String(input.recovery_remarks || '').trim();
+    if (
+      creatorOwned &&
+      String(context.sourceCreatorId) !== signerId &&
+      recoveryRemarks.length < 5
+    ) {
+      throw serviceError(
+        'VALIDATION',
+        'Prepared by is assigned to the form creator. Recovery reassignment requires remarks.'
+      );
+    }
     const active = await client.query(
       'SELECT id, full_name FROM users WHERE id = $1::uuid AND is_active = true',
       [signerId]
@@ -295,7 +388,13 @@ async function assignSourceSigner(pool, user, sourceModule, sourceTable, sourceR
       documentType: config.sourceModule,
       targetUserId: signerId,
       beforeState: previous && { slot_key: slotKey, assigned_signer_id: previous.assigned_signer_id },
-      afterState: { source_table: sourceTable, slot_key: slotKey, assigned_signer_id: signerId },
+      afterState: {
+        source_table: sourceTable,
+        slot_key: slotKey,
+        assigned_signer_id: signerId,
+        assignment_source: creatorOwned ? 'admin_recovery' : 'manual',
+        recovery_remarks: recoveryRemarks || null,
+      },
     });
     await client.query('COMMIT');
   } catch (error) {
@@ -376,6 +475,8 @@ function listLdSignatureRequests(pool, user) {
 module.exports = {
   RSP_SIGNATURE_SLOTS,
   LD_SIGNATURE_SLOTS,
+  creatorOwnedSlotKeys,
+  initializeCreatorSourceSignatures,
   getSourceSignatures,
   getRspSourceSignatures,
   listSourceSignatureRequests,

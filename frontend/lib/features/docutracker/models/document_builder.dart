@@ -81,6 +81,8 @@ class DocuTrackerSourceSignature {
     required this.canSign,
     this.id,
     this.assignedSignerName,
+    this.canAssign,
+    this.assignmentSource = 'manual',
     this.signatureAssetId,
     this.signatureImageBytes,
     this.mimeType,
@@ -94,6 +96,8 @@ class DocuTrackerSourceSignature {
   final String label;
   final String assignedSignerId;
   final String? assignedSignerName;
+  final bool? canAssign;
+  final String assignmentSource;
   final bool canSign;
   final String? signatureAssetId;
   final Uint8List? signatureImageBytes;
@@ -116,6 +120,10 @@ class DocuTrackerSourceSignature {
       label: json['label']?.toString() ?? 'Signature',
       assignedSignerId: json['assigned_signer_id']?.toString() ?? '',
       assignedSignerName: json['assigned_signer_name']?.toString(),
+      canAssign: json.containsKey('can_assign')
+          ? json['can_assign'] == true
+          : null,
+      assignmentSource: json['assignment_source']?.toString() ?? 'manual',
       canSign: json['can_sign'] == true,
       signatureAssetId: json['signature_asset_id']?.toString(),
       signatureImageBytes: encoded == null || encoded.isEmpty

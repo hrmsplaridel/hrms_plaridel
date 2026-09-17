@@ -889,7 +889,7 @@ class FormPdf {
   );
 
   /// Signature block used side-by-side (Prepared by / Checked by): label on
-  /// top, blank space for a pen signature, then the (typed) name below.
+  /// top, centered signature, then the signer's name below.
   static pw.Widget _signatureBlock(
     String label,
     String value, {
@@ -902,14 +902,17 @@ class FormPdf {
       pw.SizedBox(
         height: 28,
         child: signature?.isSigned == true
-            ? pw.Image(
-                pw.MemoryImage(signature!.signatureImageBytes!),
-                fit: pw.BoxFit.contain,
+            ? pw.Center(
+                child: pw.Image(
+                  pw.MemoryImage(signature!.signatureImageBytes!),
+                  fit: pw.BoxFit.contain,
+                ),
               )
             : null,
       ),
       pw.Text(
         _signatureName(signature, value),
+        textAlign: pw.TextAlign.center,
         style: const pw.TextStyle(fontSize: 10),
       ),
     ],
@@ -920,7 +923,11 @@ class FormPdf {
     String fallback,
   ) {
     final signerName = signature?.signerName?.trim();
-    return signerName == null || signerName.isEmpty ? fallback : signerName;
+    if (signerName != null && signerName.isNotEmpty) return signerName;
+    final assignedSignerName = signature?.assignedSignerName?.trim();
+    return assignedSignerName == null || assignedSignerName.isEmpty
+        ? fallback
+        : assignedSignerName;
   }
 
   static pw.Widget _signatureImage(
@@ -930,9 +937,11 @@ class FormPdf {
     if (signature?.isSigned != true) return pw.SizedBox(height: height);
     return pw.SizedBox(
       height: height,
-      child: pw.Image(
-        pw.MemoryImage(signature!.signatureImageBytes!),
-        fit: pw.BoxFit.contain,
+      child: pw.Center(
+        child: pw.Image(
+          pw.MemoryImage(signature!.signatureImageBytes!),
+          fit: pw.BoxFit.contain,
+        ),
       ),
     );
   }

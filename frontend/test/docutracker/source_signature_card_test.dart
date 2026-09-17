@@ -22,6 +22,9 @@ DocuTrackerSourceSignatureBundle _bundle({
   required bool canAssign,
   required String assignedSignerId,
   required bool canSign,
+  bool? fieldCanAssign,
+  String assignmentSource = 'manual',
+  String? assignedSignerName,
 }) {
   return DocuTrackerSourceSignatureBundle(
     sourceModule: 'ld',
@@ -34,6 +37,9 @@ DocuTrackerSourceSignatureBundle _bundle({
         slotKey: 'prepared_by',
         label: 'Prepared by',
         assignedSignerId: assignedSignerId,
+        assignedSignerName: assignedSignerName,
+        canAssign: fieldCanAssign,
+        assignmentSource: assignmentSource,
         canSign: canSign,
       ),
     ],
@@ -93,4 +99,31 @@ void main() {
     expect(find.text('Add Signature'), findsOneWidget);
     expect(find.text('No signer assigned yet'), findsNothing);
   });
+
+  testWidgets(
+    'creator-owned Prepared by shows the creator and no assignment button',
+    (tester) async {
+      await tester.pumpWidget(
+        _subject(
+          _bundle(
+            canAssign: true,
+            fieldCanAssign: false,
+            assignmentSource: 'creator',
+            assignedSignerId: 'employee-1',
+            assignedSignerName: 'Maria Santos',
+            canSign: true,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('Prepared by Maria Santos'), findsOneWidget);
+      expect(
+        find.text('This field belongs to the person who created the form.'),
+        findsOneWidget,
+      );
+      expect(find.text('Change signer'), findsNothing);
+      expect(find.text('Add Signature'), findsOneWidget);
+    },
+  );
 }

@@ -18,6 +18,7 @@ import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/d
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_module_header.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_status_badge.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_status_theme.dart';
+import 'package:hrms_plaridel/features/docutracker/utils/docutracker_workflow_phase.dart';
 
 String _statusLabel(
   DocuTrackerDocument document,
@@ -876,11 +877,8 @@ class _DocumentList extends StatelessWidget {
         }
         return Column(
           children: filtered.map((doc) {
-            final isOverdue =
-                doc.status == DocumentStatus.overdue ||
-                (doc.deadlineTime != null &&
-                    DateTime.now().isAfter(doc.deadlineTime!));
-            final statusForUi = isOverdue ? DocumentStatus.overdue : doc.status;
+            final statusForUi = docuTrackerStatusForDisplay(doc);
+            final isOverdue = statusForUi == DocumentStatus.overdue;
             return _DocumentRowCard(
               doc: doc,
               statusForUi: statusForUi,
@@ -942,13 +940,8 @@ class _DocumentDataTable extends StatelessWidget {
               DataColumn(label: Text('Current assignee')),
             ],
             rows: documents.map((doc) {
-              final isOverdue =
-                  doc.status == DocumentStatus.overdue ||
-                  (doc.deadlineTime != null &&
-                      DateTime.now().isAfter(doc.deadlineTime!));
-              final statusForUi = isOverdue
-                  ? DocumentStatus.overdue
-                  : doc.status;
+              final statusForUi = docuTrackerStatusForDisplay(doc);
+              final isOverdue = statusForUi == DocumentStatus.overdue;
               final title = doc.title;
               return DataRow(
                 onSelectChanged: (_) async {

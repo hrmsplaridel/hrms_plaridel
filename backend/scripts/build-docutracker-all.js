@@ -34,6 +34,7 @@ const postSections = [
   ["23 - GOVERNANCE AUDIT TRAIL", "migrate-docutracker-governance-audit-v1.sql"],
   ["24 - EFFECTIVE-DATED OFFICIAL SIGNATORIES", "migrate-docutracker-official-signatories-v1.sql"],
   ["25 - AUTOMATIC MAYOR LEAVE SIGNATORY", "migrate-docutracker-automatic-mayor-signatory-v2.sql"],
+  ["26 - SOURCE FORM PREPARER OWNERSHIP", "migrate-docutracker-source-preparer-ownership-v1.sql"],
 ];
 
 function readBody(file) {
@@ -100,10 +101,10 @@ const applyOnceOut = `-- =======================================================
 ${applyOnceBody}
 `;
 
-// --- Phase 3: post production hardening (10-25)
+// --- Phase 3: post production hardening (10-26)
 const postToc = postSections.map(([t]) => t);
 const postOut = buildRollup({
-  title: "HRMS Plaridel - DocuTracker: INSTALL PHASE 3 (post production hardening, 10-25)",
+  title: "HRMS Plaridel - DocuTracker: INSTALL PHASE 3 (post production hardening, 10-26)",
   descriptionLines: [
     "PREREQUISITE: phase 1 complete AND docutracker-install-production-hardening-apply-once.sql applied.",
     "Section 10 drops/replaces *_prod_v1 status constraints created in production hardening.",
@@ -118,6 +119,7 @@ const postOut = buildRollup({
     "Sections 21-22 add assigned, audited signature fields to saved RSP and L&D forms.",
     "Section 23 adds the governance audit trail.",
     "Sections 24-25 assign effective-dated officials used by generated leave forms.",
+    "Section 26 records authenticated source-form creators for automatic Prepared by assignment.",
   ],
   tocLines: postToc,
   sections: postSections,
@@ -133,7 +135,7 @@ const orchestratorOut = `-- ====================================================
 -- This file uses psql \\ir (include relative to this file) to run, in order:
 --   1) docutracker-install-core.sql                    (sections 01-08)
 --   2) docutracker-install-production-hardening-apply-once.sql
---   3) docutracker-install-post-production-hardening.sql (sections 10-25)
+--   3) docutracker-install-post-production-hardening.sql (sections 10-26)
 --
 -- USAGE (from repo root; path must point at this file - \\ir resolves next to it):
 --   psql -d hrms_plaridel -v ON_ERROR_STOP=1 -f backend/scripts/migrations/docutracker/docutracker-install-all-in-order.sql

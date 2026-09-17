@@ -234,8 +234,9 @@ class _DocuTrackerSourceSignatureCardState
   @override
   Widget build(BuildContext context) {
     final signature = _bundle?.signatureFor(widget.slotKey);
-    final canAssign = _bundle?.canAssign == true;
+    final canAssign = signature?.canAssign ?? (_bundle?.canAssign == true);
     final canSign = signature?.canSign == true;
+    final isCreatorAssigned = signature?.assignmentSource == 'creator';
     final hasAssignedSigner = (signature?.assignedSignerId ?? '')
         .trim()
         .isNotEmpty;
@@ -340,7 +341,9 @@ class _DocuTrackerSourceSignatureCardState
             if ((signature?.assignedSignerName ?? '').isNotEmpty) ...[
               const SizedBox(height: 8),
               Text(
-                'Assigned to ${signature!.assignedSignerName}',
+                isCreatorAssigned
+                    ? 'Prepared by ${signature!.assignedSignerName}'
+                    : 'Assigned to ${signature!.assignedSignerName}',
                 textAlign: TextAlign.center,
                 style: const TextStyle(
                   color: DocuTrackerTokens.textMuted,
@@ -379,7 +382,18 @@ class _DocuTrackerSourceSignatureCardState
                   fontSize: 12,
                 ),
               ),
-            if (_bundle?.canAssign == true) ...[
+            if (isCreatorAssigned) ...[
+              const SizedBox(height: 8),
+              const Text(
+                'This field belongs to the person who created the form.',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: DocuTrackerTokens.textMuted,
+                  fontSize: 12,
+                ),
+              ),
+            ],
+            if (canAssign) ...[
               const SizedBox(height: 8),
               OutlinedButton.icon(
                 onPressed: _assigning || _signing ? null : _assignSigner,

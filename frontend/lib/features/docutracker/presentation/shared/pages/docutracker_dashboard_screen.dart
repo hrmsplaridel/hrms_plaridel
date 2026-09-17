@@ -19,6 +19,7 @@ import 'package:hrms_plaridel/features/docutracker/data/navigation/docutracker_d
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_error_banner.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_summary_card.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_press_scale.dart';
+import 'package:hrms_plaridel/features/docutracker/utils/docutracker_workflow_phase.dart';
 
 /// Step 10 & 13: DocuTracker Dashboard.
 /// Employee: Incoming, Pending, Nearing deadline, Overdue, Returned, Completed.
@@ -953,14 +954,7 @@ class _DocumentTileState extends State<_DocumentTile> {
     return LayoutBuilder(
       builder: (context, constraints) {
         final compact = constraints.maxWidth < 520;
-        final isOverdue =
-            widget.document.status == DocumentStatus.overdue ||
-            (widget.document.deadlineTime != null &&
-                DateTime.now().isAfter(widget.document.deadlineTime!));
-
-        final statusForUi = isOverdue
-            ? DocumentStatus.overdue
-            : widget.document.status;
+        final statusForUi = docuTrackerStatusForDisplay(widget.document);
 
         final statusLabel = statusForUi.displayName.toUpperCase();
 

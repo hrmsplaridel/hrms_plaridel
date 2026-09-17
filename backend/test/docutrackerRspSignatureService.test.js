@@ -8,6 +8,7 @@ const {
   listRspSignatureRequests,
   assignRspSourceSigner,
   signRspSourceSlot,
+  initializeCreatorSourceSignatures,
 } = require('../src/services/docutrackerRspSignatureService');
 
 const formId = '11111111-1111-4111-8111-111111111111';
@@ -16,8 +17,8 @@ const signerId = '33333333-3333-4333-8333-333333333333';
 const otherId = '44444444-4444-4444-8444-444444444444';
 const assetId = '55555555-5555-4555-8555-555555555555';
 
-function sourceRow() {
-  return { rowCount: 1, rows: [{ id: formId }] };
+function sourceRow(overrides = {}) {
+  return { rowCount: 1, rows: [{ id: formId, created_by: null, ...overrides }] };
 }
 
 function signatureRow(overrides = {}) {
@@ -40,7 +41,7 @@ function signatureRow(overrides = {}) {
 test('only an assigned RSP signer or admin can load signature fields', async () => {
   const pool = {
     async query(sql) {
-      if (sql.includes('SELECT id FROM "selection_lineup_entries"')) {
+      if (sql.includes('SELECT id, created_by FROM "selection_lineup_entries"')) {
         return sourceRow();
       }
       if (sql.includes('FROM docutracker_rsp_source_signatures s')) {
@@ -82,6 +83,108 @@ test('only an assigned RSP signer or admin can load signature fields', async () 
   assert.equal(admin.signatures[0].can_sign, false);
 });
 
+test('creator-owned Prepared by fields cannot be casually reassigned', async () => {
+  const queries = [];
+  const client = {
+    async query(sql) {
+      queries.push(sql);
+      if (['BEGIN', 'ROLLBACK'].includes(sql)) {
+        return { rowCount: 0, rows: [] };
+      }
+      if (sql.includes('SELECT id, created_by FROM "selection_lineup_entries"')) {
+        return sourceRow({ created_by: signerId });
+      }
+      if (sql.includes('FROM docutracker_rsp_source_signatures s')) {
+        return { rowCount: 1, rows: [signatureRow()] };
+      }
+      throw new Error(`Unexpected query: ${sql}`);
+    },
+    release() {},
+  };
+  const pool = { async connect() { return client; } };
+
+  await assert.rejects(
+    assignRspSourceSigner(
+      pool,
+      { id: adminId, role: 'admin' },
+      'rsp',
+      'selection_lineup_entries',
+      formId,
+      'prepared_by',
+      { assigned_signer_id: otherId }
+    ),
+    (error) =>
+      error.code === 'VALIDATION' &&
+      error.message.includes('Recovery reassignment requires remarks')
+  );
+  assert.ok(queries.includes('ROLLBACK'));
+});
+
+test('creator-owned Prepared by fields expose creator assignment without an edit control', async () => {
+  const pool = {
+    async query(sql) {
+      if (sql.includes('SELECT id, created_by FROM "selection_lineup_entries"')) {
+        return sourceRow({ created_by: signerId });
+      }
+      if (sql.includes('FROM docutracker_rsp_source_signatures s')) {
+        return { rowCount: 1, rows: [signatureRow()] };
+      }
+      throw new Error(`Unexpected query: ${sql}`);
+    },
+  };
+
+  const result = await getRspSourceSignatures(
+    pool,
+    { id: adminId, role: 'admin' },
+    'rsp',
+    'selection_lineup_entries',
+    formId
+  );
+
+  assert.equal(result.can_assign, true);
+  assert.equal(result.signatures[0].assignment_source, 'creator');
+  assert.equal(result.signatures[0].can_assign, false);
+  assert.equal(result.signatures[0].assigned_signer_name, 'Prepared Person');
+});
+
+test('new source forms assign Prepared by to the authenticated creator', async () => {
+  const queries = [];
+  const db = {
+    async query(sql, params = []) {
+      queries.push({ sql, params });
+      if (sql.includes('INSERT INTO docutracker_rsp_source_signatures')) {
+        return { rowCount: 1, rows: [{ id: '77777777-7777-4777-8777-777777777777' }] };
+      }
+      if (sql.includes('INSERT INTO docutracker_governance_audit')) {
+        return { rowCount: 1, rows: [] };
+      }
+      throw new Error(`Unexpected query: ${sql}`);
+    },
+  };
+
+  const initialized = await initializeCreatorSourceSignatures(
+    db,
+    { id: signerId, role: 'admin' },
+    'selection_lineup_entries',
+    formId
+  );
+
+  assert.equal(initialized, true);
+  assert.ok(
+    queries.some(({ sql, params }) =>
+      sql.includes('ON CONFLICT') &&
+      params[2] === 'prepared_by' &&
+      params[4] === signerId
+    )
+  );
+  assert.ok(
+    queries.some(({ sql, params }) =>
+      sql.includes('INSERT INTO docutracker_governance_audit') &&
+      params.includes('source_signer_assigned')
+    )
+  );
+});
+
 test('signature request list returns only forms assigned to the current user', async () => {
   const pool = {
     async query(sql, params = []) {
@@ -96,7 +199,7 @@ test('signature request list returns only forms assigned to the current user', a
           }],
         };
       }
-      if (sql.includes('SELECT id FROM "selection_lineup_entries"')) {
+      if (sql.includes('SELECT id, created_by FROM "selection_lineup_entries"')) {
         return sourceRow();
       }
       if (sql.includes('FROM docutracker_rsp_source_signatures s')) {
@@ -140,7 +243,7 @@ test('RSP admins can discover unassigned signature-bearing forms for setup', asy
       if (sql.includes('ORDER BY updated_at')) {
         return { rowCount: 0, rows: [] };
       }
-      if (sql.includes('SELECT id FROM "selection_lineup_entries"')) {
+      if (sql.includes('SELECT id, created_by FROM "selection_lineup_entries"')) {
         return sourceRow();
       }
       if (sql.includes('FROM docutracker_rsp_source_signatures s')) {
@@ -190,7 +293,7 @@ test('completed source signature requests are omitted', async () => {
           }],
         };
       }
-      if (sql.includes('SELECT id FROM "selection_lineup_entries"')) {
+      if (sql.includes('SELECT id, created_by FROM "selection_lineup_entries"')) {
         return sourceRow();
       }
       if (sql.includes('FROM docutracker_rsp_source_signatures s')) {
@@ -260,7 +363,7 @@ test('L&D admins can discover unassigned signature-bearing forms for setup', asy
       ) {
         return { rowCount: 0, rows: [] };
       }
-      if (sql.includes('SELECT id FROM "idp_entries"')) {
+      if (sql.includes('SELECT id, created_by FROM "idp_entries"')) {
         return sourceRow();
       }
       if (sql.includes('FROM docutracker_rsp_source_signatures s')) {
@@ -301,7 +404,7 @@ test('L&D admins can discover unassigned signature-bearing forms for setup', asy
 test('unassigned users cannot open L&D source signature fields directly', async () => {
   const pool = {
     async query(sql) {
-      if (sql.includes('SELECT id FROM "idp_entries"')) return sourceRow();
+      if (sql.includes('SELECT id, created_by FROM "idp_entries"')) return sourceRow();
       if (sql.includes('FROM docutracker_rsp_source_signatures s')) {
         return { rowCount: 0, rows: [] };
       }
@@ -330,7 +433,7 @@ test('admin assignment is transactional and clears a different signer signature'
       if (['BEGIN', 'COMMIT', 'ROLLBACK'].includes(sql)) {
         return { rowCount: 0, rows: [] };
       }
-      if (sql.includes('SELECT id FROM "selection_lineup_entries"')) {
+      if (sql.includes('SELECT id, created_by FROM "selection_lineup_entries"')) {
         return sourceRow();
       }
       if (sql.includes('FROM docutracker_rsp_source_signatures s')) {
@@ -355,7 +458,7 @@ test('admin assignment is transactional and clears a different signer signature'
       return client;
     },
     async query(sql) {
-      if (sql.includes('SELECT id FROM "selection_lineup_entries"')) {
+      if (sql.includes('SELECT id, created_by FROM "selection_lineup_entries"')) {
         return sourceRow();
       }
       if (sql.includes('FROM docutracker_rsp_source_signatures s')) {
@@ -396,7 +499,7 @@ test('an RSP signature can only use an asset owned by the assigned signer', asyn
       if (['BEGIN', 'ROLLBACK'].includes(sql)) {
         return { rowCount: 0, rows: [] };
       }
-      if (sql.includes('SELECT id FROM "selection_lineup_entries"')) {
+      if (sql.includes('SELECT id, created_by FROM "selection_lineup_entries"')) {
         return sourceRow();
       }
       if (sql.includes('FROM docutracker_rsp_source_signatures s')) {
@@ -434,7 +537,7 @@ test('assigned signer can sign with an owned saved signature and the action is a
       if (['BEGIN', 'COMMIT', 'ROLLBACK'].includes(sql)) {
         return { rowCount: 0, rows: [] };
       }
-      if (sql.includes('SELECT id FROM "selection_lineup_entries"')) {
+      if (sql.includes('SELECT id, created_by FROM "selection_lineup_entries"')) {
         return sourceRow();
       }
       if (sql.includes('FROM docutracker_rsp_source_signatures s')) {
@@ -462,7 +565,7 @@ test('assigned signer can sign with an owned saved signature and the action is a
       return client;
     },
     async query(sql) {
-      if (sql.includes('SELECT id FROM "selection_lineup_entries"')) {
+      if (sql.includes('SELECT id, created_by FROM "selection_lineup_entries"')) {
         return sourceRow();
       }
       if (sql.includes('FROM docutracker_rsp_source_signatures s')) {

@@ -188,6 +188,13 @@ and permits signing only when `assigned_signer_id` matches the authenticated
 user. Assignment and signing events are also appended to
 `docutracker_governance_audit`.
 
+The source tables `applicants_profile_entries`, `selection_lineup_entries`,
+`computation_of_points_entries`, `turn_around_time_entries`, and `idp_entries`
+have a nullable `created_by` foreign key to `users`. New rows set it from the
+authenticated server user and create the matching `prepared_by` assignment in
+the same transaction. It remains null on legacy rows so their established
+manual signer assignments continue to work.
+
 The RSP and L&D signature-request feeds expose unassigned forms to
 administrators for signer setup. Non-admin users receive only forms assigned to
 their account. Both feeds omit forms with no remaining setup or signing action.

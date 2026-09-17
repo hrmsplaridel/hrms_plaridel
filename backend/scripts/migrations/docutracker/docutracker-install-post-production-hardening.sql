@@ -1,5 +1,5 @@
 -- =============================================================================
--- HRMS Plaridel - DocuTracker: INSTALL PHASE 3 (post production hardening, 10-25)
+-- HRMS Plaridel - DocuTracker: INSTALL PHASE 3 (post production hardening, 10-26)
 -- =============================================================================
 -- PREREQUISITE: phase 1 complete AND docutracker-install-production-hardening-apply-once.sql applied.
 -- Section 10 drops/replaces *_prod_v1 status constraints created in production hardening.
@@ -14,6 +14,7 @@
 -- Sections 21-22 add assigned, audited signature fields to saved RSP and L&D forms.
 -- Section 23 adds the governance audit trail.
 -- Sections 24-25 assign effective-dated officials used by generated leave forms.
+-- Section 26 records authenticated source-form creators for automatic Prepared by assignment.
 --
 -- TABLE OF CONTENTS
 --   10 - STATUS SEMANTICS V2 (drop forwarded as document status)
@@ -32,6 +33,7 @@
 --   23 - GOVERNANCE AUDIT TRAIL
 --   24 - EFFECTIVE-DATED OFFICIAL SIGNATORIES
 --   25 - AUTOMATIC MAYOR LEAVE SIGNATORY
+--   26 - SOURCE FORM PREPARER OWNERSHIP
 --
 -- =============================================================================
 
@@ -1076,5 +1078,32 @@ ALTER TABLE docutracker_official_signatories
 ALTER TABLE docutracker_official_signatories
   ADD CONSTRAINT docutracker_official_signatories_role_check
   CHECK (role_key IN ('leave_credit_certifier'));
+
+COMMIT;
+
+
+-- #############################################################################
+-- 26 - SOURCE FORM PREPARER OWNERSHIP
+-- Source file: migrate-docutracker-source-preparer-ownership-v1.sql
+-- #############################################################################
+
+BEGIN;
+
+-- New RSP/L&D forms record their authenticated creator so the official
+-- Prepared by field can be assigned without trusting a typed client value.
+ALTER TABLE IF EXISTS public.applicants_profile_entries
+  ADD COLUMN IF NOT EXISTS created_by UUID REFERENCES public.users(id) ON DELETE SET NULL;
+
+ALTER TABLE IF EXISTS public.selection_lineup_entries
+  ADD COLUMN IF NOT EXISTS created_by UUID REFERENCES public.users(id) ON DELETE SET NULL;
+
+ALTER TABLE IF EXISTS public.computation_of_points_entries
+  ADD COLUMN IF NOT EXISTS created_by UUID REFERENCES public.users(id) ON DELETE SET NULL;
+
+ALTER TABLE IF EXISTS public.turn_around_time_entries
+  ADD COLUMN IF NOT EXISTS created_by UUID REFERENCES public.users(id) ON DELETE SET NULL;
+
+ALTER TABLE IF EXISTS public.idp_entries
+  ADD COLUMN IF NOT EXISTS created_by UUID REFERENCES public.users(id) ON DELETE SET NULL;
 
 COMMIT;

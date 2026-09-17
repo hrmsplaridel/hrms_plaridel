@@ -38,7 +38,7 @@ class DocuTrackerRspSignatureSection extends StatelessWidget {
           ),
           const SizedBox(height: 4),
           Text(
-            'Assign each field to the person who must sign. Only that account can add or replace its signature.',
+            'Prepared by is assigned to the form creator. Other fields are assigned to the person who must sign.',
             style: DocuTrackerTokens.subtitleStyle(context),
           ),
           const SizedBox(height: 12),

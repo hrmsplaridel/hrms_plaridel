@@ -1620,6 +1620,7 @@ CREATE TABLE IF NOT EXISTS action_brainstorming_coaching_entries (
 
 CREATE TABLE IF NOT EXISTS turn_around_time_entries (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  created_by UUID REFERENCES users(id) ON DELETE SET NULL,
   position TEXT,
   office TEXT,
   no_of_vacant_position TEXT,
@@ -1637,6 +1638,7 @@ CREATE TABLE IF NOT EXISTS turn_around_time_entries (
 
 CREATE TABLE IF NOT EXISTS idp_entries (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  created_by UUID REFERENCES users(id) ON DELETE SET NULL,
   name TEXT,
   position TEXT,
   category TEXT,
@@ -1891,6 +1893,7 @@ ON CONFLICT (id) DO NOTHING;
 
 CREATE TABLE IF NOT EXISTS selection_lineup_entries (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  created_by UUID REFERENCES users(id) ON DELETE SET NULL,
   date TEXT,
   name_of_agency_office TEXT,
   vacant_position TEXT,
@@ -1904,6 +1907,7 @@ CREATE TABLE IF NOT EXISTS selection_lineup_entries (
 
 CREATE TABLE IF NOT EXISTS computation_of_points_entries (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  created_by UUID REFERENCES users(id) ON DELETE SET NULL,
   date TEXT,
   position_level TEXT,
   position TEXT,
@@ -1936,6 +1940,7 @@ CREATE TABLE IF NOT EXISTS work_experience_sheet_entries (
 
 CREATE TABLE IF NOT EXISTS applicants_profile_entries (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  created_by UUID REFERENCES users(id) ON DELETE SET NULL,
   position_applied_for TEXT,
   minimum_requirements TEXT,
   date_of_posting TEXT,
