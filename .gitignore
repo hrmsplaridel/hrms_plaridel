@@ -82,6 +82,7 @@ accomplishment_reports
 build/
 coverage/
 frontend/windows/installer/output/
+frontend/windows/installer/prerequisites/
 
 # Symbolication related
 app.*.symbols
