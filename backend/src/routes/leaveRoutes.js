@@ -97,6 +97,11 @@ const {
   requireDepartmentHeadApprovalSignature,
   requireHrApprovalSignature,
 } = require('../services/docutrackerLeaveSignatureService');
+const {
+  ROLE_KEYS: OFFICIAL_SIGNATORY_ROLES,
+  resolveActiveMayor,
+  resolveOfficialSignatory,
+} = require('../services/officialSignatoryService');
 const { todayInHrmsTimezone } = require('../utils/dateRangeParser');
 
 const router = express.Router();
@@ -234,6 +239,16 @@ function mapSignatoryProfile(row) {
     name: row.full_name || null,
     position_title: row.position_title || null,
     department_id: row.department_id || null,
+    department_name: row.department_name || null,
+  };
+}
+
+function mapOfficialSignatoryProfile(row) {
+  if (!row) return null;
+  return {
+    user_id: row.employee_id || null,
+    name: row.name || null,
+    position_title: row.position_title || null,
     department_name: row.department_name || null,
   };
 }
@@ -3057,10 +3072,60 @@ router.get('/my', protect, async (req, res) => {
   }
 });
 
+// GET /api/leave/my/:id/history
+// Employees may read only the persisted workflow history of their own request.
+router.get('/my/:id/history', protect, async (req, res) => {
+  const userId = req.user?.id;
+  const requestId = (req.params?.id || '').toString().trim();
+  if (!userId) return res.status(401).json({ error: 'Not authenticated' });
+  if (!requestId) return res.status(400).json({ error: 'Leave request id is required' });
+
+  try {
+    const ownedRequest = await pool.query(
+      `SELECT 1
+       FROM leave_requests lr
+       WHERE lr.id = $1::uuid
+         AND (lr.user_id = $2::uuid OR lr.employee_id = $2::uuid)
+       LIMIT 1`,
+      [requestId, userId]
+    );
+    if (ownedRequest.rowCount === 0) {
+      return res.status(404).json({ error: 'Leave request not found' });
+    }
+
+    const history = await pool.query(
+      `SELECT h.id,
+              h.leave_request_id,
+              h.action,
+              h.from_status,
+              h.to_status,
+              h.acted_by,
+              h.acted_at,
+              h.remarks,
+              h.metadata_json,
+              actor.full_name AS actor_name,
+              actor.role AS actor_role
+       FROM leave_request_history h
+       LEFT JOIN users actor ON actor.id = h.acted_by
+       WHERE h.leave_request_id = $1::uuid
+       ORDER BY h.acted_at ASC, h.id ASC`,
+      [requestId]
+    );
+    res.json(history.rows);
+  } catch (err) {
+    if (err?.code === '22P02') {
+      return res.status(404).json({ error: 'Leave request not found' });
+    }
+    console.error('[leave GET /my/:id/history]', err);
+    res.status(500).json({ error: 'Failed to fetch leave request history' });
+  }
+});
+
 // GET /api/leave/signatories?employee_id=uuid&leave_request_id=uuid
 // Printable leave form signatories:
-// 7.A = active employee with Administrative Officer V position.
+// 7.A = configured certifier, with Administrative Officer V as legacy fallback.
 // 7.B = department head snapshotted when the leave request was submitted.
+// 7.C/7.D = latest active Mayor, snapshotted when final approval is recorded.
 router.get('/signatories', protect, async (req, res) => {
   const requesterId = req.user?.id;
   const role = req.user?.role;
@@ -3089,6 +3154,8 @@ router.get('/signatories', protect, async (req, res) => {
                   lr.created_at
                 )::date::text AS submitted_on,
                 lr.review_department_id,
+                lr.approved_at::date::text AS approved_on,
+                lr.approving_authority_snapshot,
                 lr.assigned_department_head_id,
                 d.name AS review_department_name,
                 EXISTS (
@@ -3141,10 +3208,23 @@ router.get('/signatories', protect, async (req, res) => {
       }
     }
 
-    const hrCertifier = await findActiveEmployeeByPositionTitle(
+    const signatoryDate = requestContext?.submitted_on || todayInHrmsTimezone();
+    const configuredCertifier = await resolveOfficialSignatory(
       pool,
-      HR_CERTIFICATION_POSITION_TITLE
+      OFFICIAL_SIGNATORY_ROLES.LEAVE_CREDIT_CERTIFIER,
+      signatoryDate
     );
+    const hrCertifier = configuredCertifier
+      ? null
+      : await findActiveEmployeeByPositionTitle(pool, HR_CERTIFICATION_POSITION_TITLE);
+    const approvingAuthority =
+      requestContext?.status === 'approved' &&
+      requestContext?.approving_authority_snapshot?.name
+        ? requestContext.approving_authority_snapshot
+        : await resolveActiveMayor(
+            pool,
+            requestContext?.approved_on || todayInHrmsTimezone()
+          );
     const departmentHeadInfo = requestContext
       ? requestContext.assigned_department_head_id
         ? {
@@ -3163,7 +3243,9 @@ router.get('/signatories', protect, async (req, res) => {
       : null;
 
     res.json({
-      hr_certification_officer: mapSignatoryProfile(hrCertifier),
+      hr_certification_officer: configuredCertifier
+        ? mapOfficialSignatoryProfile(configuredCertifier)
+        : mapSignatoryProfile(hrCertifier),
       recommendation_officer: departmentHeadProfile
         ? mapSignatoryProfile({
             ...departmentHeadProfile,
@@ -3172,6 +3254,7 @@ router.get('/signatories', protect, async (req, res) => {
               departmentHeadInfo.departmentName || departmentHeadProfile.department_name,
           })
         : null,
+      approving_authority: mapOfficialSignatoryProfile(approvingAuthority),
     });
   } catch (err) {
     console.error('[leave GET /signatories]', err);
@@ -4050,6 +4133,10 @@ router.patch('/:id/approve', protect, requireAdminOrHr, async (req, res) => {
         desiredStatus: 'approved',
       });
       await requireHrApprovalSignature(client, id, reviewerId);
+      const approvingAuthority = await resolveActiveMayor(
+        client,
+        todayInHrmsTimezone()
+      );
 
       const updated = await client.query(
         `UPDATE leave_requests
@@ -4064,6 +4151,7 @@ router.patch('/:id/approve', protect, requireAdminOrHr, async (req, res) => {
              reviewed_at = now(),
              approved_by = $2::uuid,
              approved_at = now(),
+             approving_authority_snapshot = $8::jsonb,
              updated_at = now()
          WHERE id = $1
          RETURNING *`,
@@ -4075,6 +4163,7 @@ router.patch('/:id/approve', protect, requireAdminOrHr, async (req, res) => {
            allocation.approvedDaysWithPay,
            allocation.approvedDaysWithoutPay,
            approvedOtherDetails,
+           JSON.stringify(approvingAuthority || {}),
          ]
       );
       const row = updated.rows[0];
@@ -4393,6 +4482,9 @@ router.patch('/:id/revoke', protect, requireAdminOrHr, async (req, res) => {
            approved_other_details = NULL,
            recommendation_remarks = NULL,
            disapproval_reason = NULL,
+           approved_by = NULL,
+           approved_at = NULL,
+           approving_authority_snapshot = '{}'::jsonb,
            reviewed_at   = now(),
            updated_at    = now()
        WHERE id = $1`,

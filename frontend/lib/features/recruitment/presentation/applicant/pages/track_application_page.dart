@@ -1,9 +1,12 @@
 import 'dart:async';
-import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:hrms_plaridel/features/recruitment/models/recruitment_application.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
+import 'package:hrms_plaridel/features/recruitment/presentation/applicant/pages/application_flow_page.dart';
+import 'package:hrms_plaridel/features/recruitment/presentation/applicant/widgets/application_resume.dart';
+import 'package:hrms_plaridel/features/recruitment/presentation/applicant/widgets/rsp_applicant_app_bar.dart';
 import 'package:hrms_plaridel/features/recruitment/presentation/applicant/widgets/rsp_application_status_timeline.dart';
+import 'package:hrms_plaridel/shared/widgets/login_style_grid_backdrop.dart';
 
 /// Screen for applicants to track their application status by email.
 /// Auto-detects and displays the current step in the process (document review, exams, result, etc.).
@@ -140,60 +143,36 @@ class _TrackApplicationPageState extends State<TrackApplicationPage>
     final isWide = MediaQuery.sizeOf(context).width > 700;
 
     return Scaffold(
-      backgroundColor: const Color(0xFFF4F5F7),
-      body: NestedScrollView(
-        headerSliverBuilder: (context, _) => [
-          SliverAppBar(
-            expandedHeight: kIsWeb ? 180 : 160,
-            collapsedHeight: kToolbarHeight,
-            pinned: true,
-            backgroundColor: AppTheme.primaryNavy,
-            foregroundColor: Colors.white,
-            surfaceTintColor: Colors.transparent,
-            elevation: 0,
-            scrolledUnderElevation: 0,
-            leading: IconButton(
-              icon: const Icon(Icons.arrow_back_ios_new_rounded, size: 20),
-              onPressed: () => Navigator.of(context).pop(),
-            ),
-            actions: [
-              if (_application != null)
-                Padding(
-                  padding: const EdgeInsets.only(right: 8),
-                  child: _loading
-                      ? const Center(
-                          child: SizedBox(
-                            width: 22,
-                            height: 22,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2.2,
-                              color: Colors.white,
-                            ),
-                          ),
-                        )
-                      : IconButton(
-                          icon: const Icon(Icons.refresh_rounded),
-                          onPressed: _refresh,
-                          tooltip: 'Refresh status',
+      backgroundColor: const Color(0xFFFAFBFC),
+      appBar: RspApplicantAppBar(
+        title: 'Track Application Status',
+        subtitle: 'Look up your application by email',
+        icon: Icons.manage_search_rounded,
+        actions: [
+          if (_application != null)
+            Padding(
+              padding: const EdgeInsets.only(right: 4),
+              child: _loading
+                  ? const Center(
+                      child: SizedBox(
+                        width: 22,
+                        height: 22,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2.2,
+                          color: Colors.white,
                         ),
-                ),
-            ],
-            flexibleSpace: FlexibleSpaceBar(
-              collapseMode: CollapseMode.pin,
-              background: _HeroHeader(isWide: isWide),
-              title: const Text(
-                'Track Application Status',
-                style: TextStyle(
-                  fontWeight: FontWeight.w700,
-                  fontSize: 16,
-                  letterSpacing: -0.2,
-                ),
-              ),
-              titlePadding: const EdgeInsets.only(left: 56, bottom: 14),
+                      ),
+                    )
+                  : IconButton(
+                      icon: const Icon(Icons.refresh_rounded, color: Colors.white),
+                      onPressed: _refresh,
+                      tooltip: 'Refresh status',
+                    ),
             ),
-          ),
         ],
-        body: SingleChildScrollView(
+      ),
+      body: LoginStyleGridBackdrop(
+        child: SingleChildScrollView(
           padding: EdgeInsets.symmetric(
             horizontal: isWide ? 40 : 20,
             vertical: 28,
@@ -222,10 +201,21 @@ class _TrackApplicationPageState extends State<TrackApplicationPage>
                       opacity: _resultFade,
                       child: SlideTransition(
                         position: _resultSlide,
-                        child: RspApplicationStatusTimeline(
-                          application: _application!,
-                          examResult: _examResult,
-                          sameAsRecruitmentFlowNote: true,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            RspApplicationStatusTimeline(
+                              application: _application!,
+                              examResult: _examResult,
+                              sameAsRecruitmentFlowNote: true,
+                            ),
+                            const SizedBox(height: 16),
+                            _ContinueToRecruitment(
+                              application: _application!,
+                              examResult: _examResult,
+                              email: _emailController.text.trim(),
+                            ),
+                          ],
                         ),
                       ),
                     ),
@@ -234,91 +224,6 @@ class _TrackApplicationPageState extends State<TrackApplicationPage>
                 ],
               ),
             ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-// ── Hero header in the SliverAppBar flexible space ──────────────────────────
-
-class _HeroHeader extends StatelessWidget {
-  const _HeroHeader({required this.isWide});
-  final bool isWide;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [
-            AppTheme.primaryNavyDark,
-            AppTheme.primaryNavy,
-            AppTheme.primaryNavyLight.withValues(alpha: 0.85),
-          ],
-          stops: const [0.0, 0.55, 1.0],
-        ),
-      ),
-      child: SafeArea(
-        child: Padding(
-          padding: EdgeInsets.fromLTRB(
-            isWide ? 40 : 24,
-            kToolbarHeight + 8,
-            isWide ? 40 : 24,
-            20,
-          ),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              Container(
-                width: 52,
-                height: 52,
-                decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: 0.18),
-                  borderRadius: BorderRadius.circular(16),
-                  border: Border.all(
-                    color: Colors.white.withValues(alpha: 0.35),
-                    width: 1.5,
-                  ),
-                ),
-                child: const Icon(
-                  Icons.manage_search_rounded,
-                  color: Colors.white,
-                  size: 28,
-                ),
-              ),
-              const SizedBox(width: 16),
-              Expanded(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Track your application',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontSize: isWide ? 22 : 18,
-                        fontWeight: FontWeight.w800,
-                        letterSpacing: -0.4,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      'Look up by email · Auto-refreshes every 30 s',
-                      style: TextStyle(
-                        color: Colors.white.withValues(alpha: 0.82),
-                        fontSize: 12.5,
-                        fontWeight: FontWeight.w500,
-                        letterSpacing: 0.1,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
           ),
         ),
       ),
@@ -638,6 +543,64 @@ class _ErrorBanner extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _ContinueToRecruitment extends StatelessWidget {
+  const _ContinueToRecruitment({
+    required this.application,
+    required this.examResult,
+    required this.email,
+  });
+
+  final RecruitmentApplication application;
+  final RecruitmentExamResult? examResult;
+  final String email;
+
+  @override
+  Widget build(BuildContext context) {
+    final canContinue = canProceedTrackingContinue(application, examResult);
+    if (!canContinue) {
+      return Text(
+        trackingContinueBlockedHint(application, examResult),
+        textAlign: TextAlign.center,
+        style: TextStyle(
+          fontSize: 13,
+          height: 1.45,
+          color: AppTheme.textSecondary.withValues(alpha: 0.9),
+        ),
+      );
+    }
+
+    return SizedBox(
+      height: 52,
+      child: FilledButton.icon(
+        onPressed: email.isEmpty
+            ? null
+            : () {
+                Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (context) =>
+                        ApplicationFlowPage(resumeEmail: email),
+                  ),
+                );
+              },
+        style: FilledButton.styleFrom(
+          backgroundColor: AppTheme.primaryNavy,
+          foregroundColor: Colors.white,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(14),
+          ),
+        ),
+        icon: const Icon(Icons.arrow_forward_rounded, size: 20),
+        label: Text(
+          application.status == 'document_declined'
+              ? 'Replace documents'
+              : 'Continue',
+          style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
+        ),
       ),
     );
   }

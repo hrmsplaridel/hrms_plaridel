@@ -17,6 +17,7 @@ const {
   buildDeviceInfoPayload,
   enrichSessionRow,
   isMobileClient,
+  resolveSessionDevice,
 } = require('../utils/sessionDevice');
 const {
   normalizePhilippinesMobileNumber,
@@ -138,6 +139,44 @@ function hashRefreshToken(token) {
   return crypto.createHash('sha256').update(String(token)).digest('hex');
 }
 
+function currentRefreshTokenHash(req) {
+  const header = req.get('x-hrms-refresh');
+  const body =
+    req.body && typeof req.body.refreshToken === 'string'
+      ? req.body.refreshToken
+      : null;
+  const raw = (header || body || '').trim();
+  return raw ? hashRefreshToken(raw) : null;
+}
+
+function isUuid(value) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+    String(value || '')
+  );
+}
+
+function deviceInfoSource(deviceInfo) {
+  if (!deviceInfo || !String(deviceInfo).startsWith('{')) return null;
+  try {
+    const parsed = JSON.parse(deviceInfo);
+    return parsed && typeof parsed.source === 'string' ? parsed.source : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+async function writeAuthAudit(userId, action, details) {
+  try {
+    await pool.query(
+      `INSERT INTO audit_logs (user_id, action, entity_type, entity_id, details)
+       VALUES ($1, $2, 'auth', $1, $3)`,
+      [userId, action, JSON.stringify(details || {})]
+    );
+  } catch (auditErr) {
+    console.error('[auth] audit', auditErr);
+  }
+}
+
 function createTokenId() {
   return typeof crypto.randomUUID === 'function'
     ? crypto.randomUUID()
@@ -157,7 +196,8 @@ function normalizeIpForDb(value) {
 /**
  * Issue access + refresh JWTs and persist refresh token hash.
  */
-async function issueTokensForUser(user, req, db = pool) {
+async function issueTokensForUser(user, req, db = pool, options = {}) {
+  const source = options.source === 'refresh' ? 'refresh' : 'login';
   const accessPayload = {
     id: user.id,
     email: user.email,
@@ -184,7 +224,10 @@ async function issueTokensForUser(user, req, db = pool) {
 
   const ua = req.get('user-agent');
   const clientHint = req.get('x-hrms-device');
-  const devicePayload = buildDeviceInfoPayload(ua, clientHint);
+  const devicePayload = {
+    ...buildDeviceInfoPayload(ua, clientHint),
+    source,
+  };
   const deviceInfoStored = JSON.stringify(devicePayload);
   const ipForDb = normalizeIpForDb(req.ip || req.socket?.remoteAddress);
 
@@ -394,7 +437,9 @@ router.post('/refresh', authTokenLimiter, async (req, res) => {
       [rec.id]
     );
 
-    const { accessToken, refreshToken } = await issueTokensForUser(user, req, client);
+    const { accessToken, refreshToken } = await issueTokensForUser(user, req, client, {
+      source: 'refresh',
+    });
     await client.query('COMMIT');
 
     return res.json({
@@ -510,8 +555,9 @@ router.get('/me', authMiddleware, async (req, res) => {
  */
 router.get('/sessions', authMiddleware, async (req, res) => {
   try {
+    const currentHash = currentRefreshTokenHash(req);
     const result = await pool.query(
-      `SELECT id, device_info, ip_address, created_at, expires_at
+      `SELECT id, device_info, ip_address, created_at, expires_at, token_hash
        FROM auth_refresh_tokens
        WHERE user_id = $1
          AND revoked_at IS NULL
@@ -520,7 +566,13 @@ router.get('/sessions', authMiddleware, async (req, res) => {
       [req.user.id]
     );
     res.json({
-      sessions: result.rows.map((row) => enrichSessionRow(row)),
+      sessions: result.rows.map((row) => {
+        const { token_hash: tokenHash, ...rest } = row;
+        return {
+          ...enrichSessionRow(rest),
+          is_current: Boolean(currentHash) && tokenHash === currentHash,
+        };
+      }),
     });
   } catch (err) {
     console.error('[auth/sessions]', err);
@@ -529,16 +581,141 @@ router.get('/sessions', authMiddleware, async (req, res) => {
 });
 
 /**
- * POST /auth/logout-all — revoke every refresh session for this user (other devices).
+ * DELETE /auth/sessions/:id — revoke one refresh session owned by this user.
+ */
+router.delete('/sessions/:id', authMiddleware, authTokenLimiter, async (req, res) => {
+  try {
+    const sessionId = req.params.id;
+    if (!isUuid(sessionId)) {
+      return res.status(400).json({ error: 'Invalid session id' });
+    }
+    const currentHash = currentRefreshTokenHash(req);
+    const existing = await pool.query(
+      `SELECT id, token_hash
+         FROM auth_refresh_tokens
+        WHERE id = $1 AND user_id = $2 AND revoked_at IS NULL`,
+      [sessionId, req.user.id]
+    );
+    const row = existing.rows[0];
+    if (!row) {
+      return res.status(404).json({ error: 'Session not found' });
+    }
+    if (currentHash && row.token_hash === currentHash) {
+      return res.status(400).json({
+        error: 'Cannot end the current session from this list',
+      });
+    }
+    await pool.query(
+      `UPDATE auth_refresh_tokens
+          SET revoked_at = now()
+        WHERE id = $1 AND user_id = $2 AND revoked_at IS NULL`,
+      [sessionId, req.user.id]
+    );
+    await writeAuthAudit(req.user.id, 'session_revoked', { session_id: sessionId });
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[auth/sessions/:id]', err);
+    res.status(500).json({ error: 'Failed to end session' });
+  }
+});
+
+/**
+ * GET /auth/security-activity — recent real auth events for this user.
+ */
+router.get('/security-activity', authMiddleware, async (req, res) => {
+  try {
+    const [sessions, resets, audits] = await Promise.all([
+      pool.query(
+        `SELECT id, device_info, created_at, revoked_at
+           FROM auth_refresh_tokens
+          WHERE user_id = $1
+          ORDER BY created_at DESC
+          LIMIT 20`,
+        [req.user.id]
+      ),
+      pool.query(
+        `SELECT created_at
+           FROM auth_password_reset_otps
+          WHERE user_id = $1
+          ORDER BY created_at DESC
+          LIMIT 10`,
+        [req.user.id]
+      ),
+      pool.query(
+        `SELECT action, created_at, details
+           FROM audit_logs
+          WHERE user_id = $1
+            AND entity_type = 'auth'
+            AND action IN ('password_changed', 'session_revoked')
+          ORDER BY created_at DESC
+          LIMIT 10`,
+        [req.user.id]
+      ),
+    ]);
+
+    const events = [];
+    for (const row of sessions.rows) {
+      if (deviceInfoSource(row.device_info) !== 'login') continue;
+      const label = resolveSessionDevice(row.device_info).label;
+      events.push({
+        type: 'session_created',
+        title: 'Signed in',
+        subtitle: label,
+        at: row.created_at,
+      });
+    }
+    for (const row of resets.rows) {
+      events.push({
+        type: 'password_reset_requested',
+        title: 'Password reset requested',
+        subtitle: null,
+        at: row.created_at,
+      });
+    }
+    for (const row of audits.rows) {
+      events.push({
+        type: row.action,
+        title:
+          row.action === 'session_revoked'
+            ? 'Session ended'
+            : 'Password changed',
+        subtitle: null,
+        at: row.created_at,
+      });
+    }
+
+    events.sort((a, b) => new Date(b.at) - new Date(a.at));
+    res.json({ events: events.slice(0, 5) });
+  } catch (err) {
+    console.error('[auth/security-activity]', err);
+    res.status(500).json({ error: 'Failed to load security activity' });
+  }
+});
+
+/**
+ * POST /auth/logout-all — revoke other refresh sessions for this user.
  */
 router.post('/logout-all', authMiddleware, async (req, res) => {
   try {
-    await pool.query(
-      `UPDATE auth_refresh_tokens
-       SET revoked_at = now()
-       WHERE user_id = $1 AND revoked_at IS NULL`,
-      [req.user.id]
-    );
+    const currentHash = currentRefreshTokenHash(req);
+    if (currentHash) {
+      await pool.query(
+        `UPDATE auth_refresh_tokens
+            SET revoked_at = now()
+          WHERE user_id = $1
+            AND revoked_at IS NULL
+            AND token_hash <> $2`,
+        [req.user.id, currentHash]
+      );
+    } else {
+      await pool.query(
+        `UPDATE auth_refresh_tokens
+            SET revoked_at = now()
+          WHERE user_id = $1 AND revoked_at IS NULL`,
+        [req.user.id]
+      );
+    }
+    await writeAuthAudit(req.user.id, 'session_revoked', { scope: 'logout-all' });
     res.json({ ok: true });
   } catch (err) {
     console.error('[auth/logout-all]', err);
@@ -710,6 +887,9 @@ router.post(
         'UPDATE users SET password_hash = $1, updated_at = now() WHERE id = $2',
         [hash, req.user.id]
       );
+      await writeAuthAudit(req.user.id, 'password_changed', {
+        source: 'change-password',
+      });
       res.json({ message: 'Password updated' });
     } catch (err) {
       console.error('[auth/change-password]', err);

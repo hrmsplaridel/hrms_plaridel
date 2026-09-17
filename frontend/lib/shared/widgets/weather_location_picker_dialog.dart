@@ -382,45 +382,48 @@ class _SearchResultsList extends StatelessWidget {
       );
     }
 
-    return Container(
-      constraints: const BoxConstraints(maxHeight: 200),
-      decoration: BoxDecoration(
-        color: Colors.white,
+    return Material(
+      color: Colors.white,
+      shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
+        side: BorderSide(color: Colors.black.withValues(alpha: 0.06)),
       ),
-      child: ListView.separated(
-        shrinkWrap: true,
-        padding: const EdgeInsets.symmetric(vertical: 4),
-        itemCount: results.length,
-        separatorBuilder: (_, __) => Divider(
-          height: 1,
-          color: Colors.black.withValues(alpha: 0.06),
-        ),
-        itemBuilder: (context, index) {
-          final place = results[index];
-          return ListTile(
-            dense: true,
-            leading: Icon(
-              Icons.place_outlined,
-              size: 18,
-              color: AppTheme.primaryNavy.withValues(alpha: 0.75),
-            ),
-            title: Text(
-              place.label,
-              style: const TextStyle(
-                fontSize: 13,
-                fontWeight: FontWeight.w600,
+      clipBehavior: Clip.antiAlias,
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxHeight: 200),
+        child: ListView.separated(
+          shrinkWrap: true,
+          padding: const EdgeInsets.symmetric(vertical: 4),
+          itemCount: results.length,
+          separatorBuilder: (_, __) => Divider(
+            height: 1,
+            color: Colors.black.withValues(alpha: 0.06),
+          ),
+          itemBuilder: (context, index) {
+            final place = results[index];
+            return ListTile(
+              dense: true,
+              leading: Icon(
+                Icons.place_outlined,
+                size: 18,
+                color: AppTheme.primaryNavy.withValues(alpha: 0.75),
               ),
-            ),
-            trailing: Icon(
-              Icons.arrow_forward_ios_rounded,
-              size: 12,
-              color: AppTheme.dashTextSecondaryOf(context),
-            ),
-            onTap: () => onPick(place),
-          );
-        },
+              title: Text(
+                place.label,
+                style: const TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              trailing: Icon(
+                Icons.arrow_forward_ios_rounded,
+                size: 12,
+                color: AppTheme.dashTextSecondaryOf(context),
+              ),
+              onTap: () => onPick(place),
+            );
+          },
+        ),
       ),
     );
   }

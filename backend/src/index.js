@@ -17,6 +17,7 @@ const {
   generalApiReadLimiter,
   generalApiLimiter,
 } = require('./middleware/rateLimiters');
+const { registerLongBondPaperForm } = require('./utils/registerLongBondPaper');
 
 const authRoutes = require('./routes/auth');
 const departmentsRoutes = require('./routes/departments');
@@ -48,6 +49,7 @@ const rspApplicationsRoutes = require('./routes/rspApplications');
 const rspEmailVerificationPublicRoutes = require('./routes/rspEmailVerificationPublic');
 const rspStorageRoutes = require('./routes/rspStorage');
 const rspLdSavedEntriesRoutes = require('./routes/rspLdSavedEntries');
+const formPrintTemplatesRoutes = require('./routes/formPrintTemplates');
 const mayorEndorsementsRoutes = require('./routes/mayorEndorsements');
 const leaveRoutes = require('./routes/leaveRoutes');
 const notificationsRoutes = require('./routes/notifications');
@@ -99,19 +101,33 @@ if (!process.env.JWT_REFRESH_SECRET) {
 // Middleware (large limit: RSP/L&D forms e.g. turn-around tables with many JSON rows)
 const corsOrigins = process.env.CORS_ORIGINS?.split(',').map((s) => s.trim()).filter(Boolean);
 const isLocalDevelopment = process.env.NODE_ENV !== 'production';
-const isLocalDevelopmentOrigin = (origin) =>
-  /^https?:\/\/(localhost|127\.0\.0\.1)(?::\d+)?$/.test(origin);
+
+function isLocalBrowserOrigin(origin) {
+  try {
+    const u = new URL(origin);
+    const host = u.hostname.toLowerCase();
+    const local =
+      host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === '[::1]';
+    return local && (u.protocol === 'http:' || u.protocol === 'https:');
+  } catch {
+    return false;
+  }
+}
+
+// Flutter web debug uses a random localhost port (not only :5000 / :5050).
+// Allow those in development, plus CORS_ORIGINS. Native / curl have no Origin.
 app.use(
   cors({
     origin(origin, callback) {
       if (
         !origin ||
         corsOrigins?.includes(origin) ||
-        (isLocalDevelopment && isLocalDevelopmentOrigin(origin))
+        (isLocalDevelopment && isLocalBrowserOrigin(origin))
       ) {
-        return callback(null, true);
+        callback(null, true);
+        return;
       }
-      return callback(null, false);
+      callback(null, false);
     },
   }),
 );
@@ -120,7 +136,8 @@ app.use((_req, res, next) => {
   res.setHeader('X-Frame-Options', 'DENY');
   res.setHeader('Referrer-Policy', 'no-referrer');
   res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
-  res.setHeader('Cross-Origin-Resource-Policy', 'same-site');
+  // Public API is called from Flutter web on other localhost ports / 127.0.0.1.
+  res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
   next();
 });
 app.use(express.json({ limit: '15mb' }));
@@ -180,6 +197,7 @@ app.use('/api/rsp/applications', rspApplicationsRoutes);
 app.use('/api/rsp/email-verification', rspEmailVerificationPublicRoutes);
 app.use('/api/rsp/storage', rspStorageRoutes);
 app.use('/api/rsp-ld-saved-entries', rspLdSavedEntriesRoutes);
+app.use('/api/form-print-templates', formPrintTemplatesRoutes);
 app.use('/api/mayor/endorsements', mayorEndorsementsRoutes);
 app.use('/api/leave', leaveRoutes);
 app.use('/api/notifications', notificationsRoutes);
@@ -194,6 +212,7 @@ async function startServer() {
   console.log('[startup] Assignment database schema validated.');
   await validateHolidayTemplateSchema(pool);
   console.log('[startup] Holiday template database schema validated.');
+  registerLongBondPaperForm();
 
   const server = app.listen(PORT, HOST, () => {
   console.log(`HRMS API listening on http://${HOST}:${PORT}`);

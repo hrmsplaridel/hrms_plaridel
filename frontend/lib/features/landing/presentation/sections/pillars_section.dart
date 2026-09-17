@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:hrms_plaridel/features/recruitment/presentation/applicant/pages/application_flow_page.dart';
+import 'package:hrms_plaridel/features/recruitment/presentation/applicant/pages/track_application_page.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/features/landing/presentation/widgets/section_container.dart';
 
@@ -280,7 +280,7 @@ class _PillarCardState extends State<_PillarCard> {
 
   void _handleTrackStatus(BuildContext context) {
     Navigator.of(context).push(
-      MaterialPageRoute(builder: (context) => const ApplicationFlowPage()),
+      MaterialPageRoute(builder: (context) => const TrackApplicationPage()),
     );
   }
 

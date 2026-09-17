@@ -15,12 +15,16 @@ class StructuredAddressForm extends StatefulWidget {
     this.initialRawAddress,
     required this.inputDecoration,
     this.sectionLabel = 'Address',
+    this.twoColumn = false,
+    this.onChanged,
   });
 
   final TextEditingController streetController;
   final String? initialRawAddress;
   final InputDecoration Function(String hint) inputDecoration;
   final String sectionLabel;
+  final bool twoColumn;
+  final VoidCallback? onChanged;
 
   @override
   StructuredAddressFormState createState() => StructuredAddressFormState();
@@ -38,11 +42,14 @@ class StructuredAddressFormState extends State<StructuredAddressForm> {
   @override
   void initState() {
     super.initState();
+    widget.streetController.addListener(_notifyChanged);
     if (!PhilippinePsgcData.isIndexLoaded) {
-      unawaited(PhilippinePsgcData.ensureIndexLoaded().then((_) {
-        if (!mounted || _province == null) return;
-        _loadProvinceData(_province!);
-      }));
+      unawaited(
+        PhilippinePsgcData.ensureIndexLoaded().then((_) {
+          if (!mounted || _province == null) return;
+          _loadProvinceData(_province!);
+        }),
+      );
     }
   }
 
@@ -128,6 +135,16 @@ class StructuredAddressFormState extends State<StructuredAddressForm> {
     );
   }
 
+  @override
+  void dispose() {
+    widget.streetController.removeListener(_notifyChanged);
+    super.dispose();
+  }
+
+  void _notifyChanged() {
+    widget.onChanged?.call();
+  }
+
   void _onProvinceChanged(String? v) {
     if (v == null) {
       setState(() {
@@ -137,10 +154,12 @@ class StructuredAddressFormState extends State<StructuredAddressForm> {
         _cityOptions = [];
         _barangayOptions = [];
       });
+      _notifyChanged();
       return;
     }
     _province = v;
     _loadProvinceData(v);
+    _notifyChanged();
   }
 
   void _onCityChanged(String? v) {
@@ -149,6 +168,7 @@ class StructuredAddressFormState extends State<StructuredAddressForm> {
       _barangayDropdown = null;
       _barangayOptions = PhilippinePsgcData.barangaysFor(_province, v) ?? [];
     });
+    _notifyChanged();
   }
 
   bool get _hasProvinceData =>
@@ -191,13 +211,6 @@ class StructuredAddressFormState extends State<StructuredAddressForm> {
         ? _barangayDropdown
         : null;
 
-    final streetFilled = widget.streetController.text.trim().isNotEmpty;
-    final provinceFilled = (_province ?? '').trim().isNotEmpty;
-    final cityFilled = (_city ?? '').trim().isNotEmpty;
-    final barangayFilled = (_barangayDropdown ?? '').trim().isNotEmpty;
-    final isComplete =
-        provinceFilled && cityFilled && barangayFilled && streetFilled;
-
     final fieldStyle = AppTheme.dashFieldTextStyle(context);
     final hintStyle = AppTheme.dashFieldHintStyle(context);
     final sectionTitleColor = AppTheme.dashTextPrimaryOf(context);
@@ -208,35 +221,54 @@ class StructuredAddressFormState extends State<StructuredAddressForm> {
         provinceSelected && _hasProvinceData && !_loadingProvince;
     final barangayEnabled =
         cityEnabled && (_city ?? '').isNotEmpty && _barangayOptions.isNotEmpty;
+    final mutedFill = AppTheme.dashIsDark(context)
+        ? Colors.white.withValues(alpha: 0.03)
+        : const Color(0xFFF3F4F6);
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Text(
-          widget.sectionLabel,
-          style: TextStyle(
-            color: sectionTitleColor,
-            fontSize: 13,
-            fontWeight: FontWeight.w700,
-          ),
-        ),
-        const SizedBox(height: 12),
-        if (provinceItems.isEmpty)
-          Padding(
-            padding: const EdgeInsets.only(bottom: 8),
-            child: Text(
-              'Province list is still loading. Stop and restart the app '
-              '(full restart, not hot reload) if this does not clear.',
-              style: TextStyle(fontSize: 12, color: tipColor, height: 1.4),
+    InputDecoration fieldDec({
+      String? hint,
+      String? helper,
+      bool enabled = true,
+    }) {
+      return dec(hint ?? '').copyWith(
+        floatingLabelBehavior: FloatingLabelBehavior.never,
+        labelText: null,
+        hintText: hint,
+        helperText: helper,
+        filled: true,
+        fillColor: enabled ? null : mutedFill,
+      );
+    }
+
+    Widget labeled(String label, Widget field) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 12.5,
+              fontWeight: FontWeight.w600,
+              color: AppTheme.dashTextPrimaryOf(context),
             ),
+          ),
+          const SizedBox(height: 6),
+          field,
+        ],
+      );
+    }
+
+    final provinceField = provinceItems.isEmpty
+        ? Text(
+            'Province list is still loading.',
+            style: TextStyle(fontSize: 12, color: tipColor),
           )
-        else
-          DropdownButtonFormField<String>(
+        : DropdownButtonFormField<String>(
             key: ValueKey('province-$provinceInitial-${provinceItems.length}'),
             initialValue: provinceInitial,
             style: fieldStyle,
             dropdownColor: AppTheme.dashPanelOf(context),
-            decoration: dec('Province'),
+            decoration: fieldDec(hint: 'Select province'),
             hint: Text('Select province', style: hintStyle),
             isExpanded: true,
             items: provinceItems
@@ -248,98 +280,143 @@ class StructuredAddressFormState extends State<StructuredAddressForm> {
                 )
                 .toList(),
             onChanged: _onProvinceChanged,
+          );
+
+    final cityField = DropdownButtonFormField<String>(
+      key: ValueKey('city-$cityInitial-${cityItems.length}'),
+      initialValue: cityInitial,
+      style: fieldStyle,
+      dropdownColor: AppTheme.dashPanelOf(context),
+      decoration: fieldDec(
+        hint: !provinceSelected
+            ? 'Select province first'
+            : 'Select city / municipality',
+        helper: !provinceSelected ? 'Select province first' : null,
+        enabled: cityEnabled,
+      ),
+      hint: Text(
+        !provinceSelected
+            ? 'Select province first'
+            : cityItems.isEmpty
+            ? 'Loading cities…'
+            : 'Select city / municipality',
+        style: hintStyle,
+      ),
+      isExpanded: true,
+      items: cityItems
+          .map(
+            (o) => DropdownMenuItem(value: o, child: Text(o, style: fieldStyle)),
+          )
+          .toList(),
+      onChanged: cityEnabled && cityItems.isNotEmpty ? _onCityChanged : null,
+    );
+
+    final barangayField = DropdownButtonFormField<String>(
+      key: ValueKey('brgy-$barangayInitial-${barangayItems.length}'),
+      initialValue: barangayInitial,
+      style: fieldStyle,
+      dropdownColor: AppTheme.dashPanelOf(context),
+      decoration: fieldDec(
+        hint: !provinceSelected
+            ? 'Select province first'
+            : (_city ?? '').isEmpty
+            ? 'Select city first'
+            : 'Select barangay',
+        helper: !provinceSelected
+            ? 'Select province first'
+            : (_city ?? '').isEmpty
+            ? 'Select city / municipality first'
+            : null,
+        enabled: barangayEnabled,
+      ),
+      hint: Text(
+        !provinceSelected
+            ? 'Select province first'
+            : (_city ?? '').isEmpty
+            ? 'Select city / municipality first'
+            : barangayItems.isEmpty
+            ? 'Loading barangays…'
+            : 'Select barangay',
+        style: hintStyle,
+      ),
+      isExpanded: true,
+      items: barangayItems
+          .map(
+            (o) => DropdownMenuItem(value: o, child: Text(o, style: fieldStyle)),
+          )
+          .toList(),
+      onChanged: barangayEnabled
+          ? (v) {
+              setState(() => _barangayDropdown = v);
+              _notifyChanged();
+            }
+          : null,
+    );
+
+    final streetField = TextFormField(
+      controller: widget.streetController,
+      style: fieldStyle,
+      decoration: fieldDec(hint: 'Street / House No. / Building'),
+      maxLines: widget.twoColumn ? 1 : 2,
+    );
+
+    Widget pair(Widget a, Widget b) {
+      if (!widget.twoColumn) {
+        return Column(
+          children: [a, const SizedBox(height: 12), b],
+        );
+      }
+      return Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Expanded(child: a),
+          const SizedBox(width: 12),
+          Expanded(child: b),
+        ],
+      );
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (widget.sectionLabel.trim().isNotEmpty) ...[
+          Text(
+            widget.sectionLabel,
+            style: TextStyle(
+              color: sectionTitleColor,
+              fontSize: 13,
+              fontWeight: FontWeight.w700,
+            ),
           ),
-        const SizedBox(height: 16),
+          const SizedBox(height: 12),
+        ],
         if (_loadingProvince)
           Padding(
             padding: const EdgeInsets.only(bottom: 8),
             child: Row(
               children: [
                 const SizedBox(
-                  width: 22,
-                  height: 22,
+                  width: 18,
+                  height: 18,
                   child: CircularProgressIndicator(strokeWidth: 2),
                 ),
-                const SizedBox(width: 12),
+                const SizedBox(width: 10),
                 Text(
                   'Loading cities and barangays…',
-                  style: TextStyle(fontSize: 13, color: tipColor),
+                  style: TextStyle(fontSize: 12, color: tipColor),
                 ),
               ],
             ),
           ),
-        DropdownButtonFormField<String>(
-          key: ValueKey('city-$cityInitial-${cityItems.length}'),
-          initialValue: cityInitial,
-          style: fieldStyle,
-          dropdownColor: AppTheme.dashPanelOf(context),
-          decoration: dec('City / Municipality'),
-          hint: Text(
-            !provinceSelected
-                ? 'Select province first'
-                : cityItems.isEmpty
-                ? 'Loading cities…'
-                : 'Select city / municipality',
-            style: hintStyle,
-          ),
-          isExpanded: true,
-          items: cityItems
-              .map(
-                (o) => DropdownMenuItem(
-                  value: o,
-                  child: Text(o, style: fieldStyle),
-                ),
-              )
-              .toList(),
-          onChanged: cityEnabled && cityItems.isNotEmpty ? _onCityChanged : null,
+        pair(
+          labeled('Province', provinceField),
+          labeled('City / Municipality', cityField),
         ),
-        const SizedBox(height: 16),
-        DropdownButtonFormField<String>(
-          key: ValueKey('brgy-$barangayInitial-${barangayItems.length}'),
-          initialValue: barangayInitial,
-          style: fieldStyle,
-          dropdownColor: AppTheme.dashPanelOf(context),
-          decoration: dec('Barangay'),
-          hint: Text(
-            !provinceSelected
-                ? 'Select province first'
-                : (_city ?? '').isEmpty
-                ? 'Select city / municipality first'
-                : barangayItems.isEmpty
-                ? 'Loading barangays…'
-                : 'Select barangay',
-            style: hintStyle,
-          ),
-          isExpanded: true,
-          items: barangayItems
-              .map(
-                (o) => DropdownMenuItem(
-                  value: o,
-                  child: Text(o, style: fieldStyle),
-                ),
-              )
-              .toList(),
-          onChanged: barangayEnabled
-              ? (v) => setState(() => _barangayDropdown = v)
-              : null,
+        const SizedBox(height: 12),
+        pair(
+          labeled('Barangay', barangayField),
+          labeled('Street / House No. / Building', streetField),
         ),
-        const SizedBox(height: 16),
-        TextFormField(
-          controller: widget.streetController,
-          style: fieldStyle,
-          decoration: dec(
-            'Street / house no. / building (e.g. Rizal St., Blk 2)',
-          ),
-          maxLines: 2,
-        ),
-        if (!isComplete) ...[
-          const SizedBox(height: 8),
-          Text(
-            'Tip: Choose Province, then City/Municipality, then Barangay. '
-            'Lists cover all provinces in the Philippines (PSGC).',
-            style: TextStyle(fontSize: 11, color: tipColor, height: 1.3),
-          ),
-        ],
       ],
     );
   }

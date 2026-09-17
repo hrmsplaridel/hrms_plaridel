@@ -54,6 +54,109 @@ class TrainingDailyReportDateUtils {
   }
 }
 
+/// Compact date controls for the admin filter toolbar.
+class TrainingDailyReportDateToolbar extends StatelessWidget {
+  const TrainingDailyReportDateToolbar({
+    super.key,
+    required this.filterByDate,
+    required this.datesWithReports,
+    required this.onDateChanged,
+    this.compact = false,
+  });
+
+  final DateTime? filterByDate;
+  final List<DateTime> datesWithReports;
+  final ValueChanged<DateTime?> onDateChanged;
+  final bool compact;
+
+  Future<void> _pick(BuildContext context) async {
+    final picked = await TrainingDailyReportDateUtils.pick(
+      context: context,
+      current: filterByDate,
+      knownReportDays: datesWithReports,
+    );
+    if (picked != null) onDateChanged(picked);
+  }
+
+  void _shift(int delta) {
+    final today = TrainingDailyReportDateUtils.toLocalDate(DateTime.now());
+    final base = filterByDate ?? today;
+    final next = base.add(Duration(days: delta));
+    if (next.isAfter(today)) return;
+    onDateChanged(next);
+  }
+
+  void _goToday() {
+    onDateChanged(TrainingDailyReportDateUtils.toLocalDate(DateTime.now()));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final primary = AppTheme.dashTextPrimaryOf(context);
+    final hairline = AppTheme.dashHairlineOf(context);
+    final today = TrainingDailyReportDateUtils.toLocalDate(DateTime.now());
+    final filtering = filterByDate != null;
+    final isToday = filtering && filterByDate == today;
+    final label = !filtering
+        ? 'All dates'
+        : isToday
+        ? 'Today'
+        : TrainingDailyReportDateUtils.formatDisplay(filterByDate!);
+
+    final dateBtn = Tooltip(
+      message: 'Choose a date',
+      child: OutlinedButton.icon(
+        onPressed: () => _pick(context),
+        icon: const Icon(Icons.calendar_today_rounded, size: 16),
+        label: Text(label, overflow: TextOverflow.ellipsis),
+        style: OutlinedButton.styleFrom(
+          foregroundColor: primary,
+          side: BorderSide(color: hairline),
+          visualDensity: VisualDensity.compact,
+          minimumSize: Size(compact ? 44 : 0, 40),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        ),
+      ),
+    );
+
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        dateBtn,
+        const SizedBox(width: 4),
+        IconButton(
+          tooltip: 'Previous day',
+          onPressed: () => _shift(-1),
+          icon: const Icon(Icons.chevron_left_rounded),
+          style: IconButton.styleFrom(
+            minimumSize: const Size(40, 40),
+            visualDensity: VisualDensity.compact,
+          ),
+        ),
+        TextButton(
+          onPressed: _goToday,
+          style: TextButton.styleFrom(
+            foregroundColor: isToday ? AppTheme.primaryNavy : primary,
+            minimumSize: const Size(44, 40),
+            visualDensity: VisualDensity.compact,
+          ),
+          child: const Text('Today'),
+        ),
+        IconButton(
+          tooltip: 'Next day',
+          onPressed: () => _shift(1),
+          icon: const Icon(Icons.chevron_right_rounded),
+          style: IconButton.styleFrom(
+            minimumSize: const Size(40, 40),
+            visualDensity: VisualDensity.compact,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
 /// Date pill + prev/next + optional day chips for training report lists.
 class TrainingDailyReportDateFilterBar extends StatelessWidget {
   const TrainingDailyReportDateFilterBar({

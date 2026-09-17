@@ -10,6 +10,7 @@ Complete database schema for the DocuTracker module. Run migrations in order.
 | docutracker_routing_records | Per-step routing tracking |
 | docutracker_document_history | Audit trail, overdue/escalation logs |
 | docutracker_permissions | System-level role/user security permissions; not workflow routing |
+| docutracker_official_signatories | Effective-dated Leave Credit Certifier assignments; the Mayor is resolved automatically from active accounts |
 | docutracker_routing_configs | Workflow definitions per document type |
 | docutracker_workflow_steps | Normalized workflow steps per type and version |
 | docutracker_workflow_step_assignees | Selected users assigned to each workflow step |

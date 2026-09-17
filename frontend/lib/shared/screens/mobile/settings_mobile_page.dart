@@ -32,12 +32,15 @@ class SettingsMobilePage extends StatelessWidget {
         ),
       ),
       body: SingleChildScrollView(
-        padding: const EdgeInsets.fromLTRB(12, 8, 12, 28),
-        child: ProfileContent(
-          showAccountSection: false,
-          showPasswordSection: false,
-          showAppSettings: true,
-          initialTab: initialTab,
+        padding: const EdgeInsets.fromLTRB(16, 8, 16, 20),
+        child: SizedBox(
+          width: double.infinity,
+          child: ProfileContent(
+            showAccountSection: false,
+            showPasswordSection: false,
+            showAppSettings: true,
+            initialTab: initialTab,
+          ),
         ),
       ),
     );

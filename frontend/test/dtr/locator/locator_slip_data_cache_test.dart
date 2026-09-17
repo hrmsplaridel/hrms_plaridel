@@ -57,12 +57,7 @@ void main() {
       'items': [
         {'id': 'locator-1', 'status': 'approved'},
       ],
-      'pagination': {
-        'page': 3,
-        'page_size': 10,
-        'total': 27,
-        'page_count': 3,
-      },
+      'pagination': {'page': 3, 'page_size': 10, 'total': 27, 'page_count': 3},
       'filter_options': {
         'departments': [
           {'id': 'department-1', 'name': 'Human Resources'},
@@ -87,6 +82,31 @@ void main() {
 
   test('admin locator page parser supports the legacy list response', () {
     final page = LocatorAdminRequestPage.fromData([
+      {'id': 'locator-1'},
+      {'id': 'locator-2'},
+    ]);
+
+    expect(page.items, hasLength(2));
+    expect(page.total, 2);
+    expect(page.pageCount, 1);
+  });
+
+  test('employee locator page parses pagination metadata', () {
+    final page = LocatorRequestPage.fromData({
+      'items': [
+        {'id': 'locator-51'},
+      ],
+      'pagination': {'page': 2, 'page_size': 50, 'total': 73, 'page_count': 2},
+    });
+
+    expect(page.items.single['id'], 'locator-51');
+    expect(page.page, 2);
+    expect(page.total, 73);
+    expect(page.hasMore, isFalse);
+  });
+
+  test('employee locator page parser supports legacy list responses', () {
+    final page = LocatorRequestPage.fromData([
       {'id': 'locator-1'},
       {'id': 'locator-2'},
     ]);

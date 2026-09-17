@@ -4,6 +4,7 @@ import 'package:hrms_plaridel/features/dtr/leave/data/repositories/leave_reposit
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_balance.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_balance_ledger.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_request.dart';
+import 'package:hrms_plaridel/features/dtr/leave/models/leave_request_history.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_type.dart';
 
 /// Credit balances and explicitly marked annual-entitlement summaries are shown.
@@ -156,6 +157,17 @@ class LeaveProvider extends ChangeNotifier {
   void clearSelection() {
     _selectedRequest = null;
     notifyListeners();
+  }
+
+  Future<List<LeaveRequestHistoryEntry>> loadMyRequestHistory(
+    String requestId,
+  ) async {
+    final authGeneration = _authGeneration;
+    final history = await _repository.listMyRequestHistory(requestId);
+    if (!_isCurrentAuthGeneration(authGeneration)) {
+      throw StateError('The authenticated session changed.');
+    }
+    return history;
   }
 
   void setFilters({LeaveRequestStatus? status, LeaveType? leaveType}) {
@@ -752,6 +764,7 @@ class LeaveProvider extends ChangeNotifier {
   /// to get latest attachment). Updates _selectedRequest and upserts into list.
   Future<LeaveRequest?> refreshRequestById(String requestId) async {
     final authGeneration = _authGeneration;
+    _error = null;
     try {
       final fresh = await _repository.getRequestById(requestId);
       if (!_isCurrentAuthGeneration(authGeneration)) return null;
@@ -761,7 +774,14 @@ class LeaveProvider extends ChangeNotifier {
         notifyListeners();
       }
       return fresh;
-    } catch (_) {
+    } catch (e) {
+      if (_isCurrentAuthGeneration(authGeneration)) {
+        _error = _loadErrorMessage(
+          e,
+          'Could not check the latest request. Please try again.',
+        );
+        notifyListeners();
+      }
       return null;
     }
   }
@@ -1233,8 +1253,9 @@ class LeaveProvider extends ChangeNotifier {
     try {
       final bytes = await _repository.getAttachmentBytes(requestId);
       return _isCurrentAuthGeneration(authGeneration) ? bytes : null;
-    } catch (_) {
-      return null;
+    } catch (error) {
+      if (!_isCurrentAuthGeneration(authGeneration)) return null;
+      rethrow;
     }
   }
 

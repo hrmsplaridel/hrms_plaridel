@@ -3,6 +3,9 @@ import 'package:flutter/foundation.dart';
 
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
 
+/// Tight insets so Settings / Profile uses nearly the full main content width.
+const kDashboardSettingsScrollPadding = EdgeInsets.fromLTRB(16, 8, 16, 20);
+
 /// Routes for the nested navigator inside admin/employee dashboard content.
 abstract final class DashboardContentRoutes {
   static const home = '/';
@@ -282,7 +285,10 @@ class _DashboardScrollPage extends StatelessWidget {
             child: SingleChildScrollView(
               key: ValueKey<int>(version),
               padding: paddingBuilder(),
-              child: childBuilder(),
+              child: SizedBox(
+                width: double.infinity,
+                child: childBuilder(),
+              ),
             ),
           ),
         );

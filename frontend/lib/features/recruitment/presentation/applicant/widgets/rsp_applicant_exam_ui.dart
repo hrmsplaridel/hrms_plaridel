@@ -439,7 +439,7 @@ class RspApplicantMcqOptionTile extends StatelessWidget {
               ),
             ),
             child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
               child: Row(
                 children: [
                   Icon(
@@ -731,25 +731,418 @@ class RspApplicantExamResultHero extends StatelessWidget {
   const RspApplicantExamResultHero({
     super.key,
     required this.passed,
-    required this.scorePercent,
+    this.scorePercent,
+    this.showScore = false,
   });
 
   final bool passed;
-  final double scorePercent;
+  final double? scorePercent;
+  final bool showScore;
 
   @override
   Widget build(BuildContext context) {
     final accent = passed
         ? const Color(0xFF2E7D32)
         : Colors.deepOrange.shade700;
+    final body = passed
+        ? 'You have completed screening. HR will record the deliberation outcome.'
+        : 'Thank you for completing the recruitment assessments. Your application did not proceed to Final Hiring.';
 
     return RspApplicantStatusCard(
       icon: passed ? Icons.check_circle_rounded : Icons.cancel_rounded,
-      title: passed ? 'Passed' : 'Not passed',
-      body:
-          'Score: ${scorePercent.toStringAsFixed(0)}%'
-          '${passed ? '' : ' — You need 60% or higher. You may try again with a new application.'}',
+      title: passed ? 'Passed' : 'Application result',
+      body: showScore && scorePercent != null
+          ? 'Score: ${scorePercent!.toStringAsFixed(0)}%'
+          : body,
       accentColor: accent,
+    );
+  }
+}
+
+class RspApplicantExamSessionHeader extends StatelessWidget {
+  const RspApplicantExamSessionHeader({
+    super.key,
+    required this.title,
+    required this.questionIndex,
+    required this.total,
+    this.timeLabel,
+    this.urgent = false,
+  });
+
+  final String title;
+  final int questionIndex;
+  final int total;
+  final String? timeLabel;
+  final bool urgent;
+
+  @override
+  Widget build(BuildContext context) {
+    final ratio = total <= 0 ? 0.0 : (questionIndex / total).clamp(0.0, 1.0);
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: AppTheme.dashHairline),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(
+            title,
+            style: TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.w800,
+              color: AppTheme.dashTextPrimaryOf(context),
+            ),
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  'Question $questionIndex of $total',
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w700,
+                    fontSize: 13.5,
+                  ),
+                ),
+              ),
+              if (timeLabel != null)
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 5,
+                  ),
+                  decoration: BoxDecoration(
+                    color: urgent
+                        ? const Color(0xFFFFEBEE)
+                        : AppTheme.primaryNavy.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        Icons.timer_outlined,
+                        size: 16,
+                        color: urgent
+                            ? const Color(0xFFC62828)
+                            : AppTheme.primaryNavy,
+                      ),
+                      const SizedBox(width: 5),
+                      Text(
+                        timeLabel!,
+                        style: TextStyle(
+                          fontWeight: FontWeight.w800,
+                          fontSize: 13.5,
+                          fontFeatures: const [FontFeature.tabularFigures()],
+                          color: urgent
+                              ? const Color(0xFFC62828)
+                              : AppTheme.dashTextPrimaryOf(context),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(8),
+            child: LinearProgressIndicator(
+              value: ratio,
+              minHeight: 7,
+              backgroundColor: AppTheme.primaryNavy.withValues(alpha: 0.12),
+              color: AppTheme.primaryNavy,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class RspApplicantExamPagerNav extends StatelessWidget {
+  const RspApplicantExamPagerNav({
+    super.key,
+    required this.canGoBack,
+    required this.isLast,
+    required this.onBack,
+    required this.onForward,
+    this.forwardLabel,
+  });
+
+  final bool canGoBack;
+  final bool isLast;
+  final VoidCallback? onBack;
+  final VoidCallback? onForward;
+  final String? forwardLabel;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Expanded(
+          child: OutlinedButton(
+            onPressed: canGoBack ? onBack : null,
+            style: OutlinedButton.styleFrom(
+              minimumSize: const Size(0, 48),
+              foregroundColor: AppTheme.primaryNavy,
+            ),
+            child: const Text('Previous'),
+          ),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: FilledButton(
+            onPressed: onForward,
+            style: FilledButton.styleFrom(
+              minimumSize: const Size(0, 48),
+              backgroundColor: AppTheme.primaryNavy,
+            ),
+            child: Text(forwardLabel ?? (isLast ? 'Review answers' : 'Next')),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+Future<bool> showRspApplicantExamSubmitDialog({
+  required BuildContext context,
+  required String examTitle,
+  required int answered,
+  required int total,
+}) async {
+  final unanswered = (total - answered).clamp(0, total);
+  final complete = unanswered == 0 && total > 0;
+  final ratio = total <= 0 ? 0.0 : (answered / total).clamp(0.0, 1.0);
+  final ok = await showDialog<bool>(
+    context: context,
+    barrierColor: Colors.black.withValues(alpha: 0.45),
+    builder: (ctx) {
+      return Dialog(
+        backgroundColor: Colors.white,
+        surfaceTintColor: Colors.transparent,
+        insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 440),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(22, 22, 22, 18),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Container(
+                      width: 44,
+                      height: 44,
+                      decoration: BoxDecoration(
+                        color: AppTheme.primaryNavy.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: const Icon(
+                        Icons.send_rounded,
+                        color: AppTheme.primaryNavy,
+                        size: 22,
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Submit $examTitle?',
+                            style: const TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.w800,
+                              height: 1.25,
+                              color: AppTheme.textPrimary,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            complete
+                                ? 'All questions have answers. Submit when you are ready.'
+                                : 'Some questions are still unanswered.',
+                            style: const TextStyle(
+                              fontSize: 13.5,
+                              height: 1.4,
+                              color: AppTheme.textSecondary,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 18),
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(8),
+                  child: LinearProgressIndicator(
+                    value: ratio,
+                    minHeight: 8,
+                    backgroundColor: AppTheme.primaryNavy.withValues(
+                      alpha: 0.12,
+                    ),
+                    color: complete
+                        ? const Color(0xFF2E7D32)
+                        : AppTheme.primaryNavy,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    Expanded(
+                      child: _SubmitStatChip(
+                        icon: Icons.check_circle_rounded,
+                        label: 'Answered',
+                        value: '$answered / $total',
+                        color: const Color(0xFF2E7D32),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: _SubmitStatChip(
+                        icon: unanswered > 0
+                            ? Icons.radio_button_unchecked_rounded
+                            : Icons.check_circle_outline_rounded,
+                        label: 'Unanswered',
+                        value: '$unanswered',
+                        color: unanswered > 0
+                            ? const Color(0xFFC62828)
+                            : AppTheme.textSecondary,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 14),
+                Container(
+                  padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFFF3E8),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: AppTheme.primaryNavy.withValues(alpha: 0.28),
+                    ),
+                  ),
+                  child: const Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Icon(
+                        Icons.info_outline_rounded,
+                        size: 20,
+                        color: AppTheme.primaryNavy,
+                      ),
+                      SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'Once submitted, answers cannot be changed.',
+                          style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                            height: 1.4,
+                            color: AppTheme.textPrimary,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 18),
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton(
+                        onPressed: () => Navigator.pop(ctx, false),
+                        style: OutlinedButton.styleFrom(
+                          minimumSize: const Size(0, 46),
+                          foregroundColor: AppTheme.textPrimary,
+                          side: const BorderSide(color: AppTheme.dashHairline),
+                        ),
+                        child: const Text('Go back'),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: FilledButton(
+                        onPressed: () => Navigator.pop(ctx, true),
+                        style: FilledButton.styleFrom(
+                          minimumSize: const Size(0, 46),
+                          backgroundColor: AppTheme.primaryNavy,
+                        ),
+                        child: const Text('Submit'),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    },
+  );
+  return ok == true;
+}
+
+class _SubmitStatChip extends StatelessWidget {
+  const _SubmitStatChip({
+    required this.icon,
+    required this.label,
+    required this.value,
+    required this.color,
+  });
+
+  final IconData icon;
+  final String label;
+  final String value;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(10, 10, 10, 10),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: color.withValues(alpha: 0.22)),
+      ),
+      child: Row(
+        children: [
+          Icon(icon, size: 18, color: color),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  label,
+                  style: const TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                    color: AppTheme.textSecondary,
+                  ),
+                ),
+                Text(
+                  value,
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w800,
+                    color: color,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

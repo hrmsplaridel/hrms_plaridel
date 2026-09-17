@@ -12,6 +12,7 @@ import 'package:hrms_plaridel/shared/widgets/dashboard_header_actions.dart';
 import 'package:hrms_plaridel/shared/widgets/portal_sidebar_brand.dart';
 import 'package:hrms_plaridel/shared/widgets/admin_welcome_status_card.dart';
 import 'package:hrms_plaridel/shared/models/philippine_address_data.dart';
+import 'package:hrms_plaridel/features/mayor/data/mayor_endorsement_offices.dart';
 import 'package:hrms_plaridel/shared/utils/time_greeting.dart';
 import 'package:hrms_plaridel/shared/widgets/structured_address_fields.dart';
 import 'package:provider/provider.dart';
@@ -568,6 +569,12 @@ class _MayorDashboardPageState extends State<MayorDashboardPage> {
     }
   }
 
+  void _openRequests({String status = ''}) {
+    _status = status;
+    _page = 1;
+    _onMenuSelected(_MayorMenu.requests);
+  }
+
   Widget _settingsPanel() => DashboardProfilePanel(onBack: _closeProfile);
 
   void _onMenuSelected(_MayorMenu menu) {
@@ -622,6 +629,8 @@ class _MayorDashboardPageState extends State<MayorDashboardPage> {
           dashboardFuture: _dashboardFuture,
           onRefresh: _refreshDashboard,
           onOpenRequest: _openRequest,
+          onViewAllRequests: () => _openRequests(),
+          onOpenFilteredRequests: (status) => _openRequests(status: status),
         );
       case _MayorMenu.requests:
         return _MayorRequestsTab(
@@ -769,12 +778,8 @@ class _MayorDashboardPageState extends State<MayorDashboardPage> {
                               homeBuilder: _buildContent,
                               settingsPanel: _settingsPanel(),
                               homeScrollPadding: EdgeInsets.all(contentPadding),
-                              settingsScrollPadding: const EdgeInsets.fromLTRB(
-                                12,
-                                8,
-                                12,
-                                28,
-                              ),
+                              settingsScrollPadding:
+                                  kDashboardSettingsScrollPadding,
                             ),
                           ),
                         ),
@@ -814,12 +819,7 @@ class _MayorDashboardPageState extends State<MayorDashboardPage> {
                         homeBuilder: _buildContent,
                         settingsPanel: _settingsPanel(),
                         homeScrollPadding: EdgeInsets.all(contentPadding),
-                        settingsScrollPadding: const EdgeInsets.fromLTRB(
-                          12,
-                          8,
-                          12,
-                          28,
-                        ),
+                        settingsScrollPadding: kDashboardSettingsScrollPadding,
                       ),
                     ),
                   ),
@@ -855,7 +855,7 @@ class _MayorSidebar extends StatelessWidget {
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        SizedBox(height: railMode ? 12 : (showBrand ? 4 : 12)),
+        SizedBox(height: railMode ? 8 : (showBrand ? 2 : 8)),
         DashboardSidebarNavTile(
           icon: Icons.dashboard_outlined,
           label: 'Dashboard',
@@ -979,17 +979,18 @@ class _MayorDashboardTab extends StatelessWidget {
     required this.dashboardFuture,
     required this.onRefresh,
     required this.onOpenRequest,
+    required this.onViewAllRequests,
+    required this.onOpenFilteredRequests,
   });
 
   final Future<MayorDashboardData> dashboardFuture;
   final Future<void> Function() onRefresh;
   final ValueChanged<MayorEndorsementRequest> onOpenRequest;
+  final VoidCallback onViewAllRequests;
+  final ValueChanged<String> onOpenFilteredRequests;
 
   @override
   Widget build(BuildContext context) {
-    final displayName = context.select<AuthProvider, String>(
-      (a) => a.displayName.isNotEmpty ? a.displayName : 'Mayor',
-    );
     return FutureBuilder<MayorDashboardData>(
       future: dashboardFuture,
       builder: (context, snap) {
@@ -1014,187 +1015,68 @@ class _MayorDashboardTab extends StatelessWidget {
           );
         }
         final data = snap.data!;
-
-        final cards = [
-          _StatCard(
-            title: 'Pending Endorsements',
-            value: data.pendingCount.toString(),
-            color: Colors.orange.shade700,
-            icon: Icons.pending_actions_rounded,
-          ),
-          _StatCard(
-            title: 'Awaiting Office Form',
-            value: data.mayorApprovedCount.toString(),
-            color: Colors.blue.shade700,
-            icon: Icons.assignment_turned_in_outlined,
-          ),
-          _StatCard(
-            title: 'Approved Endorsements',
-            value: data.endorsedCount.toString(),
-            color: Colors.green.shade700,
-            icon: Icons.check_circle_rounded,
-          ),
-          _StatCard(
-            title: 'Rejected Endorsements',
-            value: data.rejectedCount.toString(),
-            color: Colors.red.shade700,
-            icon: Icons.cancel_rounded,
-          ),
-        ];
-
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            _MayorWelcomeBanner(displayName: displayName),
-            const SizedBox(height: 14),
-            Wrap(
-              spacing: 12,
-              runSpacing: 12,
-              children: cards
-                  .map((c) => SizedBox(width: 310, child: c))
-                  .toList(),
-            ),
-            const SizedBox(height: 16),
-            _MayorSectionCard(
-              title: 'Endorsement Statistics by Destination Office',
-              child: data.officeStatistics.isEmpty
-                  ? const _MayorEmptyState(
-                      icon: Icons.account_balance_outlined,
-                      title: 'No office statistics yet',
-                      subtitle:
-                          'Office distribution will appear once requests are reviewed.',
-                    )
-                  : Column(
-                      children: data.officeStatistics
-                          .map(
-                            (s) => ListTile(
-                              dense: true,
-                              contentPadding: EdgeInsets.zero,
-                              leading: const Icon(
-                                Icons.account_balance_rounded,
-                              ),
-                              title: Text(s.officeName),
-                              trailing: Container(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 10,
-                                  vertical: 4,
-                                ),
-                                decoration: BoxDecoration(
-                                  color: AppTheme.primaryNavy.withValues(
-                                    alpha: 0.08,
-                                  ),
-                                  borderRadius: BorderRadius.circular(999),
-                                ),
-                                child: Text(
-                                  '${s.total}',
-                                  style: const TextStyle(
-                                    fontWeight: FontWeight.w700,
-                                  ),
-                                ),
-                              ),
-                            ),
-                          )
-                          .toList(),
+        return LayoutBuilder(
+          builder: (context, constraints) {
+            final width = constraints.maxWidth;
+            final isDesktop = width >= 1100;
+            final isTablet = width >= 700;
+            return Align(
+              alignment: Alignment.topCenter,
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 1360),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    const _MayorWelcomeBanner(),
+                    const SizedBox(height: 16),
+                    _MayorKpiRow(
+                      pending: data.pendingCount,
+                      awaiting: data.mayorApprovedCount,
+                      approved: data.endorsedCount,
+                      rejected: data.rejectedCount,
+                      twoColumns: !isDesktop,
+                      onOpenFiltered: onOpenFilteredRequests,
                     ),
-            ),
-            const SizedBox(height: 16),
-            _MayorSectionCard(
-              title: 'Recent Endorsement Requests',
-              child: data.recentRequests.isEmpty
-                  ? const _MayorEmptyState(
-                      icon: Icons.inbox_outlined,
-                      title: 'No recent requests',
-                      subtitle:
-                          'New submissions from staff will appear in this list.',
-                    )
-                  : Column(
-                      children: data.recentRequests
-                          .map(
-                            (r) => Padding(
-                              padding: const EdgeInsets.only(bottom: 10),
-                              child: InkWell(
-                                borderRadius: BorderRadius.circular(12),
-                                onTap: () => onOpenRequest(r),
-                                child: Container(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 12,
-                                    vertical: 10,
-                                  ),
-                                  decoration: BoxDecoration(
-                                    borderRadius: BorderRadius.circular(12),
-                                    border: Border.all(
-                                      color: AppTheme.dashHairlineOf(context),
-                                    ),
-                                    color: AppTheme.dashPanelOf(context),
-                                  ),
-                                  child: Row(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      const Icon(
-                                        Icons.person_outline_rounded,
-                                        size: 18,
-                                      ),
-                                      const SizedBox(width: 10),
-                                      Expanded(
-                                        child: Column(
-                                          crossAxisAlignment:
-                                              CrossAxisAlignment.start,
-                                          children: [
-                                            Text(
-                                              r.applicantName,
-                                              style: const TextStyle(
-                                                fontSize: 14,
-                                                fontWeight: FontWeight.w700,
-                                              ),
-                                            ),
-                                            const SizedBox(height: 4),
-                                            Text(
-                                              [
-                                                if ((r.submittedByName ?? '')
-                                                    .trim()
-                                                    .isNotEmpty)
-                                                  'From ${r.submittedByName!.trim()}',
-                                                'Office: ${r.endorseToOffice}',
-                                                r.decisionLabel,
-                                              ].join(' · '),
-                                              style: TextStyle(
-                                                fontSize: 12.5,
-                                                color:
-                                                    AppTheme.dashTextSecondaryOf(
-                                                      context,
-                                                    ),
-                                              ),
-                                            ),
-                                          ],
-                                        ),
-                                      ),
-                                      const SizedBox(width: 10),
-                                      Column(
-                                        crossAxisAlignment:
-                                            CrossAxisAlignment.end,
-                                        children: [
-                                          _MayorStatusPill(status: r.status),
-                                          const SizedBox(height: 6),
-                                          Text(
-                                            _fmtDateTime(r.submittedAt),
-                                            style: Theme.of(context)
-                                                .textTheme
-                                                .bodySmall
-                                                ?.copyWith(fontSize: 12),
-                                          ),
-                                        ],
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ),
+                    const SizedBox(height: 16),
+                    if (isDesktop)
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Expanded(
+                            flex: 7,
+                            child: _MayorRecentRequestsPanel(
+                              requests: data.recentRequests,
+                              onOpenRequest: onOpenRequest,
+                              onViewAll: onViewAllRequests,
+                              compactTable: true,
                             ),
-                          )
-                          .toList(),
-                    ),
-            ),
-          ],
+                          ),
+                          const SizedBox(width: 14),
+                          Expanded(
+                            flex: 3,
+                            child: _MayorOfficeOverviewPanel(
+                              offices: data.officeStatistics,
+                            ),
+                          ),
+                        ],
+                      )
+                    else ...[
+                      _MayorRecentRequestsPanel(
+                        requests: data.recentRequests,
+                        onOpenRequest: onOpenRequest,
+                        onViewAll: onViewAllRequests,
+                        compactTable: isTablet,
+                      ),
+                      const SizedBox(height: 14),
+                      _MayorOfficeOverviewPanel(
+                        offices: data.officeStatistics,
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            );
+          },
         );
       },
     );
@@ -1999,10 +1881,7 @@ class _MayorEndorsementIntakeDialog extends StatefulWidget {
 class _MayorEndorsementIntakeDialogState
     extends State<_MayorEndorsementIntakeDialog> {
   String _priority = 'normal';
-  final _officeCtrl = TextEditingController();
-  String? _requestedOfficeId;
-  List<_MayorOfficeOption> _offices = const [];
-  bool _loadingOffices = false;
+  String? _requestedOfficeName;
   final _lastNameCtrl = TextEditingController();
   final _firstNameCtrl = TextEditingController();
   final _middleCtrl = TextEditingController();
@@ -2089,7 +1968,7 @@ class _MayorEndorsementIntakeDialogState
                 _previewRow('Add. sa Current Work', intake.currentWorkAddress),
                 _previewRow('PRC No. / CSC No.', intake.prcCscNo),
                 _previewRow('Rank and Code', intake.rankAndCode),
-                _previewRow('Office to endorse', _officeCtrl.text.trim()),
+                _previewRow('Office to endorse', _requestedOfficeName ?? ''),
               ],
             ),
           ),
@@ -2122,61 +2001,8 @@ class _MayorEndorsementIntakeDialogState
     );
   }
 
-  Future<void> _loadOffices() async {
-    setState(() => _loadingOffices = true);
-    try {
-      final res = await ApiClient.instance.get<List<dynamic>>(
-        '/api/offices',
-        queryParameters: const {'status': 'Active'},
-      );
-      final parsed = (res.data ?? const [])
-          .whereType<Map>()
-          .map((e) {
-            final m = Map<String, dynamic>.from(e);
-            return _MayorOfficeOption(
-              id: (m['id'] ?? '').toString(),
-              name: (m['name'] ?? '').toString().trim(),
-            );
-          })
-          .where((o) => o.id.isNotEmpty && o.name.isNotEmpty)
-          .toList();
-      if (!mounted) return;
-      setState(() => _offices = parsed);
-    } catch (_) {
-      if (!mounted) return;
-      setState(() => _offices = const []);
-    } finally {
-      if (mounted) setState(() => _loadingOffices = false);
-    }
-  }
-
-  void _applyRequestedOffice(_MayorOfficeOption? office, {String? typed}) {
-    if (office != null) {
-      _requestedOfficeId = office.id;
-      _officeCtrl.text = office.name;
-      return;
-    }
-    final name = (typed ?? _officeCtrl.text).trim();
-    _officeCtrl.text = name;
-    String? matchedId;
-    for (final o in _offices) {
-      if (o.name.toLowerCase() == name.toLowerCase()) {
-        matchedId = o.id;
-        break;
-      }
-    }
-    _requestedOfficeId = matchedId;
-  }
-
-  @override
-  void initState() {
-    super.initState();
-    _loadOffices();
-  }
-
   @override
   void dispose() {
-    _officeCtrl.dispose();
     _lastNameCtrl.dispose();
     _firstNameCtrl.dispose();
     _middleCtrl.dispose();
@@ -2204,11 +2030,11 @@ class _MayorEndorsementIntakeDialogState
       return;
     }
 
-    if (_officeCtrl.text.trim().isEmpty) {
+    if ((_requestedOfficeName ?? '').isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text(
-            'Please enter the office the applicant will be endorsed to.',
+            'Please select the office the applicant will be endorsed to.',
           ),
         ),
       );
@@ -2222,8 +2048,7 @@ class _MayorEndorsementIntakeDialogState
         staffNotes: _staffNotesCtrl.text.trim().isEmpty
             ? null
             : _staffNotesCtrl.text.trim(),
-        requestedOfficeId: _requestedOfficeId,
-        requestedOfficeName: _officeCtrl.text.trim(),
+        requestedOfficeName: _requestedOfficeName,
       ),
     );
   }
@@ -2275,42 +2100,32 @@ class _MayorEndorsementIntakeDialogState
                             setState(() => _priority = v ?? 'normal'),
                       ),
                       const SizedBox(height: 12),
-                      Autocomplete<_MayorOfficeOption>(
-                        displayStringForOption: (o) => o.name,
-                        optionsBuilder: (textEditingValue) {
-                          final q = textEditingValue.text.trim().toLowerCase();
-                          if (q.isEmpty) return _offices;
-                          return _offices.where(
-                            (o) => o.name.toLowerCase().contains(q),
-                          );
-                        },
-                        onSelected: (office) {
-                          setState(() => _applyRequestedOffice(office));
-                        },
-                        fieldViewBuilder: (context, textCtrl, focusNode, onSubmit) {
-                          if (textCtrl.text != _officeCtrl.text) {
-                            textCtrl.value = TextEditingValue(
-                              text: _officeCtrl.text,
-                              selection: TextSelection.collapsed(
-                                offset: _officeCtrl.text.length,
+                      DropdownButtonFormField<String>(
+                        initialValue: _requestedOfficeName,
+                        isExpanded: true,
+                        decoration: const InputDecoration(
+                          labelText:
+                              'Office to endorse (papasukan ng applicant)',
+                          hintText: 'Select office',
+                          border: OutlineInputBorder(),
+                          isDense: true,
+                          contentPadding: EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 12,
+                          ),
+                        ),
+                        items: [
+                          for (final office in kMayorEndorsementOffices)
+                            DropdownMenuItem(
+                              value: office,
+                              child: Text(
+                                office,
+                                overflow: TextOverflow.ellipsis,
                               ),
-                            );
-                          }
-                          return TextField(
-                            controller: textCtrl,
-                            focusNode: focusNode,
-                            onChanged: (v) {
-                              setState(
-                                () => _applyRequestedOffice(null, typed: v),
-                              );
-                            },
-                            decoration: _dec(
-                              _loadingOffices
-                                  ? 'Loading offices…'
-                                  : 'Office to endorse (papasukan ng applicant)',
                             ),
-                          );
-                        },
+                        ],
+                        onChanged: (v) =>
+                            setState(() => _requestedOfficeName = v),
                       ),
                     ],
                   ),
@@ -3651,94 +3466,257 @@ class _StatCard extends StatelessWidget {
     required this.value,
     required this.color,
     required this.icon,
+    this.hint,
+    this.emphasized = false,
+    this.onTap,
   });
 
   final String title;
   final String value;
   final Color color;
   final IconData icon;
+  final String? hint;
+  final bool emphasized;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
-    return Card(
-      elevation: 0,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(14),
-        side: BorderSide(color: color.withValues(alpha: 0.22)),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Row(
-          children: [
-            CircleAvatar(
-              radius: 18,
-              backgroundColor: color.withValues(alpha: 0.14),
-              child: Icon(icon, color: color),
+    final card = Material(
+      color: AppTheme.dashPanelOf(context),
+      borderRadius: BorderRadius.circular(15),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(15),
+        child: Ink(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(15),
+            border: Border.all(
+              color: emphasized
+                  ? color.withValues(alpha: 0.45)
+                  : AppTheme.dashHairlineOf(context),
             ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    title,
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: AppTheme.dashTextSecondaryOf(context),
-                      fontWeight: FontWeight.w600,
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.035),
+                blurRadius: 8,
+                offset: const Offset(0, 2),
+              ),
+            ],
+          ),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(14, 14, 14, 12),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Container(
+                      width: 32,
+                      height: 32,
+                      decoration: BoxDecoration(
+                        color: color.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(9),
+                      ),
+                      child: Icon(icon, size: 18, color: color),
                     ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                          color: AppTheme.dashTextSecondaryOf(context),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  value,
+                  style: TextStyle(
+                    fontWeight: FontWeight.w800,
+                    fontSize: 28,
+                    height: 1.05,
+                    color: AppTheme.dashTextPrimaryOf(context),
+                    letterSpacing: -0.6,
                   ),
+                ),
+                if ((hint ?? '').isNotEmpty) ...[
                   const SizedBox(height: 4),
                   Text(
-                    value,
-                    style: const TextStyle(
-                      fontWeight: FontWeight.w800,
-                      fontSize: 20,
+                    hint!,
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: emphasized
+                          ? color
+                          : AppTheme.dashTextSecondaryOf(context),
                     ),
                   ),
                 ],
-              ),
+              ],
             ),
-          ],
+          ),
         ),
       ),
+    );
+    return Semantics(
+      button: onTap != null,
+      label: [
+        title,
+        value,
+        if ((hint ?? '').isNotEmpty) hint!,
+      ].join(', '),
+      child: card,
+    );
+  }
+}
+
+class _MayorKpiRow extends StatelessWidget {
+  const _MayorKpiRow({
+    required this.pending,
+    required this.awaiting,
+    required this.approved,
+    required this.rejected,
+    required this.twoColumns,
+    required this.onOpenFiltered,
+  });
+
+  final int pending;
+  final int awaiting;
+  final int approved;
+  final int rejected;
+  final bool twoColumns;
+  final ValueChanged<String> onOpenFiltered;
+
+  @override
+  Widget build(BuildContext context) {
+    final cards = [
+      _StatCard(
+        title: 'Pending',
+        value: pending.toString(),
+        color: const Color(0xFFD97706),
+        icon: Icons.pending_actions_rounded,
+        hint: pending > 0 ? 'Requires attention' : 'No action needed',
+        emphasized: pending > 0,
+        onTap: () => onOpenFiltered('pending'),
+      ),
+      _StatCard(
+        title: 'Awaiting',
+        value: awaiting.toString(),
+        color: const Color(0xFF1D4ED8),
+        icon: Icons.assignment_turned_in_outlined,
+        hint: 'Office form',
+        onTap: () => onOpenFiltered('mayor_approved'),
+      ),
+      _StatCard(
+        title: 'Approved',
+        value: approved.toString(),
+        color: const Color(0xFF15803D),
+        icon: Icons.check_circle_rounded,
+        hint: 'Completed',
+        onTap: () => onOpenFiltered('endorsed'),
+      ),
+      _StatCard(
+        title: 'Rejected',
+        value: rejected.toString(),
+        color: const Color(0xFFB91C1C),
+        icon: Icons.cancel_rounded,
+        onTap: () => onOpenFiltered('rejected'),
+      ),
+    ];
+
+    if (!twoColumns) {
+      return Row(
+        children: [
+          for (var i = 0; i < cards.length; i++) ...[
+            if (i > 0) const SizedBox(width: 12),
+            Expanded(child: cards[i]),
+          ],
+        ],
+      );
+    }
+
+    return Column(
+      children: [
+        Row(
+          children: [
+            Expanded(child: cards[0]),
+            const SizedBox(width: 10),
+            Expanded(child: cards[1]),
+          ],
+        ),
+        const SizedBox(height: 10),
+        Row(
+          children: [
+            Expanded(child: cards[2]),
+            const SizedBox(width: 10),
+            Expanded(child: cards[3]),
+          ],
+        ),
+      ],
     );
   }
 }
 
 class _MayorWelcomeBanner extends StatelessWidget {
-  const _MayorWelcomeBanner({required this.displayName});
-
-  final String displayName;
+  const _MayorWelcomeBanner();
 
   @override
   Widget build(BuildContext context) {
     final primary = AppTheme.dashTextPrimaryOf(context);
     final secondary = AppTheme.dashTextSecondaryOf(context);
-    final greeting = personalizedTimeGreeting(displayName);
-    final firstName = greetingFirstName(displayName);
-    final initial = firstName.isNotEmpty ? firstName[0].toUpperCase() : 'M';
-    final isNarrow = MediaQuery.of(context).size.width < 1180;
+    final greeting = mayorPortalGreeting();
+    final width = MediaQuery.sizeOf(context).width;
+    final isNarrow = width < 720;
+    final pad = isNarrow ? 16.0 : 20.0;
+
+    final textColumn = Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Mayor Portal',
+          style: TextStyle(
+            color: AppTheme.primaryNavy,
+            fontSize: 11,
+            fontWeight: FontWeight.w800,
+            letterSpacing: 0.4,
+          ),
+        ),
+        const SizedBox(height: 6),
+        Text(
+          greeting,
+          style: TextStyle(
+            color: primary,
+            fontSize: isNarrow ? 24 : 28,
+            fontWeight: FontWeight.w800,
+            letterSpacing: -0.5,
+            height: 1.1,
+          ),
+        ),
+        const SizedBox(height: 6),
+        Text(
+          "Here's an overview of today's endorsement activity.",
+          style: TextStyle(
+            color: secondary,
+            fontSize: 13.5,
+            height: 1.35,
+          ),
+        ),
+      ],
+    );
 
     return Container(
-      padding: EdgeInsets.all(isNarrow ? 18 : 22),
+      padding: EdgeInsets.all(pad),
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(18),
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [
-            const Color(0xFFFFF8F3),
-            Colors.white,
-            const Color(0xFFF8FAFF),
-          ],
-        ),
-        border: Border.all(color: AppTheme.primaryNavy.withValues(alpha: 0.14)),
+        color: AppTheme.dashPanelOf(context),
+        borderRadius: BorderRadius.circular(15),
+        border: Border.all(color: AppTheme.dashHairlineOf(context)),
         boxShadow: [
-          BoxShadow(
-            color: AppTheme.primaryNavy.withValues(alpha: 0.08),
-            blurRadius: 18,
-            offset: const Offset(0, 6),
-          ),
           BoxShadow(
             color: Colors.black.withValues(alpha: 0.03),
             blurRadius: 8,
@@ -3750,127 +3728,41 @@ class _MayorWelcomeBanner extends StatelessWidget {
           ? Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    _welcomeAvatar(initial: initial),
-                    const SizedBox(width: 14),
-                    Expanded(
-                      child: _welcomeText(
-                        greeting: greeting,
-                        primary: primary,
-                        secondary: secondary,
-                      ),
-                    ),
-                  ],
-                ),
+                textColumn,
                 const SizedBox(height: 12),
                 const Align(
-                  alignment: Alignment.centerRight,
-                  child: AdminWelcomeStatusCard(),
+                  alignment: Alignment.centerLeft,
+                  child: AdminWelcomeStatusCard(
+                    layout: WelcomeStatusLayout.inline,
+                  ),
                 ),
               ],
             )
           : Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                _welcomeAvatar(initial: initial),
-                const SizedBox(width: 14),
-                Expanded(
-                  child: _welcomeText(
-                    greeting: greeting,
-                    primary: primary,
-                    secondary: secondary,
+                Container(
+                  width: 40,
+                  height: 40,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: AppTheme.primaryNavy.withValues(alpha: 0.1),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(
+                    Icons.account_balance_rounded,
+                    size: 20,
+                    color: AppTheme.primaryNavy,
                   ),
                 ),
-                const SizedBox(width: 10),
-                const AdminWelcomeStatusCard(),
+                const SizedBox(width: 12),
+                Expanded(child: textColumn),
+                const SizedBox(width: 12),
+                const AdminWelcomeStatusCard(
+                  layout: WelcomeStatusLayout.inline,
+                ),
               ],
             ),
-    );
-  }
-
-  Widget _welcomeAvatar({required String initial}) {
-    return Container(
-      width: 52,
-      height: 52,
-      alignment: Alignment.center,
-      decoration: BoxDecoration(
-        shape: BoxShape.circle,
-        gradient: const LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [Color(0xFFFFB54D), Color(0xFFE85D04)],
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: const Color(0xFFE85D04).withValues(alpha: 0.25),
-            blurRadius: 12,
-            offset: const Offset(0, 4),
-          ),
-        ],
-      ),
-      child: Text(
-        initial,
-        style: const TextStyle(
-          color: Colors.white,
-          fontSize: 20,
-          fontWeight: FontWeight.w800,
-        ),
-      ),
-    );
-  }
-
-  Widget _welcomeText({
-    required String greeting,
-    required Color primary,
-    required Color secondary,
-  }) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-          decoration: BoxDecoration(
-            color: const Color(0xFFE85D04).withValues(alpha: 0.09),
-            borderRadius: BorderRadius.circular(20),
-            border: Border.all(
-              color: const Color(0xFFE85D04).withValues(alpha: 0.18),
-            ),
-          ),
-          child: const Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(
-                Icons.account_balance_rounded,
-                size: 13,
-                color: Color(0xFFE85D04),
-              ),
-              SizedBox(width: 6),
-              Text(
-                'Mayor Portal',
-                style: TextStyle(
-                  color: Color(0xFFE85D04),
-                  fontSize: 11,
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: 0.35,
-                ),
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(height: 10),
-        Text(
-          greeting,
-          style: TextStyle(
-            color: primary,
-            fontSize: 33,
-            fontWeight: FontWeight.w800,
-            letterSpacing: -0.6,
-            height: 1.08,
-          ),
-        ),
-      ],
     );
   }
 }
@@ -3943,30 +3835,390 @@ class _MayorTabHero extends StatelessWidget {
 }
 
 class _MayorSectionCard extends StatelessWidget {
-  const _MayorSectionCard({required this.title, required this.child});
+  const _MayorSectionCard({
+    required this.title,
+    required this.child,
+    this.trailing,
+  });
 
   final String title;
   final Widget child;
+  final Widget? trailing;
 
   @override
   Widget build(BuildContext context) {
-    return Card(
-      elevation: 0,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(14),
-        side: BorderSide(color: AppTheme.dashHairlineOf(context)),
+    return Container(
+      decoration: BoxDecoration(
+        color: AppTheme.dashPanelOf(context),
+        borderRadius: BorderRadius.circular(15),
+        border: Border.all(color: AppTheme.dashHairlineOf(context)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.03),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
       ),
       child: Padding(
-        padding: const EdgeInsets.all(14),
+        padding: const EdgeInsets.fromLTRB(16, 16, 16, 14),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(title, style: const TextStyle(fontWeight: FontWeight.w700)),
-            const SizedBox(height: 8),
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    title,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: -0.2,
+                    ),
+                  ),
+                ),
+                if (trailing != null) trailing!,
+              ],
+            ),
+            const SizedBox(height: 12),
             child,
           ],
         ),
       ),
+    );
+  }
+}
+
+class _MayorRecentRequestsPanel extends StatelessWidget {
+  const _MayorRecentRequestsPanel({
+    required this.requests,
+    required this.onOpenRequest,
+    required this.onViewAll,
+    required this.compactTable,
+  });
+
+  final List<MayorEndorsementRequest> requests;
+  final ValueChanged<MayorEndorsementRequest> onOpenRequest;
+  final VoidCallback onViewAll;
+  final bool compactTable;
+
+  @override
+  Widget build(BuildContext context) {
+    final secondary = AppTheme.dashTextSecondaryOf(context);
+    return _MayorSectionCard(
+      title: 'Recent Endorsement Requests',
+      trailing: TextButton(
+        onPressed: onViewAll,
+        child: const Text('View all requests →'),
+      ),
+      child: requests.isEmpty
+          ? const _MayorEmptyState(
+              icon: Icons.inbox_outlined,
+              title: 'No recent endorsement requests',
+              subtitle:
+                  'New submissions from staff will appear in this list.',
+            )
+          : Column(
+              children: [
+                if (compactTable) ...[
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          flex: 4,
+                          child: Text(
+                            'Applicant',
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w700,
+                              color: secondary,
+                            ),
+                          ),
+                        ),
+                        Expanded(
+                          flex: 3,
+                          child: Text(
+                            'Destination',
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w700,
+                              color: secondary,
+                            ),
+                          ),
+                        ),
+                        Expanded(
+                          flex: 3,
+                          child: Text(
+                            'Status',
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w700,
+                              color: secondary,
+                            ),
+                          ),
+                        ),
+                        SizedBox(
+                          width: 72,
+                          child: Text(
+                            'Date',
+                            textAlign: TextAlign.right,
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w700,
+                              color: secondary,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Divider(height: 1, color: AppTheme.dashHairlineOf(context)),
+                ],
+                for (final r in requests)
+                  compactTable
+                      ? _MayorRecentRequestTableRow(
+                          request: r,
+                          onTap: () => onOpenRequest(r),
+                        )
+                      : _MayorRecentRequestMobileRow(
+                          request: r,
+                          onTap: () => onOpenRequest(r),
+                        ),
+              ],
+            ),
+    );
+  }
+}
+
+class _MayorRecentRequestTableRow extends StatelessWidget {
+  const _MayorRecentRequestTableRow({
+    required this.request,
+    required this.onTap,
+  });
+
+  final MayorEndorsementRequest request;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(8),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 10),
+          child: Row(
+            children: [
+              Expanded(
+                flex: 4,
+                child: Text(
+                  request.applicantName,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 13.5,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+              Expanded(
+                flex: 3,
+                child: Text(
+                  request.endorseToOffice,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: AppTheme.dashTextSecondaryOf(context),
+                  ),
+                ),
+              ),
+              Expanded(
+                flex: 3,
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    alignment: Alignment.centerLeft,
+                    child: _MayorStatusPill(status: request.status),
+                  ),
+                ),
+              ),
+              SizedBox(
+                width: 72,
+                child: Text(
+                  _fmtShortDate(request.submittedAt.toLocal()),
+                  textAlign: TextAlign.right,
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: AppTheme.dashTextSecondaryOf(context),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _MayorRecentRequestMobileRow extends StatelessWidget {
+  const _MayorRecentRequestMobileRow({
+    required this.request,
+    required this.onTap,
+  });
+
+  final MayorEndorsementRequest request;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final secondary = AppTheme.dashTextSecondaryOf(context);
+    final from = (request.submittedByName ?? '').trim();
+    final showFrom = !_isMayorOfficeLabel(from);
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Material(
+        color: AppTheme.dashCanvasOf(context),
+        borderRadius: BorderRadius.circular(12),
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(12),
+          child: Padding(
+            padding: const EdgeInsets.all(12),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  request.applicantName,
+                  style: const TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  request.endorseToOffice,
+                  style: TextStyle(fontSize: 13, color: secondary),
+                ),
+                if (showFrom) ...[
+                  const SizedBox(height: 2),
+                  Text(
+                    'From $from',
+                    style: TextStyle(fontSize: 12, color: secondary),
+                  ),
+                ],
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    _MayorStatusPill(status: request.status),
+                    const Spacer(),
+                    Text(
+                      _fmtShortDate(request.submittedAt.toLocal()),
+                      style: TextStyle(fontSize: 12, color: secondary),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _MayorOfficeOverviewPanel extends StatelessWidget {
+  const _MayorOfficeOverviewPanel({required this.offices});
+
+  final List<MayorOfficeStat> offices;
+
+  @override
+  Widget build(BuildContext context) {
+    final sorted = [...offices]..sort((a, b) => b.total.compareTo(a.total));
+    final maxTotal = sorted.fold<int>(0, (m, s) => s.total > m ? s.total : m);
+    return _MayorSectionCard(
+      title: 'Endorsements by Office',
+      child: sorted.isEmpty
+          ? const _MayorEmptyState(
+              icon: Icons.account_balance_outlined,
+              title: 'No endorsement data available',
+              subtitle:
+                  'Office distribution will appear once requests are reviewed.',
+            )
+          : Column(
+              children: [
+                for (final s in sorted)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 12),
+                    child: _MayorOfficeBar(
+                      name: s.officeName,
+                      total: s.total,
+                      maxTotal: maxTotal <= 0 ? 1 : maxTotal,
+                    ),
+                  ),
+              ],
+            ),
+    );
+  }
+}
+
+class _MayorOfficeBar extends StatelessWidget {
+  const _MayorOfficeBar({
+    required this.name,
+    required this.total,
+    required this.maxTotal,
+  });
+
+  final String name;
+  final int total;
+  final int maxTotal;
+
+  @override
+  Widget build(BuildContext context) {
+    final ratio = (total / maxTotal).clamp(0.0, 1.0);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: Text(
+                name,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+            Text(
+              '$total',
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w800,
+                color: AppTheme.dashTextPrimaryOf(context),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 6),
+        ClipRRect(
+          borderRadius: BorderRadius.circular(99),
+          child: LinearProgressIndicator(
+            value: ratio,
+            minHeight: 8,
+            backgroundColor: AppTheme.dashHairlineOf(context),
+            color: AppTheme.primaryNavy.withValues(alpha: 0.75),
+          ),
+        ),
+      ],
     );
   }
 }
@@ -4299,6 +4551,30 @@ String _fmtDateOnly(DateTime d) =>
 
 String _fmtDateTime(DateTime d) =>
     '${_fmtDateOnly(d)} ${d.hour.toString().padLeft(2, '0')}:${d.minute.toString().padLeft(2, '0')}';
+
+String _fmtShortDate(DateTime d) {
+  const months = [
+    'Jan',
+    'Feb',
+    'Mar',
+    'Apr',
+    'May',
+    'Jun',
+    'Jul',
+    'Aug',
+    'Sep',
+    'Oct',
+    'Nov',
+    'Dec',
+  ];
+  return '${months[d.month - 1]} ${d.day}';
+}
+
+bool _isMayorOfficeLabel(String? value) {
+  final t = (value ?? '').trim().toLowerCase();
+  if (t.isEmpty) return true;
+  return t.contains('mayor');
+}
 
 class MayorEndorsementRepo {
   MayorEndorsementRepo._();

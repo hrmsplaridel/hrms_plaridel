@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:hrms_plaridel/app/providers.dart';
@@ -82,30 +84,76 @@ class _StartupGate extends StatefulWidget {
 }
 
 class _StartupGateState extends State<_StartupGate> {
-  late final Future<void> _startup = _bootstrap();
+  late final Future<void> _themeStartup = _loadSavedTheme();
+  late final Future<void> _psgcStartup = _loadPsgcIndex();
+  late Future<SessionRestoreResult> _startup = _bootstrap();
+  Timer? _sessionRetryTimer;
+  int _sessionRetryAttempt = 0;
 
-  Future<void> _bootstrap() async {
-    final themeModeFuture = ThemeModeNotifier.loadSavedMode();
-    final psgcFuture = PhilippinePsgcData.loadIndex();
-    final sessionFuture = widget.auth.restoreSession();
+  Future<SessionRestoreResult> _bootstrap() async {
+    final restoreResult = await widget.auth.restoreSession();
+    if (restoreResult != SessionRestoreResult.temporarilyUnavailable) {
+      await _themeStartup;
+      await _psgcStartup;
+    }
+    return restoreResult;
+  }
 
+  Future<void> _loadSavedTheme() async {
     try {
-      final savedThemeMode = await themeModeFuture;
+      final savedThemeMode = await ThemeModeNotifier.loadSavedMode();
       widget.themeNotifier.restorePersistedMode(savedThemeMode);
     } catch (e, st) {
       debugPrint('Theme preference restore failed: $e\n$st');
     }
+  }
 
+  Future<void> _loadPsgcIndex() async {
     try {
-      await Future.wait<void>([psgcFuture, sessionFuture]);
+      await PhilippinePsgcData.loadIndex();
     } catch (e, st) {
-      debugPrint('Startup bootstrap failed: $e\n$st');
+      debugPrint('PSGC startup load failed: $e\n$st');
     }
+  }
+
+  Future<SessionRestoreResult> _restoreSessionAfterStartup() async {
+    final restoreResult = await widget.auth.restoreSession();
+    if (restoreResult != SessionRestoreResult.temporarilyUnavailable) {
+      await _themeStartup;
+      await _psgcStartup;
+    }
+    return restoreResult;
+  }
+
+  void _scheduleSessionRetry() {
+    if (_sessionRetryTimer?.isActive == true) return;
+    final delaySeconds = switch (_sessionRetryAttempt) {
+      0 => 2,
+      1 => 4,
+      _ => 8,
+    };
+    _sessionRetryAttempt += 1;
+    _sessionRetryTimer = Timer(Duration(seconds: delaySeconds), _retrySession);
+  }
+
+  void _retrySession() {
+    _sessionRetryTimer?.cancel();
+    _sessionRetryTimer = null;
+    if (!mounted) return;
+    setState(() {
+      _startup = _restoreSessionAfterStartup();
+    });
+  }
+
+  @override
+  void dispose() {
+    _sessionRetryTimer?.cancel();
+    super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    return FutureBuilder<void>(
+    return FutureBuilder<SessionRestoreResult>(
       future: _startup,
       builder: (context, snapshot) {
         if (snapshot.connectionState != ConnectionState.done) {
@@ -114,10 +162,73 @@ class _StartupGateState extends State<_StartupGate> {
             subtitle: 'Loading HRMS Plaridel',
           );
         }
+        final restoreResult = snapshot.data;
+        if (snapshot.hasError ||
+            restoreResult == SessionRestoreResult.temporarilyUnavailable) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted) _scheduleSessionRetry();
+          });
+          return _SessionReconnectScreen(onRetry: _retrySession);
+        }
+        _sessionRetryTimer?.cancel();
+        _sessionRetryTimer = null;
+        _sessionRetryAttempt = 0;
         final view = WidgetsBinding.instance.platformDispatcher.views.first;
         final logicalWidth = view.physicalSize.width / view.devicePixelRatio;
         return _initialHome(widget.auth, logicalWidth: logicalWidth);
       },
+    );
+  }
+}
+
+class _SessionReconnectScreen extends StatelessWidget {
+  const _SessionReconnectScreen({required this.onRetry});
+
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 440),
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  Icons.cloud_off_rounded,
+                  size: 44,
+                  color: Theme.of(context).colorScheme.primary,
+                ),
+                const SizedBox(height: 18),
+                Text(
+                  'Waiting for the HRMS server',
+                  textAlign: TextAlign.center,
+                  style: Theme.of(
+                    context,
+                  ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'Your saved sign-in is still available. The app will reconnect automatically.',
+                  textAlign: TextAlign.center,
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+                ),
+                const SizedBox(height: 20),
+                FilledButton.icon(
+                  onPressed: onRetry,
+                  icon: const Icon(Icons.refresh_rounded),
+                  label: const Text('Retry now'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
     );
   }
 }

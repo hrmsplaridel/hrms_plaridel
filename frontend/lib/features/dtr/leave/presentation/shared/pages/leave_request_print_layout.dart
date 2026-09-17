@@ -7,6 +7,7 @@ import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/providers/auth_provider.dart';
 import 'package:hrms_plaridel/features/dtr/leave/data/providers/leave_provider.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_balance.dart';
+import 'package:hrms_plaridel/features/dtr/leave/utils/leave_certification_balance.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_request.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_type.dart';
 import 'package:hrms_plaridel/features/dtr/leave/utils/leave_form_signatories.dart';
@@ -1265,10 +1266,24 @@ class _LeaveRequestPrintLayoutState extends State<LeaveRequestPrintLayout> {
                 children: [
                   const _TableCell(text: 'Total Earned'),
                   _TableCell(
-                    text: formatDays(vlBal.earnedDays + vlBal.adjustedDays),
+                    text: formatDays(
+                      leaveCertificationBalanceBeforeApplication(
+                        balance: vlBal,
+                        requestStatus:
+                            currentRequest?.status ?? LeaveRequestStatus.draft,
+                        applicationDays: vlDeduction,
+                      ),
+                    ),
                   ),
                   _TableCell(
-                    text: formatDays(slBal.earnedDays + slBal.adjustedDays),
+                    text: formatDays(
+                      leaveCertificationBalanceBeforeApplication(
+                        balance: slBal,
+                        requestStatus:
+                            currentRequest?.status ?? LeaveRequestStatus.draft,
+                        applicationDays: slDeduction,
+                      ),
+                    ),
                   ),
                 ],
               ),
@@ -1283,10 +1298,24 @@ class _LeaveRequestPrintLayoutState extends State<LeaveRequestPrintLayout> {
                 children: [
                   const _TableCell(text: 'Balance'),
                   _TableCell(
-                    text: formatBalance(vlBal.remainingDays - vlDeduction),
+                    text: formatBalance(
+                      leaveCertificationBalanceAfterApplication(
+                        balance: vlBal,
+                        requestStatus:
+                            currentRequest?.status ?? LeaveRequestStatus.draft,
+                        applicationDays: vlDeduction,
+                      ),
+                    ),
                   ),
                   _TableCell(
-                    text: formatBalance(slBal.remainingDays - slDeduction),
+                    text: formatBalance(
+                      leaveCertificationBalanceAfterApplication(
+                        balance: slBal,
+                        requestStatus:
+                            currentRequest?.status ?? LeaveRequestStatus.draft,
+                        applicationDays: slDeduction,
+                      ),
+                    ),
                   ),
                 ],
               ),
@@ -1800,6 +1829,8 @@ class _LeaveRequestPrintLayoutState extends State<LeaveRequestPrintLayout> {
         recommendationOfficerName: formSignatories.recommendationOfficer?.name,
         recommendationOfficerTitle:
             formSignatories.recommendationOfficer?.title,
+        approvingAuthorityName: formSignatories.approvingAuthority?.name,
+        approvingAuthorityTitle: formSignatories.approvingAuthority?.title,
         applicantSignatureBytes:
             formSignatories.applicantSignature?.signatureImageBytes,
         departmentHeadSignatureBytes:

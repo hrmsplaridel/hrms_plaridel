@@ -1,0 +1,20 @@
+/// Offices the Mayor may endorse an applicant into (papasukan).
+const kMayorEndorsementOffices = <String>[
+  'AMOMC',
+  'AMORAP',
+  'BANK OF HOPE',
+  'CDH',
+  'DAR',
+  'DEPED',
+  'DPWH RENEWAL',
+  'LITE SHIPPING',
+  'MARSGEN',
+  'MAYOR ACOSTA',
+  'MOPH',
+  'MOTI',
+  'OFFICE OF VICE GOVERNOR',
+  'PGMO',
+  'PNP',
+  'REGION',
+  'UTILITY',
+];

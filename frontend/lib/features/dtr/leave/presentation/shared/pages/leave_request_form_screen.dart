@@ -180,7 +180,8 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
       _checkingStatus = true;
       _statusError = null;
     });
-    final fresh = await context.read<LeaveProvider>().refreshRequestById(id);
+    final provider = context.read<LeaveProvider>();
+    final fresh = await provider.refreshRequestById(id);
     if (!mounted) return false;
     setState(() {
       _checkingStatus = false;
@@ -188,6 +189,7 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
         _savedRequest = fresh;
       } else {
         _statusError =
+            provider.error ??
             'Could not check the latest request status. Please retry.';
       }
     });
@@ -212,7 +214,10 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
       if (!mounted) return false;
       requestId = _savedRequest?.id;
       if (requestId == null || requestId.isEmpty) {
-        _showMessage('Save the leave request before adding a signature.');
+        final error = context.read<LeaveProvider>().error;
+        if (error == null || error.trim().isEmpty) {
+          _showMessage('Save the leave request before adding a signature.');
+        }
         return false;
       }
     }
@@ -679,8 +684,12 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
       // Wait for it to be mounted again before validating a saved draft.
       await WidgetsBinding.instance.endOfFrame;
       if (!mounted) return;
-      final form = _formKey.currentState;
-      if (form == null || !form.validate()) return;
+      final formState = _formKey.currentState;
+      if (formState == null) {
+        _showMessage('The leave form is not ready. Please try again.');
+        return;
+      }
+      if (!formState.validate()) return;
       final accountEligibilityMessage = _selectedAccountEligibilityMessage();
       if (accountEligibilityMessage != null) {
         _showMessage(accountEligibilityMessage);
@@ -1351,6 +1360,13 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
             }
           }
           _showMessage('Draft saved.');
+        } else {
+          final err = context.read<LeaveProvider>().error;
+          _showMessage(
+            (err != null && err.trim().isNotEmpty)
+                ? err.replaceFirst(RegExp(r'^Exception:\s*'), '')
+                : 'Could not save the draft. Please try again.',
+          );
         }
       } else {
         final pendingBytes = _pendingAttachmentBytes;
@@ -1407,7 +1423,16 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
     final formMaxWidth = 800.0; // Clean, narrow column for digital entry
     final leaveProvider = context.watch<LeaveProvider>();
 
-    if (_checkingStatus || _statusError != null || !_canEditRequest) {
+    if (_checkingStatus &&
+        ((_savedRequest ?? widget.initialRequest)?.id ?? '').isNotEmpty) {
+      return Scaffold(
+        backgroundColor: AppTheme.dashCanvasOf(context),
+        appBar: AppBar(title: const Text('Leave Request')),
+        body: const Center(child: CircularProgressIndicator()),
+      );
+    }
+
+    if (_statusError != null || (!_checkingStatus && !_canEditRequest)) {
       final status = (_savedRequest ?? widget.initialRequest)?.status;
       return Scaffold(
         backgroundColor: AppTheme.dashCanvasOf(context),
@@ -1417,9 +1442,7 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              if (_checkingStatus)
-                const Center(child: CircularProgressIndicator())
-              else if (_statusError != null) ...[
+              if (_statusError != null) ...[
                 Text(_statusError!),
                 TextButton(
                   onPressed: _refreshSavedStatus,
@@ -1438,8 +1461,6 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
                       ? 'This request has already been submitted. You can track its progress in the leave list.'
                       : 'This request cannot be edited in its current status.',
                 ),
-                const SizedBox(height: 24),
-                _buildApplicantSignatureSection(),
                 const SizedBox(height: 24),
                 FilledButton(
                   onPressed: () => Navigator.of(context).pop(),
@@ -1718,12 +1739,17 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
                       const SizedBox(height: 32),
 
                       // Actions
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.end,
+                      Wrap(
+                        alignment: WrapAlignment.end,
+                        spacing: 16,
+                        runSpacing: 12,
                         children: [
                           if (widget.onSaveDraft != null)
                             OutlinedButton(
-                              onPressed: _busy || _submitFlowInFlight
+                              onPressed:
+                                  _busy ||
+                                      _submitFlowInFlight ||
+                                      _checkingStatus
                                   ? null
                                   : _saveDraft,
                               style: OutlinedButton.styleFrom(
@@ -1734,10 +1760,12 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
                               ),
                               child: const Text('Save Draft'),
                             ),
-                          const SizedBox(width: 16),
                           if (widget.onSubmitRequest != null)
                             FilledButton(
-                              onPressed: _busy || _submitFlowInFlight
+                              onPressed:
+                                  _busy ||
+                                      _submitFlowInFlight ||
+                                      _checkingStatus
                                   ? null
                                   : _submitRequest,
                               style: FilledButton.styleFrom(

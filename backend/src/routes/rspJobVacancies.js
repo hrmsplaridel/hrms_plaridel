@@ -15,14 +15,14 @@ async function ensureTable() {
   await pool.query(
     `CREATE TABLE IF NOT EXISTS public.job_vacancy_announcement (
        id TEXT PRIMARY KEY DEFAULT 'default',
-       has_vacancies BOOLEAN DEFAULT true,
+       has_vacancies BOOLEAN DEFAULT false,
        headline TEXT,
        body TEXT,
        vacancies JSONB DEFAULT '[]'::JSONB,
        updated_at TIMESTAMPTZ DEFAULT now()
      );
      INSERT INTO public.job_vacancy_announcement (id, has_vacancies, headline, body)
-     VALUES ('default', true, NULL, NULL)
+     VALUES ('default', false, NULL, NULL)
      ON CONFLICT (id) DO NOTHING;`
   );
 
@@ -52,10 +52,11 @@ router.get('/', async (_req, res) => {
     if (!row) {
       return res.json({
         id: 'default',
-        has_vacancies: true,
+        has_vacancies: false,
         headline: null,
         body: null,
         vacancies: [],
+        accepting_applications: false,
         updated_at: null,
       });
     }
@@ -70,12 +71,20 @@ router.get('/', async (_req, res) => {
     }
     vacancies = await enrichVacanciesWithApplicationCounts(vacancies);
 
+    const acceptingApplications =
+      row.has_vacancies === true &&
+      vacancies.some((v) => {
+        const headline = typeof v?.headline === 'string' ? v.headline.trim() : '';
+        return headline.length > 0 && v?.is_closed !== true;
+      });
+
     res.json({
       id: row.id,
-      has_vacancies: row.has_vacancies,
+      has_vacancies: row.has_vacancies === true,
       headline: row.headline,
       body: row.body,
       vacancies,
+      accepting_applications: acceptingApplications,
       updated_at: row.updated_at ? row.updated_at.toISOString() : null,
     });
   } catch (err) {

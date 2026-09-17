@@ -8,6 +8,7 @@ import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_balance.dart';
+import 'package:hrms_plaridel/features/dtr/leave/utils/leave_certification_balance.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_request.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_type.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_type_definition.dart';
@@ -279,6 +280,8 @@ class LeaveRequestPdf {
     String? certificationOfficerTitle,
     String? recommendationOfficerName,
     String? recommendationOfficerTitle,
+    String? approvingAuthorityName,
+    String? approvingAuthorityTitle,
     Uint8List? applicantSignatureBytes,
     Uint8List? departmentHeadSignatureBytes,
     Uint8List? hrApproverSignatureBytes,
@@ -290,6 +293,8 @@ class LeaveRequestPdf {
       certificationOfficerTitle: certificationOfficerTitle,
       recommendationOfficerName: recommendationOfficerName,
       recommendationOfficerTitle: recommendationOfficerTitle,
+      approvingAuthorityName: approvingAuthorityName,
+      approvingAuthorityTitle: approvingAuthorityTitle,
       applicantSignatureBytes: applicantSignatureBytes,
       departmentHeadSignatureBytes: departmentHeadSignatureBytes,
       hrApproverSignatureBytes: hrApproverSignatureBytes,
@@ -306,6 +311,8 @@ class LeaveRequestPdf {
     String? certificationOfficerTitle,
     String? recommendationOfficerName,
     String? recommendationOfficerTitle,
+    String? approvingAuthorityName,
+    String? approvingAuthorityTitle,
     Uint8List? applicantSignatureBytes,
     Uint8List? departmentHeadSignatureBytes,
     Uint8List? hrApproverSignatureBytes,
@@ -318,6 +325,8 @@ class LeaveRequestPdf {
       certificationOfficerTitle: certificationOfficerTitle,
       recommendationOfficerName: recommendationOfficerName,
       recommendationOfficerTitle: recommendationOfficerTitle,
+      approvingAuthorityName: approvingAuthorityName,
+      approvingAuthorityTitle: approvingAuthorityTitle,
       applicantSignatureBytes: applicantSignatureBytes,
       departmentHeadSignatureBytes: departmentHeadSignatureBytes,
       hrApproverSignatureBytes: hrApproverSignatureBytes,
@@ -943,7 +952,11 @@ class LeaveRequestPdf {
                                       padding: const pw.EdgeInsets.all(4),
                                       child: pw.Text(
                                         formatDays(
-                                          vlBal.earnedDays + vlBal.adjustedDays,
+                                          leaveCertificationBalanceBeforeApplication(
+                                            balance: vlBal,
+                                            requestStatus: request.status,
+                                            applicationDays: vlDeduction,
+                                          ),
                                         ),
                                         style: const pw.TextStyle(fontSize: 9),
                                       ),
@@ -952,7 +965,11 @@ class LeaveRequestPdf {
                                       padding: const pw.EdgeInsets.all(4),
                                       child: pw.Text(
                                         formatDays(
-                                          slBal.earnedDays + slBal.adjustedDays,
+                                          leaveCertificationBalanceBeforeApplication(
+                                            balance: slBal,
+                                            requestStatus: request.status,
+                                            applicationDays: slDeduction,
+                                          ),
                                         ),
                                         style: const pw.TextStyle(fontSize: 9),
                                       ),
@@ -997,7 +1014,11 @@ class LeaveRequestPdf {
                                       padding: const pw.EdgeInsets.all(4),
                                       child: pw.Text(
                                         formatBalance(
-                                          vlBal.remainingDays - vlDeduction,
+                                          leaveCertificationBalanceAfterApplication(
+                                            balance: vlBal,
+                                            requestStatus: request.status,
+                                            applicationDays: vlDeduction,
+                                          ),
                                         ),
                                         style: const pw.TextStyle(fontSize: 9),
                                       ),
@@ -1006,7 +1027,11 @@ class LeaveRequestPdf {
                                       padding: const pw.EdgeInsets.all(4),
                                       child: pw.Text(
                                         formatBalance(
-                                          slBal.remainingDays - slDeduction,
+                                          leaveCertificationBalanceAfterApplication(
+                                            balance: slBal,
+                                            requestStatus: request.status,
+                                            applicationDays: slDeduction,
+                                          ),
                                         ),
                                         style: const pw.TextStyle(fontSize: 9),
                                       ),
@@ -1659,6 +1684,8 @@ class _LeaveRequestPdfFixedEngine {
     String? certificationOfficerTitle,
     String? recommendationOfficerName,
     String? recommendationOfficerTitle,
+    String? approvingAuthorityName,
+    String? approvingAuthorityTitle,
     Uint8List? applicantSignatureBytes,
     Uint8List? departmentHeadSignatureBytes,
     Uint8List? hrApproverSignatureBytes,
@@ -1672,14 +1699,23 @@ class _LeaveRequestPdfFixedEngine {
         .where((e) => e.leaveType == LeaveType.sickLeave)
         .cast<LeaveBalance?>()
         .firstWhere((e) => e != null, orElse: () => null);
+    final vlBalance =
+        vl ??
+        const LeaveBalance(userId: '', leaveType: LeaveType.vacationLeave);
+    final slBalance =
+        sl ?? const LeaveBalance(userId: '', leaveType: LeaveType.sickLeave);
     final wd = _workDays(request);
     final daysText = wd == null ? '' : '${wd.toStringAsFixed(1)} day/s';
     final fullName = _s(request.employeeName).isNotEmpty
         ? _s(request.employeeName)
         : request.userId;
     final n = _nameParts(fullName);
-    final reviewerName = _s(request.reviewerName);
-    final reviewerTitle = _s(request.reviewerTitle).isNotEmpty
+    final reviewerName = _s(approvingAuthorityName).isNotEmpty
+        ? _s(approvingAuthorityName)
+        : _s(request.reviewerName);
+    final reviewerTitle = _s(approvingAuthorityTitle).isNotEmpty
+        ? _s(approvingAuthorityTitle)
+        : _s(request.reviewerTitle).isNotEmpty
         ? _s(request.reviewerTitle)
         : _s(request.reviewerRole);
     final certifierName = _s(certificationOfficerName);
@@ -1695,8 +1731,11 @@ class _LeaveRequestPdfFixedEngine {
             departmentHeadSignatureBytes.isEmpty
         ? null
         : pw.MemoryImage(departmentHeadSignatureBytes);
+    final hasAutomaticMayor = _s(approvingAuthorityName).isNotEmpty;
     final hrApproverSignatureImage =
-        hrApproverSignatureBytes == null || hrApproverSignatureBytes.isEmpty
+        hasAutomaticMayor ||
+            hrApproverSignatureBytes == null ||
+            hrApproverSignatureBytes.isEmpty
         ? null
         : pw.MemoryImage(hrApproverSignatureBytes);
     final hasDepartmentHeadRecommendation =
@@ -2466,9 +2505,12 @@ class _LeaveRequestPdfFixedEngine {
                                                       ),
                                                   child: pw.Text(
                                                     d3(
-                                                      (vl?.earnedDays ?? 0) +
-                                                          (vl?.adjustedDays ??
-                                                              0),
+                                                      leaveCertificationBalanceBeforeApplication(
+                                                        balance: vlBalance,
+                                                        requestStatus:
+                                                            request.status,
+                                                        applicationDays: vlDed,
+                                                      ),
                                                     ),
                                                     style: const pw.TextStyle(
                                                       fontSize: _small,
@@ -2482,9 +2524,12 @@ class _LeaveRequestPdfFixedEngine {
                                                       ),
                                                   child: pw.Text(
                                                     d3(
-                                                      (sl?.earnedDays ?? 0) +
-                                                          (sl?.adjustedDays ??
-                                                              0),
+                                                      leaveCertificationBalanceBeforeApplication(
+                                                        balance: slBalance,
+                                                        requestStatus:
+                                                            request.status,
+                                                        applicationDays: slDed,
+                                                      ),
                                                     ),
                                                     style: const pw.TextStyle(
                                                       fontSize: _small,
@@ -2554,8 +2599,12 @@ class _LeaveRequestPdfFixedEngine {
                                                       ),
                                                   child: pw.Text(
                                                     balanceD3(
-                                                      (vl?.remainingDays ?? 0) -
-                                                          vlDed,
+                                                      leaveCertificationBalanceAfterApplication(
+                                                        balance: vlBalance,
+                                                        requestStatus:
+                                                            request.status,
+                                                        applicationDays: vlDed,
+                                                      ),
                                                     ),
                                                     style: const pw.TextStyle(
                                                       fontSize: _small,
@@ -2569,8 +2618,12 @@ class _LeaveRequestPdfFixedEngine {
                                                       ),
                                                   child: pw.Text(
                                                     balanceD3(
-                                                      (sl?.remainingDays ?? 0) -
-                                                          slDed,
+                                                      leaveCertificationBalanceAfterApplication(
+                                                        balance: slBalance,
+                                                        requestStatus:
+                                                            request.status,
+                                                        applicationDays: slDed,
+                                                      ),
                                                     ),
                                                     style: const pw.TextStyle(
                                                       fontSize: _small,
@@ -2938,6 +2991,8 @@ class _LeaveRequestPdfFixedEngine {
     String? certificationOfficerTitle,
     String? recommendationOfficerName,
     String? recommendationOfficerTitle,
+    String? approvingAuthorityName,
+    String? approvingAuthorityTitle,
     Uint8List? applicantSignatureBytes,
     Uint8List? departmentHeadSignatureBytes,
     Uint8List? hrApproverSignatureBytes,
@@ -2949,6 +3004,8 @@ class _LeaveRequestPdfFixedEngine {
       certificationOfficerTitle: certificationOfficerTitle,
       recommendationOfficerName: recommendationOfficerName,
       recommendationOfficerTitle: recommendationOfficerTitle,
+      approvingAuthorityName: approvingAuthorityName,
+      approvingAuthorityTitle: approvingAuthorityTitle,
       applicantSignatureBytes: applicantSignatureBytes,
       departmentHeadSignatureBytes: departmentHeadSignatureBytes,
       hrApproverSignatureBytes: hrApproverSignatureBytes,

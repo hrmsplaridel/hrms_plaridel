@@ -93,6 +93,9 @@ router.get('/recruitment-attachment', async (req, res) => {
       } else {
         res.setHeader('Cache-Control', 'private, max-age=300');
         // Allow embedding in the Flutter web preview iframe (cross-origin).
+        // Global middleware sets X-Frame-Options: DENY, which blocks the admin PDF iframe.
+        res.removeHeader('X-Frame-Options');
+        res.setHeader('Content-Security-Policy', "frame-ancestors *");
         res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
         res.setHeader('X-Content-Type-Options', 'nosniff');
         // Encourage inline rendering (especially for PDFs inside iframes).

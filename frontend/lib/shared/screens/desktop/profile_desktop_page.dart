@@ -31,7 +31,7 @@ class ProfileDesktopPage extends StatelessWidget {
         ),
       ),
       body: const SingleChildScrollView(
-        padding: EdgeInsets.fromLTRB(24, 16, 24, 24),
+        padding: EdgeInsets.fromLTRB(16, 16, 16, 20),
         child: SizedBox(width: double.infinity, child: ProfileContent()),
       ),
     );

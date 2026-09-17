@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:hrms_plaridel/features/recruitment/models/job_vacancy_announcement.dart';
 import 'package:hrms_plaridel/main.dart' as app;
@@ -11,7 +13,7 @@ import 'package:hrms_plaridel/features/landing/presentation/sections/footer_sect
 /// Landing page for the Government HRMS (Municipality of Plaridel).
 /// All related UI lives under the [landingpage] folder. No public registration on this page;
 /// registration is only available after passing the screening exam.
-/// Refetches job vacancy data when the user returns from admin so toggle/delete changes are visible.
+/// Polls job vacancy data so admin toggle/save/delete changes show without a manual refresh.
 class LandingPage extends StatefulWidget {
   const LandingPage({super.key});
 
@@ -19,20 +21,33 @@ class LandingPage extends StatefulWidget {
   State<LandingPage> createState() => _LandingPageState();
 }
 
-class _LandingPageState extends State<LandingPage> with RouteAware {
+class _LandingPageState extends State<LandingPage>
+    with RouteAware, WidgetsBindingObserver {
+  static const _vacancyPollInterval = Duration(seconds: 5);
+
   final GlobalKey _headerKey = GlobalKey();
   final GlobalKey _heroKey = GlobalKey();
   final GlobalKey _jobVacanciesKey = GlobalKey();
   final GlobalKey _contactKey = GlobalKey();
 
-  late Future<JobVacancyAnnouncement> _announcementFuture;
+  JobVacancyAnnouncement _announcement = const JobVacancyAnnouncement(
+    hasVacancies: false,
+  );
+  bool _loadingAnnouncement = true;
+  Timer? _vacancyPollTimer;
+  bool _vacancyReloadInFlight = false;
   final ScrollController _scrollController = ScrollController();
   bool _didInitialScrollReset = false;
 
   @override
   void initState() {
     super.initState();
-    _announcementFuture = JobVacancyAnnouncementRepo.instance.fetch();
+    WidgetsBinding.instance.addObserver(this);
+    _reloadVacancies();
+    _vacancyPollTimer = Timer.periodic(
+      _vacancyPollInterval,
+      (_) => _reloadVacancies(silent: true),
+    );
 
     // Ensure the landing page always opens at the hero (not scrolled down).
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -55,17 +70,23 @@ class _LandingPageState extends State<LandingPage> with RouteAware {
 
   @override
   void dispose() {
+    _vacancyPollTimer?.cancel();
+    WidgetsBinding.instance.removeObserver(this);
     app.routeObserver.unsubscribe(this);
     _scrollController.dispose();
     super.dispose();
   }
 
   @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _reloadVacancies(silent: true);
+    }
+  }
+
+  @override
   void didPopNext() {
-    // User returned to this page (e.g. from admin). Refetch so job vacancy changes (toggle off, delete) are shown.
-    setState(() {
-      _announcementFuture = JobVacancyAnnouncementRepo.instance.fetch();
-    });
+    _reloadVacancies(silent: true);
 
     // Some platforms/browsers preserve scroll position when navigating back.
     // Always reset to the top so the hero shows consistently.
@@ -75,19 +96,52 @@ class _LandingPageState extends State<LandingPage> with RouteAware {
     });
   }
 
-  void _scrollTo(GlobalKey key) {
+  Future<void> _reloadVacancies({bool silent = false}) async {
+    if (_vacancyReloadInFlight) return;
+    _vacancyReloadInFlight = true;
+    try {
+      final next = await JobVacancyAnnouncementRepo.instance.fetchIfAvailable();
+      if (!mounted) return;
+      if (next == null) {
+        // Keep the last successful listing. Do not fake "closed" on a network blip.
+        if (!silent && _loadingAnnouncement) {
+          setState(() => _loadingAnnouncement = false);
+        }
+        return;
+      }
+      final sameListing =
+          !_loadingAnnouncement &&
+          next.publicListingFingerprint ==
+              _announcement.publicListingFingerprint;
+      if (sameListing) return;
+      setState(() {
+        _announcement = next;
+        _loadingAnnouncement = false;
+      });
+    } catch (_) {
+      if (!mounted || silent) return;
+      setState(() => _loadingAnnouncement = false);
+    } finally {
+      _vacancyReloadInFlight = false;
+    }
+  }
+
+  void _scrollTo(GlobalKey key, {double alignment = 0.0}) {
     final context = key.currentContext;
     if (context != null) {
       Scrollable.ensureVisible(
         context,
         duration: const Duration(milliseconds: 500),
         curve: Curves.easeInOut,
+        alignment: alignment,
       );
     }
   }
 
   void _onApplyForVacancy(JobVacancyItem vacancy) {
-    final selected = vacancy.positionKey;
+    if (!_announcement.isAcceptingApplications) return;
+    final selected = vacancy.headline?.trim();
+    if (selected == null || selected.isEmpty) return;
 
     Navigator.of(context).push(
       MaterialPageRoute(
@@ -135,42 +189,35 @@ class _LandingPageState extends State<LandingPage> with RouteAware {
                         onScrollToVacancies: () => _scrollTo(_jobVacanciesKey),
                         onTrackApplicationTap: _onTrackApplication,
                       ),
-                      const SizedBox(height: 18),
-                      FutureBuilder<JobVacancyAnnouncement>(
-                        future: _announcementFuture,
-                        builder: (context, snapshot) {
-                          if (snapshot.connectionState ==
-                                  ConnectionState.waiting &&
-                              !snapshot.hasData) {
-                            return const Padding(
-                              padding: EdgeInsets.symmetric(vertical: 48),
-                              child: Center(
-                                child: SizedBox(
-                                  width: 28,
-                                  height: 28,
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 2.5,
+                      const SizedBox(height: 8),
+                      KeyedSubtree(
+                        key: _jobVacanciesKey,
+                        child: _loadingAnnouncement
+                            ? const Padding(
+                                padding: EdgeInsets.symmetric(vertical: 48),
+                                child: Center(
+                                  child: SizedBox(
+                                    width: 28,
+                                    height: 28,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2.5,
+                                    ),
                                   ),
                                 ),
+                              )
+                            : JobVacanciesSection(
+                                hasVacancies: _announcement.hasVacancies,
+                                headline: _announcement.headline,
+                                body: _announcement.body,
+                                vacancies: _announcement.listedVacancies.isEmpty
+                                    ? null
+                                    : _announcement.listedVacancies,
+                                onGoToRecruitmentTap: null,
+                                onApplyForVacancyTap:
+                                    _announcement.isAcceptingApplications
+                                    ? _onApplyForVacancy
+                                    : null,
                               ),
-                            );
-                          }
-                          final a =
-                              snapshot.data ??
-                              const JobVacancyAnnouncement(hasVacancies: false);
-                          return JobVacanciesSection(
-                            key: _jobVacanciesKey,
-                            hasVacancies: a.hasVacancies,
-                            headline: a.headline,
-                            body: a.body,
-                            vacancies: a.vacancies.isEmpty ? null : a.vacancies,
-                            // Applicants should use the per-vacancy "Apply" buttons instead.
-                            onGoToRecruitmentTap: null,
-                            onApplyForVacancyTap: a.hasVacancies
-                                ? _onApplyForVacancy
-                                : null,
-                          );
-                        },
                       ),
                       ContactSection(key: _contactKey),
                       const FooterSection(),

@@ -24,6 +24,7 @@ import 'docutracker_escalation_config_screen.dart';
 import 'docutracker_workflow_editor_screen.dart';
 import 'docutracker_permission_editor_screen.dart';
 import 'docutracker_governance_audit_screen.dart';
+import 'docutracker_official_signatories_screen.dart';
 
 /// Groups list rows by role/user only (one row per person, all document types combined).
 String _permissionGroupKey(DocumentPermission p) =>
@@ -622,6 +623,12 @@ class _DocuTrackerAdminScreenState extends State<DocuTrackerAdminScreen> {
                 builder: (_) => const DocuTrackerEscalationConfigScreen(),
               ),
             );
+          case 'signatories':
+            await Navigator.of(context).push(
+              MaterialPageRoute<void>(
+                builder: (_) => const DocuTrackerOfficialSignatoriesScreen(),
+              ),
+            );
           case 'refresh':
             await _load();
         }
@@ -630,6 +637,10 @@ class _DocuTrackerAdminScreenState extends State<DocuTrackerAdminScreen> {
         PopupMenuItem(value: 'access', child: Text('System access')),
         PopupMenuItem(value: 'audit', child: Text('Audit log')),
         PopupMenuItem(value: 'escalation', child: Text('Escalation rules')),
+        PopupMenuItem(
+          value: 'signatories',
+          child: Text('Official signatories'),
+        ),
         PopupMenuDivider(),
         PopupMenuItem(value: 'refresh', child: Text('Refresh')),
       ],

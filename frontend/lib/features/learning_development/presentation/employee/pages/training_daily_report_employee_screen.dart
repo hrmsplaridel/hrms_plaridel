@@ -2,10 +2,8 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 
 import 'package:hrms_plaridel/features/learning_development/models/training_daily_report.dart';
-import 'package:hrms_plaridel/features/dashboard/presentation/employee/shared/widgets/employee_dash_ui.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/shared/widgets/read_only_saved_entry_dialog.dart';
-import 'package:hrms_plaridel/shared/widgets/rsp_form_header_footer.dart';
 import 'package:hrms_plaridel/shared/widgets/training_daily_report_read_only_view.dart';
 
 class TrainingDailyReportEmployeeScreen extends StatefulWidget {
@@ -29,6 +27,8 @@ class _TrainingDailyReportEmployeeScreenState
     extends State<TrainingDailyReportEmployeeScreen> {
   final _titleController = TextEditingController();
   final _descriptionController = TextEditingController();
+  final _searchController = TextEditingController();
+  final _titleFocusNode = FocusNode();
 
   bool _submitting = false;
   bool _loading = false;
@@ -37,6 +37,21 @@ class _TrainingDailyReportEmployeeScreenState
 
   /// Calendar day (local) to filter by; `null` shows all reports.
   DateTime? _filterByDate;
+
+  static const _months = [
+    'Jan',
+    'Feb',
+    'Mar',
+    'Apr',
+    'May',
+    'Jun',
+    'Jul',
+    'Aug',
+    'Sep',
+    'Oct',
+    'Nov',
+    'Dec',
+  ];
 
   static DateTime _toLocalDate(DateTime d) {
     final l = d.toLocal();
@@ -48,6 +63,11 @@ class _TrainingDailyReportEmployeeScreenState
     return '${d.year}-${two(d.month)}-${two(d.day)}';
   }
 
+  static String _formatListDate(DateTime d) {
+    final l = d.toLocal();
+    return '${_months[l.month - 1]} ${l.day}, ${l.year}';
+  }
+
   List<DateTime> get _datesWithReports {
     final days = <DateTime>{};
     for (final r in _reports) {
@@ -57,11 +77,23 @@ class _TrainingDailyReportEmployeeScreenState
   }
 
   List<TrainingDailyReport> get _visibleReports {
-    final sorted = List<TrainingDailyReport>.from(_reports)
+    var sorted = List<TrainingDailyReport>.from(_reports)
       ..sort((a, b) => b.submittedAt.compareTo(a.submittedAt));
-    if (_filterByDate == null) return sorted;
-    final day = _filterByDate!;
-    return sorted.where((r) => _toLocalDate(r.submittedAt) == day).toList();
+    if (_filterByDate != null) {
+      final day = _filterByDate!;
+      sorted = sorted
+          .where((r) => _toLocalDate(r.submittedAt) == day)
+          .toList();
+    }
+    final q = _searchController.text.trim().toLowerCase();
+    if (q.isNotEmpty) {
+      sorted = sorted.where((r) {
+        final title = r.title.toLowerCase();
+        final desc = (r.description ?? '').toLowerCase();
+        return title.contains(q) || desc.contains(q);
+      }).toList();
+    }
+    return sorted;
   }
 
   static String _formatSubmittedAt(DateTime d) {
@@ -70,33 +102,59 @@ class _TrainingDailyReportEmployeeScreenState
     return '${l.year}-${two(l.month)}-${two(l.day)} · ${two(l.hour)}:${two(l.minute)}';
   }
 
+  static String _fileSizeLabel(PlatformFile file) {
+    final bytes = file.size;
+    if (bytes < 1024) return '$bytes B';
+    if (bytes < 1024 * 1024) {
+      return '${(bytes / 1024).toStringAsFixed(1)} KB';
+    }
+    return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
+  }
+
+  static String _fileKindLabel(String name) {
+    final ext = name.contains('.')
+        ? name.split('.').last.toUpperCase()
+        : 'FILE';
+    return ext;
+  }
+
   static bool _isDark(BuildContext context) => AppTheme.dashIsDark(context);
 
-  static Color _accent(BuildContext context) =>
-      _isDark(context) ? AppTheme.primaryNavyLight : AppTheme.primaryNavy;
-
-  static Color _accentSurface(BuildContext context) =>
-      AppTheme.primaryNavy.withValues(alpha: _isDark(context) ? 0.22 : 0.12);
+  BoxDecoration _cardDecoration(BuildContext context, {double radius = 18}) {
+    final dark = _isDark(context);
+    return BoxDecoration(
+      color: AppTheme.dashPanelOf(context),
+      borderRadius: BorderRadius.circular(radius),
+      border: Border.all(color: AppTheme.dashHairlineOf(context)),
+      boxShadow: [
+        BoxShadow(
+          color: Colors.black.withValues(alpha: dark ? 0.18 : 0.04),
+          blurRadius: 12,
+          offset: const Offset(0, 3),
+        ),
+      ],
+    );
+  }
 
   InputDecoration _inputDecoration(
     BuildContext context, {
-    String? label,
     String? hint,
     Widget? prefixIcon,
     bool alignLabelWithHint = false,
   }) {
     return AppTheme.dashInputDecoration(
       context,
-      labelText: label?.trim().isNotEmpty == true ? label : null,
       hintText: hint,
       prefixIcon: prefixIcon,
-      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
-      radius: 14,
+      contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      radius: 11,
     ).copyWith(
+      filled: true,
+      fillColor: _isDark(context)
+          ? AppTheme.dashMutedSurfaceOf(context)
+          : const Color(0xFFF7F8FA),
       alignLabelWithHint: alignLabelWithHint,
-      floatingLabelBehavior: label?.trim().isNotEmpty == true
-          ? FloatingLabelBehavior.auto
-          : FloatingLabelBehavior.never,
+      floatingLabelBehavior: FloatingLabelBehavior.never,
     );
   }
 
@@ -104,9 +162,86 @@ class _TrainingDailyReportEmployeeScreenState
     setState(() => _selectedFile = null);
   }
 
+  void _clearForm() {
+    _titleController.clear();
+    _descriptionController.clear();
+    setState(() => _selectedFile = null);
+  }
+
+  void _focusCreateForm() {
+    final ctx = widget.tutorialFormKey?.currentContext;
+    if (ctx != null) {
+      Scrollable.ensureVisible(
+        ctx,
+        duration: const Duration(milliseconds: 280),
+        alignment: 0.08,
+      );
+    }
+    _titleFocusNode.requestFocus();
+  }
+
+  void _openReport(TrainingDailyReport r) {
+    showReadOnlySavedEntryDialog(
+      context,
+      title: 'Submitted report',
+      subtitle: r.title.trim().isNotEmpty
+          ? r.title
+          : r.submittedAt.toLocal().toString().split('.').first,
+      previewBuilder: () => TrainingDailyReportReadOnlyView(report: r),
+      contentWidth: 640,
+    );
+  }
+
+  Widget _fieldLabel(
+    BuildContext context,
+    String text, {
+    bool required = false,
+    String? hint,
+  }) {
+    final primary = AppTheme.dashTextPrimaryOf(context);
+    final secondary = AppTheme.dashTextSecondaryOf(context);
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Row(
+        children: [
+          Text.rich(
+            TextSpan(
+              text: text,
+              style: TextStyle(
+                color: primary,
+                fontSize: 13,
+                fontWeight: FontWeight.w700,
+              ),
+              children: [
+                if (required)
+                  const TextSpan(
+                    text: ' *',
+                    style: TextStyle(
+                      color: AppTheme.primaryNavy,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          if (hint != null) ...[
+            const SizedBox(width: 6),
+            Text(
+              hint,
+              style: TextStyle(color: secondary, fontSize: 12),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
   @override
   void initState() {
     super.initState();
+    _searchController.addListener(() {
+      if (mounted) setState(() {});
+    });
     _loadReports();
   }
 
@@ -138,9 +273,6 @@ class _TrainingDailyReportEmployeeScreenState
     final now = DateTime.now();
     final today = _toLocalDate(now);
     final dates = _datesWithReports;
-    // Allow browsing any day in range — not only days that already have reports.
-    // (Using oldest report as firstDate locked the calendar to one day when only
-    // one report existed.)
     final oneYearAgo = DateTime(today.year - 1, today.month, today.day);
     final DateTime firstDate;
     if (dates.isEmpty) {
@@ -244,395 +376,603 @@ class _TrainingDailyReportEmployeeScreenState
   void dispose() {
     _titleController.dispose();
     _descriptionController.dispose();
+    _searchController.dispose();
+    _titleFocusNode.dispose();
     super.dispose();
   }
 
-  Widget _buildPageHeader(BuildContext context) {
-    final isNarrow = MediaQuery.sizeOf(context).width < 600;
-    return Container(
-      padding: EdgeInsets.all(isNarrow ? 20 : 24),
-      decoration: EmployeeDashUi.welcomeBanner(context),
-      child: EmployeeSectionHeader(
-        title: 'Daily Training Reports',
-        icon: Icons.edit_note_rounded,
-        subtitle:
-            'Submit your daily training activities while you are on training.',
-      ),
-    );
-  }
-
-  Widget _buildFormCard(BuildContext context) {
+  Widget _buildHero(BuildContext context) {
     final primary = AppTheme.dashTextPrimaryOf(context);
     final secondary = AppTheme.dashTextSecondaryOf(context);
-    final hasFile = _selectedFile != null;
     final dark = _isDark(context);
-    final accent = _accent(context);
+    final compact = MediaQuery.sizeOf(context).width < 768;
 
     return Container(
-      clipBehavior: Clip.antiAlias,
-      decoration: EmployeeDashUi.elevatedPanel(context),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
+      constraints: BoxConstraints(minHeight: compact ? 0 : 132),
+      padding: EdgeInsets.fromLTRB(
+        compact ? 16 : 24,
+        compact ? 16 : 22,
+        compact ? 16 : 24,
+        compact ? 16 : 22,
+      ),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(20),
+        gradient: LinearGradient(
+          begin: Alignment.centerLeft,
+          end: Alignment.centerRight,
+          colors: dark
+              ? [AppTheme.dashPanelOf(context), const Color(0xFF2A241E)]
+              : const [Colors.white, Color(0xFFFFF6EE)],
+        ),
+        border: Border.all(
+          color: dark
+              ? AppTheme.dashHairlineOf(context)
+              : AppTheme.primaryNavy.withValues(alpha: 0.14),
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: dark ? 0.18 : 0.04),
+            blurRadius: 12,
+            offset: const Offset(0, 3),
+          ),
+        ],
+      ),
+      child: Row(
         children: [
           Container(
-            padding: const EdgeInsets.fromLTRB(22, 20, 22, 18),
+            width: compact ? 48 : 58,
+            height: compact ? 48 : 58,
+            alignment: Alignment.center,
             decoration: BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: dark
-                    ? [
-                        AppTheme.primaryNavy.withValues(alpha: 0.18),
-                        AppTheme.dashMutedSurfaceOf(context),
-                      ]
-                    : [
-                        AppTheme.primaryNavy.withValues(alpha: 0.06),
-                        AppTheme.dashMutedSurfaceOf(context),
-                      ],
-              ),
-              border: Border(
-                bottom: BorderSide(color: AppTheme.dashHairlineOf(context)),
-              ),
+              color: AppTheme.primaryNavy.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(16),
             ),
-            child: Row(
+            child: Icon(
+              Icons.assignment_outlined,
+              color: AppTheme.primaryNavy,
+              size: compact ? 26 : 30,
+            ),
+          ),
+          SizedBox(width: compact ? 12 : 16),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                Container(
-                  padding: const EdgeInsets.all(10),
-                  decoration: BoxDecoration(
-                    color: _accentSurface(context),
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: accent.withValues(alpha: 0.25)),
+                Text(
+                  'TRAINING REPORTS',
+                  style: TextStyle(
+                    color: AppTheme.primaryNavy,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 1.1,
                   ),
-                  child: Icon(Icons.post_add_rounded, color: accent, size: 22),
                 ),
-                const SizedBox(width: 14),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'New report',
-                        style: TextStyle(
-                          color: primary,
-                          fontSize: 17,
-                          fontWeight: FontWeight.w800,
-                          letterSpacing: -0.3,
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        'Title is required. Add a short description and an optional JPG, PNG, or PDF.',
-                        style: TextStyle(
-                          color: secondary,
-                          fontSize: 13,
-                          height: 1.4,
-                        ),
-                      ),
-                    ],
+                const SizedBox(height: 4),
+                Text(
+                  'Daily Training Reports',
+                  style: TextStyle(
+                    color: primary,
+                    fontSize: compact ? 22 : 30,
+                    fontWeight: FontWeight.w800,
+                    height: 1.15,
+                    letterSpacing: -0.4,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  'Record and submit your daily training activities.',
+                  style: TextStyle(
+                    color: secondary,
+                    fontSize: compact ? 13.5 : 15,
+                    height: 1.35,
                   ),
                 ),
               ],
             ),
           ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(22, 22, 22, 24),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                RspSpacedOutlineField(
-                  child: TextField(
-                    controller: _titleController,
-                    textCapitalization: TextCapitalization.sentences,
-                    style: AppTheme.dashFieldTextStyle(context),
-                    decoration: _inputDecoration(
-                      context,
-                      hint: 'Report title',
-                      prefixIcon: Icon(
-                        Icons.article_outlined,
-                        color: accent.withValues(alpha: 0.9),
-                      ),
+          if (!compact) ...[
+            const SizedBox(width: 16),
+            Container(
+              width: 1,
+              height: 72,
+              color: AppTheme.dashHairlineOf(context),
+            ),
+            const SizedBox(width: 20),
+            SizedBox(
+              width: 188,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Icon(
+                    Icons.menu_book_outlined,
+                    size: 22,
+                    color: AppTheme.primaryNavy.withValues(alpha: 0.7),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Small progress\nbuilds great talent.',
+                    textAlign: TextAlign.right,
+                    style: TextStyle(
+                      color: primary,
+                      fontSize: 13.5,
+                      fontWeight: FontWeight.w700,
+                      height: 1.35,
                     ),
                   ),
-                ),
-                RspSpacedOutlineField(
-                  child: TextField(
-                    controller: _descriptionController,
-                    maxLines: 5,
-                    textCapitalization: TextCapitalization.sentences,
-                    style: AppTheme.dashFieldTextStyle(context),
-                    decoration: _inputDecoration(
-                      context,
-                      hint: 'Description',
-                      alignLabelWithHint: true,
-                    ),
+                  const SizedBox(height: 4),
+                  Text(
+                    'Keep learning. Keep growing.',
+                    textAlign: TextAlign.right,
+                    style: TextStyle(color: secondary, fontSize: 12),
                   ),
+                ],
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildFormCard(BuildContext context, {required bool compact}) {
+    final primary = AppTheme.dashTextPrimaryOf(context);
+    final secondary = AppTheme.dashTextSecondaryOf(context);
+    final hasFile = _selectedFile != null;
+
+    return Container(
+      padding: EdgeInsets.fromLTRB(
+        compact ? 16 : 22,
+        compact ? 16 : 22,
+        compact ? 16 : 22,
+        compact ? 16 : 20,
+      ),
+      decoration: _cardDecoration(context),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 36,
+                height: 36,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: AppTheme.primaryNavy.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(10),
                 ),
-                const SizedBox(height: rspFormFieldVerticalGap),
-                Text('ATTACHMENT', style: EmployeeDashUi.metricLabel(context)),
-                const SizedBox(height: 10),
-                Material(
-                  color: Colors.transparent,
-                  child: InkWell(
-                    onTap: _pickFile,
-                    borderRadius: BorderRadius.circular(
-                      EmployeeDashUi.radiusMd,
-                    ),
-                    child: Ink(
-                      decoration: BoxDecoration(
-                        borderRadius: BorderRadius.circular(
-                          EmployeeDashUi.radiusMd,
-                        ),
-                        gradient: LinearGradient(
-                          begin: Alignment.topLeft,
-                          end: Alignment.bottomRight,
-                          colors: dark
-                              ? [
-                                  AppTheme.primaryNavy.withValues(alpha: 0.16),
-                                  AppTheme.dashPanelOf(context),
-                                ]
-                              : [
-                                  AppTheme.primaryNavy.withValues(alpha: 0.07),
-                                  AppTheme.primaryNavyLight.withValues(
-                                    alpha: 0.04,
-                                  ),
-                                ],
-                        ),
-                        border: Border.all(
-                          color: hasFile
-                              ? accent.withValues(alpha: 0.55)
-                              : accent.withValues(alpha: dark ? 0.35 : 0.22),
-                          width: hasFile ? 1.5 : 1,
-                        ),
-                      ),
-                      child: Padding(
-                        padding: const EdgeInsets.all(18),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            LayoutBuilder(
-                              builder: (context, constraints) {
-                                final stackBrowse = constraints.maxWidth < 480;
-                                final uploadRow = Row(
-                                  crossAxisAlignment: stackBrowse
-                                      ? CrossAxisAlignment.start
-                                      : CrossAxisAlignment.center,
-                                  children: [
-                                    Container(
-                                      padding: const EdgeInsets.all(12),
-                                      decoration: BoxDecoration(
-                                        shape: BoxShape.circle,
-                                        color: _accentSurface(context),
-                                      ),
-                                      child: Icon(
-                                        hasFile
-                                            ? Icons.check_circle_outline_rounded
-                                            : Icons.cloud_upload_outlined,
-                                        size: 26,
-                                        color: accent,
-                                      ),
-                                    ),
-                                    const SizedBox(width: 14),
-                                    Expanded(
-                                      child: Column(
-                                        crossAxisAlignment:
-                                            CrossAxisAlignment.start,
-                                        children: [
-                                          Text(
-                                            hasFile
-                                                ? 'File attached'
-                                                : 'Image or PDF',
-                                            style: TextStyle(
-                                              color: primary,
-                                              fontWeight: FontWeight.w700,
-                                              fontSize: 15,
-                                            ),
-                                          ),
-                                          const SizedBox(height: 4),
-                                          Text(
-                                            'JPG, PNG, or PDF · optional · up to 10 MB',
-                                            style: TextStyle(
-                                              color: secondary,
-                                              fontSize: 12.5,
-                                              height: 1.35,
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                    if (!stackBrowse)
-                                      FilledButton(
-                                        onPressed: _pickFile,
-                                        style: FilledButton.styleFrom(
-                                          backgroundColor: AppTheme.primaryNavy,
-                                          foregroundColor: Colors.white,
-                                          padding: const EdgeInsets.symmetric(
-                                            horizontal: 18,
-                                            vertical: 10,
-                                          ),
-                                          elevation: 0,
-                                          shape: RoundedRectangleBorder(
-                                            borderRadius: BorderRadius.circular(
-                                              20,
-                                            ),
-                                          ),
-                                        ),
-                                        child: const Text('Browse'),
-                                      ),
-                                  ],
-                                );
-                                if (!stackBrowse) return uploadRow;
-                                return Column(
-                                  crossAxisAlignment:
-                                      CrossAxisAlignment.stretch,
-                                  children: [
-                                    uploadRow,
-                                    const SizedBox(height: 12),
-                                    Align(
-                                      alignment: Alignment.centerRight,
-                                      child: FilledButton(
-                                        onPressed: _pickFile,
-                                        style: FilledButton.styleFrom(
-                                          backgroundColor: AppTheme.primaryNavy,
-                                          foregroundColor: Colors.white,
-                                          padding: const EdgeInsets.symmetric(
-                                            horizontal: 22,
-                                            vertical: 10,
-                                          ),
-                                          elevation: 0,
-                                          shape: RoundedRectangleBorder(
-                                            borderRadius: BorderRadius.circular(
-                                              20,
-                                            ),
-                                          ),
-                                        ),
-                                        child: const Text('Browse'),
-                                      ),
-                                    ),
-                                  ],
-                                );
-                              },
-                            ),
-                            if (hasFile) ...[
-                              const SizedBox(height: 14),
-                              Container(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 14,
-                                  vertical: 12,
-                                ),
-                                decoration: BoxDecoration(
-                                  color: AppTheme.dashPanelOf(context),
-                                  borderRadius: BorderRadius.circular(12),
-                                  border: Border.all(
-                                    color: AppTheme.dashHairlineOf(context),
-                                  ),
-                                ),
-                                child: Row(
-                                  children: [
-                                    Icon(
-                                      Icons.insert_drive_file_rounded,
-                                      size: 22,
-                                      color: accent,
-                                    ),
-                                    const SizedBox(width: 12),
-                                    Expanded(
-                                      child: Text(
-                                        _selectedFile!.name,
-                                        style: TextStyle(
-                                          fontSize: 13,
-                                          fontWeight: FontWeight.w600,
-                                          color: primary,
-                                        ),
-                                        maxLines: 2,
-                                        overflow: TextOverflow.ellipsis,
-                                      ),
-                                    ),
-                                    IconButton(
-                                      tooltip: 'Remove file',
-                                      onPressed: _clearSelectedFile,
-                                      icon: Icon(
-                                        Icons.close_rounded,
-                                        color: secondary,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ] else ...[
-                              const SizedBox(height: 10),
-                              Text(
-                                'Tap this area or use Browse to attach proof.',
-                                style: TextStyle(
-                                  color: secondary.withValues(alpha: 0.8),
-                                  fontSize: 12,
-                                  fontStyle: FontStyle.italic,
-                                ),
-                              ),
-                            ],
-                          ],
-                        ),
+                child: const Icon(
+                  Icons.note_add_outlined,
+                  size: 20,
+                  color: AppTheme.primaryNavy,
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Create Daily Report',
+                      style: TextStyle(
+                        color: primary,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w800,
                       ),
                     ),
-                  ),
-                ),
-                const SizedBox(height: 24),
-                Align(
-                  alignment: Alignment.centerRight,
-                  child: DecoratedBox(
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(14),
-                      gradient: LinearGradient(
-                        begin: Alignment.topLeft,
-                        end: Alignment.bottomRight,
-                        colors: dark
-                            ? [
-                                AppTheme.primaryNavyLight,
-                                AppTheme.primaryNavy,
-                                AppTheme.primaryNavyDark,
-                              ]
-                            : const [
-                                Color(0xFFF0671A),
-                                AppTheme.primaryNavy,
-                                AppTheme.primaryNavyDark,
-                              ],
+                    const SizedBox(height: 2),
+                    Text(
+                      "Record what you accomplished during today's training.",
+                      style: TextStyle(
+                        color: secondary,
+                        fontSize: 13,
+                        height: 1.3,
                       ),
-                      boxShadow: [
-                        BoxShadow(
-                          color: AppTheme.primaryNavy.withValues(
-                            alpha: dark ? 0.45 : 0.35,
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 18),
+          _fieldLabel(context, 'Report Title', required: true),
+          TextField(
+            controller: _titleController,
+            focusNode: _titleFocusNode,
+            textCapitalization: TextCapitalization.sentences,
+            style: AppTheme.dashFieldTextStyle(context),
+            decoration: _inputDecoration(
+              context,
+              hint: 'e.g. Database Configuration Training',
+              prefixIcon: Icon(
+                Icons.article_outlined,
+                color: secondary,
+                size: 20,
+              ),
+            ),
+          ),
+          const SizedBox(height: 14),
+          _fieldLabel(context, 'Description'),
+          TextField(
+            controller: _descriptionController,
+            minLines: 5,
+            maxLines: 6,
+            textCapitalization: TextCapitalization.sentences,
+            style: AppTheme.dashFieldTextStyle(context),
+            decoration: _inputDecoration(
+              context,
+              hint:
+                  'Briefly describe the activities, tasks, or lessons completed today...',
+              prefixIcon: Padding(
+                padding: const EdgeInsets.only(bottom: 48),
+                child: Icon(Icons.edit_outlined, color: secondary, size: 18),
+              ),
+              alignLabelWithHint: true,
+            ),
+          ),
+          const SizedBox(height: 14),
+          _fieldLabel(context, 'Attachment', hint: '(Optional)'),
+          CustomPaint(
+            painter: _DashedRRectPainter(
+              color: hasFile
+                  ? AppTheme.primaryNavy.withValues(alpha: 0.55)
+                  : AppTheme.dashHairlineOf(context),
+              radius: 12,
+            ),
+            child: Material(
+              color: _isDark(context)
+                  ? AppTheme.dashMutedSurfaceOf(context)
+                  : const Color(0xFFFAFBFC),
+              borderRadius: BorderRadius.circular(12),
+              child: InkWell(
+                onTap: _pickFile,
+                borderRadius: BorderRadius.circular(12),
+                child: SizedBox(
+                  height: compact ? 132 : 148,
+                  width: double.infinity,
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      const Icon(
+                        Icons.cloud_upload_outlined,
+                        size: 28,
+                        color: AppTheme.primaryNavy,
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        'Drag and drop a file here or browse',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          color: primary,
+                          fontWeight: FontWeight.w600,
+                          fontSize: 13.5,
+                        ),
+                      ),
+                      const SizedBox(height: 3),
+                      Text(
+                        'JPG, PNG or PDF • Maximum 10 MB',
+                        style: TextStyle(color: secondary, fontSize: 12),
+                      ),
+                      const SizedBox(height: 10),
+                      OutlinedButton(
+                        onPressed: _pickFile,
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: AppTheme.primaryNavy,
+                          side: BorderSide(
+                            color: AppTheme.primaryNavy.withValues(alpha: 0.45),
                           ),
-                          blurRadius: 16,
-                          offset: const Offset(0, 6),
+                          minimumSize: const Size(0, 36),
+                          padding: const EdgeInsets.symmetric(horizontal: 16),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                        ),
+                        child: const Text('Choose file'),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+          if (hasFile) ...[
+            const SizedBox(height: 10),
+            Container(
+              padding: const EdgeInsets.fromLTRB(12, 10, 6, 10),
+              decoration: BoxDecoration(
+                color: AppTheme.dashMutedSurfaceOf(context),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: AppTheme.dashHairlineOf(context)),
+              ),
+              child: Row(
+                children: [
+                  const Icon(
+                    Icons.insert_drive_file_rounded,
+                    size: 20,
+                    color: AppTheme.primaryNavy,
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          _selectedFile!.name,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                            color: primary,
+                          ),
+                        ),
+                        Text(
+                          '${_fileKindLabel(_selectedFile!.name)} • ${_fileSizeLabel(_selectedFile!)}',
+                          style: TextStyle(fontSize: 12, color: secondary),
                         ),
                       ],
                     ),
-                    child: FilledButton.icon(
-                      onPressed: _submitting ? null : _submit,
-                      icon: _submitting
-                          ? const SizedBox(
-                              width: 18,
-                              height: 18,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2,
-                                color: AppTheme.white,
-                              ),
-                            )
-                          : const Icon(Icons.send_rounded, size: 20),
-                      label: Text(
-                        _submitting ? 'Submitting…' : 'Submit report',
-                      ),
-                      style: FilledButton.styleFrom(
-                        backgroundColor: Colors.transparent,
-                        shadowColor: Colors.transparent,
-                        foregroundColor: AppTheme.white,
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 24,
-                          vertical: 14,
-                        ),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(14),
-                        ),
+                  ),
+                  TextButton(
+                    onPressed: _clearSelectedFile,
+                    child: const Text('Remove'),
+                  ),
+                ],
+              ),
+            ),
+          ],
+          const SizedBox(height: 16),
+          if (compact)
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                _submitButton(fullWidth: true),
+                const SizedBox(height: 8),
+                OutlinedButton(
+                  onPressed: _submitting ? null : _clearForm,
+                  style: _clearButtonStyle(context, primary),
+                  child: const Text('Clear'),
+                ),
+              ],
+            )
+          else
+            Row(
+              children: [
+                OutlinedButton(
+                  onPressed: _submitting ? null : _clearForm,
+                  style: _clearButtonStyle(context, primary),
+                  child: const Text('Clear'),
+                ),
+                const Spacer(),
+                SizedBox(width: 184, child: _submitButton(fullWidth: false)),
+              ],
+            ),
+        ],
+      ),
+    );
+  }
+
+  ButtonStyle _clearButtonStyle(BuildContext context, Color primary) {
+    return OutlinedButton.styleFrom(
+      foregroundColor: primary,
+      side: BorderSide(color: AppTheme.dashHairlineOf(context)),
+      minimumSize: const Size(88, 44),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+    );
+  }
+
+  Widget _submitButton({required bool fullWidth}) {
+    return FilledButton.icon(
+      onPressed: _submitting ? null : _submit,
+      icon: _submitting
+          ? const SizedBox(
+              width: 16,
+              height: 16,
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                color: Colors.white,
+              ),
+            )
+          : const Icon(Icons.send_rounded, size: 18),
+      label: Text(_submitting ? 'Submitting…' : 'Submit Report'),
+      style: FilledButton.styleFrom(
+        backgroundColor: AppTheme.primaryNavy,
+        foregroundColor: Colors.white,
+        disabledBackgroundColor: AppTheme.primaryNavy.withValues(alpha: 0.45),
+        minimumSize: Size(fullWidth ? double.infinity : 170, 44),
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      ),
+    );
+  }
+
+  Widget _dateFilterButton(BuildContext context) {
+    final primary = AppTheme.dashTextPrimaryOf(context);
+    final filtering = _filterByDate != null;
+    final dateLabel = filtering
+        ? _formatDateOnly(_filterByDate!)
+        : 'Select date';
+    return OutlinedButton.icon(
+      onPressed: _pickFilterDate,
+      icon: const Icon(Icons.calendar_today_rounded, size: 16),
+      label: Text(dateLabel, overflow: TextOverflow.ellipsis),
+      style: OutlinedButton.styleFrom(
+        foregroundColor: primary,
+        side: BorderSide(color: AppTheme.dashHairlineOf(context)),
+        minimumSize: const Size(double.infinity, 44),
+        padding: const EdgeInsets.symmetric(horizontal: 12),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(11)),
+      ),
+    );
+  }
+
+  Widget _historyControls(BuildContext context, {required bool compact}) {
+    final secondary = AppTheme.dashTextSecondaryOf(context);
+    final searchField = TextField(
+      controller: _searchController,
+      style: AppTheme.dashFieldTextStyle(context),
+      decoration: _inputDecoration(
+        context,
+        hint: 'Search reports...',
+        prefixIcon: Icon(Icons.search_rounded, color: secondary, size: 20),
+      ),
+    );
+
+    if (compact) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          searchField,
+          const SizedBox(height: 10),
+          _dateFilterButton(context),
+        ],
+      );
+    }
+
+    return Row(
+      children: [
+        Expanded(flex: 6, child: searchField),
+        const SizedBox(width: 10),
+        Expanded(flex: 4, child: _dateFilterButton(context)),
+      ],
+    );
+  }
+
+  Widget _buildHistoryCard(BuildContext context, {required bool compact}) {
+    final primary = AppTheme.dashTextPrimaryOf(context);
+    final secondary = AppTheme.dashTextSecondaryOf(context);
+    final filtering = _filterByDate != null;
+
+    return Container(
+      padding: EdgeInsets.fromLTRB(
+        compact ? 16 : 20,
+        compact ? 16 : 20,
+        compact ? 16 : 20,
+        compact ? 16 : 18,
+      ),
+      decoration: _cardDecoration(context),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 36,
+                height: 36,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: AppTheme.primaryNavy.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: const Icon(
+                  Icons.history_rounded,
+                  size: 20,
+                  color: AppTheme.primaryNavy,
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Report History',
+                      style: TextStyle(
+                        color: primary,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w800,
                       ),
                     ),
+                    const SizedBox(height: 2),
+                    Text(
+                      'Review your previously submitted daily training reports.',
+                      style: TextStyle(
+                        color: secondary,
+                        fontSize: 13,
+                        height: 1.3,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          if (!_loading && _reports.isNotEmpty) ...[
+            const SizedBox(height: 14),
+            _historyControls(context, compact: compact),
+            Row(
+              children: [
+                IconButton(
+                  tooltip: 'Previous day',
+                  onPressed: () => _shiftFilterDay(-1),
+                  icon: const Icon(Icons.chevron_left_rounded),
+                  visualDensity: VisualDensity.compact,
+                ),
+                IconButton(
+                  tooltip: 'Next day',
+                  onPressed: () => _shiftFilterDay(1),
+                  icon: const Icon(Icons.chevron_right_rounded),
+                  visualDensity: VisualDensity.compact,
+                ),
+                const Spacer(),
+                if (filtering)
+                  TextButton(
+                    onPressed: _clearDateFilter,
+                    child: const Text('Show all'),
+                  ),
+              ],
+            ),
+          ],
+          const SizedBox(height: 12),
+          _buildReportsList(context),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildReminderCard(BuildContext context) {
+    final primary = AppTheme.dashTextPrimaryOf(context);
+    final secondary = AppTheme.dashTextSecondaryOf(context);
+    final dark = _isDark(context);
+    return Container(
+      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+      decoration: BoxDecoration(
+        color: dark
+            ? AppTheme.primaryNavy.withValues(alpha: 0.12)
+            : const Color(0xFFFFF6EE),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: AppTheme.primaryNavy.withValues(alpha: dark ? 0.28 : 0.2),
+        ),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(
+            Icons.lightbulb_outline_rounded,
+            size: 18,
+            color: AppTheme.primaryNavy,
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Reminder',
+                  style: TextStyle(
+                    color: primary,
+                    fontWeight: FontWeight.w800,
+                    fontSize: 13,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  'Submit your daily training report regularly to keep track of your learning progress and activities.',
+                  style: TextStyle(
+                    color: secondary,
+                    fontSize: 12.5,
+                    height: 1.4,
                   ),
                 ),
               ],
@@ -643,474 +983,233 @@ class _TrainingDailyReportEmployeeScreenState
     );
   }
 
-  static const Color _datePillAccent = Color(0xFFF0671A);
-
-  /// Tappable date pill — opens the calendar to browse by day.
-  Widget _buildSelectableDatePill(BuildContext context) {
-    final filtering = _filterByDate != null;
-    final label = filtering
-        ? _formatDateOnly(_filterByDate!)
-        : 'Tap to select date';
-
-    return Semantics(
-      button: true,
-      label: 'Selected date $label. Double tap to open calendar.',
-      child: MouseRegion(
-        cursor: SystemMouseCursors.click,
-        child: Material(
-          color: Colors.transparent,
-          child: InkWell(
-            onTap: _pickFilterDate,
-            borderRadius: BorderRadius.circular(20),
-            child: Ink(
-              decoration: BoxDecoration(
-                color: AppTheme.dashPanelOf(context),
-                borderRadius: BorderRadius.circular(20),
-                border: Border.all(
-                  color: _datePillAccent.withValues(alpha: 0.55),
-                  width: 1.2,
-                ),
-              ),
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(
-                    Icons.calendar_today_rounded,
-                    size: 18,
-                    color: _datePillAccent,
-                  ),
-                  const SizedBox(width: 8),
-                  Text(
-                    label,
-                    style: TextStyle(
-                      color: _datePillAccent,
-                      fontSize: 14,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                  Icon(
-                    Icons.arrow_drop_down_rounded,
-                    size: 22,
-                    color: _datePillAccent.withValues(alpha: 0.9),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildDateFilterBar(BuildContext context) {
+  Widget _emptyState({
+    required BuildContext context,
+    required IconData icon,
+    required String title,
+    required String body,
+    Widget? action,
+  }) {
     final primary = AppTheme.dashTextPrimaryOf(context);
     final secondary = AppTheme.dashTextSecondaryOf(context);
-    final dates = _datesWithReports;
-    final filtering = _filterByDate != null;
-    final accent = _accent(context);
-
-    return Container(
-      padding: const EdgeInsets.fromLTRB(18, 16, 18, 14),
-      decoration: EmployeeDashUi.elevatedPanel(context),
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 28, horizontal: 8),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Row(
-            children: [
-              Icon(Icons.calendar_month_rounded, size: 20, color: accent),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Text(
-                  'Browse by date',
-                  style: TextStyle(
-                    color: primary,
-                    fontWeight: FontWeight.w700,
-                    fontSize: 14,
-                  ),
-                ),
-              ),
-              if (filtering)
-                TextButton(
-                  onPressed: _clearDateFilter,
-                  style: EmployeeDashUi.ghostAction(context),
-                  child: const Text('Show all'),
-                ),
-            ],
-          ),
-          const SizedBox(height: 4),
+          Icon(icon, size: 40, color: AppTheme.primaryNavy.withValues(alpha: 0.7)),
+          const SizedBox(height: 10),
           Text(
-            'Tap the date to open the calendar, or use the arrows to move day by day.',
-            style: TextStyle(color: secondary, fontSize: 12.5, height: 1.4),
-          ),
-          const SizedBox(height: 14),
-          Row(
-            children: [
-              IconButton(
-                tooltip: 'Previous day',
-                onPressed: () => _shiftFilterDay(-1),
-                icon: Icon(Icons.chevron_left_rounded, color: accent),
-                style: IconButton.styleFrom(
-                  backgroundColor: _accentSurface(context),
-                ),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Align(
-                  alignment: Alignment.center,
-                  child: _buildSelectableDatePill(context),
-                ),
-              ),
-              const SizedBox(width: 8),
-              IconButton(
-                tooltip: 'Next day',
-                onPressed: () {
-                  final next = (_filterByDate ?? _toLocalDate(DateTime.now()))
-                      .add(const Duration(days: 1));
-                  if (next.isAfter(_toLocalDate(DateTime.now()))) return;
-                  setState(() => _filterByDate = next);
-                },
-                icon: Icon(Icons.chevron_right_rounded, color: accent),
-                style: IconButton.styleFrom(
-                  backgroundColor: _accentSurface(context),
-                ),
-              ),
-            ],
-          ),
-          if (dates.length > 1) ...[
-            const SizedBox(height: 14),
-            Text(
-              'Days with reports',
-              style: EmployeeDashUi.metricLabel(context),
+            title,
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: primary,
+              fontWeight: FontWeight.w700,
+              fontSize: 15,
             ),
-            const SizedBox(height: 8),
-            SizedBox(
-              height: 36,
-              child: ListView.separated(
-                scrollDirection: Axis.horizontal,
-                itemCount: dates.length,
-                separatorBuilder: (_, __) => const SizedBox(width: 8),
-                itemBuilder: (context, index) {
-                  final day = dates[index];
-                  final selected = filtering && _filterByDate == day;
-                  final count = _reports
-                      .where((r) => _toLocalDate(r.submittedAt) == day)
-                      .length;
-                  return InputChip(
-                    label: Text(
-                      '${_formatDateOnly(day)} ($count)',
-                      style: TextStyle(
-                        fontSize: 12,
-                        fontWeight: selected
-                            ? FontWeight.w700
-                            : FontWeight.w500,
-                        color: selected ? _datePillAccent : primary,
-                      ),
-                    ),
-                    avatar: Icon(
-                      Icons.calendar_today_rounded,
-                      size: 16,
-                      color: selected ? _datePillAccent : accent,
-                    ),
-                    onPressed: () => setState(() => _filterByDate = day),
-                    backgroundColor: selected
-                        ? _datePillAccent.withValues(alpha: 0.12)
-                        : AppTheme.dashMutedSurfaceOf(context),
-                    side: BorderSide(
-                      color: selected
-                          ? _datePillAccent.withValues(alpha: 0.55)
-                          : AppTheme.dashHairlineOf(context),
-                    ),
-                  );
-                },
-              ),
-            ),
-          ],
+          ),
+          const SizedBox(height: 6),
+          Text(
+            body,
+            textAlign: TextAlign.center,
+            style: TextStyle(color: secondary, fontSize: 13, height: 1.4),
+          ),
+          if (action != null) ...[const SizedBox(height: 10), action],
         ],
       ),
     );
   }
 
   Widget _buildReportsList(BuildContext context) {
-    final primary = AppTheme.dashTextPrimaryOf(context);
-    final secondary = AppTheme.dashTextSecondaryOf(context);
-
     if (_loading) {
-      return Container(
-        padding: const EdgeInsets.symmetric(vertical: 40),
-        decoration: EmployeeDashUi.elevatedPanel(context),
-        child: const Center(child: CircularProgressIndicator()),
+      return const Padding(
+        padding: EdgeInsets.symmetric(vertical: 32),
+        child: Center(child: CircularProgressIndicator()),
       );
     }
 
-    final accent = _accent(context);
-
     if (_reports.isEmpty) {
-      return Container(
-        padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 28),
-        decoration: EmployeeDashUi.elevatedPanel(context),
-        child: Row(
-          children: [
-            Container(
-              padding: const EdgeInsets.all(14),
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: _accentSurface(context),
-              ),
-              child: Icon(Icons.inbox_outlined, color: accent, size: 28),
-            ),
-            const SizedBox(width: 18),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'No reports yet',
-                    style: TextStyle(
-                      color: primary,
-                      fontWeight: FontWeight.w700,
-                      fontSize: 16,
-                    ),
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    'When you submit your first daily report, it will show up here.',
-                    style: TextStyle(
-                      color: secondary,
-                      fontSize: 13.5,
-                      height: 1.45,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
+      return _emptyState(
+        context: context,
+        icon: Icons.description_outlined,
+        title: 'No training reports yet',
+        body:
+            'When you submit your first daily report, it will show up here.',
+        action: TextButton(
+          onPressed: _focusCreateForm,
+          child: const Text('Create your first report'),
         ),
       );
     }
 
     final visible = _visibleReports;
     if (visible.isEmpty) {
-      final dayLabel = _filterByDate != null
-          ? _formatDateOnly(_filterByDate!)
-          : '';
-      return Container(
-        padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 28),
-        decoration: EmployeeDashUi.elevatedPanel(context),
-        child: Row(
-          children: [
-            Container(
-              padding: const EdgeInsets.all(14),
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: _accentSurface(context),
-              ),
-              child: Icon(Icons.event_busy_rounded, color: accent, size: 28),
-            ),
-            const SizedBox(width: 18),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'No reports on $dayLabel',
-                    style: TextStyle(
-                      color: primary,
-                      fontWeight: FontWeight.w700,
-                      fontSize: 16,
-                    ),
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    'Try another date using the calendar, arrows, or the day chips above.',
-                    style: TextStyle(
-                      color: secondary,
-                      fontSize: 13.5,
-                      height: 1.45,
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  TextButton(
-                    onPressed: _clearDateFilter,
-                    child: const Text('Show all reports'),
-                  ),
-                ],
-              ),
-            ),
-          ],
+      final searching = _searchController.text.trim().isNotEmpty;
+      return _emptyState(
+        context: context,
+        icon: Icons.search_off_rounded,
+        title: searching ? 'No matching reports' : 'No reports on this date',
+        body: searching
+            ? 'Try a different search or clear the date filter.'
+            : 'Try another date or show all reports.',
+        action: TextButton(
+          onPressed: () {
+            _searchController.clear();
+            _clearDateFilter();
+          },
+          child: const Text('Show all reports'),
         ),
       );
     }
 
     return Column(
-      children: visible
-          .map(
-            (r) => Padding(
-              padding: const EdgeInsets.only(bottom: 12),
-              child: Material(
-                color: Colors.transparent,
-                child: InkWell(
-                  onTap: () => showReadOnlySavedEntryDialog(
-                    context,
-                    title: 'Submitted report',
-                    subtitle: r.title.trim().isNotEmpty
-                        ? r.title
-                        : r.submittedAt.toLocal().toString().split('.').first,
-                    previewBuilder: () =>
-                        TrainingDailyReportReadOnlyView(report: r),
-                    contentWidth: 640,
-                  ),
-                  borderRadius: BorderRadius.circular(EmployeeDashUi.radiusMd),
-                  child: Ink(
-                    decoration: EmployeeDashUi.summaryCard(
-                      context: context,
-                      tint: _isDark(context)
-                          ? AppTheme.dashPanelOf(context)
-                          : const Color(0xFFFFF8F3),
-                      accent: AppTheme.primaryNavy,
-                    ),
-                    child: Padding(
-                      padding: const EdgeInsets.fromLTRB(18, 16, 16, 14),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Expanded(
-                                child: Text(
-                                  r.title,
-                                  style: TextStyle(
-                                    color: primary,
-                                    fontWeight: FontWeight.w700,
-                                    fontSize: 15,
-                                    height: 1.25,
-                                  ),
-                                ),
-                              ),
-                              const SizedBox(width: 10),
-                              _StatusChip(status: r.status),
-                            ],
-                          ),
-                          const SizedBox(height: 8),
-                          Text(
-                            (r.description != null &&
-                                    r.description!.trim().isNotEmpty)
-                                ? r.description!.trim()
-                                : 'No description provided.',
-                            style: TextStyle(
-                              color: secondary,
-                              fontSize: 13.5,
-                              height: 1.45,
-                            ),
-                            maxLines: 3,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                          const SizedBox(height: 12),
-                          Row(
-                            children: [
-                              Icon(
-                                Icons.schedule_rounded,
-                                size: 16,
-                                color: secondary.withValues(alpha: 0.75),
-                              ),
-                              const SizedBox(width: 6),
-                              Expanded(
-                                child: Text(
-                                  'Submitted ${_formatSubmittedAt(r.submittedAt)}',
-                                  style: TextStyle(
-                                    color: secondary,
-                                    fontSize: 12.5,
-                                    fontWeight: FontWeight.w500,
-                                  ),
-                                ),
-                              ),
-                              TextButton.icon(
-                                onPressed: () => showReadOnlySavedEntryDialog(
-                                  context,
-                                  title: 'Submitted report',
-                                  subtitle: r.title.trim().isNotEmpty
-                                      ? r.title
-                                      : r.submittedAt
-                                            .toLocal()
-                                            .toString()
-                                            .split('.')
-                                            .first,
-                                  previewBuilder: () =>
-                                      TrainingDailyReportReadOnlyView(
-                                        report: r,
-                                      ),
-                                  contentWidth: 640,
-                                ),
-                                icon: const Icon(
-                                  Icons.visibility_outlined,
-                                  size: 16,
-                                ),
-                                label: const Text('View'),
-                                style: EmployeeDashUi.ghostAction(context),
-                              ),
-                            ],
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          )
-          .toList(),
+      children: [
+        for (var i = 0; i < visible.length; i++) ...[
+          if (i > 0)
+            Divider(height: 1, color: AppTheme.dashHairlineOf(context)),
+          _ReportHistoryRow(
+            report: visible[i],
+            dateLabel: _formatListDate(visible[i].submittedAt),
+            submittedAtLabel: _formatSubmittedAt(visible[i].submittedAt),
+            onView: () => _openReport(visible[i]),
+          ),
+        ],
+      ],
     );
   }
 
   @override
   Widget build(BuildContext context) {
-    final visibleCount = _visibleReports.length;
-    final totalCount = _reports.length;
-    String countLabel = '';
-    if (!_loading && totalCount > 0) {
-      if (_filterByDate != null) {
-        countLabel = ' ($visibleCount of $totalCount)';
-      } else {
-        countLabel = ' ($totalCount)';
-      }
-    }
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final twoCol = constraints.maxWidth >= 900;
+        final compact = constraints.maxWidth < 768;
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        KeyedSubtree(
-          key: widget.tutorialHeaderKey,
-          child: _buildPageHeader(context),
-        ),
-        const SizedBox(height: 22),
-        KeyedSubtree(
+        final form = KeyedSubtree(
           key: widget.tutorialFormKey,
-          child: _buildFormCard(context),
-        ),
-        const SizedBox(height: 28),
-        KeyedSubtree(
-          key: widget.tutorialHistoryKey,
+          child: _buildFormCard(context, compact: compact),
+        );
+        final history = Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            KeyedSubtree(
+              key: widget.tutorialHistoryKey,
+              child: _buildHistoryCard(context, compact: compact),
+            ),
+            const SizedBox(height: 12),
+            _buildReminderCard(context),
+          ],
+        );
+
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            KeyedSubtree(
+              key: widget.tutorialHeaderKey,
+              child: _buildHero(context),
+            ),
+            const SizedBox(height: 16),
+            if (twoCol)
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(flex: 108, child: form),
+                  const SizedBox(width: 18),
+                  Expanded(flex: 92, child: history),
+                ],
+              )
+            else ...[
+              form,
+              const SizedBox(height: 16),
+              history,
+            ],
+          ],
+        );
+      },
+    );
+  }
+}
+
+class _ReportHistoryRow extends StatelessWidget {
+  const _ReportHistoryRow({
+    required this.report,
+    required this.dateLabel,
+    required this.submittedAtLabel,
+    required this.onView,
+  });
+
+  final TrainingDailyReport report;
+  final String dateLabel;
+  final String submittedAtLabel;
+  final VoidCallback onView;
+
+  @override
+  Widget build(BuildContext context) {
+    final primary = AppTheme.dashTextPrimaryOf(context);
+    final secondary = AppTheme.dashTextSecondaryOf(context);
+    final attachment = (report.attachmentName ?? '').trim();
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onView,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 12),
           child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              EmployeeSectionHeader(
-                title: 'My previous reports$countLabel',
-                icon: Icons.history_rounded,
-                subtitle: _filterByDate != null
-                    ? 'Showing reports submitted on ${_formatDateOnly(_filterByDate!)}.'
-                    : 'Pick a date below or open any row to see the full entry you submitted.',
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          report.title,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            color: primary,
+                            fontWeight: FontWeight.w700,
+                            fontSize: 14,
+                            height: 1.25,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Tooltip(
+                          message: submittedAtLabel,
+                          child: Text(
+                            dateLabel,
+                            style: TextStyle(color: secondary, fontSize: 12.5),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  _StatusChip(status: report.status),
+                ],
               ),
-              if (!_loading && _reports.isNotEmpty) ...[
-                const SizedBox(height: 14),
-                _buildDateFilterBar(context),
-              ],
-              const SizedBox(height: 14),
-              _buildReportsList(context),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      attachment.isEmpty ? 'No attachment' : attachment,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(color: secondary, fontSize: 12.5),
+                    ),
+                  ),
+                  TextButton(
+                    onPressed: onView,
+                    child: const Text('View →'),
+                  ),
+                ],
+              ),
             ],
           ),
         ),
-      ],
+      ),
     );
   }
 }
@@ -1130,6 +1229,9 @@ class _StatusChip extends StatelessWidget {
     final raw = status.trim();
     Color color;
     switch (raw.toLowerCase()) {
+      case 'submitted':
+        color = const Color(0xFF546E7A);
+        break;
       case 'seen':
         color = Colors.blueGrey;
         break;
@@ -1147,18 +1249,11 @@ class _StatusChip extends StatelessWidget {
         color = Colors.grey;
     }
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(20),
         color: color.withValues(alpha: 0.12),
         border: Border.all(color: color.withValues(alpha: 0.3)),
-        boxShadow: [
-          BoxShadow(
-            color: color.withValues(alpha: 0.08),
-            blurRadius: 6,
-            offset: const Offset(0, 2),
-          ),
-        ],
       ),
       child: Text(
         _displayLabel(raw),
@@ -1166,9 +1261,43 @@ class _StatusChip extends StatelessWidget {
           color: color,
           fontSize: 11,
           fontWeight: FontWeight.w700,
-          letterSpacing: 0.35,
         ),
       ),
     );
+  }
+}
+
+class _DashedRRectPainter extends CustomPainter {
+  _DashedRRectPainter({required this.color, required this.radius});
+
+  final Color color;
+  final double radius;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    const dashWidth = 6.0;
+    const dashGap = 4.0;
+    final paint = Paint()
+      ..color = color
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.2;
+    final rrect = RRect.fromRectAndRadius(
+      Offset.zero & size,
+      Radius.circular(radius),
+    );
+    final path = Path()..addRRect(rrect);
+    for (final metric in path.computeMetrics()) {
+      var distance = 0.0;
+      while (distance < metric.length) {
+        final next = (distance + dashWidth).clamp(0, metric.length).toDouble();
+        canvas.drawPath(metric.extractPath(distance, next), paint);
+        distance += dashWidth + dashGap;
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _DashedRRectPainter oldDelegate) {
+    return oldDelegate.color != color || oldDelegate.radius != radius;
   }
 }

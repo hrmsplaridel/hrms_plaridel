@@ -29,11 +29,10 @@ class EmployeeLeaveActions {
         result != kLeaveFormResultSubmitted) {
       return;
     }
+    showLeaveFormSuccessSnackBar(context, result);
     if (userId != null && userId.isNotEmpty) {
       await provider.loadMyLeaveData(userId);
     }
-    if (!context.mounted || !isMounted()) return;
-    showLeaveFormSuccessSnackBar(context, result);
   }
 
   Widget buildEditLeaveRequestForm({
@@ -110,6 +109,8 @@ class EmployeeLeaveActions {
         recommendationOfficerName: formSignatories.recommendationOfficer?.name,
         recommendationOfficerTitle:
             formSignatories.recommendationOfficer?.title,
+        approvingAuthorityName: formSignatories.approvingAuthority?.name,
+        approvingAuthorityTitle: formSignatories.approvingAuthority?.title,
         applicantSignatureBytes:
             formSignatories.applicantSignature?.signatureImageBytes,
         name: 'Leave_Application_${target.id ?? target.userId}.pdf',

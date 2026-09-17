@@ -18,11 +18,8 @@ class RspAttachmentActions extends StatelessWidget {
   final String path;
   final String fileName;
 
-  Future<String?> _resolveUrl() =>
-      RecruitmentRepo.instance.getAttachmentDownloadUrl(
-        path,
-        fileName: fileName,
-      );
+  Future<String?> _resolveUrl() => RecruitmentRepo.instance
+      .getAttachmentDownloadUrl(path, fileName: fileName);
 
   Future<void> _preview(BuildContext context) async {
     final url = await _resolveUrl();
@@ -158,6 +155,8 @@ void showRspAttachmentPreviewDialog(
 }) {
   showDialog<void>(
     context: context,
+    useRootNavigator: true,
+    barrierDismissible: true,
     builder: (ctx) => _RspAttachmentPreviewDialog(
       url: url,
       fileName: fileName,
@@ -224,11 +223,10 @@ class _RspAttachmentPreviewDialogState
         ),
       );
       final status = res.statusCode ?? 0;
-      final contentType =
-          (res.headers.value('content-type') ?? '').toLowerCase();
+      final contentType = (res.headers.value('content-type') ?? '')
+          .toLowerCase();
       final looksJson = contentType.contains('application/json');
-      final looksHtmlError =
-          status >= 400 && contentType.contains('text/html');
+      final looksHtmlError = status >= 400 && contentType.contains('text/html');
 
       if (status >= 400 || looksJson || looksHtmlError) {
         if (!mounted) return;
@@ -269,7 +267,7 @@ class _RspAttachmentPreviewDialogState
 
     return Dialog(
       insetPadding: const EdgeInsets.all(24),
-      clipBehavior: Clip.antiAlias,
+      clipBehavior: Clip.none,
       child: SizedBox(
         width: dialogW,
         height: dialogH,
@@ -313,10 +311,7 @@ class _RspAttachmentPreviewDialogState
                     borderRadius: BorderRadius.circular(10),
                     border: Border.all(color: AppTheme.dashHairlineOf(context)),
                   ),
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(10),
-                    child: _buildBody(context),
-                  ),
+                  child: _buildBody(context),
                 ),
               ),
               const SizedBox(height: 12),

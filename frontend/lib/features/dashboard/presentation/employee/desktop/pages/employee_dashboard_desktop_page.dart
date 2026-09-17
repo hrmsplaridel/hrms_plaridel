@@ -459,12 +459,11 @@ class _EmployeeDashboardState extends State<EmployeeDashboardDesktopPage>
         result != kLeaveFormResultSubmitted) {
       return;
     }
+    showLeaveFormSuccessSnackBar(context, result);
     final userId = context.read<AuthProvider>().user?.id;
     if (userId != null && userId.isNotEmpty) {
       await context.read<LeaveProvider>().loadMyLeaveData(userId);
     }
-    if (!mounted) return;
-    showLeaveFormSuccessSnackBar(context, result);
   }
 
   void _openHrmsAssistant() {
@@ -693,12 +692,8 @@ class _EmployeeDashboardState extends State<EmployeeDashboardDesktopPage>
                             homeScrollPadding: employeeMainScrollPadding(
                               context,
                             ),
-                            settingsScrollPadding: const EdgeInsets.fromLTRB(
-                              12,
-                              8,
-                              12,
-                              28,
-                            ),
+                            settingsScrollPadding:
+                                kDashboardSettingsScrollPadding,
                           ),
                         ),
                       ),

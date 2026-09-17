@@ -843,20 +843,16 @@ class _DocuTrackerPermissionEditorScreenState
       clipBehavior: Clip.antiAlias,
       child: Material(
         type: MaterialType.transparency,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
+        child: ExpansionTile(
+          initiallyExpanded: roleId != DocuTrackerRoles.admin,
+          title: Text(
+            _roleLabel(roleId),
+            style: const TextStyle(fontWeight: FontWeight.w800),
+          ),
+          subtitle: Text(
+            isAdmin ? 'Full system access' : _documentTypeLabel(_documentType),
+          ),
           children: [
-            ListTile(
-              title: Text(
-                '${_roleLabel(roleId)} access',
-                style: const TextStyle(fontWeight: FontWeight.w800),
-              ),
-              subtitle: Text(
-                _documentType == '*'
-                    ? 'Default for all document types'
-                    : 'Applies to ${_documentTypeLabel(_documentType)} only',
-              ),
-            ),
             if (isAdmin)
               const ListTile(
                 leading: Icon(Icons.verified_user_outlined),
@@ -961,14 +957,14 @@ class _DocuTrackerPermissionEditorScreenState
           Container(
             constraints: const BoxConstraints(maxHeight: 300),
             decoration: DocuTrackerTokens.cardDecoration(context: context),
-            child: _filteredEmployees().isEmpty
-                ? const Padding(
-                    padding: EdgeInsets.all(16),
-                    child: Text('No matching active employees.'),
-                  )
-                : Material(
-                    type: MaterialType.transparency,
-                    child: ListView(
+            child: Material(
+              type: MaterialType.transparency,
+              child: _filteredEmployees().isEmpty
+                  ? const Padding(
+                      padding: EdgeInsets.all(16),
+                      child: Text('No matching active employees.'),
+                    )
+                  : ListView(
                       shrinkWrap: true,
                       children: _filteredEmployees()
                           .map(
@@ -980,7 +976,7 @@ class _DocuTrackerPermissionEditorScreenState
                           )
                           .toList(),
                     ),
-                  ),
+            ),
           ),
         ],
         const SizedBox(height: 12),

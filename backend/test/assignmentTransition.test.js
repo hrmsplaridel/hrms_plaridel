@@ -131,6 +131,32 @@ test('active assignment selection rejects inactive organizational records', asyn
   );
 });
 
+for (const isActive of [true, false]) {
+  for (const employeeState of [
+    { employee_is_active: false },
+    { employee_status: 'resigned' },
+  ]) {
+    test(`new primary assignment rejects inactive employee: ${JSON.stringify(employeeState)}, assignment active=${isActive}`, async () => {
+      const calls = [];
+      const db = {
+        async query(sql) {
+          calls.push(sql);
+          if (sql.includes('AS employee_exists')) {
+            return { rowCount: 1, rows: [validSelectionRow(employeeState)] };
+          }
+          throw new Error(`Unexpected query after employee rejection: ${sql}`);
+        },
+      };
+      await assert.rejects(
+        createAssignmentTransition(db, assignmentPayload({ isActive })),
+        (error) => error instanceof AssignmentTransitionError &&
+          error.statusCode === 409 && /active employee account/.test(error.message)
+      );
+      assert.equal(calls.length, 1);
+    });
+  }
+}
+
 test('future transfer closes the current assignment on the previous day', async () => {
   const calls = [];
   const db = {

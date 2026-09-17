@@ -3,10 +3,12 @@ import 'dart:convert';
 import 'package:dio/dio.dart';
 
 import 'package:hrms_plaridel/core/api/client.dart';
+import 'package:hrms_plaridel/core/api/user_facing_api_error.dart';
 import 'leave_repository.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_balance.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_balance_ledger.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_request.dart';
+import 'package:hrms_plaridel/features/dtr/leave/models/leave_request_history.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_type.dart';
 
 class ApiLeaveRepository implements LeaveRepository {
@@ -47,12 +49,23 @@ class ApiLeaveRepository implements LeaveRepository {
       Map<String, dynamic>.from(v as Map);
 
   /// Extract backend error message from DioException for user-facing feedback.
-  static String _messageFromDio(DioException e) {
-    final data = e.response?.data;
+  static String _messageFromDio(
+    DioException e, {
+    bool submissionMayHaveCompleted = false,
+  }) {
+    var data = e.response?.data;
+    if (data is List<int>) {
+      try {
+        data = jsonDecode(utf8.decode(data));
+      } catch (_) {}
+    }
     if (data is Map && data['error'] != null) {
       return data['error'].toString();
     }
-    return e.message ?? 'Request failed';
+    return userFacingApiError(
+      e,
+      operationMayHaveCompleted: submissionMayHaveCompleted,
+    );
   }
 
   static String _employeeReadMessageFromDio(
@@ -124,7 +137,7 @@ class ApiLeaveRepository implements LeaveRepository {
       if (data == null) throw Exception('No data returned');
       return LeaveRequest.fromJson(data);
     } on DioException catch (e) {
-      throw Exception(_messageFromDio(e));
+      throw Exception(_messageFromDio(e, submissionMayHaveCompleted: true));
     }
   }
 
@@ -146,7 +159,7 @@ class ApiLeaveRepository implements LeaveRepository {
       if (data == null) throw Exception('No data returned');
       return LeaveRequest.fromJson(data);
     } on DioException catch (e) {
-      throw Exception(_messageFromDio(e));
+      throw Exception(_messageFromDio(e, submissionMayHaveCompleted: true));
     }
   }
 
@@ -165,7 +178,13 @@ class ApiLeaveRepository implements LeaveRepository {
       if (data == null) throw Exception('No data returned');
       return LeaveRequest.fromJson(data);
     } on DioException catch (e) {
-      throw Exception(_messageFromDio(e));
+      throw Exception(
+        _messageFromDio(
+          e,
+          submissionMayHaveCompleted:
+              request.status == LeaveRequestStatus.pending,
+        ),
+      );
     }
   }
 
@@ -181,7 +200,29 @@ class ApiLeaveRepository implements LeaveRepository {
       return LeaveRequest.fromJson(data);
     } on DioException catch (e) {
       if (e.response?.statusCode == 404) return null;
-      rethrow;
+      throw Exception(_messageFromDio(e));
+    }
+  }
+
+  @override
+  Future<List<LeaveRequestHistoryEntry>> listMyRequestHistory(
+    String requestId,
+  ) async {
+    try {
+      final safeId = Uri.encodeComponent(requestId.trim());
+      final res = await ApiClient.instance.get<List<dynamic>>(
+        '/api/leave/my/$safeId/history',
+      );
+      return (res.data ?? const [])
+          .map((item) => LeaveRequestHistoryEntry.fromJson(_asMap(item)))
+          .toList();
+    } on DioException catch (e) {
+      throw Exception(
+        _employeeReadMessageFromDio(
+          e,
+          'Unable to load leave request history. Please try again.',
+        ),
+      );
     }
   }
 
@@ -482,8 +523,7 @@ class ApiLeaveRepository implements LeaveRepository {
       );
       return res.data;
     } on DioException catch (e) {
-      if (e.response?.statusCode == 404) return null;
-      rethrow;
+      throw Exception(_messageFromDio(e));
     }
   }
 

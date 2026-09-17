@@ -55,6 +55,7 @@ async function validateAssignmentSelection(
     positionId,
     shiftId,
     requireActiveReferences = true,
+    requireActiveEmployee = requireActiveReferences,
   }
 ) {
   const employee = cleanRequiredSelectionId(employeeId, 'Employee');
@@ -100,16 +101,18 @@ async function validateAssignmentSelection(
   if (!row.shift_exists) {
     throw new AssignmentTransitionError('Selected shift was not found');
   }
-  if (requireActiveReferences) {
+  if (requireActiveEmployee) {
     if (
       !row.employee_is_active ||
       String(row.employee_status || 'active').toLowerCase() !== 'active'
     ) {
       throw new AssignmentTransitionError(
-        'An active assignment requires an active employee account',
+        'A new or active assignment requires an active employee account',
         409
       );
     }
+  }
+  if (requireActiveReferences) {
     if (!row.department_is_active) {
       throw new AssignmentTransitionError(
         'Selected department is inactive',
@@ -320,6 +323,7 @@ async function createAssignmentTransition(
     positionId,
     shiftId,
     requireActiveReferences: isActive === true,
+    requireActiveEmployee: true,
   });
   if (isActive) {
     validateEmployeeServiceCoverage(selection, {

@@ -24,6 +24,13 @@ const { coalesceDocumentTitle } = require('../utils/docutrackerDisplayTitle');
 const { sameEntityId } = require('../utils/sameEntityId');
 const { writeGovernanceAudit } = require('../services/docutrackerGovernanceAudit');
 const {
+  OfficialSignatoryError,
+  configureOfficialSignatory,
+  listOfficialSignatories,
+  resolveActiveMayor,
+} = require('../services/officialSignatoryService');
+const { todayInHrmsTimezone } = require('../utils/dateRangeParser');
+const {
   getDocumentBuilder,
   saveDocumentBuilder,
   createSignatureAsset,
@@ -1226,6 +1233,75 @@ router.put('/permission-policy', protect, requireAdmin, async (req, res) => {
     return permissionAdminErrorResponse(res, err, 'Failed to save system access settings');
   }
 });
+
+function officialSignatoryErrorResponse(res, error, fallback) {
+  if (error instanceof OfficialSignatoryError) {
+    return res.status(error.status).json({ error: error.message });
+  }
+  if (error?.code === '42P01') {
+    console.error(`[docutracker official signatories] ${fallback}`, error);
+    return res.status(503).json({
+      error: 'A required DocuTracker table is not initialized. Apply all DocuTracker migrations.',
+    });
+  }
+  console.error(`[docutracker official signatories] ${fallback}`, error);
+  return res.status(500).json({ error: fallback });
+}
+
+router.get('/official-signatories', protect, requireAdmin, async (req, res) => {
+  try {
+    const effectiveDate =
+      String(req.query?.effective_date || '').trim() || todayInHrmsTimezone();
+    const items = await listOfficialSignatories(pool, { effectiveDate });
+    return res.json({ effective_date: effectiveDate, items });
+  } catch (error) {
+    return officialSignatoryErrorResponse(
+      res,
+      error,
+      'Failed to load official signatories.'
+    );
+  }
+});
+
+router.get('/official-signatories/automatic-mayor', protect, requireAdmin, async (req, res) => {
+  try {
+    const effectiveDate =
+      String(req.query?.effective_date || '').trim() || todayInHrmsTimezone();
+    const mayor = await resolveActiveMayor(pool, effectiveDate);
+    return res.json({ effective_date: effectiveDate, mayor });
+  } catch (error) {
+    return officialSignatoryErrorResponse(
+      res,
+      error,
+      'Failed to load the active Mayor.'
+    );
+  }
+});
+
+router.put(
+  '/official-signatories/:roleKey',
+  protect,
+  requireAdmin,
+  async (req, res) => {
+    try {
+      const saved = await configureOfficialSignatory(pool, {
+        roleKey: req.params.roleKey,
+        employeeId: req.body?.employee_id,
+        effectiveFrom: req.body?.effective_from,
+        effectiveTo: req.body?.effective_to,
+        remarks: req.body?.remarks,
+        actorId: req.user.id,
+      });
+      return res.json(saved);
+    } catch (error) {
+      return officialSignatoryErrorResponse(
+        res,
+        error,
+        'Failed to configure official signatory.'
+      );
+    }
+  }
+);
 
 /**
  * GET /api/docutracker/documents/:id/history

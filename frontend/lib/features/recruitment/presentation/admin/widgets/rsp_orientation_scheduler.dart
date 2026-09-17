@@ -30,10 +30,7 @@ class _RspOrientationSchedulerState extends State<RspOrientationScheduler> {
       if (!mounted) return;
       setState(() {
         _applications = apps.where((a) => a.finalRequirementsApproved).toList()
-          ..sort(
-            (a, b) =>
-                a.fullName.toLowerCase().compareTo(b.fullName.toLowerCase()),
-          );
+          ..sort(_compareLatestAppliedFirst);
         _loading = false;
       });
     } catch (_) {
@@ -49,6 +46,18 @@ class _RspOrientationSchedulerState extends State<RspOrientationScheduler> {
   void initState() {
     super.initState();
     _load();
+  }
+
+  int _compareLatestAppliedFirst(
+    RecruitmentApplication a,
+    RecruitmentApplication b,
+  ) {
+    final ad = a.createdAt ?? a.updatedAt;
+    final bd = b.createdAt ?? b.updatedAt;
+    if (ad != null && bd != null) return bd.compareTo(ad);
+    if (ad != null) return -1;
+    if (bd != null) return 1;
+    return a.fullName.toLowerCase().compareTo(b.fullName.toLowerCase());
   }
 
   Set<String> get _positionFilterOptions {

@@ -19,6 +19,7 @@ import 'package:hrms_plaridel/features/docutracker/models/document_routing_recor
 import 'package:hrms_plaridel/features/docutracker/models/document_status.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document_type.dart';
 import 'package:hrms_plaridel/features/docutracker/models/linked_source_document.dart';
+import 'package:hrms_plaridel/features/docutracker/models/official_signatory.dart';
 import 'package:hrms_plaridel/features/docutracker/services/docutracker_document_visibility.dart';
 import 'package:hrms_plaridel/features/docutracker/services/docutracker_permission_service.dart';
 import 'package:hrms_plaridel/features/docutracker/services/docutracker_permissions_datasource.dart';
@@ -50,6 +51,11 @@ Never _throwRequestError(Object error) {
   throw _DocuTrackerRequestException(_apiErrorMessage(error));
 }
 
+String _isoDate(DateTime value) =>
+    '${value.year.toString().padLeft(4, '0')}-'
+    '${value.month.toString().padLeft(2, '0')}-'
+    '${value.day.toString().padLeft(2, '0')}';
+
 /// DocuTracker data via HRMS PostgreSQL API (replaces Supabase client).
 class DocuTrackerRepository implements DocuTrackerPermissionsDataSource {
   DocuTrackerRepository._() {
@@ -60,6 +66,65 @@ class DocuTrackerRepository implements DocuTrackerPermissionsDataSource {
   static const _base = '/api/docutracker';
 
   late final DocuTrackerPermissionService _permissionService;
+
+  Future<List<OfficialSignatoryPeriod>> listOfficialSignatories() async {
+    try {
+      final response = await ApiClient.instance.get<Map<String, dynamic>>(
+        '$_base/official-signatories',
+      );
+      final items = response.data?['items'];
+      if (items is! List) return const [];
+      return items
+          .whereType<Map>()
+          .map(
+            (item) => OfficialSignatoryPeriod.fromJson(
+              Map<String, dynamic>.from(item),
+            ),
+          )
+          .toList(growable: false);
+    } catch (error) {
+      throw Exception(_apiErrorMessage(error));
+    }
+  }
+
+  Future<AutomaticMayorSignatory?> getAutomaticMayorSignatory() async {
+    try {
+      final response = await ApiClient.instance.get<Map<String, dynamic>>(
+        '$_base/official-signatories/automatic-mayor',
+      );
+      final mayor = response.data?['mayor'];
+      if (mayor is! Map) return null;
+      return AutomaticMayorSignatory.fromJson(Map<String, dynamic>.from(mayor));
+    } catch (error) {
+      throw Exception(_apiErrorMessage(error));
+    }
+  }
+
+  Future<OfficialSignatoryPeriod> configureOfficialSignatory({
+    required String roleKey,
+    required String employeeId,
+    required DateTime effectiveFrom,
+    DateTime? effectiveTo,
+    String? remarks,
+  }) async {
+    try {
+      final response = await ApiClient.instance.put<Map<String, dynamic>>(
+        '$_base/official-signatories/${Uri.encodeComponent(roleKey)}',
+        data: {
+          'employee_id': employeeId,
+          'effective_from': _isoDate(effectiveFrom),
+          if (effectiveTo != null) 'effective_to': _isoDate(effectiveTo),
+          if (remarks != null && remarks.trim().isNotEmpty)
+            'remarks': remarks.trim(),
+        },
+      );
+      final data = response.data;
+      if (data == null) throw Exception('The saved official is unavailable.');
+      return OfficialSignatoryPeriod.fromJson(data);
+    } catch (error) {
+      throw Exception(_apiErrorMessage(error));
+    }
+  }
 
   Future<DocuTrackerResult<DocuTrackerLinkedSourceDocument>>
   getLinkedSourceDocument({

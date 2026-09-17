@@ -1,61 +1,21 @@
+import 'dart:math' as math;
+import 'dart:ui' show ImageFilter;
+
 import 'package:flutter/material.dart';
 
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
 
-/// Geometric accent mesh for the profile hero (replaces flat waves).
-class ProfileHeroMeshPainter extends CustomPainter {
-  ProfileHeroMeshPainter({required this.dark});
+/// Cropped Municipal Hall photograph used behind the profile banner.
+const String kPlaridelMunicipalHallAsset = 'assets/images/SETTINGS.jpg';
 
-  final bool dark;
+/// Intrinsic size of [kPlaridelMunicipalHallAsset] (portrait 3:4).
+const double kMunicipalHallImageWidth = 1536;
+const double kMunicipalHallImageHeight = 2048;
 
-  @override
-  void paint(Canvas canvas, Size size) {
-    final navy = dark ? const Color(0xFF2A3550) : AppTheme.primaryNavy;
-    final orange = const Color(0xFFE85D04);
+/// CSS `object-position: center 39%` — shift the photo up so the hall
+/// facade (not the sky) sits in the wide header.
+const double kMunicipalHallObjectPositionY = 0.39;
 
-    final orb = Paint()
-      ..shader =
-          RadialGradient(
-            colors: [
-              orange.withValues(alpha: dark ? 0.35 : 0.22),
-              Colors.transparent,
-            ],
-          ).createShader(
-            Rect.fromCircle(
-              center: Offset(size.width * 0.88, size.height * 0.15),
-              radius: size.width * 0.42,
-            ),
-          );
-    canvas.drawRect(Offset.zero & size, orb);
-
-    final arc = Paint()
-      ..color = Colors.white.withValues(alpha: dark ? 0.06 : 0.12)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 1.2;
-    final path = Path();
-    path.moveTo(size.width * 0.55, 0);
-    path.quadraticBezierTo(
-      size.width * 0.2,
-      size.height * 0.45,
-      -20,
-      size.height * 0.9,
-    );
-    canvas.drawPath(path, arc);
-
-    final dots = Paint()..color = navy.withValues(alpha: 0.08);
-    for (var x = 16.0; x < size.width; x += 28) {
-      for (var y = 12.0; y < size.height * 0.55; y += 24) {
-        canvas.drawCircle(Offset(x, y), 1.2, dots);
-      }
-    }
-  }
-
-  @override
-  bool shouldRepaint(covariant ProfileHeroMeshPainter oldDelegate) =>
-      oldDelegate.dark != dark;
-}
-
-/// Role-based accent for profile hero chips.
 class ProfileRoleStyle {
   const ProfileRoleStyle({
     required this.label,
@@ -99,26 +59,24 @@ class ProfileBackButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final dark = AppTheme.dashIsDark(context);
     return Tooltip(
       message: 'Back',
       child: Material(
-        color: dark
-            ? Colors.white.withValues(alpha: 0.1)
-            : Colors.white.withValues(alpha: 0.92),
+        color: Colors.white.withValues(alpha: 0.16),
         shape: const CircleBorder(),
         elevation: 0,
         child: InkWell(
           onTap: onPressed,
           customBorder: const CircleBorder(),
-          child: SizedBox(
+          hoverColor: Colors.white.withValues(alpha: 0.18),
+          child: const SizedBox(
             width: 40,
             height: 40,
             child: Center(
               child: Icon(
                 Icons.arrow_back_rounded,
                 size: 22,
-                color: dark ? Colors.white : AppTheme.primaryNavy,
+                color: Colors.white,
               ),
             ),
           ),
@@ -128,7 +86,7 @@ class ProfileBackButton extends StatelessWidget {
   }
 }
 
-/// Identity hero: overlapping avatar, single metadata row, navy band.
+/// Compact horizontal profile banner.
 class ProfileHeroHeader extends StatelessWidget {
   const ProfileHeroHeader({
     super.key,
@@ -153,96 +111,94 @@ class ProfileHeroHeader extends StatelessWidget {
   final bool isUploading;
   final VoidCallback? onBack;
 
-  static const double _avatarRadius = 54;
-  static const double _headerBandHeight = 118;
-
-  /// Avatar overlaps below the navy band; header stack must include this so taps register.
-  static const double _avatarOverlap = _avatarRadius;
+  static const double _avatarRadius = 48;
+  static const double _desktopBannerHeight = 172;
 
   @override
   Widget build(BuildContext context) {
-    final dark = AppTheme.dashIsDark(context);
     final roleStyle = ProfileRoleStyle.fromLabel(roleLabel);
-    final titleColor = dark ? const Color(0xFFF4F7FB) : Colors.white;
-    final bodyBg = dark ? const Color(0xFF1A1F2A) : const Color(0xFFFAFBFC);
-    final muted = AppTheme.dashTextSecondaryOf(context);
-    final primaryText = AppTheme.dashTextPrimaryOf(context);
+    const onPhoto = Colors.white;
 
-    final bandGradient = dark
+    final overlay = wideLayout
         ? const LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [Color(0xFF1E2A3D), Color(0xFF243B55)],
+            begin: Alignment.centerLeft,
+            end: Alignment.centerRight,
+            colors: [
+              Color.fromRGBO(234, 88, 12, 0.86),
+              Color.fromRGBO(180, 75, 30, 0.40),
+              Color.fromRGBO(25, 35, 65, 0.28),
+            ],
+            stops: [0.0, 0.36, 1.0],
           )
         : const LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [AppTheme.primaryNavy, Color(0xFF2D4A7C)],
+            begin: Alignment.centerLeft,
+            end: Alignment.centerRight,
+            colors: [
+              Color.fromRGBO(234, 88, 12, 0.82),
+              Color.fromRGBO(40, 48, 72, 0.48),
+              Color.fromRGBO(18, 26, 48, 0.40),
+            ],
+            stops: [0.0, 0.45, 1.0],
           );
 
     Widget avatarFrame() {
-      final frame = Stack(
+      return Stack(
         clipBehavior: Clip.none,
-        alignment: Alignment.center,
         children: [
           Container(
-            width: _avatarRadius * 2 + 10,
-            height: _avatarRadius * 2 + 10,
+            width: _avatarRadius * 2,
+            height: _avatarRadius * 2,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
-              gradient: const LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: [Color(0xFFE85D04), Color(0xFFFFB74D)],
-              ),
-              boxShadow: [
+              border: Border.all(color: Colors.white, width: 3),
+              boxShadow: const [
                 BoxShadow(
-                  color: AppTheme.primaryNavy.withValues(alpha: 0.25),
-                  blurRadius: 24,
-                  offset: const Offset(0, 10),
+                  color: Color(0x40000000),
+                  blurRadius: 10,
+                  offset: Offset(0, 3),
                 ),
               ],
-            ),
-          ),
-          Container(
-            width: _avatarRadius * 2 + 4,
-            height: _avatarRadius * 2 + 4,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              border: Border.all(color: Colors.white, width: 4),
             ),
             child: ClipOval(child: avatar),
           ),
           if (onChangePhoto != null)
             Positioned(
-              right: 0,
-              bottom: 0,
-              child: Material(
-                color: const Color(0xFFE85D04),
-                elevation: 4,
-                shadowColor: Colors.black26,
-                shape: const CircleBorder(),
-                child: InkWell(
-                  onTap: isUploading ? null : onChangePhoto,
-                  customBorder: const CircleBorder(),
-                  child: SizedBox(
-                    width: 44,
-                    height: 44,
-                    child: Center(
-                      child: isUploading
-                          ? const SizedBox(
-                              width: 18,
-                              height: 18,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2,
-                                color: Colors.white,
-                              ),
-                            )
-                          : const Icon(
-                              Icons.camera_alt_rounded,
-                              size: 20,
-                              color: Colors.white,
-                            ),
+              right: -2,
+              bottom: -2,
+              child: Tooltip(
+                message: isUploading
+                    ? 'Uploading photo…'
+                    : 'Change profile picture',
+                child: Semantics(
+                  button: true,
+                  enabled: !isUploading,
+                  label: 'Change profile picture',
+                  child: Material(
+                    color: const Color(0xFFE85D04),
+                    shape: const CircleBorder(),
+                    child: InkWell(
+                      onTap: isUploading ? null : onChangePhoto,
+                      customBorder: const CircleBorder(),
+                      child: SizedBox(
+                        width: 28,
+                        height: 28,
+                        child: Center(
+                          child: isUploading
+                              ? const SizedBox(
+                                  width: 12,
+                                  height: 12,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    color: Colors.white,
+                                  ),
+                                )
+                              : const Icon(
+                                  Icons.camera_alt_rounded,
+                                  size: 14,
+                                  color: Colors.white,
+                                ),
+                        ),
+                      ),
                     ),
                   ),
                 ),
@@ -250,349 +206,213 @@ class ProfileHeroHeader extends StatelessWidget {
             ),
         ],
       );
-      if (onChangePhoto == null || isUploading) return frame;
-      return GestureDetector(
-        onTap: onChangePhoto,
-        behavior: HitTestBehavior.opaque,
-        child: frame,
-      );
     }
 
-    Widget headerBandStack({required List<Widget> children}) {
-      return SizedBox(
-        height: _headerBandHeight + _avatarOverlap,
-        child: Stack(
-          clipBehavior: Clip.none,
-          children: [
-            Positioned(
-              top: 0,
-              left: 0,
-              right: 0,
-              height: _headerBandHeight,
-              child: DecoratedBox(
-                decoration: BoxDecoration(gradient: bandGradient),
-                child: CustomPaint(painter: ProfileHeroMeshPainter(dark: dark)),
-              ),
+    Widget chip(String text) {
+      return ClipRRect(
+        borderRadius: BorderRadius.circular(8),
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 6, sigmaY: 6),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.10),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: Colors.white.withValues(alpha: 0.30)),
             ),
-            ...children,
-          ],
-        ),
-      );
-    }
-
-    Widget metaChip({
-      required IconData icon,
-      required String text,
-      required Color accent,
-      bool onDark = false,
-    }) {
-      return Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        decoration: BoxDecoration(
-          color: onDark
-              ? Colors.white.withValues(alpha: 0.12)
-              : accent.withValues(alpha: 0.08),
-          borderRadius: BorderRadius.circular(10),
-          border: Border.all(
-            color: onDark
-                ? Colors.white.withValues(alpha: 0.2)
-                : accent.withValues(alpha: 0.22),
+            child: Text(
+              text,
+              style: const TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: onPhoto,
+              ),
+              overflow: TextOverflow.ellipsis,
+            ),
           ),
         ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              icon,
-              size: 16,
-              color: onDark ? Colors.white.withValues(alpha: 0.9) : accent,
-            ),
-            const SizedBox(width: 8),
-            Flexible(
-              child: Text(
-                text,
-                style: TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w700,
-                  color: onDark ? Colors.white : primaryText,
-                  letterSpacing: 0.15,
-                ),
-                overflow: TextOverflow.ellipsis,
-              ),
-            ),
-          ],
-        ),
       );
     }
 
-    final identityBody = Column(
+    final identity = Column(
+      mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: wideLayout
           ? CrossAxisAlignment.start
           : CrossAxisAlignment.center,
       children: [
+        const Text(
+          'My Profile',
+          style: TextStyle(
+            color: Color(0xE6FFFFFF),
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+            letterSpacing: 0.3,
+          ),
+        ),
+        const SizedBox(height: 2),
         Row(
           mainAxisSize: MainAxisSize.min,
-          mainAxisAlignment: wideLayout
-              ? MainAxisAlignment.start
-              : MainAxisAlignment.center,
           children: [
             Flexible(
               child: Text(
                 displayName,
                 textAlign: wideLayout ? TextAlign.start : TextAlign.center,
                 style: TextStyle(
-                  color: primaryText,
-                  fontSize: wideLayout ? 26 : 22,
-                  fontWeight: FontWeight.w800,
-                  letterSpacing: -0.5,
-                  height: 1.15,
+                  color: onPhoto,
+                  fontSize: wideLayout ? 22 : 20,
+                  fontWeight: FontWeight.w700,
+                  height: 1.2,
+                  shadows: const [
+                    Shadow(
+                      color: Color(0x66000000),
+                      blurRadius: 6,
+                      offset: Offset(0, 1),
+                    ),
+                  ],
                 ),
               ),
             ),
-            const SizedBox(width: 8),
-            Container(
-              padding: const EdgeInsets.all(4),
-              decoration: BoxDecoration(
-                color: const Color(0xFF2E7D32).withValues(alpha: 0.12),
-                shape: BoxShape.circle,
-              ),
-              child: Icon(
-                Icons.verified_rounded,
-                size: wideLayout ? 22 : 20,
-                color: Colors.green.shade700,
-              ),
-            ),
+            const SizedBox(width: 6),
+            Icon(Icons.verified_rounded, size: 16, color: Colors.green.shade300),
           ],
         ),
-        const SizedBox(height: 14),
+        const SizedBox(height: 8),
         Wrap(
-          spacing: 10,
-          runSpacing: 10,
+          spacing: 6,
+          runSpacing: 6,
           alignment: wideLayout ? WrapAlignment.start : WrapAlignment.center,
           children: [
-            if (idLabel != null)
-              metaChip(
-                icon: Icons.pin_rounded,
-                text: idLabel!,
-                accent: AppTheme.primaryNavy,
-              ),
-            metaChip(
-              icon: roleStyle.icon,
-              text: roleStyle.label,
-              accent: roleStyle.color,
-            ),
-            metaChip(
-              icon: Icons.alternate_email_rounded,
-              text: email.isEmpty ? 'No email' : email,
-              accent: muted,
-            ),
+            if (idLabel != null) chip(idLabel!.replaceAll(' · ', ': ')),
+            chip(roleStyle.label),
+            chip(email.isEmpty ? 'No email' : email),
           ],
         ),
       ],
     );
 
-    if (wideLayout) {
-      return Container(
-        width: double.infinity,
-        decoration: BoxDecoration(
-          color: bodyBg,
-          borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
-          border: Border(
-            bottom: BorderSide(color: AppTheme.dashHairlineOf(context)),
-          ),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            headerBandStack(
-              children: [
-                Positioned(
-                  left: 20,
-                  top: 20,
-                  right: 20,
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.center,
-                    children: [
-                      if (onBack != null) ...[
-                        ProfileBackButton(onPressed: onBack!),
-                        const SizedBox(width: 12),
-                      ],
-                      Icon(
-                        Icons.account_circle_rounded,
-                        size: 18,
-                        color: titleColor.withValues(alpha: 0.85),
-                      ),
-                      const SizedBox(width: 8),
-                      Text(
-                        'My profile',
-                        style: TextStyle(
-                          color: titleColor.withValues(alpha: 0.9),
-                          fontSize: 12,
-                          fontWeight: FontWeight.w800,
-                          letterSpacing: 0.8,
-                          height: 1.2,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                Positioned(left: 32, bottom: 0, child: avatarFrame()),
-              ],
-            ),
-            Padding(
-              padding: EdgeInsets.fromLTRB(
-                32 + _avatarRadius * 2 + 28,
-                20,
-                32,
-                28,
-              ),
-              child: identityBody,
-            ),
-          ],
-        ),
-      );
-    }
-
-    return Container(
-      width: double.infinity,
-      decoration: BoxDecoration(
-        color: bodyBg,
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
-        border: Border(
-          bottom: BorderSide(color: AppTheme.dashHairlineOf(context)),
-        ),
+    final content = Padding(
+      padding: EdgeInsets.fromLTRB(
+        wideLayout ? 20 : 16,
+        wideLayout ? 18 : 16,
+        wideLayout ? 20 : 16,
+        wideLayout ? 18 : 16,
       ),
-      child: Column(
-        children: [
-          headerBandStack(
-            children: [
-              if (onBack != null)
-                Positioned(
-                  top: 12,
-                  left: 12,
-                  right: 12,
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.center,
-                    children: [
-                      ProfileBackButton(onPressed: onBack!),
-                      const SizedBox(width: 12),
-                      Icon(
-                        Icons.account_circle_rounded,
-                        size: 18,
-                        color: titleColor.withValues(alpha: 0.85),
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          'My profile',
-                          style: TextStyle(
-                            color: titleColor.withValues(alpha: 0.9),
-                            fontSize: 13,
-                            fontWeight: FontWeight.w800,
-                            letterSpacing: 0.4,
-                            height: 1.2,
-                          ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                    ],
+      child: wideLayout
+          ? Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                if (onBack != null) ...[
+                  Align(
+                    alignment: Alignment.topCenter,
+                    child: ProfileBackButton(onPressed: onBack!),
+                  ),
+                  const SizedBox(width: 12),
+                ],
+                Align(alignment: Alignment.center, child: avatarFrame()),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: identity,
                   ),
                 ),
-              Positioned(
-                top: onBack != null ? 60 : 16,
-                left: 0,
-                right: 0,
-                child: Center(
-                  child: Opacity(
-                    opacity: 0.9,
-                    child: Image.asset(
-                      'assets/images/TransparentLogo.png',
-                      width: 36,
-                      height: 36,
-                      fit: BoxFit.contain,
-                      errorBuilder: (_, __, ___) => Icon(
-                        Icons.account_balance_rounded,
-                        color: titleColor.withValues(alpha: 0.8),
-                        size: 32,
-                      ),
+              ],
+            )
+          : Column(
+              children: [
+                if (onBack != null)
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: Padding(
+                      padding: const EdgeInsets.only(bottom: 10),
+                      child: ProfileBackButton(onPressed: onBack!),
                     ),
                   ),
+                avatarFrame(),
+                const SizedBox(height: 12),
+                identity,
+              ],
+            ),
+    );
+
+    return ClipRRect(
+      borderRadius: const BorderRadius.vertical(top: Radius.circular(12)),
+      child: Semantics(
+        label: 'My Profile header, Municipality of Plaridel',
+        child: ConstrainedBox(
+          constraints: BoxConstraints(
+            minHeight: wideLayout ? 160 : 0,
+            maxHeight: wideLayout ? 180 : double.infinity,
+          ),
+          child: SizedBox(
+            width: double.infinity,
+            height: wideLayout ? _desktopBannerHeight : null,
+            child: Stack(
+              children: [
+                const Positioned.fill(
+                  child: ExcludeSemantics(
+                    child: _MunicipalHallCoverImage(),
+                  ),
                 ),
-              ),
+                Positioned.fill(
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(gradient: overlay),
+                  ),
+                ),
+                content,
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// CSS-equivalent of `object-fit: cover; object-position: center 39%`.
+class _MunicipalHallCoverImage extends StatelessWidget {
+  const _MunicipalHallCoverImage();
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final boxW = constraints.maxWidth;
+        final boxH = constraints.maxHeight;
+        if (!boxW.isFinite || !boxH.isFinite || boxW <= 0 || boxH <= 0) {
+          return const SizedBox.shrink();
+        }
+
+        final scale = math.max(
+          boxW / kMunicipalHallImageWidth,
+          boxH / kMunicipalHallImageHeight,
+        );
+        final scaledW = kMunicipalHallImageWidth * scale;
+        final scaledH = kMunicipalHallImageHeight * scale;
+        final left = (boxW - scaledW) / 2;
+        final top = kMunicipalHallObjectPositionY * (boxH - scaledH);
+
+        return ClipRect(
+          child: Stack(
+            children: [
               Positioned(
-                left: 0,
-                right: 0,
-                bottom: 0,
-                child: Center(child: avatarFrame()),
+                left: left,
+                top: top,
+                width: scaledW,
+                height: scaledH,
+                child: Image.asset(
+                  kPlaridelMunicipalHallAsset,
+                  width: scaledW,
+                  height: scaledH,
+                  fit: BoxFit.fill,
+                  filterQuality: FilterQuality.medium,
+                  gaplessPlayback: true,
+                ),
               ),
             ],
           ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(24, 16, 24, 28),
-            child: Column(
-              children: [
-                Text(
-                  displayName,
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    color: primaryText,
-                    fontSize: 22,
-                    fontWeight: FontWeight.w800,
-                    letterSpacing: -0.4,
-                  ),
-                ),
-                const SizedBox(height: 6),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(
-                      Icons.verified_rounded,
-                      size: 18,
-                      color: Colors.green.shade700,
-                    ),
-                    const SizedBox(width: 6),
-                    Text(
-                      'Verified account',
-                      style: TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                        color: muted,
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 16),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  alignment: WrapAlignment.center,
-                  children: [
-                    if (idLabel != null)
-                      metaChip(
-                        icon: Icons.pin_rounded,
-                        text: idLabel!,
-                        accent: AppTheme.primaryNavy,
-                      ),
-                    metaChip(
-                      icon: roleStyle.icon,
-                      text: roleStyle.label,
-                      accent: roleStyle.color,
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 12),
-                metaChip(
-                  icon: Icons.mail_outline_rounded,
-                  text: email.isEmpty ? '?' : email,
-                  accent: AppTheme.primaryNavy,
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
+        );
+      },
     );
   }
 }
@@ -618,36 +438,67 @@ class ProfileTabBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final entries = <({ProfilePageTab t, String label})>[];
+    final entries = <({ProfilePageTab t, String label, IconData icon})>[];
     if (showAccount) {
-      entries.add((t: ProfilePageTab.account, label: 'Account'));
+      entries.add((
+        t: ProfilePageTab.account,
+        label: 'Account',
+        icon: Icons.person_outline_rounded,
+      ));
     }
     if (showSecurity) {
-      entries.add((t: ProfilePageTab.security, label: 'Password & Security'));
+      entries.add((
+        t: ProfilePageTab.security,
+        label: 'Security',
+        icon: Icons.lock_outline_rounded,
+      ));
     }
     if (showAppSettings) {
-      entries.add((t: ProfilePageTab.notification, label: 'Notification'));
-      entries.add((t: ProfilePageTab.preference, label: 'Preference'));
-      entries.add((t: ProfilePageTab.about, label: 'About'));
+      entries.add((
+        t: ProfilePageTab.notification,
+        label: 'Notifications',
+        icon: Icons.notifications_none_rounded,
+      ));
+      entries.add((
+        t: ProfilePageTab.preference,
+        label: 'Preferences',
+        icon: Icons.settings_outlined,
+      ));
+      entries.add((
+        t: ProfilePageTab.about,
+        label: 'About',
+        icon: Icons.info_outline_rounded,
+      ));
     }
 
     if (entries.isEmpty) return const SizedBox.shrink();
 
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(0, 12, 0, 0),
-      child: SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
-        child: Row(
-          children: [
-            for (var i = 0; i < entries.length; i++) ...[
-              if (i > 0) const SizedBox(width: 24),
-              _Tab(
-                label: entries[i].label,
-                selected: tab == entries[i].t,
-                onTap: () => onChanged(entries[i].t),
-              ),
+    return SizedBox(
+      width: double.infinity,
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          border: Border(
+            bottom: BorderSide(color: AppTheme.dashHairlineOf(context)),
+          ),
+        ),
+        child: SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: Row(
+            children: [
+              for (var i = 0; i < entries.length; i++)
+                Padding(
+                  padding: EdgeInsets.only(
+                    right: i == entries.length - 1 ? 0 : 32,
+                  ),
+                  child: _Tab(
+                    label: entries[i].label,
+                    icon: entries[i].icon,
+                    selected: tab == entries[i].t,
+                    onTap: () => onChanged(entries[i].t),
+                  ),
+                ),
             ],
-          ],
+          ),
         ),
       ),
     );
@@ -657,45 +508,50 @@ class ProfileTabBar extends StatelessWidget {
 class _Tab extends StatelessWidget {
   const _Tab({
     required this.label,
+    required this.icon,
     required this.selected,
     required this.onTap,
   });
 
   final String label;
+  final IconData icon;
   final bool selected;
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    final color = selected
-        ? AppTheme.primaryNavy
-        : AppTheme.dashTextSecondaryOf(context);
+    final muted = AppTheme.dashTextSecondaryOf(context);
+    final color = selected ? AppTheme.primaryNavy : muted;
 
     return InkWell(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(8),
+      hoverColor: AppTheme.primaryNavy.withValues(alpha: 0.06),
       child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
+        padding: const EdgeInsets.fromLTRB(4, 10, 4, 0),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text(
-              label,
-              style: TextStyle(
-                color: color,
-                fontWeight: selected ? FontWeight.w800 : FontWeight.w600,
-                fontSize: 14,
-              ),
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(icon, size: 16, color: color),
+                const SizedBox(width: 6),
+                Text(
+                  label,
+                  style: TextStyle(
+                    color: color,
+                    fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                    fontSize: 13.5,
+                  ),
+                ),
+              ],
             ),
-            const SizedBox(height: 6),
+            const SizedBox(height: 8),
             AnimatedContainer(
-              duration: const Duration(milliseconds: 200),
-              height: 3,
-              width: selected ? 32 : 0,
-              decoration: BoxDecoration(
-                color: AppTheme.primaryNavy,
-                borderRadius: BorderRadius.circular(2),
-              ),
+              duration: const Duration(milliseconds: 150),
+              height: 2.5,
+              width: selected ? 22 : 0,
+              color: AppTheme.primaryNavy,
             ),
           ],
         ),
@@ -709,12 +565,14 @@ class ModernProfileCard extends StatelessWidget {
   const ModernProfileCard({
     super.key,
     required this.title,
+    this.subtitle,
     this.icon,
     this.trailing,
     required this.child,
   });
 
   final String title;
+  final String? subtitle;
   final IconData? icon;
   final Widget? trailing;
   final Widget child;
@@ -725,18 +583,18 @@ class ModernProfileCard extends StatelessWidget {
 
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.fromLTRB(22, 20, 22, 22),
+      padding: const EdgeInsets.fromLTRB(20, 18, 20, 18),
       decoration: BoxDecoration(
         color: dark ? AppTheme.dashPanelOf(context) : Colors.white,
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(12),
         border: Border.all(color: AppTheme.dashHairlineOf(context)),
         boxShadow: dark
             ? null
             : [
                 BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.04),
-                  blurRadius: 14,
-                  offset: const Offset(0, 4),
+                  color: Colors.black.withValues(alpha: 0.03),
+                  blurRadius: 8,
+                  offset: const Offset(0, 1),
                 ),
               ],
       ),
@@ -744,26 +602,38 @@ class ModernProfileCard extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              if (icon != null) ...[
-                Icon(icon, size: 20, color: AppTheme.primaryNavy),
-                const SizedBox(width: 10),
-              ],
               Expanded(
-                child: Text(
-                  title,
-                  style: TextStyle(
-                    color: AppTheme.dashTextPrimaryOf(context),
-                    fontSize: 16,
-                    fontWeight: FontWeight.w800,
-                    letterSpacing: -0.2,
-                  ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: TextStyle(
+                        color: AppTheme.dashTextPrimaryOf(context),
+                        fontSize: 16,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    if (subtitle != null && subtitle!.trim().isNotEmpty) ...[
+                      const SizedBox(height: 2),
+                      Text(
+                        subtitle!,
+                        style: TextStyle(
+                          color: AppTheme.dashTextSecondaryOf(context),
+                          fontSize: 12.5,
+                          height: 1.35,
+                        ),
+                      ),
+                    ],
+                  ],
                 ),
               ),
               if (trailing != null) trailing!,
             ],
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 14),
           child,
         ],
       ),
@@ -771,52 +641,96 @@ class ModernProfileCard extends StatelessWidget {
   }
 }
 
-/// Label?value row for the About / work info panel.
-class ProfileAboutRow extends StatelessWidget {
-  const ProfileAboutRow({
+InputDecoration profileFieldDecoration(
+  BuildContext context, {
+  String? hint,
+  Widget? suffixIcon,
+  String? helper,
+}) {
+  return AppTheme.dashInputDecoration(
+    context,
+    hintText: hint,
+    helperText: helper,
+    suffixIcon: suffixIcon,
+    radius: 10,
+    contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+  ).copyWith(
+    floatingLabelBehavior: FloatingLabelBehavior.never,
+    labelText: null,
+  );
+}
+
+class ProfileLabeledField extends StatelessWidget {
+  const ProfileLabeledField({
+    super.key,
+    required this.label,
+    required this.child,
+  });
+
+  final String label;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Text(
+          label,
+          style: TextStyle(
+            fontSize: 12.5,
+            fontWeight: FontWeight.w600,
+            color: AppTheme.dashTextPrimaryOf(context),
+          ),
+        ),
+        const SizedBox(height: 6),
+        child,
+      ],
+    );
+  }
+}
+
+class ProfileInfoRow extends StatelessWidget {
+  const ProfileInfoRow({
     super.key,
     required this.label,
     required this.value,
-    this.icon,
+    this.valueWidget,
   });
 
   final String label;
   final String value;
-  final IconData? icon;
+  final Widget? valueWidget;
 
   @override
   Widget build(BuildContext context) {
-    final labelStyle = TextStyle(
-      color: AppTheme.dashTextPrimaryOf(context),
-      fontWeight: FontWeight.w700,
-      fontSize: 13,
-    );
-    final valueStyle = TextStyle(
-      color: AppTheme.dashTextSecondaryOf(context),
-      fontSize: 13.5,
-      height: 1.35,
-    );
-
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 10),
+      padding: const EdgeInsets.symmetric(vertical: 7),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          if (icon != null) ...[
-            Icon(icon, size: 18, color: AppTheme.primaryNavy),
-            const SizedBox(width: 12),
-          ],
           Expanded(
-            child: RichText(
-              text: TextSpan(
-                style: valueStyle,
-                children: [
-                  TextSpan(text: label, style: labelStyle),
-                  const TextSpan(text: ' '),
-                  TextSpan(text: value),
-                ],
+            flex: 4,
+            child: Text(
+              label,
+              style: TextStyle(
+                color: AppTheme.dashTextSecondaryOf(context),
+                fontSize: 13,
               ),
             ),
+          ),
+          Expanded(
+            flex: 6,
+            child:
+                valueWidget ??
+                Text(
+                  value,
+                  style: TextStyle(
+                    color: AppTheme.dashTextPrimaryOf(context),
+                    fontSize: 13.5,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
           ),
         ],
       ),
@@ -824,321 +738,130 @@ class ProfileAboutRow extends StatelessWidget {
   }
 }
 
-class ProfileAboutDivider extends StatelessWidget {
-  const ProfileAboutDivider({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return Divider(
-      height: 1,
-      thickness: 1,
-      color: AppTheme.dashHairlineOf(context),
-    );
-  }
-}
-
-/// Password strength for the security tab meter.
-class ProfilePasswordStrength {
-  const ProfilePasswordStrength({
-    required this.label,
-    required this.color,
-    required this.score,
-  });
+class ProfileStatusBadge extends StatelessWidget {
+  const ProfileStatusBadge({super.key, required this.label});
 
   final String label;
-  final Color color;
-  final int score;
-
-  static ProfilePasswordStrength evaluate(String value) {
-    if (value.isEmpty) {
-      return ProfilePasswordStrength(label: '', color: Colors.grey, score: 0);
-    }
-    final hasLower = value.contains(RegExp(r'[a-z]'));
-    final hasUpper = value.contains(RegExp(r'[A-Z]'));
-    final hasDigit = value.contains(RegExp(r'[0-9]'));
-    final hasSpecial = value.contains(RegExp(r'[!@#$%^&*(),.?":{}|<>]'));
-    final length = value.length;
-    var score = 0;
-    if (length >= 6) score++;
-    if (length >= 10) score++;
-    if (hasLower && hasUpper) score++;
-    if (hasDigit) score++;
-    if (hasSpecial) score++;
-    if (score <= 1) {
-      return ProfilePasswordStrength(
-        label: 'Weak',
-        color: const Color(0xFFC62828),
-        score: 1,
-      );
-    }
-    if (score <= 3) {
-      return ProfilePasswordStrength(
-        label: 'Fair',
-        color: const Color(0xFFE65100),
-        score: 2,
-      );
-    }
-    return ProfilePasswordStrength(
-      label: 'Strong',
-      color: const Color(0xFF2E7D32),
-      score: 4,
-    );
-  }
-}
-
-/// Segmented strength bar under the new-password field.
-class ProfilePasswordStrengthMeter extends StatelessWidget {
-  const ProfilePasswordStrengthMeter({super.key, required this.strength});
-
-  final ProfilePasswordStrength strength;
 
   @override
   Widget build(BuildContext context) {
-    if (strength.score == 0) return const SizedBox.shrink();
-    final muted = AppTheme.dashTextSecondaryOf(context);
+    final raw = label.trim().replaceAll('_', ' ');
+    final normalized = raw.toLowerCase();
+    final color = (normalized.isEmpty || normalized == 'active')
+        ? const Color(0xFF2E7D32)
+        : (normalized.contains('inactiv') ||
+              normalized.contains('separat') ||
+              normalized.contains('resign'))
+        ? const Color(0xFFC62828)
+        : const Color(0xFFE65100);
+    final text = raw.isEmpty ? 'Active' : raw;
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
+    return Row(
+      mainAxisSize: MainAxisSize.min,
       children: [
-        Row(
-          children: [
-            Expanded(
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(4),
-                child: Row(
-                  children: List.generate(4, (i) {
-                    final filled = i < strength.score;
-                    return Expanded(
-                      child: Container(
-                        height: 5,
-                        margin: EdgeInsets.only(right: i < 3 ? 4 : 0),
-                        decoration: BoxDecoration(
-                          color: filled
-                              ? strength.color
-                              : AppTheme.dashHairlineOf(context),
-                          borderRadius: BorderRadius.circular(4),
-                        ),
-                      ),
-                    );
-                  }),
-                ),
-              ),
-            ),
-            const SizedBox(width: 10),
-            Text(
-              strength.label,
-              style: TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.w700,
-                color: strength.color,
-              ),
-            ),
-          ],
+        Container(
+          width: 7,
+          height: 7,
+          decoration: BoxDecoration(color: color, shape: BoxShape.circle),
         ),
-        const SizedBox(height: 6),
+        const SizedBox(width: 6),
         Text(
-          'Mix letters, numbers, and symbols for a stronger password.',
-          style: TextStyle(fontSize: 11.5, color: muted, height: 1.3),
+          '${text[0].toUpperCase()}${text.substring(1)}',
+          style: TextStyle(
+            fontSize: 13,
+            fontWeight: FontWeight.w700,
+            color: color,
+          ),
         ),
       ],
     );
   }
 }
 
-/// Soft inset surface for grouped form fields.
-class ProfileInsetSurface extends StatelessWidget {
-  const ProfileInsetSurface({super.key, required this.child});
+class ProfileCardActions extends StatelessWidget {
+  const ProfileCardActions({
+    super.key,
+    this.secondary,
+    required this.primary,
+  });
 
-  final Widget child;
+  final Widget? secondary;
+  final Widget primary;
 
   @override
   Widget build(BuildContext context) {
-    final dark = AppTheme.dashIsDark(context);
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.fromLTRB(18, 18, 18, 20),
-      decoration: BoxDecoration(
-        color: dark
-            ? Colors.white.withValues(alpha: 0.04)
-            : const Color(0xFFF8FAFC),
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(
-          color: AppTheme.dashHairlineOf(
-            context,
-          ).withValues(alpha: dark ? 0.5 : 1),
-        ),
+    return Align(
+      alignment: Alignment.centerRight,
+      child: Wrap(
+        spacing: 8,
+        runSpacing: 8,
+        alignment: WrapAlignment.end,
+        children: [if (secondary != null) secondary!, primary],
       ),
-      child: child,
     );
   }
 }
 
-/// Tip banner for the security tab.
-class ProfileSecurityTipBanner extends StatelessWidget {
-  const ProfileSecurityTipBanner({super.key});
+class ProfileThemeChoice extends StatelessWidget {
+  const ProfileThemeChoice({
+    super.key,
+    required this.label,
+    required this.icon,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final String label;
+  final IconData icon;
+  final bool selected;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    final dark = AppTheme.dashIsDark(context);
-    return Container(
-      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: dark
-              ? [
-                  AppTheme.primaryNavy.withValues(alpha: 0.18),
-                  AppTheme.primaryNavy.withValues(alpha: 0.08),
-                ]
-              : [
-                  AppTheme.primaryNavy.withValues(alpha: 0.1),
-                  AppTheme.primaryNavy.withValues(alpha: 0.04),
-                ],
-        ),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppTheme.primaryNavy.withValues(alpha: 0.22)),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Container(
-            padding: const EdgeInsets.all(8),
-            decoration: BoxDecoration(
-              color: AppTheme.primaryNavy.withValues(alpha: 0.15),
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: const Icon(
-              Icons.shield_outlined,
-              size: 20,
-              color: AppTheme.primaryNavy,
+    final accent = AppTheme.primaryNavy;
+    return Material(
+      color: selected
+          ? accent.withValues(alpha: 0.08)
+          : AppTheme.dashIsDark(context)
+          ? Colors.white.withValues(alpha: 0.04)
+          : const Color(0xFFF8FAFC),
+      borderRadius: BorderRadius.circular(10),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(10),
+        child: Container(
+          padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 10),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(
+              color: selected ? accent : AppTheme.dashHairlineOf(context),
+              width: selected ? 1.5 : 1,
             ),
           ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Text(
-              'Choose a unique password you do not use elsewhere. '
-              'Update it regularly to keep your account secure.',
-              style: TextStyle(
-                fontSize: 12.5,
-                height: 1.4,
-                color: AppTheme.dashTextSecondaryOf(context),
+          child: Column(
+            children: [
+              Icon(
+                icon,
+                color: selected
+                    ? accent
+                    : AppTheme.dashTextSecondaryOf(context),
               ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-/// Setting row with icon, title, subtitle, and trailing control.
-class ProfileSettingTile extends StatelessWidget {
-  const ProfileSettingTile({
-    super.key,
-    required this.icon,
-    required this.title,
-    required this.subtitle,
-    required this.trailing,
-    this.iconColor,
-    this.iconBackground,
-  });
-
-  final IconData icon;
-  final String title;
-  final String subtitle;
-  final Widget trailing;
-  final Color? iconColor;
-  final Color? iconBackground;
-
-  @override
-  Widget build(BuildContext context) {
-    final fg = iconColor ?? AppTheme.primaryNavy;
-    final bg = iconBackground ?? AppTheme.primaryNavy.withValues(alpha: 0.1);
-
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.center,
-        children: [
-          Container(
-            width: 44,
-            height: 44,
-            decoration: BoxDecoration(
-              color: bg,
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Icon(icon, color: fg, size: 22),
-          ),
-          const SizedBox(width: 14),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  title,
-                  style: TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w700,
-                    color: AppTheme.dashTextPrimaryOf(context),
-                  ),
+              const SizedBox(height: 6),
+              Text(
+                label,
+                style: TextStyle(
+                  fontWeight: FontWeight.w700,
+                  fontSize: 13,
+                  color: selected
+                      ? accent
+                      : AppTheme.dashTextPrimaryOf(context),
                 ),
-                const SizedBox(height: 3),
-                Text(
-                  subtitle,
-                  style: TextStyle(
-                    fontSize: 12,
-                    height: 1.35,
-                    color: AppTheme.dashTextSecondaryOf(context),
-                  ),
-                ),
-              ],
-            ),
+              ),
+            ],
           ),
-          const SizedBox(width: 8),
-          trailing,
-        ],
+        ),
       ),
     );
   }
 }
 
-/// Empty state for lists inside profile cards.
-class ProfileCardEmptyState extends StatelessWidget {
-  const ProfileCardEmptyState({
-    super.key,
-    required this.icon,
-    required this.message,
-  });
-
-  final IconData icon;
-  final String message;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 8),
-      child: Column(
-        children: [
-          Icon(
-            icon,
-            size: 36,
-            color: AppTheme.dashTextSecondaryOf(
-              context,
-            ).withValues(alpha: 0.55),
-          ),
-          const SizedBox(height: 10),
-          Text(
-            message,
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              fontSize: 13,
-              height: 1.4,
-              color: AppTheme.dashTextSecondaryOf(context),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}

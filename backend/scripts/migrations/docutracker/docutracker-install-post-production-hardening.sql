@@ -1,5 +1,5 @@
 -- =============================================================================
--- HRMS Plaridel - DocuTracker: INSTALL PHASE 3 (post production hardening, 10-21)
+-- HRMS Plaridel - DocuTracker: INSTALL PHASE 3 (post production hardening, 10-25)
 -- =============================================================================
 -- PREREQUISITE: phase 1 complete AND docutracker-install-production-hardening-apply-once.sql applied.
 -- Section 10 drops/replaces *_prod_v1 status constraints created in production hardening.
@@ -11,7 +11,9 @@
 -- Section 17 allows the server-audited signed history action.
 -- Section 18 links audited applicant signatures to DTR leave requests without copying leave data.
 -- Sections 19-20 add assigned department-head and HR approval signatures for leave forms.
--- Section 21 adds assigned, audited signature fields to saved RSP forms.
+-- Sections 21-22 add assigned, audited signature fields to saved RSP and L&D forms.
+-- Section 23 adds the governance audit trail.
+-- Sections 24-25 assign effective-dated officials used by generated leave forms.
 --
 -- TABLE OF CONTENTS
 --   10 - STATUS SEMANTICS V2 (drop forwarded as document status)
@@ -27,6 +29,9 @@
 --   20 - HR APPROVER LEAVE E-SIGNATURE
 --   21 - LINKED RSP FORM E-SIGNATURES
 --   22 - LINKED L&D FORM E-SIGNATURES
+--   23 - GOVERNANCE AUDIT TRAIL
+--   24 - EFFECTIVE-DATED OFFICIAL SIGNATORIES
+--   25 - AUTOMATIC MAYOR LEAVE SIGNATORY
 --
 -- =============================================================================
 
@@ -954,5 +959,122 @@ ALTER TABLE docutracker_rsp_source_signatures
       'certified_by'
     )
   );
+
+COMMIT;
+
+
+-- #############################################################################
+-- 23 - GOVERNANCE AUDIT TRAIL
+-- Source file: migrate-docutracker-governance-audit-v1.sql
+-- #############################################################################
+
+-- DocuTracker governance audit trail (apply once).
+CREATE TABLE IF NOT EXISTS docutracker_governance_audit (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  actor_id UUID NOT NULL REFERENCES users(id),
+  event_type TEXT NOT NULL,
+  entity_type TEXT NOT NULL,
+  entity_id TEXT NULL,
+  document_type TEXT NULL,
+  workflow_version INT NULL,
+  target_user_id UUID NULL REFERENCES users(id),
+  target_role_id TEXT NULL,
+  before_state JSONB NULL,
+  after_state JSONB NULL,
+  reason TEXT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_docutracker_governance_audit_created_at
+  ON docutracker_governance_audit(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_docutracker_governance_audit_document_type
+  ON docutracker_governance_audit(document_type, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_docutracker_governance_audit_event_type
+  ON docutracker_governance_audit(event_type, created_at DESC);
+
+
+-- #############################################################################
+-- 24 - EFFECTIVE-DATED OFFICIAL SIGNATORIES
+-- Source file: migrate-docutracker-official-signatories-v1.sql
+-- #############################################################################
+
+BEGIN;
+
+CREATE TABLE IF NOT EXISTS docutracker_official_signatories (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  role_key TEXT NOT NULL,
+  employee_id UUID NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+  employee_name_snapshot TEXT NOT NULL,
+  position_title_snapshot TEXT,
+  department_name_snapshot TEXT,
+  effective_from DATE NOT NULL,
+  effective_to DATE,
+  remarks TEXT,
+  created_by UUID REFERENCES users(id) ON DELETE SET NULL,
+  updated_by UUID REFERENCES users(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT docutracker_official_signatories_role_check
+    CHECK (role_key IN ('leave_credit_certifier')),
+  CONSTRAINT docutracker_official_signatories_period_check
+    CHECK (effective_to IS NULL OR effective_to >= effective_from),
+  CONSTRAINT docutracker_official_signatories_name_check
+    CHECK (length(btrim(employee_name_snapshot)) BETWEEN 1 AND 200),
+  CONSTRAINT docutracker_official_signatories_role_start_unique
+    UNIQUE (role_key, effective_from)
+);
+
+CREATE INDEX IF NOT EXISTS idx_docutracker_official_signatories_effective
+  ON docutracker_official_signatories(role_key, effective_from DESC, effective_to);
+
+CREATE INDEX IF NOT EXISTS idx_docutracker_official_signatories_employee
+  ON docutracker_official_signatories(employee_id, effective_from DESC);
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conname = 'docutracker_official_signatories_no_overlap'
+      AND conrelid = 'docutracker_official_signatories'::regclass
+  ) THEN
+    ALTER TABLE docutracker_official_signatories
+      ADD CONSTRAINT docutracker_official_signatories_no_overlap
+      EXCLUDE USING gist (
+        role_key WITH =,
+        daterange(effective_from, COALESCE(effective_to, 'infinity'::date), '[]') WITH &&
+      );
+  END IF;
+END $$;
+
+COMMIT;
+
+
+-- #############################################################################
+-- 25 - AUTOMATIC MAYOR LEAVE SIGNATORY
+-- Source file: migrate-docutracker-automatic-mayor-signatory-v2.sql
+-- #############################################################################
+
+BEGIN;
+
+ALTER TABLE leave_requests
+  ADD COLUMN IF NOT EXISTS approving_authority_snapshot JSONB NOT NULL DEFAULT '{}'::jsonb;
+
+ALTER TABLE leave_requests
+  DROP CONSTRAINT IF EXISTS chk_leave_approving_authority_snapshot_object;
+
+ALTER TABLE leave_requests
+  ADD CONSTRAINT chk_leave_approving_authority_snapshot_object
+  CHECK (jsonb_typeof(approving_authority_snapshot) = 'object');
+
+DELETE FROM docutracker_official_signatories
+WHERE role_key = 'leave_approving_authority';
+
+ALTER TABLE docutracker_official_signatories
+  DROP CONSTRAINT IF EXISTS docutracker_official_signatories_role_check;
+
+ALTER TABLE docutracker_official_signatories
+  ADD CONSTRAINT docutracker_official_signatories_role_check
+  CHECK (role_key IN ('leave_credit_certifier'));
 
 COMMIT;

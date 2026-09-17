@@ -5,10 +5,12 @@ class _EmployeeSummary {
   const _EmployeeSummary({
     required this.id,
     required this.fullName,
+    required this.canAddAssignments,
     this.employeeNumber,
   });
   final String id;
   final String fullName;
+  final bool canAddAssignments;
   final int? employeeNumber;
 
   String get displayEmployeeNo => employeeNumber != null

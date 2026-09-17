@@ -732,6 +732,8 @@ CREATE TABLE IF NOT EXISTS leave_requests (
 
   approved_by UUID REFERENCES users(id) ON DELETE SET NULL,
   approved_at TIMESTAMPTZ,
+  -- Mayor identity frozen at final approval so historical forms remain stable.
+  approving_authority_snapshot JSONB NOT NULL DEFAULT '{}'::jsonb,
 
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -756,6 +758,9 @@ CREATE TABLE IF NOT EXISTS leave_requests (
   ),
   CONSTRAINT chk_leave_reserved_credit_days_nonnegative CHECK (
     reserved_credit_days IS NULL OR reserved_credit_days >= 0
+  ),
+  CONSTRAINT chk_leave_approving_authority_snapshot_object CHECK (
+    jsonb_typeof(approving_authority_snapshot) = 'object'
   )
 );
 CREATE INDEX IF NOT EXISTS idx_leave_requests_review_department
@@ -1661,6 +1666,62 @@ CREATE TABLE IF NOT EXISTS idp_entries (
   updated_at TIMESTAMPTZ DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS learning_application_plan_entries (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  memo_report_to TEXT,
+  from_name TEXT,
+  thru TEXT,
+  subject TEXT,
+  title TEXT,
+  date TEXT,
+  venue TEXT,
+  cost TEXT,
+  reap_types JSONB DEFAULT '[]'::JSONB,
+  other_reap_type TEXT,
+  reported_by TEXT,
+  received_by TEXT,
+  entries JSONB DEFAULT '[]'::JSONB,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS ojt_work_immersion_evaluation_entries (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  ojt_immersion TEXT,
+  school TEXT,
+  interview_date TEXT,
+  problem_solving_score INT,
+  problem_solving_notes TEXT,
+  communication_score INT,
+  communication_notes TEXT,
+  teamwork_score INT,
+  teamwork_notes TEXT,
+  adaptability_score INT,
+  adaptability_notes TEXT,
+  total_score INT,
+  overall_recommendation TEXT,
+  key_strengths TEXT,
+  key_concerns TEXT,
+  interviewer TEXT,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+-- Official print backgrounds uploaded per RSP/L&D form.
+CREATE TABLE IF NOT EXISTS form_print_templates (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  module TEXT NOT NULL CHECK (module IN ('rsp', 'ld')),
+  form_key TEXT NOT NULL,
+  paper_size TEXT NOT NULL,
+  file_path TEXT NOT NULL,
+  original_filename TEXT,
+  mime_type TEXT,
+  uploaded_by UUID REFERENCES users(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (module, form_key)
+);
+
 -- =========================================
 -- L&D — TRAINING DAILY REPORTS
 -- =========================================
@@ -1773,6 +1834,8 @@ CREATE TABLE IF NOT EXISTS recruitment_applications (
   hired_user_id UUID REFERENCES users(id) ON DELETE SET NULL,
   hr_account_setup_done BOOLEAN NOT NULL DEFAULT FALSE,
   hire_credentials_email_sent_at TIMESTAMPTZ,
+  hire_login_username TEXT,
+  hire_login_password TEXT,
   created_at TIMESTAMPTZ DEFAULT now(),
   updated_at TIMESTAMPTZ DEFAULT now()
 );
@@ -2307,6 +2370,74 @@ CREATE INDEX IF NOT EXISTS idx_docutracker_documents_deadline_active
 
 CREATE INDEX IF NOT EXISTS idx_docutracker_signature_assets_owner_saved
   ON docutracker_signature_assets(owner_user_id, is_saved, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS docutracker_governance_audit (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  actor_id UUID NOT NULL REFERENCES users(id),
+  event_type TEXT NOT NULL,
+  entity_type TEXT NOT NULL,
+  entity_id TEXT,
+  document_type TEXT,
+  workflow_version INT,
+  target_user_id UUID REFERENCES users(id),
+  target_role_id TEXT,
+  before_state JSONB,
+  after_state JSONB,
+  reason TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_docutracker_governance_audit_created_at
+  ON docutracker_governance_audit(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_docutracker_governance_audit_document_type
+  ON docutracker_governance_audit(document_type, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_docutracker_governance_audit_event_type
+  ON docutracker_governance_audit(event_type, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS docutracker_official_signatories (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  role_key TEXT NOT NULL,
+  employee_id UUID NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+  employee_name_snapshot TEXT NOT NULL,
+  position_title_snapshot TEXT,
+  department_name_snapshot TEXT,
+  effective_from DATE NOT NULL,
+  effective_to DATE,
+  remarks TEXT,
+  created_by UUID REFERENCES users(id) ON DELETE SET NULL,
+  updated_by UUID REFERENCES users(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT docutracker_official_signatories_role_check
+    CHECK (role_key IN ('leave_credit_certifier')),
+  CONSTRAINT docutracker_official_signatories_period_check
+    CHECK (effective_to IS NULL OR effective_to >= effective_from),
+  CONSTRAINT docutracker_official_signatories_name_check
+    CHECK (length(btrim(employee_name_snapshot)) BETWEEN 1 AND 200),
+  CONSTRAINT docutracker_official_signatories_role_start_unique
+    UNIQUE (role_key, effective_from)
+);
+
+CREATE INDEX IF NOT EXISTS idx_docutracker_official_signatories_effective
+  ON docutracker_official_signatories(role_key, effective_from DESC, effective_to);
+CREATE INDEX IF NOT EXISTS idx_docutracker_official_signatories_employee
+  ON docutracker_official_signatories(employee_id, effective_from DESC);
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conname = 'docutracker_official_signatories_no_overlap'
+      AND conrelid = 'docutracker_official_signatories'::regclass
+  ) THEN
+    ALTER TABLE docutracker_official_signatories
+      ADD CONSTRAINT docutracker_official_signatories_no_overlap
+      EXCLUDE USING gist (
+        role_key WITH =,
+        daterange(effective_from, COALESCE(effective_to, 'infinity'::date), '[]') WITH &&
+      );
+  END IF;
+END $$;
 CREATE INDEX IF NOT EXISTS idx_docutracker_signature_fields_document_page
   ON docutracker_signature_fields(document_id, page_number, created_at);
 CREATE INDEX IF NOT EXISTS idx_docutracker_signature_fields_signer_pending
@@ -2832,6 +2963,10 @@ CREATE INDEX IF NOT EXISTS idx_turn_around_time_entries_created
   ON turn_around_time_entries(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_idp_entries_created
   ON idp_entries(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_learning_application_plan_entries_created
+  ON learning_application_plan_entries(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_ojt_work_immersion_evaluation_entries_created
+  ON ojt_work_immersion_evaluation_entries(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_training_daily_reports_employee_submitted
   ON training_daily_reports(employee_id, submitted_at DESC);
 CREATE INDEX IF NOT EXISTS idx_training_daily_reports_status

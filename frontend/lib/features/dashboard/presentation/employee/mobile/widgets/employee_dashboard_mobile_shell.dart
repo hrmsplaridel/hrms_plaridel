@@ -129,10 +129,10 @@ class EmployeeDashboardMobileShell extends StatelessWidget {
                         mobileNav: true,
                       ),
                       settingsScrollPadding: EdgeInsets.fromLTRB(
-                        12,
+                        16,
                         8,
-                        12,
-                        28 +
+                        16,
+                        20 +
                             DashboardMobileBottomNav.scrollPaddingExtra(
                               context,
                             ),

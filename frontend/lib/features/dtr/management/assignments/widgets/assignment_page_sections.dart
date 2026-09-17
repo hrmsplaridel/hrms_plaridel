@@ -391,7 +391,8 @@ extension _ManageAssignmentPageSections on _ManageAssignmentState {
                 ),
                 if (hasSelection) ...[
                   FilledButton.icon(
-                    onPressed: _loadingLookups
+                    onPressed:
+                        _loadingLookups || !_selectedEmployeeCanAddAssignments
                         ? null
                         : () => _openAssignmentDrawer(),
                     icon: const Icon(Icons.add_rounded, size: 18),
@@ -411,6 +412,14 @@ extension _ManageAssignmentPageSections on _ManageAssignmentState {
               ],
             ),
             const SizedBox(height: 24),
+            if (hasSelection && !_selectedEmployeeCanAddAssignments) ...[
+              Text(
+                'Employee inactive. Reactivate the employee to add assignments or other positions.',
+                key: const Key('assignment-inactive-employee'),
+                style: TextStyle(color: _mutedColor(context)),
+              ),
+              const SizedBox(height: 16),
+            ],
             _buildAssignmentsTable(hasSelection),
             if (hasSelection) ...[
               const SizedBox(height: 24),
@@ -663,7 +672,8 @@ extension _ManageAssignmentPageSections on _ManageAssignmentState {
                   ),
                 ),
                 TextButton.icon(
-                  onPressed: _loadingLookups
+                  onPressed:
+                      _loadingLookups || !_selectedEmployeeCanAddAssignments
                       ? null
                       : () => _openDesignationDrawer(),
                   icon: const Icon(Icons.add_rounded, size: 18),

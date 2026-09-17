@@ -58,7 +58,13 @@ class _RspEmployeeAccountSetupPanelState
       applicationId: app.id,
       email: app.email,
       fullName: app.fullName,
+      firstName: app.firstName,
+      middleName: app.middleName,
+      lastName: app.lastName,
+      suffix: app.suffix,
       phone: app.phone,
+      sex: app.sex,
+      address: app.address,
     );
     widget.onGoToCreateAccount?.call();
     if (mounted) {
@@ -71,6 +77,7 @@ class _RspEmployeeAccountSetupPanelState
   }
 
   Future<void> _openHireEmailForm() async {
+    if (!_accountLinked) return;
     final app = widget.app;
     final to = app.email.trim();
     if (to.isEmpty) {
@@ -84,8 +91,7 @@ class _RspEmployeeAccountSetupPanelState
     final hire = context.read<RecruitmentHirePrefill>();
     final stored = hire.credentialsFor(app.id);
     var loginUsername = stored?.loginEmail ?? to;
-    var loginPassword =
-        stored?.password ?? kDefaultEmployeeAccountPassword;
+    var loginPassword = stored?.password ?? kDefaultEmployeeAccountPassword;
 
     if (stored == null &&
         _accountLinked &&
@@ -186,8 +192,12 @@ class _RspEmployeeAccountSetupPanelState
             padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 14),
           ),
         );
+        final canSendEmail = !locked && !busy && accountLinked && !emailSent;
+        final emailLooksDone = emailSent;
+        final emailLooksLocked = !accountLinked && !emailSent;
+        final emailMuted = emailLooksDone || emailLooksLocked;
         final emailBtn = OutlinedButton.icon(
-          onPressed: locked || busy || emailSent ? null : _openHireEmailForm,
+          onPressed: canSendEmail ? _openHireEmailForm : null,
           icon: Icon(
             emailSent
                 ? Icons.mark_email_read_rounded
@@ -196,18 +206,18 @@ class _RspEmployeeAccountSetupPanelState
           ),
           label: Text(emailSent ? 'Email sent' : 'Email applicant'),
           style: OutlinedButton.styleFrom(
-            foregroundColor: emailSent
+            foregroundColor: emailMuted
                 ? AppTheme.dashTextSecondaryOf(context)
                 : navy,
             disabledForegroundColor: AppTheme.dashTextSecondaryOf(context),
             side: BorderSide(
-              color: emailSent
+              color: emailMuted
                   ? AppTheme.dashTextSecondaryOf(
                       context,
                     ).withValues(alpha: 0.35)
                   : navy.withValues(alpha: 0.55),
             ),
-            backgroundColor: emailSent
+            backgroundColor: emailMuted
                 ? AppTheme.offWhite.withValues(alpha: 0.6)
                 : null,
             padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
@@ -283,7 +293,9 @@ class _RspEmployeeAccountSetupPanelState
                 children: [
                   Expanded(
                     child: Text(
-                      'Create login in sidebar, then email credentials to ${app.email.trim().isEmpty ? 'the applicant' : app.email.trim()}.',
+                      accountLinked
+                          ? 'Account is ready. Email login details to ${app.email.trim().isEmpty ? 'the applicant' : app.email.trim()}.'
+                          : 'Create the employee account first. Email applicant stays gray until the account is linked.',
                       style: TextStyle(
                         fontSize: 12,
                         color: AppTheme.dashTextSecondaryOf(context),
@@ -376,9 +388,7 @@ class _RspEmployeeAccountSetupPanelState
 
         if (!locked) return content;
 
-        return IgnorePointer(
-          child: Opacity(opacity: 0.45, child: content),
-        );
+        return IgnorePointer(child: Opacity(opacity: 0.45, child: content));
       },
     );
   }

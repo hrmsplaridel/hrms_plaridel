@@ -73,6 +73,22 @@ const TABLE_COLUMNS = {
     'noted_by_title',
     'updated_at',
   ],
+  learning_application_plan_entries: [
+    'memo_report_to',
+    'from_name',
+    'thru',
+    'subject',
+    'title',
+    'date',
+    'venue',
+    'cost',
+    'reap_types',
+    'other_reap_type',
+    'reported_by',
+    'received_by',
+    'entries',
+    'updated_at',
+  ],
   idp_entries: [
     'name',
     'position',
@@ -166,6 +182,25 @@ const TABLE_COLUMNS = {
     'signatory_title',
     'updated_at',
   ],
+  ojt_work_immersion_evaluation_entries: [
+    'ojt_immersion',
+    'school',
+    'interview_date',
+    'problem_solving_score',
+    'problem_solving_notes',
+    'communication_score',
+    'communication_notes',
+    'teamwork_score',
+    'teamwork_notes',
+    'adaptability_score',
+    'adaptability_notes',
+    'total_score',
+    'overall_recommendation',
+    'key_strengths',
+    'key_concerns',
+    'interviewer',
+    'updated_at',
+  ],
 };
 
 function isAllowedTable(table) {
@@ -222,6 +257,7 @@ const TABLE_JSONB_COLUMNS = {
   action_brainstorming_coaching_entries: ['rows'],
   turn_around_time_entries: ['applicants'],
   idp_entries: ['development_plan_rows'],
+  learning_application_plan_entries: ['reap_types', 'entries'],
   selection_lineup_entries: ['applicants'],
   computation_of_points_entries: ['candidates'],
   applicants_profile_entries: ['applicants'],
@@ -362,6 +398,27 @@ async function ensureRspLdSavedEntryTables() {
   `);
 
   await pool.query(`
+    CREATE TABLE IF NOT EXISTS public.learning_application_plan_entries (
+      id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+      memo_report_to TEXT,
+      from_name TEXT,
+      thru TEXT,
+      subject TEXT,
+      title TEXT,
+      date TEXT,
+      venue TEXT,
+      cost TEXT,
+      reap_types JSONB DEFAULT '[]'::JSONB,
+      other_reap_type TEXT,
+      reported_by TEXT,
+      received_by TEXT,
+      entries JSONB DEFAULT '[]'::JSONB,
+      created_at TIMESTAMPTZ DEFAULT now(),
+      updated_at TIMESTAMPTZ DEFAULT now()
+    );
+  `);
+
+  await pool.query(`
     CREATE TABLE IF NOT EXISTS public.idp_entries (
       id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
       name TEXT,
@@ -483,6 +540,30 @@ async function ensureRspLdSavedEntryTables() {
       date_year TEXT,
       signatory_name TEXT,
       signatory_title TEXT,
+      created_at TIMESTAMPTZ DEFAULT now(),
+      updated_at TIMESTAMPTZ DEFAULT now()
+    );
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS public.ojt_work_immersion_evaluation_entries (
+      id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+      ojt_immersion TEXT,
+      school TEXT,
+      interview_date TEXT,
+      problem_solving_score INT,
+      problem_solving_notes TEXT,
+      communication_score INT,
+      communication_notes TEXT,
+      teamwork_score INT,
+      teamwork_notes TEXT,
+      adaptability_score INT,
+      adaptability_notes TEXT,
+      total_score INT,
+      overall_recommendation TEXT,
+      key_strengths TEXT,
+      key_concerns TEXT,
+      interviewer TEXT,
       created_at TIMESTAMPTZ DEFAULT now(),
       updated_at TIMESTAMPTZ DEFAULT now()
     );

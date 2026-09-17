@@ -114,6 +114,8 @@ class _RspWorkExperienceSheetSectionState
         buildDocument: () =>
             FormPdf.buildWorkExperienceSheetPdf(entry, signatures: signatures),
         filename: 'Work_Experience_Sheet.pdf',
+        printModule: 'rsp',
+        printFormKey: 'work_experience',
       );
     } catch (error) {
       if (!mounted) return;

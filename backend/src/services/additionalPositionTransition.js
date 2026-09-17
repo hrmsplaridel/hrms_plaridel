@@ -66,7 +66,8 @@ async function lockEmployeeAdditionalPositions(db, employeeId) {
 
 async function validateAdditionalPositionSelection(
   db,
-  { employeeId, departmentId, positionId, requireActiveReferences = true }
+  { employeeId, departmentId, positionId, requireActiveReferences = true,
+    requireActiveEmployee = requireActiveReferences }
 ) {
   const employee = cleanRequiredId(employeeId, 'Employee');
   const department = cleanRequiredId(departmentId, 'Department');
@@ -102,16 +103,18 @@ async function validateAdditionalPositionSelection(
       'Selected position does not belong to the selected department'
     );
   }
-  if (requireActiveReferences) {
+  if (requireActiveEmployee) {
     if (
       !row.employee_is_active ||
       String(row.employee_status || 'active').toLowerCase() !== 'active'
     ) {
       throw new AdditionalPositionTransitionError(
-        'An active additional position requires an active employee account',
+        'A new or active additional position requires an active employee account',
         409
       );
     }
+  }
+  if (requireActiveReferences) {
     if (!row.department_is_active) {
       throw new AdditionalPositionTransitionError(
         'Selected department is inactive',
@@ -185,6 +188,7 @@ async function createAdditionalPositionTransition(
     departmentId: department,
     positionId: position,
     requireActiveReferences: isActive !== false,
+    requireActiveEmployee: true,
   });
   if (isActive !== false) {
     await assertNoDuplicateAdditionalPositionOverlap(db, {

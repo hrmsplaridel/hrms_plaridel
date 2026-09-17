@@ -11,6 +11,8 @@ import 'package:hrms_plaridel/core/services/push_notification_service.dart';
 import 'package:hrms_plaridel/features/dtr/assistant/data/dtr_assistant_session_storage.dart';
 import 'package:hrms_plaridel/features/dtr/locator/data/repositories/locator_slip_data_cache.dart';
 
+enum SessionRestoreResult { restored, noSession, temporarilyUnavailable }
+
 /// Central auth state. Uses API (JWT) instead of Supabase.
 /// Exposes current user, displayName, email, avatarPath. Call [refreshUser] after
 /// profile/avatar updates so UI stays in sync.
@@ -71,7 +73,7 @@ class AuthProvider extends ChangeNotifier {
   }
 
   /// Restore session from stored JWT. Call before runApp.
-  Future<void> restoreSession() async {
+  Future<SessionRestoreResult> restoreSession() async {
     String? token;
     try {
       final future = TokenStorage.instance.getToken();
@@ -88,9 +90,11 @@ class AuthProvider extends ChangeNotifier {
           : await future;
     } catch (e) {
       debugPrint('TokenStorage.getToken failed: $e');
-      return;
+      return SessionRestoreResult.temporarilyUnavailable;
     }
-    if (token == null || token.isEmpty) return;
+    if (token == null || token.isEmpty) {
+      return SessionRestoreResult.noSession;
+    }
     try {
       final res = await ApiClient.instance.get<Map<String, dynamic>>(
         '/auth/me',
@@ -105,15 +109,26 @@ class AuthProvider extends ChangeNotifier {
           await DtrAssistantSessionStorage.clearAllForUser(previousUserId);
         }
         _user = restoredUser;
-        await PushNotificationService.instance.syncTokenWithBackend();
         notifyListeners();
+        unawaited(
+          PushNotificationService.instance
+              .syncTokenWithBackend()
+              .timeout(const Duration(seconds: 10), onTimeout: () {})
+              .catchError((_) {}),
+        );
+        return SessionRestoreResult.restored;
       }
+      return SessionRestoreResult.temporarilyUnavailable;
     } on DioException catch (e) {
       if (e.response?.statusCode == 401 || e.response?.statusCode == 403) {
         await TokenStorage.instance.clearAllTokens();
+        return SessionRestoreResult.noSession;
       }
-    } catch (_) {
-      await TokenStorage.instance.clearAllTokens();
+      debugPrint('AuthProvider.restoreSession unavailable: $e');
+      return SessionRestoreResult.temporarilyUnavailable;
+    } catch (e) {
+      debugPrint('AuthProvider.restoreSession failed: $e');
+      return SessionRestoreResult.temporarilyUnavailable;
     }
   }
 

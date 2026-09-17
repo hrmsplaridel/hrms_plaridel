@@ -1,283 +1,119 @@
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
+import 'package:hrms_plaridel/features/dashboard/presentation/admin/desktop/widgets/recruitment_monitoring_stats.dart';
 import 'package:hrms_plaridel/features/recruitment/models/recruitment_application.dart';
 
-/// Analytics charts for the admin dashboard recruitment hub.
+/// RSP monitoring content for the admin dashboard home.
 class RecruitmentHubAnalyticsPanel extends StatelessWidget {
   const RecruitmentHubAnalyticsPanel({
     super.key,
-    required this.applications,
-    required this.pending,
-    required this.inProgress,
-    required this.hired,
-    required this.closed,
-    required this.total,
+    required this.stats,
+    required this.activeApplications,
+    required this.dateLabel,
+    this.hiringOpen,
+    this.listedPositionCount,
   });
 
-  final List<RecruitmentApplication> applications;
-  final int pending;
-  final int inProgress;
-  final int hired;
-  final int closed;
-  final int total;
+  final RecruitmentMonitoringStats stats;
+  final List<RecruitmentApplication> activeApplications;
+  final String Function(DateTime?) dateLabel;
+  final bool? hiringOpen;
+  final int? listedPositionCount;
 
-  static const _pendingColor = AppTheme.primaryNavy;
-  static const _progressColor = Color(0xFF1565C0);
-  static const _hiredColor = Color(0xFF2E7D32);
-  static const _closedColor = Color(0xFF6A1B9A);
-
-  List<({String label, int count})> get _monthlySubmissions {
-    final now = DateTime.now();
-    final months = <DateTime>[];
-    for (var i = 5; i >= 0; i--) {
-      var y = now.year;
-      var m = now.month - i;
-      while (m < 1) {
-        m += 12;
-        y -= 1;
-      }
-      months.add(DateTime(y, m, 1));
-    }
-
-    final counts = {for (final d in months) d: 0};
-    for (final app in applications) {
-      if (app.isFromMayorModule) continue;
-      final dt = app.createdAt?.toLocal();
-      if (dt == null) continue;
-      final key = DateTime(dt.year, dt.month, 1);
-      if (counts.containsKey(key)) counts[key] = counts[key]! + 1;
-    }
-
-    const shortMonths = [
-      'Jan',
-      'Feb',
-      'Mar',
-      'Apr',
-      'May',
-      'Jun',
-      'Jul',
-      'Aug',
-      'Sep',
-      'Oct',
-      'Nov',
-      'Dec',
-    ];
-    return months
-        .map(
-          (d) => (
-            label: shortMonths[d.month - 1],
-            count: counts[d] ?? 0,
-          ),
-        )
-        .toList();
-  }
-
-  Map<String, int> get _statusBreakdown {
-    final map = <String, int>{};
-    for (final app in applications) {
-      if (app.isFromMayorModule) continue;
-      final label = _statusLabel(app.status);
-      map[label] = (map[label] ?? 0) + 1;
-    }
-    return map;
-  }
-
-  static String _statusLabel(String status) {
-    switch (status) {
-      case 'submitted':
-        return 'Pending review';
-      case 'document_approved':
-        return 'Docs approved';
-      case 'document_declined':
-        return 'Docs declined';
-      case 'exam_taken':
-        return 'Exam taken';
-      case 'passed':
-        return 'Passed exam';
-      case 'failed':
-        return 'Failed exam';
-      case 'registered':
-        return 'Hired';
-      default:
-        return status.replaceAll('_', ' ');
-    }
-  }
+  static const _pending = Color(0xFFD97706);
+  static const _progress = Color(0xFF1565C0);
+  static const _hired = Color(0xFF2E7D32);
+  static const _attention = Color(0xFFC62828);
 
   @override
   Widget build(BuildContext context) {
-    if (total == 0) {
-      return _RecruitmentAnalyticsEmptyState(
-        monthlyLabels: _monthlySubmissions.map((e) => e.label).toList(),
-      );
-    }
+    final width = MediaQuery.sizeOf(context).width;
+    final isDesktop = width >= 960;
+    final isMobile = width < 720;
 
-    final isWide = MediaQuery.sizeOf(context).width > 720;
-    final pipelineSegments = [
-      if (pending > 0) (label: 'Pending', count: pending, color: _pendingColor),
-      if (inProgress > 0)
-        (label: 'In progress', count: inProgress, color: _progressColor),
-      if (hired > 0) (label: 'Hired', count: hired, color: _hiredColor),
-      if (closed > 0) (label: 'Closed', count: closed, color: _closedColor),
-    ];
-
-    final charts = isWide
-        ? Row(
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _KpiGrid(
+          stats: stats,
+          hiringOpen: hiringOpen,
+          listedPositionCount: listedPositionCount,
+        ),
+        const SizedBox(height: 14),
+        _SectionCard(
+          title: 'Recruitment Pipeline',
+          subtitle: 'Where applicants currently are in the hiring process',
+          child: _PipelineTracker(stages: stats.pipeline),
+        ),
+        const SizedBox(height: 14),
+        if (isDesktop)
+          Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Expanded(
-                child: _AnalyticsChartCard(
-                  title: 'Pipeline distribution',
-                  subtitle: 'Share of applicants by stage',
-                  child: _PipelineDonutChart(
-                    segments: pipelineSegments,
-                    total: total,
+                flex: 6,
+                child: _SectionCard(
+                  title: 'Application Trend',
+                  subtitle: 'Applications received over the last 6 months',
+                  child: _ApplicationTrendChart(
+                    months: stats.monthlySubmissions,
                   ),
                 ),
               ),
-              const SizedBox(width: 16),
+              const SizedBox(width: 14),
               Expanded(
-                child: _AnalyticsChartCard(
-                  title: 'Submissions trend',
-                  subtitle: 'New applications (last 6 months)',
-                  child: _SubmissionsBarChart(months: _monthlySubmissions),
+                flex: 4,
+                child: Column(
+                  children: [
+                    _SectionCard(
+                      title: 'Status Breakdown',
+                      subtitle: 'Applicants by current recruitment status',
+                      child: _StatusBreakdownList(items: stats.statusBreakdown),
+                    ),
+                    const SizedBox(height: 14),
+                    _RequiresAttentionCard(items: stats.attention),
+                  ],
                 ),
               ),
             ],
           )
-        : Column(
-            children: [
-              _AnalyticsChartCard(
-                title: 'Pipeline distribution',
-                subtitle: 'Share of applicants by stage',
-                child: _PipelineDonutChart(
-                  segments: pipelineSegments,
-                  total: total,
-                ),
-              ),
-              const SizedBox(height: 14),
-              _AnalyticsChartCard(
-                title: 'Submissions trend',
-                subtitle: 'New applications (last 6 months)',
-                child: _SubmissionsBarChart(months: _monthlySubmissions),
-              ),
-            ],
-          );
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        SingleChildScrollView(
-          scrollDirection: Axis.horizontal,
-          child: Row(
-            children: [
-              _InsightChip(
-                label: 'Pending Review',
-                value: '$pending',
-                icon: Icons.hourglass_top_rounded,
-                color: _pendingColor,
-              ),
-              const SizedBox(width: 10),
-              _InsightChip(
-                label: 'In Progress',
-                value: '$inProgress',
-                icon: Icons.timelapse_rounded,
-                color: _progressColor,
-              ),
-              const SizedBox(width: 10),
-              _InsightChip(
-                label: 'Total Applicants',
-                value: '$total',
-                icon: Icons.groups_rounded,
-                color: _closedColor,
-              ),
-            ],
+        else ...[
+          _SectionCard(
+            title: 'Application Trend',
+            subtitle: 'Applications received over the last 6 months',
+            child: _ApplicationTrendChart(months: stats.monthlySubmissions),
           ),
-        ),
-        const SizedBox(height: 16),
-        charts,
+          const SizedBox(height: 14),
+          _SectionCard(
+            title: 'Status Breakdown',
+            subtitle: 'Applicants by current recruitment status',
+            child: _StatusBreakdownList(items: stats.statusBreakdown),
+          ),
+          const SizedBox(height: 14),
+          _RequiresAttentionCard(items: stats.attention),
+        ],
         const SizedBox(height: 14),
-        _AnalyticsChartCard(
-          title: 'Status breakdown',
-          subtitle: 'Applicants by current recruitment status',
-          child: _StatusBreakdownChart(breakdown: _statusBreakdown),
+        _SectionCard(
+          title: 'Active Applications',
+          subtitle: 'Latest applicants and their current recruitment stage',
+          child: isMobile
+              ? _ActiveApplicationCards(
+                  applications: activeApplications,
+                  dateLabel: dateLabel,
+                )
+              : _ActiveApplicationTable(
+                  applications: activeApplications,
+                  dateLabel: dateLabel,
+                ),
         ),
       ],
     );
   }
 }
 
-class _RecruitmentAnalyticsEmptyState extends StatelessWidget {
-  const _RecruitmentAnalyticsEmptyState({required this.monthlyLabels});
-
-  final List<String> monthlyLabels;
-
-  @override
-  Widget build(BuildContext context) {
-    final secondary = AppTheme.dashTextSecondaryOf(context);
-    final zeroMonths = monthlyLabels
-        .map((label) => (label: label, count: 0))
-        .toList();
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        _AnalyticsChartCard(
-          title: 'Submissions trend',
-          subtitle: 'New applications (last 6 months)',
-          child: Column(
-            children: [
-              _SubmissionsBarChart(months: zeroMonths, muted: true),
-              const SizedBox(height: 12),
-              Text(
-                'Charts will populate when applicants submit recruitment forms.',
-                textAlign: TextAlign.center,
-                style: TextStyle(color: secondary, fontSize: 13, height: 1.4),
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(height: 14),
-        Container(
-          width: double.infinity,
-          padding: const EdgeInsets.symmetric(vertical: 24, horizontal: 20),
-          decoration: BoxDecoration(
-            color: AppTheme.dashMutedSurfaceOf(context),
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: AppTheme.dashHairlineOf(context)),
-          ),
-          child: Column(
-            children: [
-              Icon(
-                Icons.pie_chart_outline_rounded,
-                size: 36,
-                color: AppTheme.primaryNavy.withValues(alpha: 0.45),
-              ),
-              const SizedBox(height: 10),
-              Text(
-                'No pipeline data yet',
-                style: TextStyle(
-                  color: AppTheme.dashTextPrimaryOf(context),
-                  fontWeight: FontWeight.w700,
-                  fontSize: 15,
-                ),
-              ),
-              const SizedBox(height: 6),
-              Text(
-                'Pipeline donut and status charts appear once applications are recorded.',
-                textAlign: TextAlign.center,
-                style: TextStyle(color: secondary, fontSize: 13, height: 1.4),
-              ),
-            ],
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _AnalyticsChartCard extends StatelessWidget {
-  const _AnalyticsChartCard({
+class _SectionCard extends StatelessWidget {
+  const _SectionCard({
     required this.title,
     required this.subtitle,
     required this.child,
@@ -291,11 +127,20 @@ class _AnalyticsChartCard extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
       decoration: BoxDecoration(
-        color: AppTheme.dashMutedSurfaceOf(context),
-        borderRadius: BorderRadius.circular(16),
+        color: AppTheme.dashPanelOf(context),
+        borderRadius: BorderRadius.circular(14),
         border: Border.all(color: AppTheme.dashHairlineOf(context)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(
+              alpha: AppTheme.dashIsDark(context) ? 0.22 : 0.04,
+            ),
+            blurRadius: 14,
+            offset: const Offset(0, 4),
+          ),
+        ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -304,16 +149,17 @@ class _AnalyticsChartCard extends StatelessWidget {
             title,
             style: TextStyle(
               color: AppTheme.dashTextPrimaryOf(context),
-              fontSize: 14,
-              fontWeight: FontWeight.w700,
+              fontSize: 15,
+              fontWeight: FontWeight.w800,
             ),
           ),
-          const SizedBox(height: 4),
+          const SizedBox(height: 2),
           Text(
             subtitle,
             style: TextStyle(
               color: AppTheme.dashTextSecondaryOf(context),
               fontSize: 12,
+              height: 1.35,
             ),
           ),
           const SizedBox(height: 14),
@@ -324,48 +170,184 @@ class _AnalyticsChartCard extends StatelessWidget {
   }
 }
 
-class _InsightChip extends StatelessWidget {
-  const _InsightChip({
+class _KpiGrid extends StatelessWidget {
+  const _KpiGrid({
+    required this.stats,
+    required this.hiringOpen,
+    required this.listedPositionCount,
+  });
+
+  final RecruitmentMonitoringStats stats;
+  final bool? hiringOpen;
+  final int? listedPositionCount;
+
+  @override
+  Widget build(BuildContext context) {
+    final vacancyValue = hiringOpen == null
+        ? '—'
+        : (hiringOpen! ? 'Open' : 'Closed');
+    String vacancyHint;
+    if (hiringOpen == null) {
+      vacancyHint = 'Unable to load';
+    } else if (hiringOpen! && (listedPositionCount ?? 0) > 0) {
+      final n = listedPositionCount!;
+      vacancyHint = n == 1 ? '1 posted position' : '$n posted positions';
+    } else if (hiringOpen!) {
+      vacancyHint = 'Hiring active';
+    } else {
+      vacancyHint = 'Hiring inactive';
+    }
+
+    final cards = [
+      _KpiCard(
+        label: 'Total Applicants',
+        value: '${stats.total}',
+        icon: Icons.groups_rounded,
+        accent: AppTheme.primaryNavy,
+      ),
+      _KpiCard(
+        label: 'Pending Review',
+        value: '${stats.pending}',
+        icon: Icons.hourglass_top_rounded,
+        accent: RecruitmentHubAnalyticsPanel._pending,
+      ),
+      _KpiCard(
+        label: 'Active Recruitment',
+        value: '${stats.inProgress}',
+        icon: Icons.timelapse_rounded,
+        accent: RecruitmentHubAnalyticsPanel._progress,
+        hint: 'In progress',
+      ),
+      _KpiCard(
+        label: 'Job Vacancies',
+        value: vacancyValue,
+        icon: Icons.work_outline_rounded,
+        accent: hiringOpen == true
+            ? RecruitmentHubAnalyticsPanel._hired
+            : AppTheme.primaryNavy,
+        hint: vacancyHint,
+      ),
+    ];
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final w = constraints.maxWidth;
+        final columns = w >= 960 ? 4 : (w >= 420 ? 2 : 1);
+        const gap = 12.0;
+        final itemWidth = columns == 1
+            ? w
+            : (w - gap * (columns - 1)) / columns;
+        return Wrap(
+          spacing: gap,
+          runSpacing: gap,
+          children: [
+            for (final card in cards) SizedBox(width: itemWidth, child: card),
+          ],
+        );
+      },
+    );
+  }
+}
+
+class _KpiCard extends StatelessWidget {
+  const _KpiCard({
     required this.label,
     required this.value,
     required this.icon,
-    required this.color,
+    required this.accent,
+    this.hint,
   });
 
   final String label;
   final String value;
   final IconData icon;
-  final Color color;
+  final Color accent;
+  final String? hint;
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      constraints: const BoxConstraints(minHeight: 92),
       decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.08),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: color.withValues(alpha: 0.22)),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 16, color: color),
-          const SizedBox(width: 8),
-          Text(
-            value,
-            style: TextStyle(
-              color: color,
-              fontSize: 15,
-              fontWeight: FontWeight.w800,
+        color: AppTheme.dashPanelOf(context),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: AppTheme.dashHairlineOf(context)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(
+              alpha: AppTheme.dashIsDark(context) ? 0.2 : 0.035,
             ),
+            blurRadius: 10,
+            offset: const Offset(0, 3),
           ),
-          const SizedBox(width: 6),
-          Text(
-            label,
-            style: TextStyle(
-              color: AppTheme.dashTextSecondaryOf(context),
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
+        ],
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Row(
+        children: [
+          Container(width: 4, color: accent),
+          Expanded(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
+              child: Row(
+                children: [
+                  Container(
+                    width: 34,
+                    height: 34,
+                    decoration: BoxDecoration(
+                      color: accent.withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Icon(icon, size: 18, color: accent),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Text(
+                          value,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            color: AppTheme.dashTextPrimaryOf(context),
+                            fontSize: 22,
+                            fontWeight: FontWeight.w800,
+                            height: 1.1,
+                            letterSpacing: -0.4,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          label,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            color: AppTheme.dashTextSecondaryOf(context),
+                            fontSize: 11.5,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        if (hint != null) ...[
+                          const SizedBox(height: 1),
+                          Text(
+                            hint!,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              color: AppTheme.dashTextSecondaryOf(
+                                context,
+                              ).withValues(alpha: 0.9),
+                              fontSize: 10.5,
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
         ],
@@ -374,88 +356,117 @@ class _InsightChip extends StatelessWidget {
   }
 }
 
-class _PipelineDonutChart extends StatelessWidget {
-  const _PipelineDonutChart({
-    required this.segments,
-    required this.total,
-  });
+class _PipelineTracker extends StatelessWidget {
+  const _PipelineTracker({required this.stages});
 
-  final List<({String label, int count, Color color})> segments;
-  final int total;
+  final List<RecruitmentPipelineStage> stages;
 
   @override
   Widget build(BuildContext context) {
-    if (segments.isEmpty || total == 0) {
-      return const SizedBox(
-        height: 200,
-        child: Center(child: Text('No pipeline data')),
+    if (stages.every((s) => s.count == 0)) {
+      return Text(
+        'Pipeline counts appear once applications are recorded.',
+        style: TextStyle(
+          color: AppTheme.dashTextSecondaryOf(context),
+          fontSize: 13,
+          height: 1.4,
+        ),
       );
     }
 
-    return SizedBox(
-      height: 220,
-      child: Row(
-        children: [
-          Expanded(
-            flex: 3,
-            child: PieChart(
-              PieChartData(
-                sectionsSpace: 2,
-                centerSpaceRadius: 42,
-                sections: [
-                  for (final s in segments)
-                    PieChartSectionData(
-                      color: s.color,
-                      value: s.count.toDouble(),
-                      title:
-                          '${(s.count / total * 100).toStringAsFixed(0)}%',
-                      radius: 52,
-                      titleStyle: const TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w700,
-                        color: Colors.white,
-                      ),
-                      titlePositionPercentageOffset: 0.58,
-                    ),
-                ],
-              ),
-              duration: const Duration(milliseconds: 350),
-            ),
-          ),
-          const SizedBox(width: 8),
-          Expanded(
-            flex: 2,
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              crossAxisAlignment: CrossAxisAlignment.start,
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final compact = constraints.maxWidth < 760;
+        if (compact) {
+          return SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
               children: [
-                for (final s in segments) ...[
-                  Row(
-                    children: [
-                      Container(
-                        width: 10,
-                        height: 10,
-                        decoration: BoxDecoration(
-                          color: s.color,
-                          shape: BoxShape.circle,
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          '${s.label} (${s.count})',
-                          style: TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w600,
-                            color: AppTheme.dashTextSecondaryOf(context),
-                          ),
-                        ),
-                      ),
-                    ],
+                for (var i = 0; i < stages.length; i++) ...[
+                  SizedBox(
+                    width: 108,
+                    child: _PipelineStageChip(stage: stages[i]),
                   ),
-                  const SizedBox(height: 8),
+                  if (i < stages.length - 1) const _PipelineConnector(),
                 ],
               ],
+            ),
+          );
+        }
+        return Row(
+          children: [
+            for (var i = 0; i < stages.length; i++) ...[
+              Expanded(child: _PipelineStageChip(stage: stages[i])),
+              if (i < stages.length - 1) const _PipelineConnector(),
+            ],
+          ],
+        );
+      },
+    );
+  }
+}
+
+class _PipelineConnector extends StatelessWidget {
+  const _PipelineConnector();
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 4),
+      child: Icon(
+        Icons.chevron_right_rounded,
+        size: 16,
+        color: AppTheme.dashTextSecondaryOf(context).withValues(alpha: 0.55),
+      ),
+    );
+  }
+}
+
+class _PipelineStageChip extends StatelessWidget {
+  const _PipelineStageChip({required this.stage});
+
+  final RecruitmentPipelineStage stage;
+
+  @override
+  Widget build(BuildContext context) {
+    final active = stage.count > 0;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
+      decoration: BoxDecoration(
+        color: active
+            ? AppTheme.primaryNavy.withValues(alpha: 0.06)
+            : AppTheme.dashMutedSurfaceOf(context),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: active
+              ? AppTheme.primaryNavy.withValues(alpha: 0.22)
+              : AppTheme.dashHairlineOf(context),
+        ),
+      ),
+      child: Column(
+        children: [
+          Text(
+            '${stage.count}',
+            style: TextStyle(
+              color: active
+                  ? AppTheme.dashTextPrimaryOf(context)
+                  : AppTheme.dashTextSecondaryOf(context),
+              fontSize: 20,
+              fontWeight: FontWeight.w800,
+              height: 1.1,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            stage.label,
+            textAlign: TextAlign.center,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              color: AppTheme.dashTextSecondaryOf(context),
+              fontSize: 10.5,
+              fontWeight: FontWeight.w600,
+              height: 1.2,
             ),
           ),
         ],
@@ -464,36 +475,52 @@ class _PipelineDonutChart extends StatelessWidget {
   }
 }
 
-class _SubmissionsBarChart extends StatelessWidget {
-  const _SubmissionsBarChart({
-    required this.months,
-    this.muted = false,
-  });
+class _ApplicationTrendChart extends StatelessWidget {
+  const _ApplicationTrendChart({required this.months});
 
-  final List<({String label, int count})> months;
-  final bool muted;
+  final List<RecruitmentMonthCount> months;
 
   @override
   Widget build(BuildContext context) {
     final maxVal = months.fold<int>(0, (m, e) => e.count > m ? e.count : m);
     final maxY = (maxVal + 1).clamp(2, 20).toDouble();
-    final barColor = muted
-        ? AppTheme.dashTextSecondaryOf(context).withValues(alpha: 0.35)
-        : AppTheme.primaryNavy;
+    final barColor = AppTheme.primaryNavy;
+    final hasData = maxVal > 0;
 
     return SizedBox(
-      height: 200,
+      height: 168,
       child: BarChart(
         BarChartData(
           maxY: maxY,
+          barTouchData: BarTouchData(
+            enabled: true,
+            touchTooltipData: BarTouchTooltipData(
+              getTooltipColor: (_) => const Color(0xFF1F2937),
+              tooltipPadding: const EdgeInsets.symmetric(
+                horizontal: 10,
+                vertical: 8,
+              ),
+              getTooltipItem: (group, groupIndex, rod, rodIndex) {
+                if (group.x < 0 || group.x >= months.length) return null;
+                final n = rod.toY.toInt();
+                return BarTooltipItem(
+                  '${months[group.x].label}\n$n ${n == 1 ? 'application' : 'applications'}',
+                  const TextStyle(
+                    color: Colors.white,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    height: 1.35,
+                  ),
+                );
+              },
+            ),
+          ),
           gridData: FlGridData(
             show: true,
             drawVerticalLine: false,
             horizontalInterval: 1,
-            getDrawingHorizontalLine: (v) => FlLine(
-              color: AppTheme.dashHairlineOf(context),
-              strokeWidth: 1,
-            ),
+            getDrawingHorizontalLine: (v) =>
+                FlLine(color: AppTheme.dashHairlineOf(context), strokeWidth: 1),
           ),
           borderData: FlBorderData(show: false),
           titlesData: FlTitlesData(
@@ -506,14 +533,18 @@ class _SubmissionsBarChart extends StatelessWidget {
             leftTitles: AxisTitles(
               sideTitles: SideTitles(
                 showTitles: true,
-                reservedSize: 28,
-                getTitlesWidget: (v, meta) => Text(
-                  v.toInt().toString(),
-                  style: TextStyle(
-                    fontSize: 10,
-                    color: AppTheme.dashTextSecondaryOf(context),
-                  ),
-                ),
+                reservedSize: 26,
+                interval: 1,
+                getTitlesWidget: (v, meta) {
+                  if (v % 1 != 0) return const SizedBox.shrink();
+                  return Text(
+                    v.toInt().toString(),
+                    style: TextStyle(
+                      fontSize: 10,
+                      color: AppTheme.dashTextSecondaryOf(context),
+                    ),
+                  );
+                },
               ),
             ),
             bottomTitles: AxisTitles(
@@ -544,66 +575,389 @@ class _SubmissionsBarChart extends StatelessWidget {
               barRods: [
                 BarChartRodData(
                   toY: count.toDouble(),
-                  width: 18,
+                  width: 16,
                   borderRadius: const BorderRadius.vertical(
-                    top: Radius.circular(6),
+                    top: Radius.circular(5),
                   ),
-                  gradient: LinearGradient(
-                    begin: Alignment.bottomCenter,
-                    end: Alignment.topCenter,
-                    colors: [
-                      barColor.withValues(alpha: 0.55),
-                      barColor,
-                    ],
-                  ),
+                  color: hasData ? barColor : barColor.withValues(alpha: 0.28),
                 ),
               ],
             );
           }),
         ),
-        duration: const Duration(milliseconds: 350),
+        duration: const Duration(milliseconds: 280),
       ),
     );
   }
 }
 
-class _StatusBreakdownChart extends StatelessWidget {
-  const _StatusBreakdownChart({required this.breakdown});
+class _StatusBreakdownList extends StatelessWidget {
+  const _StatusBreakdownList({required this.items});
 
-  final Map<String, int> breakdown;
-
-  static const _colors = [
-    AppTheme.primaryNavy,
-    Color(0xFF1565C0),
-    Color(0xFF2E7D32),
-    Color(0xFF6A1B9A),
-    Color(0xFFC62828),
-    Color(0xFFE65100),
-    Color(0xFF00838F),
-  ];
+  final List<RecruitmentStatusCount> items;
 
   @override
   Widget build(BuildContext context) {
-    final entries = breakdown.entries.toList()
-      ..sort((a, b) => b.value.compareTo(a.value));
-    if (entries.isEmpty) {
-      return const SizedBox(
-        height: 80,
-        child: Center(child: Text('No status data')),
+    if (items.isEmpty) {
+      return Text(
+        'Status counts appear once applications are recorded.',
+        style: TextStyle(
+          color: AppTheme.dashTextSecondaryOf(context),
+          fontSize: 13,
+          height: 1.4,
+        ),
       );
     }
 
-    final maxVal = entries.first.value.toDouble();
+    final maxVal = items.first.count.toDouble();
+    return Column(
+      children: [
+        for (var i = 0; i < items.length; i++) ...[
+          if (i > 0) const SizedBox(height: 8),
+          _StatusRow(label: items[i].label, value: items[i].count, max: maxVal),
+        ],
+      ],
+    );
+  }
+}
+
+class _StatusRow extends StatelessWidget {
+  const _StatusRow({
+    required this.label,
+    required this.value,
+    required this.max,
+  });
+
+  final String label;
+  final int value;
+  final double max;
+
+  @override
+  Widget build(BuildContext context) {
+    final fraction = max <= 0 ? 0.0 : (value / max).clamp(0.0, 1.0);
+    return Row(
+      children: [
+        Expanded(
+          flex: 4,
+          child: Text(
+            label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+              color: AppTheme.dashTextSecondaryOf(context),
+            ),
+          ),
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          flex: 5,
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(999),
+            child: SizedBox(
+              height: 7,
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  ColoredBox(color: AppTheme.dashHairlineOf(context)),
+                  FractionallySizedBox(
+                    alignment: Alignment.centerLeft,
+                    widthFactor: fraction,
+                    child: const ColoredBox(color: AppTheme.primaryNavy),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(width: 8),
+        SizedBox(
+          width: 24,
+          child: Text(
+            '$value',
+            textAlign: TextAlign.right,
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w800,
+              color: AppTheme.dashTextPrimaryOf(context),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _RequiresAttentionCard extends StatelessWidget {
+  const _RequiresAttentionCard({required this.items});
+
+  final List<RecruitmentAttentionItem> items;
+
+  @override
+  Widget build(BuildContext context) {
+    return _SectionCard(
+      title: 'Requires Attention',
+      subtitle: 'Existing statuses that currently need HR action',
+      child: items.isEmpty
+          ? Text(
+              'No recruitment items currently require immediate action.',
+              style: TextStyle(
+                color: AppTheme.dashTextSecondaryOf(context),
+                fontSize: 13,
+                height: 1.4,
+              ),
+            )
+          : Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                for (final item in items)
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 8,
+                    ),
+                    decoration: BoxDecoration(
+                      color: RecruitmentHubAnalyticsPanel._attention.withValues(
+                        alpha: 0.06,
+                      ),
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(
+                        color: RecruitmentHubAnalyticsPanel._attention
+                            .withValues(alpha: 0.18),
+                      ),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          '${item.count}',
+                          style: const TextStyle(
+                            fontWeight: FontWeight.w800,
+                            fontSize: 13,
+                            color: RecruitmentHubAnalyticsPanel._attention,
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                        Text(
+                          item.label,
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                            color: AppTheme.dashTextPrimaryOf(context),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+              ],
+            ),
+    );
+  }
+}
+
+class _ActiveApplicationTable extends StatelessWidget {
+  const _ActiveApplicationTable({
+    required this.applications,
+    required this.dateLabel,
+  });
+
+  final List<RecruitmentApplication> applications;
+  final String Function(DateTime?) dateLabel;
+
+  @override
+  Widget build(BuildContext context) {
+    if (applications.isEmpty) {
+      return Text(
+        'No active applications',
+        style: TextStyle(
+          color: AppTheme.dashTextSecondaryOf(context),
+          fontSize: 13,
+          height: 1.4,
+        ),
+      );
+    }
 
     return Column(
       children: [
-        for (var i = 0; i < entries.length; i++) ...[
-          if (i > 0) const SizedBox(height: 10),
-          _HorizontalBarRow(
-            label: entries[i].key,
-            value: entries[i].value,
-            max: maxVal,
-            color: _colors[i % _colors.length],
+        _TableHeaderRow(),
+        const Divider(height: 1),
+        for (var i = 0; i < applications.length; i++) ...[
+          _ApplicantTableRow(
+            application: applications[i],
+            dateLabel: dateLabel,
+          ),
+          if (i < applications.length - 1) const Divider(height: 1),
+        ],
+      ],
+    );
+  }
+}
+
+class _TableHeaderRow extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    final style = TextStyle(
+      fontWeight: FontWeight.w700,
+      fontSize: 11,
+      letterSpacing: 0.4,
+      color: AppTheme.dashTextSecondaryOf(context),
+    );
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(4, 0, 4, 10),
+      child: Row(
+        children: [
+          Expanded(flex: 3, child: Text('APPLICANT', style: style)),
+          Expanded(flex: 2, child: Text('POSITION', style: style)),
+          Expanded(flex: 2, child: Text('APPLIED DATE', style: style)),
+          Expanded(flex: 2, child: Text('CURRENT STAGE', style: style)),
+        ],
+      ),
+    );
+  }
+}
+
+class _ApplicantTableRow extends StatefulWidget {
+  const _ApplicantTableRow({
+    required this.application,
+    required this.dateLabel,
+  });
+
+  final RecruitmentApplication application;
+  final String Function(DateTime?) dateLabel;
+
+  @override
+  State<_ApplicantTableRow> createState() => _ApplicantTableRowState();
+}
+
+class _ApplicantTableRowState extends State<_ApplicantTableRow> {
+  bool _hovered = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final a = widget.application;
+    final name = a.fullName.trim().isEmpty
+        ? '(Unnamed applicant)'
+        : a.fullName.trim();
+    final position = (a.positionAppliedFor?.trim().isNotEmpty ?? false)
+        ? a.positionAppliedFor!.trim()
+        : 'Recruitment';
+    final hoverColor = AppTheme.dashMutedSurfaceOf(context);
+
+    return MouseRegion(
+      onEnter: (_) => setState(() => _hovered = true),
+      onExit: (_) => setState(() => _hovered = false),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 120),
+        color: _hovered ? hoverColor : Colors.transparent,
+        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 10),
+        child: Row(
+          children: [
+            Expanded(
+              flex: 3,
+              child: Row(
+                children: [
+                  _ApplicantAvatar(name: name),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          name,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            color: AppTheme.dashTextPrimaryOf(context),
+                            fontSize: 13,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        Text(
+                          a.email,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            color: AppTheme.dashTextSecondaryOf(context),
+                            fontSize: 11.5,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Expanded(
+              flex: 2,
+              child: Text(
+                position,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 12.5,
+                  color: AppTheme.dashTextSecondaryOf(context),
+                ),
+              ),
+            ),
+            Expanded(
+              flex: 2,
+              child: Text(
+                widget.dateLabel(a.createdAt),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 12.5,
+                  color: AppTheme.dashTextSecondaryOf(context),
+                ),
+              ),
+            ),
+            Expanded(
+              flex: 2,
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: _StageBadge(
+                  label: RecruitmentMonitoringStats.detailedStageLabel(a),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ActiveApplicationCards extends StatelessWidget {
+  const _ActiveApplicationCards({
+    required this.applications,
+    required this.dateLabel,
+  });
+
+  final List<RecruitmentApplication> applications;
+  final String Function(DateTime?) dateLabel;
+
+  @override
+  Widget build(BuildContext context) {
+    if (applications.isEmpty) {
+      return Text(
+        'No active applications',
+        style: TextStyle(
+          color: AppTheme.dashTextSecondaryOf(context),
+          fontSize: 13,
+          height: 1.4,
+        ),
+      );
+    }
+
+    return Column(
+      children: [
+        for (var i = 0; i < applications.length; i++) ...[
+          if (i > 0) const SizedBox(height: 8),
+          _ApplicantMobileCard(
+            application: applications[i],
+            dateLabel: dateLabel,
           ),
         ],
       ],
@@ -611,66 +965,144 @@ class _StatusBreakdownChart extends StatelessWidget {
   }
 }
 
-class _HorizontalBarRow extends StatelessWidget {
-  const _HorizontalBarRow({
-    required this.label,
-    required this.value,
-    required this.max,
-    required this.color,
+class _ApplicantMobileCard extends StatelessWidget {
+  const _ApplicantMobileCard({
+    required this.application,
+    required this.dateLabel,
   });
 
-  final String label;
-  final int value;
-  final double max;
-  final Color color;
+  final RecruitmentApplication application;
+  final String Function(DateTime?) dateLabel;
 
   @override
   Widget build(BuildContext context) {
-    final fraction = max <= 0 ? 0.0 : (value / max).clamp(0.0, 1.0);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            Expanded(
-              child: Text(
-                label,
-                style: TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                  color: AppTheme.dashTextSecondaryOf(context),
+    final a = application;
+    final name = a.fullName.trim().isEmpty
+        ? '(Unnamed applicant)'
+        : a.fullName.trim();
+    final position = (a.positionAppliedFor?.trim().isNotEmpty ?? false)
+        ? a.positionAppliedFor!.trim()
+        : 'Recruitment';
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: AppTheme.dashMutedSurfaceOf(context),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppTheme.dashHairlineOf(context)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              _ApplicantAvatar(name: name),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: AppTheme.dashTextPrimaryOf(context),
+                        fontSize: 13.5,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    Text(
+                      position,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: AppTheme.dashTextSecondaryOf(context),
+                        fontSize: 12,
+                      ),
+                    ),
+                  ],
                 ),
               ),
-            ),
-            Text(
-              '$value',
-              style: TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.w800,
-                color: AppTheme.dashTextPrimaryOf(context),
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 6),
-        ClipRRect(
-          borderRadius: BorderRadius.circular(999),
-          child: SizedBox(
-            height: 10,
-            child: Stack(
-              fit: StackFit.expand,
-              children: [
-                ColoredBox(color: AppTheme.dashHairlineOf(context)),
-                FractionallySizedBox(
-                  alignment: Alignment.centerLeft,
-                  widthFactor: fraction,
-                  child: ColoredBox(color: color),
-                ),
-              ],
+            ],
+          ),
+          const SizedBox(height: 10),
+          Text(
+            'Applied: ${dateLabel(a.createdAt)}',
+            style: TextStyle(
+              color: AppTheme.dashTextSecondaryOf(context),
+              fontSize: 12,
             ),
           ),
-        ),
-      ],
+          const SizedBox(height: 8),
+          _StageBadge(label: RecruitmentMonitoringStats.detailedStageLabel(a)),
+        ],
+      ),
     );
   }
+}
+
+class _ApplicantAvatar extends StatelessWidget {
+  const _ApplicantAvatar({required this.name});
+
+  final String name;
+
+  @override
+  Widget build(BuildContext context) {
+    return CircleAvatar(
+      radius: 15,
+      backgroundColor: AppTheme.primaryNavy.withValues(alpha: 0.12),
+      child: Text(
+        _initials(name),
+        style: const TextStyle(
+          fontSize: 11,
+          fontWeight: FontWeight.w800,
+          color: AppTheme.primaryNavy,
+        ),
+      ),
+    );
+  }
+}
+
+class _StageBadge extends StatelessWidget {
+  const _StageBadge({required this.label});
+
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: AppTheme.primaryNavy.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: AppTheme.primaryNavy.withValues(alpha: 0.22)),
+      ),
+      child: Text(
+        label,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: const TextStyle(
+          fontSize: 11,
+          fontWeight: FontWeight.w700,
+          color: AppTheme.primaryNavy,
+        ),
+      ),
+    );
+  }
+}
+
+String _initials(String name) {
+  final parts = name
+      .trim()
+      .split(RegExp(r'\s+'))
+      .where((p) => p.isNotEmpty && p != '(' && !p.startsWith('('))
+      .toList();
+  if (parts.isEmpty) return '?';
+  if (parts.length == 1) {
+    final s = parts.first;
+    return s.substring(0, s.length >= 2 ? 2 : 1).toUpperCase();
+  }
+  return (parts.first[0] + parts.last[0]).toUpperCase();
 }

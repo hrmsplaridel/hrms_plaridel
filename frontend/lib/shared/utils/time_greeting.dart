@@ -22,3 +22,7 @@ String personalizedTimeGreeting(String displayName, [DateTime? when]) {
   final name = greetingFirstName(displayName);
   return '${timeOfDayGreeting(when)}, $name!';
 }
+
+/// Executive greeting for the Mayor portal (time of day + "Mayor").
+String mayorPortalGreeting([DateTime? when]) =>
+    '${timeOfDayGreeting(when)}, Mayor';

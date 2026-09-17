@@ -1,6 +1,7 @@
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_balance.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_balance_ledger.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_request.dart';
+import 'package:hrms_plaridel/features/dtr/leave/models/leave_request_history.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_type.dart';
 
 /// Query options for listing leave requests.
@@ -716,6 +717,11 @@ abstract class LeaveRepository {
 
   /// Get one request by id.
   Future<LeaveRequest?> getRequestById(String requestId);
+
+  /// Actual workflow events for an employee-owned leave request.
+  Future<List<LeaveRequestHistoryEntry>> listMyRequestHistory(
+    String requestId,
+  ) => throw UnsupportedError('Request history is not supported');
 
   /// Employee-facing request list.
   Future<List<LeaveRequest>> listMyRequests(

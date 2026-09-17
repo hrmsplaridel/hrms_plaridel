@@ -38,6 +38,28 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
   Uint8List? _selectedImageBytes;
   bool _saving = false;
   int? _lastAppliedPrefillStamp;
+  String? _prefillRawAddress;
+
+  static const _suffixChoices = ['None', 'Jr.', 'Sr.', 'II', 'III', 'IV'];
+
+  static String? _normalizeHireSex(String? raw) {
+    final s = raw?.trim().toLowerCase();
+    if (s == 'male' || s == 'm') return 'Male';
+    if (s == 'female' || s == 'f') return 'Female';
+    return null;
+  }
+
+  static String? _normalizeHireSuffix(String? raw) {
+    final s = raw?.trim();
+    if (s == null || s.isEmpty) return null;
+    if (s.toLowerCase() == 'none') return null;
+    for (final o in _suffixChoices) {
+      if (o.toLowerCase() == s.toLowerCase()) {
+        return o == 'None' ? null : o;
+      }
+    }
+    return null;
+  }
 
   void _ensureTemporaryPassword() {
     if (_passwordController.text.trim().isEmpty) {
@@ -81,25 +103,47 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
     if (em != null && em.isNotEmpty) {
       _emailController.text = em;
     }
-    final raw = hire.applicantFullName?.trim() ?? '';
-    if (raw.isNotEmpty) {
-      final sp = raw.indexOf(' ');
-      if (sp < 0) {
-        _firstNameController.text = raw;
-        _lastNameController.text = raw;
-      } else {
-        _firstNameController.text = raw.substring(0, sp).trim();
-        _lastNameController.text = raw.substring(sp + 1).trim();
-        if (_lastNameController.text.isEmpty) {
-          _lastNameController.text = _firstNameController.text;
+
+    final first = hire.applicantFirstName?.trim() ?? '';
+    final middle = hire.applicantMiddleName?.trim() ?? '';
+    final last = hire.applicantLastName?.trim() ?? '';
+    if (first.isNotEmpty || last.isNotEmpty) {
+      if (first.isNotEmpty) _firstNameController.text = first;
+      if (middle.isNotEmpty) _middleNameController.text = middle;
+      if (last.isNotEmpty) _lastNameController.text = last;
+    } else {
+      final raw = hire.applicantFullName?.trim() ?? '';
+      if (raw.isNotEmpty) {
+        final sp = raw.indexOf(' ');
+        if (sp < 0) {
+          _firstNameController.text = raw;
+          _lastNameController.text = raw;
+        } else {
+          _firstNameController.text = raw.substring(0, sp).trim();
+          _lastNameController.text = raw.substring(sp + 1).trim();
+          if (_lastNameController.text.isEmpty) {
+            _lastNameController.text = _firstNameController.text;
+          }
         }
       }
     }
+
     final ph = hire.applicantPhone?.trim();
     if (ph != null && ph.isNotEmpty) {
       _contactController.text = ph;
     }
+
+    final sex = _normalizeHireSex(hire.applicantSex);
+    final suffix = _normalizeHireSuffix(hire.applicantSuffix);
+    final address = hire.applicantAddress?.trim();
+
     setState(() {
+      if (sex != null) _sex = sex;
+      if (suffix != null) _suffix = suffix;
+      if (address != null && address.isNotEmpty) {
+        _prefillRawAddress = address;
+        _addressFormKey = GlobalKey<StructuredAddressFormState>();
+      }
       _privilege = 'Employee';
       _ensureTemporaryPassword();
     });
@@ -224,6 +268,7 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
     _biometricIdController.clear();
     setState(() {
       _addressFormKey = GlobalKey<StructuredAddressFormState>();
+      _prefillRawAddress = null;
       _privilege = null;
       _suffix = null;
       _sex = null;
@@ -869,17 +914,13 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
         ),
         const SizedBox(height: 18),
         DropdownButtonFormField<String>(
+          key: ValueKey('add_emp_suffix_${_suffix ?? 'None'}'),
           initialValue: _suffix ?? 'None',
           isExpanded: true,
           decoration: _fieldDecoration('Suffix', hint: 'None, Jr., Sr., …'),
-          items: [
-            'None',
-            'Jr.',
-            'Sr.',
-            'II',
-            'III',
-            'IV',
-          ].map((o) => DropdownMenuItem(value: o, child: Text(o))).toList(),
+          items: _suffixChoices
+              .map((o) => DropdownMenuItem(value: o, child: Text(o)))
+              .toList(),
           onChanged: (v) => setState(() => _suffix = (v == 'None') ? null : v),
         ),
         const SizedBox(height: 20),
@@ -894,6 +935,7 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
         ),
         const SizedBox(height: 14),
         DropdownButtonFormField<String>(
+          key: ValueKey('add_emp_sex_${_sex ?? ''}'),
           initialValue: _sex,
           isExpanded: true,
           decoration: _fieldDecoration('Sex', hint: 'Male or Female'),
@@ -951,7 +993,7 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
         StructuredAddressForm(
           key: _addressFormKey,
           streetController: _streetController,
-          initialRawAddress: null,
+          initialRawAddress: _prefillRawAddress,
           inputDecoration: _fieldDecoration,
         ),
       ],

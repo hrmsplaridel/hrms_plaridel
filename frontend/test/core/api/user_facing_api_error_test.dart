@@ -18,6 +18,11 @@ DioException _apiError({Object? data, int? statusCode, String? message}) {
   );
 }
 
+DioException _networkError(DioExceptionType type) => DioException(
+  requestOptions: RequestOptions(path: '/api/leave/submit'),
+  type: type,
+);
+
 void main() {
   test('uses a structured backend error message', () {
     expect(
@@ -48,6 +53,39 @@ void main() {
     expect(
       userFacingApiError(_apiError(statusCode: 500)),
       'Server error. Please try again later.',
+    );
+  });
+
+  test('identifies an unconfirmed offline leave submission', () {
+    expect(
+      userFacingApiError(
+        _networkError(DioExceptionType.connectionError),
+        operationMayHaveCompleted: true,
+      ),
+      'No internet connection or the server is unreachable. Submission was not confirmed. Refresh My Leave before submitting again.',
+    );
+  });
+
+  test('identifies an unconfirmed timed-out leave submission', () {
+    expect(
+      userFacingApiError(
+        _networkError(DioExceptionType.receiveTimeout),
+        operationMayHaveCompleted: true,
+      ),
+      'Submission timed out and was not confirmed. Refresh My Leave before submitting again.',
+    );
+  });
+
+  test('does not hide a backend response for a failed submission', () {
+    expect(
+      userFacingApiError(
+        _apiError(
+          statusCode: 409,
+          data: {'error': 'A leave request already covers these dates.'},
+        ),
+        operationMayHaveCompleted: true,
+      ),
+      'A leave request already covers these dates.',
     );
   });
 }

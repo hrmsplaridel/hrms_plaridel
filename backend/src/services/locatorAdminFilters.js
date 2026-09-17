@@ -49,6 +49,58 @@ function parseStatusFilter(value) {
   return LOCATOR_STATUSES.has(status) ? [status] : undefined;
 }
 
+function parseHistoryStatusFilter(value, { departmentHead = false } = {}) {
+  const status = String(value || '').trim().toLowerCase();
+  if (!status) return null;
+  if (status === 'pending') {
+    return departmentHead
+      ? ['pending_department_head']
+      : ['pending', 'pending_department_head', 'pending_hr'];
+  }
+  if (status === 'forwarded') return ['pending', 'pending_hr'];
+  if (status === 'returned') return ['returned_for_correction'];
+  return parseStatusFilter(status);
+}
+
+function parseLocatorHistoryFilters(query = {}, options = {}) {
+  const page = parseInteger(query.page, 1, { min: 1, max: 1000000 });
+  const pageSize = parseInteger(query.page_size, 50, { min: 1, max: 100 });
+  if (page == null || pageSize == null) {
+    return {
+      ok: false,
+      error: 'page must be positive and page_size must be between 1 and 100.',
+    };
+  }
+
+  const statuses = parseHistoryStatusFilter(query.status, options);
+  if (statuses === undefined) {
+    return { ok: false, error: 'Invalid status filter.' };
+  }
+  const from = parseDateOnly(query.from);
+  const to = parseDateOnly(query.to);
+  if (from === undefined || to === undefined) {
+    return { ok: false, error: 'Date filters must use YYYY-MM-DD.' };
+  }
+  if (from && to && from > to) {
+    return { ok: false, error: 'The from date cannot be after the to date.' };
+  }
+  const search = String(query.search || '').trim();
+  if (search.length > 100) {
+    return { ok: false, error: 'Search text cannot exceed 100 characters.' };
+  }
+  return {
+    ok: true,
+    filters: {
+      page,
+      pageSize,
+      statuses,
+      from,
+      to,
+      search: search || null,
+    },
+  };
+}
+
 function parseLocatorAdminFilters(query = {}) {
   const page = parseInteger(query.page, 1, { min: 1, max: 1000000 });
   const pageSize = parseInteger(query.page_size, 10, { min: 1, max: 100 });
@@ -104,5 +156,6 @@ function parseLocatorAdminFilters(query = {}) {
 
 module.exports = {
   parseLocatorAdminFilters,
+  parseLocatorHistoryFilters,
   parseStatusFilter,
 };
