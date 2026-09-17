@@ -8,6 +8,7 @@ import 'package:printing/printing.dart';
 import 'package:provider/provider.dart';
 import 'package:hrms_plaridel/core/api/client.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
+import 'package:hrms_plaridel/core/utils/responsive_right_side_panel.dart';
 import 'package:hrms_plaridel/features/dtr/attendance/models/time_record.dart';
 import 'package:hrms_plaridel/features/dtr/reports/data/dtr_export.dart';
 import 'package:hrms_plaridel/features/dtr/reports/data/official_time.dart';
@@ -1180,6 +1181,60 @@ class _DtrReportsState extends State<DtrReports> {
   }
 
   /// Print DTR report: open system print dialog when supported; otherwise share PDF.
+  Future<void> _previewDtrReport(
+    BuildContext context, {
+    required String selectedName,
+    required DateTime start,
+    required DateTime end,
+    required Map<DateTime, TimeRecord> recordsByDate,
+    String? department,
+    String? position,
+  }) async {
+    if (!_guardOfficialReportAction()) return;
+    final signatories = _reportSignatories!;
+    final pageFormat = await _chooseDtrPaperSize(context);
+    if (pageFormat == null || !context.mounted) return;
+    final baseName =
+        'DTR_${selectedName.replaceAll(' ', '_')}_${_months[_selectedMonth - 1]}_$_selectedYear.pdf';
+
+    try {
+      final bytes = await DtrExport.generatePdf(
+        employeeName: selectedName,
+        year: _selectedYear,
+        month: _selectedMonth,
+        start: start,
+        end: end,
+        recordsByDate: recordsByDate,
+        department: department ?? _reportDepartment,
+        position: position ?? _reportPosition,
+        officialHours: _shiftOfficialHours,
+        scheduledWorkHoursPerDay: _shiftWorkHoursPerDay,
+        punchMode: _shiftPunchMode,
+        workingDays: _shiftWorkingDays,
+        assignmentEffectiveFrom: _assignmentEffectiveFrom,
+        assignmentEffectiveTo: _assignmentEffectiveTo,
+        assignmentSegments: _exportAssignmentSegments,
+        reportableThrough: _reportableThrough,
+        signatories: signatories,
+        pageFormat: pageFormat,
+      );
+      if (!context.mounted) return;
+      await openResponsiveRightSidePanel<void>(
+        context: context,
+        barrierLabel: 'Close DTR preview',
+        breakpoint: 900,
+        minWidth: 680,
+        initialWidthFraction: 0.62,
+        builder: (_) => _DtrPdfPreviewPanel(bytes: bytes, filename: baseName),
+      );
+    } catch (error) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Unable to preview DTR: $error')));
+    }
+  }
+
   Future<void> _printDtrReport(
     BuildContext context, {
     required String selectedName,
@@ -1821,7 +1876,6 @@ class _DtrReportsState extends State<DtrReports> {
     // Only count days up to today (elapsed) — future days in the month are not "absent" yet.
     final statsEnd = _tardinessStatsInclusiveEnd();
     final totalWeekdays = _countScheduledWorkDaysThrough(statsEnd);
-    var lateCount = 0;
     var absentCount = 0;
     var holidaysCount = 0;
     for (var d = _rangeStartDay; d <= end.day; d++) {
@@ -1835,22 +1889,13 @@ class _DtrReportsState extends State<DtrReports> {
         // On leave: not absent for tardiness
       } else if (rec == null || (rec.timeIn == null && rec.breakIn == null)) {
         absentCount++;
-      } else {
-        if (rec.status == 'late' || (rec.lateMinutes ?? 0) > 0) {
-          lateCount++;
-        }
       }
     }
     // Show summary whenever this month has any report rows — not only days with punches.
     // (Absent / undertime-only days have no timeIn/breakIn but must still roll up to totals.)
     final hasRecords = rangedRecordsByDate.isNotEmpty || hasAssignment;
     final workingDays = hasRecords ? totalWeekdays - holidaysCount : 0;
-    final displayLateCount = hasRecords ? lateCount : 0;
     final displayAbsentCount = hasRecords ? absentCount : 0;
-    final tardyCount = hasRecords ? (lateCount + absentCount) : 0;
-    final tardinessPct = workingDays > 0
-        ? ((tardyCount / workingDays) * 100).round()
-        : 0;
 
     // Total late and undertime minutes (elapsed days only, same window as counts)
     var totalLateMinutes = 0;
@@ -1945,10 +1990,7 @@ class _DtrReportsState extends State<DtrReports> {
                               sortedDates: sortedDates,
                               selectedName: selectedName,
                               workingDays: workingDays,
-                              lateCount: displayLateCount,
                               absentCount: displayAbsentCount,
-                              tardyCount: tardyCount,
-                              tardinessPct: tardinessPct,
                               totalLateMinutes: displayTotalLateMinutes,
                               totalUndertimeMinutes:
                                   displayTotalUndertimeMinutes,
@@ -1963,10 +2005,7 @@ class _DtrReportsState extends State<DtrReports> {
                               sortedDates: sortedDates,
                               selectedName: selectedName,
                               workingDays: workingDays,
-                              lateCount: displayLateCount,
                               absentCount: displayAbsentCount,
-                              tardyCount: tardyCount,
-                              tardinessPct: tardinessPct,
                               totalLateMinutes: displayTotalLateMinutes,
                               totalUndertimeMinutes:
                                   displayTotalUndertimeMinutes,
@@ -2007,10 +2046,7 @@ class _DtrReportsState extends State<DtrReports> {
                                             _buildSummaryCard(
                                               selectedName: selectedName,
                                               workingDays: workingDays,
-                                              lateCount: displayLateCount,
                                               absentCount: displayAbsentCount,
-                                              tardyCount: tardyCount,
-                                              tardinessPct: tardinessPct,
                                               totalLateMinutes:
                                                   displayTotalLateMinutes,
                                               totalUndertimeMinutes:
@@ -2494,10 +2530,7 @@ class _DtrReportsState extends State<DtrReports> {
     required List<DateTime> sortedDates,
     required String selectedName,
     required int workingDays,
-    required int lateCount,
     required int absentCount,
-    required int tardyCount,
-    required int tardinessPct,
     required int totalLateMinutes,
     required int totalUndertimeMinutes,
     required bool hasRecords,
@@ -2566,10 +2599,7 @@ class _DtrReportsState extends State<DtrReports> {
         _buildSummaryCard(
           selectedName: selectedName,
           workingDays: workingDays,
-          lateCount: lateCount,
           absentCount: absentCount,
-          tardyCount: tardyCount,
-          tardinessPct: tardinessPct,
           totalLateMinutes: totalLateMinutes,
           totalUndertimeMinutes: totalUndertimeMinutes,
           hasRecords: hasRecords,
@@ -3068,13 +3098,17 @@ class _DtrReportsState extends State<DtrReports> {
         : '${hours.toStringAsFixed(2)} hrs';
   }
 
+  String _formatEquivalentDay(double value) {
+    return value
+        .toStringAsFixed(3)
+        .replaceFirst(RegExp(r'0+$'), '')
+        .replaceFirst(RegExp(r'\.$'), '');
+  }
+
   Widget _buildSummaryCard({
     required String selectedName,
     required int workingDays,
-    required int lateCount,
     required int absentCount,
-    required int tardyCount,
-    required int tardinessPct,
     required int totalLateMinutes,
     required int totalUndertimeMinutes,
     bool hasRecords = true,
@@ -3087,6 +3121,19 @@ class _DtrReportsState extends State<DtrReports> {
   }) {
     final dark = AppTheme.dashIsDark(context);
     final compactPanel = dense || !fullWidth;
+    final equivalentDay = DtrExport.calculateOfficialTotals(
+      year: _selectedYear,
+      month: _selectedMonth,
+      start: start,
+      end: end,
+      recordsByDate: recordsByDate,
+      scheduledWorkHoursPerDay: _shiftWorkHoursPerDay,
+      workingDays: _shiftWorkingDays,
+      assignmentEffectiveFrom: _assignmentEffectiveFrom,
+      assignmentEffectiveTo: _assignmentEffectiveTo,
+      assignmentSegments: _exportAssignmentSegments,
+      reportableThrough: _reportableThrough,
+    ).equivalentDay;
     return Container(
       width: fullWidth ? null : 200,
       constraints: fullWidth
@@ -3212,13 +3259,6 @@ class _DtrReportsState extends State<DtrReports> {
                     borderColor: Colors.orange,
                     compact: compactPanel,
                   ),
-                  _SummaryStat(
-                    label: 'Tardy',
-                    value: '$tardyCount',
-                    hasBorder: tardyCount > 0,
-                    borderColor: Colors.orange,
-                    compact: compactPanel,
-                  ),
                 ];
                 if (compactPanel || isResponsive) {
                   final gap = compactPanel ? 8.0 : 12.0;
@@ -3250,15 +3290,32 @@ class _DtrReportsState extends State<DtrReports> {
             ),
             SizedBox(height: compactPanel ? 10 : 16),
             Text(
-              '$tardinessPct% TARDINESS',
+              'Equivalent Day: ${_formatEquivalentDay(equivalentDay)}',
               style: TextStyle(
-                fontSize: compactPanel ? 13 : 14,
-                fontWeight: FontWeight.w800,
+                fontSize: compactPanel ? 12 : 13,
+                fontWeight: FontWeight.w600,
                 color: AppTheme.dashTextPrimaryOf(context),
               ),
-              textAlign: TextAlign.center,
+              textAlign: TextAlign.start,
             ),
             SizedBox(height: compactPanel ? 12 : 20),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: _officialActionsEnabled
+                    ? () => _previewDtrReport(
+                        context,
+                        selectedName: selectedName,
+                        start: start,
+                        end: end,
+                        recordsByDate: recordsByDate,
+                      )
+                    : null,
+                icon: const Icon(Icons.preview_rounded, size: 18),
+                label: const Text('PREVIEW'),
+              ),
+            ),
+            SizedBox(height: compactPanel ? 8 : 10),
             SizedBox(
               width: double.infinity,
               child: FilledButton.icon(
@@ -3423,10 +3480,7 @@ class _DtrReportsState extends State<DtrReports> {
     required List<DateTime> sortedDates,
     required String selectedName,
     required int workingDays,
-    required int lateCount,
     required int absentCount,
-    required int tardyCount,
-    required int tardinessPct,
     required int totalLateMinutes,
     required int totalUndertimeMinutes,
     required bool hasRecords,
@@ -3459,10 +3513,7 @@ class _DtrReportsState extends State<DtrReports> {
                       child: _buildSummaryCard(
                         selectedName: selectedName,
                         workingDays: workingDays,
-                        lateCount: lateCount,
                         absentCount: absentCount,
-                        tardyCount: tardyCount,
-                        tardinessPct: tardinessPct,
                         totalLateMinutes: totalLateMinutes,
                         totalUndertimeMinutes: totalUndertimeMinutes,
                         hasRecords: hasRecords,
@@ -3480,10 +3531,7 @@ class _DtrReportsState extends State<DtrReports> {
                       child: _buildSummaryCard(
                         selectedName: selectedName,
                         workingDays: workingDays,
-                        lateCount: lateCount,
                         absentCount: absentCount,
-                        tardyCount: tardyCount,
-                        tardinessPct: tardinessPct,
                         totalLateMinutes: totalLateMinutes,
                         totalUndertimeMinutes: totalUndertimeMinutes,
                         hasRecords: hasRecords,
@@ -3749,6 +3797,66 @@ class _ToggleDtrMultiSelectIntent extends Intent {
 
 class _ExitDtrMultiSelectIntent extends Intent {
   const _ExitDtrMultiSelectIntent();
+}
+
+class _DtrPdfPreviewPanel extends StatelessWidget {
+  const _DtrPdfPreviewPanel({required this.bytes, required this.filename});
+
+  final Uint8List bytes;
+  final String filename;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: AppTheme.dashCanvasOf(context),
+      child: SafeArea(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Material(
+              color: AppTheme.dashPanelOf(context),
+              elevation: 1,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(20, 10, 8, 10),
+                child: Row(
+                  children: [
+                    const Icon(Icons.preview_rounded, size: 20),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        'DTR Preview',
+                        style: TextStyle(
+                          color: AppTheme.dashTextPrimaryOf(context),
+                          fontSize: 16,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                    IconButton(
+                      tooltip: 'Close preview',
+                      onPressed: () => Navigator.of(context).pop(),
+                      icon: const Icon(Icons.close_rounded),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            Expanded(
+              child: PdfPreview(
+                build: (_) async => bytes,
+                pdfFileName: filename,
+                allowPrinting: true,
+                allowSharing: true,
+                canChangeOrientation: false,
+                canChangePageFormat: false,
+                canDebug: false,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
 class _SummaryStat extends StatelessWidget {
