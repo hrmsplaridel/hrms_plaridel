@@ -583,7 +583,7 @@ class _TrainingNeedAnalysisEditorState
     final yearField = ro
         ? _readOnlyValueBox(context, 'Report Year', _cyYear ?? '—')
         : DropdownButtonFormField<String>(
-            value: _cyYear,
+            initialValue: _cyYear,
             items: [
               for (final y in _tnaYearOptions(include: _cyYear))
                 DropdownMenuItem(value: y, child: Text(y)),
@@ -600,7 +600,7 @@ class _TrainingNeedAnalysisEditorState
         ? _readOnlyValueBox(context, 'Department', _department ?? '—')
         : (_officesLoaded
               ? DropdownButtonFormField<String>(
-                  value: _department,
+                  initialValue: _department,
                   items: [
                     for (final name in <String>{
                       ..._officeNames,

@@ -761,7 +761,7 @@ class _ActionBrainstormingEditorState extends State<ActionBrainstormingEditor> {
         ? _readOnlyValueBox(context, 'Department', _department ?? '—')
         : (_officesLoaded
               ? DropdownButtonFormField<String>(
-                  value: _department,
+                  initialValue: _department,
                   items: [
                     for (final name in <String>{
                       ..._officeNames,

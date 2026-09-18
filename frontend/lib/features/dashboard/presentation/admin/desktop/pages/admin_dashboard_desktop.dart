@@ -116,13 +116,11 @@ class _AdminSectionHeader extends StatelessWidget {
     required this.title,
     this.icon,
     this.subtitle,
-    this.trailing,
   });
 
   final String title;
   final IconData? icon;
   final String? subtitle;
-  final Widget? trailing;
 
   @override
   Widget build(BuildContext context) {
@@ -181,7 +179,6 @@ class _AdminSectionHeader extends StatelessWidget {
             ],
           ),
         ),
-        if (trailing != null) trailing!,
       ],
     );
   }
@@ -1208,17 +1205,14 @@ class _AdminDashboardShimmer extends StatelessWidget {
 class _AdminDashboardBone extends StatelessWidget {
   const _AdminDashboardBone({
     required this.height,
-    this.width,
     this.radius = 7,
   });
 
   final double height;
-  final double? width;
   final double radius;
 
   @override
   Widget build(BuildContext context) => Container(
-    width: width,
     height: height,
     decoration: BoxDecoration(
       color: AppTheme.dashMutedSurfaceOf(context),
