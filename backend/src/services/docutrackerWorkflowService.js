@@ -1935,31 +1935,10 @@ async function insertNotification(client, payload) {
   );
 }
 
-function buildNotificationEventKey(payload = {}) {
-  const docId = payload.document_id || 'unknown-doc';
-  const type = payload.type || 'unknown';
-  if (type === 'assigned') {
-    return `assigned:doc:${docId}:step:${payload.step_order ?? 'na'}`;
-  }
-  if (type === 'returned') {
-    return `returned:doc:${docId}:step:${payload.step_order ?? 'na'}`;
-  }
-  if (type === 'rejected') {
-    return `rejected:doc:${docId}:step:${payload.step_order ?? 'na'}`;
-  }
-  if (type === 'escalated') {
-    return `escalated:doc:${docId}:level:${payload.escalation_level ?? 'na'}`;
-  }
-  if (type === 'overdue') {
-    return `overdue:doc:${docId}:level:${payload.escalation_level ?? 'na'}`;
-  }
-  return `${type}:doc:${docId}`;
-}
-
 async function insertNotificationIfNotRecent(client, payload, dedupeMinutes = 15) {
   if (!payload.user_id) return false;
-  const eventKey = payload.event_key || buildNotificationEventKey(payload);
-  if (eventKey) {
+  const explicitEventKey = String(payload.event_key || '').trim() || null;
+  if (explicitEventKey) {
     const byKey = await client.query(
       `SELECT id
        FROM docutracker_notifications
@@ -1968,9 +1947,18 @@ async function insertNotificationIfNotRecent(client, payload, dedupeMinutes = 15
          AND type = $3
          AND event_key = $4
        LIMIT 1`,
-      [payload.document_id, payload.user_id, payload.type, eventKey]
+      [payload.document_id, payload.user_id, payload.type, explicitEventKey]
     );
     if (byKey.rowCount > 0) return false;
+
+    // A caller-supplied event key identifies one logical workflow event.
+    // Different keys must remain distinct even when their title/body match,
+    // such as assignment to the same step after a return/resume cycle.
+    await insertNotification(client, {
+      ...payload,
+      event_key: explicitEventKey,
+    });
+    return true;
   }
   const existing = await client.query(
     `SELECT id
@@ -1992,7 +1980,7 @@ async function insertNotificationIfNotRecent(client, payload, dedupeMinutes = 15
     ]
   );
   if (existing.rowCount > 0) return false;
-  await insertNotification(client, { ...payload, event_key: eventKey });
+  await insertNotification(client, { ...payload, event_key: null });
   return true;
 }
 
@@ -2879,6 +2867,7 @@ module.exports = {
   getDocumentBundle,
   createDocument,
   transitionDocument,
+  insertNotificationIfNotRecent,
   updateDocumentMetadata,
   recoverDocumentAssignment,
   addDocumentRemark,

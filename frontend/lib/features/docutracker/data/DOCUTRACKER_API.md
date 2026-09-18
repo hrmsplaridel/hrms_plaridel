@@ -16,6 +16,12 @@ Document list items may include `viewer_is_routing_assignee`, a viewer-specific
 boolean used by the client to retain documents assigned through the routing
 snapshot without exposing other assignees' user IDs.
 
+Workflow transition requests use an idempotency key tied to the document state
+observed by the client. Retrying the same action against the same state reuses
+the key. A return, reassignment, or other confirmed state change produces a new
+key so a later pass through the same workflow step is executed instead of
+replaying an earlier response.
+
 ## Document Builder and E-Signatures
 
 The HRMS Express API stores editor content as Quill Delta JSON per A4 page.

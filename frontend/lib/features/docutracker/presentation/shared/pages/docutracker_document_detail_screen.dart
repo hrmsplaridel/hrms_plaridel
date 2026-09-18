@@ -712,9 +712,13 @@ class _DocuTrackerDocumentDetailScreenState
         : doc.assigneeName?.trim().isNotEmpty == true
         ? doc.assigneeName!.trim()
         : (isDraft ? 'Not submitted' : 'Unassigned');
-    final backupNames = assigneeNames
-        .where((name) => name.trim().isNotEmpty && name != doc.assigneeName)
-        .toList();
+    final backupNames = isTerminal
+        ? const <String>[]
+        : assigneeNames
+              .where(
+                (name) => name.trim().isNotEmpty && name != doc.assigneeName,
+              )
+              .toList();
     final phase = _workflowPhaseFor(doc, context.read<DocuTrackerProvider>());
     final guidance = _buildWorkflowGuidance(
       doc: doc,
@@ -860,10 +864,7 @@ class _DocuTrackerDocumentDetailScreenState
           spacing: 12,
           runSpacing: 12,
           children: [
-            _DetailSummaryItem(
-              label: 'Current step',
-              value: currentStepValue,
-            ),
+            _DetailSummaryItem(label: 'Current step', value: currentStepValue),
             _DetailSummaryItem(
               label: 'Primary assignee',
               value: currentAssigneeValue,
@@ -1791,11 +1792,12 @@ class _WorkflowStepStrip extends StatelessWidget {
                   margin: const EdgeInsets.only(top: 14, left: 4, right: 4),
                   width: 40,
                   height: 2,
-                  color: DocuTrackerWorkflowPhase.indicatorForStep(
-                    doc: document,
-                    stepOrder: steps[i].stepOrder,
-                    history: history,
-                  ).isCompleted
+                  color:
+                      DocuTrackerWorkflowPhase.indicatorForStep(
+                        doc: document,
+                        stepOrder: steps[i].stepOrder,
+                        history: history,
+                      ).isCompleted
                       ? DocuTrackerTokens.brand
                       : DocuTrackerTokens.borderSubtle,
                 ),
@@ -1822,10 +1824,8 @@ class _WorkflowStepNode extends StatelessWidget {
   Widget build(BuildContext context) {
     final isCurrent = indicator.kind == DocuTrackerStepIndicatorKind.current;
     final isDone = indicator.isCompleted;
-    final isReturned =
-        indicator.kind == DocuTrackerStepIndicatorKind.returned;
-    final isRejected =
-        indicator.kind == DocuTrackerStepIndicatorKind.rejected;
+    final isReturned = indicator.kind == DocuTrackerStepIndicatorKind.returned;
+    final isRejected = indicator.kind == DocuTrackerStepIndicatorKind.rejected;
     final isOverdue = indicator.kind == DocuTrackerStepIndicatorKind.overdue;
     final isEscalated =
         indicator.kind == DocuTrackerStepIndicatorKind.escalated;
@@ -1851,9 +1851,7 @@ class _WorkflowStepNode extends StatelessWidget {
         isOverdue ||
         isEscalated ||
         isCancelled;
-    final nodeColor = emphasized
-        ? statusColor
-        : DocuTrackerTokens.surfaceCream;
+    final nodeColor = emphasized ? statusColor : DocuTrackerTokens.surfaceCream;
     final borderColor = emphasized
         ? statusColor
         : DocuTrackerTokens.borderStrong;

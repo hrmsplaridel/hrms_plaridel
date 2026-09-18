@@ -352,6 +352,7 @@ function mapDocumentRow(row) {
     created_by: row.created_by,
     creator_name: row.creator_name,
     current_holder_id: row.current_holder_id,
+    assignee_name: row.assignee_name ?? null,
     current_step: row.current_step,
     status: row.status,
     sent_time: row.sent_time,
@@ -1369,9 +1370,12 @@ router.get('/documents/:id', protect, async (req, res) => {
       return res.status(403).json({ error: 'Forbidden' });
     }
     const docResult = await pool.query(
-      `SELECT d.*, creator.full_name AS creator_name
+      `SELECT d.*,
+              creator.full_name AS creator_name,
+              holder.full_name AS assignee_name
        FROM docutracker_documents d
        LEFT JOIN users creator ON creator.id = d.created_by
+       LEFT JOIN users holder ON holder.id = d.current_holder_id
        WHERE d.id = $1`,
       [id]
     );

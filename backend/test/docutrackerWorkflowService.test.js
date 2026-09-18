@@ -11,6 +11,7 @@ const {
   canUserPerformDocumentAction,
   filterDocumentsViewableByUser,
   transitionDocument,
+  insertNotificationIfNotRecent,
   getEffectivePermissionExplanation,
   recoverDocumentAssignment,
   listDocuments,
@@ -267,6 +268,44 @@ test('transitionDocument replays previous response for same idempotency key', as
     calls.some((c) => c.sql.includes('UPDATE docutracker_documents')),
     false
   );
+});
+
+test('distinct notification event keys are not suppressed by matching content', async () => {
+  const calls = [];
+  const client = {
+    query: async (sql, params = []) => {
+      calls.push({ sql, params });
+      if (sql.includes('event_key = $4')) {
+        return { rowCount: 0, rows: [] };
+      }
+      if (sql.includes('INSERT INTO docutracker_notifications')) {
+        return { rowCount: 1, rows: [] };
+      }
+      if (sql.includes('created_at >= now()')) {
+        throw new Error('Explicit event keys must not use content-based deduplication');
+      }
+      return { rowCount: 0, rows: [] };
+    },
+  };
+
+  const inserted = await insertNotificationIfNotRecent(client, {
+    document_id: 'doc-returned',
+    user_id: 'reviewer-1',
+    type: 'assigned',
+    event_key: 'assigned:doc:doc-returned:step:2:req:resume-cycle-2',
+    title: 'Document requires your review',
+    body: 'The document was forwarded and requires your review.',
+  });
+
+  assert.equal(inserted, true);
+  assert.equal(
+    calls.some((call) => call.sql.includes('created_at >= now()')),
+    false
+  );
+  const insert = calls.find((call) =>
+    call.sql.includes('INSERT INTO docutracker_notifications')
+  );
+  assert.equal(insert.params[3], 'assigned:doc:doc-returned:step:2:req:resume-cycle-2');
 });
 
 test('transitionDocument enforces invalid action from status', async () => {

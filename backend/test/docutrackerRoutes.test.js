@@ -121,6 +121,78 @@ test('GET /permission-explain returns explanation payload', async () => {
   delete require.cache[routePath];
 });
 
+test('GET /documents/:id returns the current holder name for detail summaries', async () => {
+  const documentId = '11111111-1111-4111-8111-111111111111';
+  const restoreWorkflow = withMockedModule(
+    '../src/services/docutrackerWorkflowService',
+    workflowServiceMock()
+  );
+  const queries = [];
+  const restoreDb = withMockedModule('../src/config/db', {
+    pool: {
+      query: async (sql) => {
+        queries.push(sql);
+        if (sql.includes('LEFT JOIN users holder ON holder.id = d.current_holder_id')) {
+          return {
+            rowCount: 1,
+            rows: [
+              {
+                id: documentId,
+                document_type: 'memo',
+                title: 'Holder detail test',
+                created_by: 'creator-1',
+                creator_name: 'Creator User',
+                current_holder_id: 'holder-1',
+                assignee_name: 'Primary Reviewer',
+                current_step: 1,
+                status: 'in_review',
+              },
+            ],
+          };
+        }
+        if (sql.includes('FROM docutracker_routing_records rr')) {
+          return { rowCount: 0, rows: [] };
+        }
+        if (sql.includes('FROM docutracker_document_history h')) {
+          return { rowCount: 0, rows: [] };
+        }
+        return { rowCount: 0, rows: [] };
+      },
+    },
+  });
+  const restoreAuth = withMockedModule('../src/middleware/auth', {
+    authMiddleware: (_req, _res, next) => next?.(),
+  });
+  const restoreRbac = withMockedModule('../src/middleware/rbac', {
+    requireAdmin: (_req, _res, next) => next?.(),
+  });
+
+  const routePath = require.resolve('../src/routes/docutracker');
+  delete require.cache[routePath];
+  const router = require('../src/routes/docutracker');
+  const handler = getRouteHandler(router, 'get', '/documents/:id');
+  const req = {
+    params: { id: documentId },
+    user: { id: 'admin-1', role: 'admin' },
+  };
+  const res = createMockResponse();
+
+  await handler(req, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.payload?.document?.assignee_name, 'Primary Reviewer');
+  assert.equal(
+    queries.some((sql) => sql.includes('LEFT JOIN users holder ON holder.id = d.current_holder_id')),
+    true
+  );
+
+  restoreWorkflow();
+  restoreDb();
+  restoreAuth();
+  restoreRbac();
+  delete require.cache[routePath];
+});
+
 test('POST /documents/:id/transition forwards idempotency key in body', async () => {
   let capturedPayload = null;
   const workflowService = {

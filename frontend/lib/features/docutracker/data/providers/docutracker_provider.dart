@@ -146,12 +146,19 @@ class DocuTrackerProvider extends ChangeNotifier {
     required String documentId,
     required int fromStep,
     required String actorId,
+    required String stateToken,
     String? remarks,
     String? targetHolderId,
   }) {
     final r = (remarks ?? '').trim();
     final t = (targetHolderId ?? '').trim();
-    return '$action:$actorId:$documentId:$fromStep:${_fnv1aHash(r)}:${_fnv1aHash(t)}';
+    return '$action:$actorId:$documentId:$fromStep:${_fnv1aHash(stateToken)}:${_fnv1aHash(r)}:${_fnv1aHash(t)}';
+  }
+
+  String _transitionStateToken(DocuTrackerDocument doc) {
+    final updatedAt = doc.updatedAt?.toUtc().toIso8601String() ?? '';
+    final sentTime = doc.sentTime?.toUtc().toIso8601String() ?? '';
+    return '${doc.status.value}|${doc.currentStep ?? 0}|${doc.currentHolderId ?? ''}|$updatedAt|$sentTime';
   }
 
   Future<bool> _transitionWithAction({
@@ -177,6 +184,7 @@ class DocuTrackerProvider extends ChangeNotifier {
           documentId: documentId,
           fromStep: fromStep,
           actorId: actionBy,
+          stateToken: _transitionStateToken(doc),
           remarks: remarks,
           targetHolderId: targetHolderId,
         );
