@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 
 import 'package:hrms_plaridel/shared/models/philippine_address_data.dart';
 import 'package:hrms_plaridel/shared/models/philippine_psgc_loader.dart';
@@ -92,6 +93,13 @@ class StructuredAddressFormState extends State<StructuredAddressForm> {
   }
 
   Future<void> _applyInitial(String? raw) async {
+    // Controller listeners can rebuild ancestors, so initialization during
+    // mount or widget updates must wait until build and layout have finished.
+    if (SchedulerBinding.instance.schedulerPhase ==
+        SchedulerPhase.persistentCallbacks) {
+      await WidgetsBinding.instance.endOfFrame;
+    }
+    if (!mounted) return;
     final p = parseStoredAddress(raw);
     widget.streetController.text = p.street;
     if (!p.isStructured || p.province.isEmpty) {
