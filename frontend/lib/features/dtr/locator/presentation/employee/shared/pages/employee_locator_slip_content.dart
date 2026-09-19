@@ -70,9 +70,10 @@ class EmployeeLocatorSlipContent extends StatefulWidget {
       EmployeeLocatorSlipContentState();
 }
 
-class EmployeeLocatorSlipContentState
-    extends State<EmployeeLocatorSlipContent> {
+class EmployeeLocatorSlipContentState extends State<EmployeeLocatorSlipContent>
+    with WidgetsBindingObserver {
   static const int _historyPageSize = 50;
+  static const Duration _reconciliationInterval = Duration(minutes: 2);
   final List<_LocatorSlipDraft> _slips = [];
   final List<_LocatorSlipDraft> _deptHeadQueue = [];
   final ScrollController _myRequestsScrollController = ScrollController();
@@ -114,6 +115,10 @@ class EmployeeLocatorSlipContentState
   String? _selectedSlipId;
   String? _selectedApprovalSlipId;
   StreamSubscription<AppRealtimeEvent>? _locatorRealtimeSub;
+  AppRealtimeProvider? _realtimeProvider;
+  Timer? _reconciliationTimer;
+  bool _wasRealtimeConnected = false;
+  bool _reconciliationInProgress = false;
   String? _authenticatedUserId;
   String? _authenticatedUserRole;
   DateTime? _officialHrmsDate;
@@ -160,6 +165,16 @@ class EmployeeLocatorSlipContentState
   }
 
   @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _reconciliationTimer = Timer.periodic(
+      _reconciliationInterval,
+      (_) => unawaited(_reconcileLocatorData()),
+    );
+  }
+
+  @override
   void didChangeDependencies() {
     super.didChangeDependencies();
     final authProvider = context.watch<AuthProvider>();
@@ -183,16 +198,36 @@ class EmployeeLocatorSlipContentState
       unawaited(_loadOfficialDate());
     }
     final realtimeProvider = context.read<AppRealtimeProvider>();
+    if (!identical(_realtimeProvider, realtimeProvider)) {
+      _realtimeProvider?.removeListener(_handleRealtimeConnectionChanged);
+      _realtimeProvider = realtimeProvider;
+      _wasRealtimeConnected = realtimeProvider.connected;
+      realtimeProvider.addListener(_handleRealtimeConnectionChanged);
+    }
     _locatorRealtimeSub ??= realtimeProvider.events.listen((event) {
       if (event.name != 'locator_updated') return;
       final userId = _authenticatedUserId;
-      if (event.affectsUser(userId)) {
-        unawaited(_loadMyRequests(forceRefresh: true));
-      }
-      if (_currentSection == _LocatorSection.approvals) {
-        unawaited(_loadDepartmentHeadRequests(forceRefresh: true));
+      if (event.affectsUser(userId) ||
+          _currentSection == _LocatorSection.approvals) {
+        unawaited(_reconcileLocatorData());
       }
     });
+  }
+
+  void _handleRealtimeConnectionChanged() {
+    final connected = _realtimeProvider?.connected == true;
+    final reconnected = connected && !_wasRealtimeConnected;
+    _wasRealtimeConnected = connected;
+    if (reconnected) {
+      unawaited(_reconcileLocatorData());
+    }
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      unawaited(_reconcileLocatorData());
+    }
   }
 
   void _synchronizeAuthenticatedUser(AuthProvider authProvider) {
@@ -312,6 +347,9 @@ class EmployeeLocatorSlipContentState
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _reconciliationTimer?.cancel();
+    _realtimeProvider?.removeListener(_handleRealtimeConnectionChanged);
     _locatorRealtimeSub?.cancel();
     _myFilterDebounce?.cancel();
     _approvalFilterDebounce?.cancel();
@@ -423,6 +461,8 @@ class EmployeeLocatorSlipContentState
               child: _LocatorHeader(
                 employeeName: displayName,
                 onCreatePressed: () => _openCreateForm(context, displayName),
+                onRefresh: () => _reconcileLocatorData(showConfirmation: true),
+                refreshing: _reconciliationInProgress,
                 showCreateAction: width >= 1024,
                 createEnabled:
                     _officialHrmsDate != null &&
@@ -1994,6 +2034,33 @@ class EmployeeLocatorSlipContentState
     }
   }
 
+  Future<void> _reconcileLocatorData({bool showConfirmation = false}) async {
+    if (!mounted || _authenticatedUserId == null || _reconciliationInProgress) {
+      return;
+    }
+    setState(() => _reconciliationInProgress = true);
+    LocatorSlipDataCache.instance.invalidateRequests();
+    try {
+      final refreshes = <Future<void>>[
+        _loadMyRequests(forceRefresh: true),
+        if (_reviewerAccess.canAccessReviewSection)
+          _loadDepartmentHeadRequests(forceRefresh: true),
+      ];
+      await Future.wait(refreshes);
+      if (showConfirmation &&
+          mounted &&
+          _myRequestsError == null &&
+          (!_reviewerAccess.canAccessReviewSection ||
+              _approvalsError == null)) {
+        _showLocatorSnack('Locator requests refreshed.');
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _reconciliationInProgress = false);
+      }
+    }
+  }
+
   Future<void> _loadLocatorTypes({bool forceRefresh = false}) async {
     final userId = _authenticatedUserId;
     if (userId == null) return;
@@ -2747,12 +2814,16 @@ class _LocatorHeader extends StatelessWidget {
   const _LocatorHeader({
     required this.employeeName,
     required this.onCreatePressed,
+    required this.onRefresh,
+    required this.refreshing,
     required this.showCreateAction,
     required this.createEnabled,
   });
 
   final String employeeName;
   final VoidCallback onCreatePressed;
+  final VoidCallback onRefresh;
+  final bool refreshing;
   final bool showCreateAction;
   final bool createEnabled;
 
@@ -2789,12 +2860,31 @@ class _LocatorHeader extends StatelessWidget {
               ],
             ),
           ),
-          if (showCreateAction)
-            FilledButton.icon(
-              onPressed: createEnabled ? onCreatePressed : null,
-              icon: const Icon(Icons.add_rounded),
-              label: const Text('File Request'),
-            ),
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              IconButton(
+                tooltip: refreshing
+                    ? 'Refreshing locator requests'
+                    : 'Refresh locator requests',
+                onPressed: refreshing ? null : onRefresh,
+                icon: refreshing
+                    ? const SizedBox.square(
+                        dimension: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.refresh_rounded),
+              ),
+              if (showCreateAction) ...[
+                const SizedBox(width: 8),
+                FilledButton.icon(
+                  onPressed: createEnabled ? onCreatePressed : null,
+                  icon: const Icon(Icons.add_rounded),
+                  label: const Text('File Request'),
+                ),
+              ],
+            ],
+          ),
         ],
       ),
     );

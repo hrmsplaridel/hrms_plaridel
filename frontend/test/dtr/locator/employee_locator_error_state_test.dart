@@ -132,6 +132,68 @@ void main() {
       expect(adapter.approvalRequestCount, 2);
     },
   );
+
+  testWidgets(
+    'manual refresh, app resume, and realtime reconnect reconcile requests',
+    (tester) async {
+      final adapter = _LocatorRefreshAdapter();
+      ApiClient.instance.dio.httpClientAdapter = adapter;
+      final realtime = _FakeRealtimeProvider();
+      final auth = AuthProvider()
+        ..replaceUser(
+          const AppUser(
+            id: 'employee-1',
+            email: 'employee@example.com',
+            role: 'employee',
+            fullName: 'Employee One',
+          ),
+        );
+      addTearDown(realtime.dispose);
+      addTearDown(auth.dispose);
+
+      await tester.binding.setSurfaceSize(const Size(1400, 900));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+
+      await tester.pumpWidget(
+        MultiProvider(
+          providers: [
+            ChangeNotifierProvider<AuthProvider>.value(value: auth),
+            ChangeNotifierProvider<AppRealtimeProvider>.value(value: realtime),
+          ],
+          child: const MaterialApp(
+            home: Scaffold(
+              body: SingleChildScrollView(child: EmployeeLocatorSlipContent()),
+            ),
+          ),
+        ),
+      );
+
+      await _pumpUntil(tester, () => adapter.myRequestCount >= 1);
+
+      var previousCount = adapter.myRequestCount;
+      await tester.tap(find.byTooltip('Refresh locator requests'));
+      await _pumpUntil(tester, () => adapter.myRequestCount > previousCount);
+      expect(find.text('Locator requests refreshed.'), findsOneWidget);
+
+      previousCount = adapter.myRequestCount;
+      for (final state in const [
+        AppLifecycleState.inactive,
+        AppLifecycleState.hidden,
+        AppLifecycleState.paused,
+        AppLifecycleState.hidden,
+        AppLifecycleState.inactive,
+        AppLifecycleState.resumed,
+      ]) {
+        tester.binding.handleAppLifecycleStateChanged(state);
+        await tester.pump();
+      }
+      await _pumpUntil(tester, () => adapter.myRequestCount > previousCount);
+
+      previousCount = adapter.myRequestCount;
+      realtime.setConnected(true);
+      await _pumpUntil(tester, () => adapter.myRequestCount > previousCount);
+    },
+  );
 }
 
 Future<void> _pumpUntil(
@@ -201,6 +263,57 @@ class _LocatorErrorStateAdapter implements HttpClientAdapter {
 
   @override
   void close({bool force = false}) {}
+}
+
+class _LocatorRefreshAdapter implements HttpClientAdapter {
+  int myRequestCount = 0;
+
+  @override
+  Future<ResponseBody> fetch(
+    RequestOptions options,
+    Stream<Uint8List>? requestStream,
+    Future<void>? cancelFuture,
+  ) async {
+    switch (options.uri.path) {
+      case '/api/locator-slips/types':
+        return _jsonResponse([
+          {
+            'code': 'locator',
+            'label': 'Locator / Official Business',
+            'is_active': true,
+          },
+        ]);
+      case '/api/locator-slips/context':
+        return _jsonResponse({'official_date': '2026-09-19'});
+      case '/api/locator-slips/department-head/check':
+        return _jsonResponse({
+          'isDeptHead': false,
+          'canReviewPending': false,
+          'hasReviewHistory': false,
+        });
+      case '/api/locator-slips/my':
+        myRequestCount += 1;
+        return _emptyPage();
+      default:
+        throw StateError('Unexpected request: ${options.uri}');
+    }
+  }
+
+  @override
+  void close({bool force = false}) {}
+}
+
+class _FakeRealtimeProvider extends AppRealtimeProvider {
+  bool _connected = false;
+
+  @override
+  bool get connected => _connected;
+
+  void setConnected(bool value) {
+    if (_connected == value) return;
+    _connected = value;
+    notifyListeners();
+  }
 }
 
 ResponseBody _emptyPage() => _jsonResponse({
