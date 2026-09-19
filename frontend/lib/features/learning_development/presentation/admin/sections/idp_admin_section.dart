@@ -719,7 +719,9 @@ class _IdpFormEditorState extends State<IdpFormEditor> {
               borderRadius: BorderRadius.circular(10),
               border: Border.all(color: AppTheme.dashHairlineOf(context)),
             ),
-            child: ListView(
+            child: Material(
+              type: MaterialType.transparency,
+              child: ListView(
               shrinkWrap: true,
               padding: const EdgeInsets.symmetric(vertical: 4),
               children: [
@@ -742,6 +744,7 @@ class _IdpFormEditorState extends State<IdpFormEditor> {
                     onTap: () => _selectEmployee(m),
                   ),
               ],
+              ),
             ),
           ),
       ],

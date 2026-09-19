@@ -1762,7 +1762,9 @@ class _AbCoachingEditorDialogState extends State<_AbCoachingEditorDialog> {
                             color: AppTheme.dashHairlineOf(context),
                           ),
                         ),
-                        child: ListView(
+                        child: Material(
+                          type: MaterialType.transparency,
+                          child: ListView(
                           shrinkWrap: true,
                           padding: const EdgeInsets.symmetric(vertical: 4),
                           children: [
@@ -1787,6 +1789,7 @@ class _AbCoachingEditorDialogState extends State<_AbCoachingEditorDialog> {
                                 onTap: () => _selectEmployee(m),
                               ),
                           ],
+                          ),
                         ),
                       ),
                     if ((_pickedPosition ?? '').trim().isNotEmpty ||

@@ -1143,7 +1143,7 @@ class _DashboardContent extends StatelessWidget {
           ),
         if (showWelcome) _AdminWelcomeBanner(isNarrow: isNarrow),
         if (showWelcome && showRspMonitoring) const SizedBox(height: 20),
-        if (showRspMonitoring) const _RecruitmentHubCard(),
+        if (showRspMonitoring) const RecruitmentOverviewCard(),
         if ((showWelcome || showRspMonitoring) && showDocu)
           const SizedBox(height: 28),
         if (showDocu) ...[
@@ -1260,14 +1260,22 @@ class _RecruitmentHubLoadingSkeleton extends StatelessWidget {
   }
 }
 
-class _RecruitmentHubCard extends StatefulWidget {
-  const _RecruitmentHubCard();
+class RecruitmentOverviewCard extends StatefulWidget {
+  const RecruitmentOverviewCard({
+    super.key,
+    this.loadApplications,
+    this.loadAnnouncement,
+  });
+
+  final Future<List<RecruitmentApplication>> Function()? loadApplications;
+  final Future<JobVacancyAnnouncement> Function()? loadAnnouncement;
 
   @override
-  State<_RecruitmentHubCard> createState() => _RecruitmentHubCardState();
+  State<RecruitmentOverviewCard> createState() =>
+      _RecruitmentOverviewCardState();
 }
 
-class _RecruitmentHubCardState extends State<_RecruitmentHubCard> {
+class _RecruitmentOverviewCardState extends State<RecruitmentOverviewCard> {
   bool _loading = true;
   bool _refreshing = false;
   String? _error;
@@ -1304,8 +1312,11 @@ class _RecruitmentHubCardState extends State<_RecruitmentHubCard> {
       });
     }
 
+    unawaited(_loadVacancyAnnouncement());
+
     try {
-      final apps = await RecruitmentRepo.instance.listApplications();
+      final apps = await (widget.loadApplications?.call() ??
+          RecruitmentRepo.instance.listApplications());
       if (!mounted) return;
       setState(() {
         _all = apps.where((a) => !a.isFromMayorModule).toList();
@@ -1314,10 +1325,20 @@ class _RecruitmentHubCardState extends State<_RecruitmentHubCard> {
     } catch (e) {
       if (!mounted) return;
       setState(() => _error = userFacingApiError(e));
+    } finally {
+      if (mounted) {
+        setState(() {
+          _loading = false;
+          _refreshing = false;
+        });
+      }
     }
+  }
 
+  Future<void> _loadVacancyAnnouncement() async {
     try {
-      final announcement = await JobVacancyAnnouncementRepo.instance.fetch();
+      final announcement = await (widget.loadAnnouncement?.call() ??
+          JobVacancyAnnouncementRepo.instance.fetch());
       if (!mounted) return;
       setState(() {
         _announcement = announcement;
@@ -1326,13 +1347,6 @@ class _RecruitmentHubCardState extends State<_RecruitmentHubCard> {
     } catch (_) {
       if (!mounted) return;
       setState(() => _vacancyLoadFailed = true);
-    } finally {
-      if (mounted) {
-        setState(() {
-          _loading = false;
-          _refreshing = false;
-        });
-      }
     }
   }
 

@@ -1364,7 +1364,9 @@ class _TnaEmployeeEditorDialogState extends State<_TnaEmployeeEditorDialog> {
                             color: AppTheme.dashHairlineOf(context),
                           ),
                         ),
-                        child: ListView(
+                        child: Material(
+                          type: MaterialType.transparency,
+                          child: ListView(
                           shrinkWrap: true,
                           padding: const EdgeInsets.symmetric(vertical: 4),
                           children: [
@@ -1387,6 +1389,7 @@ class _TnaEmployeeEditorDialogState extends State<_TnaEmployeeEditorDialog> {
                                 onTap: () => _selectEmployee(m),
                               ),
                           ],
+                          ),
                         ),
                       ),
                     const SizedBox(height: 12),
