@@ -26,7 +26,7 @@ python scripts/zkteco-sync-py.py
 | `ZK_HEARTBEAT_INTERVAL` | 60                 | Minimum seconds between successful empty-device heartbeats         |
 | `ZK_TIMEZONE_OFFSET` | +08:00                | Device local offset used for punch timestamps and Hikvision query windows |
 | `ANVIZ_RECORD_FORMAT` | (disabled)           | Explicit verified Anviz format; only `bcd6-second-minute-hour-day-month-year2000` is accepted |
-| `ZK_SYNC_STATE_FILE` | (internal)            | State is stored in `backend/.zkteco-sync-state.json` per registered device UUID and identity |
+| `ZK_SYNC_STATE_FILE` | `backend/.zkteco-sync-state.json` | Writable cursor file; production services should set this to `/var/lib/hrms/biometric/sync-state.json` |
 
 Active device IPs are loaded from **`GET /api/biometric-attendance-logs/devices`** (rows in `biometric_devices`). You do not set a single `ZK_DEVICE_IP` in the Python sync unless you change the script.
 
