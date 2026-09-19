@@ -1,0 +1,40 @@
+---
+title: Figure 5. DocuTracker System Diagram
+config:
+  securityLevel: loose
+  flowchart:
+    curve: stepAfter
+    htmlLabels: true
+---
+flowchart LR
+    subgraph U[Authorized Users]
+        EMP[Employee]
+        REV[Reviewer / Signer]
+        ADM[Administrator]
+    end
+
+    subgraph DT[DocuTracker Module]
+        UI["<img src='https://cdn.jsdelivr.net/npm/simple-icons@11/icons/flutter.svg' style='width:34px;height:34px;object-fit:contain'/><br/><b>Flutter DocuTracker</b><br/>Dashboard, Documents, Builder,<br/>Notifications and Admin UI"]
+        CORE["<img src='https://cdn.jsdelivr.net/npm/simple-icons@11/icons/nodedotjs.svg' style='width:34px;height:34px;object-fit:contain'/>&nbsp;&nbsp;<img src='https://cdn.jsdelivr.net/npm/simple-icons@11/icons/express.svg' style='width:34px;height:34px;object-fit:contain'/><br/><b>Node.js + Express Services</b><br/>Document, Workflow, Permission,<br/>Signature and Escalation Functions"]
+    end
+
+    AUTH[HRMS Authentication<br/>and User Directory]
+    DB[("<img src='https://cdn.jsdelivr.net/npm/simple-icons@11/icons/postgresql.svg' style='width:34px;height:34px;object-fit:contain'/><br/><b>PostgreSQL</b><br/>DocuTracker Data")]
+    FILES[(Attachment Storage)]
+    SOURCES[Authorized HRMS Sources<br/>DTR, RSP and L&D]
+
+    EMP --> UI
+    REV --> UI
+    ADM --> UI
+    UI --> CORE
+    CORE <--> AUTH
+    CORE <--> DB
+    CORE <--> FILES
+    CORE <--> SOURCES
+
+    classDef user fill:#fff2cc,stroke:#b8860b,stroke-width:2px;
+    classDef module fill:#dbeafe,stroke:#2563eb,stroke-width:2px;
+    classDef external fill:#f3f4f6,stroke:#4b5563,stroke-width:1.5px;
+    class EMP,REV,ADM user;
+    class UI,CORE module;
+    class AUTH,DB,FILES,SOURCES external;

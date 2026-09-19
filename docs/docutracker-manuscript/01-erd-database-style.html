@@ -1,0 +1,180 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Figure 1. DocuTracker Entity-Relationship Diagram</title>
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; width: 1800px; height: 1120px; background: #fff; font-family: Arial, sans-serif; color: #191919; }
+  #canvas { position: relative; width: 1800px; height: 1120px; overflow: hidden; background: #fff; }
+  h1 { position: absolute; top: 18px; left: 0; width: 100%; margin: 0; text-align: center; font-size: 24px; font-weight: 600; }
+  svg.links { position: absolute; inset: 0; z-index: 0; width: 1800px; height: 1120px; }
+  .rel { fill: none; stroke: #555; stroke-width: 2; stroke-linejoin: miter; }
+  .table { position: absolute; z-index: 2; border: 2px solid #444; background: #fff; font-size: 16px; }
+  .name { height: 34px; padding: 6px 8px; background: #d7d7d7; border-bottom: 2px solid #444; text-align: center; font-size: 18px; font-weight: 500; }
+  .row { display: grid; grid-template-columns: 48px 1fr; min-height: 27px; border-bottom: 1px solid #aaa; }
+  .row:last-child { border-bottom: 0; }
+  .key { padding: 4px 5px; border-right: 1px solid #777; font-weight: 700; }
+  .field { padding: 4px 7px; white-space: nowrap; }
+  .pk { font-weight: 700; text-decoration: underline; }
+  .fk { font-weight: 700; }
+  .type { color: #666; font-size: 13px; font-weight: 400; }
+  .legend { position: absolute; z-index: 2; left: 40px; top: 965px; width: 320px; padding: 10px 14px; border: 1px solid #777; background: #fafafa; font-size: 14px; line-height: 1.45; }
+</style>
+</head>
+<body>
+<div id="canvas">
+  <h1>Figure 1. DocuTracker Entity-Relationship Diagram</h1>
+
+  <svg class="links" viewBox="0 0 1800 1120" aria-hidden="true">
+    <defs>
+      <marker id="one" viewBox="0 -8 16 16" refX="1" refY="0" markerWidth="14" markerHeight="14" orient="auto-start-reverse" markerUnits="userSpaceOnUse">
+        <path d="M3,-7 V7 M8,-7 V7" stroke="#555" stroke-width="1.7" fill="none"/>
+      </marker>
+      <marker id="many" viewBox="0 -9 24 18" refX="22" refY="0" markerWidth="22" markerHeight="18" orient="auto" markerUnits="userSpaceOnUse">
+        <circle cx="5" cy="0" r="3.4" fill="#fff" stroke="#555" stroke-width="1.5"/>
+        <path d="M9,0 H14 M14,0 L22,-8 M14,0 L22,0 M14,0 L22,8" stroke="#555" stroke-width="1.5" fill="none"/>
+      </marker>
+      <marker id="zeroOne" viewBox="0 -9 22 18" refX="20" refY="0" markerWidth="20" markerHeight="18" orient="auto" markerUnits="userSpaceOnUse">
+        <circle cx="5" cy="0" r="3.4" fill="#fff" stroke="#555" stroke-width="1.5"/>
+        <path d="M12,-7 V7 M17,-7 V7" stroke="#555" stroke-width="1.5" fill="none"/>
+      </marker>
+    </defs>
+
+    <!-- Configuration relationships: primary key to foreign key row -->
+    <path class="rel" d="M310 138 H370" marker-start="url(#one)" marker-end="url(#many)"/>
+    <path class="rel" d="M650 138 H680 V165 H710" marker-start="url(#one)" marker-end="url(#many)"/>
+
+    <!-- Users to assignee, permission, document, audit and signature foreign keys -->
+    <path class="rel" d="M1030 138 H1010 V192 H990" marker-start="url(#one)" marker-end="url(#many)"/>
+    <path class="rel" d="M1260 138 H1325 V179 H1390" marker-start="url(#one)" marker-end="url(#many)"/>
+    <path class="rel" d="M1070 220 V300 H1135 V522 H1100" marker-start="url(#one)" marker-end="url(#many)"/>
+    <path class="rel" d="M1100 220 V320 H1160 V549 H1100" marker-start="url(#one)" marker-end="url(#many)"/>
+    <path class="rel" d="M1130 220 V620 H395 V849" marker-start="url(#one)" marker-end="url(#many)"/>
+    <path class="rel" d="M1160 220 V640 H730 V822" marker-start="url(#one)" marker-end="url(#many)"/>
+    <path class="rel" d="M1190 220 V660 H1035 V822" marker-start="url(#one)" marker-end="url(#many)"/>
+    <path class="rel" d="M1220 220 V330 H1275 V465 H1300" marker-start="url(#one)" marker-end="url(#many)"/>
+
+    <!-- Document primary key to document_id foreign-key rows -->
+    <path class="rel" d="M760 414 H210 V794 H95" marker-start="url(#one)" marker-end="url(#many)"/>
+    <path class="rel" d="M760 414 H235 V675 H750 V794 H730" marker-start="url(#one)" marker-end="url(#many)"/>
+    <path class="rel" d="M760 414 H260 V690 H1070 V794 H1035" marker-start="url(#one)" marker-end="url(#many)"/>
+    <path class="rel" d="M1100 414 H1180 V768 H1060" marker-start="url(#one)" marker-end="url(#zeroOne)"/>
+    <path class="rel" d="M1100 414 H1210 V650 H1360 V794 H1380" marker-start="url(#one)" marker-end="url(#many)"/>
+    <path class="rel" d="M1450 559 V650 H1740 V849 H1720" marker-start="url(#one)" marker-end="url(#many)"/>
+  </svg>
+
+  <section class="table" style="left:40px;top:90px;width:270px">
+    <div class="name">ROUTING_CONFIGS</div>
+    <div class="row"><div class="key">PK</div><div class="field pk">id <span class="type">uuid</span></div></div>
+    <div class="row"><div class="key"></div><div class="field">document_type <span class="type">text</span></div></div>
+    <div class="row"><div class="key"></div><div class="field">workflow_version <span class="type">int</span></div></div>
+    <div class="row"><div class="key"></div><div class="field">review_deadline_hours <span class="type">int</span></div></div>
+  </section>
+
+  <section class="table" style="left:370px;top:90px;width:280px">
+    <div class="name">WORKFLOW_STEPS</div>
+    <div class="row"><div class="key">PK</div><div class="field pk">id <span class="type">uuid</span></div></div>
+    <div class="row"><div class="key"></div><div class="field">document_type <span class="type">text</span></div></div>
+    <div class="row"><div class="key"></div><div class="field">workflow_version <span class="type">int</span></div></div>
+    <div class="row"><div class="key"></div><div class="field">step_order <span class="type">int</span></div></div>
+    <div class="row"><div class="key"></div><div class="field">label <span class="type">text</span></div></div>
+  </section>
+
+  <section class="table" style="left:710px;top:90px;width:280px">
+    <div class="name">STEP_ASSIGNEES</div>
+    <div class="row"><div class="key">PK</div><div class="field pk">id <span class="type">uuid</span></div></div>
+    <div class="row"><div class="key">FK</div><div class="field fk">step_id <span class="type">uuid</span></div></div>
+    <div class="row"><div class="key">FK</div><div class="field fk">user_id <span class="type">uuid</span></div></div>
+    <div class="row"><div class="key"></div><div class="field">is_primary <span class="type">boolean</span></div></div>
+    <div class="row"><div class="key"></div><div class="field">backup_rank <span class="type">int</span></div></div>
+  </section>
+
+  <section class="table" style="left:1030px;top:75px;width:230px">
+    <div class="name">USERS</div>
+    <div class="row"><div class="key">PK</div><div class="field pk">id <span class="type">uuid</span></div></div>
+    <div class="row"><div class="key"></div><div class="field">name <span class="type">text</span></div></div>
+    <div class="row"><div class="key"></div><div class="field">role <span class="type">text</span></div></div>
+    <div class="row"><div class="key"></div><div class="field">department_id <span class="type">text</span></div></div>
+  </section>
+
+  <section class="table" style="left:1390px;top:75px;width:290px">
+    <div class="name">PERMISSIONS</div>
+    <div class="row"><div class="key">PK</div><div class="field pk">id <span class="type">uuid</span></div></div>
+    <div class="row"><div class="key"></div><div class="field">role_id <span class="type">text</span></div></div>
+    <div class="row"><div class="key">FK</div><div class="field fk">user_id <span class="type">uuid</span></div></div>
+    <div class="row"><div class="key"></div><div class="field">document_type <span class="type">text</span></div></div>
+    <div class="row"><div class="key"></div><div class="field">action <span class="type">text</span></div></div>
+    <div class="row"><div class="key"></div><div class="field">granted <span class="type">boolean</span></div></div>
+  </section>
+
+  <section class="table" style="left:760px;top:365px;width:340px">
+    <div class="name">DOCUMENTS</div>
+    <div class="row"><div class="key">PK</div><div class="field pk">id <span class="type">uuid</span></div></div>
+    <div class="row"><div class="key">UK</div><div class="field pk">document_number <span class="type">text</span></div></div>
+    <div class="row"><div class="key"></div><div class="field">document_type <span class="type">text</span></div></div>
+    <div class="row"><div class="key"></div><div class="field">title <span class="type">text</span></div></div>
+    <div class="row"><div class="key">FK</div><div class="field fk">created_by <span class="type">uuid</span></div></div>
+    <div class="row"><div class="key">FK</div><div class="field fk">current_holder_id <span class="type">uuid</span></div></div>
+    <div class="row"><div class="key"></div><div class="field">current_step <span class="type">int</span></div></div>
+    <div class="row"><div class="key"></div><div class="field">status <span class="type">text</span></div></div>
+  </section>
+
+  <section class="table" style="left:1300px;top:390px;width:300px">
+    <div class="name">SIGNATURE_ASSETS</div>
+    <div class="row"><div class="key">PK</div><div class="field pk">id <span class="type">uuid</span></div></div>
+    <div class="row"><div class="key">FK</div><div class="field fk">owner_user_id <span class="type">uuid</span></div></div>
+    <div class="row"><div class="key"></div><div class="field">image_bytes <span class="type">bytea</span></div></div>
+    <div class="row"><div class="key"></div><div class="field">mime_type <span class="type">text</span></div></div>
+    <div class="row"><div class="key"></div><div class="field">is_saved <span class="type">boolean</span></div></div>
+  </section>
+
+  <section class="table" style="left:95px;top:720px;width:300px">
+    <div class="name">ROUTING_RECORDS</div>
+    <div class="row"><div class="key">PK</div><div class="field pk">id <span class="type">uuid</span></div></div>
+    <div class="row"><div class="key">FK</div><div class="field fk">document_id <span class="type">uuid</span></div></div>
+    <div class="row"><div class="key"></div><div class="field">step_order <span class="type">int</span></div></div>
+    <div class="row"><div class="key">FK</div><div class="field fk">assigned_to <span class="type">uuid</span></div></div>
+    <div class="row"><div class="key"></div><div class="field">status <span class="type">text</span></div></div>
+  </section>
+
+  <section class="table" style="left:420px;top:720px;width:310px">
+    <div class="name">DOCUMENT_HISTORY</div>
+    <div class="row"><div class="key">PK</div><div class="field pk">id <span class="type">uuid</span></div></div>
+    <div class="row"><div class="key">FK</div><div class="field fk">document_id <span class="type">uuid</span></div></div>
+    <div class="row"><div class="key">FK</div><div class="field fk">actor_id <span class="type">uuid</span></div></div>
+    <div class="row"><div class="key"></div><div class="field">action <span class="type">text</span></div></div>
+    <div class="row"><div class="key"></div><div class="field">from_status <span class="type">text</span></div></div>
+    <div class="row"><div class="key"></div><div class="field">to_status <span class="type">text</span></div></div>
+  </section>
+
+  <section class="table" style="left:755px;top:720px;width:280px">
+    <div class="name">NOTIFICATIONS</div>
+    <div class="row"><div class="key">PK</div><div class="field pk">id <span class="type">uuid</span></div></div>
+    <div class="row"><div class="key">FK</div><div class="field fk">document_id <span class="type">uuid</span></div></div>
+    <div class="row"><div class="key">FK</div><div class="field fk">user_id <span class="type">uuid</span></div></div>
+    <div class="row"><div class="key"></div><div class="field">type <span class="type">text</span></div></div>
+    <div class="row"><div class="key"></div><div class="field">read <span class="type">boolean</span></div></div>
+  </section>
+
+  <section class="table" style="left:1060px;top:720px;width:290px">
+    <div class="name">DOCUMENT_CONTENTS</div>
+    <div class="row"><div class="key">PK/FK</div><div class="field pk">document_id <span class="type">uuid</span></div></div>
+    <div class="row"><div class="key"></div><div class="field">pages <span class="type">jsonb</span></div></div>
+    <div class="row"><div class="key"></div><div class="field">revision <span class="type">int</span></div></div>
+    <div class="row"><div class="key">FK</div><div class="field fk">updated_by <span class="type">uuid</span></div></div>
+  </section>
+
+  <section class="table" style="left:1380px;top:720px;width:340px">
+    <div class="name">SIGNATURE_FIELDS</div>
+    <div class="row"><div class="key">PK</div><div class="field pk">id <span class="type">uuid</span></div></div>
+    <div class="row"><div class="key">FK</div><div class="field fk">document_id <span class="type">uuid</span></div></div>
+    <div class="row"><div class="key">FK</div><div class="field fk">assigned_signer_id <span class="type">uuid</span></div></div>
+    <div class="row"><div class="key">FK</div><div class="field fk">signature_asset_id <span class="type">uuid</span></div></div>
+    <div class="row"><div class="key"></div><div class="field">signed_at <span class="type">timestamptz</span></div></div>
+  </section>
+
+  <aside class="legend"><b>Crow’s Foot legend</b><br>Double bar = exactly one<br>Circle + crow’s foot = zero or many<br>Circle + double bar = zero or one<br><b>PK</b> primary key · <b>FK</b> foreign key · <b>UK</b> unique key</aside>
+</div>
+</body>
+</html>

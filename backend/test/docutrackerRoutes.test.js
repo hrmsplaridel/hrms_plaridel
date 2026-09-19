@@ -121,6 +121,72 @@ test('GET /permission-explain returns explanation payload', async () => {
   delete require.cache[routePath];
 });
 
+test('GET /governance-audit preserves entries for deleted actors', async () => {
+  const queries = [];
+  const auditRow = {
+    id: 'audit-1',
+    actor_id: 'deleted-user-1',
+    actor_name: null,
+    event_type: 'workflow_published',
+    entity_type: 'workflow_version',
+    document_type: 'memo',
+  };
+  const restoreWorkflow = withMockedModule(
+    '../src/services/docutrackerWorkflowService',
+    workflowServiceMock()
+  );
+  const restoreDb = withMockedModule('../src/config/db', {
+    pool: {
+      query: async (sql, params) => {
+        queries.push({ sql, params });
+        return { rowCount: 1, rows: [auditRow] };
+      },
+    },
+  });
+  const restoreAuth = withMockedModule('../src/middleware/auth', {
+    authMiddleware: (_req, _res, next) => next?.(),
+  });
+  const restoreRbac = withMockedModule('../src/middleware/rbac', {
+    requireAdmin: (_req, _res, next) => next?.(),
+  });
+
+  const routePath = require.resolve('../src/routes/docutracker');
+  delete require.cache[routePath];
+  const router = require('../src/routes/docutracker');
+  const handler = getRouteHandler(router, 'get', '/governance-audit');
+  const req = {
+    query: {
+      document_type: 'memo',
+      event_type: 'workflow_published',
+      actor_id: 'deleted-user-1',
+      limit: '25',
+      offset: '50',
+    },
+    user: { id: 'admin-1', role: 'admin' },
+  };
+  const res = createMockResponse();
+
+  await handler(req, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(res.payload, [auditRow]);
+  assert.equal(queries.length, 1);
+  assert.match(queries[0].sql, /LEFT JOIN users u ON u\.id = a\.actor_id/);
+  assert.deepEqual(queries[0].params, [
+    'memo',
+    'workflow_published',
+    'deleted-user-1',
+    25,
+    50,
+  ]);
+
+  restoreWorkflow();
+  restoreDb();
+  restoreAuth();
+  restoreRbac();
+  delete require.cache[routePath];
+});
+
 test('GET /documents/:id returns the current holder name for detail summaries', async () => {
   const documentId = '11111111-1111-4111-8111-111111111111';
   const restoreWorkflow = withMockedModule(

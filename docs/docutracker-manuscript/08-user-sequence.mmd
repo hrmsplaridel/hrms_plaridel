@@ -1,0 +1,33 @@
+---
+title: Figure 8. DocuTracker User Sequence Diagram
+---
+sequenceDiagram
+    autonumber
+    actor E as Employee
+    participant UI as Flutter DocuTracker UI
+    participant API as Express API
+    participant DB as PostgreSQL
+    actor R as Reviewer / Signer
+
+    E->>UI: Create or edit document draft
+    UI->>API: Save document/content
+    API->>DB: Validate permission and persist draft
+    DB-->>API: Saved record and revision
+    API-->>UI: Confirmed draft
+    E->>UI: Submit document
+    UI->>API: Request validated transition
+    API->>DB: Validate workflow, assign reviewer,<br/>create routing/history/notification
+    DB-->>API: Committed workflow state
+    API-->>UI: Submitted document
+    API-->>R: Assignment notification
+    R->>UI: Open assigned document
+    UI->>API: Request authorized document bundle
+    API->>DB: Check access and load current state
+    DB-->>API: Document, routing, capabilities
+    API-->>UI: Authorized document details
+    R->>UI: Approve, forward, return or reject
+    UI->>API: Send action with idempotency key
+    API->>DB: Validate assignee/action and<br/>atomically update state and audit trail
+    DB-->>API: Committed result
+    API-->>UI: Confirmed action and refreshed state
+    API-->>E: Status notification

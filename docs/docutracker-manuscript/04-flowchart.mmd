@@ -1,0 +1,38 @@
+---
+title: Figure 4. DocuTracker Document Workflow Flowchart
+config:
+  flowchart:
+    curve: stepAfter
+---
+flowchart TD
+    S([Start]) --> LOGIN[User authenticates in HRMS]
+    LOGIN --> ACCESS{Authorized for<br/>DocuTracker?}
+    ACCESS -- No --> DENY[Show access denied] --> END([End])
+    ACCESS -- Yes --> CREATE[Create or open draft document]
+    CREATE --> EDIT[Enter metadata, content, attachments,<br/>and signature fields as permitted]
+    EDIT --> SUBMIT{Submit document?}
+    SUBMIT -- No --> SAVE[Save draft] --> EDIT
+    SUBMIT -- Yes --> VALIDATE{Valid workflow and<br/>submission permission?}
+    VALIDATE -- No --> ERROR[Show validation error<br/>and preserve draft] --> EDIT
+    VALIDATE -- Yes --> ASSIGN[Create routing record,<br/>assign current reviewer, set deadline]
+    ASSIGN --> NOTIFY[Notify assigned reviewer]
+    NOTIFY --> REVIEW[Reviewer opens assigned document]
+    REVIEW --> AUTH{Assigned and action<br/>is allowed?}
+    AUTH -- No --> DENY2[Reject action and retain state] --> REVIEW
+    AUTH -- Yes --> ACTION{Reviewer action}
+    ACTION -- Return --> RETURN[Record history and return to sender] --> NOTIFY_CREATOR[Notify creator] --> EDIT
+    ACTION -- Reject --> REJECT[Record rejected status and history] --> NOTIFY_CREATOR --> END
+    ACTION -- Forward --> NEXT[Advance to next configured step]
+    ACTION -- Approve --> MORE{More enabled<br/>workflow steps?}
+    MORE -- Yes --> NEXT
+    NEXT --> ASSIGN
+    MORE -- No --> APPROVED[Set approved status<br/>and record history] --> NOTIFY_CREATOR --> END
+    REVIEW --> DUE{Deadline exceeded?}
+    DUE -- Yes --> ESC[Apply configured escalation,<br/>record history, notify parties] --> REVIEW
+    DUE -- No --> REVIEW
+
+    classDef terminal fill:#dcfce7,stroke:#15803d,stroke-width:2px;
+    classDef decision fill:#fef3c7,stroke:#b45309,stroke-width:2px;
+    classDef process fill:#dbeafe,stroke:#2563eb,stroke-width:1.5px;
+    class S,END terminal;
+    class ACCESS,SUBMIT,VALIDATE,AUTH,ACTION,MORE,DUE decision;

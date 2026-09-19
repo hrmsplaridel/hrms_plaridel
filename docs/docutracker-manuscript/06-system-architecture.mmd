@@ -1,0 +1,50 @@
+---
+title: Figure 6. DocuTracker System Architecture
+config:
+  securityLevel: loose
+  flowchart:
+    curve: stepAfter
+    htmlLabels: true
+---
+flowchart TB
+    subgraph CLIENT[Presentation Layer - Flutter]
+        SCREENS["<img src='https://cdn.jsdelivr.net/npm/simple-icons@11/icons/flutter.svg' style='width:34px;height:34px;object-fit:contain'/><br/><b>Flutter Presentation</b><br/>Admin, Employee and Shared Screens"]
+        PROVIDER[DocuTracker Provider]
+        SCREENS --> PROVIDER
+    end
+
+    subgraph DOMAIN[Client Service and Data Layer]
+        SERVICES[Access, Visibility, Permission,<br/>Workflow and Notification Services]
+        REPO[DocuTracker Repository]
+        MODELS[Typed Models and DTOs]
+        PROVIDER --> SERVICES
+        PROVIDER --> REPO
+        SERVICES --> REPO
+        REPO <--> MODELS
+    end
+
+    subgraph SERVER[Node.js and Express Backend]
+        API["<img src='https://cdn.jsdelivr.net/npm/simple-icons@11/icons/nodedotjs.svg' style='width:32px;height:32px;object-fit:contain'/>&nbsp;&nbsp;<img src='https://cdn.jsdelivr.net/npm/simple-icons@11/icons/express.svg' style='width:32px;height:32px;object-fit:contain'/><br/><b>Node.js + Express API</b><br/>Authenticated /api/docutracker Routes"]
+        RULES[Authorization, Workflow,<br/>Validation and Audit Logic]
+        WORKER[Deadline / Escalation Worker]
+        API --> RULES
+        WORKER --> RULES
+    end
+
+    subgraph DATA[Data and Integration Layer]
+        DB[("<img src='https://cdn.jsdelivr.net/npm/simple-icons@11/icons/postgresql.svg' style='width:34px;height:34px;object-fit:contain'/><br/><b>PostgreSQL</b>")]
+        STORE[(Attachment Storage)]
+        HRMS[Allowlisted DTR, RSP and L&D Sources]
+    end
+
+    REPO -->|HTTPS / JSON + authenticated session| API
+    RULES <--> DB
+    RULES <--> STORE
+    RULES <--> HRMS
+
+    classDef layer fill:#eff6ff,stroke:#2563eb,stroke-width:1.5px;
+    classDef server fill:#ecfdf5,stroke:#059669,stroke-width:1.5px;
+    classDef data fill:#fefce8,stroke:#ca8a04,stroke-width:1.5px;
+    class SCREENS,PROVIDER,SERVICES,REPO,MODELS layer;
+    class API,RULES,WORKER server;
+    class DB,STORE,HRMS data;

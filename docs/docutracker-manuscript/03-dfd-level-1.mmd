@@ -1,0 +1,55 @@
+---
+title: Figure 3. DocuTracker Data Flow Diagram - Level 1
+config:
+  flowchart:
+    curve: stepAfter
+---
+flowchart LR
+    E[Employee]:::entity
+    R[Reviewer / Signer]:::entity
+    A[Administrator]:::entity
+
+    P1((1.0<br/>Manage Documents)):::process
+    P2((2.0<br/>Execute Workflow)):::process
+    P3((3.0<br/>Authorize Access)):::process
+    P4((4.0<br/>Manage Notifications)):::process
+    P5((5.0<br/>Configure System)):::process
+    P6((6.0<br/>Monitor Escalations)):::process
+
+    D1[(D1 Documents & Contents)]:::store
+    D2[(D2 Workflow Configuration)]:::store
+    D3[(D3 Routing & History)]:::store
+    D4[(D4 Permissions & Users)]:::store
+    D5[(D5 Attachments & Signatures)]:::store
+    D6[(D6 Notifications)]:::store
+    D7[(D7 Escalation Rules)]:::store
+
+    E -->|create, edit, attach, submit| P1
+    P1 -->|document and status| E
+    R -->|approve, forward, return, reject, sign| P2
+    P2 -->|assignment and result| R
+    A -->|configuration changes| P5
+    P5 -->|saved settings and audit result| A
+
+    P1 <--> D1
+    P1 <--> D5
+    P1 --> P3
+    P2 --> P3
+    P2 <--> D2
+    P2 <--> D3
+    P2 --> P4
+    P3 <--> D4
+    P4 <--> D6
+    P4 --> E
+    P4 --> R
+    P5 <--> D2
+    P5 <--> D4
+    P5 <--> D7
+    P6 <--> D1
+    P6 <--> D7
+    P6 --> D3
+    P6 --> P4
+
+    classDef entity fill:#fff2cc,stroke:#b8860b,color:#222,stroke-width:2px;
+    classDef process fill:#dbeafe,stroke:#2563eb,color:#111,stroke-width:2px;
+    classDef store fill:#ede9fe,stroke:#7c3aed,color:#111,stroke-width:2px;

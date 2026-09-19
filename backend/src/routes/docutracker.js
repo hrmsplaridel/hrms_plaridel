@@ -1029,7 +1029,7 @@ router.get('/governance-audit', protect, requireAdmin, async (req, res) => {
     const result = await pool.query(
       `SELECT a.*, u.full_name AS actor_name
        FROM docutracker_governance_audit a
-       JOIN users u ON u.id = a.actor_id
+       LEFT JOIN users u ON u.id = a.actor_id
        ${filter}
        ORDER BY a.created_at DESC
        LIMIT $${params.length - 1} OFFSET $${params.length}`,
