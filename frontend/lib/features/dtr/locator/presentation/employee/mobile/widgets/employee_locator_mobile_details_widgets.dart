@@ -31,56 +31,43 @@ class EmployeeLocatorMobileDetailsDialog extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final screen = MediaQuery.sizeOf(context);
     final dark = AppTheme.dashIsDark(context);
-    final maxH = screen.height * 0.88;
-    final maxW = (screen.width - 28).clamp(320.0, 640.0);
     final panelColor = AppTheme.dashPanelOf(context);
     final borderColor = AppTheme.dashHairlineOf(context);
 
-    return Dialog(
-      backgroundColor: Colors.transparent,
-      elevation: 0,
-      insetPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 22),
-      child: ConstrainedBox(
-        constraints: BoxConstraints(maxWidth: maxW, maxHeight: maxH),
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(28),
-          child: Material(
-            color: panelColor,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                _EmployeeLocatorMobileDetailHeader(
-                  requestTypeLabel: requestTypeLabel,
-                  dateLabel: dateLabel,
-                  requestTypeIcon: requestTypeIcon,
-                  statusLabel: statusLabel,
-                  statusIcon: statusIcon,
-                  statusBg: statusBg,
-                  statusBorder: statusBorder,
-                  statusText: statusText,
-                  onClose: onClose,
-                ),
-                Flexible(
-                  fit: FlexFit.loose,
-                  child: SingleChildScrollView(
-                    padding: const EdgeInsets.fromLTRB(16, 14, 16, 18),
-                    child: body,
-                  ),
-                ),
-                DecoratedBox(
-                  decoration: BoxDecoration(
-                    color: dark
-                        ? AppTheme.dashMutedSurfaceOf(context)
-                        : AppTheme.offWhite,
-                    border: Border(top: BorderSide(color: borderColor)),
-                  ),
-                  child: SafeArea(top: false, child: actions),
-                ),
-              ],
+    return Material(
+      color: panelColor,
+      child: SafeArea(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            _EmployeeLocatorMobileDetailHeader(
+              requestTypeLabel: requestTypeLabel,
+              dateLabel: dateLabel,
+              requestTypeIcon: requestTypeIcon,
+              statusLabel: statusLabel,
+              statusIcon: statusIcon,
+              statusBg: statusBg,
+              statusBorder: statusBorder,
+              statusText: statusText,
+              onClose: onClose,
             ),
-          ),
+            Expanded(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.fromLTRB(20, 18, 20, 24),
+                child: body,
+              ),
+            ),
+            DecoratedBox(
+              decoration: BoxDecoration(
+                color: dark
+                    ? AppTheme.dashMutedSurfaceOf(context)
+                    : AppTheme.offWhite,
+                border: Border(top: BorderSide(color: borderColor)),
+              ),
+              child: SafeArea(top: false, child: actions),
+            ),
+          ],
         ),
       ),
     );

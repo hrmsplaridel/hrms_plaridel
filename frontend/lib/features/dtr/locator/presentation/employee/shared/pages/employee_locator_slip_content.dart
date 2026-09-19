@@ -634,222 +634,230 @@ class EmployeeLocatorSlipContentState
       );
     }
 
-    showDialog<void>(
-      context: context,
-      builder: (dialogContext) => EmployeeLocatorMobileDetailsDialog(
-        requestTypeLabel: item.requestType.label,
-        dateLabel: _formatDate(item.date),
-        requestTypeIcon: _locatorRequestTypeIcon(item.requestType),
-        statusLabel: item.status.label,
-        statusIcon: _locatorStatusIcon(item.status),
-        statusBg: statusBg,
-        statusBorder: statusBorder,
-        statusText: statusText,
-        onClose: () => Navigator.of(dialogContext).pop(),
-        body: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            EmployeeLocatorMobileDetailSection(
-              title: 'Slip Information',
-              icon: Icons.receipt_long_rounded,
-              children: [
-                EmployeeLocatorMobileDetailTile(
-                  icon: Icons.calendar_today_rounded,
-                  label: 'Date',
-                  value: _formatDate(item.date),
-                ),
-                EmployeeLocatorMobileDetailTile(
-                  icon: Icons.category_rounded,
-                  label: 'Type',
-                  value: item.requestType.label,
-                ),
-                EmployeeLocatorMobileDetailTile(
-                  icon: Icons.place_rounded,
-                  label: item.requestType.locationLabel,
-                  value: item.office.trim().isEmpty
-                      ? 'Not specified'
-                      : item.office.trim(),
-                ),
-                EmployeeLocatorMobileDetailTile(
-                  icon: Icons.schedule_rounded,
-                  label: 'Time Segments',
-                  value: _approvalSegmentsText(item),
-                ),
-                EmployeeLocatorMobileDetailTile(
-                  icon: Icons.attach_file_rounded,
-                  label: 'Attachment',
-                  value: (item.attachmentName ?? '').trim().isEmpty
-                      ? 'None'
-                      : item.attachmentName!.trim(),
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            EmployeeLocatorMobileStatusPanel(
-              statusLabel: item.status.label,
-              statusIcon: _locatorStatusIcon(item.status),
-              statusSubtitle: statusSubtitle,
-              statusBg: statusBg,
-              statusBorder: statusBorder,
-              statusText: statusText,
-            ),
-            const SizedBox(height: 12),
-            EmployeeLocatorMobileReasonPanel(
-              text: item.remarks.trim().isEmpty
-                  ? 'No reason provided.'
-                  : item.remarks.trim(),
-            ),
-            if (returnBlockedByPastDate) ...[
-              const SizedBox(height: 12),
-              const EmployeeLocatorMobileDetailSection(
-                title: 'Correction unavailable',
-                icon: Icons.event_busy_rounded,
-                children: [
-                  EmployeeLocatorMobileDetailTile(
-                    icon: Icons.info_outline_rounded,
-                    label: 'Past-dated request',
-                    value:
-                        'This request can no longer be returned to the employee. Approve or reject it, or ask HR to use Record Correction.',
-                  ),
-                ],
-              ),
-            ],
-            if (correctionBlockedByPastDate) ...[
-              const SizedBox(height: 12),
-              const EmployeeLocatorMobileDetailSection(
-                title: 'Correction unavailable',
-                icon: Icons.event_busy_rounded,
-                children: [
-                  EmployeeLocatorMobileDetailTile(
-                    icon: Icons.info_outline_rounded,
-                    label: 'Past-dated request',
-                    value:
-                        'This returned request can no longer be corrected or moved to another date. Cancel it or contact HR for Record Correction.',
-                  ),
-                ],
-              ),
-            ],
-            if (datePolicyUnavailable) ...[
-              const SizedBox(height: 12),
-              const EmployeeLocatorMobileDetailSection(
-                title: 'Return temporarily unavailable',
-                icon: Icons.sync_problem_rounded,
-                children: [
-                  EmployeeLocatorMobileDetailTile(
-                    icon: Icons.info_outline_rounded,
-                    label: 'Official date unavailable',
-                    value:
-                        'Reload the page before returning this request for correction.',
-                  ),
-                ],
-              ),
-            ],
-            if (typeConfigurationUnavailable) ...[
-              const SizedBox(height: 12),
-              const EmployeeLocatorMobileDetailSection(
-                title: 'Correction temporarily unavailable',
-                icon: Icons.sync_problem_rounded,
-                children: [
-                  EmployeeLocatorMobileDetailTile(
-                    icon: Icons.info_outline_rounded,
-                    label: 'Request types unavailable',
-                    value:
-                        'Reload the page and retry loading locator request types before correcting this request.',
-                  ),
-                ],
-              ),
-            ],
-            if (canCorrect) ...[
-              const SizedBox(height: 12),
+    unawaited(
+      openResponsiveRightSidePanel<void>(
+        context: context,
+        barrierLabel: reviewMode
+            ? 'Close locator approval details'
+            : 'Close locator request details',
+        breakpoint: 900,
+        minWidth: 620,
+        initialWidthFraction: 0.5,
+        builder: (dialogContext) => EmployeeLocatorMobileDetailsDialog(
+          requestTypeLabel: item.requestType.label,
+          dateLabel: _formatDate(item.date),
+          requestTypeIcon: _locatorRequestTypeIcon(item.requestType),
+          statusLabel: item.status.label,
+          statusIcon: _locatorStatusIcon(item.status),
+          statusBg: statusBg,
+          statusBorder: statusBorder,
+          statusText: statusText,
+          onClose: () => Navigator.of(dialogContext).pop(),
+          body: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
               EmployeeLocatorMobileDetailSection(
-                title: 'Correction Requested',
-                icon: Icons.assignment_return_rounded,
+                title: 'Slip Information',
+                icon: Icons.receipt_long_rounded,
                 children: [
                   EmployeeLocatorMobileDetailTile(
-                    icon: Icons.rate_review_outlined,
-                    label: 'Reviewer remarks',
-                    value: (correctionRemarks ?? '').trim().isEmpty
-                        ? 'Please replace or restore the required attachment.'
-                        : correctionRemarks!.trim(),
+                    icon: Icons.calendar_today_rounded,
+                    label: 'Date',
+                    value: _formatDate(item.date),
                   ),
-                ],
-              ),
-            ],
-            if (item.status == _LocatorSlipStatus.revoked) ...[
-              const SizedBox(height: 12),
-              EmployeeLocatorMobileDetailSection(
-                title: 'Approval Revoked',
-                icon: Icons.undo_rounded,
-                children: [
                   EmployeeLocatorMobileDetailTile(
-                    icon: Icons.person_outline_rounded,
-                    label: 'Revoked by',
-                    value: (item.revokedByName ?? '').trim().isEmpty
-                        ? 'HR/Admin'
-                        : item.revokedByName!.trim(),
+                    icon: Icons.category_rounded,
+                    label: 'Type',
+                    value: item.requestType.label,
+                  ),
+                  EmployeeLocatorMobileDetailTile(
+                    icon: Icons.place_rounded,
+                    label: item.requestType.locationLabel,
+                    value: item.office.trim().isEmpty
+                        ? 'Not specified'
+                        : item.office.trim(),
                   ),
                   EmployeeLocatorMobileDetailTile(
                     icon: Icons.schedule_rounded,
-                    label: 'Revoked at',
-                    value: item.revokedAt == null
-                        ? 'Not recorded'
-                        : _formatDateTime(item.revokedAt!),
+                    label: 'Time Segments',
+                    value: _approvalSegmentsText(item),
                   ),
                   EmployeeLocatorMobileDetailTile(
-                    icon: Icons.rate_review_outlined,
-                    label: 'Reason',
-                    value: (item.revocationReason ?? '').trim().isEmpty
-                        ? 'No reason recorded.'
-                        : item.revocationReason!.trim(),
+                    icon: Icons.attach_file_rounded,
+                    label: 'Attachment',
+                    value: (item.attachmentName ?? '').trim().isEmpty
+                        ? 'None'
+                        : item.attachmentName!.trim(),
                   ),
-                  if (item.monthEndReconciliationRequired)
-                    const EmployeeLocatorMobileDetailTile(
-                      icon: Icons.sync_problem_rounded,
-                      label: 'DTR reconciliation',
-                      value:
-                          'HR must rerun month-end processing for this month.',
-                    ),
                 ],
               ),
+              const SizedBox(height: 12),
+              EmployeeLocatorMobileStatusPanel(
+                statusLabel: item.status.label,
+                statusIcon: _locatorStatusIcon(item.status),
+                statusSubtitle: statusSubtitle,
+                statusBg: statusBg,
+                statusBorder: statusBorder,
+                statusText: statusText,
+              ),
+              const SizedBox(height: 12),
+              EmployeeLocatorMobileReasonPanel(
+                text: item.remarks.trim().isEmpty
+                    ? 'No reason provided.'
+                    : item.remarks.trim(),
+              ),
+              if (returnBlockedByPastDate) ...[
+                const SizedBox(height: 12),
+                const EmployeeLocatorMobileDetailSection(
+                  title: 'Correction unavailable',
+                  icon: Icons.event_busy_rounded,
+                  children: [
+                    EmployeeLocatorMobileDetailTile(
+                      icon: Icons.info_outline_rounded,
+                      label: 'Past-dated request',
+                      value:
+                          'This request can no longer be returned to the employee. Approve or reject it, or ask HR to use Record Correction.',
+                    ),
+                  ],
+                ),
+              ],
+              if (correctionBlockedByPastDate) ...[
+                const SizedBox(height: 12),
+                const EmployeeLocatorMobileDetailSection(
+                  title: 'Correction unavailable',
+                  icon: Icons.event_busy_rounded,
+                  children: [
+                    EmployeeLocatorMobileDetailTile(
+                      icon: Icons.info_outline_rounded,
+                      label: 'Past-dated request',
+                      value:
+                          'This returned request can no longer be corrected or moved to another date. Cancel it or contact HR for Record Correction.',
+                    ),
+                  ],
+                ),
+              ],
+              if (datePolicyUnavailable) ...[
+                const SizedBox(height: 12),
+                const EmployeeLocatorMobileDetailSection(
+                  title: 'Return temporarily unavailable',
+                  icon: Icons.sync_problem_rounded,
+                  children: [
+                    EmployeeLocatorMobileDetailTile(
+                      icon: Icons.info_outline_rounded,
+                      label: 'Official date unavailable',
+                      value:
+                          'Reload the page before returning this request for correction.',
+                    ),
+                  ],
+                ),
+              ],
+              if (typeConfigurationUnavailable) ...[
+                const SizedBox(height: 12),
+                const EmployeeLocatorMobileDetailSection(
+                  title: 'Correction temporarily unavailable',
+                  icon: Icons.sync_problem_rounded,
+                  children: [
+                    EmployeeLocatorMobileDetailTile(
+                      icon: Icons.info_outline_rounded,
+                      label: 'Request types unavailable',
+                      value:
+                          'Reload the page and retry loading locator request types before correcting this request.',
+                    ),
+                  ],
+                ),
+              ],
+              if (canCorrect) ...[
+                const SizedBox(height: 12),
+                EmployeeLocatorMobileDetailSection(
+                  title: 'Correction Requested',
+                  icon: Icons.assignment_return_rounded,
+                  children: [
+                    EmployeeLocatorMobileDetailTile(
+                      icon: Icons.rate_review_outlined,
+                      label: 'Reviewer remarks',
+                      value: (correctionRemarks ?? '').trim().isEmpty
+                          ? 'Please replace or restore the required attachment.'
+                          : correctionRemarks!.trim(),
+                    ),
+                  ],
+                ),
+              ],
+              if (item.status == _LocatorSlipStatus.revoked) ...[
+                const SizedBox(height: 12),
+                EmployeeLocatorMobileDetailSection(
+                  title: 'Approval Revoked',
+                  icon: Icons.undo_rounded,
+                  children: [
+                    EmployeeLocatorMobileDetailTile(
+                      icon: Icons.person_outline_rounded,
+                      label: 'Revoked by',
+                      value: (item.revokedByName ?? '').trim().isEmpty
+                          ? 'HR/Admin'
+                          : item.revokedByName!.trim(),
+                    ),
+                    EmployeeLocatorMobileDetailTile(
+                      icon: Icons.schedule_rounded,
+                      label: 'Revoked at',
+                      value: item.revokedAt == null
+                          ? 'Not recorded'
+                          : _formatDateTime(item.revokedAt!),
+                    ),
+                    EmployeeLocatorMobileDetailTile(
+                      icon: Icons.rate_review_outlined,
+                      label: 'Reason',
+                      value: (item.revocationReason ?? '').trim().isEmpty
+                          ? 'No reason recorded.'
+                          : item.revocationReason!.trim(),
+                    ),
+                    if (item.monthEndReconciliationRequired)
+                      const EmployeeLocatorMobileDetailTile(
+                        icon: Icons.sync_problem_rounded,
+                        label: 'DTR reconciliation',
+                        value:
+                            'HR must rerun month-end processing for this month.',
+                      ),
+                  ],
+                ),
+              ],
             ],
-          ],
-        ),
-        actions: EmployeeLocatorMobileDetailActions(
-          canCancel: !reviewMode && _canCancelSlip(item),
-          canPrint: item.status == _LocatorSlipStatus.approved,
-          canOpenAttachment:
-              item.id?.trim().isNotEmpty == true &&
-              item.attachmentName?.trim().isNotEmpty == true,
-          canReject: canReview,
-          canApprove: canReview,
-          canReturn: canReturnForCorrection,
-          canCorrect: canCorrect,
-          onHistory: () {
-            Navigator.of(dialogContext).pop();
-            _showSlipHistory(context, item);
-          },
-          onCancel: () {
-            Navigator.of(dialogContext).pop();
-            _cancelSlip(item);
-          },
-          onPrint: printForm,
-          onOpenAttachment: () => _openAttachment(item),
-          onReject: () {
-            Navigator.of(dialogContext).pop();
-            _departmentHeadReject(item);
-          },
-          onApprove: () {
-            Navigator.of(dialogContext).pop();
-            _departmentHeadApprove(item);
-          },
-          onReturn: () {
-            Navigator.of(dialogContext).pop();
-            _departmentHeadReturn(item);
-          },
-          onCorrect: () {
-            Navigator.of(dialogContext).pop();
-            _correctAndResubmit(item);
-          },
+          ),
+          actions: EmployeeLocatorMobileDetailActions(
+            canCancel: !reviewMode && _canCancelSlip(item),
+            canPrint: item.status == _LocatorSlipStatus.approved,
+            canOpenAttachment:
+                item.id?.trim().isNotEmpty == true &&
+                item.attachmentName?.trim().isNotEmpty == true,
+            canReject: canReview,
+            canApprove: canReview,
+            canReturn: canReturnForCorrection,
+            canCorrect: canCorrect,
+            onHistory: () {
+              Navigator.of(dialogContext).pop();
+              _showSlipHistory(context, item);
+            },
+            onCancel: () {
+              Navigator.of(dialogContext).pop();
+              _cancelSlip(item);
+            },
+            onPrint: printForm,
+            onOpenAttachment: () => _openAttachment(item),
+            onReject: () {
+              Navigator.of(dialogContext).pop();
+              _departmentHeadReject(item);
+            },
+            onApprove: () {
+              Navigator.of(dialogContext).pop();
+              _departmentHeadApprove(item);
+            },
+            onReturn: () {
+              Navigator.of(dialogContext).pop();
+              _departmentHeadReturn(item);
+            },
+            onCorrect: () {
+              Navigator.of(dialogContext).pop();
+              _correctAndResubmit(item);
+            },
+          ),
         ),
       ),
     );
