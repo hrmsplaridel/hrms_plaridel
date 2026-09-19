@@ -845,7 +845,7 @@ class _EditEmployeeDialogState extends State<_EditEmployeeDialog> {
             decoration: _inputDecoration('Employment Status'),
             items: [
               'active',
-              'inactive',
+              if (_profile.employmentStatus == 'inactive') 'inactive',
               'resigned',
               'retired',
               'terminated',
@@ -920,34 +920,37 @@ class _EditEmployeeDialogState extends State<_EditEmployeeDialog> {
             ),
           ],
           const SizedBox(height: 14),
-          SwitchListTile.adaptive(
-            contentPadding: EdgeInsets.zero,
-            value: _leaveCreditEligible,
-            title: Text(
-              _requiresSeparationDate(_employmentStatus)
-                  ? 'Eligible for VL/SL through separation'
-                  : 'Earn monthly VL/SL credits',
-              style: TextStyle(
-                color: AppTheme.dashTextPrimaryOf(context),
-                fontWeight: FontWeight.w600,
+          Material(
+            type: MaterialType.transparency,
+            child: SwitchListTile.adaptive(
+              contentPadding: EdgeInsets.zero,
+              value: _leaveCreditEligible,
+              title: Text(
+                _requiresSeparationDate(_employmentStatus)
+                    ? 'Eligible for VL/SL through separation'
+                    : 'Earn monthly VL/SL credits',
+                style: TextStyle(
+                  color: AppTheme.dashTextPrimaryOf(context),
+                  fontWeight: FontWeight.w600,
+                ),
               ),
+              subtitle: _requiresSeparationDate(_employmentStatus)
+                  ? const Text(
+                      'Used to calculate the prorated final-month credit.',
+                    )
+                  : (_employmentStatus == 'active'
+                        ? null
+                        : const Text('Available only for active employees')),
+              secondary: Icon(
+                Icons.account_balance_wallet_outlined,
+                color: AppTheme.primaryNavy,
+              ),
+              onChanged:
+                  _employmentStatus == 'active' ||
+                      _requiresSeparationDate(_employmentStatus)
+                  ? (value) => setState(() => _leaveCreditEligible = value)
+                  : null,
             ),
-            subtitle: _requiresSeparationDate(_employmentStatus)
-                ? const Text(
-                    'Used to calculate the prorated final-month credit.',
-                  )
-                : (_employmentStatus == 'active'
-                      ? null
-                      : const Text('Available only for active employees')),
-            secondary: Icon(
-              Icons.account_balance_wallet_outlined,
-              color: AppTheme.primaryNavy,
-            ),
-            onChanged:
-                _employmentStatus == 'active' ||
-                    _requiresSeparationDate(_employmentStatus)
-                ? (value) => setState(() => _leaveCreditEligible = value)
-                : null,
           ),
         ],
       ),
