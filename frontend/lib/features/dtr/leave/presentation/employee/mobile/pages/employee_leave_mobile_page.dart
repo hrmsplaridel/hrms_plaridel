@@ -172,7 +172,7 @@ class _EmployeeLeaveMobilePageState extends State<EmployeeLeaveMobilePage>
         onBalanceHistory: _openBalanceHistory,
       ),
       requestsPanel: EmployeeLeaveRequestsPanel(
-        requests: provider.requests,
+        requests: provider.myRequests,
         loading: provider.myRequestsLoading,
         error: provider.myRequestsError,
         onRetry: _retryRequests,

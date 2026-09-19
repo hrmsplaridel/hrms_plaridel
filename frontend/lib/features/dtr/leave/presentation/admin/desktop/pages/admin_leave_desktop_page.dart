@@ -407,7 +407,9 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
   @override
   Widget build(BuildContext context) {
     final provider = context.watch<LeaveProvider>();
-    final requests = provider.requests;
+    final requests = widget.isDepartmentHead
+        ? provider.departmentHeadRequests
+        : provider.requests;
     final departmentMap = <String, String>{};
     for (final request in requests) {
       final raw = (request.officeDepartment ?? '').trim();

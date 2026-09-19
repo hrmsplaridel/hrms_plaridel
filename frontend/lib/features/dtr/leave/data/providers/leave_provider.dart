@@ -60,6 +60,8 @@ class LeaveProvider extends ChangeNotifier {
   LeaveRepository get repository => _repository;
 
   List<LeaveRequest> _requests = [];
+  List<LeaveRequest> _myRequests = [];
+  List<LeaveRequest> _departmentHeadRequests = [];
   List<LeaveBalance> _balances = [];
   LeaveRequest? _selectedRequest;
   static const Duration _requestCacheTtl = Duration(seconds: 30);
@@ -97,6 +99,9 @@ class LeaveProvider extends ChangeNotifier {
   LeaveType? _filterLeaveType;
 
   List<LeaveRequest> get requests => List.unmodifiable(_requests);
+  List<LeaveRequest> get myRequests => List.unmodifiable(_myRequests);
+  List<LeaveRequest> get departmentHeadRequests =>
+      List.unmodifiable(_departmentHeadRequests);
   List<LeaveBalance> get balances => List.unmodifiable(_balances);
   LeaveRequest? get selectedRequest => _selectedRequest;
 
@@ -122,10 +127,11 @@ class LeaveProvider extends ChangeNotifier {
   LeaveType? get filterLeaveType => _filterLeaveType;
 
   List<LeaveRequest> get pendingRequests =>
-      _requests.where((r) => r.status.isPending).toList();
+      _myRequests.where((r) => r.status.isPending).toList();
 
-  List<LeaveRequest> get approvedRequests =>
-      _requests.where((r) => r.status == LeaveRequestStatus.approved).toList();
+  List<LeaveRequest> get approvedRequests => _myRequests
+      .where((r) => r.status == LeaveRequestStatus.approved)
+      .toList();
 
   List<LeaveRequest> get upcomingApprovedRequests {
     final startOfToday = _officialDate;
@@ -304,6 +310,8 @@ class LeaveProvider extends ChangeNotifier {
     _officialDateLoadGeneration += 1;
     invalidateCachedLeaveData(notify: false);
     _requests = [];
+    _myRequests = [];
+    _departmentHeadRequests = [];
     _balances = [];
     _selectedRequest = null;
     _loading = false;
@@ -447,10 +455,10 @@ class LeaveProvider extends ChangeNotifier {
         forceRefresh: forceRefresh,
       );
       if (!_isCurrentAuthGeneration(authGeneration)) return;
-      _requests = requests;
+      _myRequests = requests;
     } catch (e) {
       if (!_isCurrentAuthGeneration(authGeneration)) return;
-      _requests = [];
+      _myRequests = [];
       _error = e.toString();
     } finally {
       if (_isCurrentAuthGeneration(authGeneration)) {
@@ -629,7 +637,7 @@ class LeaveProvider extends ChangeNotifier {
         shouldAcceptResult: isCurrentLoad,
       );
       if (!isCurrentLoad()) return;
-      _requests = List<LeaveRequest>.from(page.items);
+      _myRequests = List<LeaveRequest>.from(page.items);
       _myRequestsTotal = page.total;
       _myRequestsNextOffset = page.offset + page.items.length;
       _myRequestsHasMore = page.hasMore;
@@ -668,7 +676,7 @@ class LeaveProvider extends ChangeNotifier {
       );
       if (!isCurrentLoad()) return;
 
-      final merged = List<LeaveRequest>.from(_requests);
+      final merged = List<LeaveRequest>.from(_myRequests);
       final indexesById = <String, int>{
         for (var index = 0; index < merged.length; index++)
           if ((merged[index].id ?? '').isNotEmpty) merged[index].id!: index,
@@ -683,7 +691,7 @@ class LeaveProvider extends ChangeNotifier {
           merged[existingIndex] = request;
         }
       }
-      _requests = merged;
+      _myRequests = merged;
       _myRequestsTotal = page.total;
       _myRequestsNextOffset = page.offset + page.items.length;
       _myRequestsHasMore = page.hasMore;
@@ -796,7 +804,7 @@ class LeaveProvider extends ChangeNotifier {
       if (!_isCurrentAuthGeneration(authGeneration)) return null;
       invalidateCachedLeaveData();
       _selectedRequest = saved;
-      _upsertRequest(saved);
+      _upsertRequest(saved, addToMyRequests: true);
       return saved;
     } catch (e) {
       if (!_isCurrentAuthGeneration(authGeneration)) return null;
@@ -819,7 +827,7 @@ class LeaveProvider extends ChangeNotifier {
       final saved = await _repository.submitRequest(request);
       if (!_isCurrentAuthGeneration(authGeneration)) return null;
       _selectedRequest = saved;
-      _upsertRequest(saved);
+      _upsertRequest(saved, addToMyRequests: true);
       _notifyMutation();
       return saved;
     } catch (e) {
@@ -855,7 +863,7 @@ class LeaveProvider extends ChangeNotifier {
       );
       if (!_isCurrentAuthGeneration(authGeneration)) return null;
       _selectedRequest = saved;
-      _upsertRequest(saved);
+      _upsertRequest(saved, addToMyRequests: true);
       _notifyMutation();
       return saved;
     } catch (e) {
@@ -883,7 +891,7 @@ class LeaveProvider extends ChangeNotifier {
       final saved = await _repository.updateRequest(request);
       if (!_isCurrentAuthGeneration(authGeneration)) return null;
       _selectedRequest = saved;
-      _upsertRequest(saved);
+      _upsertRequest(saved, addToMyRequests: true);
       _notifyMutation();
       return saved;
     } catch (e) {
@@ -915,7 +923,7 @@ class LeaveProvider extends ChangeNotifier {
       );
       if (!_isCurrentAuthGeneration(authGeneration)) return null;
       _selectedRequest = updated;
-      _upsertRequest(updated);
+      _upsertRequest(updated, addToMyRequests: true);
       _notifyMutation();
       return updated;
     } catch (e) {
@@ -946,7 +954,7 @@ class LeaveProvider extends ChangeNotifier {
         reviewerTitle: updated.reviewerTitle ?? input.reviewerTitle,
       );
       _selectedRequest = merged;
-      _upsertRequest(merged);
+      _upsertRequest(merged, addToAdminRequests: true);
       _notifyMutation();
       return merged;
     } catch (e) {
@@ -978,7 +986,7 @@ class LeaveProvider extends ChangeNotifier {
         reviewerTitle: updated.reviewerTitle ?? input.reviewerTitle,
       );
       _selectedRequest = merged;
-      _upsertRequest(merged);
+      _upsertRequest(merged, addToAdminRequests: true);
       _notifyMutation();
       return merged;
     } catch (e) {
@@ -1009,7 +1017,7 @@ class LeaveProvider extends ChangeNotifier {
         reviewerTitle: updated.reviewerTitle ?? input.reviewerTitle,
       );
       _selectedRequest = merged;
-      _upsertRequest(merged);
+      _upsertRequest(merged, addToAdminRequests: true);
       _notifyMutation();
       return merged;
     } catch (e) {
@@ -1038,7 +1046,7 @@ class LeaveProvider extends ChangeNotifier {
         reviewerTitle: updated.reviewerTitle ?? input.reviewerTitle,
       );
       _selectedRequest = merged;
-      _upsertRequest(merged);
+      _upsertRequest(merged, addToAdminRequests: true);
       _notifyMutation();
       return merged;
     } catch (e) {
@@ -1259,13 +1267,24 @@ class LeaveProvider extends ChangeNotifier {
     }
   }
 
-  void _upsertRequest(LeaveRequest request) {
-    final index = _requests.indexWhere((r) => r.id == request.id);
-    if (index >= 0) {
-      _requests[index] = request;
-    } else {
-      _requests = [request, ..._requests];
+  void _upsertRequest(
+    LeaveRequest request, {
+    bool addToMyRequests = false,
+    bool addToAdminRequests = false,
+    bool addToDepartmentHeadRequests = false,
+  }) {
+    void updateList(List<LeaveRequest> list, bool insert) {
+      final index = list.indexWhere((r) => r.id == request.id);
+      if (index >= 0) {
+        list[index] = request;
+      } else if (insert) {
+        list.insert(0, request);
+      }
     }
+
+    updateList(_myRequests, addToMyRequests);
+    updateList(_requests, addToAdminRequests);
+    updateList(_departmentHeadRequests, addToDepartmentHeadRequests);
   }
 
   // ---- Department Head workflow ----
@@ -1325,14 +1344,14 @@ class LeaveProvider extends ChangeNotifier {
           ? null
           : _readListCache(_requestCache, key, _requestCacheTtl);
       if (cached != null) {
-        _requests = cached;
+        _departmentHeadRequests = cached;
       } else {
         final fresh = await _repository.listDepartmentHeadRequests(
           query: query,
         );
         if (!_isCurrentAuthGeneration(authGeneration)) return;
         _writeListCache(_requestCache, key, fresh);
-        _requests = List<LeaveRequest>.from(fresh);
+        _departmentHeadRequests = List<LeaveRequest>.from(fresh);
       }
     } catch (e) {
       if (!_isCurrentAuthGeneration(authGeneration)) return;
@@ -1357,7 +1376,7 @@ class LeaveProvider extends ChangeNotifier {
       final updated = await _repository.departmentHeadApprove(input);
       if (!_isCurrentAuthGeneration(authGeneration)) return null;
       _selectedRequest = updated;
-      _upsertRequest(updated);
+      _upsertRequest(updated, addToDepartmentHeadRequests: true);
       _notifyMutation();
       return updated;
     } catch (e) {
@@ -1385,7 +1404,7 @@ class LeaveProvider extends ChangeNotifier {
       final updated = await _repository.departmentHeadReject(input);
       if (!_isCurrentAuthGeneration(authGeneration)) return null;
       _selectedRequest = updated;
-      _upsertRequest(updated);
+      _upsertRequest(updated, addToDepartmentHeadRequests: true);
       _notifyMutation();
       return updated;
     } catch (e) {
@@ -1413,7 +1432,7 @@ class LeaveProvider extends ChangeNotifier {
       final updated = await _repository.departmentHeadReturn(input);
       if (!_isCurrentAuthGeneration(authGeneration)) return null;
       _selectedRequest = updated;
-      _upsertRequest(updated);
+      _upsertRequest(updated, addToDepartmentHeadRequests: true);
       _notifyMutation();
       return updated;
     } catch (e) {

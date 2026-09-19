@@ -301,7 +301,7 @@ class _EmployeeLeaveScreenState extends State<EmployeeLeaveScreen>
               ),
               const SizedBox(height: 16),
               EmployeeLeaveRequestsPanel(
-                requests: provider.requests,
+                requests: provider.myRequests,
                 loading: provider.myRequestsLoading,
                 error: provider.myRequestsError,
                 onRetry: _retryRequests,
@@ -359,7 +359,7 @@ class _EmployeeLeaveScreenState extends State<EmployeeLeaveScreen>
         },
       ),
       requestsPanel: EmployeeLeaveRequestsPanel(
-        requests: provider.requests,
+        requests: provider.myRequests,
         loading: provider.myRequestsLoading,
         error: provider.myRequestsError,
         onRetry: _retryRequests,

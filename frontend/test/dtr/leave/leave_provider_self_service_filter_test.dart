@@ -20,7 +20,7 @@ void main() {
 
     expect(repository.receivedStatus, isNull);
     expect(
-      provider.requests.map((request) => request.status),
+      provider.myRequests.map((request) => request.status),
       containsAll([LeaveRequestStatus.pending, LeaveRequestStatus.approved]),
     );
   });

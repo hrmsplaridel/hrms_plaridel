@@ -2062,9 +2062,13 @@ class _EmployeeUpcomingLeaveCard extends StatelessWidget {
       builder: (context, provider, _) {
         final upcoming = provider.upcomingApprovedRequests;
         final showLoading =
-            provider.loading && provider.requests.isEmpty && upcoming.isEmpty;
+            provider.myRequestsLoading &&
+            provider.myRequests.isEmpty &&
+            upcoming.isEmpty;
         final showError =
-            provider.error != null && provider.requests.isEmpty && !showLoading;
+            provider.myRequestsError != null &&
+            provider.myRequests.isEmpty &&
+            !showLoading;
 
         Widget leaveBody() {
           if (showLoading) {

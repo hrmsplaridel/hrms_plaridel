@@ -79,9 +79,12 @@ class AdminLeaveDetailsSideSheet extends StatelessWidget {
                 var req = initial;
                 final id = initial.id;
                 if (id != null && id.isNotEmpty) {
-                  final hit = provider.requests
-                      .where((r) => r.id == id)
-                      .toList();
+                  final hit =
+                      (isDepartmentHead
+                              ? provider.departmentHeadRequests
+                              : provider.requests)
+                          .where((r) => r.id == id)
+                          .toList();
                   if (hit.isNotEmpty) req = hit.first;
                 }
                 final canReview = isDepartmentHead
