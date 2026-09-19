@@ -754,12 +754,30 @@ router.get('/department-head/check', protect, async (req, res) => {
        LIMIT 1`,
       [userId]
     );
+    const reviewed = await client.query(
+      `SELECT ls.department_id, d.name AS department_name
+       FROM locator_slips ls
+       LEFT JOIN departments d ON d.id = ls.department_id
+       WHERE ls.dept_head_reviewer_id = $1::uuid
+       ORDER BY COALESCE(ls.dept_head_reviewed_at, ls.updated_at) DESC
+       LIMIT 1`,
+      [userId]
+    );
     const assignedDepartmentId = assigned.rows[0]?.department_id || null;
     const assignedDepartmentName = assigned.rows[0]?.department_name || null;
+    const reviewedDepartmentId = reviewed.rows[0]?.department_id || null;
+    const reviewedDepartmentName = reviewed.rows[0]?.department_name || null;
+    const canReviewPending = current.isDeptHead || assigned.rows.length > 0;
+    const hasReviewHistory = reviewed.rows.length > 0;
     res.json({
-      isDeptHead: current.isDeptHead || Boolean(assignedDepartmentId),
-      departmentId: current.departmentId || assignedDepartmentId,
-      departmentName: current.departmentName || assignedDepartmentName,
+      // Keep the legacy field while clients migrate to the explicit capabilities.
+      isDeptHead: canReviewPending || hasReviewHistory,
+      canReviewPending,
+      hasReviewHistory,
+      departmentId:
+        current.departmentId || assignedDepartmentId || reviewedDepartmentId,
+      departmentName:
+        current.departmentName || assignedDepartmentName || reviewedDepartmentName,
     });
   } catch (err) {
     console.error('[locator GET /department-head/check]', err);

@@ -82,6 +82,7 @@ class EmployeeLocatorSlipContentState
   bool _locatorTypesLoaded = false;
   String? _locatorTypesError;
   Future<bool>? _isDeptHeadFuture;
+  LocatorReviewerAccess _reviewerAccess = const LocatorReviewerAccess.none();
   _LocatorSection _currentSection = _LocatorSection.requests;
   bool _appliedDeptHeadDefaultSection = false;
   bool _loadingMy = false;
@@ -249,6 +250,7 @@ class EmployeeLocatorSlipContentState
     _approvalFilterDebounce?.cancel();
     _selectedSlipId = null;
     _selectedApprovalSlipId = null;
+    _reviewerAccess = const LocatorReviewerAccess.none();
 
     final generation = _authGeneration;
     _isDeptHeadFuture = userId == null
@@ -564,7 +566,11 @@ class EmployeeLocatorSlipContentState
 
   void _openApprovalDetails(_LocatorSlipDraft item) {
     setState(() => _selectedApprovalSlipId = _slipSelectionKey(item));
-    _showSlipDetails(context, item, reviewMode: true);
+    _showSlipDetails(
+      context,
+      item,
+      reviewMode: _reviewerAccess.canReviewPending,
+    );
   }
 
   String _slipSelectionKey(_LocatorSlipDraft item) {
@@ -1975,13 +1981,14 @@ class EmployeeLocatorSlipContentState
     required int authGeneration,
   }) async {
     try {
-      final isDeptHead = await LocatorSlipDataCache.instance
-          .checkIsDepartmentHead(userId: userId, role: role);
+      final access = await LocatorSlipDataCache.instance
+          .checkDepartmentHeadAccess(userId: userId, role: role);
       if (!_isCurrentAuthSession(userId, authGeneration)) return false;
-      if (isDeptHead) {
+      _reviewerAccess = access;
+      if (access.canAccessReviewSection) {
         unawaited(_loadDepartmentHeadRequests());
       }
-      return isDeptHead;
+      return access.canAccessReviewSection;
     } catch (_) {
       return false;
     }
