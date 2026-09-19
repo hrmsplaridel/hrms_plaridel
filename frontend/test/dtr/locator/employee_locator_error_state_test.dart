@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 
@@ -194,6 +195,76 @@ void main() {
       await _pumpUntil(tester, () => adapter.myRequestCount > previousCount);
     },
   );
+
+  testWidgets('history failure is explicit and retry loads persisted events', (
+    tester,
+  ) async {
+    final adapter = _LocatorHistoryAdapter();
+    ApiClient.instance.dio.httpClientAdapter = adapter;
+    final realtime = _FakeRealtimeProvider();
+    final auth = AuthProvider()
+      ..replaceUser(
+        const AppUser(
+          id: 'employee-1',
+          email: 'employee@example.com',
+          role: 'employee',
+          fullName: 'Employee One',
+        ),
+      );
+    addTearDown(realtime.dispose);
+    addTearDown(auth.dispose);
+
+    await tester.binding.setSurfaceSize(const Size(1400, 1000));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    await tester.pumpWidget(
+      MultiProvider(
+        providers: [
+          ChangeNotifierProvider<AuthProvider>.value(value: auth),
+          ChangeNotifierProvider<AppRealtimeProvider>.value(value: realtime),
+        ],
+        child: const MaterialApp(
+          home: Scaffold(
+            body: SingleChildScrollView(child: EmployeeLocatorSlipContent()),
+          ),
+        ),
+      ),
+    );
+
+    await _pumpUntil(
+      tester,
+      () => find.text('City Hall').evaluate().isNotEmpty,
+    );
+    await tester.tap(find.text('City Hall').first);
+    await _pumpUntil(tester, () => find.text('History').evaluate().isNotEmpty);
+    await tester.pumpAndSettle();
+    final historyButton = find.text('History');
+    await tester.ensureVisible(historyButton);
+    await tester.pump();
+    await tester.tap(historyButton);
+    await _pumpUntil(
+      tester,
+      () => find
+          .text('Loading official workflow history...')
+          .evaluate()
+          .isNotEmpty,
+    );
+
+    adapter.releaseFirstHistoryRequest();
+    await _pumpUntil(
+      tester,
+      () => find.text('History unavailable').evaluate().isNotEmpty,
+    );
+    expect(find.text('Approved by HR'), findsNothing);
+
+    await tester.tap(find.text('Retry'));
+    await _pumpUntil(
+      tester,
+      () => find.text('Returned for correction').evaluate().isNotEmpty,
+    );
+    expect(adapter.historyRequestCount, 2);
+    expect(find.text('Approved by HR'), findsNothing);
+  });
 }
 
 Future<void> _pumpUntil(
@@ -314,6 +385,87 @@ class _FakeRealtimeProvider extends AppRealtimeProvider {
     _connected = value;
     notifyListeners();
   }
+}
+
+class _LocatorHistoryAdapter implements HttpClientAdapter {
+  final Completer<void> _firstHistoryRequest = Completer<void>();
+  int historyRequestCount = 0;
+
+  void releaseFirstHistoryRequest() {
+    if (!_firstHistoryRequest.isCompleted) {
+      _firstHistoryRequest.complete();
+    }
+  }
+
+  @override
+  Future<ResponseBody> fetch(
+    RequestOptions options,
+    Stream<Uint8List>? requestStream,
+    Future<void>? cancelFuture,
+  ) async {
+    switch (options.uri.path) {
+      case '/api/locator-slips/types':
+        return _jsonResponse([
+          {
+            'code': 'locator',
+            'label': 'Locator / Official Business',
+            'is_active': true,
+          },
+        ]);
+      case '/api/locator-slips/context':
+        return _jsonResponse({'official_date': '2026-09-19'});
+      case '/api/locator-slips/department-head/check':
+        return _jsonResponse({'isDeptHead': false});
+      case '/api/locator-slips/my':
+        return _jsonResponse({
+          'items': [
+            {
+              'id': 'request-1',
+              'slip_date': '2026-09-18',
+              'employee_name': 'Employee One',
+              'request_type': 'locator',
+              'request_type_label': 'Locator / Official Business',
+              'request_type_short_label': 'Locator',
+              'office': 'City Hall',
+              'reason': 'Official transaction',
+              'status': 'approved',
+              'am_in': true,
+              'am_out': true,
+              'pm_in': false,
+              'pm_out': false,
+            },
+          ],
+          'pagination': {
+            'page': 1,
+            'page_size': 50,
+            'total': 1,
+            'page_count': 1,
+          },
+        });
+      case '/api/locator-slips/request-1/history':
+        historyRequestCount += 1;
+        if (historyRequestCount == 1) {
+          await _firstHistoryRequest.future;
+          return _jsonResponse({
+            'message': 'History service unavailable',
+          }, statusCode: 503);
+        }
+        return _jsonResponse([
+          {
+            'action': 'returned_for_correction',
+            'title': 'Returned for correction',
+            'actor_name': 'Department Head',
+            'remarks': 'Correct the destination.',
+            'created_at': '2026-09-18T08:30:00.000Z',
+          },
+        ]);
+      default:
+        throw StateError('Unexpected request: ${options.uri}');
+    }
+  }
+
+  @override
+  void close({bool force = false}) {}
 }
 
 ResponseBody _emptyPage() => _jsonResponse({

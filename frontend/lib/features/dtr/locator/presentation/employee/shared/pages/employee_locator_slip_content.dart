@@ -916,141 +916,106 @@ class EmployeeLocatorSlipContentState extends State<EmployeeLocatorSlipContent>
     final userId = _authenticatedUserId;
     if (userId == null) return;
     final authGeneration = _authGeneration;
-    final rawStatus = item.rawStatus;
-    final history = <_LocatorWorkflowStep>[
-      (
-        title: item.status == _LocatorSlipStatus.draft ? 'Draft' : 'Submitted',
-        actor: item.employeeName,
-        date: item.createdAt ?? item.date,
-        remarks: null,
-        completed: true,
-      ),
-      if (item.status == _LocatorSlipStatus.pendingDepartmentHead)
-        (
-          title: 'Pending Department Head',
-          actor: item.departmentHeadName,
-          date: null,
-          remarks: null,
-          completed: false,
-        ),
-      if (item.departmentHeadReviewedAt != null ||
-          rawStatus == 'pending_hr' ||
-          rawStatus == 'approved' ||
-          rawStatus == 'revoked' ||
-          rawStatus == 'rejected_by_hr' ||
-          rawStatus == 'returned_for_correction' ||
-          rawStatus == 'rejected_by_department_head')
-        (
-          title: rawStatus == 'rejected_by_department_head'
-              ? 'Rejected by Department Head'
-              : rawStatus == 'returned_for_correction' &&
-                    item.hrReviewedAt == null
-              ? 'Returned by Department Head'
-              : 'Reviewed by Department Head',
-          actor: item.departmentHeadName,
-          date: item.departmentHeadReviewedAt,
-          remarks: item.departmentHeadRemarks,
-          completed: true,
-        ),
-      if (item.status == _LocatorSlipStatus.pendingHr)
-        (
-          title: 'Pending HR Admin',
-          actor: item.hrReviewerName,
-          date: null,
-          remarks: null,
-          completed: false,
-        ),
-      if (rawStatus == 'approved' || rawStatus == 'revoked')
-        (
-          title: 'Approved by HR',
-          actor: item.hrReviewerName,
-          date: item.hrReviewedAt,
-          remarks: item.hrRemarks,
-          completed: true,
-        ),
-      if (rawStatus == 'revoked')
-        (
-          title: 'Approval Revoked',
-          actor: item.revokedByName,
-          date: item.revokedAt,
-          remarks: item.revocationReason,
-          completed: true,
-        ),
-      if (rawStatus == 'rejected_by_hr')
-        (
-          title: 'Rejected by HR',
-          actor: item.hrReviewerName,
-          date: item.hrReviewedAt,
-          remarks: item.hrRemarks,
-          completed: true,
-        ),
-      if (rawStatus == 'returned_for_correction' && item.hrReviewedAt != null)
-        (
-          title: 'Returned by HR',
-          actor: item.hrReviewerName,
-          date: item.hrReviewedAt,
-          remarks: item.hrRemarks,
-          completed: true,
-        ),
-      if (rawStatus == 'cancelled')
-        (
-          title: 'Cancelled',
-          actor: null,
-          date: item.updatedAt,
-          remarks: null,
-          completed: true,
-        ),
-    ];
+    final history = <_LocatorWorkflowStep>[];
 
     final slipId = item.id?.trim();
-    if (slipId != null && slipId.isNotEmpty) {
-      try {
-        final response = await ApiClient.instance.get<List<dynamic>>(
-          '/api/locator-slips/$slipId/history',
-        );
-        final events = (response.data ?? const <dynamic>[])
-            .whereType<Map>()
-            .map(
-              (json) => LocatorWorkflowEvent.fromJson(
-                Map<String, dynamic>.from(json),
-              ),
-            )
-            .toList();
-        if (events.isNotEmpty) {
-          history
-            ..clear()
-            ..addAll(
-              events.map(
-                (event) => (
-                  title: event.title,
-                  actor: event.actorName,
-                  date: event.createdAt,
-                  remarks: event.remarks,
-                  completed: true,
+    if (slipId == null || slipId.isEmpty) {
+      _showLocatorSnack('Official workflow history is not available yet.');
+      return;
+    }
+    unawaited(
+      showDialog<void>(
+        context: context,
+        barrierDismissible: false,
+        builder: (loadingContext) => PopScope(
+          canPop: false,
+          child: AlertDialog(
+            content: Row(
+              children: [
+                const SizedBox.square(
+                  dimension: 22,
+                  child: CircularProgressIndicator(strokeWidth: 2),
                 ),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Text(
+                    'Loading official workflow history...',
+                    style: TextStyle(
+                      color: AppTheme.dashTextPrimaryOf(loadingContext),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+    try {
+      final response = await ApiClient.instance.get<List<dynamic>>(
+        '/api/locator-slips/$slipId/history',
+      );
+      final events = (response.data ?? const <dynamic>[])
+          .whereType<Map>()
+          .map(
+            (json) =>
+                LocatorWorkflowEvent.fromJson(Map<String, dynamic>.from(json)),
+          )
+          .toList();
+      if (events.isNotEmpty) {
+        history
+          ..clear()
+          ..addAll(
+            events.map(
+              (event) => (
+                title: event.title,
+                actor: event.actorName,
+                date: event.createdAt,
+                remarks: event.remarks,
+                completed: true,
               ),
-            );
-          if (item.status == _LocatorSlipStatus.pendingDepartmentHead) {
-            history.add((
-              title: 'Pending Department Head',
-              actor: item.departmentHeadName,
-              date: null,
-              remarks: null,
-              completed: false,
-            ));
-          } else if (item.status == _LocatorSlipStatus.pendingHr) {
-            history.add((
-              title: 'Pending HR Admin',
-              actor: item.hrReviewerName,
-              date: null,
-              remarks: null,
-              completed: false,
-            ));
-          }
-        }
-      } catch (_) {
-        // Legacy reconstruction remains available if history cannot be loaded.
+            ),
+          );
       }
+    } catch (error) {
+      if (context.mounted) {
+        Navigator.of(context, rootNavigator: true).pop();
+      }
+      if (!context.mounted || !_isCurrentAuthSession(userId, authGeneration)) {
+        return;
+      }
+      final retry = await showDialog<bool>(
+        context: context,
+        builder: (errorContext) => AlertDialog(
+          title: const Text('History unavailable'),
+          content: Text(
+            _apiErrorMessage(
+              error,
+              fallback: 'Could not load the official workflow history.',
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(errorContext).pop(false),
+              child: const Text('Close'),
+            ),
+            FilledButton.icon(
+              onPressed: () => Navigator.of(errorContext).pop(true),
+              icon: const Icon(Icons.refresh_rounded, size: 18),
+              label: const Text('Retry'),
+            ),
+          ],
+        ),
+      );
+      if (retry == true &&
+          context.mounted &&
+          _isCurrentAuthSession(userId, authGeneration)) {
+        await _showSlipHistory(context, item);
+      }
+      return;
+    }
+    if (context.mounted) {
+      Navigator.of(context, rootNavigator: true).pop();
     }
     if (!context.mounted || !_isCurrentAuthSession(userId, authGeneration)) {
       return;
@@ -1096,104 +1061,130 @@ class EmployeeLocatorSlipContentState extends State<EmployeeLocatorSlipContent>
                 child: SingleChildScrollView(
                   padding: const EdgeInsets.fromLTRB(20, 18, 20, 14),
                   child: Column(
-                    children: List.generate(history.length, (index) {
-                      final step = history[index];
-                      final isFirst = index == 0;
-                      final isLast = index == history.length - 1;
-                      final actor = step.actor?.trim();
-                      String subtitle = step.date == null
-                          ? 'Awaiting action'
-                          : _formatDateTime(step.date!);
-                      if (actor != null && actor.isNotEmpty) {
-                        subtitle = '$subtitle by $actor';
-                      } else if (step.title.contains('Department Head') &&
-                          step.title != 'Pending Department Head') {
-                        subtitle = '$subtitle by Department Head';
-                      } else if (step.title.contains('HR')) {
-                        subtitle = '$subtitle by HR Admin';
-                      }
-                      return Padding(
-                        padding: EdgeInsets.only(bottom: isLast ? 0 : 2),
-                        child: Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            SizedBox(
-                              width: 44,
-                              height: 96,
-                              child: Stack(
+                    children: history.isEmpty
+                        ? [
+                            Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 28),
+                              child: Text(
+                                'No official workflow events were recorded for this request.',
+                                textAlign: TextAlign.center,
+                                style: TextStyle(
+                                  color: _mutedColor(dialogContext),
+                                  fontSize: 14,
+                                ),
+                              ),
+                            ),
+                          ]
+                        : List.generate(history.length, (index) {
+                            final step = history[index];
+                            final isFirst = index == 0;
+                            final isLast = index == history.length - 1;
+                            final actor = step.actor?.trim();
+                            String subtitle = step.date == null
+                                ? 'Awaiting action'
+                                : _formatDateTime(step.date!);
+                            if (actor != null && actor.isNotEmpty) {
+                              subtitle = '$subtitle by $actor';
+                            } else if (step.title.contains('Department Head') &&
+                                step.title != 'Pending Department Head') {
+                              subtitle = '$subtitle by Department Head';
+                            } else if (step.title.contains('HR')) {
+                              subtitle = '$subtitle by HR Admin';
+                            }
+                            return Padding(
+                              padding: EdgeInsets.only(bottom: isLast ? 0 : 2),
+                              child: Row(
+                                crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  Positioned(
-                                    left: 20,
-                                    top: isFirst ? 14 : 0,
-                                    bottom: isLast ? 82 : 0,
-                                    child: Container(width: 4, color: accent),
+                                  SizedBox(
+                                    width: 44,
+                                    height: 96,
+                                    child: Stack(
+                                      children: [
+                                        Positioned(
+                                          left: 20,
+                                          top: isFirst ? 14 : 0,
+                                          bottom: isLast ? 82 : 0,
+                                          child: Container(
+                                            width: 4,
+                                            color: accent,
+                                          ),
+                                        ),
+                                        Positioned(
+                                          left: 8,
+                                          top: 0,
+                                          child: Container(
+                                            width: 28,
+                                            height: 28,
+                                            decoration: BoxDecoration(
+                                              color: accent,
+                                              shape: BoxShape.circle,
+                                            ),
+                                            child: Icon(
+                                              step.completed
+                                                  ? Icons.check_rounded
+                                                  : Icons.hourglass_top_rounded,
+                                              size: 18,
+                                              color: Colors.white,
+                                            ),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
                                   ),
-                                  Positioned(
-                                    left: 8,
-                                    top: 0,
-                                    child: Container(
-                                      width: 28,
-                                      height: 28,
-                                      decoration: BoxDecoration(
-                                        color: accent,
-                                        shape: BoxShape.circle,
-                                      ),
-                                      child: Icon(
-                                        step.completed
-                                            ? Icons.check_rounded
-                                            : Icons.hourglass_top_rounded,
-                                        size: 18,
-                                        color: Colors.white,
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                    child: Padding(
+                                      padding: const EdgeInsets.only(top: 2),
+                                      child: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          Text(
+                                            step.title,
+                                            style: TextStyle(
+                                              color: _headingColor(
+                                                dialogContext,
+                                              ),
+                                              fontSize: 18,
+                                              fontWeight: FontWeight.w700,
+                                            ),
+                                          ),
+                                          const SizedBox(height: 4),
+                                          Text(
+                                            subtitle,
+                                            style: TextStyle(
+                                              color: _mutedColor(dialogContext),
+                                              fontSize: 14,
+                                              fontWeight: FontWeight.w600,
+                                            ),
+                                          ),
+                                          if ((step.remarks ?? '')
+                                              .trim()
+                                              .isNotEmpty)
+                                            Padding(
+                                              padding: const EdgeInsets.only(
+                                                top: 4,
+                                              ),
+                                              child: Text(
+                                                step.remarks!.trim(),
+                                                style: TextStyle(
+                                                  color: _mutedColor(
+                                                    dialogContext,
+                                                  ),
+                                                  fontSize: 13,
+                                                  height: 1.35,
+                                                ),
+                                              ),
+                                            ),
+                                        ],
                                       ),
                                     ),
                                   ),
                                 ],
                               ),
-                            ),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: Padding(
-                                padding: const EdgeInsets.only(top: 2),
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(
-                                      step.title,
-                                      style: TextStyle(
-                                        color: _headingColor(dialogContext),
-                                        fontSize: 18,
-                                        fontWeight: FontWeight.w700,
-                                      ),
-                                    ),
-                                    const SizedBox(height: 4),
-                                    Text(
-                                      subtitle,
-                                      style: TextStyle(
-                                        color: _mutedColor(dialogContext),
-                                        fontSize: 14,
-                                        fontWeight: FontWeight.w600,
-                                      ),
-                                    ),
-                                    if ((step.remarks ?? '').trim().isNotEmpty)
-                                      Padding(
-                                        padding: const EdgeInsets.only(top: 4),
-                                        child: Text(
-                                          step.remarks!.trim(),
-                                          style: TextStyle(
-                                            color: _mutedColor(dialogContext),
-                                            fontSize: 13,
-                                            height: 1.35,
-                                          ),
-                                        ),
-                                      ),
-                                  ],
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      );
-                    }),
+                            );
+                          }),
                   ),
                 ),
               ),
