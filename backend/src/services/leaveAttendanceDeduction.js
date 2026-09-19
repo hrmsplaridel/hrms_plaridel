@@ -219,14 +219,14 @@ async function loadEmployees(client, startStr, endStr) {
     `SELECT DISTINCT u.id AS user_id, u.full_name
      FROM users u
      JOIN assignments a ON a.employee_id = u.id
-     WHERE COALESCE(u.leave_credit_eligible, true) = true
+     WHERE (
+       COALESCE(u.leave_credit_eligible, true) = true
+       OR u.leave_credit_eligible_until >= $1::date
+     )
        AND (u.date_hired IS NULL OR u.date_hired <= $2::date)
        AND (u.separation_date IS NULL OR u.separation_date >= $1::date)
        AND (
-         (
-           (u.is_active IS NULL OR u.is_active = true)
-           AND COALESCE(u.employment_status, 'active') = 'active'
-         )
+         COALESCE(u.employment_status, 'active') = 'active'
          OR u.separation_date >= $1::date
        )
        AND a.effective_from <= $2::date

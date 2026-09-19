@@ -108,6 +108,101 @@ test('direct employee deactivation revokes sessions and audits on one client', a
   }
 });
 
+test('ending employment closes dated assignments and disables login atomically', async () => {
+  const actorId = '11111111-1111-4111-8111-111111111111';
+  const employeeId = '22222222-2222-4222-8222-222222222222';
+  const calls = [];
+  const client = {
+    async query(sql, params) {
+      const normalized = String(sql).replace(/\s+/g, ' ').trim();
+      calls.push({ sql: normalized, params });
+      if (['BEGIN', 'COMMIT'].includes(normalized) ||
+          normalized.startsWith('SELECT pg_advisory_xact_lock')) {
+        return { rowCount: 0, rows: [] };
+      }
+      if (normalized.includes('FROM users') && normalized.includes('FOR UPDATE')) {
+        return { rowCount: 1, rows: [{
+          id: employeeId, role: 'employee', is_active: true,
+          employment_status: 'active', full_name: 'Employee User',
+        }] };
+      }
+      if (normalized.startsWith('UPDATE users SET')) {
+        return { rowCount: 1, rows: [{
+          id: employeeId, is_active: false, employment_status: 'resigned',
+          separation_date: '2026-07-27',
+        }] };
+      }
+      if (normalized.startsWith('UPDATE assignments') ||
+          normalized.startsWith('UPDATE policy_assignments') ||
+          normalized.startsWith('UPDATE auth_refresh_tokens') ||
+          normalized.startsWith('INSERT INTO audit_logs')) {
+        return { rowCount: 1, rows: [] };
+      }
+      throw new Error(`Unexpected SQL: ${normalized}`);
+    },
+    release() {},
+  };
+  const pool = {
+    connect: async () => client,
+    query: async (sql) => {
+      if (String(sql).includes('SELECT biometric_user_id')) {
+        return { rowCount: 1, rows: [{
+          biometric_user_id: null,
+          employment_status: 'active',
+          date_hired: new Date('2025-01-01T00:00:00Z'),
+          separation_date: null,
+          leave_credit_eligible: true,
+          leave_credit_eligible_until: null,
+        }] };
+      }
+      throw new Error(`Unexpected pool query: ${sql}`);
+    },
+  };
+  const restoreDb = withMockedModule('../src/config/db', { pool });
+  const restoreAuth = withMockedModule('../src/middleware/auth', {
+    authMiddleware: (_req, _res, next) => next(),
+  });
+  const restoreRbac = withMockedModule('../src/middleware/rbac', {
+    requireAdmin: (_req, _res, next) => next(),
+  });
+  clearModule('../src/routes/employees');
+  try {
+    const router = require('../src/routes/employees');
+    const layer = router.stack.find(
+      (entry) => entry.route?.path === '/:id' && entry.route.methods.put
+    );
+    const handler = layer.route.stack[layer.route.stack.length - 1].handle;
+    const res = responseRecorder();
+    await handler({
+      params: { id: employeeId },
+      user: { id: actorId, role: 'admin' },
+      body: { employment_status: 'resigned', separation_date: '2026-07-27' },
+    }, res);
+
+    assert.equal(res.statusCode, 200);
+    assert.equal(res.body.is_active, false);
+    assert.equal(res.body.employment_status, 'resigned');
+    assert.ok(calls.some((call) =>
+      call.sql.startsWith('UPDATE assignments') &&
+      call.sql.includes('effective_to = $2::date')
+    ));
+    assert.ok(calls.some((call) =>
+      call.sql.startsWith('UPDATE policy_assignments') &&
+      call.sql.includes('effective_to = $2::date')
+    ));
+    assert.ok(calls.some((call) =>
+      call.sql.startsWith('UPDATE auth_refresh_tokens')
+    ));
+    assert.equal(calls[0].sql, 'BEGIN');
+    assert.equal(calls.at(-1).sql, 'COMMIT');
+  } finally {
+    clearModule('../src/routes/employees');
+    restoreRbac();
+    restoreAuth();
+    restoreDb();
+  }
+});
+
 test('bulk account status returns partial per-employee results', async () => {
   const actorId = '11111111-1111-4111-8111-111111111111';
   const activeEmployeeId = '33333333-3333-4333-8333-333333333333';
