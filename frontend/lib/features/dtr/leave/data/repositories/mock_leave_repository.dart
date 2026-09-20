@@ -149,6 +149,9 @@ class MockLeaveRepository implements LeaveRepository {
   }) async {
     var results = _requests.where((r) {
       if (query.userId != null && r.userId != query.userId) return false;
+      if (query.department != null && r.officeDepartment != query.department) {
+        return false;
+      }
       if (query.status != null && r.status != query.status) return false;
       final leaveTypeName = query.leaveTypeName?.trim();
       if (leaveTypeName != null &&
@@ -188,6 +191,54 @@ class MockLeaveRepository implements LeaveRepository {
       results = results.take(query.limit!).toList();
     }
     return results;
+  }
+
+  @override
+  Future<LeaveRequestPage> listReviewRequestsPage({
+    required LeaveRequestQuery query,
+    required bool departmentHead,
+  }) async {
+    final unbounded = LeaveRequestQuery(
+      userId: query.userId,
+      department: query.department,
+      status: query.status,
+      leaveType: query.leaveType,
+      leaveTypeName: query.leaveTypeName,
+      startDateFrom: query.startDateFrom,
+      startDateTo: query.startDateTo,
+      createdFrom: query.createdFrom,
+      createdTo: query.createdTo,
+    );
+    final all = departmentHead
+        ? await listDepartmentHeadRequests(query: unbounded)
+        : await listRequests(query: unbounded);
+    final offset = (query.offset ?? 0).clamp(0, all.length);
+    final limit = query.limit ?? 50;
+    final end = (offset + limit).clamp(offset, all.length);
+    return LeaveRequestPage(
+      items: all.sublist(offset, end),
+      total: all.length,
+      limit: limit,
+      offset: offset,
+    );
+  }
+
+  @override
+  Future<List<LeaveReviewFilterOption>> listReviewFilterOptions({
+    required bool departmentHead,
+  }) async {
+    final rows = departmentHead
+        ? await listDepartmentHeadRequests()
+        : await listRequests();
+    return rows
+        .map(
+          (r) => LeaveReviewFilterOption(
+            userId: r.userId,
+            employeeName: r.employeeName ?? '',
+            department: r.officeDepartment,
+          ),
+        )
+        .toList();
   }
 
   @override
@@ -410,6 +461,11 @@ class MockLeaveRepository implements LeaveRepository {
   Future<List<LeaveRequest>> listDepartmentHeadRequests({
     LeaveRequestQuery query = const LeaveRequestQuery(),
   }) async => _requests.where((request) {
+    if (query.userId != null && request.userId != query.userId) return false;
+    if (query.department != null &&
+        request.officeDepartment != query.department) {
+      return false;
+    }
     final statusOk = query.status == null || request.status == query.status;
     final leaveTypeName = query.leaveTypeName?.trim();
     final leaveTypeOk = leaveTypeName != null && leaveTypeName.isNotEmpty

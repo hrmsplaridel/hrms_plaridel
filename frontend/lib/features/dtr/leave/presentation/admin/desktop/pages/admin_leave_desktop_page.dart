@@ -64,6 +64,8 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
   LeaveRequestStatus? _statusFilter;
   String? _leaveTypeFilter;
   List<AdminLeaveLeaveTypeFilterOption> _configuredLeaveTypeOptions = const [];
+  List<LeaveReviewFilterOption> _reviewFilterOptions = const [];
+  String? _reviewFilterOptionsError;
   String? _departmentFilter;
   String? _employeeFilter;
   List<LeaveTypeDefinition> _leaveTypeDefinitions = const [];
@@ -171,6 +173,9 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
     WidgetsBinding.instance.addPostFrameCallback(
       (_) => _loadLeaveTypeFilterOptions(),
     );
+    WidgetsBinding.instance.addPostFrameCallback(
+      (_) => _loadReviewFilterOptions(),
+    );
     WidgetsBinding.instance.addObserver(this);
     if (_isScreenActive) _startAutoRefresh();
     final leaveProvider = context.read<LeaveProvider>();
@@ -204,6 +209,27 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
     _autoRefreshTimer = Timer.periodic(const Duration(seconds: 20), (_) {
       _safeAutoRefresh();
     });
+  }
+
+  Future<void> _loadReviewFilterOptions() async {
+    if (!mounted) return;
+    try {
+      final options = await context
+          .read<LeaveProvider>()
+          .repository
+          .listReviewFilterOptions(departmentHead: widget.isDepartmentHead);
+      if (!mounted) return;
+      setState(() {
+        _reviewFilterOptions = options;
+        _reviewFilterOptionsError = null;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(
+        () => _reviewFilterOptionsError =
+            'Could not load all employee filters. Refresh to try again.',
+      );
+    }
   }
 
   Future<void> _loadLeaveTypeFilterOptions({bool forceRefresh = false}) async {
@@ -410,9 +436,18 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
     final requests = widget.isDepartmentHead
         ? provider.departmentHeadRequests
         : provider.requests;
+    final filterOptions = _reviewFilterOptions.isNotEmpty
+        ? _reviewFilterOptions
+        : requests.map(
+            (request) => LeaveReviewFilterOption(
+              userId: request.userId,
+              employeeName: request.employeeName ?? '',
+              department: request.officeDepartment,
+            ),
+          );
     final departmentMap = <String, String>{};
-    for (final request in requests) {
-      final raw = (request.officeDepartment ?? '').trim();
+    for (final option in filterOptions) {
+      final raw = (option.department ?? '').trim();
       if (raw.isEmpty) continue;
       final normalized = raw
           .toLowerCase()
@@ -423,19 +458,20 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
     }
     final departments = departmentMap.values.toList()..sort();
     final employeeDirectory = <String, String>{};
-    for (final r in requests) {
-      final name = (r.employeeName ?? '').trim();
+    for (final option in filterOptions) {
+      final name = option.employeeName.trim();
       if (name.isEmpty) continue;
-      employeeDirectory[r.userId] = name;
+      employeeDirectory[option.userId] = name;
     }
     final employees =
         employeeDirectory.entries.map((e) => (id: e.key, name: e.value)).where((
           e,
         ) {
           if (_departmentFilter == null) return true;
-          final req = requests.where((r) => r.userId == e.id);
-          return req.any(
-            (r) => (r.officeDepartment ?? '').trim() == _departmentFilter,
+          return filterOptions.any(
+            (option) =>
+                option.userId == e.id &&
+                (option.department ?? '').trim() == _departmentFilter,
           );
         }).toList()..sort((a, b) => a.name.compareTo(b.name));
     final leaveTypeOptions = _leaveTypeFilterOptions(requests);
@@ -511,7 +547,12 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         _AdminHeaderCard(
-          totalRequests: filteredRequests.length,
+          totalRequests: provider.reviewTotal(
+            departmentHead: widget.isDepartmentHead,
+          ),
+          hasMore: provider.reviewHasMore(
+            departmentHead: widget.isDepartmentHead,
+          ),
           pendingCount: filteredRequests
               .where(
                 (r) => widget.isDepartmentHead
@@ -520,7 +561,12 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
               )
               .length,
           reviewing: provider.reviewing,
-          onRefresh: () => _loadRequests(forceRefresh: true),
+          onRefresh: () async {
+            await Future.wait([
+              _loadReviewFilterOptions(),
+              _loadRequests(forceRefresh: true),
+            ]);
+          },
           onManageSignatures: _openSignatureLibrary,
           onForcedLeaveDeduction: widget.isDepartmentHead
               ? null
@@ -547,11 +593,42 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
             onDismiss: provider.clearError,
           ),
         ],
+        if (_reviewFilterOptionsError != null) ...[
+          const SizedBox(height: 12),
+          AdminLeaveErrorBanner(
+            message: _reviewFilterOptionsError!,
+            onDismiss: () => setState(() => _reviewFilterOptionsError = null),
+          ),
+        ],
         const SizedBox(height: 24),
         AdminLeaveRequestQueuePanel(
           requests: filteredRequests,
+          filterKey: [
+            _statusFilter?.value ?? '',
+            _leaveTypeFilter ?? '',
+            _departmentFilter ?? '',
+            _employeeFilter ?? '',
+            _startDateFrom?.toIso8601String() ?? '',
+            _startDateTo?.toIso8601String() ?? '',
+          ].join('|'),
           isDepartmentHead: widget.isDepartmentHead,
           loading: provider.loading,
+          totalCount: provider.reviewTotal(
+            departmentHead: widget.isDepartmentHead,
+          ),
+          hasMore: provider.reviewHasMore(
+            departmentHead: widget.isDepartmentHead,
+          ),
+          loadingMore: provider.reviewLoadingMore(
+            departmentHead: widget.isDepartmentHead,
+          ),
+          loadMoreError: provider.reviewLoadMoreError(
+            departmentHead: widget.isDepartmentHead,
+          ),
+          onLoadMore: () => provider.loadMoreReviewRequests(
+            query: _currentReviewQuery(),
+            departmentHead: widget.isDepartmentHead,
+          ),
           selectedRequest: selected,
           filterBar: AdminLeaveFilterBar(
             isDepartmentHead: widget.isDepartmentHead,
@@ -576,12 +653,17 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
               setState(() => _leaveTypeFilter = value);
               _loadRequests();
             },
-            onDepartmentChanged: (value) => setState(() {
-              _departmentFilter = value;
-              _employeeFilter = null;
-            }),
-            onEmployeeChanged: (value) =>
-                setState(() => _employeeFilter = value),
+            onDepartmentChanged: (value) {
+              setState(() {
+                _departmentFilter = value;
+                _employeeFilter = null;
+              });
+              _loadRequests();
+            },
+            onEmployeeChanged: (value) {
+              setState(() => _employeeFilter = value);
+              _loadRequests();
+            },
             onStartDateFromChanged: (value) {
               setState(() => _startDateFrom = value);
               _loadRequests();
@@ -639,13 +721,7 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
   Future<void> _performLoadRequests({bool forceRefresh = false}) async {
     if (!mounted) return;
     final provider = context.read<LeaveProvider>();
-    final query = LeaveRequestQuery(
-      status: _statusFilter,
-      leaveTypeName: _leaveTypeFilter,
-      startDateFrom: _startDateFrom,
-      startDateTo: _startDateTo,
-      limit: 200,
-    );
+    final query = _currentReviewQuery();
     if (widget.isDepartmentHead) {
       await provider.loadDepartmentHeadRequests(
         query: query,
@@ -656,6 +732,16 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
     }
     if (!mounted) return;
   }
+
+  LeaveRequestQuery _currentReviewQuery() => LeaveRequestQuery(
+    userId: _employeeFilter,
+    department: _departmentFilter,
+    status: _statusFilter,
+    leaveTypeName: _leaveTypeFilter,
+    startDateFrom: _startDateFrom,
+    startDateTo: _startDateTo,
+    limit: 200,
+  );
 
   /// Same UX as filing leave: wide = resizable right sheet; narrow = full-screen route.
   /// Opens immediately; refresh runs in background so tap is not blocked on the network.
@@ -1250,6 +1336,7 @@ class _HeaderMenuAction {
 class _AdminHeaderCard extends StatelessWidget {
   const _AdminHeaderCard({
     required this.totalRequests,
+    required this.hasMore,
     required this.pendingCount,
     required this.reviewing,
     required this.onRefresh,
@@ -1264,6 +1351,7 @@ class _AdminHeaderCard extends StatelessWidget {
   });
 
   final int totalRequests;
+  final bool hasMore;
   final int pendingCount;
   final bool reviewing;
   final Future<void> Function() onRefresh;
@@ -1393,10 +1481,13 @@ class _AdminHeaderCard extends StatelessWidget {
                   spacing: 10,
                   runSpacing: 6,
                   children: [
-                    _CompactHeaderCount(value: totalRequests, label: 'loaded'),
+                    _CompactHeaderCount(
+                      value: totalRequests,
+                      label: 'matching',
+                    ),
                     _CompactHeaderCount(
                       value: pendingCount,
-                      label: 'pending',
+                      label: hasMore ? 'pending loaded' : 'pending',
                       emphasize: true,
                     ),
                   ],
@@ -1435,11 +1526,11 @@ class _AdminHeaderCard extends StatelessWidget {
                         runSpacing: 10,
                         children: [
                           AdminLeaveHeaderChip(
-                            label: 'Total Loaded',
+                            label: 'Total Matching',
                             value: '$totalRequests',
                           ),
                           AdminLeaveHeaderChip(
-                            label: 'Pending',
+                            label: hasMore ? 'Pending Loaded' : 'Pending',
                             value: '$pendingCount',
                             emphasize: true,
                           ),

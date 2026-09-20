@@ -8,6 +8,7 @@ import 'package:hrms_plaridel/features/dtr/leave/models/leave_type.dart';
 class LeaveRequestQuery {
   const LeaveRequestQuery({
     this.userId,
+    this.department,
     this.status,
     this.leaveType,
     this.leaveTypeName,
@@ -16,9 +17,11 @@ class LeaveRequestQuery {
     this.createdFrom,
     this.createdTo,
     this.limit,
+    this.offset,
   });
 
   final String? userId;
+  final String? department;
   final LeaveRequestStatus? status;
   final LeaveType? leaveType;
   final String? leaveTypeName;
@@ -27,13 +30,16 @@ class LeaveRequestQuery {
   final DateTime? createdFrom;
   final DateTime? createdTo;
   final int? limit;
+  final int? offset;
 
   /// Convert to URL query-param map for the API layer.
   Map<String, dynamic> toQueryParams() => {
     if (status != null) 'status': status!.value,
     if (_effectiveLeaveTypeName != null) 'leave_type': _effectiveLeaveTypeName,
     if (userId != null && userId!.isNotEmpty) 'user_id': userId,
+    if (department != null && department!.isNotEmpty) 'department': department,
     if (limit != null) 'limit': limit,
+    if (offset != null) 'offset': offset,
     if (startDateFrom != null) 'start_date_from': _toDateStr(startDateFrom!),
     if (startDateTo != null) 'start_date_to': _toDateStr(startDateTo!),
     if (createdFrom != null) 'created_from': createdFrom!.toIso8601String(),
@@ -64,6 +70,25 @@ class LeaveRequestPage {
   final int offset;
 
   bool get hasMore => offset + items.length < total;
+}
+
+class LeaveReviewFilterOption {
+  const LeaveReviewFilterOption({
+    required this.userId,
+    required this.employeeName,
+    required this.department,
+  });
+
+  final String userId;
+  final String employeeName;
+  final String? department;
+
+  factory LeaveReviewFilterOption.fromJson(Map<String, dynamic> json) =>
+      LeaveReviewFilterOption(
+        userId: json['user_id']?.toString() ?? '',
+        employeeName: json['employee_name']?.toString() ?? '',
+        department: json['department']?.toString(),
+      );
 }
 
 /// Approval payload used by HR/admin actions.
@@ -733,6 +758,15 @@ abstract class LeaveRepository {
   /// General request listing for admin tables/reports.
   Future<List<LeaveRequest>> listRequests({
     LeaveRequestQuery query = const LeaveRequestQuery(),
+  });
+
+  Future<LeaveRequestPage> listReviewRequestsPage({
+    required LeaveRequestQuery query,
+    required bool departmentHead,
+  });
+
+  Future<List<LeaveReviewFilterOption>> listReviewFilterOptions({
+    required bool departmentHead,
   });
 
   /// Pending requests awaiting review.

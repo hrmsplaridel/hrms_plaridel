@@ -42,6 +42,8 @@ class LeaveProvider extends ChangeNotifier {
   int _myRequestsLoadGeneration = 0;
   int _myBalancesLoadGeneration = 0;
   int _officialDateLoadGeneration = 0;
+  int _adminReviewGeneration = 0;
+  int _headReviewGeneration = 0;
   bool _disposed = false;
 
   bool _isCurrentAuthGeneration(int generation) =>
@@ -62,6 +64,19 @@ class LeaveProvider extends ChangeNotifier {
   List<LeaveRequest> _requests = [];
   List<LeaveRequest> _myRequests = [];
   List<LeaveRequest> _departmentHeadRequests = [];
+  static const int _reviewPageSize = 200;
+  int _adminReviewTotal = 0;
+  int _headReviewTotal = 0;
+  int _adminReviewNextOffset = 0;
+  int _headReviewNextOffset = 0;
+  bool _adminReviewHasMore = false;
+  bool _headReviewHasMore = false;
+  bool _adminReviewLoadingMore = false;
+  bool _headReviewLoadingMore = false;
+  String? _adminReviewLoadMoreError;
+  String? _headReviewLoadMoreError;
+  String? _adminReviewQueryKey;
+  String? _headReviewQueryKey;
   List<LeaveBalance> _balances = [];
   LeaveRequest? _selectedRequest;
   static const Duration _requestCacheTtl = Duration(seconds: 30);
@@ -102,6 +117,14 @@ class LeaveProvider extends ChangeNotifier {
   List<LeaveRequest> get myRequests => List.unmodifiable(_myRequests);
   List<LeaveRequest> get departmentHeadRequests =>
       List.unmodifiable(_departmentHeadRequests);
+  int reviewTotal({required bool departmentHead}) =>
+      departmentHead ? _headReviewTotal : _adminReviewTotal;
+  bool reviewHasMore({required bool departmentHead}) =>
+      departmentHead ? _headReviewHasMore : _adminReviewHasMore;
+  bool reviewLoadingMore({required bool departmentHead}) =>
+      departmentHead ? _headReviewLoadingMore : _adminReviewLoadingMore;
+  String? reviewLoadMoreError({required bool departmentHead}) =>
+      departmentHead ? _headReviewLoadMoreError : _adminReviewLoadMoreError;
   List<LeaveBalance> get balances => List.unmodifiable(_balances);
   LeaveRequest? get selectedRequest => _selectedRequest;
 
@@ -227,6 +250,7 @@ class LeaveProvider extends ChangeNotifier {
     return [
       scope,
       _normalize(query.userId) ?? '',
+      _normalize(query.department) ?? '',
       query.status?.value ?? '',
       _normalize(query.leaveTypeName) ?? query.leaveType?.value ?? '',
       _dateOnlyKey(query.startDateFrom),
@@ -234,6 +258,7 @@ class LeaveProvider extends ChangeNotifier {
       _dateTimeKey(query.createdFrom),
       _dateTimeKey(query.createdTo),
       query.limit?.toString() ?? '',
+      query.offset?.toString() ?? '',
     ].join('|');
   }
 
@@ -308,10 +333,24 @@ class LeaveProvider extends ChangeNotifier {
     _myRequestsLoadGeneration += 1;
     _myBalancesLoadGeneration += 1;
     _officialDateLoadGeneration += 1;
+    _adminReviewGeneration += 1;
+    _headReviewGeneration += 1;
     invalidateCachedLeaveData(notify: false);
     _requests = [];
     _myRequests = [];
     _departmentHeadRequests = [];
+    _adminReviewTotal = 0;
+    _headReviewTotal = 0;
+    _adminReviewNextOffset = 0;
+    _headReviewNextOffset = 0;
+    _adminReviewHasMore = false;
+    _headReviewHasMore = false;
+    _adminReviewLoadingMore = false;
+    _headReviewLoadingMore = false;
+    _adminReviewLoadMoreError = null;
+    _headReviewLoadMoreError = null;
+    _adminReviewQueryKey = null;
+    _headReviewQueryKey = null;
     _balances = [];
     _selectedRequest = null;
     _loading = false;
@@ -471,33 +510,159 @@ class LeaveProvider extends ChangeNotifier {
   Future<void> loadRequests({
     LeaveRequestQuery query = const LeaveRequestQuery(),
     bool forceRefresh = false,
+  }) => _loadReviewRequests(query: query, departmentHead: false);
+
+  LeaveRequestQuery _reviewPageQuery(LeaveRequestQuery query, int offset) =>
+      LeaveRequestQuery(
+        userId: query.userId,
+        department: query.department,
+        status: query.status,
+        leaveType: query.leaveType,
+        leaveTypeName: query.leaveTypeName,
+        startDateFrom: query.startDateFrom,
+        startDateTo: query.startDateTo,
+        createdFrom: query.createdFrom,
+        createdTo: query.createdTo,
+        limit: _reviewPageSize,
+        offset: offset,
+      );
+
+  Future<void> _loadReviewRequests({
+    required LeaveRequestQuery query,
+    required bool departmentHead,
   }) async {
     final authGeneration = _authGeneration;
+    final generation = departmentHead
+        ? ++_headReviewGeneration
+        : ++_adminReviewGeneration;
+    bool isCurrent() =>
+        _isCurrentAuthGeneration(authGeneration) &&
+        generation ==
+            (departmentHead ? _headReviewGeneration : _adminReviewGeneration);
+    final key = _requestQueryKey(departmentHead ? 'head' : 'admin', query);
+    final oldKey = departmentHead ? _headReviewQueryKey : _adminReviewQueryKey;
+    final previousCount = oldKey == key
+        ? (departmentHead ? _departmentHeadRequests.length : _requests.length)
+        : 0;
+    if (departmentHead) {
+      _headReviewLoadingMore = false;
+    } else {
+      _adminReviewLoadingMore = false;
+    }
+    _filterStatus = query.status;
+    _filterLeaveType = query.leaveType;
     _loading = true;
     _error = null;
     notifyListeners();
     try {
-      _filterStatus = query.status;
-      _filterLeaveType = query.leaveType;
-      final key = _requestQueryKey('admin', query);
-      final cached = forceRefresh
-          ? null
-          : _readListCache(_requestCache, key, _requestCacheTtl);
-      if (cached != null) {
-        _requests = cached;
+      final items = <LeaveRequest>[];
+      var offset = 0;
+      var total = 0;
+      do {
+        final page = await _repository.listReviewRequestsPage(
+          query: _reviewPageQuery(query, offset),
+          departmentHead: departmentHead,
+        );
+        if (!isCurrent()) return;
+        items.addAll(page.items);
+        total = page.total;
+        offset = page.offset + page.items.length;
+        if (page.items.isEmpty) break;
+      } while (offset < previousCount && offset < total);
+      if (departmentHead) {
+        _departmentHeadRequests = items;
+        _headReviewTotal = total;
+        _headReviewNextOffset = offset;
+        _headReviewHasMore = offset < total;
+        _headReviewQueryKey = key;
+        _headReviewLoadMoreError = null;
       } else {
-        final fresh = await _repository.listRequests(query: query);
-        if (!_isCurrentAuthGeneration(authGeneration)) return;
-        _writeListCache(_requestCache, key, fresh);
-        _requests = List<LeaveRequest>.from(fresh);
+        _requests = items;
+        _adminReviewTotal = total;
+        _adminReviewNextOffset = offset;
+        _adminReviewHasMore = offset < total;
+        _adminReviewQueryKey = key;
+        _adminReviewLoadMoreError = null;
       }
     } catch (e) {
-      if (!_isCurrentAuthGeneration(authGeneration)) return;
-      // Keep the currently displayed queue if a background refresh fails.
+      if (!isCurrent()) return;
       _error = e.toString();
     } finally {
-      if (_isCurrentAuthGeneration(authGeneration)) {
+      if (isCurrent()) {
         _loading = false;
+        notifyListeners();
+      }
+    }
+  }
+
+  Future<void> loadMoreReviewRequests({
+    required LeaveRequestQuery query,
+    required bool departmentHead,
+  }) async {
+    final key = _requestQueryKey(departmentHead ? 'head' : 'admin', query);
+    if (key != (departmentHead ? _headReviewQueryKey : _adminReviewQueryKey) ||
+        !reviewHasMore(departmentHead: departmentHead) ||
+        reviewLoadingMore(departmentHead: departmentHead)) {
+      return;
+    }
+    final authGeneration = _authGeneration;
+    final generation = departmentHead
+        ? _headReviewGeneration
+        : _adminReviewGeneration;
+    final offset = departmentHead
+        ? _headReviewNextOffset
+        : _adminReviewNextOffset;
+    bool isCurrent() =>
+        _isCurrentAuthGeneration(authGeneration) &&
+        generation ==
+            (departmentHead ? _headReviewGeneration : _adminReviewGeneration);
+    if (departmentHead) {
+      _headReviewLoadingMore = true;
+      _headReviewLoadMoreError = null;
+    } else {
+      _adminReviewLoadingMore = true;
+      _adminReviewLoadMoreError = null;
+    }
+    notifyListeners();
+    try {
+      final page = await _repository.listReviewRequestsPage(
+        query: _reviewPageQuery(query, offset),
+        departmentHead: departmentHead,
+      );
+      if (!isCurrent()) return;
+      final merged = <String, LeaveRequest>{
+        for (final request
+            in departmentHead ? _departmentHeadRequests : _requests)
+          if (request.id != null) request.id!: request,
+      };
+      for (final request in page.items) {
+        if (request.id != null) merged[request.id!] = request;
+      }
+      if (departmentHead) {
+        _departmentHeadRequests = merged.values.toList();
+        _headReviewTotal = page.total;
+        _headReviewNextOffset = page.offset + page.items.length;
+        _headReviewHasMore = page.hasMore;
+      } else {
+        _requests = merged.values.toList();
+        _adminReviewTotal = page.total;
+        _adminReviewNextOffset = page.offset + page.items.length;
+        _adminReviewHasMore = page.hasMore;
+      }
+    } catch (e) {
+      if (!isCurrent()) return;
+      if (departmentHead) {
+        _headReviewLoadMoreError = e.toString();
+      } else {
+        _adminReviewLoadMoreError = e.toString();
+      }
+    } finally {
+      if (isCurrent()) {
+        if (departmentHead) {
+          _headReviewLoadingMore = false;
+        } else {
+          _adminReviewLoadingMore = false;
+        }
         notifyListeners();
       }
     }
@@ -1331,39 +1496,7 @@ class LeaveProvider extends ChangeNotifier {
   Future<void> loadDepartmentHeadRequests({
     LeaveRequestQuery query = const LeaveRequestQuery(),
     bool forceRefresh = false,
-  }) async {
-    final authGeneration = _authGeneration;
-    _loading = true;
-    _error = null;
-    notifyListeners();
-    try {
-      _filterStatus = query.status;
-      _filterLeaveType = query.leaveType;
-      final key = _requestQueryKey('department-head', query);
-      final cached = forceRefresh
-          ? null
-          : _readListCache(_requestCache, key, _requestCacheTtl);
-      if (cached != null) {
-        _departmentHeadRequests = cached;
-      } else {
-        final fresh = await _repository.listDepartmentHeadRequests(
-          query: query,
-        );
-        if (!_isCurrentAuthGeneration(authGeneration)) return;
-        _writeListCache(_requestCache, key, fresh);
-        _departmentHeadRequests = List<LeaveRequest>.from(fresh);
-      }
-    } catch (e) {
-      if (!_isCurrentAuthGeneration(authGeneration)) return;
-      // Keep the currently displayed queue if a background refresh fails.
-      _error = e.toString();
-    } finally {
-      if (_isCurrentAuthGeneration(authGeneration)) {
-        _loading = false;
-        notifyListeners();
-      }
-    }
-  }
+  }) => _loadReviewRequests(query: query, departmentHead: true);
 
   Future<LeaveRequest?> departmentHeadApprove(
     LeaveReviewDecisionInput input,
