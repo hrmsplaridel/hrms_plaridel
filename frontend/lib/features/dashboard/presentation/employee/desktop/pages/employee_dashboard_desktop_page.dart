@@ -907,6 +907,9 @@ class _EmployeeLeaveMainEntryState extends State<_EmployeeLeaveMainEntry> {
       future: _deptHeadFuture,
       builder: (context, snapshot) {
         final isDeptHead = snapshot.data ?? false;
+        final leaveProvider = context.read<LeaveProvider>();
+        final hasHistory = leaveProvider.canViewReviewHistory;
+        final canReviewPending = leaveProvider.canReviewPendingLeave;
         if (snapshot.connectionState != ConnectionState.done) {
           final compact = MediaQuery.sizeOf(context).width < 820;
           return Column(
@@ -932,7 +935,8 @@ class _EmployeeLeaveMainEntryState extends State<_EmployeeLeaveMainEntry> {
         }
         return LeaveMain(
           isAdmin: false,
-          isDepartmentHead: isDeptHead,
+          isDepartmentHead: isDeptHead || hasHistory,
+          canReviewPending: canReviewPending,
           initialSection: widget.initialSection,
           onFileLeavePressed: widget.onFileLeavePressed,
           hideEmployeeFileLeaveAction: widget.hideFileLeaveAction,

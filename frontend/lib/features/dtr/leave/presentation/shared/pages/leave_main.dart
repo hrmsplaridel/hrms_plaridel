@@ -34,6 +34,7 @@ class LeaveMain extends StatefulWidget {
     this.initialSection,
     this.isAdmin = false,
     this.isDepartmentHead = false,
+    this.canReviewPending = true,
     this.employeeRequestsContent,
     this.employeeBalancesContent,
     this.adminApprovalsContent,
@@ -54,6 +55,7 @@ class LeaveMain extends StatefulWidget {
 
   /// Whether current user is a department head (non-admin reviewer).
   final bool isDepartmentHead;
+  final bool canReviewPending;
 
   /// Optional injected content for employee requests.
   final Widget? employeeRequestsContent;
@@ -231,7 +233,10 @@ class _LeaveMainState extends State<LeaveMain> {
               ),
         LeaveSection.approvals =>
           widget.adminApprovalsContent ??
-              AdminLeaveScreen(isDepartmentHead: widget.isDepartmentHead),
+              AdminLeaveScreen(
+                isDepartmentHead: widget.isDepartmentHead,
+                canReviewPending: widget.canReviewPending,
+              ),
         LeaveSection.balances =>
           widget.employeeBalancesContent ??
               EmployeeLeaveScreen(

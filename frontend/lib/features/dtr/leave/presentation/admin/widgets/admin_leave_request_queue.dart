@@ -459,6 +459,9 @@ class AdminLeaveRequestQueuePanel extends StatefulWidget {
     required this.filterKey,
     required this.isDepartmentHead,
     required this.loading,
+    required this.initialLoadComplete,
+    required this.initialLoadAttempted,
+    required this.onRetry,
     required this.totalCount,
     required this.hasMore,
     required this.loadingMore,
@@ -473,6 +476,9 @@ class AdminLeaveRequestQueuePanel extends StatefulWidget {
   final String filterKey;
   final bool isDepartmentHead;
   final bool loading;
+  final bool initialLoadComplete;
+  final bool initialLoadAttempted;
+  final VoidCallback onRetry;
   final int totalCount;
   final bool hasMore;
   final bool loadingMore;
@@ -554,8 +560,27 @@ class _AdminLeaveRequestQueuePanelState
         children: [
           widget.filterBar,
           const SizedBox(height: 14),
-          if (widget.loading && widget.requests.isEmpty)
+          if (widget.requests.isEmpty &&
+              (widget.loading ||
+                  (!widget.initialLoadComplete &&
+                      !widget.initialLoadAttempted)))
             const AdminLeaveCenteredState(message: 'Loading leave requests...')
+          else if (widget.requests.isEmpty && !widget.initialLoadComplete)
+            Center(
+              child: Column(
+                children: [
+                  const AdminLeaveCenteredState(
+                    message:
+                        'Requests unavailable. Please check your connection.',
+                  ),
+                  OutlinedButton.icon(
+                    onPressed: widget.onRetry,
+                    icon: const Icon(Icons.refresh_rounded),
+                    label: const Text('Retry'),
+                  ),
+                ],
+              ),
+            )
           else if (widget.requests.isEmpty)
             const AdminLeaveCenteredState(
               message: 'No leave requests matched the filters.',

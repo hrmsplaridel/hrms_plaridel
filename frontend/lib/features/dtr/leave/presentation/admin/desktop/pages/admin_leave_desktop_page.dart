@@ -43,12 +43,14 @@ class AdminLeaveScreen extends StatefulWidget {
   const AdminLeaveScreen({
     super.key,
     this.isDepartmentHead = false,
+    this.canReviewPending = true,
     this.onApprove,
     this.onReturnRequest,
     this.onRejectRequest,
   });
 
   final bool isDepartmentHead;
+  final bool canReviewPending;
   final LeaveApproveAction? onApprove;
   final LeaveDecisionAction? onReturnRequest;
   final LeaveDecisionAction? onRejectRequest;
@@ -586,11 +588,16 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
               ? null
               : _openLeaveTypeRules,
         ),
-        if (provider.error != null) ...[
+        if (provider.reviewError(departmentHead: widget.isDepartmentHead) !=
+            null) ...[
           const SizedBox(height: 16),
           AdminLeaveErrorBanner(
-            message: provider.error!,
-            onDismiss: provider.clearError,
+            message: provider.reviewError(
+              departmentHead: widget.isDepartmentHead,
+            )!,
+            onDismiss: () => provider.clearReviewError(
+              departmentHead: widget.isDepartmentHead,
+            ),
           ),
         ],
         if (_reviewFilterOptionsError != null) ...[
@@ -612,7 +619,16 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
             _startDateTo?.toIso8601String() ?? '',
           ].join('|'),
           isDepartmentHead: widget.isDepartmentHead,
-          loading: provider.loading,
+          loading: provider.reviewLoading(
+            departmentHead: widget.isDepartmentHead,
+          ),
+          initialLoadComplete: provider.reviewInitialLoadComplete(
+            departmentHead: widget.isDepartmentHead,
+          ),
+          initialLoadAttempted: provider.reviewLoadAttempted(
+            departmentHead: widget.isDepartmentHead,
+          ),
+          onRetry: () => _loadRequests(forceRefresh: true),
           totalCount: provider.reviewTotal(
             departmentHead: widget.isDepartmentHead,
           ),
@@ -760,6 +776,7 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
         builder: (ctx) => AdminLeaveDetailsSideSheet(
           initial: request,
           isDepartmentHead: widget.isDepartmentHead,
+          canReviewPending: widget.canReviewPending,
           onApprove: widget.isDepartmentHead ? _deptHeadApprove : _approve,
           onReturn: widget.isDepartmentHead ? _deptHeadReturn : _returnRequest,
           onReject: widget.isDepartmentHead ? _deptHeadReject : _rejectRequest,

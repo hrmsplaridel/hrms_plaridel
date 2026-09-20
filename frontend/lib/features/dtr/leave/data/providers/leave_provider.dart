@@ -75,6 +75,14 @@ class LeaveProvider extends ChangeNotifier {
   bool _headReviewLoadingMore = false;
   String? _adminReviewLoadMoreError;
   String? _headReviewLoadMoreError;
+  bool _adminReviewLoading = false;
+  String? _adminReviewError;
+  bool _adminReviewInitialLoadComplete = false;
+  bool _adminReviewLoadAttempted = false;
+  bool _headReviewLoading = false;
+  String? _headReviewError;
+  bool _headReviewInitialLoadComplete = false;
+  bool _headReviewLoadAttempted = false;
   String? _adminReviewQueryKey;
   String? _headReviewQueryKey;
   List<LeaveBalance> _balances = [];
@@ -125,6 +133,16 @@ class LeaveProvider extends ChangeNotifier {
       departmentHead ? _headReviewLoadingMore : _adminReviewLoadingMore;
   String? reviewLoadMoreError({required bool departmentHead}) =>
       departmentHead ? _headReviewLoadMoreError : _adminReviewLoadMoreError;
+  bool reviewLoading({required bool departmentHead}) =>
+      departmentHead ? _headReviewLoading : _adminReviewLoading;
+  String? reviewError({required bool departmentHead}) =>
+      departmentHead ? _headReviewError : _adminReviewError;
+  bool reviewInitialLoadComplete({required bool departmentHead}) =>
+      departmentHead
+          ? _headReviewInitialLoadComplete
+          : _adminReviewInitialLoadComplete;
+  bool reviewLoadAttempted({required bool departmentHead}) =>
+      departmentHead ? _headReviewLoadAttempted : _adminReviewLoadAttempted;
   List<LeaveBalance> get balances => List.unmodifiable(_balances);
   LeaveRequest? get selectedRequest => _selectedRequest;
 
@@ -180,6 +198,15 @@ class LeaveProvider extends ChangeNotifier {
 
   void clearError() {
     _error = null;
+    notifyListeners();
+  }
+
+  void clearReviewError({required bool departmentHead}) {
+    if (departmentHead) {
+      _headReviewError = null;
+    } else {
+      _adminReviewError = null;
+    }
     notifyListeners();
   }
 
@@ -349,6 +376,14 @@ class LeaveProvider extends ChangeNotifier {
     _headReviewLoadingMore = false;
     _adminReviewLoadMoreError = null;
     _headReviewLoadMoreError = null;
+    _adminReviewLoading = false;
+    _headReviewLoading = false;
+    _adminReviewError = null;
+    _headReviewError = null;
+    _adminReviewInitialLoadComplete = false;
+    _headReviewInitialLoadComplete = false;
+    _adminReviewLoadAttempted = false;
+    _headReviewLoadAttempted = false;
     _adminReviewQueryKey = null;
     _headReviewQueryKey = null;
     _balances = [];
@@ -570,15 +605,32 @@ class LeaveProvider extends ChangeNotifier {
     final previousCount = oldKey == key
         ? (departmentHead ? _departmentHeadRequests.length : _requests.length)
         : 0;
+    if (oldKey != key) {
+      if (departmentHead) {
+        _departmentHeadRequests = [];
+        _headReviewTotal = 0;
+        _headReviewHasMore = false;
+        _headReviewInitialLoadComplete = false;
+        _headReviewLoadAttempted = false;
+      } else {
+        _requests = [];
+        _adminReviewTotal = 0;
+        _adminReviewHasMore = false;
+        _adminReviewInitialLoadComplete = false;
+        _adminReviewLoadAttempted = false;
+      }
+    }
     if (departmentHead) {
       _headReviewLoadingMore = false;
+      _headReviewLoading = true;
+      _headReviewError = null;
     } else {
       _adminReviewLoadingMore = false;
+      _adminReviewLoading = true;
+      _adminReviewError = null;
     }
     _filterStatus = query.status;
     _filterLeaveType = query.leaveType;
-    _loading = true;
-    _error = null;
     notifyListeners();
     try {
       final items = <LeaveRequest>[];
@@ -602,6 +654,7 @@ class LeaveProvider extends ChangeNotifier {
         _headReviewHasMore = offset < total;
         _headReviewQueryKey = key;
         _headReviewLoadMoreError = null;
+        _headReviewInitialLoadComplete = true;
       } else {
         _requests = items;
         _adminReviewTotal = total;
@@ -609,13 +662,24 @@ class LeaveProvider extends ChangeNotifier {
         _adminReviewHasMore = offset < total;
         _adminReviewQueryKey = key;
         _adminReviewLoadMoreError = null;
+        _adminReviewInitialLoadComplete = true;
       }
     } catch (e) {
       if (!isCurrent()) return;
-      _error = e.toString();
+      if (departmentHead) {
+        _headReviewError = e.toString();
+        _headReviewLoadAttempted = true;
+      } else {
+        _adminReviewError = e.toString();
+        _adminReviewLoadAttempted = true;
+      }
     } finally {
       if (isCurrent()) {
-        _loading = false;
+        if (departmentHead) {
+          _headReviewLoading = false;
+        } else {
+          _adminReviewLoading = false;
+        }
         notifyListeners();
       }
     }
@@ -1484,6 +1548,11 @@ class LeaveProvider extends ChangeNotifier {
   Map<String, dynamic>? _deptHeadCheck;
   Map<String, dynamic>? get deptHeadCheck => _deptHeadCheck;
   bool get isDeptHead => _deptHeadCheck?['isDeptHead'] == true;
+  bool get hasDeptHeadHistory => _deptHeadCheck?['hasHistory'] == true;
+  bool get canReviewPendingLeave =>
+      _deptHeadCheck?['canReviewPending'] == true || isDeptHead;
+  bool get canViewReviewHistory =>
+      _deptHeadCheck?['canViewReviewHistory'] == true || hasDeptHeadHistory;
 
   /// Check if the current user is a department head.
   Future<bool> checkIsDepartmentHead({bool forceRefresh = false}) async {

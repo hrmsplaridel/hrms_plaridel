@@ -111,3 +111,45 @@ test('HR and department-head queues page past 200 and expose complete filter cho
     restoreDb();
   }
 });
+
+test('former head receives history visibility without pending review authority', async () => {
+  let assignedPending = false;
+  const query = async (sql) => {
+    const statement = String(sql).replace(/\s+/g, ' ').trim();
+    if (statement.includes('FROM leave_requests lr LEFT JOIN departments')) {
+      assert.match(statement, /lr\.assigned_department_head_id = \$1::uuid/);
+      return { rows: assignedPending ? [{ department_id: 'department' }] : [] };
+    }
+    if (statement.startsWith('SELECT EXISTS (') && statement.includes('leave_request_history')) {
+      return { rows: [{ exists: true }] };
+    }
+    return { rows: [] };
+  };
+  const pool = { query, connect: async () => ({ query, release() {} }) };
+  const restoreDb = withMockedModule('../src/config/db', { pool });
+  const restoreHead = withMockedModule('../src/services/departmentHeadService', {
+    isDepartmentHead: async () => ({ isDeptHead: false, departmentId: null, departmentName: null }),
+  });
+  clearModule('../src/routes/leaveRoutes');
+  try {
+    const router = require('../src/routes/leaveRoutes');
+    const handler = router.stack.find(
+      (entry) => entry.route?.path === '/department-head/check' && entry.route.methods.get
+    ).route.stack.at(-1).handle;
+    const res = responseRecorder();
+    await handler({ user: { id: 'former-head' } }, res);
+    assert.equal(res.statusCode, 200);
+    assert.equal(res.body.canReviewPending, false);
+    assert.equal(res.body.canViewReviewHistory, true);
+    assert.equal(res.body.hasHistory, true);
+
+    assignedPending = true;
+    const assignedRes = responseRecorder();
+    await handler({ user: { id: 'assigned-head' } }, assignedRes);
+    assert.equal(assignedRes.body.canReviewPending, true);
+  } finally {
+    clearModule('../src/routes/leaveRoutes');
+    restoreHead();
+    restoreDb();
+  }
+});

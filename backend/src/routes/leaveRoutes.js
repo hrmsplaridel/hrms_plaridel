@@ -3672,20 +3672,38 @@ router.get('/department-head/check', protect, async (req, res) => {
       `SELECT lr.review_department_id AS department_id,
               d.name AS department_name
        FROM leave_requests lr
-       JOIN leave_request_department_reviewers lrr
-         ON lrr.leave_request_id = lr.id
        LEFT JOIN departments d ON d.id = lr.review_department_id
-       WHERE lrr.reviewer_id = $1::uuid
-         AND lr.status = 'pending_department_head'
+       WHERE lr.status = 'pending_department_head'
+         AND (
+           lr.assigned_department_head_id = $1::uuid
+           OR EXISTS (
+             SELECT 1 FROM leave_request_department_reviewers lrr
+             WHERE lrr.leave_request_id = lr.id AND lrr.reviewer_id = $1::uuid
+           )
+         )
        ORDER BY lr.updated_at DESC
        LIMIT 1`,
       [userId]
     );
     const assignedDepartment = assigned.rows[0] || null;
+
+    const hasHistoryResult = await client.query(
+      `SELECT EXISTS (
+         SELECT 1 FROM leave_request_history h
+         WHERE h.acted_by = $1::uuid
+           AND h.action IN ('department_head_approved', 'department_head_rejected', 'department_head_returned')
+       )`,
+      [userId]
+    );
+
+    const canReviewPending = result.isDeptHead || Boolean(assignedDepartment);
     res.json({
-      isDeptHead: result.isDeptHead || Boolean(assignedDepartment),
+      isDeptHead: canReviewPending,
+      canReviewPending,
+      canViewReviewHistory: hasHistoryResult.rows[0].exists,
       departmentId: result.departmentId || assignedDepartment?.department_id || null,
       departmentName: result.departmentName || assignedDepartment?.department_name || null,
+      hasHistory: hasHistoryResult.rows[0].exists
     });
   } catch (err) {
     console.error('[leave GET /department-head/check]', err);

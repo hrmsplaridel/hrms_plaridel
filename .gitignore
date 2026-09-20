@@ -55,6 +55,7 @@ firebase-debug.log
 # Private infrastructure and deployment documentation
 docs/private/
 docs/weekly_progress/
+/.agents/
 /bugs/
 /Capstone_research/
 /tmp_figure_review/
