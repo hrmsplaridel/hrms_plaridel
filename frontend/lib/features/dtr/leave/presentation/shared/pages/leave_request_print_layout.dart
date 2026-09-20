@@ -1816,9 +1816,14 @@ class _LeaveRequestPrintLayoutState extends State<LeaveRequestPrintLayout> {
     setState(() => _busy = true);
     try {
       final userId = request.userId;
+      // Use the strict variant for the fallback path so a balance API failure
+      // throws rather than returning an empty list that would silently produce
+      // zero/default credit figures on the printed certification.
       final balances = _employeeBalances.isNotEmpty
           ? _employeeBalances
-          : await context.read<LeaveProvider>().fetchBalancesForUser(userId);
+          : await context
+                .read<LeaveProvider>()
+                .fetchBalancesForUserStrict(userId);
       final formSignatories = await loadLeaveFormSignatories(request: request);
 
       await LeaveRequestPdf.printLeaveRequest(
@@ -1840,7 +1845,10 @@ class _LeaveRequestPrintLayoutState extends State<LeaveRequestPrintLayout> {
         name: 'Leave_Application_${request.id ?? request.userId}.pdf',
       );
     } catch (e) {
-      _showMessage('Print failed: $e');
+      _showMessage(
+        'Print failed — balance or request data could not be verified. '
+        'Please retry when the server is reachable.\n($e)',
+      );
     } finally {
       if (mounted) setState(() => _busy = false);
     }

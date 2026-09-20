@@ -460,6 +460,11 @@ class LeaveProvider extends ChangeNotifier {
   }
 
   /// Fetches leave balances for a user (e.g. for admin approval dialog).
+  ///
+  /// On network or server failure, returns an empty list so callers that
+  /// treat balances as informational (e.g. the approval confirmation dialog)
+  /// can still proceed. Use [fetchBalancesForUserStrict] in print flows where
+  /// incorrect balance figures must not appear on a formal document.
   Future<List<LeaveBalance>> fetchBalancesForUser(
     String userId, {
     bool forceRefresh = false,
@@ -476,6 +481,27 @@ class LeaveProvider extends ChangeNotifier {
     } catch (_) {
       return [];
     }
+  }
+
+  /// Fetches leave balances for a user for a formal print flow.
+  ///
+  /// Unlike [fetchBalancesForUser], this method rethrows any network or
+  /// server error so callers can block certification printing rather than
+  /// silently substituting zero/default balance figures on the printed form.
+  Future<List<LeaveBalance>> fetchBalancesForUserStrict(
+    String userId, {
+    bool forceRefresh = false,
+  }) async {
+    final authGeneration = _authGeneration;
+    // Intentionally no try/catch — errors propagate to the print caller.
+    final balances = await _getBalancesForUserCached(
+      userId,
+      forceRefresh: forceRefresh,
+    );
+    if (!_isCurrentAuthGeneration(authGeneration)) {
+      return const <LeaveBalance>[];
+    }
+    return balances;
   }
 
   Future<void> loadMyRequests(

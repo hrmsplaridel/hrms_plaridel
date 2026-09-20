@@ -776,16 +776,23 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
     if (!mounted) return;
 
     try {
-      // Best-effort refresh so we print the latest snapshot (e.g. after HR changes).
+      // Refresh the request so we print the latest snapshot (e.g. after HR
+      // changes). If the refresh fails, block the print — printing a stale
+      // snapshot with potentially outdated status or balance figures risks
+      // producing an invalid formal document.
       LeaveRequest target = request;
       final id = request.id;
       if (id != null && id.isNotEmpty) {
         final fresh = await provider.refreshRequestById(id);
-        if (fresh != null) {
-          target = fresh;
-          if (_selectedRequest?.id == id) {
-            setState(() => _selectedRequest = fresh);
-          }
+        if (fresh == null) {
+          throw Exception(
+            'Could not load the latest request data. '
+            'Please check your connection and try again.',
+          );
+        }
+        target = fresh;
+        if (_selectedRequest?.id == id) {
+          setState(() => _selectedRequest = fresh);
         }
       }
 
@@ -806,7 +813,10 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
       );
       final formSignatories = await loadLeaveFormSignatories(request: target);
 
-      final balances = await provider.fetchBalancesForUser(
+      // Use the strict variant so any balance API failure throws rather than
+      // returning an empty list that would silently produce zero credit figures
+      // on the printed certification.
+      final balances = await provider.fetchBalancesForUserStrict(
         target.userId,
         forceRefresh: true,
       );
@@ -837,9 +847,15 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
       );
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Print failed: $e')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Print failed — balance or request data could not be verified. '
+            'Please retry when the server is reachable.\n($e)',
+          ),
+          duration: const Duration(seconds: 6),
+        ),
+      );
     }
   }
 
