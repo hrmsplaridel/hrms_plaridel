@@ -139,8 +139,8 @@ class LeaveProvider extends ChangeNotifier {
       departmentHead ? _headReviewError : _adminReviewError;
   bool reviewInitialLoadComplete({required bool departmentHead}) =>
       departmentHead
-          ? _headReviewInitialLoadComplete
-          : _adminReviewInitialLoadComplete;
+      ? _headReviewInitialLoadComplete
+      : _adminReviewInitialLoadComplete;
   bool reviewLoadAttempted({required bool departmentHead}) =>
       departmentHead ? _headReviewLoadAttempted : _adminReviewLoadAttempted;
   List<LeaveBalance> get balances => List.unmodifiable(_balances);
@@ -533,6 +533,17 @@ class LeaveProvider extends ChangeNotifier {
       userId,
       forceRefresh: forceRefresh,
     );
+    if (!_isCurrentAuthGeneration(authGeneration)) {
+      return const <LeaveBalance>[];
+    }
+    return balances;
+  }
+
+  Future<List<LeaveBalance>> fetchFormCreditsForRequestStrict(
+    String requestId,
+  ) async {
+    final authGeneration = _authGeneration;
+    final balances = await _repository.getFormCreditsForRequest(requestId);
     if (!_isCurrentAuthGeneration(authGeneration)) {
       return const <LeaveBalance>[];
     }

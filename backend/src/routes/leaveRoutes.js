@@ -4939,6 +4939,55 @@ router.get('/ledger', protect, async (req, res) => {
   }
 });
 
+// PDF certification credits for one request; this does not grant general balance access.
+router.get('/:id/form-credits', protect, async (req, res) => {
+  const viewerId = req.user?.id;
+  if (!viewerId) return res.status(401).json({ error: 'Not authenticated' });
+  try {
+    const privileged = req.user.role === 'admin' || req.user.role === 'hr';
+    const access = await pool.query(
+      `SELECT COALESCE(lr.user_id, lr.employee_id) AS employee_id,
+              ($2::boolean = true
+                OR lr.user_id = $3::uuid OR lr.employee_id = $3::uuid
+                OR (lr.status = 'pending_department_head'
+                    AND lr.assigned_department_head_id = $3::uuid)
+                OR EXISTS (
+                  SELECT 1 FROM leave_request_history h
+                  WHERE h.leave_request_id = lr.id AND h.acted_by = $3::uuid
+                    AND h.action IN ('department_head_approved',
+                      'department_head_rejected', 'department_head_returned')
+                )) AS can_view
+       FROM leave_requests lr WHERE lr.id = $1::uuid LIMIT 1`,
+      [req.params.id, privileged, viewerId]
+    );
+    const request = access.rows[0];
+    if (!request) return res.status(404).json({ error: 'Leave request not found' });
+    if (!request.can_view) return res.status(403).json({ error: 'Not allowed to view this leave form' });
+
+    const result = await pool.query(
+      `SELECT lb.id, lb.user_id, lb.leave_type, lb.earned_days,
+              lb.used_days, lb.pending_days, lb.adjusted_days,
+              lb.as_of_date, lb.last_accrual_date, lb.created_at, lb.updated_at
+       FROM leave_balances lb
+       WHERE lb.user_id = $1::uuid
+         AND lb.leave_type IN ('vacationLeave', 'sickLeave')
+       ORDER BY CASE lb.leave_type WHEN 'vacationLeave' THEN 0 ELSE 1 END`,
+      [request.employee_id]
+    );
+    res.json(result.rows.map((row) => ({
+      ...row,
+      record_kind: 'credit_balance',
+      earned_days: Number(row.earned_days || 0),
+      used_days: Number(row.used_days || 0),
+      pending_days: Number(row.pending_days || 0),
+      adjusted_days: Number(row.adjusted_days || 0),
+    })));
+  } catch (err) {
+    console.error('[leave GET /:id/form-credits]', err);
+    res.status(500).json({ error: 'Failed to fetch leave form credits' });
+  }
+});
+
 // GET /api/leave/balances/:userId (self or admin)
 router.get('/balances/:userId', protect, async (req, res) => {
   const requesterId = req.user?.id;

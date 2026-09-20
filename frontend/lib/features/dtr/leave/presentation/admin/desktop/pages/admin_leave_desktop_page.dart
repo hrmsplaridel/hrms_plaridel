@@ -845,10 +845,10 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
       // Use the strict variant so any balance API failure throws rather than
       // returning an empty list that would silently produce zero credit figures
       // on the printed certification.
-      final balances = await provider.fetchBalancesForUserStrict(
-        target.userId,
-        forceRefresh: true,
-      );
+      if (id == null || id.isEmpty) {
+        throw StateError('A saved leave request is required to print the form');
+      }
+      final balances = await provider.fetchFormCreditsForRequestStrict(id);
 
       if (!preview && mounted) {
         ScaffoldMessenger.of(

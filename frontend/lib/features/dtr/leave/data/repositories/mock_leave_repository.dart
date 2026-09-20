@@ -258,6 +258,13 @@ class MockLeaveRepository implements LeaveRepository {
   }
 
   @override
+  Future<List<LeaveBalance>> getFormCreditsForRequest(String requestId) async {
+    final request = _getRequestByIdInternal(requestId);
+    if (request == null) throw StateError('Leave request not found');
+    return getBalancesForUser(request.userId);
+  }
+
+  @override
   Future<LeaveBalance?> getBalanceForUserByType(
     String userId,
     LeaveType leaveType,

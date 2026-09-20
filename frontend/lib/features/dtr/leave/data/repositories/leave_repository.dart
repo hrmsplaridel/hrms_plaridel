@@ -775,6 +775,9 @@ abstract class LeaveRepository {
   /// Employee-facing balances for all supported leave types.
   Future<List<LeaveBalance>> getBalancesForUser(String userId);
 
+  /// VL/SL credits exposed only for a request this viewer may inspect.
+  Future<List<LeaveBalance>> getFormCreditsForRequest(String requestId);
+
   /// One specific leave type balance for validation or summaries.
   Future<LeaveBalance?> getBalanceForUserByType(
     String userId,

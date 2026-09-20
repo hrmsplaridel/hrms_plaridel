@@ -393,6 +393,25 @@ class ApiLeaveRepository implements LeaveRepository {
   }
 
   @override
+  Future<List<LeaveBalance>> getFormCreditsForRequest(String requestId) async {
+    try {
+      final res = await ApiClient.instance.get<List<dynamic>>(
+        '/api/leave/$requestId/form-credits',
+      );
+      return (res.data ?? const [])
+          .map((row) => LeaveBalance.fromJson(_asMap(row)))
+          .toList();
+    } on DioException catch (e) {
+      throw Exception(
+        _employeeReadMessageFromDio(
+          e,
+          'Unable to verify leave form credits. Please try again.',
+        ),
+      );
+    }
+  }
+
+  @override
   Future<LeaveBalance?> getBalanceForUserByType(
     String userId,
     LeaveType leaveType,
