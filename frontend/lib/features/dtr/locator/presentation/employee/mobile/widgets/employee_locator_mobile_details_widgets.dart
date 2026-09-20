@@ -491,6 +491,7 @@ class EmployeeLocatorMobileDetailActions extends StatelessWidget {
     required this.canOpenAttachment,
     required this.onHistory,
     required this.onCancel,
+    required this.onPreview,
     required this.onPrint,
     required this.onOpenAttachment,
     this.canReject = false,
@@ -512,6 +513,7 @@ class EmployeeLocatorMobileDetailActions extends StatelessWidget {
   final bool canCorrect;
   final VoidCallback onHistory;
   final VoidCallback onCancel;
+  final VoidCallback onPreview;
   final VoidCallback onPrint;
   final VoidCallback onOpenAttachment;
   final VoidCallback? onReject;
@@ -567,6 +569,16 @@ class EmployeeLocatorMobileDetailActions extends StatelessWidget {
                   ),
                 ],
                 if (canPrint) ...[
+                  const SizedBox(height: 8),
+                  SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton.icon(
+                      onPressed: onPreview,
+                      style: secondaryStyle,
+                      icon: const Icon(Icons.visibility_outlined, size: 18),
+                      label: const Text('Preview'),
+                    ),
+                  ),
                   const SizedBox(height: 8),
                   SizedBox(
                     width: double.infinity,
@@ -690,6 +702,13 @@ class EmployeeLocatorMobileDetailActions extends StatelessWidget {
                     style: primaryStyle,
                     icon: const Icon(Icons.upload_file_rounded, size: 18),
                     label: const Text('Correct & Resubmit'),
+                  ),
+                if (canPrint)
+                  OutlinedButton.icon(
+                    onPressed: onPreview,
+                    style: secondaryStyle,
+                    icon: const Icon(Icons.visibility_outlined, size: 18),
+                    label: const Text('Preview'),
                   ),
                 if (canPrint)
                   FilledButton.icon(

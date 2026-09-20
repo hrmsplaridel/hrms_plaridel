@@ -27,6 +27,7 @@ class AdminLeaveDetailsSideSheet extends StatelessWidget {
     required this.onApprove,
     required this.onReturn,
     required this.onReject,
+    this.onPreview,
     required this.onPrint,
     this.onRevoke,
   });
@@ -37,6 +38,7 @@ class AdminLeaveDetailsSideSheet extends StatelessWidget {
   final Future<void> Function(LeaveRequest) onApprove;
   final Future<void> Function(LeaveRequest) onReturn;
   final Future<void> Function(LeaveRequest) onReject;
+  final Future<void> Function(LeaveRequest)? onPreview;
   final Future<void> Function(LeaveRequest)? onRevoke;
   final Future<void> Function(LeaveRequest) onPrint;
 
@@ -106,6 +108,7 @@ class AdminLeaveDetailsSideSheet extends StatelessWidget {
                     onApprove: canReview ? () => onApprove(req) : null,
                     onReturn: canReview ? () => onReturn(req) : null,
                     onReject: canReview ? () => onReject(req) : null,
+                    onPreview: onPreview == null ? null : () => onPreview!(req),
                     onRevoke:
                         approved &&
                             onRevoke != null &&
@@ -136,6 +139,7 @@ class _AdminLeaveRequestDetailsPanel extends StatelessWidget {
     this.onReturn,
     this.onReject,
     this.onRevoke, // #15
+    this.onPreview,
     this.revokeDisabledReason,
     this.onPrint,
   });
@@ -147,6 +151,7 @@ class _AdminLeaveRequestDetailsPanel extends StatelessWidget {
   final VoidCallback? onReturn;
   final VoidCallback? onReject;
   final VoidCallback? onRevoke; // #15
+  final VoidCallback? onPreview;
   final String? revokeDisabledReason;
   final VoidCallback? onPrint;
 
@@ -238,7 +243,7 @@ class _AdminLeaveRequestDetailsPanel extends StatelessWidget {
         const SizedBox(height: 8),
         HistoryTimeline(events: _buildHistoryEvents(request!)),
         const SizedBox(height: 10),
-        AdminLeaveSubsectionTitle(title: 'Review Actions'),
+        AdminLeaveSubsectionTitle(title: 'Actions'),
         const SizedBox(height: 10),
         Wrap(
           spacing: 12,
@@ -275,6 +280,12 @@ class _AdminLeaveRequestDetailsPanel extends StatelessWidget {
                   side: BorderSide(color: Colors.orange.shade300),
                 ),
                 label: const Text('Revoke Approval'),
+              ),
+            if (onPreview != null)
+              OutlinedButton.icon(
+                onPressed: reviewing ? null : onPreview,
+                icon: const Icon(Icons.visibility_outlined),
+                label: const Text('Preview Form'),
               ),
             if (onPrint != null)
               OutlinedButton.icon(

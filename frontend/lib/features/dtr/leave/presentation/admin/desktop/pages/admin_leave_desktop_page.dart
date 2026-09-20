@@ -1,10 +1,12 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:printing/printing.dart';
 import 'package:provider/provider.dart';
 
 import 'package:hrms_plaridel/core/api/client.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
+import 'package:hrms_plaridel/core/widgets/form_pdf_preview.dart';
 import 'package:hrms_plaridel/providers/auth_provider.dart';
 import 'package:hrms_plaridel/core/services/app_realtime_provider.dart';
 import 'package:hrms_plaridel/features/dtr/leave/data/providers/leave_provider.dart';
@@ -781,13 +783,23 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
           onReturn: widget.isDepartmentHead ? _deptHeadReturn : _returnRequest,
           onReject: widget.isDepartmentHead ? _deptHeadReject : _rejectRequest,
           onRevoke: widget.isDepartmentHead ? null : _revokeApproval,
+          onPreview: _previewLeaveForm,
           onPrint: _printLeaveForm,
         ),
       );
     });
   }
 
-  Future<void> _printLeaveForm(LeaveRequest request) async {
+  Future<void> _printLeaveForm(LeaveRequest request) =>
+      _openLeaveForm(request, preview: false);
+
+  Future<void> _previewLeaveForm(LeaveRequest request) =>
+      _openLeaveForm(request, preview: true);
+
+  Future<void> _openLeaveForm(
+    LeaveRequest request, {
+    required bool preview,
+  }) async {
     final provider = context.read<LeaveProvider>();
     final auth = context.read<AuthProvider>();
     if (!mounted) return;
@@ -808,7 +820,7 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
           );
         }
         target = fresh;
-        if (_selectedRequest?.id == id) {
+        if (mounted && _selectedRequest?.id == id) {
           setState(() => _selectedRequest = fresh);
         }
       }
@@ -838,13 +850,13 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
         forceRefresh: true,
       );
 
-      if (mounted) {
+      if (!preview && mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(const SnackBar(content: Text('Preparing print...')));
       }
 
-      await LeaveRequestPdf.printLeaveRequest(
+      final document = await LeaveRequestPdf.buildPdf(
         request: target,
         balances: balances,
         certificationOfficerName: formSignatories.certificationOfficer?.name,
@@ -860,14 +872,29 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
             formSignatories.departmentHeadSignature?.signatureImageBytes,
         hrApproverSignatureBytes:
             formSignatories.hrApproverSignature?.signatureImageBytes,
-        name: 'Leave_Application_${target.id ?? target.userId}.pdf',
       );
+      final filename = 'Leave_Application_${target.id ?? target.userId}.pdf';
+      if (preview) {
+        final bytes = await document.save();
+        if (!mounted) return;
+        await showFormPdfPreview(
+          context: context,
+          bytes: bytes,
+          title: 'Leave Form Preview',
+          filename: filename,
+        );
+      } else {
+        await Printing.layoutPdf(
+          onLayout: (_) => document.save(),
+          name: filename,
+        );
+      }
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            'Print failed — balance or request data could not be verified. '
+            '${preview ? 'Preview' : 'Print'} failed — balance or request data could not be verified. '
             'Please retry when the server is reachable.\n($e)',
           ),
           duration: const Duration(seconds: 6),

@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:pdf/pdf.dart';
@@ -7,8 +9,7 @@ import 'package:printing/printing.dart';
 class LocatorSlipPrint {
   const LocatorSlipPrint._();
 
-  static Future<void> printForm({
-    required BuildContext context,
+  static Future<Uint8List> buildPdf({
     required String? id,
     required String employeeName,
     required String dateText,
@@ -326,9 +327,39 @@ class LocatorSlipPrint {
       ),
     );
 
+    return doc.save();
+  }
+
+  static Future<void> printForm({
+    required BuildContext context,
+    required String? id,
+    required String employeeName,
+    required String dateText,
+    required String requestTypeLabel,
+    required String locationLabel,
+    required String office,
+    required String remarks,
+    required bool amIn,
+    required bool amOut,
+    required bool pmIn,
+    required bool pmOut,
+  }) async {
     try {
+      final bytes = await buildPdf(
+        id: id,
+        employeeName: employeeName,
+        dateText: dateText,
+        requestTypeLabel: requestTypeLabel,
+        locationLabel: locationLabel,
+        office: office,
+        remarks: remarks,
+        amIn: amIn,
+        amOut: amOut,
+        pmIn: pmIn,
+        pmOut: pmOut,
+      );
       await Printing.layoutPdf(
-        onLayout: (format) async => doc.save(),
+        onLayout: (_) async => bytes,
         name: 'Locator_Slip_${id ?? 'form'}.pdf',
       );
     } catch (e) {

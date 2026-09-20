@@ -10,6 +10,7 @@ import 'package:hrms_plaridel/features/dtr/locator/data/repositories/locator_sli
 import 'package:hrms_plaridel/features/dtr/locator/models/locator_request_type.dart';
 import 'package:hrms_plaridel/features/dtr/locator/models/locator_workflow_event.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
+import 'package:hrms_plaridel/core/widgets/form_pdf_preview.dart';
 import 'package:hrms_plaridel/core/services/app_realtime_provider.dart';
 import 'package:hrms_plaridel/features/dtr/locator/presentation/admin/pages/locator_type_management_screen.dart';
 import 'package:hrms_plaridel/features/dtr/locator/presentation/admin/widgets/admin_locator_correction_dialog.dart';
@@ -1172,6 +1173,45 @@ class _AdminLocatorManagementScreenState
                               icon: const Icon(Icons.undo_rounded, size: 18),
                               label: const Text('Revoke Approval'),
                             ),
+                          ),
+                        if (canPrint)
+                          OutlinedButton.icon(
+                            onPressed: () async {
+                              try {
+                                final bytes = await LocatorSlipPrint.buildPdf(
+                                  id: item.id,
+                                  employeeName: item.employeeName,
+                                  dateText: item.slipDateLabel,
+                                  requestTypeLabel: item.requestType.label,
+                                  locationLabel: item.requestType.locationLabel,
+                                  office: item.office,
+                                  remarks: item.reason,
+                                  amIn: item.amIn,
+                                  amOut: item.amOut,
+                                  pmIn: item.pmIn,
+                                  pmOut: item.pmOut,
+                                );
+                                if (!dialogContext.mounted) return;
+                                await showFormPdfPreview(
+                                  context: dialogContext,
+                                  bytes: bytes,
+                                  title: 'Locator Form Preview',
+                                  filename: 'Locator_Slip_${item.id}.pdf',
+                                );
+                              } catch (e) {
+                                if (!dialogContext.mounted) return;
+                                ScaffoldMessenger.of(
+                                  dialogContext,
+                                ).showSnackBar(
+                                  SnackBar(content: Text('Preview failed: $e')),
+                                );
+                              }
+                            },
+                            icon: const Icon(
+                              Icons.visibility_outlined,
+                              size: 18,
+                            ),
+                            label: const Text('Preview Form'),
                           ),
                         if (canPrint)
                           FilledButton.icon(

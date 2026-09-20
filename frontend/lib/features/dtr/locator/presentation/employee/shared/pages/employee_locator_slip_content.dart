@@ -8,6 +8,7 @@ import 'package:provider/provider.dart';
 
 import 'package:hrms_plaridel/core/api/client.dart';
 import 'package:hrms_plaridel/core/utils/responsive_right_side_panel.dart';
+import 'package:hrms_plaridel/core/widgets/form_pdf_preview.dart';
 import 'package:hrms_plaridel/features/dtr/locator/data/repositories/locator_slip_data_cache.dart';
 import 'package:hrms_plaridel/features/dtr/locator/models/locator_request_type.dart';
 import 'package:hrms_plaridel/features/dtr/locator/models/locator_slip_form_initial_values.dart';
@@ -680,6 +681,36 @@ class EmployeeLocatorSlipContentState extends State<EmployeeLocatorSlipContent>
       );
     }
 
+    Future<void> previewForm(BuildContext dialogContext) async {
+      try {
+        final bytes = await LocatorSlipPrint.buildPdf(
+          id: item.id,
+          employeeName: item.employeeName,
+          dateText: _formatDate(item.date),
+          requestTypeLabel: item.requestType.label,
+          locationLabel: item.requestType.locationLabel,
+          office: item.office,
+          remarks: item.remarks,
+          amIn: item.amIn,
+          amOut: item.amOut,
+          pmIn: item.pmIn,
+          pmOut: item.pmOut,
+        );
+        if (!dialogContext.mounted) return;
+        await showFormPdfPreview(
+          context: dialogContext,
+          bytes: bytes,
+          title: 'Locator Form Preview',
+          filename: 'Locator_Slip_${item.id ?? 'form'}.pdf',
+        );
+      } catch (e) {
+        if (!dialogContext.mounted) return;
+        ScaffoldMessenger.of(
+          dialogContext,
+        ).showSnackBar(SnackBar(content: Text('Preview failed: $e')));
+      }
+    }
+
     unawaited(
       openResponsiveRightSidePanel<void>(
         context: context,
@@ -886,6 +917,7 @@ class EmployeeLocatorSlipContentState extends State<EmployeeLocatorSlipContent>
               _cancelSlip(item);
             },
             onPrint: printForm,
+            onPreview: () => unawaited(previewForm(dialogContext)),
             onOpenAttachment: () => _openAttachment(item),
             onReject: () {
               Navigator.of(dialogContext).pop();
