@@ -4301,7 +4301,8 @@ router.patch('/:id/reject', protect, requireAdminOrHr, async (req, res) => {
               lr.user_id, lr.employee_id, lt.name AS leave_type_name
        FROM leave_requests lr
        LEFT JOIN leave_types lt ON lt.id = lr.leave_type_id
-       WHERE lr.id = $1`,
+       WHERE lr.id = $1
+       FOR UPDATE OF lr`,
       [id]
     );
     if (current.rows.length === 0) {
@@ -4310,12 +4311,7 @@ router.patch('/:id/reject', protect, requireAdminOrHr, async (req, res) => {
     }
     const currentRow = current.rows[0];
 
-    const { historyAction } = validateAdminTransition({
-      currentStatus: currentRow.status,
-      desiredStatus: 'rejected',
-    });
-
-    const { nextStatus: rejectNextStatus } = validateAdminTransition({
+    const { nextStatus: rejectNextStatus, historyAction } = validateAdminTransition({
       currentStatus: currentRow.status,
       desiredStatus: 'rejected',
     });
@@ -4613,7 +4609,8 @@ router.patch('/:id/return', protect, requireAdminOrHr, async (req, res) => {
               lr.user_id, lr.employee_id, lt.name AS leave_type_name
        FROM leave_requests lr
        LEFT JOIN leave_types lt ON lt.id = lr.leave_type_id
-       WHERE lr.id = $1`,
+       WHERE lr.id = $1
+       FOR UPDATE OF lr`,
       [id]
     );
     if (current.rows.length === 0) {
