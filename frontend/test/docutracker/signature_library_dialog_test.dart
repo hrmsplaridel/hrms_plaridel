@@ -35,10 +35,20 @@ class _SignatureLibraryProvider extends DocuTrackerProvider {
   ];
 
   String? removedId;
+  String? renamedName;
 
   @override
   Future<List<DocuTrackerSignatureAsset>> listSavedSignatures() async =>
       List.unmodifiable(assets);
+
+  @override
+  Future<DocuTrackerSignatureAsset> renameSavedSignature({
+    required String assetId,
+    required String displayName,
+  }) async {
+    renamedName = displayName;
+    return assets.firstWhere((asset) => asset.id == assetId);
+  }
 
   @override
   Future<void> removeSavedSignature(String assetId) async {
@@ -115,6 +125,42 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(tester.takeException(), isNull);
-    expect(find.byKey(const ValueKey('docutracker-add-saved-signature')), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('docutracker-add-saved-signature')),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('naming dialog submits and disposes safely', (tester) async {
+    final provider = _SignatureLibraryProvider();
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Builder(
+          builder: (context) => FilledButton(
+            onPressed: () => showDocuTrackerSignatureLibraryDialog(
+              context,
+              provider: provider,
+            ),
+            child: const Text('Open'),
+          ),
+        ),
+      ),
+    );
+
+    await tester.tap(find.text('Open'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Signature actions').first);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Rename'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Rename Signature'), findsOneWidget);
+    await tester.enterText(find.byType(TextField), 'My approval signature');
+    await tester.tap(find.widgetWithText(FilledButton, 'Save'));
+    await tester.pumpAndSettle();
+
+    expect(provider.renamedName, 'My approval signature');
+    expect(find.text('My Signatures'), findsOneWidget);
+    expect(tester.takeException(), isNull);
   });
 }
