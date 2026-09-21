@@ -212,7 +212,10 @@ class _LdTrainingRequirementsEmployeeScreenState
       );
     }
 
-    const preKinds = [LdTrainingRequirementDocKind.invitationLetter];
+    const preKinds = [
+      LdTrainingRequirementDocKind.invitationLetter,
+      LdTrainingRequirementDocKind.travelOrder,
+    ];
     const postKinds = [
       LdTrainingRequirementDocKind.lap,
       LdTrainingRequirementDocKind.trainingCertificate,
@@ -228,7 +231,7 @@ class _LdTrainingRequirementsEmployeeScreenState
           step: 1,
           title: 'Pre-training requirements',
           description:
-              'Upload your invitation letter for training travel approved by the mayor.',
+              'Upload your invitation letter (mayor-approved) and Travel Order for training travel.',
           kinds: preKinds,
           record: r,
           status: _phaseStatus(
@@ -1268,6 +1271,8 @@ class _DocTile extends StatelessWidget {
     switch (kind) {
       case LdTrainingRequirementDocKind.invitationLetter:
         return 'Invitation Letter';
+      case LdTrainingRequirementDocKind.travelOrder:
+        return 'Travel Order';
       case LdTrainingRequirementDocKind.lap:
         return 'Learning Application Plan (LAP)';
       case LdTrainingRequirementDocKind.trainingCertificate:
@@ -1279,6 +1284,8 @@ class _DocTile extends StatelessWidget {
     switch (kind) {
       case LdTrainingRequirementDocKind.invitationLetter:
         return 'For training travel • Mayor-approved document';
+      case LdTrainingRequirementDocKind.travelOrder:
+        return 'Official travel order for the training';
       case LdTrainingRequirementDocKind.lap:
         return 'Required after training completion';
       case LdTrainingRequirementDocKind.trainingCertificate:
@@ -1290,6 +1297,8 @@ class _DocTile extends StatelessWidget {
     switch (kind) {
       case LdTrainingRequirementDocKind.invitationLetter:
         return Icons.mail_outline_rounded;
+      case LdTrainingRequirementDocKind.travelOrder:
+        return Icons.airplane_ticket_outlined;
       case LdTrainingRequirementDocKind.lap:
         return Icons.menu_book_outlined;
       case LdTrainingRequirementDocKind.trainingCertificate:

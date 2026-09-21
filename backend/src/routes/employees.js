@@ -844,8 +844,9 @@ router.post('/', protect, requireAdmin, async (req, res) => {
 
     let accountEmailSent = false;
     let accountEmailError = null;
+    const skipAccountEmail = req.body?.skip_account_email === true;
 
-    if (createdEmployee.is_active && isSmtpConfigured()) {
+    if (createdEmployee.is_active && isSmtpConfigured() && !skipAccountEmail) {
       try {
         const employeeEmail = String(createdEmployee.email || '').trim();
         await sendSmtpMail({

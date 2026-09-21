@@ -3,6 +3,7 @@ const path = require('path');
 const fs = require('fs');
 const multer = require('multer');
 const jwt = require('jsonwebtoken');
+const bcrypt = require('bcrypt');
 const { pool } = require('../config/db');
 const {
   assertPositionAcceptingApplications,
@@ -12,12 +13,16 @@ const { requireAdmin } = require('../middleware/rbac');
 const { isAttachmentPathAllowedInDb } = require('../utils/rspAttachmentPolicy');
 const { resolveLocalRspAttachment, findLocalRspAttachment, RSP_SUBDIR } = require('../utils/rspLocalAttachment');
 const { sendSmtpMail, isSmtpConfigured } = require('../utils/smtpMail');
-const { notifyNewRecruitmentApplication } = require('../utils/emailJsMail');
-const recruitmentNotifications = require('../services/recruitmentNotifications');
 const {
+  notifyNewRecruitmentApplication,
   isEmailJsConfiguredForHireEmail,
   sendHireCredentialsEmailJs,
+  HIRE_CREDENTIALS_EMAIL_SUBJECT,
+  HIRE_LOGIN_INSTRUCTIONS,
+  buildHireCredentialsAccountNote,
+  buildHireCredentialsPlainText,
 } = require('../utils/emailJsMail');
+const recruitmentNotifications = require('../services/recruitmentNotifications');
 const { excludeMayorIntakeStubSql } = require('../utils/mayorIntakeStub');
 const {
   verifyRspEmailVerificationToken,
@@ -565,7 +570,6 @@ router.get('/by-email', publicLookupLimiter, async (req, res) => {
              final_interview_passed, final_requirements_approved,
              hr_account_setup_done, hired_user_id,
              hire_credentials_email_sent_at,
-             hire_login_username, hire_login_password,
              doc_application_letter_path, doc_application_letter_name,
              doc_resume_path, doc_resume_name,
              doc_tor_path, doc_tor_name,
@@ -625,15 +629,9 @@ router.get('/by-email', publicLookupLimiter, async (req, res) => {
       console.error('[rspApplications GET /by-email] applicant token', tokenErr);
     }
 
-    const accountReady =
-      row.hr_account_setup_done === true ||
-      (row.hired_user_id && String(row.hired_user_id).trim() !== '') ||
-      String(row.status || '').toLowerCase() === 'registered';
     const application = { ...row };
-    if (!accountReady) {
-      delete application.hire_login_username;
-      delete application.hire_login_password;
-    }
+    delete application.hire_login_username;
+    delete application.hire_login_password;
 
     return res.json({
       ok: true,
@@ -675,7 +673,11 @@ router.get('/by-applicant-number', async (req, res) => {
     const row = result.rows[0];
     if (!row) return res.status(404).json({ error: 'Applicant ID not found' });
 
-    return res.json({ ok: true, application: row });
+    const application = { ...row };
+    delete application.hire_login_username;
+    delete application.hire_login_password;
+
+    return res.json({ ok: true, application });
   } catch (err) {
     console.error('[rspApplications GET /by-applicant-number]', err);
     return res.status(500).json({
@@ -1258,7 +1260,7 @@ router.put('/:applicationId/hired-link', protect, async (req, res) => {
   try {
     await ensureRspApplicationsTables();
     const { applicationId } = req.params;
-    const { userId } = req.body || {};
+    const { userId, loginUsername, loginPassword } = req.body || {};
     if (!userId || typeof userId !== 'string') {
       return res.status(400).json({ error: 'userId is required' });
     }
@@ -1294,16 +1296,28 @@ router.put('/:applicationId/hired-link', protect, async (req, res) => {
       });
     }
 
+    const usernameToStore =
+      typeof loginUsername === 'string' && loginUsername.trim()
+        ? loginUsername.trim().toLowerCase()
+        : userEmail;
+    const passwordToStore =
+      typeof loginPassword === 'string' && loginPassword.length > 0
+        ? loginPassword
+        : null;
+
     const result = await pool.query(
       `
       UPDATE public.recruitment_applications
       SET hired_user_id = $1::uuid,
           status = 'registered',
+          hire_login_username = COALESCE($3, hire_login_username),
+          hire_login_password = COALESCE($4, hire_login_password),
+          hire_credentials_email_sent_at = NULL,
           updated_at = now()
       WHERE id = $2
       RETURNING ${RSP_APPLICATION_ROW_SELECT}
       `,
-      [userId, applicationId],
+      [userId, applicationId, usernameToStore, passwordToStore],
     );
     return res.json({ ok: true, application: result.rows[0] });
   } catch (err) {
@@ -1330,18 +1344,13 @@ router.post('/:applicationId/send-hire-email', protect, async (req, res) => {
     await ensureRspApplicationsTables();
     const { applicationId } = req.params;
     const { username, password } = req.body || {};
-    const u = typeof username === 'string' ? username.trim() : '';
-    const p = typeof password === 'string' ? password : '';
-    if (!u) {
-      return res.status(400).json({ error: 'username is required' });
-    }
-    if (!p) {
-      return res.status(400).json({ error: 'password is required' });
-    }
+    const bodyUser = typeof username === 'string' ? username.trim() : '';
+    const bodyPass = typeof password === 'string' ? password : '';
 
     const appQ = await pool.query(
       `
-      SELECT full_name, email, final_interview_passed, final_requirements_approved, hr_account_setup_done
+      SELECT full_name, email, final_interview_passed, final_requirements_approved, hr_account_setup_done,
+             hired_user_id, hire_login_username, hire_login_password
       FROM public.recruitment_applications
       WHERE id = $1
       `,
@@ -1362,17 +1371,37 @@ router.post('/:applicationId/send-hire-email', protect, async (req, res) => {
       });
     }
 
+    const storedUser = String(row.hire_login_username || '').trim();
+    const storedPass = String(row.hire_login_password || '');
+    const u = storedUser || bodyUser;
+    const p = storedPass || bodyPass;
+    if (!u) {
+      return res.status(400).json({ error: 'username is required' });
+    }
+    if (!p) {
+      return res.status(400).json({ error: 'password is required' });
+    }
+
     const to = String(row.email || '').trim();
     if (!to) {
       return res.status(400).json({ error: 'Applicant has no email on file' });
     }
 
+    // Keep the emailed password in sync with the employee login when Create Account
+    // credentials were not persisted (never fall back to Employee123).
+    if (!storedPass && p && row.hired_user_id) {
+      const passwordHash = await bcrypt.hash(p, 10);
+      await pool.query(
+        `UPDATE public.users SET password_hash = $1, updated_at = now() WHERE id = $2::uuid`,
+        [passwordHash, row.hired_user_id],
+      );
+    }
+
     const name =
       String(row.full_name || '').trim() || 'Applicant';
-    const accountDone = row.hr_account_setup_done === true;
-    const accountNote = accountDone
-      ? 'Your employee account is ready. Please sign in to the HRMS and change your password after your first login if you are prompted to do so.'
-      : 'If you cannot sign in yet, we may still be finishing your access in the system. Please reply to this email and we will assist you.';
+    const accountNote = buildHireCredentialsAccountNote(
+      row.hr_account_setup_done === true,
+    );
 
     if (useEmailJs) {
       await sendHireCredentialsEmailJs({
@@ -1381,21 +1410,19 @@ router.post('/:applicationId/send-hire-email', protect, async (req, res) => {
         username: u,
         password: p,
         accountNote,
+        loginInstructions: HIRE_LOGIN_INSTRUCTIONS,
       });
     } else {
-      const subject = 'Congratulations — LGU Plaridel employment';
-      const text =
-        `Dear ${name},\n\n` +
-        'Congratulations! We are pleased to inform you that you have passed the final interview and are hired by LGU Plaridel.\n\n' +
-        'Your login details:\n' +
-        `Username: ${u}\n` +
-        `Password: ${p}\n\n` +
-        `${accountNote}\n\n` +
-        'Best regards,\n' +
-        'Human Resources\n' +
-        'LGU Plaridel';
-
-      await sendSmtpMail({ to, subject, text });
+      await sendSmtpMail({
+        to,
+        subject: HIRE_CREDENTIALS_EMAIL_SUBJECT,
+        text: buildHireCredentialsPlainText({
+          applicantName: name,
+          username: u,
+          password: p,
+          accountNote,
+        }),
+      });
     }
 
     await pool.query(

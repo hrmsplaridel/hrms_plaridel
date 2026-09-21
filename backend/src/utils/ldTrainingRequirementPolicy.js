@@ -16,6 +16,7 @@ async function isLdTrainingRequirementPathAllowed(objectPath) {
         WHERE btrim($1::text) <> ''
           AND (
             btrim($1::text) = btrim(COALESCE(r.doc_invitation_letter_path, ''))
+            OR btrim($1::text) = btrim(COALESCE(r.doc_travel_order_path, ''))
             OR btrim($1::text) = btrim(COALESCE(r.doc_lap_path, ''))
             OR btrim($1::text) = btrim(COALESCE(r.doc_training_certificate_path, ''))
             OR btrim($1::text) LIKE r.id::text || '/%'

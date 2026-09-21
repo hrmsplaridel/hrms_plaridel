@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:math';
 
 import 'package:dio/dio.dart';
 import 'package:file_picker/file_picker.dart';
@@ -133,31 +132,6 @@ const String kDefaultEmployeePassword = kDefaultEmployeeAccountPassword;
 
 String defaultPasswordForRoleKey(String role) =>
     role == 'admin' ? kDefaultAdminPassword : kDefaultEmployeePassword;
-
-String generateTemporaryAccountPassword({int length = 12}) {
-  final random = Random.secure();
-  const lower = 'abcdefghijkmnopqrstuvwxyz';
-  const upper = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
-  const numbers = '23456789';
-  const symbols = '!@#%';
-  const all = '$lower$upper$numbers$symbols';
-  final chars = <String>[
-    lower[random.nextInt(lower.length)],
-    upper[random.nextInt(upper.length)],
-    numbers[random.nextInt(numbers.length)],
-    symbols[random.nextInt(symbols.length)],
-  ];
-  while (chars.length < length) {
-    chars.add(all[random.nextInt(all.length)]);
-  }
-  for (var i = chars.length - 1; i > 0; i--) {
-    final j = random.nextInt(i + 1);
-    final tmp = chars[i];
-    chars[i] = chars[j];
-    chars[j] = tmp;
-  }
-  return chars.join();
-}
 
 /// Create Account form. Use inline in Dashboard. Single place for adding employees.
 /// Prefer JSON `error` from API responses (Dio), then Dio message.

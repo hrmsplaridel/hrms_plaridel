@@ -14,42 +14,48 @@ double dashboardHeaderBarHeight(BuildContext context) {
   return MediaQuery.sizeOf(context).width < 600 ? 72 : 76;
 }
 
-/// Municipality seal in a circle (sidebar, header, rail).
+/// HRMS logo in a filled circular frame with orange ring (matches sidebar profile avatar).
 class PlaridelCircleLogo extends StatelessWidget {
   const PlaridelCircleLogo({
     super.key,
     required this.size,
-    this.borderWidth = 2,
+    this.borderWidth = 2.5,
     this.showShadow = true,
-    this.innerPaddingFactor = 0.08,
+    /// Keep 0 so the artwork fills the circle edge-to-edge.
+    this.innerPaddingFactor = 0,
   });
 
   final double size;
   final double borderWidth;
   final bool showShadow;
 
-  /// Inset between circle edge and seal artwork (breathing room inside ring).
+  /// Inset between circle edge and artwork. Prefer 0 for a full circular crop.
   final double innerPaddingFactor;
 
-  static const _asset = 'assets/images/hrmslogo.png';
+  static const _asset = 'assets/images/logo.png';
 
   @override
   Widget build(BuildContext context) {
+    final ring = borderWidth > 0 ? borderWidth : 0.0;
+    final inner = (size - ring * 2).clamp(1.0, size);
+    final pad = inner * innerPaddingFactor.clamp(0.0, 0.35);
+
     return Container(
       width: size,
       height: size,
       decoration: BoxDecoration(
         shape: BoxShape.circle,
-        border: borderWidth > 0
+        color: Colors.white,
+        border: ring > 0
             ? Border.all(
-                color: AppTheme.primaryNavy.withValues(alpha: 0.2),
-                width: borderWidth,
+                color: AppTheme.primaryNavy,
+                width: ring,
               )
             : null,
         boxShadow: showShadow
             ? [
                 BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.08),
+                  color: AppTheme.primaryNavy.withValues(alpha: 0.22),
                   blurRadius: 10,
                   offset: const Offset(0, 3),
                 ),
@@ -57,26 +63,30 @@ class PlaridelCircleLogo extends StatelessWidget {
             : null,
       ),
       child: ClipOval(
-        child: Padding(
-          padding: EdgeInsets.all(size * innerPaddingFactor),
-          child: Image.asset(
-            _asset,
-            width: size,
-            height: size,
-            fit: BoxFit.contain,
-            filterQuality: FilterQuality.high,
-            gaplessPlayback: true,
-            errorBuilder: (context, error, stackTrace) {
-              debugPrint('HRMS logo failed to load: $error');
-              return ColoredBox(
-                color: AppTheme.primaryNavy.withValues(alpha: 0.08),
-                child: Icon(
-                  Icons.hub_rounded,
-                  size: size * 0.4,
-                  color: AppTheme.primaryNavy,
-                ),
-              );
-            },
+        child: ColoredBox(
+          color: Colors.white,
+          child: Padding(
+            padding: EdgeInsets.all(pad),
+            child: Image.asset(
+              _asset,
+              width: inner,
+              height: inner,
+              fit: BoxFit.cover,
+              alignment: Alignment.center,
+              filterQuality: FilterQuality.high,
+              gaplessPlayback: true,
+              errorBuilder: (context, error, stackTrace) {
+                debugPrint('HRMS logo failed to load: $error');
+                return ColoredBox(
+                  color: AppTheme.primaryNavy.withValues(alpha: 0.08),
+                  child: Icon(
+                    Icons.hub_rounded,
+                    size: inner * 0.4,
+                    color: AppTheme.primaryNavy,
+                  ),
+                );
+              },
+            ),
           ),
         ),
       ),
@@ -372,7 +382,7 @@ class _SidebarRailMedallion extends StatelessWidget {
           size: size - 10,
           borderWidth: 0,
           showShadow: false,
-          innerPaddingFactor: 0.1,
+          innerPaddingFactor: 0,
         ),
       ),
     );

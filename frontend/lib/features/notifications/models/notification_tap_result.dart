@@ -29,9 +29,12 @@ enum NotificationTapKind {
 }
 
 class NotificationTapResult {
-  const NotificationTapResult(this.kind);
+  const NotificationTapResult(this.kind, {this.referenceId});
 
   final NotificationTapKind kind;
+
+  /// Backend `reference_id` (leave request, locator slip, application, …).
+  final String? referenceId;
 
   /// Maps backend [AppNotification.type] + user [role] to a navigation target.
   static NotificationTapResult fromNotification(
@@ -52,7 +55,10 @@ class NotificationTapResult {
     }
 
     if (cat == 'recruitment' && isPrivileged) {
-      return const NotificationTapResult(NotificationTapKind.adminRecruitment);
+      return NotificationTapResult(
+        NotificationTapKind.adminRecruitment,
+        referenceId: _trimmedOrNull(n.referenceId),
+      );
     }
     if (cat == 'training' && isPrivileged) {
       return const NotificationTapResult(
@@ -116,6 +122,12 @@ class NotificationTapResult {
     return const NotificationTapResult(
       NotificationTapKind.employeeLeaveRequests,
     );
+  }
+
+  static String? _trimmedOrNull(String? value) {
+    final trimmed = value?.trim();
+    if (trimmed == null || trimmed.isEmpty) return null;
+    return trimmed;
   }
 
   /// Resolved [LeaveSection] for employee [LeaveMain], or null if not applicable.

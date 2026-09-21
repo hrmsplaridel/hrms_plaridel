@@ -1,16 +1,19 @@
 import 'package:hrms_plaridel/core/api/client.dart';
 import 'package:hrms_plaridel/core/api/config.dart';
 
-/// Pre-training: invitation letter. Post-training: LAP + certificate.
+/// Pre-training: invitation letter + travel order. Post-training: LAP + certificate.
 enum LdTrainingRequirementDocKind {
   invitationLetter('invitation_letter'),
+  travelOrder('travel_order'),
   lap('lap'),
   trainingCertificate('training_certificate');
 
   const LdTrainingRequirementDocKind(this.apiValue);
   final String apiValue;
 
-  bool get isPreTraining => this == LdTrainingRequirementDocKind.invitationLetter;
+  bool get isPreTraining =>
+      this == LdTrainingRequirementDocKind.invitationLetter ||
+      this == LdTrainingRequirementDocKind.travelOrder;
 }
 
 class LdTrainingRequirementRecord {
@@ -22,6 +25,8 @@ class LdTrainingRequirementRecord {
     this.trainingTitle,
     this.docInvitationLetterPath,
     this.docInvitationLetterName,
+    this.docTravelOrderPath,
+    this.docTravelOrderName,
     this.docLapPath,
     this.docLapName,
     this.docTrainingCertificatePath,
@@ -39,6 +44,8 @@ class LdTrainingRequirementRecord {
   final String? trainingTitle;
   final String? docInvitationLetterPath;
   final String? docInvitationLetterName;
+  final String? docTravelOrderPath;
+  final String? docTravelOrderName;
   final String? docLapPath;
   final String? docLapName;
   final String? docTrainingCertificatePath;
@@ -48,20 +55,36 @@ class LdTrainingRequirementRecord {
   final DateTime? createdAt;
   final DateTime? updatedAt;
 
-  bool get hasPreTrainingDoc =>
-      docInvitationLetterPath != null && docInvitationLetterPath!.trim().isNotEmpty;
+  bool get hasPreTrainingDoc {
+    final invitation =
+        docInvitationLetterPath != null &&
+        docInvitationLetterPath!.trim().isNotEmpty;
+    final travelOrder =
+        docTravelOrderPath != null && docTravelOrderPath!.trim().isNotEmpty;
+    return invitation && travelOrder;
+  }
 
   bool get hasAllPostTrainingDocs {
     final lap = docLapPath != null && docLapPath!.trim().isNotEmpty;
-    final cert = docTrainingCertificatePath != null &&
+    final cert =
+        docTrainingCertificatePath != null &&
         docTrainingCertificatePath!.trim().isNotEmpty;
     return lap && cert;
   }
+
+  /// Best available activity time for "latest submission" sorting.
+  ///
+  /// Schema has no per-document submitted_at; document uploads (and other
+  /// record writes) bump [updatedAt]. Falls back to [createdAt].
+  DateTime get sortSubmissionAt =>
+      updatedAt ?? createdAt ?? DateTime.fromMillisecondsSinceEpoch(0);
 
   String? docPath(LdTrainingRequirementDocKind kind) {
     switch (kind) {
       case LdTrainingRequirementDocKind.invitationLetter:
         return docInvitationLetterPath;
+      case LdTrainingRequirementDocKind.travelOrder:
+        return docTravelOrderPath;
       case LdTrainingRequirementDocKind.lap:
         return docLapPath;
       case LdTrainingRequirementDocKind.trainingCertificate:
@@ -73,6 +96,8 @@ class LdTrainingRequirementRecord {
     switch (kind) {
       case LdTrainingRequirementDocKind.invitationLetter:
         return docInvitationLetterName;
+      case LdTrainingRequirementDocKind.travelOrder:
+        return docTravelOrderName;
       case LdTrainingRequirementDocKind.lap:
         return docLapName;
       case LdTrainingRequirementDocKind.trainingCertificate:
@@ -89,6 +114,8 @@ class LdTrainingRequirementRecord {
       trainingTitle: json['training_title'] as String?,
       docInvitationLetterPath: json['doc_invitation_letter_path'] as String?,
       docInvitationLetterName: json['doc_invitation_letter_name'] as String?,
+      docTravelOrderPath: json['doc_travel_order_path'] as String?,
+      docTravelOrderName: json['doc_travel_order_name'] as String?,
       docLapPath: json['doc_lap_path'] as String?,
       docLapName: json['doc_lap_name'] as String?,
       docTrainingCertificatePath:
@@ -109,7 +136,8 @@ class LdTrainingRequirementRecord {
 
 class LdTrainingRequirementRepo {
   LdTrainingRequirementRepo._();
-  static final LdTrainingRequirementRepo instance = LdTrainingRequirementRepo._();
+  static final LdTrainingRequirementRepo instance =
+      LdTrainingRequirementRepo._();
 
   Future<List<LdTrainingRequirementRecord>> listAll() async {
     final res = await ApiClient.instance.get<List<dynamic>>(

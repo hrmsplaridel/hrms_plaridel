@@ -34,7 +34,7 @@ const _ldHubFeatures = <LdHubFeature>[
   LdHubFeature(
     title: 'Training Requirements',
     subtitle:
-        'Monitor pre-training (invitation letter) and post-training (LAP, certificates) submissions.',
+        'Monitor pre-training (invitation letter, travel order) and post-training (LAP, certificates) submissions.',
     icon: Icons.fact_check_outlined,
     sectionIndex: 5,
   ),

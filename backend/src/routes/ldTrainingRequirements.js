@@ -26,6 +26,10 @@ const DOC_KIND_COLUMNS = {
     pathCol: 'doc_invitation_letter_path',
     nameCol: 'doc_invitation_letter_name',
   },
+  travel_order: {
+    pathCol: 'doc_travel_order_path',
+    nameCol: 'doc_travel_order_name',
+  },
   lap: { pathCol: 'doc_lap_path', nameCol: 'doc_lap_name' },
   training_certificate: {
     pathCol: 'doc_training_certificate_path',
@@ -45,6 +49,8 @@ const ROW_SELECT = `
   r.training_title,
   r.doc_invitation_letter_path,
   r.doc_invitation_letter_name,
+  r.doc_travel_order_path,
+  r.doc_travel_order_name,
   r.doc_lap_path,
   r.doc_lap_name,
   r.doc_training_certificate_path,
@@ -66,6 +72,8 @@ async function ensureTable() {
       training_title TEXT,
       doc_invitation_letter_path TEXT,
       doc_invitation_letter_name TEXT,
+      doc_travel_order_path TEXT,
+      doc_travel_order_name TEXT,
       doc_lap_path TEXT,
       doc_lap_name TEXT,
       doc_training_certificate_path TEXT,
@@ -76,6 +84,12 @@ async function ensureTable() {
       updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
       CONSTRAINT uq_ld_training_requirement_employee UNIQUE (employee_id)
     );
+  `);
+  // Existing deployments created the table before travel order existed.
+  await pool.query(`
+    ALTER TABLE public.ld_training_requirement_records
+      ADD COLUMN IF NOT EXISTS doc_travel_order_path TEXT,
+      ADD COLUMN IF NOT EXISTS doc_travel_order_name TEXT;
   `);
 }
 
@@ -89,6 +103,8 @@ function mapRow(row) {
     training_title: row.training_title,
     doc_invitation_letter_path: row.doc_invitation_letter_path,
     doc_invitation_letter_name: row.doc_invitation_letter_name,
+    doc_travel_order_path: row.doc_travel_order_path,
+    doc_travel_order_name: row.doc_travel_order_name,
     doc_lap_path: row.doc_lap_path,
     doc_lap_name: row.doc_lap_name,
     doc_training_certificate_path: row.doc_training_certificate_path,
@@ -248,6 +264,7 @@ router.get('/view-token', protect, async (req, res) => {
       SELECT employee_id
       FROM public.ld_training_requirement_records r
       WHERE btrim($1::text) = btrim(COALESCE(r.doc_invitation_letter_path, ''))
+         OR btrim($1::text) = btrim(COALESCE(r.doc_travel_order_path, ''))
          OR btrim($1::text) = btrim(COALESCE(r.doc_lap_path, ''))
          OR btrim($1::text) = btrim(COALESCE(r.doc_training_certificate_path, ''))
          OR btrim($1::text) LIKE r.id::text || '/%'
@@ -313,7 +330,7 @@ router.post(
         SET "${pathCol}" = $1,
             "${nameCol}" = $2,
             pre_requirements_approved = CASE
-              WHEN $3::text = 'invitation_letter' THEN FALSE
+              WHEN $3::text IN ('invitation_letter', 'travel_order') THEN FALSE
               ELSE pre_requirements_approved
             END,
             post_requirements_approved = CASE
@@ -346,16 +363,27 @@ router.put('/:recordId/pre-approval', adminProtect, async (req, res) => {
       return res.status(400).json({ error: 'approved is required (true or false)' });
     }
     const check = await pool.query(
-      `SELECT doc_invitation_letter_path FROM public.ld_training_requirement_records WHERE id = $1`,
+      `
+      SELECT doc_invitation_letter_path, doc_travel_order_path
+      FROM public.ld_training_requirement_records
+      WHERE id = $1
+      `,
       [recordId],
     );
     if (!check.rows[0]) {
       return res.status(404).json({ error: 'Record not found' });
     }
-    if (approved && !check.rows[0].doc_invitation_letter_path) {
-      return res.status(400).json({
-        error: 'Invitation letter must be uploaded before pre-training approval',
-      });
+    if (approved) {
+      if (!check.rows[0].doc_invitation_letter_path) {
+        return res.status(400).json({
+          error: 'Invitation letter must be uploaded before pre-training approval',
+        });
+      }
+      if (!check.rows[0].doc_travel_order_path) {
+        return res.status(400).json({
+          error: 'Travel order must be uploaded before pre-training approval',
+        });
+      }
     }
     const { rows } = await pool.query(
       `

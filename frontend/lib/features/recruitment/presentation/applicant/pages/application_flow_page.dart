@@ -124,8 +124,6 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
   /// HR monitoring flag for Step 8 (independent of employee user link).
   bool _hrAccountSetupDone = false;
   DateTime? _hireCredentialsEmailSentAt;
-  String? _hireLoginUsername;
-  String? _hireLoginPassword;
 
   final _firstNameController = TextEditingController();
   final _middleNameController = TextEditingController();
@@ -960,8 +958,6 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
     _hiredUserId = app.hiredUserId;
     _hrAccountSetupDone = app.hrAccountSetupDone;
     _hireCredentialsEmailSentAt = app.hireCredentialsEmailSentAt;
-    _hireLoginUsername = app.hireLoginUsername;
-    _hireLoginPassword = app.hireLoginPassword;
     if (app.email.trim().isNotEmpty) {
       _emailController.text = app.email.trim();
       if (_continueEmailController.text.trim().isEmpty) {
@@ -6090,15 +6086,11 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
     final passedFinal = _finalInterviewPassed == true;
     final failedFinal = _finalInterviewPassed == false;
     final finalReqApproved = _finalRequirementsApproved;
-    final loginUsername = (_hireLoginUsername ?? '').trim().isNotEmpty
-        ? _hireLoginUsername!.trim()
-        : _emailController.text.trim();
-    final loginPassword = (_hireLoginPassword ?? '').trim();
     String headerSubtitle;
     if (failedFinal) {
       headerSubtitle = 'Current hiring status from HR.';
     } else if (accountReady) {
-      headerSubtitle = 'Your employee account is ready.';
+      headerSubtitle = 'Your application is successful. You can now start work.';
     } else if (passedFinal &&
         finalReqApproved &&
         _orientationAttended == true) {
@@ -6230,13 +6222,8 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
           ),
         ] else ...[
           RspApplicantAccountDetailsCard(
-            username: loginUsername.isNotEmpty
-                ? loginUsername
-                : 'Check the hire email from HR',
-            password: loginPassword.isNotEmpty ? loginPassword : null,
             gmailAddress: _emailController.text.trim(),
             emailSentAt: _hireCredentialsEmailSentAt,
-            onGoToLogin: () => Navigator.of(context).pop(),
             onRefresh: _refreshHiringStatus,
             refreshBusy: _hiringStatusRefreshing,
           ),

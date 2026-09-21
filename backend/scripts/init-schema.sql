@@ -1762,6 +1762,8 @@ CREATE TABLE IF NOT EXISTS ld_training_requirement_records (
   training_title TEXT,
   doc_invitation_letter_path TEXT,
   doc_invitation_letter_name TEXT,
+  doc_travel_order_path TEXT,
+  doc_travel_order_name TEXT,
   doc_lap_path TEXT,
   doc_lap_name TEXT,
   doc_training_certificate_path TEXT,

@@ -838,10 +838,21 @@ class RecruitmentRepo {
   }
 
   /// Admin: link newly created employee user to this application (sets status `registered`).
-  Future<void> linkHiredUser(String applicationId, String userId) async {
+  Future<void> linkHiredUser(
+    String applicationId,
+    String userId, {
+    String? loginEmail,
+    String? loginPassword,
+  }) async {
     await ApiClient.instance.put<void>(
       '/api/rsp/applications/$applicationId/hired-link',
-      data: {'userId': userId},
+      data: {
+        'userId': userId,
+        if (loginEmail != null && loginEmail.trim().isNotEmpty)
+          'loginUsername': loginEmail.trim(),
+        if (loginPassword != null && loginPassword.isNotEmpty)
+          'loginPassword': loginPassword,
+      },
     );
   }
 

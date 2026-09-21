@@ -37,7 +37,7 @@ class DesktopLifecycleService with WindowListener, TrayListener {
     _notificationIconPath = iconPath;
 
     await trayManager.setIcon(iconPath);
-    await trayManager.setToolTip('HRMS Plaridel');
+    await trayManager.setToolTip('HRMS');
     await trayManager.setContextMenu(
       Menu(
         items: [

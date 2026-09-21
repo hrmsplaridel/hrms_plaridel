@@ -1,8 +1,48 @@
+import 'dart:math' show Random;
+
 import 'package:flutter/foundation.dart';
 
 /// Default passwords used when creating HRMS accounts (Create Account form).
 const String kDefaultEmployeeAccountPassword = 'Employee123';
 const String kDefaultAdminAccountPassword = 'Admin123';
+
+/// Randomized temporary password shown on Create Account and emailed to hires.
+String generateTemporaryAccountPassword({int length = 12}) {
+  final random = Random.secure();
+  const lower = 'abcdefghijkmnopqrstuvwxyz';
+  const upper = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
+  const numbers = '23456789';
+  const symbols = '!@#%';
+  const all = '$lower$upper$numbers$symbols';
+  final chars = <String>[
+    lower[random.nextInt(lower.length)],
+    upper[random.nextInt(upper.length)],
+    numbers[random.nextInt(numbers.length)],
+    symbols[random.nextInt(symbols.length)],
+  ];
+  while (chars.length < length) {
+    chars.add(all[random.nextInt(all.length)]);
+  }
+  for (var i = chars.length - 1; i > 0; i--) {
+    final j = random.nextInt(i + 1);
+    final tmp = chars[i];
+    chars[i] = chars[j];
+    chars[j] = tmp;
+  }
+  return chars.join();
+}
+
+/// Password HR should email: the Create Account value, never Employee123.
+String resolveHireLoginPassword({
+  String? storedPassword,
+  String? persistedPassword,
+}) {
+  final stored = storedPassword?.trim() ?? '';
+  if (stored.isNotEmpty) return stored;
+  final persisted = persistedPassword?.trim() ?? '';
+  if (persisted.isNotEmpty) return persisted;
+  return generateTemporaryAccountPassword();
+}
 
 /// Login details captured when HR creates an account from RSP.
 class CreatedAccountCredentials {

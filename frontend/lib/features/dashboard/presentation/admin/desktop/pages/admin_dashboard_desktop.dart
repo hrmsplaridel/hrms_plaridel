@@ -48,6 +48,7 @@ import 'package:hrms_plaridel/features/dtr/leave/presentation/shared/pages/leave
 import 'package:hrms_plaridel/features/dtr/leave/utils/responsive_leave_form_host.dart';
 import 'package:hrms_plaridel/features/dtr/locator/presentation/admin/pages/admin_locator_management_screen.dart';
 import 'package:hrms_plaridel/features/recruitment/presentation/admin/pages/rsp_admin_screen.dart';
+import 'package:hrms_plaridel/features/recruitment/data/recruitment_hire_prefill.dart';
 import 'package:hrms_plaridel/shared/widgets/feature_card.dart';
 import 'package:hrms_plaridel/features/dashboard/presentation/employee/employee_dashboard.dart';
 import 'package:hrms_plaridel/features/notifications/data/notification_provider.dart';
@@ -315,11 +316,7 @@ class _AdminWelcomeBanner extends StatelessWidget {
           child: stack
               ? Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    greetingBlock,
-                    const SizedBox(height: 16),
-                    status,
-                  ],
+                  children: [greetingBlock, const SizedBox(height: 16), status],
                 )
               : Row(
                   crossAxisAlignment: CrossAxisAlignment.center,
@@ -362,6 +359,10 @@ class _AdminDashboardState extends State<AdminDashboard>
   bool _sidebarCollapsed = false;
   final GlobalKey<_DtrContentState> _dtrContentKey =
       GlobalKey<_DtrContentState>();
+  String? _pendingRspApplicationId;
+  String? _pendingRspFinalReqApplicationId;
+  String? _rspHireReturnApplicationId;
+  int _rspHomeEpoch = 0;
   static const _settingsPanelKey = PageStorageKey<String>('admin_settings');
   final GlobalKey<NavigatorState> _contentNavKey = GlobalKey<NavigatorState>();
   late final Widget _settingsPanelWidget;
@@ -437,7 +438,15 @@ class _AdminDashboardState extends State<AdminDashboard>
         });
         break;
       case NotificationTapKind.adminRecruitment:
-        setState(() => _selectedMenu = AdminMenu.rsp);
+        final applicationId = result.referenceId?.trim().isNotEmpty == true
+            ? result.referenceId!.trim()
+            : null;
+        _dismissRspApplicantDetails();
+        setState(() {
+          _selectedMenu = AdminMenu.rsp;
+          _pendingRspApplicationId = applicationId;
+          _rspHomeEpoch++;
+        });
         DashboardContentNavigator.showHome(_contentNavKey);
         break;
       case NotificationTapKind.adminTrainingReports:
@@ -454,8 +463,62 @@ class _AdminDashboardState extends State<AdminDashboard>
     }
   }
 
+  void _dismissRspApplicantDetails() {
+    final nav = Navigator.of(context, rootNavigator: true);
+    nav.popUntil(
+      (route) => route.settings.name != RspAdminContent.applicantDetailsRoute,
+    );
+  }
+
+  void _clearRspNotificationDeepLink({required bool rebuildRspHome}) {
+    if (_pendingRspApplicationId == null &&
+        _pendingRspFinalReqApplicationId == null &&
+        !rebuildRspHome) {
+      return;
+    }
+    _pendingRspApplicationId = null;
+    _pendingRspFinalReqApplicationId = null;
+    if (rebuildRspHome) _rspHomeEpoch++;
+  }
+
+  void _openCreateAccountFromRspHire() {
+    final hire = context.read<RecruitmentHirePrefill>();
+    final applicationId = hire.applicationId?.trim();
+    _rspHireReturnApplicationId =
+        (applicationId != null && applicationId.isNotEmpty)
+        ? applicationId
+        : null;
+    _onMenuSelected(AdminMenu.createAccount);
+  }
+
+  void _onCreateAccountFinished() {
+    final applicationId = _rspHireReturnApplicationId?.trim();
+    _rspHireReturnApplicationId = null;
+    if (applicationId == null || applicationId.isEmpty) return;
+    _dismissRspApplicantDetails();
+    setState(() {
+      _selectedMenu = AdminMenu.rsp;
+      _pendingRspApplicationId = null;
+      _pendingRspFinalReqApplicationId = applicationId;
+      _rspHomeEpoch++;
+    });
+    DashboardContentNavigator.showHome(_contentNavKey);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text(
+          'Account created. Send the login credentials from Final Requirements.',
+        ),
+      ),
+    );
+  }
+
   void _onMenuSelected(AdminMenu menu) {
+    if (menu != AdminMenu.createAccount) {
+      _rspHireReturnApplicationId = null;
+    }
     if (menu == AdminMenu.myProfile) {
+      _dismissRspApplicantDetails();
       _openMyProfile();
       return;
     }
@@ -463,8 +526,12 @@ class _AdminDashboardState extends State<AdminDashboard>
       _contentNavKey.currentState,
     );
     if (_selectedMenu == menu && !settingsOnTop) return;
+    _dismissRspApplicantDetails();
+    _clearRspNotificationDeepLink(rebuildRspHome: menu == AdminMenu.rsp);
     if (_selectedMenu != menu) {
       setState(() => _selectedMenu = menu);
+    } else {
+      setState(() {});
     }
     DashboardContentNavigator.showHome(_contentNavKey);
     if (menu == AdminMenu.docutracker) {
@@ -570,14 +637,31 @@ class _AdminDashboardState extends State<AdminDashboard>
         return _DtrContent(key: _dtrContentKey);
       case AdminMenu.rsp:
         return RspAdminContent(
-          onOpenCreateAccount: () => _onMenuSelected(AdminMenu.createAccount),
+          onOpenCreateAccount: _openCreateAccountFromRspHire,
+          initialApplicationId: _pendingRspApplicationId,
+          initialFinalRequirementsApplicationId:
+              _pendingRspFinalReqApplicationId,
+          onInitialApplicationConsumed: () {
+            if (_pendingRspApplicationId == null &&
+                _pendingRspFinalReqApplicationId == null) {
+              return;
+            }
+            setState(() {
+              _pendingRspApplicationId = null;
+              _pendingRspFinalReqApplicationId = null;
+            });
+          },
         );
       case AdminMenu.ld:
         return const _LdContent();
       case AdminMenu.docutracker:
         return const DocuTrackerMain(isAdmin: true);
       case AdminMenu.createAccount:
-        return const _AdminSignUpContent();
+        return _AdminSignUpContent(
+          onAccountCreated: _rspHireReturnApplicationId != null
+              ? _onCreateAccountFinished
+              : null,
+        );
     }
   }
 
@@ -668,6 +752,7 @@ class _AdminDashboardState extends State<AdminDashboard>
                                 _selectedMenu,
                                 displayName,
                                 contentPadding,
+                                _rspHomeEpoch,
                               ),
                               homeBuilder: () => _buildContent(displayName),
                               settingsPanel: _settingsPanel(),
@@ -710,6 +795,7 @@ class _AdminDashboardState extends State<AdminDashboard>
                           _selectedMenu,
                           displayName,
                           contentPadding,
+                          _rspHomeEpoch,
                         ),
                         homeBuilder: () => _buildContent(displayName),
                         settingsPanel: _settingsPanel(),
@@ -1726,7 +1812,9 @@ class _DtrFeatureCacheEntry {
 
 /// Create Account: full form displayed directly (single place for adding employees).
 class _AdminSignUpContent extends StatelessWidget {
-  const _AdminSignUpContent();
+  const _AdminSignUpContent({this.onAccountCreated});
+
+  final VoidCallback? onAccountCreated;
 
   @override
   Widget build(BuildContext context) {
@@ -1795,7 +1883,7 @@ class _AdminSignUpContent extends StatelessWidget {
             ],
           ),
           clipBehavior: Clip.antiAlias,
-          child: const AddEmployeeForm(),
+          child: AddEmployeeForm(onAccountCreated: onAccountCreated),
         ),
       ],
     );
@@ -2275,7 +2363,9 @@ class _LdContentState extends State<_LdContent> {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             mainAxisSize: MainAxisSize.min,
             children: [
-              if (_ldSectionIndex != 0 && _ldSectionIndex != 1) ...[
+              if (_ldSectionIndex != 0 &&
+                  _ldSectionIndex != 1 &&
+                  _ldSectionIndex != 5) ...[
                 Align(
                   alignment: Alignment.centerLeft,
                   child: TextButton.icon(
@@ -2301,7 +2391,9 @@ class _LdContentState extends State<_LdContent> {
               else if (_ldSectionIndex == 3)
                 const LdTrainingDailyReportsSection()
               else if (_ldSectionIndex == 5)
-                const LdTrainingRequirementsAdminSection()
+                LdTrainingRequirementsAdminSection(
+                  onBackToLd: () => setState(() => _ldSectionIndex = 0),
+                )
               else
                 const SizedBox.shrink(),
             ],

@@ -43,7 +43,7 @@ class _HrmsMaterialApp extends StatelessWidget {
     );
 
     return MaterialApp(
-      title: 'HRMS Plaridel',
+      title: 'HRMS',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.lightTheme,
       darkTheme: AppTheme.darkTheme,
@@ -111,7 +111,7 @@ class _StartupGateState extends State<_StartupGate> {
         if (snapshot.connectionState != ConnectionState.done) {
           return const SignOutLoadingOverlay(
             title: 'Preparing your workspace',
-            subtitle: 'Loading HRMS Plaridel',
+            subtitle: 'Loading HRMS',
           );
         }
         final view = WidgetsBinding.instance.platformDispatcher.views.first;

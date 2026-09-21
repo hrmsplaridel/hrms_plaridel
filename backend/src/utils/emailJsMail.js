@@ -228,11 +228,67 @@ async function notifyNewRecruitmentApplication(row) {
 /**
  * Hire credentials email (POST …/send-hire-email). Template must accept dynamic recipient.
  * Env: EMAILJS_TEMPLATE_HIRE_CREDENTIALS_ID + service + public key.
+ *
+ * Recommended EmailJS template (To Email = {{to_email}}):
+ *
+ *   Hello {{applicant_name}},
+ *
+ *   Congratulations on joining LGU Plaridel. Your HRMS login details are below.
+ *
+ *   Username: {{username}}
+ *   Password: {{password}}
+ *
+ *   {{account_note}}
+ *
+ *   This email is not encrypted. Keep your password private. If you did not expect
+ *   this email, contact HR immediately.
+ *
+ *   Best regards,
+ *   Human Resource Management Office
+ *   LGU Plaridel
  */
 function isEmailJsConfiguredForHireEmail() {
   const { serviceId, publicKey } = getConfig();
   const templateId = (process.env.EMAILJS_TEMPLATE_HIRE_CREDENTIALS_ID || '').trim();
   return !!(serviceId && publicKey && templateId);
+}
+
+const HIRE_CREDENTIALS_EMAIL_SUBJECT = 'Welcome — LGU Plaridel HRMS account';
+
+const HIRE_LOGIN_INSTRUCTIONS =
+  'Please wait for the HR Head or Admin before you sign in. They will tell you when and how to access HRMS.\n\n' +
+  'How to log in (only after HR instructs you):\n' +
+  '1. Keep this username and temporary password private. Do not share them with anyone.\n' +
+  '2. Open the LGU Plaridel HRMS login page when the HR Head or Admin tells you to.\n' +
+  '3. Enter the username and password in this email.\n' +
+  '4. Change your password if the system asks you to after the first login.\n\n' +
+  'Do not try to log in on your own before you receive those instructions.';
+
+function buildHireCredentialsAccountNote(accountReady) {
+  const readiness = accountReady
+    ? 'Your employee account has been created.'
+    : 'HR is finishing your employee account in the system. If you still cannot sign in after the HR Head or Admin has instructed you, reply to this email.';
+  return `${readiness}\n\n${HIRE_LOGIN_INSTRUCTIONS}`;
+}
+
+function buildHireCredentialsPlainText({
+  applicantName,
+  username,
+  password,
+  accountNote,
+}) {
+  const name = String(applicantName || '').trim() || 'Applicant';
+  return (
+    `Hello ${name},\n\n` +
+    'Congratulations on joining LGU Plaridel. Your HRMS login details are below.\n\n' +
+    `Username: ${username}\n` +
+    `Password: ${password}\n\n` +
+    `${accountNote}\n\n` +
+    'This email is not encrypted. Keep your password private. If you did not expect this email, contact HR immediately.\n\n' +
+    'Best regards,\n' +
+    'Human Resource Management Office\n' +
+    'LGU Plaridel'
+  );
 }
 
 /**
@@ -242,6 +298,7 @@ function isEmailJsConfiguredForHireEmail() {
  *   username: string,
  *   password: string,
  *   accountNote: string,
+ *   loginInstructions?: string,
  * }} opts
  */
 async function sendHireCredentialsEmailJs(opts) {
@@ -254,6 +311,7 @@ async function sendHireCredentialsEmailJs(opts) {
       username: opts.username,
       password: opts.password,
       account_note: opts.accountNote,
+      login_instructions: opts.loginInstructions || HIRE_LOGIN_INSTRUCTIONS,
     },
   });
 }
@@ -345,6 +403,10 @@ module.exports = {
   isEmailJsConfiguredForApplicant,
   isEmailJsConfiguredForHireEmail,
   sendHireCredentialsEmailJs,
+  HIRE_CREDENTIALS_EMAIL_SUBJECT,
+  HIRE_LOGIN_INSTRUCTIONS,
+  buildHireCredentialsAccountNote,
+  buildHireCredentialsPlainText,
   isEmailJsContactConfigured,
   sendContactUsEmailJs,
   isEmailJsRspOtpConfigured,
