@@ -57,6 +57,8 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
   List<LeaveTypeDefinition> _leaveTypeDefinitions = const [];
   List<LeaveBalance> _creditBalances = const [];
   bool _loadingLeaveTypes = false;
+  bool _leaveTypesLoaded = false;
+  String? _leaveTypesError;
   LeaveLocationOption? _locationOption;
   SickLeaveNature? _sickLeaveNature;
   MaternityDeliveryType? _maternityDeliveryType;
@@ -518,10 +520,14 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
   }
 
   Future<void> _loadLeaveTypes() async {
-    setState(() => _loadingLeaveTypes = true);
+    setState(() {
+      _loadingLeaveTypes = true;
+      _leaveTypesLoaded = false;
+      _leaveTypesError = null;
+    });
     try {
       final items = await LeaveTypeDefinitionCache.instance
-          .listActiveEmployeeTypes();
+          .listActiveEmployeeTypes(forceRefresh: true);
       if (!mounted) return;
       setState(() {
         final allowedItems = items
@@ -529,6 +535,7 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
             .toList();
         _leaveTypeDefinitions = allowedItems;
         _loadingLeaveTypes = false;
+        _leaveTypesLoaded = true;
         final selectedExists = allowedItems.any(
           (item) => item.name == _leaveTypeName,
         );
@@ -544,7 +551,12 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
         _syncWorkingDaysFromDates();
       }
     } catch (_) {
-      if (mounted) setState(() => _loadingLeaveTypes = false);
+      if (mounted) {
+        setState(() {
+          _loadingLeaveTypes = false;
+          _leaveTypesError = 'Could not load active leave types.';
+        });
+      }
     }
   }
 
@@ -593,36 +605,18 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
   }
 
   List<DropdownMenuItem<String>> _leaveTypeDropdownItems() {
-    if (_leaveTypeDefinitions.isNotEmpty) {
-      final items = _leaveTypeDefinitions
-          .where(
-            (item) =>
-                _isLeaveTypeDefinitionAllowedForAccount(item) &&
-                (item.employeeCanFile && !item.adminOnly),
-          )
-          .map(
-            (item) => DropdownMenuItem<String>(
-              value: item.name,
-              child: Text(item.displayName),
-            ),
-          )
-          .toList();
-      if (!items.any((item) => item.value == _leaveTypeName)) {
-        items.add(
-          DropdownMenuItem<String>(
-            value: _leaveTypeName,
-            child: Text(_selectedLeaveTypeLabel),
-          ),
-        );
-      }
-      return items;
-    }
-    return LeaveType.values
-        .where((t) => t.employeeCanFile && _isLeaveTypeAllowedForAccount(t))
+    return _leaveTypeDefinitions
+        .where(
+          (item) =>
+              item.isActive &&
+              _isLeaveTypeDefinitionAllowedForAccount(item) &&
+              item.employeeCanFile &&
+              !item.adminOnly,
+        )
         .map(
-          (t) => DropdownMenuItem<String>(
-            value: t.value,
-            child: Text(t.displayName),
+          (item) => DropdownMenuItem<String>(
+            value: item.name,
+            child: Text(item.displayName),
           ),
         )
         .toList();
@@ -676,6 +670,10 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
 
   Future<void> _submitRequest() async {
     if (_submitFlowInFlight || _busy || _checkingStatus || !_canEditRequest) {
+      return;
+    }
+    if (!_leaveTypesLoaded || _definitionForName(_leaveTypeName) == null) {
+      _showMessage('Choose an active leave type before submitting.');
       return;
     }
     setState(() => _submitFlowInFlight = true);
@@ -1561,34 +1559,49 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
                             _buildSectionTitle('1. Leave Type'),
                             const SizedBox(height: 16),
                             DropdownButtonFormField<String>(
-                              initialValue: _leaveTypeName,
+                              key: ValueKey('$_leaveTypesLoaded:$_leaveTypeName'),
+                              initialValue: _leaveTypesLoaded &&
+                                      _definitionForName(_leaveTypeName) != null
+                                  ? _leaveTypeName
+                                  : null,
                               isExpanded: true,
                               decoration: _inputDecoration('Select Leave Type'),
                               items: _leaveTypeDropdownItems(),
-                              onChanged: (val) {
-                                if (val != null) {
-                                  setState(() {
-                                    final def = _definitionForName(val);
-                                    if (def != null) {
-                                      _selectLeaveTypeDefinition(def);
-                                    } else {
-                                      _leaveTypeName = val;
-                                      _leaveType = leaveTypeFromString(val);
-                                      _resetConditionalSelectionsForType(
-                                        _leaveType,
-                                      );
-                                    }
-                                    _annualEntitlementPreview = null;
-                                  });
-                                  if (_startDate != null && _endDate != null) {
-                                    _syncWorkingDaysFromDates();
-                                  }
-                                }
-                              },
+                              onChanged: !_leaveTypesLoaded
+                                  ? null
+                                  : (val) {
+                                      if (val != null) {
+                                        setState(() {
+                                          final def = _definitionForName(val);
+                                          if (def != null) {
+                                            _selectLeaveTypeDefinition(def);
+                                          } else {
+                                            _leaveTypeName = val;
+                                            _leaveType = leaveTypeFromString(val);
+                                            _resetConditionalSelectionsForType(
+                                              _leaveType,
+                                            );
+                                          }
+                                          _annualEntitlementPreview = null;
+                                        });
+                                        if (_startDate != null &&
+                                            _endDate != null) {
+                                          _syncWorkingDaysFromDates();
+                                        }
+                                      }
+                                    },
                             ),
                             if (_loadingLeaveTypes) ...[
                               const SizedBox(height: 8),
                               const LinearProgressIndicator(minHeight: 2),
+                            ],
+                            if (_leaveTypesError != null) ...[
+                              const SizedBox(height: 8),
+                              TextButton.icon(
+                                onPressed: _loadLeaveTypes,
+                                icon: const Icon(Icons.refresh),
+                                label: Text('$_leaveTypesError Retry'),
+                              ),
                             ],
 
                             // B. Dynamic leave-type guidance
@@ -1795,7 +1808,9 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
                               onPressed:
                                   _busy ||
                                       _submitFlowInFlight ||
-                                      _checkingStatus
+                                      _checkingStatus ||
+                                      !_leaveTypesLoaded ||
+                                      _definitionForName(_leaveTypeName) == null
                                   ? null
                                   : _submitRequest,
                               style: FilledButton.styleFrom(

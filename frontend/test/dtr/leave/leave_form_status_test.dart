@@ -8,6 +8,7 @@ import 'package:hrms_plaridel/providers/auth_provider.dart';
 import 'package:hrms_plaridel/features/docutracker/data/providers/docutracker_provider.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document_builder.dart';
 import 'package:hrms_plaridel/features/dtr/leave/data/providers/leave_provider.dart';
+import 'package:hrms_plaridel/features/dtr/leave/data/repositories/leave_type_definition_cache.dart';
 import 'package:hrms_plaridel/features/dtr/leave/data/repositories/mock_leave_repository.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_request.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_type.dart';
@@ -49,6 +50,26 @@ Future<void> _openForm(
   LeaveRequest initial = draft,
   bool loadOfficialDate = false,
 }) async {
+  ApiClient.instance.init();
+  ApiClient.instance.dio.interceptors.insert(
+    0,
+    InterceptorsWrapper(
+      onRequest: (options, handler) {
+        if (options.path == '/api/leave/types') {
+          handler.resolve(Response<List<dynamic>>(
+            requestOptions: options,
+            statusCode: 200,
+            data: [
+              {'name': 'vacationLeave', 'display_name': 'Vacation Leave'},
+              {'name': 'sickLeave', 'display_name': 'Sick Leave'},
+            ],
+          ));
+          return;
+        }
+        handler.next(options);
+      },
+    ),
+  );
   await tester.pumpWidget(
     MultiProvider(
       providers: [
@@ -78,6 +99,63 @@ Future<void> _openForm(
 }
 
 void main() {
+  testWidgets('deactivated draft type is not offered for a new filing', (
+    tester,
+  ) async {
+    final repository = _Repository();
+    final oldDraft = draft.copyWith(
+      leaveType: LeaveType.others,
+      leaveTypeName: 'earlLeave',
+      leaveTypeDisplayName: 'Earl leave',
+    );
+    repository.read = () async => oldDraft;
+    ApiClient.instance.init();
+    ApiClient.instance.dio.interceptors.clear();
+    LeaveTypeDefinitionCache.instance.invalidate();
+    var activeTypes = <Map<String, dynamic>>[
+      {'name': 'vacationLeave', 'display_name': 'Vacation Leave'},
+      {'name': 'earlLeave', 'display_name': 'Earl leave'},
+    ];
+    ApiClient.instance.dio.interceptors.add(
+      InterceptorsWrapper(
+        onRequest: (options, handler) {
+          if (options.path == '/api/leave/types') {
+            handler.resolve(Response<List<dynamic>>(
+              requestOptions: options,
+              statusCode: 200,
+              data: activeTypes,
+            ));
+            return;
+          }
+          handler.reject(DioException(requestOptions: options));
+        },
+      ),
+    );
+    await tester.runAsync(
+      () => LeaveTypeDefinitionCache.instance.listActiveEmployeeTypes(),
+    );
+    activeTypes = [
+      {'name': 'vacationLeave', 'display_name': 'Vacation Leave'},
+    ];
+
+    await _openForm(tester, repository, initial: oldDraft);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 500));
+    final dropdown = tester.widget<DropdownButtonFormField<String>>(
+      find.byType(DropdownButtonFormField<String>),
+    );
+    expect(
+      find.byWidgetPredicate(
+        (widget) =>
+            widget is DropdownMenuItem<String> && widget.value == 'earlLeave',
+        skipOffstage: false,
+      ),
+      findsNothing,
+    );
+    expect(dropdown.initialValue, 'vacationLeave');
+    LeaveTypeDefinitionCache.instance.invalidate();
+  });
+
   testWidgets('missing final reviewer blocks submit before signing or saving', (
     tester,
   ) async {
