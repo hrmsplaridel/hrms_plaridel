@@ -47,48 +47,34 @@ class LeaveFormSignatories {
 Future<LeaveFormSignatories> loadLeaveFormSignatories({
   required LeaveRequest request,
 }) async {
-  LeaveFormSignatoryInfo? certification;
-  LeaveFormSignatoryInfo? recommendation;
-  LeaveFormSignatoryInfo? approvingAuthority;
+  // Fire both independent API calls concurrently — the signatories endpoint
+  // and the DocuTracker signature lookup do not depend on each other.
+  final requestId = request.id;
+  final results = await Future.wait([
+    _fetchSignatoryRoles(request),
+    if (requestId != null && requestId.isNotEmpty)
+      DocuTrackerRepository.instance.getSourceSignatures(
+        sourceModule: 'dtr',
+        sourceTable: 'leave_requests',
+        sourceRecordId: requestId,
+      )
+    else
+      Future.value(null),
+  ]);
+
+  final roles = results[0] as _SignatoryRoles;
+  LeaveFormSignatoryInfo? certification = roles.certification;
+  LeaveFormSignatoryInfo? recommendation = roles.recommendation;
+  final LeaveFormSignatoryInfo? approvingAuthority = roles.approvingAuthority;
+
   DocuTrackerSourceSignature? applicantSignature;
   DocuTrackerSourceSignature? departmentHeadSignature;
   DocuTrackerSourceSignature? hrApproverSignature;
-
-  try {
-    final res = await ApiClient.instance.get<Map<String, dynamic>>(
-      '/api/leave/signatories',
-      queryParameters: {
-        'employee_id': request.userId,
-        if (request.id != null && request.id!.isNotEmpty)
-          'leave_request_id': request.id,
-      },
-    );
-    final data = res.data ?? const <String, dynamic>{};
-    certification = LeaveFormSignatoryInfo.fromJson(
-      data['hr_certification_officer'],
-    );
-    recommendation = LeaveFormSignatoryInfo.fromJson(
-      data['recommendation_officer'],
-    );
-    approvingAuthority = LeaveFormSignatoryInfo.fromJson(
-      data['approving_authority'],
-    );
-  } catch (_) {
-    // Printing should still work even if the optional signatory lookup fails.
-  }
-
-  final requestId = request.id;
-  if (requestId != null && requestId.isNotEmpty) {
-    final result = await DocuTrackerRepository.instance.getSourceSignatures(
-      sourceModule: 'dtr',
-      sourceTable: 'leave_requests',
-      sourceRecordId: requestId,
-    );
-    if (result is DocuTrackerSuccess<DocuTrackerSourceSignatureBundle>) {
-      applicantSignature = result.value.signatureFor('applicant');
-      departmentHeadSignature = result.value.signatureFor('department_head');
-      hrApproverSignature = result.value.signatureFor('hr_approver');
-    }
+  final sigResult = results[1];
+  if (sigResult is DocuTrackerSuccess<DocuTrackerSourceSignatureBundle>) {
+    applicantSignature = sigResult.value.signatureFor('applicant');
+    departmentHeadSignature = sigResult.value.signatureFor('department_head');
+    hrApproverSignature = sigResult.value.signatureFor('hr_approver');
   }
 
   final departmentHeadName =
@@ -109,6 +95,48 @@ Future<LeaveFormSignatories> loadLeaveFormSignatories({
     departmentHeadSignature: departmentHeadSignature,
     hrApproverSignature: hrApproverSignature,
   );
+}
+
+/// Fetches the named signatory roles from the backend. Returns an empty
+/// [_SignatoryRoles] on any error so printing still proceeds.
+Future<_SignatoryRoles> _fetchSignatoryRoles(LeaveRequest request) async {
+  try {
+    final res = await ApiClient.instance.get<Map<String, dynamic>>(
+      '/api/leave/signatories',
+      queryParameters: {
+        'employee_id': request.userId,
+        if (request.id != null && request.id!.isNotEmpty)
+          'leave_request_id': request.id,
+      },
+    );
+    final data = res.data ?? const <String, dynamic>{};
+    return _SignatoryRoles(
+      certification: LeaveFormSignatoryInfo.fromJson(
+        data['hr_certification_officer'],
+      ),
+      recommendation: LeaveFormSignatoryInfo.fromJson(
+        data['recommendation_officer'],
+      ),
+      approvingAuthority: LeaveFormSignatoryInfo.fromJson(
+        data['approving_authority'],
+      ),
+    );
+  } catch (_) {
+    // Printing should still work even if the optional signatory lookup fails.
+    return const _SignatoryRoles();
+  }
+}
+
+class _SignatoryRoles {
+  const _SignatoryRoles({
+    this.certification,
+    this.recommendation,
+    this.approvingAuthority,
+  });
+
+  final LeaveFormSignatoryInfo? certification;
+  final LeaveFormSignatoryInfo? recommendation;
+  final LeaveFormSignatoryInfo? approvingAuthority;
 }
 
 String? _nonBlank(String? value) {

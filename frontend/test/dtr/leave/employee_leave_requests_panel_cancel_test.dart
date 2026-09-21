@@ -50,6 +50,7 @@ void main() {
                 onEdit: (_) {},
                 onCancel: cancelled.add,
                 onPrint: (_) {},
+                onPreview: (_) {},
               ),
             ),
           ),

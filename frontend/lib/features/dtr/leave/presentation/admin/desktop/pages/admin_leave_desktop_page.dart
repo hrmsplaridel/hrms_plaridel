@@ -804,6 +804,14 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
     final auth = context.read<AuthProvider>();
     if (!mounted) return;
 
+    // Show a loading indicator immediately so the user gets instant feedback
+    // before any of the network calls begin.
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(preview ? 'Loading preview...' : 'Loading form data...'),
+      ),
+    );
+
     try {
       // Refresh the request so we print the latest snapshot (e.g. after HR
       // changes). If the refresh fails, block the print — printing a stale

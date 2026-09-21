@@ -183,6 +183,7 @@ class _EmployeeLeaveMobilePageState extends State<EmployeeLeaveMobilePage>
         onLoadMore: _loadMoreRequests,
         onEdit: _leaveActions.editRequest,
         onCancel: _leaveActions.cancelRequest,
+        onPreview: _leaveActions.previewLeaveForm,
         onPrint: _leaveActions.printLeaveForm,
       ),
     );

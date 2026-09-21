@@ -85,6 +85,7 @@ void main() {
       find.textContaining('request data could not be verified'),
       findsOneWidget,
     );
+    expect(find.text('Loading form data...'), findsNothing);
   });
 
   testWidgets('Printing stops and shows error if balances cannot be fetched', (
@@ -131,5 +132,6 @@ void main() {
 
     expect(find.byType(SnackBar), findsOneWidget);
     expect(find.textContaining('balance or request data'), findsOneWidget);
+    expect(find.text('Loading form data...'), findsNothing);
   });
 }

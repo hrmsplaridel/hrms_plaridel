@@ -44,6 +44,7 @@ class EmployeeLeaveRequestsPanel extends StatefulWidget {
     required this.onEdit,
     required this.onCancel,
     required this.onPrint,
+    required this.onPreview,
   });
 
   final List<LeaveRequest> requests;
@@ -58,6 +59,7 @@ class EmployeeLeaveRequestsPanel extends StatefulWidget {
   final ValueChanged<LeaveRequest> onEdit;
   final ValueChanged<LeaveRequest> onCancel;
   final ValueChanged<LeaveRequest> onPrint;
+  final ValueChanged<LeaveRequest> onPreview;
 
   @override
   State<EmployeeLeaveRequestsPanel> createState() => _RequestsPanelState();
@@ -299,6 +301,7 @@ class _RequestsPanelState extends State<EmployeeLeaveRequestsPanel> {
             onHistory: () => _showHistory(panelContext, request),
             onCancel: () => widget.onCancel(request),
             onPrint: () => widget.onPrint(request),
+            onPreview: () => widget.onPreview(request),
             onPreviewAttachment: () =>
                 _previewAttachment(request, panelContext),
             onDownloadAttachment: () =>
@@ -585,6 +588,7 @@ class _EmployeeLeaveDetailsPanel extends StatelessWidget {
     required this.onHistory,
     required this.onCancel,
     required this.onPrint,
+    required this.onPreview,
     required this.onPreviewAttachment,
     required this.onDownloadAttachment,
   });
@@ -597,6 +601,7 @@ class _EmployeeLeaveDetailsPanel extends StatelessWidget {
   final VoidCallback onHistory;
   final VoidCallback onCancel;
   final VoidCallback onPrint;
+  final VoidCallback onPreview;
   final VoidCallback onPreviewAttachment;
   final VoidCallback onDownloadAttachment;
 
@@ -853,6 +858,15 @@ class _EmployeeLeaveDetailsPanel extends StatelessWidget {
                       },
                       icon: const Icon(Icons.cancel_outlined, size: 18),
                       label: const Text('Cancel'),
+                    ),
+                  if (canPrint)
+                    OutlinedButton.icon(
+                      onPressed: () {
+                        Navigator.of(context).pop();
+                        onPreview();
+                      },
+                      icon: const Icon(Icons.visibility_outlined, size: 18),
+                      label: const Text('Preview Form'),
                     ),
                   if (canPrint)
                     OutlinedButton.icon(

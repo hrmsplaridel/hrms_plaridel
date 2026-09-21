@@ -2,8 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import 'package:hrms_plaridel/providers/auth_provider.dart';
+import 'package:hrms_plaridel/core/widgets/form_pdf_preview.dart';
 import 'package:hrms_plaridel/features/dtr/assistant/presentation/widgets/employee_hrms_assistant_overlay.dart';
 import 'package:hrms_plaridel/features/dtr/leave/data/providers/leave_provider.dart';
+import 'package:hrms_plaridel/features/dtr/leave/models/leave_balance.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_request.dart';
 import 'package:hrms_plaridel/features/dtr/leave/presentation/shared/pages/leave_request_form_screen.dart';
 import 'package:hrms_plaridel/features/dtr/leave/utils/leave_form_signatories.dart';
@@ -79,34 +81,76 @@ class EmployeeLeaveActions {
     );
   }
 
+  /// Opens the leave form as an in-app preview (DTR-style side panel with
+  /// print and share buttons) without going straight to the system dialog.
+  Future<void> previewLeaveForm(LeaveRequest request) async {
+    final provider = context.read<LeaveProvider>();
+    if (!context.mounted || !isMounted()) return;
+
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('Loading preview...')));
+
+    try {
+      final (:target, :balances, :formSignatories) = await _loadLeaveFormData(
+        provider,
+        request,
+      );
+      if (!context.mounted || !isMounted()) return;
+
+      final filename = 'Leave_Application_${target.id ?? target.userId}.pdf';
+      final doc = await LeaveRequestPdf.buildPdf(
+        request: target,
+        balances: balances,
+        certificationOfficerName: formSignatories.certificationOfficer?.name,
+        certificationOfficerTitle: formSignatories.certificationOfficer?.title,
+        recommendationOfficerName: formSignatories.recommendationOfficer?.name,
+        recommendationOfficerTitle:
+            formSignatories.recommendationOfficer?.title,
+        approvingAuthorityName: formSignatories.approvingAuthority?.name,
+        approvingAuthorityTitle: formSignatories.approvingAuthority?.title,
+        applicantSignatureBytes:
+            formSignatories.applicantSignature?.signatureImageBytes,
+      );
+      final bytes = await doc.save();
+      if (!context.mounted || !isMounted()) return;
+
+      ScaffoldMessenger.of(context).clearSnackBars();
+      await showFormPdfPreview(
+        context: context,
+        bytes: bytes,
+        title: 'Leave Form Preview',
+        filename: filename,
+      );
+    } catch (e) {
+      if (!context.mounted || !isMounted()) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Preview failed — data could not be verified. '
+            'Please retry when the server is reachable.\n($e)',
+          ),
+          duration: const Duration(seconds: 6),
+        ),
+      );
+    }
+  }
+
   Future<void> printLeaveForm(LeaveRequest request) async {
     final provider = context.read<LeaveProvider>();
     if (!context.mounted || !isMounted()) return;
-    try {
-      // Refresh the request so we print the latest snapshot. If the refresh
-      // fails, block the print — printing a stale snapshot risks producing an
-      // invalid formal document with outdated status or balance figures.
-      LeaveRequest target = request;
-      final id = request.id;
-      if (id != null && id.isNotEmpty) {
-        final fresh = await provider.refreshRequestById(id);
-        if (fresh == null) {
-          throw Exception(
-            'Could not load the latest request data. '
-            'Please check your connection and try again.',
-          );
-        }
-        target = fresh;
-      }
 
-      // Use the strict variant so any balance API failure throws rather than
-      // returning an empty list that would silently produce zero credit figures
-      // on the printed certification.
-      final balances = await provider.fetchBalancesForUserStrict(
-        target.userId,
-        forceRefresh: true,
+    // Show a loading indicator immediately so the user knows something is
+    // happening — the data fetches below can take a couple of seconds.
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('Loading form data...')));
+
+    try {
+      final (:target, :balances, :formSignatories) = await _loadLeaveFormData(
+        provider,
+        request,
       );
-      final formSignatories = await loadLeaveFormSignatories(request: target);
 
       if (!context.mounted || !isMounted()) return;
       ScaffoldMessenger.of(
@@ -129,7 +173,9 @@ class EmployeeLeaveActions {
       );
     } catch (e) {
       if (!context.mounted || !isMounted()) return;
-      ScaffoldMessenger.of(context).showSnackBar(
+      final messenger = ScaffoldMessenger.of(context);
+      messenger.clearSnackBars();
+      messenger.showSnackBar(
         SnackBar(
           content: Text(
             'Print failed — balance or request data could not be verified. '
@@ -139,6 +185,46 @@ class EmployeeLeaveActions {
         ),
       );
     }
+  }
+
+  /// Shared data-fetch helper: refreshes the request then concurrently loads
+  /// balances and signatories. Throws on any failure.
+  Future<
+    ({
+      LeaveRequest target,
+      List<LeaveBalance> balances,
+      LeaveFormSignatories formSignatories,
+    })
+  >
+  _loadLeaveFormData(LeaveProvider provider, LeaveRequest request) async {
+    LeaveRequest target = request;
+    final id = request.id;
+    if (id != null && id.isNotEmpty) {
+      final fresh = await provider.refreshRequestById(id);
+      if (fresh == null) {
+        throw Exception(
+          'Could not load the latest request data. '
+          'Please check your connection and try again.',
+        );
+      }
+      target = fresh;
+    }
+
+    // Run the two independent lookups concurrently — they both depend on
+    // `target` but not on each other, so there is no reason to wait for
+    // one before starting the next.
+    // Use the strict variant so any balance API failure throws rather than
+    // returning an empty list that would silently produce zero credit figures
+    // on the printed certification.
+    final results = await Future.wait([
+      provider.fetchBalancesForUserStrict(target.userId, forceRefresh: true),
+      loadLeaveFormSignatories(request: target),
+    ]);
+    return (
+      target: target,
+      balances: results[0] as List<LeaveBalance>,
+      formSignatories: results[1] as LeaveFormSignatories,
+    );
   }
 
   Future<void> cancelRequest(LeaveRequest request) async {

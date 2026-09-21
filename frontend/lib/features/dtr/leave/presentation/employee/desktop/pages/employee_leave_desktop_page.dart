@@ -312,6 +312,7 @@ class _EmployeeLeaveScreenState extends State<EmployeeLeaveScreen>
                 onLoadMore: _loadMoreRequests,
                 onEdit: _leaveActions.editRequest,
                 onCancel: _leaveActions.cancelRequest,
+                onPreview: _leaveActions.previewLeaveForm,
                 onPrint: _leaveActions.printLeaveForm,
               ),
             ],
@@ -370,6 +371,7 @@ class _EmployeeLeaveScreenState extends State<EmployeeLeaveScreen>
         onLoadMore: _loadMoreRequests,
         onEdit: _leaveActions.editRequest,
         onCancel: _leaveActions.cancelRequest,
+        onPreview: _leaveActions.previewLeaveForm,
         onPrint: _leaveActions.printLeaveForm,
       ),
     );
