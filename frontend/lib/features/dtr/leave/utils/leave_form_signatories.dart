@@ -5,8 +5,9 @@ import 'package:hrms_plaridel/features/docutracker/models/document_builder.dart'
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_request.dart';
 
 class LeaveFormSignatoryInfo {
-  const LeaveFormSignatoryInfo({this.name, this.title});
+  const LeaveFormSignatoryInfo({this.userId, this.name, this.title});
 
+  final String? userId;
   final String? name;
   final String? title;
 
@@ -20,6 +21,7 @@ class LeaveFormSignatoryInfo {
       return null;
     }
     return LeaveFormSignatoryInfo(
+      userId: value['user_id']?.toString(),
       name: name == null || name.isEmpty ? null : name,
       title: title == null || title.isEmpty ? null : title,
     );
@@ -44,6 +46,44 @@ class LeaveFormSignatories {
   final DocuTrackerSourceSignature? hrApproverSignature;
 }
 
+LeaveFormSignatories composeLeaveFormSignatories({
+  LeaveFormSignatoryInfo? certificationOfficer,
+  LeaveFormSignatoryInfo? recommendationOfficer,
+  LeaveFormSignatoryInfo? approvingAuthority,
+  DocuTrackerSourceSignature? applicantSignature,
+  DocuTrackerSourceSignature? departmentHeadSignature,
+  DocuTrackerSourceSignature? hrApproverSignature,
+}) {
+  DocuTrackerSourceSignature? officialSignature(
+    LeaveFormSignatoryInfo? official,
+    DocuTrackerSourceSignature? signature,
+  ) {
+    final officialId = _nonBlank(official?.userId);
+    return officialId != null &&
+            signature?.isSigned == true &&
+            _nonBlank(signature?.signedBy) == officialId
+        ? signature
+        : null;
+  }
+
+  return LeaveFormSignatories(
+    certificationOfficer: certificationOfficer?.hasName == true
+        ? certificationOfficer
+        : null,
+    recommendationOfficer: recommendationOfficer,
+    approvingAuthority: approvingAuthority,
+    applicantSignature: applicantSignature,
+    departmentHeadSignature: officialSignature(
+      recommendationOfficer,
+      departmentHeadSignature,
+    ),
+    hrApproverSignature: officialSignature(
+      approvingAuthority,
+      hrApproverSignature,
+    ),
+  );
+}
+
 Future<LeaveFormSignatories> loadLeaveFormSignatories({
   required LeaveRequest request,
 }) async {
@@ -63,10 +103,6 @@ Future<LeaveFormSignatories> loadLeaveFormSignatories({
   ]);
 
   final roles = results[0] as _SignatoryRoles;
-  LeaveFormSignatoryInfo? certification = roles.certification;
-  LeaveFormSignatoryInfo? recommendation = roles.recommendation;
-  final LeaveFormSignatoryInfo? approvingAuthority = roles.approvingAuthority;
-
   DocuTrackerSourceSignature? applicantSignature;
   DocuTrackerSourceSignature? departmentHeadSignature;
   DocuTrackerSourceSignature? hrApproverSignature;
@@ -77,20 +113,10 @@ Future<LeaveFormSignatories> loadLeaveFormSignatories({
     hrApproverSignature = sigResult.value.signatureFor('hr_approver');
   }
 
-  final departmentHeadName =
-      _nonBlank(departmentHeadSignature?.signerName) ??
-      _nonBlank(request.departmentHeadReviewerName);
-  if (departmentHeadName != null) {
-    recommendation = LeaveFormSignatoryInfo(
-      name: departmentHeadName,
-      title: recommendation?.title ?? 'Department Head',
-    );
-  }
-
-  return LeaveFormSignatories(
-    certificationOfficer: certification?.hasName == true ? certification : null,
-    recommendationOfficer: recommendation,
-    approvingAuthority: approvingAuthority,
+  return composeLeaveFormSignatories(
+    certificationOfficer: roles.certification,
+    recommendationOfficer: roles.recommendation,
+    approvingAuthority: roles.approvingAuthority,
     applicantSignature: applicantSignature,
     departmentHeadSignature: departmentHeadSignature,
     hrApproverSignature: hrApproverSignature,
