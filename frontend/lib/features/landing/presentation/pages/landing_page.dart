@@ -23,7 +23,7 @@ class LandingPage extends StatefulWidget {
 
 class _LandingPageState extends State<LandingPage>
     with RouteAware, WidgetsBindingObserver {
-  static const _vacancyPollInterval = Duration(seconds: 5);
+  static const _vacancyPollInterval = Duration(minutes: 5);
 
   final GlobalKey _headerKey = GlobalKey();
   final GlobalKey _heroKey = GlobalKey();

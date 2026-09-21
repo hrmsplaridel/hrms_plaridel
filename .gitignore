@@ -55,10 +55,12 @@ firebase-debug.log
 # Private infrastructure and deployment documentation
 docs/private/
 docs/weekly_progress/
+/.agents/
 /bugs/
 /Capstone_research/
 /tmp_figure_review/
 accomplishment_reports
+docs/test_data/
 
 
 # IntelliJ related
@@ -82,6 +84,7 @@ accomplishment_reports
 build/
 coverage/
 frontend/windows/installer/output/
+frontend/windows/installer/prerequisites/
 
 # Symbolication related
 app.*.symbols

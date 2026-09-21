@@ -31,56 +31,43 @@ class EmployeeLocatorMobileDetailsDialog extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final screen = MediaQuery.sizeOf(context);
     final dark = AppTheme.dashIsDark(context);
-    final maxH = screen.height * 0.88;
-    final maxW = (screen.width - 28).clamp(320.0, 640.0);
     final panelColor = AppTheme.dashPanelOf(context);
     final borderColor = AppTheme.dashHairlineOf(context);
 
-    return Dialog(
-      backgroundColor: Colors.transparent,
-      elevation: 0,
-      insetPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 22),
-      child: ConstrainedBox(
-        constraints: BoxConstraints(maxWidth: maxW, maxHeight: maxH),
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(28),
-          child: Material(
-            color: panelColor,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                _EmployeeLocatorMobileDetailHeader(
-                  requestTypeLabel: requestTypeLabel,
-                  dateLabel: dateLabel,
-                  requestTypeIcon: requestTypeIcon,
-                  statusLabel: statusLabel,
-                  statusIcon: statusIcon,
-                  statusBg: statusBg,
-                  statusBorder: statusBorder,
-                  statusText: statusText,
-                  onClose: onClose,
-                ),
-                Flexible(
-                  fit: FlexFit.loose,
-                  child: SingleChildScrollView(
-                    padding: const EdgeInsets.fromLTRB(16, 14, 16, 18),
-                    child: body,
-                  ),
-                ),
-                DecoratedBox(
-                  decoration: BoxDecoration(
-                    color: dark
-                        ? AppTheme.dashMutedSurfaceOf(context)
-                        : AppTheme.offWhite,
-                    border: Border(top: BorderSide(color: borderColor)),
-                  ),
-                  child: SafeArea(top: false, child: actions),
-                ),
-              ],
+    return Material(
+      color: panelColor,
+      child: SafeArea(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            _EmployeeLocatorMobileDetailHeader(
+              requestTypeLabel: requestTypeLabel,
+              dateLabel: dateLabel,
+              requestTypeIcon: requestTypeIcon,
+              statusLabel: statusLabel,
+              statusIcon: statusIcon,
+              statusBg: statusBg,
+              statusBorder: statusBorder,
+              statusText: statusText,
+              onClose: onClose,
             ),
-          ),
+            Expanded(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.fromLTRB(20, 18, 20, 24),
+                child: body,
+              ),
+            ),
+            DecoratedBox(
+              decoration: BoxDecoration(
+                color: dark
+                    ? AppTheme.dashMutedSurfaceOf(context)
+                    : AppTheme.offWhite,
+                border: Border(top: BorderSide(color: borderColor)),
+              ),
+              child: SafeArea(top: false, child: actions),
+            ),
+          ],
         ),
       ),
     );
@@ -504,6 +491,7 @@ class EmployeeLocatorMobileDetailActions extends StatelessWidget {
     required this.canOpenAttachment,
     required this.onHistory,
     required this.onCancel,
+    required this.onPreview,
     required this.onPrint,
     required this.onOpenAttachment,
     this.canReject = false,
@@ -525,6 +513,7 @@ class EmployeeLocatorMobileDetailActions extends StatelessWidget {
   final bool canCorrect;
   final VoidCallback onHistory;
   final VoidCallback onCancel;
+  final VoidCallback onPreview;
   final VoidCallback onPrint;
   final VoidCallback onOpenAttachment;
   final VoidCallback? onReject;
@@ -580,6 +569,16 @@ class EmployeeLocatorMobileDetailActions extends StatelessWidget {
                   ),
                 ],
                 if (canPrint) ...[
+                  const SizedBox(height: 8),
+                  SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton.icon(
+                      onPressed: onPreview,
+                      style: secondaryStyle,
+                      icon: const Icon(Icons.visibility_outlined, size: 18),
+                      label: const Text('Preview'),
+                    ),
+                  ),
                   const SizedBox(height: 8),
                   SizedBox(
                     width: double.infinity,
@@ -703,6 +702,13 @@ class EmployeeLocatorMobileDetailActions extends StatelessWidget {
                     style: primaryStyle,
                     icon: const Icon(Icons.upload_file_rounded, size: 18),
                     label: const Text('Correct & Resubmit'),
+                  ),
+                if (canPrint)
+                  OutlinedButton.icon(
+                    onPressed: onPreview,
+                    style: secondaryStyle,
+                    icon: const Icon(Icons.visibility_outlined, size: 18),
+                    label: const Text('Preview'),
                   ),
                 if (canPrint)
                   FilledButton.icon(

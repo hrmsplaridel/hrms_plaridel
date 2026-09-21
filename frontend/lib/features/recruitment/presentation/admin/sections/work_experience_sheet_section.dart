@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import 'package:hrms_plaridel/core/api/user_facing_api_error.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/core/utils/form_pdf.dart';
@@ -7,6 +8,8 @@ import 'package:hrms_plaridel/features/recruitment/presentation/admin/widgets/rs
 import 'package:hrms_plaridel/shared/widgets/read_only_saved_entry_dialog.dart';
 import 'package:hrms_plaridel/shared/widgets/rsp_form_header_footer.dart';
 import 'package:hrms_plaridel/shared/widgets/rsp_ld_saved_records_browser.dart';
+import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_rsp_signature_section.dart';
+import 'package:hrms_plaridel/features/docutracker/data/providers/docutracker_provider.dart';
 
 /// RSP: Work Experience Sheet — after Computation of Points.
 class RspWorkExperienceSheetSection extends StatefulWidget {
@@ -91,19 +94,57 @@ class _RspWorkExperienceSheetSectionState
 
   Future<void> _print(WorkExperienceSheetEntry entry) async {
     try {
+      final signatureProvider = context.read<DocuTrackerProvider>();
+      final signatures = entry.id == null
+          ? null
+          : await signatureProvider.loadSourceSignatures(
+              sourceModule: 'rsp',
+              sourceTable: WorkExperienceSheetEntry.tableName,
+              sourceRecordId: entry.id!,
+            );
+      if (entry.id != null && signatures == null) {
+        throw StateError(
+          signatureProvider.sourceSignatureError ??
+              'The form signatures could not be loaded.',
+        );
+      }
+      if (!mounted) return;
       await FormPdf.printForm(
         context: context,
-        buildDocument: () => FormPdf.buildWorkExperienceSheetPdf(entry),
+        buildDocument: () =>
+            FormPdf.buildWorkExperienceSheetPdf(entry, signatures: signatures),
         filename: 'Work_Experience_Sheet.pdf',
         printModule: 'rsp',
         printFormKey: 'work_experience',
       );
-    } catch (_) {}
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Print failed. ${userFacingApiError(error)}')),
+      );
+    }
   }
 
   Future<void> _download(WorkExperienceSheetEntry entry) async {
     try {
-      final doc = await FormPdf.buildWorkExperienceSheetPdf(entry);
+      final signatureProvider = context.read<DocuTrackerProvider>();
+      final signatures = entry.id == null
+          ? null
+          : await signatureProvider.loadSourceSignatures(
+              sourceModule: 'rsp',
+              sourceTable: WorkExperienceSheetEntry.tableName,
+              sourceRecordId: entry.id!,
+            );
+      if (entry.id != null && signatures == null) {
+        throw StateError(
+          signatureProvider.sourceSignatureError ??
+              'The form signatures could not be loaded.',
+        );
+      }
+      final doc = await FormPdf.buildWorkExperienceSheetPdf(
+        entry,
+        signatures: signatures,
+      );
       await FormPdf.sharePdf(doc, name: 'Work_Experience_Sheet.pdf');
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -111,9 +152,9 @@ class _RspWorkExperienceSheetSectionState
       );
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Download failed: $e')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Download failed. ${userFacingApiError(e)}')),
+      );
     }
   }
 
@@ -180,6 +221,16 @@ class _RspWorkExperienceSheetSectionState
             onPrint: _print,
             onDownloadPdf: _download,
           ),
+          if (_editing?.id != null) ...[
+            const SizedBox(height: 16),
+            DocuTrackerRspSignatureSection(
+              sourceTable: WorkExperienceSheetEntry.tableName,
+              sourceRecordId: _editing!.id!,
+              slots: const [
+                DocuTrackerRspSignatureSlot('applicant', 'Applicant'),
+              ],
+            ),
+          ],
           const SizedBox(height: 24),
         ],
         Row(
@@ -273,7 +324,9 @@ class _WorkExperienceSheetEditorState extends State<WorkExperienceSheetEditor> {
     _experience = TextEditingController(text: e.minExperience ?? '');
     _training = TextEditingController(text: e.minTraining ?? '');
     _eligibility = TextEditingController(text: e.minEligibility ?? '');
-    _jobDescription = TextEditingController(text: e.jobDescriptionLastWork ?? '');
+    _jobDescription = TextEditingController(
+      text: e.jobDescriptionLastWork ?? '',
+    );
     _applicantName = TextEditingController(text: e.applicantName ?? '');
   }
 
@@ -315,8 +368,11 @@ class _WorkExperienceSheetEditorState extends State<WorkExperienceSheetEditor> {
     );
   }
 
-  Widget _field(String label, TextEditingController controller,
-      {int maxLines = 1}) {
+  Widget _field(
+    String label,
+    TextEditingController controller, {
+    int maxLines = 1,
+  }) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 10),
       child: RspSpacedOutlineField(
@@ -525,9 +581,13 @@ class _WorkExperienceSheetList extends StatelessWidget {
       rows: entries
           .map(
             (e) => [
-              rspRecordsTextCell(context,e.positionAppliedFor ?? '', bold: true),
-              rspRecordsTextCell(context,e.applicantName ?? ''),
-              rspRecordsTextCell(context,e.department ?? ''),
+              rspRecordsTextCell(
+                context,
+                e.positionAppliedFor ?? '',
+                bold: true,
+              ),
+              rspRecordsTextCell(context, e.applicantName ?? ''),
+              rspRecordsTextCell(context, e.department ?? ''),
               RspRecordsCrudActions(
                 onView: () => showReadOnlySavedEntryDialog(
                   context,

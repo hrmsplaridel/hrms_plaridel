@@ -42,6 +42,8 @@ class LeaveProvider extends ChangeNotifier {
   int _myRequestsLoadGeneration = 0;
   int _myBalancesLoadGeneration = 0;
   int _officialDateLoadGeneration = 0;
+  int _adminReviewGeneration = 0;
+  int _headReviewGeneration = 0;
   bool _disposed = false;
 
   bool _isCurrentAuthGeneration(int generation) =>
@@ -60,6 +62,29 @@ class LeaveProvider extends ChangeNotifier {
   LeaveRepository get repository => _repository;
 
   List<LeaveRequest> _requests = [];
+  List<LeaveRequest> _myRequests = [];
+  List<LeaveRequest> _departmentHeadRequests = [];
+  static const int _reviewPageSize = 200;
+  int _adminReviewTotal = 0;
+  int _headReviewTotal = 0;
+  int _adminReviewNextOffset = 0;
+  int _headReviewNextOffset = 0;
+  bool _adminReviewHasMore = false;
+  bool _headReviewHasMore = false;
+  bool _adminReviewLoadingMore = false;
+  bool _headReviewLoadingMore = false;
+  String? _adminReviewLoadMoreError;
+  String? _headReviewLoadMoreError;
+  bool _adminReviewLoading = false;
+  String? _adminReviewError;
+  bool _adminReviewInitialLoadComplete = false;
+  bool _adminReviewLoadAttempted = false;
+  bool _headReviewLoading = false;
+  String? _headReviewError;
+  bool _headReviewInitialLoadComplete = false;
+  bool _headReviewLoadAttempted = false;
+  String? _adminReviewQueryKey;
+  String? _headReviewQueryKey;
   List<LeaveBalance> _balances = [];
   LeaveRequest? _selectedRequest;
   static const Duration _requestCacheTtl = Duration(seconds: 30);
@@ -97,6 +122,27 @@ class LeaveProvider extends ChangeNotifier {
   LeaveType? _filterLeaveType;
 
   List<LeaveRequest> get requests => List.unmodifiable(_requests);
+  List<LeaveRequest> get myRequests => List.unmodifiable(_myRequests);
+  List<LeaveRequest> get departmentHeadRequests =>
+      List.unmodifiable(_departmentHeadRequests);
+  int reviewTotal({required bool departmentHead}) =>
+      departmentHead ? _headReviewTotal : _adminReviewTotal;
+  bool reviewHasMore({required bool departmentHead}) =>
+      departmentHead ? _headReviewHasMore : _adminReviewHasMore;
+  bool reviewLoadingMore({required bool departmentHead}) =>
+      departmentHead ? _headReviewLoadingMore : _adminReviewLoadingMore;
+  String? reviewLoadMoreError({required bool departmentHead}) =>
+      departmentHead ? _headReviewLoadMoreError : _adminReviewLoadMoreError;
+  bool reviewLoading({required bool departmentHead}) =>
+      departmentHead ? _headReviewLoading : _adminReviewLoading;
+  String? reviewError({required bool departmentHead}) =>
+      departmentHead ? _headReviewError : _adminReviewError;
+  bool reviewInitialLoadComplete({required bool departmentHead}) =>
+      departmentHead
+      ? _headReviewInitialLoadComplete
+      : _adminReviewInitialLoadComplete;
+  bool reviewLoadAttempted({required bool departmentHead}) =>
+      departmentHead ? _headReviewLoadAttempted : _adminReviewLoadAttempted;
   List<LeaveBalance> get balances => List.unmodifiable(_balances);
   LeaveRequest? get selectedRequest => _selectedRequest;
 
@@ -122,10 +168,11 @@ class LeaveProvider extends ChangeNotifier {
   LeaveType? get filterLeaveType => _filterLeaveType;
 
   List<LeaveRequest> get pendingRequests =>
-      _requests.where((r) => r.status.isPending).toList();
+      _myRequests.where((r) => r.status.isPending).toList();
 
-  List<LeaveRequest> get approvedRequests =>
-      _requests.where((r) => r.status == LeaveRequestStatus.approved).toList();
+  List<LeaveRequest> get approvedRequests => _myRequests
+      .where((r) => r.status == LeaveRequestStatus.approved)
+      .toList();
 
   List<LeaveRequest> get upcomingApprovedRequests {
     final startOfToday = _officialDate;
@@ -151,6 +198,15 @@ class LeaveProvider extends ChangeNotifier {
 
   void clearError() {
     _error = null;
+    notifyListeners();
+  }
+
+  void clearReviewError({required bool departmentHead}) {
+    if (departmentHead) {
+      _headReviewError = null;
+    } else {
+      _adminReviewError = null;
+    }
     notifyListeners();
   }
 
@@ -221,6 +277,7 @@ class LeaveProvider extends ChangeNotifier {
     return [
       scope,
       _normalize(query.userId) ?? '',
+      _normalize(query.department) ?? '',
       query.status?.value ?? '',
       _normalize(query.leaveTypeName) ?? query.leaveType?.value ?? '',
       _dateOnlyKey(query.startDateFrom),
@@ -228,6 +285,7 @@ class LeaveProvider extends ChangeNotifier {
       _dateTimeKey(query.createdFrom),
       _dateTimeKey(query.createdTo),
       query.limit?.toString() ?? '',
+      query.offset?.toString() ?? '',
     ].join('|');
   }
 
@@ -302,8 +360,32 @@ class LeaveProvider extends ChangeNotifier {
     _myRequestsLoadGeneration += 1;
     _myBalancesLoadGeneration += 1;
     _officialDateLoadGeneration += 1;
+    _adminReviewGeneration += 1;
+    _headReviewGeneration += 1;
     invalidateCachedLeaveData(notify: false);
     _requests = [];
+    _myRequests = [];
+    _departmentHeadRequests = [];
+    _adminReviewTotal = 0;
+    _headReviewTotal = 0;
+    _adminReviewNextOffset = 0;
+    _headReviewNextOffset = 0;
+    _adminReviewHasMore = false;
+    _headReviewHasMore = false;
+    _adminReviewLoadingMore = false;
+    _headReviewLoadingMore = false;
+    _adminReviewLoadMoreError = null;
+    _headReviewLoadMoreError = null;
+    _adminReviewLoading = false;
+    _headReviewLoading = false;
+    _adminReviewError = null;
+    _headReviewError = null;
+    _adminReviewInitialLoadComplete = false;
+    _headReviewInitialLoadComplete = false;
+    _adminReviewLoadAttempted = false;
+    _headReviewLoadAttempted = false;
+    _adminReviewQueryKey = null;
+    _headReviewQueryKey = null;
     _balances = [];
     _selectedRequest = null;
     _loading = false;
@@ -413,6 +495,11 @@ class LeaveProvider extends ChangeNotifier {
   }
 
   /// Fetches leave balances for a user (e.g. for admin approval dialog).
+  ///
+  /// On network or server failure, returns an empty list so callers that
+  /// treat balances as informational (e.g. the approval confirmation dialog)
+  /// can still proceed. Use [fetchBalancesForUserStrict] in print flows where
+  /// incorrect balance figures must not appear on a formal document.
   Future<List<LeaveBalance>> fetchBalancesForUser(
     String userId, {
     bool forceRefresh = false,
@@ -431,6 +518,38 @@ class LeaveProvider extends ChangeNotifier {
     }
   }
 
+  /// Fetches leave balances for a user for a formal print flow.
+  ///
+  /// Unlike [fetchBalancesForUser], this method rethrows any network or
+  /// server error so callers can block certification printing rather than
+  /// silently substituting zero/default balance figures on the printed form.
+  Future<List<LeaveBalance>> fetchBalancesForUserStrict(
+    String userId, {
+    bool forceRefresh = false,
+  }) async {
+    final authGeneration = _authGeneration;
+    // Intentionally no try/catch — errors propagate to the print caller.
+    final balances = await _getBalancesForUserCached(
+      userId,
+      forceRefresh: forceRefresh,
+    );
+    if (!_isCurrentAuthGeneration(authGeneration)) {
+      return const <LeaveBalance>[];
+    }
+    return balances;
+  }
+
+  Future<List<LeaveBalance>> fetchFormCreditsForRequestStrict(
+    String requestId,
+  ) async {
+    final authGeneration = _authGeneration;
+    final balances = await _repository.getFormCreditsForRequest(requestId);
+    if (!_isCurrentAuthGeneration(authGeneration)) {
+      return const <LeaveBalance>[];
+    }
+    return balances;
+  }
+
   Future<void> loadMyRequests(
     String userId, {
     LeaveRequestStatus? status,
@@ -447,10 +566,10 @@ class LeaveProvider extends ChangeNotifier {
         forceRefresh: forceRefresh,
       );
       if (!_isCurrentAuthGeneration(authGeneration)) return;
-      _requests = requests;
+      _myRequests = requests;
     } catch (e) {
       if (!_isCurrentAuthGeneration(authGeneration)) return;
-      _requests = [];
+      _myRequests = [];
       _error = e.toString();
     } finally {
       if (_isCurrentAuthGeneration(authGeneration)) {
@@ -463,33 +582,188 @@ class LeaveProvider extends ChangeNotifier {
   Future<void> loadRequests({
     LeaveRequestQuery query = const LeaveRequestQuery(),
     bool forceRefresh = false,
+  }) => _loadReviewRequests(query: query, departmentHead: false);
+
+  LeaveRequestQuery _reviewPageQuery(LeaveRequestQuery query, int offset) =>
+      LeaveRequestQuery(
+        userId: query.userId,
+        department: query.department,
+        status: query.status,
+        leaveType: query.leaveType,
+        leaveTypeName: query.leaveTypeName,
+        startDateFrom: query.startDateFrom,
+        startDateTo: query.startDateTo,
+        createdFrom: query.createdFrom,
+        createdTo: query.createdTo,
+        limit: _reviewPageSize,
+        offset: offset,
+      );
+
+  Future<void> _loadReviewRequests({
+    required LeaveRequestQuery query,
+    required bool departmentHead,
   }) async {
     final authGeneration = _authGeneration;
-    _loading = true;
-    _error = null;
+    final generation = departmentHead
+        ? ++_headReviewGeneration
+        : ++_adminReviewGeneration;
+    bool isCurrent() =>
+        _isCurrentAuthGeneration(authGeneration) &&
+        generation ==
+            (departmentHead ? _headReviewGeneration : _adminReviewGeneration);
+    final key = _requestQueryKey(departmentHead ? 'head' : 'admin', query);
+    final oldKey = departmentHead ? _headReviewQueryKey : _adminReviewQueryKey;
+    final previousCount = oldKey == key
+        ? (departmentHead ? _departmentHeadRequests.length : _requests.length)
+        : 0;
+    if (oldKey != key) {
+      if (departmentHead) {
+        _departmentHeadRequests = [];
+        _headReviewTotal = 0;
+        _headReviewHasMore = false;
+        _headReviewInitialLoadComplete = false;
+        _headReviewLoadAttempted = false;
+      } else {
+        _requests = [];
+        _adminReviewTotal = 0;
+        _adminReviewHasMore = false;
+        _adminReviewInitialLoadComplete = false;
+        _adminReviewLoadAttempted = false;
+      }
+    }
+    if (departmentHead) {
+      _headReviewLoadingMore = false;
+      _headReviewLoading = true;
+      _headReviewError = null;
+    } else {
+      _adminReviewLoadingMore = false;
+      _adminReviewLoading = true;
+      _adminReviewError = null;
+    }
+    _filterStatus = query.status;
+    _filterLeaveType = query.leaveType;
     notifyListeners();
     try {
-      _filterStatus = query.status;
-      _filterLeaveType = query.leaveType;
-      final key = _requestQueryKey('admin', query);
-      final cached = forceRefresh
-          ? null
-          : _readListCache(_requestCache, key, _requestCacheTtl);
-      if (cached != null) {
-        _requests = cached;
+      final items = <LeaveRequest>[];
+      var offset = 0;
+      var total = 0;
+      do {
+        final page = await _repository.listReviewRequestsPage(
+          query: _reviewPageQuery(query, offset),
+          departmentHead: departmentHead,
+        );
+        if (!isCurrent()) return;
+        items.addAll(page.items);
+        total = page.total;
+        offset = page.offset + page.items.length;
+        if (page.items.isEmpty) break;
+      } while (offset < previousCount && offset < total);
+      if (departmentHead) {
+        _departmentHeadRequests = items;
+        _headReviewTotal = total;
+        _headReviewNextOffset = offset;
+        _headReviewHasMore = offset < total;
+        _headReviewQueryKey = key;
+        _headReviewLoadMoreError = null;
+        _headReviewInitialLoadComplete = true;
       } else {
-        final fresh = await _repository.listRequests(query: query);
-        if (!_isCurrentAuthGeneration(authGeneration)) return;
-        _writeListCache(_requestCache, key, fresh);
-        _requests = List<LeaveRequest>.from(fresh);
+        _requests = items;
+        _adminReviewTotal = total;
+        _adminReviewNextOffset = offset;
+        _adminReviewHasMore = offset < total;
+        _adminReviewQueryKey = key;
+        _adminReviewLoadMoreError = null;
+        _adminReviewInitialLoadComplete = true;
       }
     } catch (e) {
-      if (!_isCurrentAuthGeneration(authGeneration)) return;
-      // Keep the currently displayed queue if a background refresh fails.
-      _error = e.toString();
+      if (!isCurrent()) return;
+      if (departmentHead) {
+        _headReviewError = e.toString();
+        _headReviewLoadAttempted = true;
+      } else {
+        _adminReviewError = e.toString();
+        _adminReviewLoadAttempted = true;
+      }
     } finally {
-      if (_isCurrentAuthGeneration(authGeneration)) {
-        _loading = false;
+      if (isCurrent()) {
+        if (departmentHead) {
+          _headReviewLoading = false;
+        } else {
+          _adminReviewLoading = false;
+        }
+        notifyListeners();
+      }
+    }
+  }
+
+  Future<void> loadMoreReviewRequests({
+    required LeaveRequestQuery query,
+    required bool departmentHead,
+  }) async {
+    final key = _requestQueryKey(departmentHead ? 'head' : 'admin', query);
+    if (key != (departmentHead ? _headReviewQueryKey : _adminReviewQueryKey) ||
+        !reviewHasMore(departmentHead: departmentHead) ||
+        reviewLoadingMore(departmentHead: departmentHead)) {
+      return;
+    }
+    final authGeneration = _authGeneration;
+    final generation = departmentHead
+        ? _headReviewGeneration
+        : _adminReviewGeneration;
+    final offset = departmentHead
+        ? _headReviewNextOffset
+        : _adminReviewNextOffset;
+    bool isCurrent() =>
+        _isCurrentAuthGeneration(authGeneration) &&
+        generation ==
+            (departmentHead ? _headReviewGeneration : _adminReviewGeneration);
+    if (departmentHead) {
+      _headReviewLoadingMore = true;
+      _headReviewLoadMoreError = null;
+    } else {
+      _adminReviewLoadingMore = true;
+      _adminReviewLoadMoreError = null;
+    }
+    notifyListeners();
+    try {
+      final page = await _repository.listReviewRequestsPage(
+        query: _reviewPageQuery(query, offset),
+        departmentHead: departmentHead,
+      );
+      if (!isCurrent()) return;
+      final merged = <String, LeaveRequest>{
+        for (final request
+            in departmentHead ? _departmentHeadRequests : _requests)
+          if (request.id != null) request.id!: request,
+      };
+      for (final request in page.items) {
+        if (request.id != null) merged[request.id!] = request;
+      }
+      if (departmentHead) {
+        _departmentHeadRequests = merged.values.toList();
+        _headReviewTotal = page.total;
+        _headReviewNextOffset = page.offset + page.items.length;
+        _headReviewHasMore = page.hasMore;
+      } else {
+        _requests = merged.values.toList();
+        _adminReviewTotal = page.total;
+        _adminReviewNextOffset = page.offset + page.items.length;
+        _adminReviewHasMore = page.hasMore;
+      }
+    } catch (e) {
+      if (!isCurrent()) return;
+      if (departmentHead) {
+        _headReviewLoadMoreError = e.toString();
+      } else {
+        _adminReviewLoadMoreError = e.toString();
+      }
+    } finally {
+      if (isCurrent()) {
+        if (departmentHead) {
+          _headReviewLoadingMore = false;
+        } else {
+          _adminReviewLoadingMore = false;
+        }
         notifyListeners();
       }
     }
@@ -629,7 +903,7 @@ class LeaveProvider extends ChangeNotifier {
         shouldAcceptResult: isCurrentLoad,
       );
       if (!isCurrentLoad()) return;
-      _requests = List<LeaveRequest>.from(page.items);
+      _myRequests = List<LeaveRequest>.from(page.items);
       _myRequestsTotal = page.total;
       _myRequestsNextOffset = page.offset + page.items.length;
       _myRequestsHasMore = page.hasMore;
@@ -668,7 +942,7 @@ class LeaveProvider extends ChangeNotifier {
       );
       if (!isCurrentLoad()) return;
 
-      final merged = List<LeaveRequest>.from(_requests);
+      final merged = List<LeaveRequest>.from(_myRequests);
       final indexesById = <String, int>{
         for (var index = 0; index < merged.length; index++)
           if ((merged[index].id ?? '').isNotEmpty) merged[index].id!: index,
@@ -683,7 +957,7 @@ class LeaveProvider extends ChangeNotifier {
           merged[existingIndex] = request;
         }
       }
-      _requests = merged;
+      _myRequests = merged;
       _myRequestsTotal = page.total;
       _myRequestsNextOffset = page.offset + page.items.length;
       _myRequestsHasMore = page.hasMore;
@@ -796,7 +1070,7 @@ class LeaveProvider extends ChangeNotifier {
       if (!_isCurrentAuthGeneration(authGeneration)) return null;
       invalidateCachedLeaveData();
       _selectedRequest = saved;
-      _upsertRequest(saved);
+      _upsertRequest(saved, addToMyRequests: true);
       return saved;
     } catch (e) {
       if (!_isCurrentAuthGeneration(authGeneration)) return null;
@@ -819,7 +1093,7 @@ class LeaveProvider extends ChangeNotifier {
       final saved = await _repository.submitRequest(request);
       if (!_isCurrentAuthGeneration(authGeneration)) return null;
       _selectedRequest = saved;
-      _upsertRequest(saved);
+      _upsertRequest(saved, addToMyRequests: true);
       _notifyMutation();
       return saved;
     } catch (e) {
@@ -855,7 +1129,7 @@ class LeaveProvider extends ChangeNotifier {
       );
       if (!_isCurrentAuthGeneration(authGeneration)) return null;
       _selectedRequest = saved;
-      _upsertRequest(saved);
+      _upsertRequest(saved, addToMyRequests: true);
       _notifyMutation();
       return saved;
     } catch (e) {
@@ -883,7 +1157,7 @@ class LeaveProvider extends ChangeNotifier {
       final saved = await _repository.updateRequest(request);
       if (!_isCurrentAuthGeneration(authGeneration)) return null;
       _selectedRequest = saved;
-      _upsertRequest(saved);
+      _upsertRequest(saved, addToMyRequests: true);
       _notifyMutation();
       return saved;
     } catch (e) {
@@ -915,7 +1189,7 @@ class LeaveProvider extends ChangeNotifier {
       );
       if (!_isCurrentAuthGeneration(authGeneration)) return null;
       _selectedRequest = updated;
-      _upsertRequest(updated);
+      _upsertRequest(updated, addToMyRequests: true);
       _notifyMutation();
       return updated;
     } catch (e) {
@@ -946,7 +1220,7 @@ class LeaveProvider extends ChangeNotifier {
         reviewerTitle: updated.reviewerTitle ?? input.reviewerTitle,
       );
       _selectedRequest = merged;
-      _upsertRequest(merged);
+      _upsertRequest(merged, addToAdminRequests: true);
       _notifyMutation();
       return merged;
     } catch (e) {
@@ -978,7 +1252,7 @@ class LeaveProvider extends ChangeNotifier {
         reviewerTitle: updated.reviewerTitle ?? input.reviewerTitle,
       );
       _selectedRequest = merged;
-      _upsertRequest(merged);
+      _upsertRequest(merged, addToAdminRequests: true);
       _notifyMutation();
       return merged;
     } catch (e) {
@@ -1009,7 +1283,7 @@ class LeaveProvider extends ChangeNotifier {
         reviewerTitle: updated.reviewerTitle ?? input.reviewerTitle,
       );
       _selectedRequest = merged;
-      _upsertRequest(merged);
+      _upsertRequest(merged, addToAdminRequests: true);
       _notifyMutation();
       return merged;
     } catch (e) {
@@ -1038,7 +1312,7 @@ class LeaveProvider extends ChangeNotifier {
         reviewerTitle: updated.reviewerTitle ?? input.reviewerTitle,
       );
       _selectedRequest = merged;
-      _upsertRequest(merged);
+      _upsertRequest(merged, addToAdminRequests: true);
       _notifyMutation();
       return merged;
     } catch (e) {
@@ -1259,13 +1533,24 @@ class LeaveProvider extends ChangeNotifier {
     }
   }
 
-  void _upsertRequest(LeaveRequest request) {
-    final index = _requests.indexWhere((r) => r.id == request.id);
-    if (index >= 0) {
-      _requests[index] = request;
-    } else {
-      _requests = [request, ..._requests];
+  void _upsertRequest(
+    LeaveRequest request, {
+    bool addToMyRequests = false,
+    bool addToAdminRequests = false,
+    bool addToDepartmentHeadRequests = false,
+  }) {
+    void updateList(List<LeaveRequest> list, bool insert) {
+      final index = list.indexWhere((r) => r.id == request.id);
+      if (index >= 0) {
+        list[index] = request;
+      } else if (insert) {
+        list.insert(0, request);
+      }
     }
+
+    updateList(_myRequests, addToMyRequests);
+    updateList(_requests, addToAdminRequests);
+    updateList(_departmentHeadRequests, addToDepartmentHeadRequests);
   }
 
   // ---- Department Head workflow ----
@@ -1274,6 +1559,11 @@ class LeaveProvider extends ChangeNotifier {
   Map<String, dynamic>? _deptHeadCheck;
   Map<String, dynamic>? get deptHeadCheck => _deptHeadCheck;
   bool get isDeptHead => _deptHeadCheck?['isDeptHead'] == true;
+  bool get hasDeptHeadHistory => _deptHeadCheck?['hasHistory'] == true;
+  bool get canReviewPendingLeave =>
+      _deptHeadCheck?['canReviewPending'] == true || isDeptHead;
+  bool get canViewReviewHistory =>
+      _deptHeadCheck?['canViewReviewHistory'] == true || hasDeptHeadHistory;
 
   /// Check if the current user is a department head.
   Future<bool> checkIsDepartmentHead({bool forceRefresh = false}) async {
@@ -1312,39 +1602,7 @@ class LeaveProvider extends ChangeNotifier {
   Future<void> loadDepartmentHeadRequests({
     LeaveRequestQuery query = const LeaveRequestQuery(),
     bool forceRefresh = false,
-  }) async {
-    final authGeneration = _authGeneration;
-    _loading = true;
-    _error = null;
-    notifyListeners();
-    try {
-      _filterStatus = query.status;
-      _filterLeaveType = query.leaveType;
-      final key = _requestQueryKey('department-head', query);
-      final cached = forceRefresh
-          ? null
-          : _readListCache(_requestCache, key, _requestCacheTtl);
-      if (cached != null) {
-        _requests = cached;
-      } else {
-        final fresh = await _repository.listDepartmentHeadRequests(
-          query: query,
-        );
-        if (!_isCurrentAuthGeneration(authGeneration)) return;
-        _writeListCache(_requestCache, key, fresh);
-        _requests = List<LeaveRequest>.from(fresh);
-      }
-    } catch (e) {
-      if (!_isCurrentAuthGeneration(authGeneration)) return;
-      // Keep the currently displayed queue if a background refresh fails.
-      _error = e.toString();
-    } finally {
-      if (_isCurrentAuthGeneration(authGeneration)) {
-        _loading = false;
-        notifyListeners();
-      }
-    }
-  }
+  }) => _loadReviewRequests(query: query, departmentHead: true);
 
   Future<LeaveRequest?> departmentHeadApprove(
     LeaveReviewDecisionInput input,
@@ -1357,7 +1615,7 @@ class LeaveProvider extends ChangeNotifier {
       final updated = await _repository.departmentHeadApprove(input);
       if (!_isCurrentAuthGeneration(authGeneration)) return null;
       _selectedRequest = updated;
-      _upsertRequest(updated);
+      _upsertRequest(updated, addToDepartmentHeadRequests: true);
       _notifyMutation();
       return updated;
     } catch (e) {
@@ -1385,7 +1643,7 @@ class LeaveProvider extends ChangeNotifier {
       final updated = await _repository.departmentHeadReject(input);
       if (!_isCurrentAuthGeneration(authGeneration)) return null;
       _selectedRequest = updated;
-      _upsertRequest(updated);
+      _upsertRequest(updated, addToDepartmentHeadRequests: true);
       _notifyMutation();
       return updated;
     } catch (e) {
@@ -1413,7 +1671,7 @@ class LeaveProvider extends ChangeNotifier {
       final updated = await _repository.departmentHeadReturn(input);
       if (!_isCurrentAuthGeneration(authGeneration)) return null;
       _selectedRequest = updated;
-      _upsertRequest(updated);
+      _upsertRequest(updated, addToDepartmentHeadRequests: true);
       _notifyMutation();
       return updated;
     } catch (e) {

@@ -174,6 +174,17 @@ class _DocuTrackerDocumentDetailScreenState
             savedMessage: 'Department head signature saved.',
           ),
           const SizedBox(height: 12),
+          DocuTrackerSourceSignatureCard(
+            sourceModule: 'dtr',
+            sourceTable: 'leave_requests',
+            sourceRecordId: sourceRecordId,
+            slotKey: 'hr_approver',
+            title: 'HR/Admin E-Signature',
+            unsignedMessage: 'No final approver signature yet',
+            waitingMessage: 'Waiting for an authorized HR reviewer to sign.',
+            savedMessage: 'Final approver signature saved.',
+          ),
+          const SizedBox(height: 12),
           if (isApplicant)
             FilledButton.icon(
               onPressed: () => _openLinkedLeaveForm(doc),

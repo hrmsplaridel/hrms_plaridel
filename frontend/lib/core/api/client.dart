@@ -11,6 +11,7 @@ class ApiClient {
   static final ApiClient instance = ApiClient._();
 
   late final Dio _dio;
+  bool _initialized = false;
 
   /// Single in-flight refresh so concurrent 401s share one refresh call.
   static Future<bool>? _refreshInFlight;
@@ -18,6 +19,7 @@ class ApiClient {
   Dio get dio => _dio;
 
   void init() {
+    if (_initialized) return;
     _dio = Dio(
       BaseOptions(
         baseUrl: ApiConfig.baseUrl,
@@ -117,6 +119,7 @@ class ApiClient {
         },
       ),
     );
+    _initialized = true;
   }
 
   static Future<bool> _refreshSessionShared() {

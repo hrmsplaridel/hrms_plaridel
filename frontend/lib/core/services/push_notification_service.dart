@@ -232,7 +232,7 @@ class PushNotificationService {
   }
 
   bool get _isMessagingSupported {
-    if (kIsWeb) return true;
+    if (kIsWeb) return false;
     return defaultTargetPlatform == TargetPlatform.android ||
         defaultTargetPlatform == TargetPlatform.iOS ||
         defaultTargetPlatform == TargetPlatform.macOS;

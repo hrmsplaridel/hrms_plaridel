@@ -17,6 +17,7 @@ import 'package:hrms_plaridel/features/docutracker/security/docutracker_roles.da
 import 'package:hrms_plaridel/features/docutracker/services/employee_directory_lookup.dart';
 import 'package:hrms_plaridel/features/docutracker/theme/docutracker_tokens.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_module_header.dart';
+import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_error_banner.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_warm_widgets.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/admin/widgets/docutracker_admin_ui.dart';
 import 'docutracker_escalation_config_screen.dart';
@@ -1267,6 +1268,7 @@ class _UserPermissionsDialogState extends State<_UserPermissionsDialog> {
   String _selectedRoleId = _DocuTrackerAdminScreenState._userGroups.keys.first;
 
   bool _loading = true;
+  String? _error;
   Map<String, DocumentPermission> _existingByActionName = const {};
   late Map<String, bool> _grantedByActionName;
 
@@ -1277,23 +1279,38 @@ class _UserPermissionsDialogState extends State<_UserPermissionsDialog> {
   }
 
   Future<void> _load() async {
-    setState(() => _loading = true);
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
 
-    final perms = <DocumentPermission>[];
-    for (final r in DocuTrackerRoles.equivalentsForRead(_selectedRoleId)) {
-      perms.addAll(await _repo.listPermissions(roleId: r, documentType: '*'));
+    try {
+      final perms = <DocumentPermission>[];
+      for (final r in DocuTrackerRoles.equivalentsForRead(_selectedRoleId)) {
+        perms.addAll(await _repo.listPermissions(roleId: r, documentType: '*'));
+      }
+
+      final existing = {for (final p in perms) p.action.name: p};
+      final granted = {
+        for (final item in _DocuTrackerAdminScreenState._restrictionItems)
+          item.action.name: existing[item.action.name]?.granted ?? false,
+      };
+
+      if (!mounted) return;
+      setState(() {
+        _existingByActionName = existing;
+        _grantedByActionName = granted;
+        _loading = false;
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _loading = false;
+        _error = error.toString().trim().isEmpty
+            ? 'Permissions could not be loaded.'
+            : error.toString();
+      });
     }
-
-    _existingByActionName = {for (final p in perms) p.action.name: p};
-
-    _grantedByActionName = {
-      for (final item in _DocuTrackerAdminScreenState._restrictionItems)
-        item.action.name:
-            _existingByActionName[item.action.name]?.granted ?? false,
-    };
-
-    if (!mounted) return;
-    setState(() => _loading = false);
   }
 
   Future<void> _save() async {
@@ -1434,7 +1451,20 @@ class _UserPermissionsDialogState extends State<_UserPermissionsDialog> {
                         ),
                       ),
                       const SizedBox(height: 18),
-                      if (_loading)
+                      if (_error != null)
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            DocuTrackerErrorBanner(message: _error!),
+                            const SizedBox(height: 12),
+                            OutlinedButton.icon(
+                              onPressed: _load,
+                              icon: const Icon(Icons.refresh_rounded),
+                              label: const Text('Retry'),
+                            ),
+                          ],
+                        )
+                      else if (_loading)
                         const Padding(
                           padding: EdgeInsets.all(24),
                           child: Center(child: CircularProgressIndicator()),
@@ -1523,7 +1553,7 @@ class _UserPermissionsDialogState extends State<_UserPermissionsDialog> {
                   ),
                   const SizedBox(width: 12),
                   FilledButton(
-                    onPressed: _loading ? null : _save,
+                    onPressed: _loading || _error != null ? null : _save,
                     style: DocuTrackerTokens.terracottaFilledStyle().copyWith(
                       padding: WidgetStateProperty.all(
                         const EdgeInsets.symmetric(

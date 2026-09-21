@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const {
   VALID_STATUSES,
   mapDocumentRow,
+  sourceActionForRow,
   ensureValidWorkflowConfig,
   permissionPriority,
   resolvePermissionDecisionFromRows,
@@ -42,6 +43,75 @@ test('mapDocumentRow normalizes inReview status', () => {
   };
   const mapped = mapDocumentRow(row);
   assert.equal(mapped.status, 'in_review');
+});
+
+test('sourceActionForRow exposes only the viewer current DTR leave action', () => {
+  const base = {
+    source_module: 'dtr',
+    source_table: 'leave_requests',
+    source_owner_id: 'employee-1',
+    assigned_department_head_id: 'head-1',
+    viewer_is_department_reviewer: false,
+  };
+
+  assert.deepEqual(
+    sourceActionForRow(
+      { ...base, source_status: 'draft' },
+      { id: 'employee-1', role: 'employee' }
+    ),
+    { action: 'complete_in_dtr', label: 'Complete and submit in DTR' }
+  );
+  assert.deepEqual(
+    sourceActionForRow(
+      { ...base, source_status: 'pending_department_head' },
+      { id: 'head-1', role: 'employee' }
+    ),
+    {
+      action: 'department_review_in_dtr',
+      label: 'Sign here, then review in DTR',
+    }
+  );
+  assert.deepEqual(
+    sourceActionForRow(
+      { ...base, source_status: 'pending_hr' },
+      { id: 'hr-1', role: 'hr' }
+    ),
+    { action: 'hr_review_in_dtr', label: 'Sign here, then review in DTR' }
+  );
+  assert.equal(
+    sourceActionForRow(
+      { ...base, source_status: 'pending_department_head' },
+      { id: 'previous-reviewer', role: 'employee' }
+    ),
+    null
+  );
+  assert.equal(
+    sourceActionForRow(
+      { ...base, source_status: 'approved' },
+      { id: 'admin-1', role: 'admin' }
+    ),
+    null
+  );
+});
+
+test('mapDocumentRow preserves server-owned source action metadata', () => {
+  const mapped = mapDocumentRow({
+    id: 'source:dtr:leave-1',
+    document_type: 'dtr',
+    title: 'Leave request',
+    status: 'in_review',
+    source_module: 'dtr',
+    source_table: 'leave_requests',
+    source_record_id: 'leave-1',
+    source_status: 'pending_department_head',
+    source_action: 'department_review_in_dtr',
+    source_action_label: 'Sign here, then review in DTR',
+    source_only: true,
+  });
+
+  assert.equal(mapped.source_status, 'pending_department_head');
+  assert.equal(mapped.source_action, 'department_review_in_dtr');
+  assert.equal(mapped.source_action_label, 'Sign here, then review in DTR');
 });
 
 test('ensureValidWorkflowConfig rejects missing config', () => {

@@ -1,10 +1,11 @@
--- HRMS Plaridel Schema v2
--- Core HR + DTR + L&D + RSP + DocuTracker modules
+-- HRMS Plaridel complete fresh-install schema
+-- Core HR + DTR + L&D + RSP + DocuTracker modules and policies
 -- PostgreSQL
--- Run: psql -d hrms_plaridel -f scripts/init-schema.sql
+-- Run with psql so the relative include commands at the end are processed:
+--   psql -d hrms_plaridel -v ON_ERROR_STOP=1 -f scripts/init-schema.sql
 --
--- DocuTracker tables, constraints, functions, and seeds are included below.
--- For existing databases that predate this file, use backend/scripts/migrations/docutracker/docutracker-install-*.sql instead.
+-- This is the single entry point for a new database. Existing databases should
+-- continue to use the targeted migration scripts under scripts/migrations/.
 
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 CREATE EXTENSION IF NOT EXISTS btree_gist;
@@ -847,6 +848,24 @@ CREATE TABLE IF NOT EXISTS leave_request_history (
 );
 CREATE INDEX IF NOT EXISTS idx_leave_request_history_leave_request_id
   ON leave_request_history(leave_request_id);
+
+-- =========================================
+-- LEGACY LEAVE BALANCE DEDUCTION HISTORY
+-- =========================================
+-- Retained while leaveRoutes still initializes this compatibility table.
+CREATE TABLE IF NOT EXISTS leave_balance_deduction_history (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  leave_type TEXT NOT NULL,
+  deducted_days NUMERIC NOT NULL,
+  remaining_days NUMERIC,
+  remarks TEXT,
+  applied_by UUID REFERENCES users(id) ON DELETE SET NULL,
+  applied_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  metadata_json JSONB
+);
+CREATE INDEX IF NOT EXISTS idx_leave_balance_deduction_history_user_applied
+  ON leave_balance_deduction_history(user_id, applied_at DESC);
 
 -- =========================================
 -- LEAVE ATTACHMENT ACCESS LOG (SENSITIVE-DOCUMENT AUDIT)
@@ -2308,6 +2327,39 @@ CREATE TABLE IF NOT EXISTS docutracker_signature_fields (
   )
 );
 
+CREATE TABLE IF NOT EXISTS docutracker_rsp_source_signatures (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  source_table TEXT NOT NULL CHECK (source_table IN (
+    'applicants_profile_entries', 'selection_lineup_entries',
+    'computation_of_points_entries', 'work_experience_sheet_entries',
+    'turn_around_time_entries', 'idp_entries',
+    'action_brainstorming_coaching_entries'
+  )),
+  source_record_id UUID NOT NULL,
+  slot_key TEXT NOT NULL CHECK (slot_key IN (
+    'prepared_by', 'checked_by', 'applicant', 'noted_by',
+    'reviewed_by', 'approved_by', 'certified_by'
+  )),
+  label TEXT NOT NULL,
+  assigned_signer_id UUID NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+  signature_asset_id UUID REFERENCES docutracker_signature_assets(id) ON DELETE RESTRICT,
+  signed_by UUID REFERENCES users(id) ON DELETE RESTRICT,
+  signer_name_snapshot TEXT,
+  signed_at TIMESTAMPTZ,
+  created_by UUID REFERENCES users(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CHECK (
+    (signature_asset_id IS NULL AND signed_by IS NULL
+      AND signer_name_snapshot IS NULL AND signed_at IS NULL)
+    OR
+    (signature_asset_id IS NOT NULL AND signed_by = assigned_signer_id
+      AND length(btrim(signer_name_snapshot)) BETWEEN 1 AND 200
+      AND signed_at IS NOT NULL)
+  ),
+  UNIQUE (source_table, source_record_id, slot_key)
+);
+
 CREATE TABLE IF NOT EXISTS docutracker_transition_requests (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   document_id UUID NOT NULL REFERENCES docutracker_documents(id) ON DELETE CASCADE,
@@ -2412,6 +2464,10 @@ CREATE INDEX IF NOT EXISTS idx_docutracker_signature_fields_document_page
 CREATE INDEX IF NOT EXISTS idx_docutracker_signature_fields_signer_pending
   ON docutracker_signature_fields(assigned_signer_id, document_id)
   WHERE signed_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_docutracker_rsp_source_signatures_assignee
+  ON docutracker_rsp_source_signatures(
+    assigned_signer_id, source_table, source_record_id
+  );
 
 CREATE INDEX IF NOT EXISTS idx_docutracker_routing_config_versions_type_version_desc
   ON docutracker_routing_config_versions(document_type, version DESC);
@@ -3079,3 +3135,11 @@ CREATE TRIGGER trg_training_daily_reports_updated_at
 BEFORE UPDATE ON training_daily_reports
 FOR EACH ROW
 EXECUTE PROCEDURE set_updated_at();
+
+-- =========================================
+-- COMPLETE FRESH-INSTALL COMPONENTS
+-- =========================================
+-- \ir resolves paths relative to this file. Keep the component scripts usable
+-- independently for upgrades while making this file the one-command installer.
+\ir migrations/docutracker/docutracker-install-all-in-order.sql
+\ir rsp-storage-attachment-policy.sql

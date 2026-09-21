@@ -37,6 +37,18 @@ same geometry can be rendered on different screen sizes and in PDF output.
 | POST | `/api/docutracker/sources/dtr/leave_requests/{leaveRequestId}/signatures/applicant/sign` | Add or replace the authenticated applicant's signature while the leave request remains active |
 | POST | `/api/docutracker/sources/dtr/leave_requests/{leaveRequestId}/signatures/department_head/sign` | Add or replace the assigned department head signature before endorsement |
 | POST | `/api/docutracker/sources/dtr/leave_requests/{leaveRequestId}/signatures/hr_approver/sign` | Add or replace the authenticated HR/admin signature before final approval |
+| GET | `/api/docutracker/sources/rsp/{table}/{recordId}/signatures` | Load the configured signature fields for an authorized saved RSP form |
+| GET | `/api/docutracker/sources/rsp/signature-requests` | List saved RSP forms needing admin signer setup or a signature from the authenticated user, including the protected form preview payload; completed forms are omitted |
+| PUT | `/api/docutracker/sources/rsp/{table}/{recordId}/signatures/{slot}/assignment` | Admin-only assignment of an active HRMS user to an RSP signature field |
+| POST | `/api/docutracker/sources/rsp/{table}/{recordId}/signatures/{slot}/sign` | Add or replace the authenticated assigned user's RSP form signature |
+| GET | `/api/docutracker/sources/ld/{table}/{recordId}/signatures` | Load configured signature fields for an authorized saved L&D form |
+| GET | `/api/docutracker/sources/ld/signature-requests` | List L&D forms needing admin signer setup or a signature from the authenticated user |
+| PUT | `/api/docutracker/sources/ld/{table}/{recordId}/signatures/{slot}/assignment` | Admin-only assignment of an active HRMS user to an L&D signature field |
+| POST | `/api/docutracker/sources/ld/{table}/{recordId}/signatures/{slot}/sign` | Add or replace the authenticated assigned user's L&D form signature |
+
+The RSP and L&D signature-request feeds return `503` when their required source
+form or signature tables are not initialized. They do not convert a missing
+schema into an empty Required Actions list.
 
 Builder responses include `current_user_id` and a per-field `can_sign`
 capability calculated from the authenticated backend user. The Flutter client
@@ -47,6 +59,25 @@ Drawn or uploaded signatures can be marked `is_saved` and reused through an
 owned `signature_asset_id`. The backend verifies asset ownership and requires
 the same authenticated department reviewer or HR/admin reviewer to sign the
 corresponding fixed slot before approval.
+
+Saved RSP forms use fixed signature slots defined by the official form layout.
+Supported records are Applicants Profile (`prepared_by`, `checked_by`),
+Selection Line-Up (`prepared_by`), Computation of Points (`prepared_by`), Work
+Experience Sheet (`applicant`), and Turn Around Time (`prepared_by`,
+`noted_by`). An administrator assigns an active HRMS account to each field.
+Only that authenticated account receives `can_sign: true` and may draw, select,
+or replace its own saved signature. Assignment changes and signature changes
+are transactional and recorded in the DocuTracker governance audit. The BI
+Form has no signature field in its current official layout.
+
+Saved L&D forms use the same server-authorized assignment and signing rules.
+Supported records are Individual Development Plan (`prepared_by`,
+`reviewed_by`, `noted_by`, and `approved_by`) and Action Brainstorming and
+Coaching (`certified_by`). Administrators can discover forms with unassigned
+fields through the L&D signature-request endpoint. Assigned users see only
+their own requests. Training Needs Analysis and Performance Evaluation are not
+given artificial signature fields because their current print layouts contain
+none.
 
 Builder responses also include `format_version`. New builder content uses
 version `2`, which renders the official `assets/forms/a4_letter.pdf` full-page
@@ -95,6 +126,13 @@ leave dates, balances, status, attachments, or approval decisions. Source
 signature responses expose a backend-calculated `can_sign` capability. Only the
 leave applicant can use the applicant signing operation. A replacement appends
 a new leave history event rather than overwriting the audit trail.
+
+Source-only DTR leave rows returned by `GET /api/docutracker/documents` may also
+contain `source_status`, `source_action`, and `source_action_label`. These are
+server-calculated, viewer-specific hints for DocuTracker's Required Actions UI.
+An absent `source_action` means the viewer has no current source-module action.
+The hints do not authorize or perform a DTR transition; DTR remains responsible
+for submission, endorsement, approval, return, rejection, and leave balances.
 
 Linked L&D training reports and RSP recruitment applications also remain
 authoritative in their source modules. DocuTracker returns only an allowlisted

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import 'package:hrms_plaridel/features/docutracker/data/repositories/docutracker_repository.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document.dart';
+import 'package:hrms_plaridel/features/docutracker/models/document_status.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/pages/docutracker_document_detail_screen.dart';
 import 'package:hrms_plaridel/features/docutracker/services/docutracker_document_visibility.dart';
 
@@ -13,6 +14,34 @@ List<DocuTrackerDocument> docuTrackerDocumentsForDisplay({
 }) {
   if (isAdmin || userId.trim().isEmpty) return documents;
   return DocuTrackerDocumentVisibility.filterForUser(documents, userId: userId);
+}
+
+/// Documents for which the signed-in user has a current, server-authorized
+/// action. Source-module actions are supplied by the backend adapter; native
+/// DocuTracker actions use current-step assignment metadata.
+List<DocuTrackerDocument> docuTrackerRequiredActionDocuments({
+  required List<DocuTrackerDocument> documents,
+  required String userId,
+}) {
+  final uid = userId.trim();
+  return documents
+      .where((document) {
+        if (document.sourceOnly) {
+          return (document.sourceAction ?? '').trim().isNotEmpty;
+        }
+        if (uid.isEmpty) return false;
+        if (document.status == DocumentStatus.approved ||
+            document.status == DocumentStatus.rejected ||
+            document.status == DocumentStatus.cancelled) {
+          return false;
+        }
+        if (DocuTrackerDocumentVisibility.isWorkInProgressDraft(document)) {
+          return false;
+        }
+        return document.currentHolderId?.trim() == uid ||
+            document.viewerIsRoutingAssignee;
+      })
+      .toList(growable: false);
 }
 
 /// Opens document detail after verifying the user may access it.

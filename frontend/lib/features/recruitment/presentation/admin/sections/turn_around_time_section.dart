@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:provider/provider.dart';
 
 import 'package:hrms_plaridel/core/api/user_facing_api_error.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
@@ -10,6 +11,8 @@ import 'package:hrms_plaridel/features/recruitment/presentation/admin/widgets/rs
 import 'package:hrms_plaridel/shared/widgets/read_only_saved_entry_dialog.dart';
 import 'package:hrms_plaridel/shared/widgets/rsp_ld_record_actions.dart';
 import 'package:hrms_plaridel/shared/widgets/rsp_ld_saved_records_browser.dart';
+import 'package:hrms_plaridel/features/docutracker/data/providers/docutracker_provider.dart';
+import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_rsp_signature_section.dart';
 
 /// One recruitment milestone tracked per applicant. Keys match the official
 /// Turn-Around Time paper form columns / [TurnAroundTimeApplicant] fields —
@@ -295,20 +298,58 @@ class _RspTurnAroundTimeSectionState extends State<RspTurnAroundTimeSection> {
 
   Future<void> _print(TurnAroundTimeEntry entry) async {
     try {
+      final signatureProvider = context.read<DocuTrackerProvider>();
+      final signatures = entry.id == null
+          ? null
+          : await signatureProvider.loadSourceSignatures(
+              sourceModule: 'rsp',
+              sourceTable: TurnAroundTimeEntry.tableName,
+              sourceRecordId: entry.id!,
+            );
+      if (entry.id != null && signatures == null) {
+        throw StateError(
+          signatureProvider.sourceSignatureError ??
+              'The form signatures could not be loaded.',
+        );
+      }
+      if (!mounted) return;
       await FormPdf.printForm(
         context: context,
-        buildDocument: () => FormPdf.buildTurnAroundTimePdf(entry),
+        buildDocument: () =>
+            FormPdf.buildTurnAroundTimePdf(entry, signatures: signatures),
         filename: 'Turn_Around_Time.pdf',
         format: FormPdf.pageLongLandscape,
         printModule: 'rsp',
         printFormKey: 'turn_around_time',
       );
-    } catch (_) {}
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Print failed. ${userFacingApiError(error)}')),
+      );
+    }
   }
 
   Future<void> _download(TurnAroundTimeEntry entry) async {
     try {
-      final doc = await FormPdf.buildTurnAroundTimePdf(entry);
+      final signatureProvider = context.read<DocuTrackerProvider>();
+      final signatures = entry.id == null
+          ? null
+          : await signatureProvider.loadSourceSignatures(
+              sourceModule: 'rsp',
+              sourceTable: TurnAroundTimeEntry.tableName,
+              sourceRecordId: entry.id!,
+            );
+      if (entry.id != null && signatures == null) {
+        throw StateError(
+          signatureProvider.sourceSignatureError ??
+              'The form signatures could not be loaded.',
+        );
+      }
+      final doc = await FormPdf.buildTurnAroundTimePdf(
+        entry,
+        signatures: signatures,
+      );
       await FormPdf.sharePdf(doc, name: 'Turn_Around_Time.pdf');
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -318,7 +359,9 @@ class _RspTurnAroundTimeSectionState extends State<RspTurnAroundTimeSection> {
       if (!mounted) return;
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(SnackBar(content: Text('Download failed: $e')));
+      ).showSnackBar(
+        SnackBar(content: Text('Download failed. ${userFacingApiError(e)}')),
+      );
     }
   }
 
@@ -439,6 +482,17 @@ class _RspTurnAroundTimeSectionState extends State<RspTurnAroundTimeSection> {
             onPrint: _print,
             onDownloadPdf: _download,
           ),
+          if (_editing?.id != null) ...[
+            const SizedBox(height: 16),
+            DocuTrackerRspSignatureSection(
+              sourceTable: TurnAroundTimeEntry.tableName,
+              sourceRecordId: _editing!.id!,
+              slots: const [
+                DocuTrackerRspSignatureSlot('prepared_by', 'Prepared by'),
+                DocuTrackerRspSignatureSlot('noted_by', 'Noted by'),
+              ],
+            ),
+          ],
           const SizedBox(height: 24),
         ],
         _toolbar(context),

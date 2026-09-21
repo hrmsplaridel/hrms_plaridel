@@ -38,6 +38,19 @@ String _apiErrorMessage(Object e) {
   return e.toString();
 }
 
+class _DocuTrackerRequestException implements Exception {
+  const _DocuTrackerRequestException(this.message);
+
+  final String message;
+
+  @override
+  String toString() => message;
+}
+
+Never _throwRequestError(Object error) {
+  throw _DocuTrackerRequestException(_apiErrorMessage(error));
+}
+
 String _isoDate(DateTime value) =>
     '${value.year.toString().padLeft(4, '0')}-'
     '${value.month.toString().padLeft(2, '0')}-'
@@ -183,8 +196,8 @@ class DocuTrackerRepository implements DocuTrackerPermissionsDataSource {
             ),
           )
           .toList();
-    } catch (_) {
-      return DocumentRoutingConfig.defaults;
+    } catch (error) {
+      _throwRequestError(error);
     }
   }
 
@@ -572,6 +585,32 @@ class DocuTrackerRepository implements DocuTrackerPermissionsDataSource {
     }
   }
 
+  Future<DocuTrackerResult<List<DocuTrackerRspSignatureRequest>>>
+  getSourceSignatureRequests({required String sourceModule}) async {
+    try {
+      final module = Uri.encodeComponent(sourceModule);
+      final response = await ApiClient.instance.get<List<dynamic>>(
+        '$_base/sources/$module/signature-requests',
+      );
+      final data = response.data ?? const <dynamic>[];
+      return DocuTrackerSuccess(
+        data
+            .whereType<Map>()
+            .map(
+              (item) => DocuTrackerRspSignatureRequest.fromJson(
+                Map<String, dynamic>.from(item),
+              ),
+            )
+            .toList(growable: false),
+      );
+    } catch (error) {
+      return DocuTrackerFailure(_apiErrorMessage(error));
+    }
+  }
+
+  Future<DocuTrackerResult<List<DocuTrackerRspSignatureRequest>>>
+  getRspSignatureRequests() => getSourceSignatureRequests(sourceModule: 'rsp');
+
   Future<DocuTrackerResult<DocuTrackerSourceSignatureBundle>>
   signSourceSignature({
     required String sourceModule,
@@ -600,7 +639,32 @@ class DocuTrackerRepository implements DocuTrackerPermissionsDataSource {
       );
       final data = response.data;
       if (data == null) {
-        return const DocuTrackerFailure('The leave form was not signed');
+        return const DocuTrackerFailure('The form was not signed');
+      }
+      return DocuTrackerSuccess(
+        DocuTrackerSourceSignatureBundle.fromJson(data),
+      );
+    } catch (error) {
+      return DocuTrackerFailure(_apiErrorMessage(error));
+    }
+  }
+
+  Future<DocuTrackerResult<DocuTrackerSourceSignatureBundle>>
+  assignSourceSignature({
+    required String sourceModule,
+    required String sourceTable,
+    required String sourceRecordId,
+    required String slotKey,
+    required String assignedSignerId,
+  }) async {
+    try {
+      final response = await ApiClient.instance.put<Map<String, dynamic>>(
+        '${_sourceSignaturePath(sourceModule: sourceModule, sourceTable: sourceTable, sourceRecordId: sourceRecordId)}/${Uri.encodeComponent(slotKey)}/assignment',
+        data: <String, dynamic>{'assigned_signer_id': assignedSignerId},
+      );
+      final data = response.data;
+      if (data == null) {
+        return const DocuTrackerFailure('The signer was not assigned');
       }
       return DocuTrackerSuccess(
         DocuTrackerSourceSignatureBundle.fromJson(data),
@@ -704,8 +768,8 @@ class DocuTrackerRepository implements DocuTrackerPermissionsDataSource {
             ),
           )
           .toList();
-    } catch (_) {
-      return [];
+    } catch (error) {
+      _throwRequestError(error);
     }
   }
 
@@ -766,8 +830,8 @@ class DocuTrackerRepository implements DocuTrackerPermissionsDataSource {
             ),
           )
           .toList();
-    } catch (_) {
-      return [];
+    } catch (error) {
+      _throwRequestError(error);
     }
   }
 
@@ -833,8 +897,8 @@ class DocuTrackerRepository implements DocuTrackerPermissionsDataSource {
         return perms.where((p) => p.userId != null).toList();
       }
       return perms;
-    } catch (_) {
-      return [];
+    } catch (error) {
+      _throwRequestError(error);
     }
   }
 
@@ -852,8 +916,8 @@ class DocuTrackerRepository implements DocuTrackerPermissionsDataSource {
       );
       final list = res.data ?? const [];
       return list.map((e) => Map<String, dynamic>.from(e as Map)).toList();
-    } catch (_) {
-      return const [];
+    } catch (error) {
+      _throwRequestError(error);
     }
   }
 

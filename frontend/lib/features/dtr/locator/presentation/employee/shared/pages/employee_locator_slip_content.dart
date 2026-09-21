@@ -8,6 +8,7 @@ import 'package:provider/provider.dart';
 
 import 'package:hrms_plaridel/core/api/client.dart';
 import 'package:hrms_plaridel/core/utils/responsive_right_side_panel.dart';
+import 'package:hrms_plaridel/core/widgets/form_pdf_preview.dart';
 import 'package:hrms_plaridel/features/dtr/locator/data/repositories/locator_slip_data_cache.dart';
 import 'package:hrms_plaridel/features/dtr/locator/models/locator_request_type.dart';
 import 'package:hrms_plaridel/features/dtr/locator/models/locator_slip_form_initial_values.dart';
@@ -70,9 +71,10 @@ class EmployeeLocatorSlipContent extends StatefulWidget {
       EmployeeLocatorSlipContentState();
 }
 
-class EmployeeLocatorSlipContentState
-    extends State<EmployeeLocatorSlipContent> {
+class EmployeeLocatorSlipContentState extends State<EmployeeLocatorSlipContent>
+    with WidgetsBindingObserver {
   static const int _historyPageSize = 50;
+  static const Duration _reconciliationInterval = Duration(minutes: 2);
   final List<_LocatorSlipDraft> _slips = [];
   final List<_LocatorSlipDraft> _deptHeadQueue = [];
   final ScrollController _myRequestsScrollController = ScrollController();
@@ -82,6 +84,7 @@ class EmployeeLocatorSlipContentState
   bool _locatorTypesLoaded = false;
   String? _locatorTypesError;
   Future<bool>? _isDeptHeadFuture;
+  LocatorReviewerAccess _reviewerAccess = const LocatorReviewerAccess.none();
   _LocatorSection _currentSection = _LocatorSection.requests;
   bool _appliedDeptHeadDefaultSection = false;
   bool _loadingMy = false;
@@ -90,7 +93,8 @@ class EmployeeLocatorSlipContentState
   bool _approvalHistoryLoaded = false;
   bool _loadingMoreMy = false;
   bool _loadingMoreApprovals = false;
-  String? _error;
+  String? _myRequestsError;
+  String? _approvalsError;
   String? _myLoadMoreError;
   String? _approvalLoadMoreError;
   String? _selectedStatusFilter;
@@ -112,6 +116,10 @@ class EmployeeLocatorSlipContentState
   String? _selectedSlipId;
   String? _selectedApprovalSlipId;
   StreamSubscription<AppRealtimeEvent>? _locatorRealtimeSub;
+  AppRealtimeProvider? _realtimeProvider;
+  Timer? _reconciliationTimer;
+  bool _wasRealtimeConnected = false;
+  bool _reconciliationInProgress = false;
   String? _authenticatedUserId;
   String? _authenticatedUserRole;
   DateTime? _officialHrmsDate;
@@ -158,6 +166,16 @@ class EmployeeLocatorSlipContentState
   }
 
   @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _reconciliationTimer = Timer.periodic(
+      _reconciliationInterval,
+      (_) => unawaited(_reconcileLocatorData()),
+    );
+  }
+
+  @override
   void didChangeDependencies() {
     super.didChangeDependencies();
     final authProvider = context.watch<AuthProvider>();
@@ -171,7 +189,7 @@ class EmployeeLocatorSlipContentState
     if (_authenticatedUserId != null &&
         !_loadingMy &&
         !_myHistoryLoaded &&
-        _error == null) {
+        _myRequestsError == null) {
       unawaited(_loadMyRequests());
     }
     if (_authenticatedUserId != null &&
@@ -181,16 +199,36 @@ class EmployeeLocatorSlipContentState
       unawaited(_loadOfficialDate());
     }
     final realtimeProvider = context.read<AppRealtimeProvider>();
+    if (!identical(_realtimeProvider, realtimeProvider)) {
+      _realtimeProvider?.removeListener(_handleRealtimeConnectionChanged);
+      _realtimeProvider = realtimeProvider;
+      _wasRealtimeConnected = realtimeProvider.connected;
+      realtimeProvider.addListener(_handleRealtimeConnectionChanged);
+    }
     _locatorRealtimeSub ??= realtimeProvider.events.listen((event) {
       if (event.name != 'locator_updated') return;
       final userId = _authenticatedUserId;
-      if (event.affectsUser(userId)) {
-        unawaited(_loadMyRequests(forceRefresh: true));
-      }
-      if (_currentSection == _LocatorSection.approvals) {
-        unawaited(_loadDepartmentHeadRequests(forceRefresh: true));
+      if (event.affectsUser(userId) ||
+          _currentSection == _LocatorSection.approvals) {
+        unawaited(_reconcileLocatorData());
       }
     });
+  }
+
+  void _handleRealtimeConnectionChanged() {
+    final connected = _realtimeProvider?.connected == true;
+    final reconnected = connected && !_wasRealtimeConnected;
+    _wasRealtimeConnected = connected;
+    if (reconnected) {
+      unawaited(_reconcileLocatorData());
+    }
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      unawaited(_reconcileLocatorData());
+    }
   }
 
   void _synchronizeAuthenticatedUser(AuthProvider authProvider) {
@@ -228,7 +266,8 @@ class EmployeeLocatorSlipContentState
     _loadingLocatorTypes = false;
     _locatorTypesLoaded = false;
     _locatorTypesError = null;
-    _error = null;
+    _myRequestsError = null;
+    _approvalsError = null;
     _selectedStatusFilter = null;
     _selectedApprovalStatusFilter = null;
     _fromDate = null;
@@ -247,6 +286,7 @@ class EmployeeLocatorSlipContentState
     _approvalFilterDebounce?.cancel();
     _selectedSlipId = null;
     _selectedApprovalSlipId = null;
+    _reviewerAccess = const LocatorReviewerAccess.none();
 
     final generation = _authGeneration;
     _isDeptHeadFuture = userId == null
@@ -308,6 +348,9 @@ class EmployeeLocatorSlipContentState
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _reconciliationTimer?.cancel();
+    _realtimeProvider?.removeListener(_handleRealtimeConnectionChanged);
     _locatorRealtimeSub?.cancel();
     _myFilterDebounce?.cancel();
     _approvalFilterDebounce?.cancel();
@@ -419,6 +462,8 @@ class EmployeeLocatorSlipContentState
               child: _LocatorHeader(
                 employeeName: displayName,
                 onCreatePressed: () => _openCreateForm(context, displayName),
+                onRefresh: () => _reconcileLocatorData(showConfirmation: true),
+                refreshing: _reconciliationInProgress,
                 showCreateAction: width >= 1024,
                 createEnabled:
                     _officialHrmsDate != null &&
@@ -454,7 +499,9 @@ class EmployeeLocatorSlipContentState
                 onChanged: (section) {
                   setState(() => _currentSection = section);
                   if (section == _LocatorSection.approvals &&
-                      !_approvalHistoryLoaded) {
+                      !_approvalHistoryLoaded &&
+                      !_loadingApprovals &&
+                      _approvalsError == null) {
                     _loadDepartmentHeadRequests();
                   }
                 },
@@ -511,20 +558,25 @@ class EmployeeLocatorSlipContentState
             formatDate: _formatDate,
           ),
           const SizedBox(height: 16),
-          if (_error != null)
+          if (_myRequestsError != null)
             Padding(
               padding: const EdgeInsets.only(bottom: 12),
-              child: _ErrorState(message: _error!),
+              child: _ErrorState(
+                message: _myRequestsError!,
+                onRetry: () => _loadMyRequests(forceRefresh: true),
+              ),
             ),
           if (_loadingMy)
             const _CenteredLoading(message: 'Loading locator requests...')
-          else if (_slips.isEmpty)
+          else if (_myHistoryLoaded &&
+              _slips.isEmpty &&
+              _myRequestsError == null)
             _EmptyState(
               message: _hasMyFilters
                   ? 'No locator requests match the current filters.'
                   : 'No locator requests yet. Click "File Request" to create one.',
             )
-          else ...[
+          else if (_slips.isNotEmpty) ...[
             _myRequestsTable(
               items: visibleSlips,
               maxHeight: maxListHeight,
@@ -555,7 +607,11 @@ class EmployeeLocatorSlipContentState
 
   void _openApprovalDetails(_LocatorSlipDraft item) {
     setState(() => _selectedApprovalSlipId = _slipSelectionKey(item));
-    _showSlipDetails(context, item, reviewMode: true);
+    _showSlipDetails(
+      context,
+      item,
+      reviewMode: _reviewerAccess.canReviewPending,
+    );
   }
 
   String _slipSelectionKey(_LocatorSlipDraft item) {
@@ -625,222 +681,261 @@ class EmployeeLocatorSlipContentState
       );
     }
 
-    showDialog<void>(
-      context: context,
-      builder: (dialogContext) => EmployeeLocatorMobileDetailsDialog(
-        requestTypeLabel: item.requestType.label,
-        dateLabel: _formatDate(item.date),
-        requestTypeIcon: _locatorRequestTypeIcon(item.requestType),
-        statusLabel: item.status.label,
-        statusIcon: _locatorStatusIcon(item.status),
-        statusBg: statusBg,
-        statusBorder: statusBorder,
-        statusText: statusText,
-        onClose: () => Navigator.of(dialogContext).pop(),
-        body: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            EmployeeLocatorMobileDetailSection(
-              title: 'Slip Information',
-              icon: Icons.receipt_long_rounded,
-              children: [
-                EmployeeLocatorMobileDetailTile(
-                  icon: Icons.calendar_today_rounded,
-                  label: 'Date',
-                  value: _formatDate(item.date),
-                ),
-                EmployeeLocatorMobileDetailTile(
-                  icon: Icons.category_rounded,
-                  label: 'Type',
-                  value: item.requestType.label,
-                ),
-                EmployeeLocatorMobileDetailTile(
-                  icon: Icons.place_rounded,
-                  label: item.requestType.locationLabel,
-                  value: item.office.trim().isEmpty
-                      ? 'Not specified'
-                      : item.office.trim(),
-                ),
-                EmployeeLocatorMobileDetailTile(
-                  icon: Icons.schedule_rounded,
-                  label: 'Time Segments',
-                  value: _approvalSegmentsText(item),
-                ),
-                EmployeeLocatorMobileDetailTile(
-                  icon: Icons.attach_file_rounded,
-                  label: 'Attachment',
-                  value: (item.attachmentName ?? '').trim().isEmpty
-                      ? 'None'
-                      : item.attachmentName!.trim(),
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            EmployeeLocatorMobileStatusPanel(
-              statusLabel: item.status.label,
-              statusIcon: _locatorStatusIcon(item.status),
-              statusSubtitle: statusSubtitle,
-              statusBg: statusBg,
-              statusBorder: statusBorder,
-              statusText: statusText,
-            ),
-            const SizedBox(height: 12),
-            EmployeeLocatorMobileReasonPanel(
-              text: item.remarks.trim().isEmpty
-                  ? 'No reason provided.'
-                  : item.remarks.trim(),
-            ),
-            if (returnBlockedByPastDate) ...[
-              const SizedBox(height: 12),
-              const EmployeeLocatorMobileDetailSection(
-                title: 'Correction unavailable',
-                icon: Icons.event_busy_rounded,
-                children: [
-                  EmployeeLocatorMobileDetailTile(
-                    icon: Icons.info_outline_rounded,
-                    label: 'Past-dated request',
-                    value:
-                        'This request can no longer be returned to the employee. Approve or reject it, or ask HR to use Record Correction.',
-                  ),
-                ],
-              ),
-            ],
-            if (correctionBlockedByPastDate) ...[
-              const SizedBox(height: 12),
-              const EmployeeLocatorMobileDetailSection(
-                title: 'Correction unavailable',
-                icon: Icons.event_busy_rounded,
-                children: [
-                  EmployeeLocatorMobileDetailTile(
-                    icon: Icons.info_outline_rounded,
-                    label: 'Past-dated request',
-                    value:
-                        'This returned request can no longer be corrected or moved to another date. Cancel it or contact HR for Record Correction.',
-                  ),
-                ],
-              ),
-            ],
-            if (datePolicyUnavailable) ...[
-              const SizedBox(height: 12),
-              const EmployeeLocatorMobileDetailSection(
-                title: 'Return temporarily unavailable',
-                icon: Icons.sync_problem_rounded,
-                children: [
-                  EmployeeLocatorMobileDetailTile(
-                    icon: Icons.info_outline_rounded,
-                    label: 'Official date unavailable',
-                    value:
-                        'Reload the page before returning this request for correction.',
-                  ),
-                ],
-              ),
-            ],
-            if (typeConfigurationUnavailable) ...[
-              const SizedBox(height: 12),
-              const EmployeeLocatorMobileDetailSection(
-                title: 'Correction temporarily unavailable',
-                icon: Icons.sync_problem_rounded,
-                children: [
-                  EmployeeLocatorMobileDetailTile(
-                    icon: Icons.info_outline_rounded,
-                    label: 'Request types unavailable',
-                    value:
-                        'Reload the page and retry loading locator request types before correcting this request.',
-                  ),
-                ],
-              ),
-            ],
-            if (canCorrect) ...[
-              const SizedBox(height: 12),
+    Future<void> previewForm(BuildContext dialogContext) async {
+      try {
+        final bytes = await LocatorSlipPrint.buildPdf(
+          id: item.id,
+          employeeName: item.employeeName,
+          dateText: _formatDate(item.date),
+          requestTypeLabel: item.requestType.label,
+          locationLabel: item.requestType.locationLabel,
+          office: item.office,
+          remarks: item.remarks,
+          amIn: item.amIn,
+          amOut: item.amOut,
+          pmIn: item.pmIn,
+          pmOut: item.pmOut,
+        );
+        if (!dialogContext.mounted) return;
+        await showFormPdfPreview(
+          context: dialogContext,
+          bytes: bytes,
+          title: 'Locator Form Preview',
+          filename: 'Locator_Slip_${item.id ?? 'form'}.pdf',
+        );
+      } catch (e) {
+        if (!dialogContext.mounted) return;
+        ScaffoldMessenger.of(
+          dialogContext,
+        ).showSnackBar(SnackBar(content: Text('Preview failed: $e')));
+      }
+    }
+
+    unawaited(
+      openResponsiveRightSidePanel<void>(
+        context: context,
+        barrierLabel: reviewMode
+            ? 'Close locator approval details'
+            : 'Close locator request details',
+        breakpoint: 900,
+        minWidth: 620,
+        initialWidthFraction: 0.5,
+        builder: (dialogContext) => EmployeeLocatorMobileDetailsDialog(
+          requestTypeLabel: item.requestType.label,
+          dateLabel: _formatDate(item.date),
+          requestTypeIcon: _locatorRequestTypeIcon(item.requestType),
+          statusLabel: item.status.label,
+          statusIcon: _locatorStatusIcon(item.status),
+          statusBg: statusBg,
+          statusBorder: statusBorder,
+          statusText: statusText,
+          onClose: () => Navigator.of(dialogContext).pop(),
+          body: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
               EmployeeLocatorMobileDetailSection(
-                title: 'Correction Requested',
-                icon: Icons.assignment_return_rounded,
+                title: 'Slip Information',
+                icon: Icons.receipt_long_rounded,
                 children: [
                   EmployeeLocatorMobileDetailTile(
-                    icon: Icons.rate_review_outlined,
-                    label: 'Reviewer remarks',
-                    value: (correctionRemarks ?? '').trim().isEmpty
-                        ? 'Please replace or restore the required attachment.'
-                        : correctionRemarks!.trim(),
+                    icon: Icons.calendar_today_rounded,
+                    label: 'Date',
+                    value: _formatDate(item.date),
                   ),
-                ],
-              ),
-            ],
-            if (item.status == _LocatorSlipStatus.revoked) ...[
-              const SizedBox(height: 12),
-              EmployeeLocatorMobileDetailSection(
-                title: 'Approval Revoked',
-                icon: Icons.undo_rounded,
-                children: [
                   EmployeeLocatorMobileDetailTile(
-                    icon: Icons.person_outline_rounded,
-                    label: 'Revoked by',
-                    value: (item.revokedByName ?? '').trim().isEmpty
-                        ? 'HR/Admin'
-                        : item.revokedByName!.trim(),
+                    icon: Icons.category_rounded,
+                    label: 'Type',
+                    value: item.requestType.label,
+                  ),
+                  EmployeeLocatorMobileDetailTile(
+                    icon: Icons.place_rounded,
+                    label: item.requestType.locationLabel,
+                    value: item.office.trim().isEmpty
+                        ? 'Not specified'
+                        : item.office.trim(),
                   ),
                   EmployeeLocatorMobileDetailTile(
                     icon: Icons.schedule_rounded,
-                    label: 'Revoked at',
-                    value: item.revokedAt == null
-                        ? 'Not recorded'
-                        : _formatDateTime(item.revokedAt!),
+                    label: 'Time Segments',
+                    value: _approvalSegmentsText(item),
                   ),
                   EmployeeLocatorMobileDetailTile(
-                    icon: Icons.rate_review_outlined,
-                    label: 'Reason',
-                    value: (item.revocationReason ?? '').trim().isEmpty
-                        ? 'No reason recorded.'
-                        : item.revocationReason!.trim(),
+                    icon: Icons.attach_file_rounded,
+                    label: 'Attachment',
+                    value: (item.attachmentName ?? '').trim().isEmpty
+                        ? 'None'
+                        : item.attachmentName!.trim(),
                   ),
-                  if (item.monthEndReconciliationRequired)
-                    const EmployeeLocatorMobileDetailTile(
-                      icon: Icons.sync_problem_rounded,
-                      label: 'DTR reconciliation',
-                      value:
-                          'HR must rerun month-end processing for this month.',
-                    ),
                 ],
               ),
+              const SizedBox(height: 12),
+              EmployeeLocatorMobileStatusPanel(
+                statusLabel: item.status.label,
+                statusIcon: _locatorStatusIcon(item.status),
+                statusSubtitle: statusSubtitle,
+                statusBg: statusBg,
+                statusBorder: statusBorder,
+                statusText: statusText,
+              ),
+              const SizedBox(height: 12),
+              EmployeeLocatorMobileReasonPanel(
+                text: item.remarks.trim().isEmpty
+                    ? 'No reason provided.'
+                    : item.remarks.trim(),
+              ),
+              if (returnBlockedByPastDate) ...[
+                const SizedBox(height: 12),
+                const EmployeeLocatorMobileDetailSection(
+                  title: 'Correction unavailable',
+                  icon: Icons.event_busy_rounded,
+                  children: [
+                    EmployeeLocatorMobileDetailTile(
+                      icon: Icons.info_outline_rounded,
+                      label: 'Past-dated request',
+                      value:
+                          'This request can no longer be returned to the employee. Approve or reject it, or ask HR to use Record Correction.',
+                    ),
+                  ],
+                ),
+              ],
+              if (correctionBlockedByPastDate) ...[
+                const SizedBox(height: 12),
+                const EmployeeLocatorMobileDetailSection(
+                  title: 'Correction unavailable',
+                  icon: Icons.event_busy_rounded,
+                  children: [
+                    EmployeeLocatorMobileDetailTile(
+                      icon: Icons.info_outline_rounded,
+                      label: 'Past-dated request',
+                      value:
+                          'This returned request can no longer be corrected or moved to another date. Cancel it or contact HR for Record Correction.',
+                    ),
+                  ],
+                ),
+              ],
+              if (datePolicyUnavailable) ...[
+                const SizedBox(height: 12),
+                const EmployeeLocatorMobileDetailSection(
+                  title: 'Return temporarily unavailable',
+                  icon: Icons.sync_problem_rounded,
+                  children: [
+                    EmployeeLocatorMobileDetailTile(
+                      icon: Icons.info_outline_rounded,
+                      label: 'Official date unavailable',
+                      value:
+                          'Reload the page before returning this request for correction.',
+                    ),
+                  ],
+                ),
+              ],
+              if (typeConfigurationUnavailable) ...[
+                const SizedBox(height: 12),
+                const EmployeeLocatorMobileDetailSection(
+                  title: 'Correction temporarily unavailable',
+                  icon: Icons.sync_problem_rounded,
+                  children: [
+                    EmployeeLocatorMobileDetailTile(
+                      icon: Icons.info_outline_rounded,
+                      label: 'Request types unavailable',
+                      value:
+                          'Reload the page and retry loading locator request types before correcting this request.',
+                    ),
+                  ],
+                ),
+              ],
+              if (canCorrect) ...[
+                const SizedBox(height: 12),
+                EmployeeLocatorMobileDetailSection(
+                  title: 'Correction Requested',
+                  icon: Icons.assignment_return_rounded,
+                  children: [
+                    EmployeeLocatorMobileDetailTile(
+                      icon: Icons.rate_review_outlined,
+                      label: 'Reviewer remarks',
+                      value: (correctionRemarks ?? '').trim().isEmpty
+                          ? 'Please replace or restore the required attachment.'
+                          : correctionRemarks!.trim(),
+                    ),
+                  ],
+                ),
+              ],
+              if (item.status == _LocatorSlipStatus.revoked) ...[
+                const SizedBox(height: 12),
+                EmployeeLocatorMobileDetailSection(
+                  title: 'Approval Revoked',
+                  icon: Icons.undo_rounded,
+                  children: [
+                    EmployeeLocatorMobileDetailTile(
+                      icon: Icons.person_outline_rounded,
+                      label: 'Revoked by',
+                      value: (item.revokedByName ?? '').trim().isEmpty
+                          ? 'HR/Admin'
+                          : item.revokedByName!.trim(),
+                    ),
+                    EmployeeLocatorMobileDetailTile(
+                      icon: Icons.schedule_rounded,
+                      label: 'Revoked at',
+                      value: item.revokedAt == null
+                          ? 'Not recorded'
+                          : _formatDateTime(item.revokedAt!),
+                    ),
+                    EmployeeLocatorMobileDetailTile(
+                      icon: Icons.rate_review_outlined,
+                      label: 'Reason',
+                      value: (item.revocationReason ?? '').trim().isEmpty
+                          ? 'No reason recorded.'
+                          : item.revocationReason!.trim(),
+                    ),
+                    if (item.monthEndReconciliationRequired)
+                      const EmployeeLocatorMobileDetailTile(
+                        icon: Icons.sync_problem_rounded,
+                        label: 'DTR reconciliation',
+                        value:
+                            'HR must rerun month-end processing for this month.',
+                      ),
+                  ],
+                ),
+              ],
             ],
-          ],
-        ),
-        actions: EmployeeLocatorMobileDetailActions(
-          canCancel: !reviewMode && _canCancelSlip(item),
-          canPrint: item.status == _LocatorSlipStatus.approved,
-          canOpenAttachment:
-              item.id?.trim().isNotEmpty == true &&
-              item.attachmentName?.trim().isNotEmpty == true,
-          canReject: canReview,
-          canApprove: canReview,
-          canReturn: canReturnForCorrection,
-          canCorrect: canCorrect,
-          onHistory: () {
-            Navigator.of(dialogContext).pop();
-            _showSlipHistory(context, item);
-          },
-          onCancel: () {
-            Navigator.of(dialogContext).pop();
-            _cancelSlip(item);
-          },
-          onPrint: printForm,
-          onOpenAttachment: () => _openAttachment(item),
-          onReject: () {
-            Navigator.of(dialogContext).pop();
-            _departmentHeadReject(item);
-          },
-          onApprove: () {
-            Navigator.of(dialogContext).pop();
-            _departmentHeadApprove(item);
-          },
-          onReturn: () {
-            Navigator.of(dialogContext).pop();
-            _departmentHeadReturn(item);
-          },
-          onCorrect: () {
-            Navigator.of(dialogContext).pop();
-            _correctAndResubmit(item);
-          },
+          ),
+          actions: EmployeeLocatorMobileDetailActions(
+            canCancel: !reviewMode && _canCancelSlip(item),
+            canPrint: item.status == _LocatorSlipStatus.approved,
+            canOpenAttachment:
+                item.id?.trim().isNotEmpty == true &&
+                item.attachmentName?.trim().isNotEmpty == true,
+            canReject: canReview,
+            canApprove: canReview,
+            canReturn: canReturnForCorrection,
+            canCorrect: canCorrect,
+            onHistory: () {
+              Navigator.of(dialogContext).pop();
+              _showSlipHistory(context, item);
+            },
+            onCancel: () {
+              Navigator.of(dialogContext).pop();
+              _cancelSlip(item);
+            },
+            onPrint: printForm,
+            onPreview: () => unawaited(previewForm(dialogContext)),
+            onOpenAttachment: () => _openAttachment(item),
+            onReject: () {
+              Navigator.of(dialogContext).pop();
+              _departmentHeadReject(item);
+            },
+            onApprove: () {
+              Navigator.of(dialogContext).pop();
+              _departmentHeadApprove(item);
+            },
+            onReturn: () {
+              Navigator.of(dialogContext).pop();
+              _departmentHeadReturn(item);
+            },
+            onCorrect: () {
+              Navigator.of(dialogContext).pop();
+              _correctAndResubmit(item);
+            },
+          ),
         ),
       ),
     );
@@ -853,141 +948,106 @@ class EmployeeLocatorSlipContentState
     final userId = _authenticatedUserId;
     if (userId == null) return;
     final authGeneration = _authGeneration;
-    final rawStatus = item.rawStatus;
-    final history = <_LocatorWorkflowStep>[
-      (
-        title: item.status == _LocatorSlipStatus.draft ? 'Draft' : 'Submitted',
-        actor: item.employeeName,
-        date: item.createdAt ?? item.date,
-        remarks: null,
-        completed: true,
-      ),
-      if (item.status == _LocatorSlipStatus.pendingDepartmentHead)
-        (
-          title: 'Pending Department Head',
-          actor: item.departmentHeadName,
-          date: null,
-          remarks: null,
-          completed: false,
-        ),
-      if (item.departmentHeadReviewedAt != null ||
-          rawStatus == 'pending_hr' ||
-          rawStatus == 'approved' ||
-          rawStatus == 'revoked' ||
-          rawStatus == 'rejected_by_hr' ||
-          rawStatus == 'returned_for_correction' ||
-          rawStatus == 'rejected_by_department_head')
-        (
-          title: rawStatus == 'rejected_by_department_head'
-              ? 'Rejected by Department Head'
-              : rawStatus == 'returned_for_correction' &&
-                    item.hrReviewedAt == null
-              ? 'Returned by Department Head'
-              : 'Reviewed by Department Head',
-          actor: item.departmentHeadName,
-          date: item.departmentHeadReviewedAt,
-          remarks: item.departmentHeadRemarks,
-          completed: true,
-        ),
-      if (item.status == _LocatorSlipStatus.pendingHr)
-        (
-          title: 'Pending HR Admin',
-          actor: item.hrReviewerName,
-          date: null,
-          remarks: null,
-          completed: false,
-        ),
-      if (rawStatus == 'approved' || rawStatus == 'revoked')
-        (
-          title: 'Approved by HR',
-          actor: item.hrReviewerName,
-          date: item.hrReviewedAt,
-          remarks: item.hrRemarks,
-          completed: true,
-        ),
-      if (rawStatus == 'revoked')
-        (
-          title: 'Approval Revoked',
-          actor: item.revokedByName,
-          date: item.revokedAt,
-          remarks: item.revocationReason,
-          completed: true,
-        ),
-      if (rawStatus == 'rejected_by_hr')
-        (
-          title: 'Rejected by HR',
-          actor: item.hrReviewerName,
-          date: item.hrReviewedAt,
-          remarks: item.hrRemarks,
-          completed: true,
-        ),
-      if (rawStatus == 'returned_for_correction' && item.hrReviewedAt != null)
-        (
-          title: 'Returned by HR',
-          actor: item.hrReviewerName,
-          date: item.hrReviewedAt,
-          remarks: item.hrRemarks,
-          completed: true,
-        ),
-      if (rawStatus == 'cancelled')
-        (
-          title: 'Cancelled',
-          actor: null,
-          date: item.updatedAt,
-          remarks: null,
-          completed: true,
-        ),
-    ];
+    final history = <_LocatorWorkflowStep>[];
 
     final slipId = item.id?.trim();
-    if (slipId != null && slipId.isNotEmpty) {
-      try {
-        final response = await ApiClient.instance.get<List<dynamic>>(
-          '/api/locator-slips/$slipId/history',
-        );
-        final events = (response.data ?? const <dynamic>[])
-            .whereType<Map>()
-            .map(
-              (json) => LocatorWorkflowEvent.fromJson(
-                Map<String, dynamic>.from(json),
-              ),
-            )
-            .toList();
-        if (events.isNotEmpty) {
-          history
-            ..clear()
-            ..addAll(
-              events.map(
-                (event) => (
-                  title: event.title,
-                  actor: event.actorName,
-                  date: event.createdAt,
-                  remarks: event.remarks,
-                  completed: true,
+    if (slipId == null || slipId.isEmpty) {
+      _showLocatorSnack('Official workflow history is not available yet.');
+      return;
+    }
+    unawaited(
+      showDialog<void>(
+        context: context,
+        barrierDismissible: false,
+        builder: (loadingContext) => PopScope(
+          canPop: false,
+          child: AlertDialog(
+            content: Row(
+              children: [
+                const SizedBox.square(
+                  dimension: 22,
+                  child: CircularProgressIndicator(strokeWidth: 2),
                 ),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Text(
+                    'Loading official workflow history...',
+                    style: TextStyle(
+                      color: AppTheme.dashTextPrimaryOf(loadingContext),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+    try {
+      final response = await ApiClient.instance.get<List<dynamic>>(
+        '/api/locator-slips/$slipId/history',
+      );
+      final events = (response.data ?? const <dynamic>[])
+          .whereType<Map>()
+          .map(
+            (json) =>
+                LocatorWorkflowEvent.fromJson(Map<String, dynamic>.from(json)),
+          )
+          .toList();
+      if (events.isNotEmpty) {
+        history
+          ..clear()
+          ..addAll(
+            events.map(
+              (event) => (
+                title: event.title,
+                actor: event.actorName,
+                date: event.createdAt,
+                remarks: event.remarks,
+                completed: true,
               ),
-            );
-          if (item.status == _LocatorSlipStatus.pendingDepartmentHead) {
-            history.add((
-              title: 'Pending Department Head',
-              actor: item.departmentHeadName,
-              date: null,
-              remarks: null,
-              completed: false,
-            ));
-          } else if (item.status == _LocatorSlipStatus.pendingHr) {
-            history.add((
-              title: 'Pending HR Admin',
-              actor: item.hrReviewerName,
-              date: null,
-              remarks: null,
-              completed: false,
-            ));
-          }
-        }
-      } catch (_) {
-        // Legacy reconstruction remains available if history cannot be loaded.
+            ),
+          );
       }
+    } catch (error) {
+      if (context.mounted) {
+        Navigator.of(context, rootNavigator: true).pop();
+      }
+      if (!context.mounted || !_isCurrentAuthSession(userId, authGeneration)) {
+        return;
+      }
+      final retry = await showDialog<bool>(
+        context: context,
+        builder: (errorContext) => AlertDialog(
+          title: const Text('History unavailable'),
+          content: Text(
+            _apiErrorMessage(
+              error,
+              fallback: 'Could not load the official workflow history.',
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(errorContext).pop(false),
+              child: const Text('Close'),
+            ),
+            FilledButton.icon(
+              onPressed: () => Navigator.of(errorContext).pop(true),
+              icon: const Icon(Icons.refresh_rounded, size: 18),
+              label: const Text('Retry'),
+            ),
+          ],
+        ),
+      );
+      if (retry == true &&
+          context.mounted &&
+          _isCurrentAuthSession(userId, authGeneration)) {
+        await _showSlipHistory(context, item);
+      }
+      return;
+    }
+    if (context.mounted) {
+      Navigator.of(context, rootNavigator: true).pop();
     }
     if (!context.mounted || !_isCurrentAuthSession(userId, authGeneration)) {
       return;
@@ -1033,104 +1093,130 @@ class EmployeeLocatorSlipContentState
                 child: SingleChildScrollView(
                   padding: const EdgeInsets.fromLTRB(20, 18, 20, 14),
                   child: Column(
-                    children: List.generate(history.length, (index) {
-                      final step = history[index];
-                      final isFirst = index == 0;
-                      final isLast = index == history.length - 1;
-                      final actor = step.actor?.trim();
-                      String subtitle = step.date == null
-                          ? 'Awaiting action'
-                          : _formatDateTime(step.date!);
-                      if (actor != null && actor.isNotEmpty) {
-                        subtitle = '$subtitle by $actor';
-                      } else if (step.title.contains('Department Head') &&
-                          step.title != 'Pending Department Head') {
-                        subtitle = '$subtitle by Department Head';
-                      } else if (step.title.contains('HR')) {
-                        subtitle = '$subtitle by HR Admin';
-                      }
-                      return Padding(
-                        padding: EdgeInsets.only(bottom: isLast ? 0 : 2),
-                        child: Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            SizedBox(
-                              width: 44,
-                              height: 96,
-                              child: Stack(
+                    children: history.isEmpty
+                        ? [
+                            Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 28),
+                              child: Text(
+                                'No official workflow events were recorded for this request.',
+                                textAlign: TextAlign.center,
+                                style: TextStyle(
+                                  color: _mutedColor(dialogContext),
+                                  fontSize: 14,
+                                ),
+                              ),
+                            ),
+                          ]
+                        : List.generate(history.length, (index) {
+                            final step = history[index];
+                            final isFirst = index == 0;
+                            final isLast = index == history.length - 1;
+                            final actor = step.actor?.trim();
+                            String subtitle = step.date == null
+                                ? 'Awaiting action'
+                                : _formatDateTime(step.date!);
+                            if (actor != null && actor.isNotEmpty) {
+                              subtitle = '$subtitle by $actor';
+                            } else if (step.title.contains('Department Head') &&
+                                step.title != 'Pending Department Head') {
+                              subtitle = '$subtitle by Department Head';
+                            } else if (step.title.contains('HR')) {
+                              subtitle = '$subtitle by HR Admin';
+                            }
+                            return Padding(
+                              padding: EdgeInsets.only(bottom: isLast ? 0 : 2),
+                              child: Row(
+                                crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  Positioned(
-                                    left: 20,
-                                    top: isFirst ? 14 : 0,
-                                    bottom: isLast ? 82 : 0,
-                                    child: Container(width: 4, color: accent),
+                                  SizedBox(
+                                    width: 44,
+                                    height: 96,
+                                    child: Stack(
+                                      children: [
+                                        Positioned(
+                                          left: 20,
+                                          top: isFirst ? 14 : 0,
+                                          bottom: isLast ? 82 : 0,
+                                          child: Container(
+                                            width: 4,
+                                            color: accent,
+                                          ),
+                                        ),
+                                        Positioned(
+                                          left: 8,
+                                          top: 0,
+                                          child: Container(
+                                            width: 28,
+                                            height: 28,
+                                            decoration: BoxDecoration(
+                                              color: accent,
+                                              shape: BoxShape.circle,
+                                            ),
+                                            child: Icon(
+                                              step.completed
+                                                  ? Icons.check_rounded
+                                                  : Icons.hourglass_top_rounded,
+                                              size: 18,
+                                              color: Colors.white,
+                                            ),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
                                   ),
-                                  Positioned(
-                                    left: 8,
-                                    top: 0,
-                                    child: Container(
-                                      width: 28,
-                                      height: 28,
-                                      decoration: BoxDecoration(
-                                        color: accent,
-                                        shape: BoxShape.circle,
-                                      ),
-                                      child: Icon(
-                                        step.completed
-                                            ? Icons.check_rounded
-                                            : Icons.hourglass_top_rounded,
-                                        size: 18,
-                                        color: Colors.white,
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                    child: Padding(
+                                      padding: const EdgeInsets.only(top: 2),
+                                      child: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          Text(
+                                            step.title,
+                                            style: TextStyle(
+                                              color: _headingColor(
+                                                dialogContext,
+                                              ),
+                                              fontSize: 18,
+                                              fontWeight: FontWeight.w700,
+                                            ),
+                                          ),
+                                          const SizedBox(height: 4),
+                                          Text(
+                                            subtitle,
+                                            style: TextStyle(
+                                              color: _mutedColor(dialogContext),
+                                              fontSize: 14,
+                                              fontWeight: FontWeight.w600,
+                                            ),
+                                          ),
+                                          if ((step.remarks ?? '')
+                                              .trim()
+                                              .isNotEmpty)
+                                            Padding(
+                                              padding: const EdgeInsets.only(
+                                                top: 4,
+                                              ),
+                                              child: Text(
+                                                step.remarks!.trim(),
+                                                style: TextStyle(
+                                                  color: _mutedColor(
+                                                    dialogContext,
+                                                  ),
+                                                  fontSize: 13,
+                                                  height: 1.35,
+                                                ),
+                                              ),
+                                            ),
+                                        ],
                                       ),
                                     ),
                                   ),
                                 ],
                               ),
-                            ),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: Padding(
-                                padding: const EdgeInsets.only(top: 2),
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(
-                                      step.title,
-                                      style: TextStyle(
-                                        color: _headingColor(dialogContext),
-                                        fontSize: 18,
-                                        fontWeight: FontWeight.w700,
-                                      ),
-                                    ),
-                                    const SizedBox(height: 4),
-                                    Text(
-                                      subtitle,
-                                      style: TextStyle(
-                                        color: _mutedColor(dialogContext),
-                                        fontSize: 14,
-                                        fontWeight: FontWeight.w600,
-                                      ),
-                                    ),
-                                    if ((step.remarks ?? '').trim().isNotEmpty)
-                                      Padding(
-                                        padding: const EdgeInsets.only(top: 4),
-                                        child: Text(
-                                          step.remarks!.trim(),
-                                          style: TextStyle(
-                                            color: _mutedColor(dialogContext),
-                                            fontSize: 13,
-                                            height: 1.35,
-                                          ),
-                                        ),
-                                      ),
-                                  ],
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      );
-                    }),
+                            );
+                          }),
                   ),
                 ),
               ),
@@ -1197,22 +1283,30 @@ class EmployeeLocatorSlipContentState
                   formatDate: _formatDate,
                 ),
                 const SizedBox(height: 16),
-                if (_error != null)
+                if (_approvalsError != null)
                   Padding(
                     padding: const EdgeInsets.only(bottom: 12),
-                    child: _ErrorState(message: _error!),
+                    child: _ErrorState(
+                      message: _approvalsError!,
+                      onRetry: () =>
+                          _loadDepartmentHeadRequests(forceRefresh: true),
+                    ),
                   ),
-                if (_deptHeadQueue.isEmpty)
+                if (_approvalHistoryLoaded &&
+                    _deptHeadQueue.isEmpty &&
+                    _approvalsError == null)
                   _EmptyState(
                     message: _hasApprovalFilters
                         ? 'No locator requests match the current filters.'
                         : 'No locator requests or history yet.',
                   )
-                else if (visibleItems.isEmpty)
+                else if (_approvalHistoryLoaded &&
+                    _approvalsError == null &&
+                    visibleItems.isEmpty)
                   const _EmptyState(
                     message: 'No locator requests match the current filter.',
                   )
-                else ...[
+                else if (_deptHeadQueue.isNotEmpty) ...[
                   _approvalItemsTable(
                     items: visibleItems,
                     maxHeight: maxListHeight,
@@ -1794,7 +1888,7 @@ class EmployeeLocatorSlipContentState
       return;
     }
     setState(() {
-      _error = null;
+      _myRequestsError = null;
       _loadingMy = true;
     });
     try {
@@ -1905,7 +1999,7 @@ class EmployeeLocatorSlipContentState
     if (ok != true || !_isCurrentAuthSession(userId, authGeneration)) return;
 
     setState(() {
-      _error = null;
+      _myRequestsError = null;
       _loadingMy = true;
     });
     try {
@@ -1932,8 +2026,10 @@ class EmployeeLocatorSlipContentState
     } catch (e) {
       if (!_isCurrentAuthSession(userId, authGeneration)) return;
       setState(
-        () =>
-            _error = _apiErrorMessage(e, fallback: 'Failed to cancel request.'),
+        () => _myRequestsError = _apiErrorMessage(
+          e,
+          fallback: 'Failed to cancel request.',
+        ),
       );
     } finally {
       if (_isCurrentAuthSession(userId, authGeneration)) {
@@ -1948,15 +2044,43 @@ class EmployeeLocatorSlipContentState
     required int authGeneration,
   }) async {
     try {
-      final isDeptHead = await LocatorSlipDataCache.instance
-          .checkIsDepartmentHead(userId: userId, role: role);
+      final access = await LocatorSlipDataCache.instance
+          .checkDepartmentHeadAccess(userId: userId, role: role);
       if (!_isCurrentAuthSession(userId, authGeneration)) return false;
-      if (isDeptHead) {
+      _reviewerAccess = access;
+      if (access.canAccessReviewSection) {
         unawaited(_loadDepartmentHeadRequests());
       }
-      return isDeptHead;
+      return access.canAccessReviewSection;
     } catch (_) {
       return false;
+    }
+  }
+
+  Future<void> _reconcileLocatorData({bool showConfirmation = false}) async {
+    if (!mounted || _authenticatedUserId == null || _reconciliationInProgress) {
+      return;
+    }
+    setState(() => _reconciliationInProgress = true);
+    LocatorSlipDataCache.instance.invalidateRequests();
+    try {
+      final refreshes = <Future<void>>[
+        _loadMyRequests(forceRefresh: true),
+        if (_reviewerAccess.canAccessReviewSection)
+          _loadDepartmentHeadRequests(forceRefresh: true),
+      ];
+      await Future.wait(refreshes);
+      if (showConfirmation &&
+          mounted &&
+          _myRequestsError == null &&
+          (!_reviewerAccess.canAccessReviewSection ||
+              _approvalsError == null)) {
+        _showLocatorSnack('Locator requests refreshed.');
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _reconciliationInProgress = false);
+      }
     }
   }
 
@@ -2135,7 +2259,7 @@ class EmployeeLocatorSlipContentState
         _loadingMy = true;
         _loadingMoreMy = false;
         _myLoadMoreError = null;
-        _error = null;
+        _myRequestsError = null;
       }
     });
     try {
@@ -2174,7 +2298,7 @@ class EmployeeLocatorSlipContentState
         if (loadMore) {
           _myLoadMoreError = message;
         } else {
-          _error = message;
+          _myRequestsError = message;
         }
       });
     } finally {
@@ -2215,7 +2339,7 @@ class EmployeeLocatorSlipContentState
         _loadingApprovals = true;
         _loadingMoreApprovals = false;
         _approvalLoadMoreError = null;
-        _error = null;
+        _approvalsError = null;
       }
     });
     try {
@@ -2255,7 +2379,7 @@ class EmployeeLocatorSlipContentState
         if (loadMore) {
           _approvalLoadMoreError = message;
         } else {
-          _error = message;
+          _approvalsError = message;
         }
       });
     } finally {
@@ -2290,7 +2414,10 @@ class EmployeeLocatorSlipContentState
       _showLocatorSnack('Approved and sent to HR for final approval.');
     } catch (e) {
       if (!_isCurrentAuthSession(userId, authGeneration)) return;
-      setState(() => _error = _apiErrorMessage(e, fallback: 'Approve failed.'));
+      setState(
+        () =>
+            _approvalsError = _apiErrorMessage(e, fallback: 'Approve failed.'),
+      );
     }
   }
 
@@ -2316,7 +2443,9 @@ class EmployeeLocatorSlipContentState
       _showLocatorSnack('Request rejected.');
     } catch (e) {
       if (!_isCurrentAuthSession(userId, authGeneration)) return;
-      setState(() => _error = _apiErrorMessage(e, fallback: 'Reject failed.'));
+      setState(
+        () => _approvalsError = _apiErrorMessage(e, fallback: 'Reject failed.'),
+      );
     }
   }
 
@@ -2495,7 +2624,7 @@ class EmployeeLocatorSlipContentState
     }
 
     setState(() {
-      _error = null;
+      _myRequestsError = null;
       _loadingMy = true;
     });
     try {
@@ -2708,12 +2837,16 @@ class _LocatorHeader extends StatelessWidget {
   const _LocatorHeader({
     required this.employeeName,
     required this.onCreatePressed,
+    required this.onRefresh,
+    required this.refreshing,
     required this.showCreateAction,
     required this.createEnabled,
   });
 
   final String employeeName;
   final VoidCallback onCreatePressed;
+  final VoidCallback onRefresh;
+  final bool refreshing;
   final bool showCreateAction;
   final bool createEnabled;
 
@@ -2750,12 +2883,31 @@ class _LocatorHeader extends StatelessWidget {
               ],
             ),
           ),
-          if (showCreateAction)
-            FilledButton.icon(
-              onPressed: createEnabled ? onCreatePressed : null,
-              icon: const Icon(Icons.add_rounded),
-              label: const Text('File Request'),
-            ),
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              IconButton(
+                tooltip: refreshing
+                    ? 'Refreshing locator requests'
+                    : 'Refresh locator requests',
+                onPressed: refreshing ? null : onRefresh,
+                icon: refreshing
+                    ? const SizedBox.square(
+                        dimension: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.refresh_rounded),
+              ),
+              if (showCreateAction) ...[
+                const SizedBox(width: 8),
+                FilledButton.icon(
+                  onPressed: createEnabled ? onCreatePressed : null,
+                  icon: const Icon(Icons.add_rounded),
+                  label: const Text('File Request'),
+                ),
+              ],
+            ],
+          ),
         ],
       ),
     );

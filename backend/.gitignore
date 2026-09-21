@@ -1,5 +1,7 @@
 node_modules/
 .env
+.zkteco-sync-state.json
 *.log
 .DS_Store
 uploads/
+/accomplishments_reports/

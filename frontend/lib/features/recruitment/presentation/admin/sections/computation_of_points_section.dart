@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import 'package:flutter/services.dart';
-
 import 'package:hrms_plaridel/core/api/user_facing_api_error.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/core/utils/form_pdf.dart';
@@ -9,6 +9,8 @@ import 'package:hrms_plaridel/features/recruitment/presentation/admin/widgets/rs
 import 'package:hrms_plaridel/shared/widgets/read_only_saved_entry_dialog.dart';
 import 'package:hrms_plaridel/shared/widgets/rsp_ld_record_actions.dart';
 import 'package:hrms_plaridel/shared/widgets/rsp_ld_saved_records_browser.dart';
+import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_rsp_signature_section.dart';
+import 'package:hrms_plaridel/features/docutracker/data/providers/docutracker_provider.dart';
 
 /// One Personnel Selection Board scoring criterion (row-map key, label, max points).
 /// Order here drives the on-screen table only — the official print/PDF column
@@ -157,20 +159,58 @@ class _RspComputationOfPointsSectionState
 
   Future<void> _print(ComputationOfPointsEntry entry) async {
     try {
+      final signatureProvider = context.read<DocuTrackerProvider>();
+      final signatures = entry.id == null
+          ? null
+          : await signatureProvider.loadSourceSignatures(
+              sourceModule: 'rsp',
+              sourceTable: ComputationOfPointsEntry.tableName,
+              sourceRecordId: entry.id!,
+            );
+      if (entry.id != null && signatures == null) {
+        throw StateError(
+          signatureProvider.sourceSignatureError ??
+              'The form signatures could not be loaded.',
+        );
+      }
+      if (!mounted) return;
       await FormPdf.printForm(
         context: context,
-        buildDocument: () => FormPdf.buildComputationOfPointsPdf(entry),
+        buildDocument: () =>
+            FormPdf.buildComputationOfPointsPdf(entry, signatures: signatures),
         filename: 'Computation_of_Points.pdf',
         format: FormPdf.pageLetterLandscape,
         printModule: 'rsp',
         printFormKey: 'computation_of_points',
       );
-    } catch (_) {}
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Print failed. ${userFacingApiError(error)}')),
+      );
+    }
   }
 
   Future<void> _download(ComputationOfPointsEntry entry) async {
     try {
-      final doc = await FormPdf.buildComputationOfPointsPdf(entry);
+      final signatureProvider = context.read<DocuTrackerProvider>();
+      final signatures = entry.id == null
+          ? null
+          : await signatureProvider.loadSourceSignatures(
+              sourceModule: 'rsp',
+              sourceTable: ComputationOfPointsEntry.tableName,
+              sourceRecordId: entry.id!,
+            );
+      if (entry.id != null && signatures == null) {
+        throw StateError(
+          signatureProvider.sourceSignatureError ??
+              'The form signatures could not be loaded.',
+        );
+      }
+      final doc = await FormPdf.buildComputationOfPointsPdf(
+        entry,
+        signatures: signatures,
+      );
       await FormPdf.sharePdf(doc, name: 'Computation_of_Points.pdf');
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -178,9 +218,9 @@ class _RspComputationOfPointsSectionState
       );
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Download failed: $e')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Download failed. ${userFacingApiError(e)}')),
+      );
     }
   }
 
@@ -301,6 +341,16 @@ class _RspComputationOfPointsSectionState
             onPrint: _print,
             onDownloadPdf: _download,
           ),
+          if (_editing?.id != null) ...[
+            const SizedBox(height: 16),
+            DocuTrackerRspSignatureSection(
+              sourceTable: ComputationOfPointsEntry.tableName,
+              sourceRecordId: _editing!.id!,
+              slots: const [
+                DocuTrackerRspSignatureSlot('prepared_by', 'Prepared by'),
+              ],
+            ),
+          ],
           const SizedBox(height: 24),
         ],
         _toolbar(context),

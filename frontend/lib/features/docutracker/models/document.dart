@@ -29,6 +29,9 @@ class DocuTrackerDocument {
     this.sourceTable,
     this.sourceRecordId,
     this.sourceTitle,
+    this.sourceStatus,
+    this.sourceAction,
+    this.sourceActionLabel,
     this.sourceOnly = false,
     this.signatureSignerIds = const <String>[],
     this.viewerIsRoutingAssignee = false,
@@ -86,6 +89,9 @@ class DocuTrackerDocument {
   final String? sourceTable;
   final String? sourceRecordId;
   final String? sourceTitle;
+  final String? sourceStatus;
+  final String? sourceAction;
+  final String? sourceActionLabel;
   final bool sourceOnly;
 
   /// Existing users assigned to e-signature placeholders on this document.
@@ -154,6 +160,9 @@ class DocuTrackerDocument {
       sourceTable: json['source_table']?.toString(),
       sourceRecordId: json['source_record_id']?.toString(),
       sourceTitle: json['source_title']?.toString(),
+      sourceStatus: json['source_status']?.toString(),
+      sourceAction: json['source_action']?.toString(),
+      sourceActionLabel: json['source_action_label']?.toString(),
       sourceOnly:
           json['source_only'] == true ||
           (json['id']?.toString().startsWith('source:') == true),
@@ -188,6 +197,9 @@ class DocuTrackerDocument {
     if (sourceTable != null) 'source_table': sourceTable,
     if (sourceRecordId != null) 'source_record_id': sourceRecordId,
     if (sourceTitle != null) 'source_title': sourceTitle,
+    if (sourceStatus != null) 'source_status': sourceStatus,
+    if (sourceAction != null) 'source_action': sourceAction,
+    if (sourceActionLabel != null) 'source_action_label': sourceActionLabel,
     'source_only': sourceOnly,
     'signature_signer_ids': signatureSignerIds,
     'viewer_is_routing_assignee': viewerIsRoutingAssignee,
@@ -220,6 +232,9 @@ class DocuTrackerDocument {
     String? sourceTable,
     String? sourceRecordId,
     String? sourceTitle,
+    String? sourceStatus,
+    String? sourceAction,
+    String? sourceActionLabel,
     bool? sourceOnly,
     List<String>? signatureSignerIds,
     bool? viewerIsRoutingAssignee,
@@ -251,6 +266,9 @@ class DocuTrackerDocument {
       sourceTable: sourceTable ?? this.sourceTable,
       sourceRecordId: sourceRecordId ?? this.sourceRecordId,
       sourceTitle: sourceTitle ?? this.sourceTitle,
+      sourceStatus: sourceStatus ?? this.sourceStatus,
+      sourceAction: sourceAction ?? this.sourceAction,
+      sourceActionLabel: sourceActionLabel ?? this.sourceActionLabel,
       sourceOnly: sourceOnly ?? this.sourceOnly,
       signatureSignerIds: signatureSignerIds ?? this.signatureSignerIds,
       viewerIsRoutingAssignee:

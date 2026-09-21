@@ -7,11 +7,13 @@ import 'package:hrms_plaridel/features/docutracker/data/repositories/docutracker
 import 'package:hrms_plaridel/features/docutracker/models/document.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document_status.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document_type.dart';
+import 'package:hrms_plaridel/features/docutracker/models/document_builder.dart';
 import 'package:hrms_plaridel/features/docutracker/services/docutracker_document_visibility.dart';
 import 'package:hrms_plaridel/features/docutracker/theme/docutracker_tokens.dart';
 import 'package:hrms_plaridel/features/docutracker/data/navigation/docutracker_document_navigation.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_create_document_dialog.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_signature_library_dialog.dart';
+import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_rsp_signature_request_dialog.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_error_banner.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_module_header.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_status_badge.dart';
@@ -88,6 +90,7 @@ class _DocuTrackerDocumentsScreenState
       documentType: _filterType,
       status: _filterStatus,
     );
+    await provider.loadSourceSignatureRequests();
 
     final repo = DocuTrackerRepository.instance;
     final creatableTypes = await repo.creatableDocumentTypes();
@@ -109,6 +112,17 @@ class _DocuTrackerDocumentsScreenState
       isAdmin: widget.isAdmin,
       userId: userId,
     );
+    final requiredDocuments = docuTrackerRequiredActionDocuments(
+      documents: visibleDocuments,
+      userId: userId,
+    );
+    final pendingSourceRequests = provider.sourceSignatureRequests
+        .where(
+          (request) =>
+              request.hasUnsignedAssignedSlot ||
+              (widget.isAdmin && request.requiresSetup),
+        )
+        .toList(growable: false);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -119,6 +133,26 @@ class _DocuTrackerDocumentsScreenState
             subtitle: widget.isAdmin
                 ? 'All routed documents in the organization.'
                 : 'Documents you created, hold, or are assigned to review.',
+          ),
+          const SizedBox(height: 16),
+        ],
+        if (provider.sourceSignatureRequestsLoading ||
+            requiredDocuments.isNotEmpty ||
+            pendingSourceRequests.isNotEmpty ||
+            provider.sourceSignatureRequestsError != null) ...[
+          _RequiredActionsPanel(
+            documents: requiredDocuments,
+            sourceRequests: pendingSourceRequests,
+            loading: provider.sourceSignatureRequestsLoading,
+            hasPartialError: provider.sourceSignatureRequestsError != null,
+            onRefreshSignatures: provider.loadSourceSignatureRequests,
+            onDocumentTap: (document) => openDocuTrackerDocumentDetail(
+              context,
+              document: document,
+              isAdmin: widget.isAdmin,
+              userId: userId,
+              onReturned: _load,
+            ),
           ),
           const SizedBox(height: 16),
         ],
@@ -388,6 +422,250 @@ class _DocuTrackerDocumentsScreenState
       ),
     );
   }
+}
+
+class _RequiredActionsPanel extends StatefulWidget {
+  const _RequiredActionsPanel({
+    required this.documents,
+    required this.sourceRequests,
+    required this.loading,
+    required this.hasPartialError,
+    required this.onRefreshSignatures,
+    required this.onDocumentTap,
+  });
+
+  final List<DocuTrackerDocument> documents;
+  final List<DocuTrackerRspSignatureRequest> sourceRequests;
+  final bool loading;
+  final bool hasPartialError;
+  final Future<void> Function() onRefreshSignatures;
+  final Future<bool> Function(DocuTrackerDocument document) onDocumentTap;
+
+  @override
+  State<_RequiredActionsPanel> createState() => _RequiredActionsPanelState();
+}
+
+class _RequiredActionsPanelState extends State<_RequiredActionsPanel> {
+  bool _showAll = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final entries = <_RequiredActionEntry>[
+      ...widget.sourceRequests.map(_RequiredActionEntry.source),
+      ...widget.documents.map(_RequiredActionEntry.document),
+    ];
+    final shownEntries = _showAll ? entries : entries.take(4).toList();
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: DocuTrackerTokens.cardDecoration(context: context),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.task_alt_rounded, size: 21),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'Required actions',
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ),
+              if (entries.isNotEmpty)
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 9,
+                    vertical: 4,
+                  ),
+                  decoration: BoxDecoration(
+                    color: DocuTrackerTokens.brand.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                  child: Text(
+                    '${entries.length}',
+                    style: const TextStyle(
+                      color: DocuTrackerTokens.brand,
+                      fontWeight: FontWeight.w700,
+                      fontSize: 12,
+                    ),
+                  ),
+                ),
+            ],
+          ),
+          if (widget.loading) ...[
+            const SizedBox(height: 10),
+            const LinearProgressIndicator(minHeight: 2),
+          ],
+          if (widget.hasPartialError) ...[
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                const Expanded(
+                  child: Text(
+                    'Some signature requests could not be loaded.',
+                    style: TextStyle(
+                      color: DocuTrackerTokens.textMuted,
+                      fontSize: 12,
+                    ),
+                  ),
+                ),
+                TextButton(
+                  onPressed: widget.loading ? null : widget.onRefreshSignatures,
+                  child: const Text('Retry'),
+                ),
+              ],
+            ),
+          ],
+          if (shownEntries.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            LayoutBuilder(
+              builder: (context, constraints) {
+                final itemWidth = constraints.maxWidth >= 720
+                    ? (constraints.maxWidth - 12) / 2
+                    : constraints.maxWidth;
+                return Wrap(
+                  spacing: 12,
+                  runSpacing: 10,
+                  children: shownEntries
+                      .map(
+                        (entry) => SizedBox(
+                          width: itemWidth,
+                          child: _buildActionCard(context, entry),
+                        ),
+                      )
+                      .toList(growable: false),
+                );
+              },
+            ),
+          ],
+          if (entries.length > 4) ...[
+            const SizedBox(height: 6),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton.icon(
+                onPressed: () => setState(() => _showAll = !_showAll),
+                icon: Icon(
+                  _showAll
+                      ? Icons.expand_less_rounded
+                      : Icons.expand_more_rounded,
+                ),
+                label: Text(_showAll ? 'Show less' : 'Show all actions'),
+              ),
+            ),
+          ],
+          if (entries.isNotEmpty) ...[
+            const SizedBox(height: 4),
+            const Text(
+              'DTR, RSP, and L&D records remain managed by their source modules.',
+              style: TextStyle(
+                color: DocuTrackerTokens.textMuted,
+                fontSize: 11,
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildActionCard(BuildContext context, _RequiredActionEntry entry) {
+    final document = entry.document;
+    final request = entry.sourceRequest;
+    final isDtr = document?.sourceModule == 'dtr';
+    final sourceLabel = request != null
+        ? '${request.sourceModule == 'ld' ? 'L&D' : 'RSP'} · ${request.formName}'
+        : isDtr
+        ? 'DTR · Leave'
+        : 'DocuTracker';
+    final title = request?.title ?? document?.title ?? 'Required action';
+    final actionLabel = request != null
+        ? request.requiresSetup
+              ? 'Assign required signers'
+              : 'Review and sign'
+        : document?.sourceActionLabel ?? 'Review document';
+
+    return InkWell(
+      borderRadius: BorderRadius.circular(12),
+      onTap: () async {
+        if (request != null) {
+          await showDocuTrackerSourceSignatureRequestDialog(
+            context,
+            request: request,
+          );
+          await widget.onRefreshSignatures();
+          return;
+        }
+        if (document != null) await widget.onDocumentTap(document);
+      },
+      child: Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          border: Border.all(color: DocuTrackerTokens.borderSubtleOf(context)),
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Row(
+          children: [
+            Icon(
+              request != null
+                  ? Icons.draw_outlined
+                  : isDtr
+                  ? Icons.event_note_rounded
+                  : Icons.description_outlined,
+              color: DocuTrackerTokens.brand,
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    sourceLabel,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: DocuTrackerTokens.textMuted,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontWeight: FontWeight.w700),
+                  ),
+                  const SizedBox(height: 3),
+                  Text(
+                    actionLabel,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: DocuTrackerTokens.brand,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            const Icon(Icons.chevron_right_rounded, size: 20),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _RequiredActionEntry {
+  const _RequiredActionEntry.document(this.document) : sourceRequest = null;
+  const _RequiredActionEntry.source(this.sourceRequest) : document = null;
+
+  final DocuTrackerDocument? document;
+  final DocuTrackerRspSignatureRequest? sourceRequest;
 }
 
 class _EmptyState extends StatelessWidget {

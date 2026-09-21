@@ -3,6 +3,7 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
+import 'package:provider/provider.dart';
 // ignore: avoid_web_libraries_in_flutter
 // ignore: avoid_web_libraries_in_flutter
 import 'package:url_launcher/url_launcher.dart';
@@ -35,6 +36,8 @@ import 'package:hrms_plaridel/features/recruitment/presentation/admin/widgets/rs
 import 'package:hrms_plaridel/shared/widgets/rsp_ld_record_actions.dart';
 import 'package:hrms_plaridel/features/recruitment/presentation/admin/widgets/rsp_admin_hub.dart';
 import 'package:hrms_plaridel/features/forms/presentation/admin/pages/form_background_upload_page.dart';
+import 'package:hrms_plaridel/features/docutracker/data/providers/docutracker_provider.dart';
+import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_rsp_signature_section.dart';
 import 'package:hrms_plaridel/shared/models/philippine_address_data.dart';
 import 'package:hrms_plaridel/shared/widgets/structured_address_fields.dart';
 
@@ -4122,20 +4125,58 @@ class _RspApplicantsProfileSectionState
 
   Future<void> _printProfile(ApplicantsProfileEntry entry) async {
     try {
+      final signatureProvider = context.read<DocuTrackerProvider>();
+      final signatures = entry.id == null
+          ? null
+          : await signatureProvider.loadSourceSignatures(
+              sourceModule: 'rsp',
+              sourceTable: ApplicantsProfileEntry.tableName,
+              sourceRecordId: entry.id!,
+            );
+      if (entry.id != null && signatures == null) {
+        throw StateError(
+          signatureProvider.sourceSignatureError ??
+              'The form signatures could not be loaded.',
+        );
+      }
+      if (!mounted) return;
       await FormPdf.printForm(
         context: context,
-        buildDocument: () => FormPdf.buildApplicantsProfilePdf(entry),
+        buildDocument: () =>
+            FormPdf.buildApplicantsProfilePdf(entry, signatures: signatures),
         filename: 'Applicants_Profile.pdf',
         format: FormPdf.pageLongLandscape,
         printModule: 'rsp',
         printFormKey: 'applicants_profile',
       );
-    } catch (_) {}
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Print failed. ${userFacingApiError(error)}')),
+      );
+    }
   }
 
   Future<void> _downloadProfile(ApplicantsProfileEntry entry) async {
     try {
-      final doc = await FormPdf.buildApplicantsProfilePdf(entry);
+      final signatureProvider = context.read<DocuTrackerProvider>();
+      final signatures = entry.id == null
+          ? null
+          : await signatureProvider.loadSourceSignatures(
+              sourceModule: 'rsp',
+              sourceTable: ApplicantsProfileEntry.tableName,
+              sourceRecordId: entry.id!,
+            );
+      if (entry.id != null && signatures == null) {
+        throw StateError(
+          signatureProvider.sourceSignatureError ??
+              'The form signatures could not be loaded.',
+        );
+      }
+      final doc = await FormPdf.buildApplicantsProfilePdf(
+        entry,
+        signatures: signatures,
+      );
       await FormPdf.sharePdf(doc, name: 'Applicants_Profile.pdf');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -4146,7 +4187,9 @@ class _RspApplicantsProfileSectionState
       if (mounted) {
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(SnackBar(content: Text('Download failed: $e')));
+        ).showSnackBar(
+          SnackBar(content: Text('Download failed. ${userFacingApiError(e)}')),
+        );
       }
     }
   }
@@ -4230,6 +4273,17 @@ class _RspApplicantsProfileSectionState
             onPrint: _printProfile,
             onDownloadPdf: _downloadProfile,
           ),
+          if (_editing?.id != null) ...[
+            const SizedBox(height: 16),
+            DocuTrackerRspSignatureSection(
+              sourceTable: ApplicantsProfileEntry.tableName,
+              sourceRecordId: _editing!.id!,
+              slots: const [
+                DocuTrackerRspSignatureSlot('prepared_by', 'Prepared by'),
+                DocuTrackerRspSignatureSlot('checked_by', 'Checked by'),
+              ],
+            ),
+          ],
           const SizedBox(height: 24),
         ],
         Row(
@@ -5828,20 +5882,58 @@ class _RspSelectionLineupSectionState
 
   Future<void> _printSl(SelectionLineupEntry entry) async {
     try {
+      final signatureProvider = context.read<DocuTrackerProvider>();
+      final signatures = entry.id == null
+          ? null
+          : await signatureProvider.loadSourceSignatures(
+              sourceModule: 'rsp',
+              sourceTable: SelectionLineupEntry.tableName,
+              sourceRecordId: entry.id!,
+            );
+      if (entry.id != null && signatures == null) {
+        throw StateError(
+          signatureProvider.sourceSignatureError ??
+              'The form signatures could not be loaded.',
+        );
+      }
+      if (!mounted) return;
       await FormPdf.printForm(
         context: context,
-        buildDocument: () => FormPdf.buildSelectionLineupPdf(entry),
+        buildDocument: () =>
+            FormPdf.buildSelectionLineupPdf(entry, signatures: signatures),
         filename: 'Selection_Lineup.pdf',
         format: FormPdf.pageLetterLandscape,
         printModule: 'rsp',
         printFormKey: 'selection_lineup',
       );
-    } catch (_) {}
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Print failed. ${userFacingApiError(error)}')),
+      );
+    }
   }
 
   Future<void> _downloadSl(SelectionLineupEntry entry) async {
     try {
-      final doc = await FormPdf.buildSelectionLineupPdf(entry);
+      final signatureProvider = context.read<DocuTrackerProvider>();
+      final signatures = entry.id == null
+          ? null
+          : await signatureProvider.loadSourceSignatures(
+              sourceModule: 'rsp',
+              sourceTable: SelectionLineupEntry.tableName,
+              sourceRecordId: entry.id!,
+            );
+      if (entry.id != null && signatures == null) {
+        throw StateError(
+          signatureProvider.sourceSignatureError ??
+              'The form signatures could not be loaded.',
+        );
+      }
+      final doc = await FormPdf.buildSelectionLineupPdf(
+        entry,
+        signatures: signatures,
+      );
       await FormPdf.sharePdf(doc, name: 'Selection_Lineup.pdf');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -5852,7 +5944,9 @@ class _RspSelectionLineupSectionState
       if (mounted) {
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(SnackBar(content: Text('Download failed: $e')));
+        ).showSnackBar(
+          SnackBar(content: Text('Download failed. ${userFacingApiError(e)}')),
+        );
       }
     }
   }
@@ -5943,6 +6037,16 @@ class _RspSelectionLineupSectionState
             onPrint: _printSl,
             onDownloadPdf: _downloadSl,
           ),
+          if (_editing?.id != null) ...[
+            const SizedBox(height: 16),
+            DocuTrackerRspSignatureSection(
+              sourceTable: SelectionLineupEntry.tableName,
+              sourceRecordId: _editing!.id!,
+              slots: const [
+                DocuTrackerRspSignatureSlot('prepared_by', 'Prepared by'),
+              ],
+            ),
+          ],
           const SizedBox(height: 24),
         ],
         Row(

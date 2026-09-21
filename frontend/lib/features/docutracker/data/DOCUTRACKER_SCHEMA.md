@@ -20,6 +20,7 @@ Complete database schema for the DocuTracker module. Run migrations in order.
 | docutracker_signature_assets | Private drawn/uploaded signature images owned by users |
 | docutracker_signature_fields | Page placement, assigned signer, signed date, and lock state |
 | docutracker_leave_signatures | Fixed signature slots linked to authoritative DTR leave requests |
+| docutracker_rsp_source_signatures | Assigned and signed fields linked to allowlisted saved RSP and L&D forms; legacy table name retained for compatibility |
 
 ## docutracker_documents
 
@@ -161,6 +162,35 @@ library entry.
 The leave request remains the source of truth for form data, status, reviewers,
 balances, and DTR effects. Signature creation or replacement also appends an
 entry to `leave_request_history`.
+
+## docutracker_rsp_source_signatures
+
+| Column | Type | Purpose |
+|--------|------|---------|
+| source_table | TEXT | Allowlisted saved RSP or L&D form table |
+| source_record_id | UUID | Existing saved form record |
+| slot_key | TEXT | Fixed field such as `prepared_by`, `checked_by`, `applicant`, `noted_by`, `reviewed_by`, `approved_by`, or `certified_by` |
+| label | TEXT | Human-readable signature field label |
+| assigned_signer_id | UUID | Active HRMS user authorized to sign the field |
+| signature_asset_id | UUID | Private signature asset selected by that user |
+| signed_by | UUID | Authenticated user who last signed the field |
+| signer_name_snapshot | TEXT | Signer name retained for print and audit display |
+| signed_at | TIMESTAMPTZ | Server time of the latest signature |
+| created_by | UUID | Administrator who first assigned the field |
+
+The legacy table name is retained to avoid moving existing RSP audit data. The
+table now also stores signature metadata for L&D IDP and Action Brainstorming
+and Coaching forms. The unique key is
+`(source_table, source_record_id, slot_key)`. Changing the
+assigned user clears the previous signature atomically. The API checks the
+source table and field against a fixed allowlist, verifies that the form exists,
+and permits signing only when `assigned_signer_id` matches the authenticated
+user. Assignment and signing events are also appended to
+`docutracker_governance_audit`.
+
+The RSP and L&D signature-request feeds expose unassigned forms to
+administrators for signer setup. Non-admin users receive only forms assigned to
+their account. Both feeds omit forms with no remaining setup or signing action.
 
 L&D training reports and RSP recruitment applications are linked by their
 existing source table and record ID. They are not copied into DocuTracker

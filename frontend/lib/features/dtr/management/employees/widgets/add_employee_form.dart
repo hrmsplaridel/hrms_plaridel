@@ -1119,7 +1119,6 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
             decoration: _fieldDecoration('Employment Status'),
             items: [
               'active',
-              'inactive',
               'resigned',
               'retired',
               'terminated',

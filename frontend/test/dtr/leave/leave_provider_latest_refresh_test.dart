@@ -28,19 +28,19 @@ void main() {
 
     repository.completeCall(1, status: LeaveRequestStatus.approved, days: 8);
     await newerLoad;
-    expect(provider.requests.single.status, LeaveRequestStatus.approved);
+    expect(provider.myRequests.single.status, LeaveRequestStatus.approved);
     expect(provider.balances.single.earnedDays, 8);
     expect(provider.loading, isFalse);
 
     repository.completeCall(0, status: LeaveRequestStatus.pending, days: 5);
     await olderLoad;
-    expect(provider.requests.single.status, LeaveRequestStatus.approved);
+    expect(provider.myRequests.single.status, LeaveRequestStatus.approved);
     expect(provider.balances.single.earnedDays, 8);
     expect(provider.loading, isFalse);
     expect(provider.error, isNull);
 
     await provider.loadMyLeaveData('employee-a');
-    expect(provider.requests.single.status, LeaveRequestStatus.approved);
+    expect(provider.myRequests.single.status, LeaveRequestStatus.approved);
     expect(provider.balances.single.earnedDays, 8);
     expect(repository.requestCallCount, 2);
     expect(repository.balanceCallCount, 2);
@@ -68,7 +68,7 @@ void main() {
     repository.failCall(0);
     await olderLoad;
 
-    expect(provider.requests.single.status, LeaveRequestStatus.approved);
+    expect(provider.myRequests.single.status, LeaveRequestStatus.approved);
     expect(provider.balances.single.earnedDays, 8);
     expect(provider.loading, isFalse);
     expect(provider.error, isNull);

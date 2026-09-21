@@ -117,6 +117,9 @@ function mapDocumentRow(row) {
     source_table: row.source_table,
     source_record_id: row.source_record_id,
     source_title: row.source_title,
+    source_status: row.source_status ?? null,
+    source_action: row.source_action ?? null,
+    source_action_label: row.source_action_label ?? null,
     file_path: row.file_path,
     file_name: row.file_name,
     created_by: row.created_by,
@@ -139,6 +142,47 @@ function mapDocumentRow(row) {
     created_at: row.created_at,
     updated_at: row.updated_at,
   };
+}
+
+function sourceActionForRow(row, user) {
+  if (row.source_module !== 'dtr' || row.source_table !== 'leave_requests') {
+    return null;
+  }
+
+  const status = String(row.source_status || '').trim().toLowerCase();
+  const viewerId = String(user?.id || '').trim();
+  const role = String(user?.role || '').trim().toLowerCase();
+  const isOwner = sameEntityId(row.source_owner_id, viewerId);
+  const isDepartmentReviewer =
+    sameEntityId(row.assigned_department_head_id, viewerId) ||
+    row.viewer_is_department_reviewer === true;
+  const isHrOrAdmin = role === 'hr' || role === 'admin';
+
+  if (isOwner && status === 'draft') {
+    return {
+      action: 'complete_in_dtr',
+      label: 'Complete and submit in DTR',
+    };
+  }
+  if (isOwner && status === 'returned') {
+    return {
+      action: 'update_in_dtr',
+      label: 'Update and resubmit in DTR',
+    };
+  }
+  if (isDepartmentReviewer && status === 'pending_department_head') {
+    return {
+      action: 'department_review_in_dtr',
+      label: 'Sign here, then review in DTR',
+    };
+  }
+  if (isHrOrAdmin && (status === 'pending_hr' || status === 'pending')) {
+    return {
+      action: 'hr_review_in_dtr',
+      label: 'Sign here, then review in DTR',
+    };
+  }
+  return null;
 }
 
 function mapSourceStatusToDocuTracker(sourceModule, sourceStatus) {
@@ -340,7 +384,15 @@ async function listSourceBackedDocuments(pool, user, filters = {}) {
          u.full_name AS creator_name,
          l.created_at AS created_at,
          l.updated_at AS updated_at,
-         l.status AS source_status
+         l.status AS source_status,
+         COALESCE(l.user_id, l.employee_id)::text AS source_owner_id,
+         l.assigned_department_head_id::text AS assigned_department_head_id,
+         EXISTS (
+           SELECT 1
+           FROM leave_request_department_reviewers current_reviewer
+           WHERE current_reviewer.leave_request_id = l.id
+             AND current_reviewer.reviewer_id = $1::uuid
+         ) AS viewer_is_department_reviewer
        FROM leave_requests l
        JOIN users u ON u.id = COALESCE(l.user_id, l.employee_id)
        WHERE ${
@@ -369,7 +421,7 @@ async function listSourceBackedDocuments(pool, user, filters = {}) {
                )
              )`
        }`,
-      user.role === 'admin' || user.role === 'hr' ? [] : [user.id]
+      [user.id]
     );
     pieces.push(...leaveRows);
   }
@@ -399,6 +451,7 @@ async function listSourceBackedDocuments(pool, user, filters = {}) {
   const rows = pieces
     .map((row) => {
       const mappedStatus = mapSourceStatusToDocuTracker(row.source_module, row.source_status);
+      const sourceAction = sourceActionForRow(row, user);
       return {
         id: `source:${row.source_module}:${row.source_record_id}`,
         document_number: null,
@@ -409,6 +462,9 @@ async function listSourceBackedDocuments(pool, user, filters = {}) {
         source_table: row.source_table,
         source_record_id: row.source_record_id,
         source_title: row.source_title || null,
+        source_status: row.source_status || null,
+        source_action: sourceAction?.action || null,
+        source_action_label: sourceAction?.label || null,
         file_path: null,
         file_name: null,
         created_by: row.created_by,
@@ -2807,6 +2863,7 @@ module.exports = {
   DOC_ACTIONS,
   VALID_STATUSES,
   mapDocumentRow,
+  sourceActionForRow,
   permissionPriority,
   resolvePermissionDecisionFromRows,
   ensureValidWorkflowConfig,

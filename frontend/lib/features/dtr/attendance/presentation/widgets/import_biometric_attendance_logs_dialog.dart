@@ -301,6 +301,7 @@ class _ImportBiometricAttendanceLogsDialogState
         duplicatesSkipped: apiResponse.duplicatesSkipped,
         skippedUnmatched: apiResponse.skippedUnmatched,
         skippedIdentityMismatch: apiResponse.skippedIdentityMismatch,
+        skippedOutsideEmployment: apiResponse.skippedOutsideEmployment,
         skippedNoSchedule: apiResponse.skippedNoSchedule,
         skippedHoliday: apiResponse.skippedHoliday,
         skippedLeave: apiResponse.skippedLeave,
@@ -341,7 +342,11 @@ class _ImportBiometricAttendanceLogsDialogState
       builder: (ctx) => AlertDialog(
         title: Row(
           children: [
-            Icon(Icons.check_circle, color: Colors.green.shade700, size: 28),
+            Icon(
+              Icons.check_circle,
+              color: Theme.of(ctx).colorScheme.primary,
+              size: 28,
+            ),
             const SizedBox(width: 10),
             const Text('Import Complete'),
           ],
@@ -353,7 +358,10 @@ class _ImportBiometricAttendanceLogsDialogState
             children: [
               Text(
                 'Summary of imported biometric attendance logs.',
-                style: TextStyle(color: AppTheme.textSecondary, fontSize: 13),
+                style: TextStyle(
+                  color: AppTheme.dashTextSecondaryOf(ctx),
+                  fontSize: 13,
+                ),
               ),
               const SizedBox(height: 16),
               _PreviewRow(
@@ -381,6 +389,11 @@ class _ImportBiometricAttendanceLogsDialogState
               _PreviewRow(
                 label: 'Skipped: employee mapping changed',
                 value: '${result.skippedIdentityMismatch}',
+              ),
+              const SizedBox(height: 6),
+              _PreviewRow(
+                label: 'Skipped: outside employment period',
+                value: '${result.skippedOutsideEmployment}',
               ),
               const SizedBox(height: 6),
               _PreviewRow(
@@ -423,7 +436,7 @@ class _ImportBiometricAttendanceLogsDialogState
                 style: TextStyle(
                   fontWeight: FontWeight.w800,
                   fontSize: 13,
-                  color: AppTheme.textPrimary,
+                  color: AppTheme.dashTextPrimaryOf(ctx),
                 ),
               ),
               const SizedBox(height: 8),
@@ -451,198 +464,266 @@ class _ImportBiometricAttendanceLogsDialogState
 
   @override
   Widget build(BuildContext context) {
-    return AlertDialog(
-      title: const Text('Import Biometric Attendance Logs'),
-      content: SingleChildScrollView(
+    final scheme = Theme.of(context).colorScheme;
+    return Material(
+      color: AppTheme.dashCanvasOf(context),
+      child: SafeArea(
         child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              'Upload a text attendance export in DAT, TXT, or CSV format.',
-              style: TextStyle(color: AppTheme.textSecondary, fontSize: 14),
-            ),
-            const SizedBox(height: 16),
-            _DatFileDropArea(
-              selectedFileName: _selectedFileName,
-              onPickFile: _pickLogFile,
-              onDropPayload: _handleDroppedPayload,
-            ),
-            if (_validationError != null) ...[
-              const SizedBox(height: 10),
-              Text(
-                _validationError!,
-                style: TextStyle(
-                  color: Colors.red.shade700,
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ],
-            if (_isReading) ...[
-              const SizedBox(height: 12),
-              const Center(
-                child: Padding(
-                  padding: EdgeInsets.all(8),
-                  child: SizedBox(
-                    width: 22,
-                    height: 22,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  ),
-                ),
-              ),
-            ],
-            if (_parseError != null) ...[
-              const SizedBox(height: 10),
-              Text(
-                _parseError!,
-                style: TextStyle(
-                  color: Colors.red.shade700,
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ],
-            if (_preview != null) ...[
-              const SizedBox(height: 12),
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(14),
-                decoration: BoxDecoration(
-                  color: AppTheme.lightGray.withValues(alpha: 0.35),
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(
-                    color: Colors.black.withValues(alpha: 0.08),
-                  ),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+            Material(
+              color: AppTheme.dashPanelOf(context),
+              elevation: 1,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(24, 12, 12, 12),
+                child: Row(
                   children: [
-                    Text(
-                      'Import Preview',
-                      style: TextStyle(
-                        fontWeight: FontWeight.w800,
-                        fontSize: 13,
-                        color: AppTheme.textPrimary,
+                    Icon(
+                      Icons.upload_file_rounded,
+                      color: scheme.primary,
+                      size: 22,
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
+                        'Import Biometric Attendance Logs',
+                        style: TextStyle(
+                          color: AppTheme.dashTextPrimaryOf(context),
+                          fontSize: 18,
+                          fontWeight: FontWeight.w700,
+                        ),
                       ),
                     ),
-                    const SizedBox(height: 10),
-                    _PreviewRow(label: 'File', value: _preview!.fileName),
-                    const SizedBox(height: 6),
-                    _PreviewRow(
-                      label: 'Detected format',
-                      value: _preview!.detectedFormat,
-                    ),
-                    const SizedBox(height: 6),
-                    _PreviewRow(
-                      label: 'Non-empty rows',
-                      value: '${_preview!.totalNonEmptyRows}',
-                    ),
-                    const SizedBox(height: 6),
-                    _PreviewRow(
-                      label: 'Valid parsed rows',
-                      value: '${_preview!.validParsedRows}',
-                    ),
-                    const SizedBox(height: 6),
-                    _PreviewRow(
-                      label: 'Invalid / skipped',
-                      value: '${_preview!.invalidRows}',
-                    ),
-                    const SizedBox(height: 6),
-                    _PreviewRow(
-                      label: 'Unique biometric IDs',
-                      value: '${_preview!.uniqueBiometricUserIds}',
-                    ),
-                    const SizedBox(height: 6),
-                    _PreviewRow(
-                      label: 'Earliest timestamp',
-                      value:
-                          _preview!.earliestTimestamp?.toIso8601String() ?? '—',
-                    ),
-                    const SizedBox(height: 6),
-                    _PreviewRow(
-                      label: 'Latest timestamp',
-                      value:
-                          _preview!.latestTimestamp?.toIso8601String() ?? '—',
+                    IconButton(
+                      tooltip: 'Close',
+                      onPressed: _isImporting ? null : widget.onCancel,
+                      icon: const Icon(Icons.close_rounded),
                     ),
                   ],
                 ),
               ),
-            ],
-            if (_isMatching) ...[
-              const SizedBox(height: 12),
-              const Center(
-                child: Padding(
-                  padding: EdgeInsets.all(8),
-                  child: SizedBox(
-                    width: 22,
-                    height: 22,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  ),
+            ),
+            Expanded(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.fromLTRB(24, 22, 24, 28),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Upload a text attendance export in DAT, TXT, or CSV format.',
+                      style: TextStyle(
+                        color: AppTheme.dashTextSecondaryOf(context),
+                        fontSize: 14,
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    _DatFileDropArea(
+                      selectedFileName: _selectedFileName,
+                      onPickFile: _pickLogFile,
+                      onDropPayload: _handleDroppedPayload,
+                    ),
+                    if (_validationError != null) ...[
+                      const SizedBox(height: 10),
+                      Text(
+                        _validationError!,
+                        style: TextStyle(
+                          color: scheme.error,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                    if (_isReading) ...[
+                      const SizedBox(height: 12),
+                      const Center(
+                        child: Padding(
+                          padding: EdgeInsets.all(8),
+                          child: SizedBox(
+                            width: 22,
+                            height: 22,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          ),
+                        ),
+                      ),
+                    ],
+                    if (_parseError != null) ...[
+                      const SizedBox(height: 10),
+                      Text(
+                        _parseError!,
+                        style: TextStyle(
+                          color: scheme.error,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                    if (_preview != null) ...[
+                      const SizedBox(height: 12),
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(14),
+                        decoration: BoxDecoration(
+                          color: AppTheme.dashMutedSurfaceOf(context),
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(
+                            color: AppTheme.dashHairlineOf(context),
+                          ),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Import Preview',
+                              style: TextStyle(
+                                fontWeight: FontWeight.w800,
+                                fontSize: 13,
+                                color: AppTheme.dashTextPrimaryOf(context),
+                              ),
+                            ),
+                            const SizedBox(height: 10),
+                            _PreviewRow(
+                              label: 'File',
+                              value: _preview!.fileName,
+                            ),
+                            const SizedBox(height: 6),
+                            _PreviewRow(
+                              label: 'Detected format',
+                              value: _preview!.detectedFormat,
+                            ),
+                            const SizedBox(height: 6),
+                            _PreviewRow(
+                              label: 'Non-empty rows',
+                              value: '${_preview!.totalNonEmptyRows}',
+                            ),
+                            const SizedBox(height: 6),
+                            _PreviewRow(
+                              label: 'Valid parsed rows',
+                              value: '${_preview!.validParsedRows}',
+                            ),
+                            const SizedBox(height: 6),
+                            _PreviewRow(
+                              label: 'Invalid / skipped',
+                              value: '${_preview!.invalidRows}',
+                            ),
+                            const SizedBox(height: 6),
+                            _PreviewRow(
+                              label: 'Unique biometric IDs',
+                              value: '${_preview!.uniqueBiometricUserIds}',
+                            ),
+                            const SizedBox(height: 6),
+                            _PreviewRow(
+                              label: 'Earliest timestamp',
+                              value:
+                                  _preview!.earliestTimestamp
+                                      ?.toIso8601String() ??
+                                  '—',
+                            ),
+                            const SizedBox(height: 6),
+                            _PreviewRow(
+                              label: 'Latest timestamp',
+                              value:
+                                  _preview!.latestTimestamp
+                                      ?.toIso8601String() ??
+                                  '—',
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                    if (_isMatching) ...[
+                      const SizedBox(height: 12),
+                      const Center(
+                        child: Padding(
+                          padding: EdgeInsets.all(8),
+                          child: SizedBox(
+                            width: 22,
+                            height: 22,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      Center(
+                        child: Text(
+                          'Matching biometric IDs to employees...',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: AppTheme.dashTextSecondaryOf(context),
+                          ),
+                        ),
+                      ),
+                    ],
+                    if (_matchingError != null) ...[
+                      const SizedBox(height: 12),
+                      Text(
+                        _matchingError!,
+                        style: TextStyle(
+                          color: scheme.error,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                    if (_preview != null &&
+                        !_isMatching &&
+                        _matchedEmployees != null &&
+                        _matchingError == null) ...[
+                      const SizedBox(height: 12),
+                      _MatchingSummarySection(
+                        totalUniqueIds: _totalUniqueIds,
+                        matchedCount: _matchedCount,
+                        unmatchedCount: _unmatchedCount,
+                        matchedEmployees: _matchedEmployees!,
+                        unmatchedIds: _unmatchedIds,
+                      ),
+                      if (_matchedCount == 0) ...[
+                        const SizedBox(height: 10),
+                        Text(
+                          'No matching employees were found for the biometric IDs in this file.',
+                          style: TextStyle(
+                            color: scheme.tertiary,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                    ],
+                  ],
                 ),
               ),
-              const SizedBox(height: 6),
-              Center(
-                child: Text(
-                  'Matching biometric IDs to employees...',
-                  style: TextStyle(fontSize: 12, color: AppTheme.textSecondary),
+            ),
+            Material(
+              color: AppTheme.dashPanelOf(context),
+              elevation: 4,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(24, 14, 24, 14),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    TextButton(
+                      onPressed: _isImporting ? null : widget.onCancel,
+                      child: const Text('Cancel'),
+                    ),
+                    const SizedBox(width: 10),
+                    FilledButton.icon(
+                      onPressed: _canContinue ? _onContinue : null,
+                      icon: _isImporting
+                          ? const SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Icon(Icons.arrow_forward_rounded, size: 18),
+                      label: Text(_isImporting ? 'Importing' : 'Continue'),
+                    ),
+                  ],
                 ),
               ),
-            ],
-            if (_matchingError != null) ...[
-              const SizedBox(height: 12),
-              Text(
-                _matchingError!,
-                style: TextStyle(
-                  color: Colors.red.shade700,
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ],
-            if (_preview != null &&
-                !_isMatching &&
-                _matchedEmployees != null &&
-                _matchingError == null) ...[
-              const SizedBox(height: 12),
-              _MatchingSummarySection(
-                totalUniqueIds: _totalUniqueIds,
-                matchedCount: _matchedCount,
-                unmatchedCount: _unmatchedCount,
-                matchedEmployees: _matchedEmployees!,
-                unmatchedIds: _unmatchedIds,
-              ),
-              if (_matchedCount == 0) ...[
-                const SizedBox(height: 10),
-                Text(
-                  'No matching employees were found for the biometric IDs in this file.',
-                  style: TextStyle(
-                    color: Colors.orange.shade800,
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ],
-            ],
+            ),
           ],
         ),
       ),
-      actions: [
-        TextButton(
-          onPressed: _isImporting ? null : widget.onCancel,
-          child: const Text('Cancel'),
-        ),
-        FilledButton(
-          onPressed: _canContinue ? _onContinue : null,
-          child: _isImporting
-              ? const SizedBox(
-                  width: 20,
-                  height: 20,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                )
-              : const Text('Continue'),
-        ),
-      ],
     );
   }
 }
@@ -660,6 +741,8 @@ class _DatFileDropArea extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final surface = AppTheme.dashMutedSurfaceOf(context);
+    final border = AppTheme.dashHairlineOf(context);
     return DragTarget<Object>(
       onWillAcceptWithDetails: (_) => true,
       onAcceptWithDetails: (details) => onDropPayload(details.data),
@@ -673,12 +756,9 @@ class _DatFileDropArea extends StatelessWidget {
             width: double.infinity,
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
-              color: AppTheme.lightGray.withValues(alpha: 0.35),
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(
-                color: Colors.black.withValues(alpha: 0.15),
-                width: 1,
-              ),
+              color: surface,
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: border),
             ),
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -698,7 +778,7 @@ class _DatFileDropArea extends StatelessWidget {
                         style: TextStyle(
                           fontSize: 14,
                           fontWeight: FontWeight.w600,
-                          color: AppTheme.textPrimary,
+                          color: AppTheme.dashTextPrimaryOf(context),
                         ),
                       ),
                     ),
@@ -710,8 +790,8 @@ class _DatFileDropArea extends StatelessWidget {
                   style: TextStyle(
                     fontSize: 12,
                     color: selectedFileName != null
-                        ? AppTheme.textPrimary
-                        : AppTheme.textSecondary,
+                        ? AppTheme.dashTextPrimaryOf(context)
+                        : AppTheme.dashTextSecondaryOf(context),
                     height: 1.4,
                   ),
                 ),
@@ -740,7 +820,7 @@ class _PreviewRow extends StatelessWidget {
             label,
             style: TextStyle(
               fontSize: 12,
-              color: AppTheme.textSecondary,
+              color: AppTheme.dashTextSecondaryOf(context),
               fontWeight: FontWeight.w600,
             ),
           ),
@@ -751,7 +831,7 @@ class _PreviewRow extends StatelessWidget {
             value,
             style: TextStyle(
               fontSize: 12,
-              color: AppTheme.textPrimary,
+              color: AppTheme.dashTextPrimaryOf(context),
               fontWeight: FontWeight.w700,
             ),
             overflow: TextOverflow.ellipsis,
@@ -786,9 +866,9 @@ class _MatchingSummarySection extends StatelessWidget {
       width: double.infinity,
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: AppTheme.lightGray.withValues(alpha: 0.35),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.black.withValues(alpha: 0.08)),
+        color: AppTheme.dashMutedSurfaceOf(context),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: AppTheme.dashHairlineOf(context)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -798,7 +878,7 @@ class _MatchingSummarySection extends StatelessWidget {
             style: TextStyle(
               fontWeight: FontWeight.w800,
               fontSize: 13,
-              color: AppTheme.textPrimary,
+              color: AppTheme.dashTextPrimaryOf(context),
             ),
           ),
           const SizedBox(height: 10),
@@ -817,7 +897,7 @@ class _MatchingSummarySection extends StatelessWidget {
               style: TextStyle(
                 fontSize: 11,
                 fontWeight: FontWeight.w700,
-                color: AppTheme.textSecondary,
+                color: AppTheme.dashTextSecondaryOf(context),
               ),
             ),
             const SizedBox(height: 6),
@@ -827,10 +907,10 @@ class _MatchingSummarySection extends StatelessWidget {
                   (e) => Padding(
                     padding: const EdgeInsets.only(bottom: 4),
                     child: Text(
-                      '${e.biometricUserId} — ${e.fullName}${e.employeeNumber != null ? ' (EMP-${e.employeeNumber!.toString().padLeft(3, '0')})' : ''}',
+                      '${e.biometricUserId} — ${e.fullName}${e.employeeNumber != null ? ' (EMP-${e.employeeNumber!.toString().padLeft(3, '0')})' : ''}${e.isCurrentlyActive ? '' : ' • Inactive${e.separationDate != null ? ' through ${e.separationDate}' : ''}'}',
                       style: TextStyle(
                         fontSize: 11,
-                        color: AppTheme.textPrimary,
+                        color: AppTheme.dashTextPrimaryOf(context),
                         height: 1.3,
                       ),
                       overflow: TextOverflow.ellipsis,
@@ -845,7 +925,7 @@ class _MatchingSummarySection extends StatelessWidget {
               style: TextStyle(
                 fontSize: 11,
                 fontWeight: FontWeight.w700,
-                color: AppTheme.textSecondary,
+                color: AppTheme.dashTextSecondaryOf(context),
               ),
             ),
             const SizedBox(height: 6),
@@ -858,7 +938,7 @@ class _MatchingSummarySection extends StatelessWidget {
                       id,
                       style: TextStyle(
                         fontSize: 11,
-                        color: AppTheme.textPrimary,
+                        color: AppTheme.dashTextPrimaryOf(context),
                       ),
                       overflow: TextOverflow.ellipsis,
                     ),

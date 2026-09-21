@@ -14,7 +14,7 @@ void main() {
 
     await provider.loadMyLeaveData('employee-a', forceRefresh: true);
 
-    expect(provider.requests, hasLength(1));
+    expect(provider.myRequests, hasLength(1));
     expect(provider.myRequestsLoaded, isTrue);
     expect(provider.myRequestsError, isNull);
     expect(provider.balances, isEmpty);
@@ -34,7 +34,7 @@ void main() {
 
     await provider.loadMyLeaveData('employee-a', forceRefresh: true);
 
-    expect(provider.requests, isEmpty);
+    expect(provider.myRequests, isEmpty);
     expect(provider.myRequestsLoaded, isFalse);
     expect(
       provider.myRequestsError,
@@ -58,7 +58,7 @@ void main() {
       ..failBalances = true;
     await provider.loadMyLeaveData('employee-a', forceRefresh: true);
 
-    expect(provider.requests, hasLength(1));
+    expect(provider.myRequests, hasLength(1));
     expect(provider.balances, hasLength(1));
     expect(provider.myRequestsLoaded, isTrue);
     expect(provider.myBalancesLoaded, isTrue);

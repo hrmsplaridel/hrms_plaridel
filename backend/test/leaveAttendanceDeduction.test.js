@@ -382,6 +382,13 @@ test('completed-month DTR processing includes closed historical assignments', as
   );
 
   assert.equal(employees.length, 1);
+  const selectionSql = sqlCalls.find((sql) =>
+    sql.includes('SELECT DISTINCT u.id AS user_id')
+  );
+  assert.ok(selectionSql);
+  assert.match(selectionSql, /u\.employment_status/);
+  assert.doesNotMatch(selectionSql, /u\.is_active/);
+  assert.match(selectionSql, /u\.leave_credit_eligible_until >= \$1::date/);
   assert.equal(assignmentForDate(assignments, USER_ID, '2026-06-16')?.startMinutes, 480);
   assert.equal(
     sqlCalls.some((sql) => /a\.is_active/i.test(sql)),

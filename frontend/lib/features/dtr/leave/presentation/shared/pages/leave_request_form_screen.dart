@@ -680,6 +680,10 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
     setState(() => _submitFlowInFlight = true);
     try {
       if (!await _refreshSavedStatus() || !mounted) return;
+      // The status check temporarily replaces the editor with a loading view.
+      // Wait for it to be mounted again before validating a saved draft.
+      await WidgetsBinding.instance.endOfFrame;
+      if (!mounted) return;
       final formState = _formKey.currentState;
       if (formState == null) {
         _showMessage('The leave form is not ready. Please try again.');
@@ -1419,6 +1423,15 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
     final formMaxWidth = 800.0; // Clean, narrow column for digital entry
     final leaveProvider = context.watch<LeaveProvider>();
 
+    if (_checkingStatus &&
+        ((_savedRequest ?? widget.initialRequest)?.id ?? '').isNotEmpty) {
+      return Scaffold(
+        backgroundColor: AppTheme.dashCanvasOf(context),
+        appBar: AppBar(title: const Text('Leave Request')),
+        body: const Center(child: CircularProgressIndicator()),
+      );
+    }
+
     if (_statusError != null || (!_checkingStatus && !_canEditRequest)) {
       final status = (_savedRequest ?? widget.initialRequest)?.status;
       return Scaffold(
@@ -1448,8 +1461,6 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
                       ? 'This request has already been submitted. You can track its progress in the leave list.'
                       : 'This request cannot be edited in its current status.',
                 ),
-                const SizedBox(height: 24),
-                _buildApplicantSignatureSection(),
                 const SizedBox(height: 24),
                 FilledButton(
                   onPressed: () => Navigator.of(context).pop(),
@@ -1728,8 +1739,10 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
                       const SizedBox(height: 32),
 
                       // Actions
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.end,
+                      Wrap(
+                        alignment: WrapAlignment.end,
+                        spacing: 16,
+                        runSpacing: 12,
                         children: [
                           if (widget.onSaveDraft != null)
                             OutlinedButton(
@@ -1747,7 +1760,6 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
                               ),
                               child: const Text('Save Draft'),
                             ),
-                          const SizedBox(width: 16),
                           if (widget.onSubmitRequest != null)
                             FilledButton(
                               onPressed:

@@ -1,5 +1,5 @@
 -- =============================================================================
--- HRMS Plaridel - DocuTracker: INSTALL PHASE 3 (post production hardening, 10-21)
+-- HRMS Plaridel - DocuTracker: INSTALL PHASE 3 (post production hardening, 10-25)
 -- =============================================================================
 -- PREREQUISITE: phase 1 complete AND docutracker-install-production-hardening-apply-once.sql applied.
 -- Section 10 drops/replaces *_prod_v1 status constraints created in production hardening.
@@ -10,7 +10,10 @@
 -- Section 16 adds A4 document content and server-locked e-signature persistence.
 -- Section 17 allows the server-audited signed history action.
 -- Section 18 links audited applicant signatures to DTR leave requests without copying leave data.
--- Section 21 assigns effective-dated officials used by generated leave forms.
+-- Sections 19-20 add assigned department-head and HR approval signatures for leave forms.
+-- Sections 21-22 add assigned, audited signature fields to saved RSP and L&D forms.
+-- Section 23 adds the governance audit trail.
+-- Sections 24-25 assign effective-dated officials used by generated leave forms.
 --
 -- TABLE OF CONTENTS
 --   10 - STATUS SEMANTICS V2 (drop forwarded as document status)
@@ -24,9 +27,11 @@
 --   18 - LINKED DTR LEAVE E-SIGNATURES
 --   19 - DEPARTMENT HEAD LEAVE E-SIGNATURE
 --   20 - HR APPROVER LEAVE E-SIGNATURE
---   21 - GOVERNANCE AUDIT TRAIL
---   22 - EFFECTIVE-DATED OFFICIAL SIGNATORIES
---   23 - AUTOMATIC MAYOR LEAVE SIGNATORY
+--   21 - LINKED RSP FORM E-SIGNATURES
+--   22 - LINKED L&D FORM E-SIGNATURES
+--   23 - GOVERNANCE AUDIT TRAIL
+--   24 - EFFECTIVE-DATED OFFICIAL SIGNATORIES
+--   25 - AUTOMATIC MAYOR LEAVE SIGNATORY
 --
 -- =============================================================================
 
@@ -858,7 +863,108 @@ COMMIT;
 
 
 -- #############################################################################
--- 21 - GOVERNANCE AUDIT TRAIL
+-- 21 - LINKED RSP FORM E-SIGNATURES
+-- Source file: migrate-docutracker-rsp-source-signatures-v1.sql
+-- #############################################################################
+
+BEGIN;
+
+CREATE TABLE IF NOT EXISTS docutracker_rsp_source_signatures (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  source_table TEXT NOT NULL,
+  source_record_id UUID NOT NULL,
+  slot_key TEXT NOT NULL,
+  label TEXT NOT NULL,
+  assigned_signer_id UUID NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+  signature_asset_id UUID REFERENCES docutracker_signature_assets(id) ON DELETE RESTRICT,
+  signed_by UUID REFERENCES users(id) ON DELETE RESTRICT,
+  signer_name_snapshot TEXT,
+  signed_at TIMESTAMPTZ,
+  created_by UUID REFERENCES users(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT docutracker_rsp_source_signatures_source_check CHECK (
+    source_table IN (
+      'applicants_profile_entries',
+      'selection_lineup_entries',
+      'computation_of_points_entries',
+      'work_experience_sheet_entries',
+      'turn_around_time_entries'
+    )
+  ),
+  CONSTRAINT docutracker_rsp_source_signatures_slot_check CHECK (
+    slot_key IN ('prepared_by', 'checked_by', 'applicant', 'noted_by')
+  ),
+  CONSTRAINT docutracker_rsp_source_signatures_state_check CHECK (
+    (signature_asset_id IS NULL AND signed_by IS NULL AND signer_name_snapshot IS NULL AND signed_at IS NULL)
+    OR
+    (signature_asset_id IS NOT NULL AND signed_by = assigned_signer_id
+      AND length(btrim(signer_name_snapshot)) BETWEEN 1 AND 200 AND signed_at IS NOT NULL)
+  ),
+  CONSTRAINT docutracker_rsp_source_signatures_unique UNIQUE (
+    source_table, source_record_id, slot_key
+  )
+);
+
+CREATE INDEX IF NOT EXISTS idx_docutracker_rsp_source_signatures_assignee
+  ON docutracker_rsp_source_signatures(assigned_signer_id, source_table, source_record_id);
+
+COMMIT;
+
+
+-- #############################################################################
+-- 22 - LINKED L&D FORM E-SIGNATURES
+-- Source file: migrate-docutracker-ld-source-signatures-v1.sql
+-- #############################################################################
+
+BEGIN;
+
+-- The table name is retained for backward compatibility. It is owned by
+-- DocuTracker and now stores fixed signature slots for allowlisted RSP and
+-- L&D source forms; source-module tables remain unchanged.
+ALTER TABLE docutracker_rsp_source_signatures
+  DROP CONSTRAINT IF EXISTS docutracker_rsp_source_signatures_source_check;
+
+ALTER TABLE docutracker_rsp_source_signatures
+  DROP CONSTRAINT IF EXISTS docutracker_rsp_source_signatures_source_table_check;
+
+ALTER TABLE docutracker_rsp_source_signatures
+  ADD CONSTRAINT docutracker_rsp_source_signatures_source_check CHECK (
+    source_table IN (
+      'applicants_profile_entries',
+      'selection_lineup_entries',
+      'computation_of_points_entries',
+      'work_experience_sheet_entries',
+      'turn_around_time_entries',
+      'idp_entries',
+      'action_brainstorming_coaching_entries'
+    )
+  );
+
+ALTER TABLE docutracker_rsp_source_signatures
+  DROP CONSTRAINT IF EXISTS docutracker_rsp_source_signatures_slot_check;
+
+ALTER TABLE docutracker_rsp_source_signatures
+  DROP CONSTRAINT IF EXISTS docutracker_rsp_source_signatures_slot_key_check;
+
+ALTER TABLE docutracker_rsp_source_signatures
+  ADD CONSTRAINT docutracker_rsp_source_signatures_slot_check CHECK (
+    slot_key IN (
+      'prepared_by',
+      'checked_by',
+      'applicant',
+      'noted_by',
+      'reviewed_by',
+      'approved_by',
+      'certified_by'
+    )
+  );
+
+COMMIT;
+
+
+-- #############################################################################
+-- 23 - GOVERNANCE AUDIT TRAIL
 -- Source file: migrate-docutracker-governance-audit-v1.sql
 -- #############################################################################
 
@@ -888,7 +994,7 @@ CREATE INDEX IF NOT EXISTS idx_docutracker_governance_audit_event_type
 
 
 -- #############################################################################
--- 22 - EFFECTIVE-DATED OFFICIAL SIGNATORIES
+-- 24 - EFFECTIVE-DATED OFFICIAL SIGNATORIES
 -- Source file: migrate-docutracker-official-signatories-v1.sql
 -- #############################################################################
 
@@ -945,7 +1051,7 @@ COMMIT;
 
 
 -- #############################################################################
--- 23 - AUTOMATIC MAYOR LEAVE SIGNATORY
+-- 25 - AUTOMATIC MAYOR LEAVE SIGNATORY
 -- Source file: migrate-docutracker-automatic-mayor-signatory-v2.sql
 -- #############################################################################
 

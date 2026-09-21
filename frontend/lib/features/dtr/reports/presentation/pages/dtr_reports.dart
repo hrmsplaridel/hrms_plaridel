@@ -8,11 +8,13 @@ import 'package:printing/printing.dart';
 import 'package:provider/provider.dart';
 import 'package:hrms_plaridel/core/api/client.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
+import 'package:hrms_plaridel/core/utils/responsive_right_side_panel.dart';
 import 'package:hrms_plaridel/features/dtr/attendance/models/time_record.dart';
 import 'package:hrms_plaridel/features/dtr/reports/data/dtr_export.dart';
 import 'package:hrms_plaridel/features/dtr/reports/data/official_time.dart';
 import 'package:hrms_plaridel/features/dtr/reports/data/dtr_report_readiness.dart';
 import 'package:hrms_plaridel/features/dtr/reports/data/dtr_report_request_guard.dart';
+import 'package:hrms_plaridel/features/dtr/reports/data/dtr_report_employee_status.dart';
 import 'package:hrms_plaridel/features/dtr/dtr_provider.dart';
 import 'package:hrms_plaridel/features/dtr/reports/data/dtr_share.dart';
 import 'package:hrms_plaridel/features/dtr/attendance/presentation/widgets/attendance_display.dart';
@@ -79,6 +81,7 @@ class _DtrReportsState extends State<DtrReports> {
   String? _selectedEmployeeId;
   String? _selectedDepartmentId;
   String _selectedEmployeeStatus = 'Active';
+  String? _manualEmployeeStatus;
   final Set<String> _selectedEmployeeIds = <String>{};
   final DtrReportRequestGuard _requestGuard = DtrReportRequestGuard();
   List<EmployeeOption> _reportEmployeeOptions = const [];
@@ -96,6 +99,26 @@ class _DtrReportsState extends State<DtrReports> {
   DtrReportDataState _assignmentsState = DtrReportDataState.idle;
   DtrReportDataState _policyState = DtrReportDataState.idle;
   DtrReportDataState _signatoriesState = DtrReportDataState.idle;
+
+  EmployeeOption? get _selectedReportEmployee {
+    for (final employee in _reportEmployees()) {
+      if (employee.id == _selectedEmployeeId) return employee;
+    }
+    return null;
+  }
+
+  bool get _hasUnverifiedInactiveAttendance =>
+      _assignmentEffectiveFrom != null &&
+      _selectedReportEmployee != null &&
+      hasUndatedInactiveEmployment(
+        employmentStatus: _selectedReportEmployee!.employmentStatus,
+      );
+
+  bool get _hasUnverifiedBulkAttendance => _selectedEmployeesForBulk().any(
+    (employee) => hasUndatedInactiveEmployment(
+      employmentStatus: employee.employmentStatus,
+    ),
+  );
 
   DtrReportReadiness get _reportReadiness {
     final selectedAssignments = _assignmentsInSelectedRange;
@@ -625,6 +648,12 @@ class _DtrReportsState extends State<DtrReports> {
   void _setSelectedMonth(int month) {
     setState(() {
       _selectedMonth = month;
+      _selectedEmployeeStatus = reportEmployeeStatusForPeriod(
+        year: _selectedYear,
+        month: _selectedMonth,
+        today: DateTime.now(),
+        manualStatus: _manualEmployeeStatus,
+      );
       _rangeStartDay = 1;
       _rangeEndDay = _daysInSelectedMonth();
     });
@@ -634,6 +663,12 @@ class _DtrReportsState extends State<DtrReports> {
   void _setSelectedYear(int year) {
     setState(() {
       _selectedYear = year;
+      _selectedEmployeeStatus = reportEmployeeStatusForPeriod(
+        year: _selectedYear,
+        month: _selectedMonth,
+        today: DateTime.now(),
+        manualStatus: _manualEmployeeStatus,
+      );
       _rangeStartDay = 1;
       _rangeEndDay = _daysInSelectedMonth();
     });
@@ -770,7 +805,8 @@ class _DtrReportsState extends State<DtrReports> {
   }
 
   bool _isScheduledWorkDay(DateTime dt) {
-    return _isScheduledWorkDayFor(dt, _assignmentTimeline);
+    return !_hasUnverifiedInactiveAttendance &&
+        _isScheduledWorkDayFor(dt, _assignmentTimeline);
   }
 
   /// Holiday rows from the API are omitted when they are not meaningful for tardiness:
@@ -855,6 +891,7 @@ class _DtrReportsState extends State<DtrReports> {
       _rangeEndDay = _daysInSelectedMonth();
       _selectedDepartmentId = null;
       _selectedEmployeeStatus = 'Active';
+      _manualEmployeeStatus = null;
       _selectedEmployeeIds.clear();
       _multiSelectMode = false;
     });
@@ -1180,6 +1217,60 @@ class _DtrReportsState extends State<DtrReports> {
   }
 
   /// Print DTR report: open system print dialog when supported; otherwise share PDF.
+  Future<void> _previewDtrReport(
+    BuildContext context, {
+    required String selectedName,
+    required DateTime start,
+    required DateTime end,
+    required Map<DateTime, TimeRecord> recordsByDate,
+    String? department,
+    String? position,
+  }) async {
+    if (!_guardOfficialReportAction()) return;
+    final signatories = _reportSignatories!;
+    final pageFormat = await _chooseDtrPaperSize(context);
+    if (pageFormat == null || !context.mounted) return;
+    final baseName =
+        'DTR_${selectedName.replaceAll(' ', '_')}_${_months[_selectedMonth - 1]}_$_selectedYear.pdf';
+
+    try {
+      final bytes = await DtrExport.generatePdf(
+        employeeName: selectedName,
+        year: _selectedYear,
+        month: _selectedMonth,
+        start: start,
+        end: end,
+        recordsByDate: recordsByDate,
+        department: department ?? _reportDepartment,
+        position: position ?? _reportPosition,
+        officialHours: _shiftOfficialHours,
+        scheduledWorkHoursPerDay: _shiftWorkHoursPerDay,
+        punchMode: _shiftPunchMode,
+        workingDays: _shiftWorkingDays,
+        assignmentEffectiveFrom: _assignmentEffectiveFrom,
+        assignmentEffectiveTo: _assignmentEffectiveTo,
+        assignmentSegments: _exportAssignmentSegments,
+        reportableThrough: _reportableThrough,
+        signatories: signatories,
+        pageFormat: pageFormat,
+      );
+      if (!context.mounted) return;
+      await openResponsiveRightSidePanel<void>(
+        context: context,
+        barrierLabel: 'Close DTR preview',
+        breakpoint: 900,
+        minWidth: 680,
+        initialWidthFraction: 0.62,
+        builder: (_) => _DtrPdfPreviewPanel(bytes: bytes, filename: baseName),
+      );
+    } catch (error) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Unable to preview DTR: $error')));
+    }
+  }
+
   Future<void> _printDtrReport(
     BuildContext context, {
     required String selectedName,
@@ -1299,10 +1390,18 @@ class _DtrReportsState extends State<DtrReports> {
   bool get _officialActionsEnabled =>
       _reportReadiness.canGenerateOfficialReport &&
       _reportSignatories != null &&
+      !_hasUnverifiedInactiveAttendance &&
       !_reportLoading;
 
   bool _guardOfficialReportAction() {
     if (_officialActionsEnabled) return true;
+    if (_hasUnverifiedInactiveAttendance) {
+      _showReportSnack(
+        'Attendance is unverified: employment is marked inactive without a dated end, but the assignment is still open. Record the last day of service before exporting.',
+        backgroundColor: Colors.red.shade700,
+      );
+      return false;
+    }
     final issues = _reportReadiness.blockingIssues;
     final message = _reportReadiness.isLoading || _reportLoading
         ? 'Official report data is still being verified.'
@@ -1567,6 +1666,11 @@ class _DtrReportsState extends State<DtrReports> {
     if (selected.length < 2) {
       throw StateError('Select at least two employees first.');
     }
+    if (_hasUnverifiedBulkAttendance) {
+      throw StateError(
+        'An employee has undated inactive employment. Record the last day of service before exporting.',
+      );
+    }
     const batchSize = 100;
     final items = <DtrExportItem>[];
     final failures = <String>[];
@@ -1804,7 +1908,11 @@ class _DtrReportsState extends State<DtrReports> {
     final reportRecordsByDate = _filterRecordsForTardinessReport(recordsByDate);
     final rangedRecordsByDate = Map<DateTime, TimeRecord>.fromEntries(
       reportRecordsByDate.entries.where(
-        (e) => !e.key.isBefore(start) && !e.key.isAfter(end),
+        (e) =>
+            !e.key.isBefore(start) &&
+            !e.key.isAfter(end) &&
+            (!_hasUnverifiedInactiveAttendance ||
+                !isSyntheticAbsentRow(id: e.value.id, status: e.value.status)),
       ),
     );
     // Display the selected calendar range in the report. Non-working days without
@@ -1812,16 +1920,18 @@ class _DtrReportsState extends State<DtrReports> {
     final hasAssignment = _assignmentEffectiveFrom != null;
     final shouldShowCalendarRows =
         _selectedEmployeeId != null &&
-        (hasAssignment || rangedRecordsByDate.isNotEmpty);
+        ((hasAssignment && !_hasUnverifiedInactiveAttendance) ||
+            rangedRecordsByDate.isNotEmpty);
     final sortedDates = shouldShowCalendarRows
-        ? _calendarDatesInSelectedRange(end)
+        ? _hasUnverifiedInactiveAttendance
+              ? (rangedRecordsByDate.keys.toList()..sort())
+              : _calendarDatesInSelectedRange(end)
         : <DateTime>[];
 
     // Compute summary from real API records, using shift + assignment window when available.
     // Only count days up to today (elapsed) — future days in the month are not "absent" yet.
     final statsEnd = _tardinessStatsInclusiveEnd();
     final totalWeekdays = _countScheduledWorkDaysThrough(statsEnd);
-    var lateCount = 0;
     var absentCount = 0;
     var holidaysCount = 0;
     for (var d = _rangeStartDay; d <= end.day; d++) {
@@ -1835,22 +1945,15 @@ class _DtrReportsState extends State<DtrReports> {
         // On leave: not absent for tardiness
       } else if (rec == null || (rec.timeIn == null && rec.breakIn == null)) {
         absentCount++;
-      } else {
-        if (rec.status == 'late' || (rec.lateMinutes ?? 0) > 0) {
-          lateCount++;
-        }
       }
     }
     // Show summary whenever this month has any report rows — not only days with punches.
     // (Absent / undertime-only days have no timeIn/breakIn but must still roll up to totals.)
-    final hasRecords = rangedRecordsByDate.isNotEmpty || hasAssignment;
+    final hasRecords =
+        rangedRecordsByDate.isNotEmpty ||
+        (hasAssignment && !_hasUnverifiedInactiveAttendance);
     final workingDays = hasRecords ? totalWeekdays - holidaysCount : 0;
-    final displayLateCount = hasRecords ? lateCount : 0;
     final displayAbsentCount = hasRecords ? absentCount : 0;
-    final tardyCount = hasRecords ? (lateCount + absentCount) : 0;
-    final tardinessPct = workingDays > 0
-        ? ((tardyCount / workingDays) * 100).round()
-        : 0;
 
     // Total late and undertime minutes (elapsed days only, same window as counts)
     var totalLateMinutes = 0;
@@ -1934,6 +2037,16 @@ class _DtrReportsState extends State<DtrReports> {
                         const SizedBox(height: 16),
                         _buildReadinessBanner(context),
                       ],
+                      if (_hasUnverifiedInactiveAttendance) ...[
+                        const SizedBox(height: 16),
+                        Text(
+                          'Attendance unverified: employment is marked inactive without a dated end, but the assignment is still open. Missing days are not counted as absent. Record the last day of service to finalize the DTR.',
+                          style: TextStyle(
+                            color: AppTheme.dashTextSecondaryOf(context),
+                            fontSize: 13,
+                          ),
+                        ),
+                      ],
                       const SizedBox(height: 24),
                       isMobile
                           ? _buildMobileLayout(
@@ -1945,10 +2058,7 @@ class _DtrReportsState extends State<DtrReports> {
                               sortedDates: sortedDates,
                               selectedName: selectedName,
                               workingDays: workingDays,
-                              lateCount: displayLateCount,
                               absentCount: displayAbsentCount,
-                              tardyCount: tardyCount,
-                              tardinessPct: tardinessPct,
                               totalLateMinutes: displayTotalLateMinutes,
                               totalUndertimeMinutes:
                                   displayTotalUndertimeMinutes,
@@ -1963,10 +2073,7 @@ class _DtrReportsState extends State<DtrReports> {
                               sortedDates: sortedDates,
                               selectedName: selectedName,
                               workingDays: workingDays,
-                              lateCount: displayLateCount,
                               absentCount: displayAbsentCount,
-                              tardyCount: tardyCount,
-                              tardinessPct: tardinessPct,
                               totalLateMinutes: displayTotalLateMinutes,
                               totalUndertimeMinutes:
                                   displayTotalUndertimeMinutes,
@@ -2007,10 +2114,7 @@ class _DtrReportsState extends State<DtrReports> {
                                             _buildSummaryCard(
                                               selectedName: selectedName,
                                               workingDays: workingDays,
-                                              lateCount: displayLateCount,
                                               absentCount: displayAbsentCount,
-                                              tardyCount: tardyCount,
-                                              tardinessPct: tardinessPct,
                                               totalLateMinutes:
                                                   displayTotalLateMinutes,
                                               totalUndertimeMinutes:
@@ -2102,23 +2206,41 @@ class _DtrReportsState extends State<DtrReports> {
               },
             ),
           if (!widget.selfService)
-            DropdownButton<String>(
-              value: _selectedEmployeeStatus,
-              dropdownColor: AppTheme.dashPanelOf(context),
-              style: AppTheme.dashFieldTextStyle(context),
-              items: const ['Active', 'Inactive', 'All']
-                  .map(
-                    (status) => DropdownMenuItem<String>(
-                      value: status,
-                      child: Text(status),
-                    ),
-                  )
-                  .toList(),
-              onChanged: (value) {
-                if (value == null || value == _selectedEmployeeStatus) return;
-                setState(() => _selectedEmployeeStatus = value);
-                _load();
-              },
+            SizedBox(
+              width: 200,
+              child: DropdownButtonFormField<String>(
+                key: ValueKey('employee-status-$_selectedEmployeeStatus'),
+                initialValue: _selectedEmployeeStatus,
+                dropdownColor: AppTheme.dashPanelOf(context),
+                style: AppTheme.dashFieldTextStyle(context),
+                decoration: AppTheme.dashInputDecoration(
+                  context,
+                  labelText: 'Current employee status',
+                  contentPadding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 8,
+                  ),
+                  radius: 8,
+                ),
+                items: const ['Active', 'Inactive', 'All']
+                    .map(
+                      (status) => DropdownMenuItem<String>(
+                        value: status,
+                        child: Text(status),
+                      ),
+                    )
+                    .toList(),
+                onChanged: (value) {
+                  if (value == null || value == _selectedEmployeeStatus) {
+                    return;
+                  }
+                  setState(() {
+                    _selectedEmployeeStatus = value;
+                    _manualEmployeeStatus = value;
+                  });
+                  _load();
+                },
+              ),
             ),
           DropdownButton<int>(
             value: _selectedMonth,
@@ -2248,7 +2370,7 @@ class _DtrReportsState extends State<DtrReports> {
             ),
             const SizedBox(width: 8),
             SizedBox(
-              width: 130,
+              width: 200,
               child: DropdownButtonFormField<String>(
                 key: ValueKey('employee-status-$_selectedEmployeeStatus'),
                 initialValue: _selectedEmployeeStatus,
@@ -2256,6 +2378,7 @@ class _DtrReportsState extends State<DtrReports> {
                 style: AppTheme.dashFieldTextStyle(context),
                 decoration: AppTheme.dashInputDecoration(
                   context,
+                  labelText: 'Current employee status',
                   contentPadding: const EdgeInsets.symmetric(
                     horizontal: 12,
                     vertical: 8,
@@ -2274,7 +2397,10 @@ class _DtrReportsState extends State<DtrReports> {
                   if (value == null || value == _selectedEmployeeStatus) {
                     return;
                   }
-                  setState(() => _selectedEmployeeStatus = value);
+                  setState(() {
+                    _selectedEmployeeStatus = value;
+                    _manualEmployeeStatus = value;
+                  });
                   _load();
                 },
               ),
@@ -2447,7 +2573,10 @@ class _DtrReportsState extends State<DtrReports> {
             ),
           ),
           FilledButton.icon(
-            onPressed: _bulkExportBusy || !_officialActionsEnabled
+            onPressed:
+                _bulkExportBusy ||
+                    !_officialActionsEnabled ||
+                    _hasUnverifiedBulkAttendance
                 ? null
                 : () => _printSelectedDtrs(context),
             icon: _bulkExportBusy
@@ -2468,7 +2597,10 @@ class _DtrReportsState extends State<DtrReports> {
             ),
           ),
           OutlinedButton.icon(
-            onPressed: _bulkExportBusy || !_officialActionsEnabled
+            onPressed:
+                _bulkExportBusy ||
+                    !_officialActionsEnabled ||
+                    _hasUnverifiedBulkAttendance
                 ? null
                 : _exportSelectedDtrs,
             icon: const Icon(Icons.file_download_rounded, size: 18),
@@ -2494,10 +2626,7 @@ class _DtrReportsState extends State<DtrReports> {
     required List<DateTime> sortedDates,
     required String selectedName,
     required int workingDays,
-    required int lateCount,
     required int absentCount,
-    required int tardyCount,
-    required int tardinessPct,
     required int totalLateMinutes,
     required int totalUndertimeMinutes,
     required bool hasRecords,
@@ -2566,10 +2695,7 @@ class _DtrReportsState extends State<DtrReports> {
         _buildSummaryCard(
           selectedName: selectedName,
           workingDays: workingDays,
-          lateCount: lateCount,
           absentCount: absentCount,
-          tardyCount: tardyCount,
-          tardinessPct: tardinessPct,
           totalLateMinutes: totalLateMinutes,
           totalUndertimeMinutes: totalUndertimeMinutes,
           hasRecords: hasRecords,
@@ -3068,13 +3194,17 @@ class _DtrReportsState extends State<DtrReports> {
         : '${hours.toStringAsFixed(2)} hrs';
   }
 
+  String _formatEquivalentDay(double value) {
+    return value
+        .toStringAsFixed(3)
+        .replaceFirst(RegExp(r'0+$'), '')
+        .replaceFirst(RegExp(r'\.$'), '');
+  }
+
   Widget _buildSummaryCard({
     required String selectedName,
     required int workingDays,
-    required int lateCount,
     required int absentCount,
-    required int tardyCount,
-    required int tardinessPct,
     required int totalLateMinutes,
     required int totalUndertimeMinutes,
     bool hasRecords = true,
@@ -3087,6 +3217,21 @@ class _DtrReportsState extends State<DtrReports> {
   }) {
     final dark = AppTheme.dashIsDark(context);
     final compactPanel = dense || !fullWidth;
+    final equivalentDay = _hasUnverifiedInactiveAttendance
+        ? null
+        : DtrExport.calculateOfficialTotals(
+            year: _selectedYear,
+            month: _selectedMonth,
+            start: start,
+            end: end,
+            recordsByDate: recordsByDate,
+            scheduledWorkHoursPerDay: _shiftWorkHoursPerDay,
+            workingDays: _shiftWorkingDays,
+            assignmentEffectiveFrom: _assignmentEffectiveFrom,
+            assignmentEffectiveTo: _assignmentEffectiveTo,
+            assignmentSegments: _exportAssignmentSegments,
+            reportableThrough: _reportableThrough,
+          ).equivalentDay;
     return Container(
       width: fullWidth ? null : 200,
       constraints: fullWidth
@@ -3186,7 +3331,9 @@ class _DtrReportsState extends State<DtrReports> {
                 final stats = [
                   _SummaryStat(
                     label: 'Working Days',
-                    value: '$workingDays',
+                    value: _hasUnverifiedInactiveAttendance
+                        ? '—'
+                        : '$workingDays',
                     compact: compactPanel,
                   ),
                   _SummaryStat(
@@ -3207,15 +3354,10 @@ class _DtrReportsState extends State<DtrReports> {
                   ),
                   _SummaryStat(
                     label: 'Absent',
-                    value: '$absentCount',
+                    value: _hasUnverifiedInactiveAttendance
+                        ? '—'
+                        : '$absentCount',
                     hasBorder: absentCount > 0,
-                    borderColor: Colors.orange,
-                    compact: compactPanel,
-                  ),
-                  _SummaryStat(
-                    label: 'Tardy',
-                    value: '$tardyCount',
-                    hasBorder: tardyCount > 0,
                     borderColor: Colors.orange,
                     compact: compactPanel,
                   ),
@@ -3250,15 +3392,32 @@ class _DtrReportsState extends State<DtrReports> {
             ),
             SizedBox(height: compactPanel ? 10 : 16),
             Text(
-              '$tardinessPct% TARDINESS',
+              'Equivalent Day: ${equivalentDay == null ? 'Unverified' : _formatEquivalentDay(equivalentDay)}',
               style: TextStyle(
-                fontSize: compactPanel ? 13 : 14,
-                fontWeight: FontWeight.w800,
+                fontSize: compactPanel ? 12 : 13,
+                fontWeight: FontWeight.w600,
                 color: AppTheme.dashTextPrimaryOf(context),
               ),
-              textAlign: TextAlign.center,
+              textAlign: TextAlign.start,
             ),
             SizedBox(height: compactPanel ? 12 : 20),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: _officialActionsEnabled
+                    ? () => _previewDtrReport(
+                        context,
+                        selectedName: selectedName,
+                        start: start,
+                        end: end,
+                        recordsByDate: recordsByDate,
+                      )
+                    : null,
+                icon: const Icon(Icons.preview_rounded, size: 18),
+                label: const Text('PREVIEW'),
+              ),
+            ),
+            SizedBox(height: compactPanel ? 8 : 10),
             SizedBox(
               width: double.infinity,
               child: FilledButton.icon(
@@ -3423,10 +3582,7 @@ class _DtrReportsState extends State<DtrReports> {
     required List<DateTime> sortedDates,
     required String selectedName,
     required int workingDays,
-    required int lateCount,
     required int absentCount,
-    required int tardyCount,
-    required int tardinessPct,
     required int totalLateMinutes,
     required int totalUndertimeMinutes,
     required bool hasRecords,
@@ -3459,10 +3615,7 @@ class _DtrReportsState extends State<DtrReports> {
                       child: _buildSummaryCard(
                         selectedName: selectedName,
                         workingDays: workingDays,
-                        lateCount: lateCount,
                         absentCount: absentCount,
-                        tardyCount: tardyCount,
-                        tardinessPct: tardinessPct,
                         totalLateMinutes: totalLateMinutes,
                         totalUndertimeMinutes: totalUndertimeMinutes,
                         hasRecords: hasRecords,
@@ -3480,10 +3633,7 @@ class _DtrReportsState extends State<DtrReports> {
                       child: _buildSummaryCard(
                         selectedName: selectedName,
                         workingDays: workingDays,
-                        lateCount: lateCount,
                         absentCount: absentCount,
-                        tardyCount: tardyCount,
-                        tardinessPct: tardinessPct,
                         totalLateMinutes: totalLateMinutes,
                         totalUndertimeMinutes: totalUndertimeMinutes,
                         hasRecords: hasRecords,
@@ -3749,6 +3899,66 @@ class _ToggleDtrMultiSelectIntent extends Intent {
 
 class _ExitDtrMultiSelectIntent extends Intent {
   const _ExitDtrMultiSelectIntent();
+}
+
+class _DtrPdfPreviewPanel extends StatelessWidget {
+  const _DtrPdfPreviewPanel({required this.bytes, required this.filename});
+
+  final Uint8List bytes;
+  final String filename;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: AppTheme.dashCanvasOf(context),
+      child: SafeArea(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Material(
+              color: AppTheme.dashPanelOf(context),
+              elevation: 1,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(20, 10, 8, 10),
+                child: Row(
+                  children: [
+                    const Icon(Icons.preview_rounded, size: 20),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        'DTR Preview',
+                        style: TextStyle(
+                          color: AppTheme.dashTextPrimaryOf(context),
+                          fontSize: 16,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                    IconButton(
+                      tooltip: 'Close preview',
+                      onPressed: () => Navigator.of(context).pop(),
+                      icon: const Icon(Icons.close_rounded),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            Expanded(
+              child: PdfPreview(
+                build: (_) async => bytes,
+                pdfFileName: filename,
+                allowPrinting: true,
+                allowSharing: true,
+                canChangeOrientation: false,
+                canChangePageFormat: false,
+                canDebug: false,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
 class _SummaryStat extends StatelessWidget {

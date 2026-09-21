@@ -530,6 +530,7 @@ router.post('/push', pushAuth, async (req, res) => {
  * Resolves the authoritative user_id from the current biometric_user_id mapping.
  * Uses ON CONFLICT (biometric_user_id, logged_at) DO NOTHING to skip duplicates.
  * Preserves valid raw rows even when attendance processing is blocked for the day.
+ * Rejects rows outside the employee's known employment period.
  * Admin only.
  */
 router.post('/import', protect, requireAdmin, async (req, res) => {
@@ -542,6 +543,7 @@ router.post('/import', protect, requireAdmin, async (req, res) => {
         duplicates_skipped: 0,
         skipped_unmatched: 0,
         skipped_identity_mismatch: 0,
+        skipped_outside_employment: 0,
         skipped_no_schedule: 0,
         skipped_holiday: 0,
         skipped_leave: 0,
@@ -559,18 +561,23 @@ router.post('/import', protect, requireAdmin, async (req, res) => {
     )];
     const userLookup = uniqueBiometricIds.length > 0
       ? await pool.query(
-        `SELECT id, biometric_user_id FROM users WHERE biometric_user_id = ANY($1::text[])`,
+        `SELECT id, biometric_user_id, is_active, employment_status,
+                date_hired::text AS date_hired,
+                separation_date::text AS separation_date
+           FROM users
+          WHERE biometric_user_id = ANY($1::text[])`,
         [uniqueBiometricIds]
       )
       : { rows: [] };
-    const biometricToUserId = new Map(
-      userLookup.rows.map((row) => [String(row.biometric_user_id).trim(), row.id])
+    const biometricToUser = new Map(
+      userLookup.rows.map((row) => [String(row.biometric_user_id).trim(), row])
     );
 
     let inserted = 0;
     let duplicatesSkipped = 0;
     let skippedUnmatched = 0;
     let skippedIdentityMismatch = 0;
+    let skippedOutsideEmployment = 0;
     let skippedNoSchedule = 0;
     let skippedHoliday = 0;
     let skippedLeave = 0;
@@ -590,11 +597,12 @@ router.post('/import', protect, requireAdmin, async (req, res) => {
         continue;
       }
 
-      const userId = biometricToUserId.get(biometricUserId);
-      if (!userId) {
+      const user = biometricToUser.get(biometricUserId);
+      if (!user) {
         skippedUnmatched++;
         continue;
       }
+      const userId = user.id;
       if (suppliedUserId && suppliedUserId.toLowerCase() !== String(userId).toLowerCase()) {
         skippedIdentityMismatch++;
         continue;
@@ -603,6 +611,15 @@ router.post('/import', protect, requireAdmin, async (req, res) => {
       const manilaDate = getManilaDateStr(loggedAt);
       if (!manilaDate) {
         skippedInvalidTimestamp++;
+        continue;
+      }
+      const employmentStatus = String(user.employment_status || 'active').trim().toLowerCase();
+      const currentlyInactive = user.is_active === false || employmentStatus !== 'active';
+      const beforeHireDate = user.date_hired && manilaDate < String(user.date_hired).slice(0, 10);
+      const afterSeparation = user.separation_date && manilaDate > String(user.separation_date).slice(0, 10);
+      const inactiveWithoutSeparationDate = currentlyInactive && !user.separation_date;
+      if (beforeHireDate || afterSeparation || inactiveWithoutSeparationDate) {
+        skippedOutsideEmployment++;
         continue;
       }
       const hadStoredPunchForDay = await hasStoredBiometricPunchForDay(
@@ -667,6 +684,7 @@ router.post('/import', protect, requireAdmin, async (req, res) => {
       duplicates_skipped: duplicatesSkipped,
       skipped_unmatched: skippedUnmatched,
       skipped_identity_mismatch: skippedIdentityMismatch,
+      skipped_outside_employment: skippedOutsideEmployment,
       skipped_no_schedule: skippedNoSchedule,
       skipped_holiday: skippedHoliday,
       skipped_leave: skippedLeave,

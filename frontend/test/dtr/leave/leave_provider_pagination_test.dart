@@ -31,7 +31,7 @@ void main() {
 
       await provider.loadMyLeaveRequests('employee-a');
 
-      expect(provider.requests.map((request) => request.id), [
+      expect(provider.myRequests.map((request) => request.id), [
         'request-3',
         'request-2',
       ]);
@@ -40,7 +40,7 @@ void main() {
 
       await provider.loadMoreMyLeaveRequests('employee-a');
 
-      expect(provider.requests.map((request) => request.id), [
+      expect(provider.myRequests.map((request) => request.id), [
         'request-3',
         'request-2',
         'request-1',
@@ -71,7 +71,7 @@ void main() {
     await provider.loadMyLeaveRequests('employee-a');
     await provider.loadMoreMyLeaveRequests('employee-a');
 
-    expect(provider.requests.map((request) => request.id), [
+    expect(provider.myRequests.map((request) => request.id), [
       'request-2',
       'request-1',
     ]);

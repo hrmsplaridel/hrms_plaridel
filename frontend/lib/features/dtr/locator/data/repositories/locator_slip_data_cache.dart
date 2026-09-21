@@ -1,6 +1,35 @@
 import 'package:hrms_plaridel/core/api/client.dart';
 import 'package:hrms_plaridel/features/dtr/locator/models/locator_request_type.dart';
 
+class LocatorReviewerAccess {
+  const LocatorReviewerAccess({
+    required this.canReviewPending,
+    required this.hasReviewHistory,
+  });
+
+  const LocatorReviewerAccess.none()
+    : canReviewPending = false,
+      hasReviewHistory = false;
+
+  final bool canReviewPending;
+  final bool hasReviewHistory;
+
+  bool get canAccessReviewSection => canReviewPending || hasReviewHistory;
+
+  factory LocatorReviewerAccess.fromJson(Map<String, dynamic>? data) {
+    final legacyAccess = data?['isDeptHead'] == true;
+    final hasExplicitCapabilities =
+        data?.containsKey('canReviewPending') == true ||
+        data?.containsKey('hasReviewHistory') == true;
+    return LocatorReviewerAccess(
+      canReviewPending: hasExplicitCapabilities
+          ? (data?['canReviewPending'] == true)
+          : legacyAccess,
+      hasReviewHistory: data?['hasReviewHistory'] == true,
+    );
+  }
+}
+
 class LocatorSlipDataCache {
   LocatorSlipDataCache._();
 
@@ -14,7 +43,8 @@ class LocatorSlipDataCache {
   final Map<String, _LocatorCacheEntry<LocatorAdminRequestPage>>
   _adminRequestCache = {};
   final Map<bool, _LocatorCacheEntry<List<LocatorRequestType>>> _typeCache = {};
-  final Map<String, _LocatorCacheEntry<bool>> _departmentHeadCache = {};
+  final Map<String, _LocatorCacheEntry<LocatorReviewerAccess>>
+  _departmentHeadCache = {};
 
   Future<List<LocatorRequestType>> listTypes({
     bool includeInactive = false,
@@ -40,7 +70,7 @@ class LocatorSlipDataCache {
     return items;
   }
 
-  Future<bool> checkIsDepartmentHead({
+  Future<LocatorReviewerAccess> checkDepartmentHeadAccess({
     required String userId,
     String? role,
     bool forceRefresh = false,
@@ -58,8 +88,8 @@ class LocatorSlipDataCache {
     final res = await ApiClient.instance.get<Map<String, dynamic>>(
       '/api/locator-slips/department-head/check',
     );
-    final value = res.data?['isDeptHead'] == true;
-    _departmentHeadCache[cacheKey] = _LocatorCacheEntry<bool>(
+    final value = LocatorReviewerAccess.fromJson(res.data);
+    _departmentHeadCache[cacheKey] = _LocatorCacheEntry<LocatorReviewerAccess>(
       value,
       DateTime.now(),
     );

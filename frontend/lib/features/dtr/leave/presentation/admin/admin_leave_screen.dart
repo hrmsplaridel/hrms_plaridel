@@ -3,12 +3,20 @@ import 'package:hrms_plaridel/features/dtr/leave/presentation/admin/desktop/page
     as desktop;
 
 class AdminLeaveScreen extends StatelessWidget {
-  const AdminLeaveScreen({super.key, this.isDepartmentHead = false});
+  const AdminLeaveScreen({
+    super.key,
+    this.isDepartmentHead = false,
+    this.canReviewPending = true,
+  });
 
   final bool isDepartmentHead;
+  final bool canReviewPending;
 
   @override
   Widget build(BuildContext context) {
-    return desktop.AdminLeaveScreen(isDepartmentHead: isDepartmentHead);
+    return desktop.AdminLeaveScreen(
+      isDepartmentHead: isDepartmentHead,
+      canReviewPending: canReviewPending,
+    );
   }
 }

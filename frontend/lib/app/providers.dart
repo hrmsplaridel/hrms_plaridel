@@ -42,7 +42,13 @@ class AppProviders extends StatelessWidget {
             return dtr;
           },
         ),
-        ChangeNotifierProvider(create: (_) => DocuTrackerProvider()),
+        ChangeNotifierProxyProvider<AuthProvider, DocuTrackerProvider>(
+          create: (_) => DocuTrackerProvider(),
+          update: (_, auth, docuTracker) {
+            docuTracker!.onAuthUserChanged(auth.user?.id);
+            return docuTracker;
+          },
+        ),
         ChangeNotifierProvider(create: (_) => NotificationProvider()),
         ChangeNotifierProxyProvider<AuthProvider, LeaveProvider>(
           create: (context) => LeaveProvider(
