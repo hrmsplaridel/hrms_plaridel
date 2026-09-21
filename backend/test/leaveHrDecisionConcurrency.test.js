@@ -68,6 +68,12 @@ for (const firstAction of ['reject', 'return']) {
               await acquire(client);
               return { rows: [{ ...row, days: row.number_of_days }] };
             }
+            if (statement.includes('FROM positions p')) {
+              return { rows: [{ id: '33333333-3333-4333-8333-333333333333', name: 'Primary' }] };
+            }
+            if (statement.includes('FROM leave_final_reviewer_backups')) {
+              return { rows: [{ id: '44444444-4444-4444-8444-444444444444', name: 'Backup' }] };
+            }
             if (statement.startsWith('UPDATE leave_requests')) {
               assert.equal(lockOwner, client);
               row.status = statement.includes("status = 'returned'")

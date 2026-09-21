@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:provider/provider.dart';
@@ -11,6 +12,7 @@ import 'package:hrms_plaridel/features/dtr/leave/data/repositories/mock_leave_re
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_request.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_type.dart';
 import 'package:hrms_plaridel/features/dtr/leave/presentation/shared/pages/leave_request_form_screen.dart';
+import 'package:hrms_plaridel/core/api/client.dart';
 
 const draft = LeaveRequest(
   id: 'leave-1',
@@ -45,13 +47,19 @@ Future<void> _openForm(
   WidgetTester tester,
   _Repository repository, {
   LeaveRequest initial = draft,
+  bool loadOfficialDate = false,
 }) async {
   await tester.pumpWidget(
     MultiProvider(
       providers: [
         ChangeNotifierProvider(create: (_) => AuthProvider()),
         ChangeNotifierProvider(
-          create: (_) => LeaveProvider(repository: repository),
+          lazy: false,
+          create: (_) {
+            final provider = LeaveProvider(repository: repository);
+            if (loadOfficialDate) unawaited(provider.loadOfficialDate());
+            return provider;
+          },
         ),
         ChangeNotifierProvider<DocuTrackerProvider>(
           create: (_) => _Signatures(),
@@ -70,6 +78,94 @@ Future<void> _openForm(
 }
 
 void main() {
+  testWidgets('missing final reviewer blocks submit before signing or saving', (
+    tester,
+  ) async {
+    final date = DateTime.now().add(const Duration(days: 2));
+    final validDraft = draft.copyWith(
+      startDate: date,
+      endDate: date,
+      workingDaysApplied: 1,
+      sickLeaveNature: SickLeaveNature.outPatient,
+      sickIllnessDetails: 'Fever',
+    );
+    final repository = _Repository()..read = () async => validDraft;
+    ApiClient.instance.init();
+    ApiClient.instance.dio.interceptors.clear();
+    var availabilityChecks = 0;
+    ApiClient.instance.dio.interceptors.add(
+      InterceptorsWrapper(
+        onRequest: (options, handler) {
+          if (options.path == '/api/leave/submission-availability') {
+            availabilityChecks++;
+            handler.resolve(
+              Response<Map<String, dynamic>>(
+                requestOptions: options,
+                statusCode: 200,
+                data: {
+                  'can_submit': false,
+                  'reason': 'No eligible final leave reviewer is configured.',
+                },
+              ),
+            );
+            return;
+          }
+          handler.reject(DioException(requestOptions: options));
+        },
+      ),
+    );
+    await _openForm(
+      tester,
+      repository,
+      initial: validDraft,
+      loadOfficialDate: true,
+    );
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Submit Request'));
+    await tester.tap(find.text('Submit Request'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(
+      availabilityChecks,
+      1,
+      reason: find
+          .byType(Text)
+          .evaluate()
+          .map((element) => (element.widget as Text).data)
+          .whereType<String>()
+          .join(' | '),
+    );
+    expect(
+      find.textContaining('No eligible final leave reviewer'),
+      findsOneWidget,
+    );
+    expect(find.text('Submit Request'), findsOneWidget);
+  });
+
+  testWidgets('failed write message survives the saved-status refresh', (
+    tester,
+  ) async {
+    final repository = _Repository();
+    await _openForm(tester, repository);
+    await tester.pumpAndSettle();
+    final finalStatus = Completer<LeaveRequest?>();
+    var checks = 0;
+    repository.read = () {
+      checks++;
+      return checks == 2 ? finalStatus.future : Future.value(draft);
+    };
+    await tester.ensureVisible(find.text('Save Draft'));
+    await tester.tap(find.text('Save Draft'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(checks, 2);
+    expect(find.byType(CircularProgressIndicator), findsOneWidget);
+    expect(find.textContaining('Error:'), findsOneWidget);
+    finalStatus.complete(draft);
+    await tester.pump();
+    expect(find.text('Save Draft'), findsOneWidget);
+  });
+
   testWidgets('draft submission can validate after a delayed status check', (
     tester,
   ) async {
@@ -83,9 +179,9 @@ void main() {
     await tester.pump();
     response.complete(draft);
     await tester.pumpAndSettle();
-      expect(tester.takeException(), isNull);
-      expect(find.text('Submit Request'), findsOneWidget);
-      expect(find.text('Required'), findsWidgets);
+    expect(tester.takeException(), isNull);
+    expect(find.text('Submit Request'), findsOneWidget);
+    expect(find.text('Required'), findsWidgets);
   });
 
   testWidgets(

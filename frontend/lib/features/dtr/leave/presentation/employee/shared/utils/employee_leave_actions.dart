@@ -271,4 +271,50 @@ class EmployeeLeaveActions {
     );
     await provider.loadMyLeaveData(userId);
   }
+
+  Future<void> discardDraft(LeaveRequest request) async {
+    final userId = context.read<AuthProvider>().user?.id;
+    final requestId = request.id;
+    if (userId == null ||
+        requestId == null ||
+        request.status != LeaveRequestStatus.draft) {
+      return;
+    }
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Discard draft?'),
+        content: const Text('This draft will be removed from My Requests.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Keep draft'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('Discard'),
+          ),
+        ],
+      ),
+    );
+    if (!context.mounted || !isMounted() || confirmed != true) return;
+    final provider = context.read<LeaveProvider>();
+    final discarded = await provider.discardDraft(
+      requestId: requestId,
+      userId: userId,
+    );
+    if (!context.mounted || !isMounted()) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          discarded
+              ? 'Draft discarded.'
+              : (provider.error ?? 'Could not discard draft.'),
+        ),
+      ),
+    );
+    if (discarded) {
+      await provider.loadMyLeaveRequests(userId, forceRefresh: true);
+    }
+  }
 }

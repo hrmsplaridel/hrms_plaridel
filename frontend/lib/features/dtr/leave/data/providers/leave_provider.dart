@@ -1206,6 +1206,29 @@ class LeaveProvider extends ChangeNotifier {
     }
   }
 
+  Future<bool> discardDraft({
+    required String requestId,
+    required String userId,
+  }) async {
+    final authGeneration = _authGeneration;
+    _error = null;
+    try {
+      await _repository.discardDraft(requestId: requestId, userId: userId);
+      if (!_isCurrentAuthGeneration(authGeneration)) return false;
+      _myRequests.removeWhere((request) => request.id == requestId);
+      if (_selectedRequest?.id == requestId) _selectedRequest = null;
+      if (_myRequestsTotal > 0) _myRequestsTotal--;
+      _notifyMutation();
+      notifyListeners();
+      return true;
+    } catch (e) {
+      if (!_isCurrentAuthGeneration(authGeneration)) return false;
+      _error = e.toString().replaceFirst(RegExp(r'^Exception:\s*'), '');
+      notifyListeners();
+      return false;
+    }
+  }
+
   Future<LeaveRequest?> approveRequest(LeaveApprovalInput input) async {
     final authGeneration = _authGeneration;
     _reviewing = true;

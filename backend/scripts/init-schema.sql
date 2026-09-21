@@ -167,6 +167,7 @@ CREATE TABLE IF NOT EXISTS positions (
   description TEXT,
   department_id UUID REFERENCES departments(id) ON DELETE SET NULL,
   is_department_head BOOLEAN NOT NULL DEFAULT false,
+  is_leave_final_reviewer BOOLEAN NOT NULL DEFAULT false,
   is_active BOOLEAN NOT NULL DEFAULT true,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -181,6 +182,10 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_positions_name_department_ci
     LOWER(BTRIM(name)),
     (COALESCE(department_id, '00000000-0000-0000-0000-000000000000'::uuid))
   );
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_active_leave_final_reviewer_position
+  ON positions (is_leave_final_reviewer)
+  WHERE is_leave_final_reviewer = true AND is_active = true;
 
 -- Effective-dated official Department Head designations. Position rows retain
 -- is_department_head as a compatibility indicator; authority is resolved here.
@@ -400,6 +405,40 @@ CREATE INDEX IF NOT EXISTS idx_department_reviewer_backups_effective
   ON department_reviewer_backups
     (department_id, effective_from, effective_to, backup_rank)
   WHERE is_active = true;
+
+CREATE TABLE IF NOT EXISTS leave_final_reviewer_backups (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  employee_id UUID NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+  backup_rank INTEGER NOT NULL CHECK (backup_rank > 0),
+  effective_from DATE NOT NULL,
+  effective_to DATE,
+  is_active BOOLEAN NOT NULL DEFAULT true,
+  created_by UUID REFERENCES users(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT chk_leave_final_reviewer_backup_dates
+    CHECK (effective_to IS NULL OR effective_to >= effective_from)
+);
+
+ALTER TABLE positions
+  ADD COLUMN IF NOT EXISTS is_leave_final_reviewer BOOLEAN NOT NULL DEFAULT false;
+
+ALTER TABLE leave_final_reviewer_backups
+  DROP CONSTRAINT IF EXISTS leave_final_reviewer_backup_employee_no_overlap;
+ALTER TABLE leave_final_reviewer_backups
+  ADD CONSTRAINT leave_final_reviewer_backup_employee_no_overlap
+  EXCLUDE USING gist (
+    employee_id WITH =,
+    daterange(effective_from, effective_to, '[]') WITH &&
+  ) WHERE (is_active = true);
+ALTER TABLE leave_final_reviewer_backups
+  DROP CONSTRAINT IF EXISTS leave_final_reviewer_backup_rank_no_overlap;
+ALTER TABLE leave_final_reviewer_backups
+  ADD CONSTRAINT leave_final_reviewer_backup_rank_no_overlap
+  EXCLUDE USING gist (
+    backup_rank WITH =,
+    daterange(effective_from, effective_to, '[]') WITH &&
+  ) WHERE (is_active = true);
 
 -- =========================================
 -- EMPLOYEE OTHER POSITIONS / DESIGNATIONS
@@ -712,6 +751,8 @@ CREATE TABLE IF NOT EXISTS leave_requests (
       'rejected',                      -- legacy single-stage rejection
       'cancelled'                      -- employee cancelled
     )),
+
+  discarded_at TIMESTAMPTZ,
 
   reviewer_id UUID REFERENCES users(id) ON DELETE SET NULL,
   reviewer_remarks TEXT,

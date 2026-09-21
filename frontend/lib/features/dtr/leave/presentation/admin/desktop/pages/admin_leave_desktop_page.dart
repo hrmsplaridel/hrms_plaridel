@@ -84,6 +84,20 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
   Future<void>? _requestLoadInFlight;
   bool _requestReloadQueued = false;
   bool _queuedForceRefresh = false;
+  bool _canReviewFinal = false;
+
+  Future<void> _loadFinalReviewerEligibility() async {
+    if (widget.isDepartmentHead) return;
+    try {
+      final response = await ApiClient.instance.get<Map<String, dynamic>>(
+        '/api/leave/final-reviewer/me',
+      );
+      if (!mounted) return;
+      setState(() => _canReviewFinal = response.data?['can_review'] == true);
+    } catch (_) {
+      if (mounted) setState(() => _canReviewFinal = false);
+    }
+  }
 
   Future<({String name, String? title})> _loadReviewerSignatureInfo(
     AuthProvider auth,
@@ -160,6 +174,7 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
         _startAutoRefresh();
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (mounted && _isScreenActive) {
+            unawaited(_loadFinalReviewerEligibility());
             unawaited(_safeAutoRefresh(forceRefresh: true));
           }
         });
@@ -171,6 +186,9 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
     }
     _initialized = true;
     _isScreenActive = isScreenActive;
+    WidgetsBinding.instance.addPostFrameCallback(
+      (_) => _loadFinalReviewerEligibility(),
+    );
     if (_isScreenActive) {
       WidgetsBinding.instance.addPostFrameCallback((_) => _loadRequests());
     }
@@ -778,7 +796,9 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
         builder: (ctx) => AdminLeaveDetailsSideSheet(
           initial: request,
           isDepartmentHead: widget.isDepartmentHead,
-          canReviewPending: widget.canReviewPending,
+          currentReviewerId: context.read<AuthProvider>().user?.id,
+          canReviewPending: widget.canReviewPending &&
+              (widget.isDepartmentHead || _canReviewFinal),
           onApprove: widget.isDepartmentHead ? _deptHeadApprove : _approve,
           onReturn: widget.isDepartmentHead ? _deptHeadReturn : _returnRequest,
           onReject: widget.isDepartmentHead ? _deptHeadReject : _rejectRequest,

@@ -1,4 +1,5 @@
 import 'package:file_picker/file_picker.dart';
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -729,11 +730,34 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
         return;
       }
 
+      if (!await _checkSubmissionAvailability()) return;
       if (!await _ensureApplicantSignature()) return;
       await _submit(isDraft: false);
     } finally {
       if (mounted) setState(() => _submitFlowInFlight = false);
     }
+  }
+
+  Future<bool> _checkSubmissionAvailability() async {
+    try {
+      final response = await ApiClient.instance.get<Map<String, dynamic>>(
+        '/api/leave/submission-availability',
+      );
+      if (!mounted) return false;
+      if (response.data?['can_submit'] == true) return true;
+      _showMessage(
+        response.data?['reason']?.toString() ??
+            'No eligible final leave reviewer is available. Contact HR before submitting.',
+      );
+    } on DioException catch (error) {
+      final data = error.response?.data;
+      _showMessage(
+        data is Map && data['error'] != null
+            ? data['error'].toString()
+            : 'Could not check reviewer availability. Please try again.',
+      );
+    }
+    return false;
   }
 
   double? get _currentWorkingDaysApplied =>
@@ -1425,49 +1449,55 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
 
     if (_checkingStatus &&
         ((_savedRequest ?? widget.initialRequest)?.id ?? '').isNotEmpty) {
-      return Scaffold(
-        backgroundColor: AppTheme.dashCanvasOf(context),
-        appBar: AppBar(title: const Text('Leave Request')),
-        body: const Center(child: CircularProgressIndicator()),
+      return ScaffoldMessenger(
+        key: _messengerKey,
+        child: Scaffold(
+          backgroundColor: AppTheme.dashCanvasOf(context),
+          appBar: AppBar(title: const Text('Leave Request')),
+          body: const Center(child: CircularProgressIndicator()),
+        ),
       );
     }
 
     if (_statusError != null || (!_checkingStatus && !_canEditRequest)) {
       final status = (_savedRequest ?? widget.initialRequest)?.status;
-      return Scaffold(
-        backgroundColor: AppTheme.dashCanvasOf(context),
-        appBar: AppBar(title: const Text('Leave Request')),
-        body: SingleChildScrollView(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              if (_statusError != null) ...[
-                Text(_statusError!),
-                TextButton(
-                  onPressed: _refreshSavedStatus,
-                  child: const Text('Retry'),
-                ),
-              ] else ...[
-                Text(
-                  _submissionCompleted
-                      ? 'Request submitted'
-                      : 'Status: ${status?.displayName}',
-                  style: Theme.of(context).textTheme.titleLarge,
-                ),
-                const SizedBox(height: 12),
-                Text(
-                  status?.isPending == true || _submissionCompleted
-                      ? 'This request has already been submitted. You can track its progress in the leave list.'
-                      : 'This request cannot be edited in its current status.',
-                ),
-                const SizedBox(height: 24),
-                FilledButton(
-                  onPressed: () => Navigator.of(context).pop(),
-                  child: const Text('Close'),
-                ),
+      return ScaffoldMessenger(
+        key: _messengerKey,
+        child: Scaffold(
+          backgroundColor: AppTheme.dashCanvasOf(context),
+          appBar: AppBar(title: const Text('Leave Request')),
+          body: SingleChildScrollView(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                if (_statusError != null) ...[
+                  Text(_statusError!),
+                  TextButton(
+                    onPressed: _refreshSavedStatus,
+                    child: const Text('Retry'),
+                  ),
+                ] else ...[
+                  Text(
+                    _submissionCompleted
+                        ? 'Request submitted'
+                        : 'Status: ${status?.displayName}',
+                    style: Theme.of(context).textTheme.titleLarge,
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    status?.isPending == true || _submissionCompleted
+                        ? 'This request has already been submitted. You can track its progress in the leave list.'
+                        : 'This request cannot be edited in its current status.',
+                  ),
+                  const SizedBox(height: 24),
+                  FilledButton(
+                    onPressed: () => Navigator.of(context).pop(),
+                    child: const Text('Close'),
+                  ),
+                ],
               ],
-            ],
+            ),
           ),
         ),
       );

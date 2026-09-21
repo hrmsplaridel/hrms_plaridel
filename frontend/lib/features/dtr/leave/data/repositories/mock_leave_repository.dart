@@ -424,6 +424,19 @@ class MockLeaveRepository implements LeaveRepository {
   }
 
   @override
+  Future<void> discardDraft({
+    required String requestId,
+    required String userId,
+  }) async {
+    final request = _requireRequest(requestId);
+    if (request.userId != userId ||
+        request.status != LeaveRequestStatus.draft) {
+      throw Exception('Only your unsubmitted drafts can be discarded.');
+    }
+    _requests.removeWhere((item) => item.id == requestId);
+  }
+
+  @override
   Future<LeaveRequest> attachFile({
     required String requestId,
     required List<int> fileBytes,

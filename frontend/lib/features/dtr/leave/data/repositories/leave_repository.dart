@@ -824,6 +824,12 @@ abstract class LeaveRepository {
     String? reason,
   });
 
+  /// Remove an unsubmitted draft from the employee's request list.
+  Future<void> discardDraft({
+    required String requestId,
+    required String userId,
+  });
+
   /// Optional hook for uploading a supporting attachment.
   ///
   /// Kept backend-neutral by accepting raw bytes and a filename.

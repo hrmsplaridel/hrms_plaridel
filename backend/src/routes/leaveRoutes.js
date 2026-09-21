@@ -103,6 +103,7 @@ const {
   resolveOfficialSignatory,
 } = require('../services/officialSignatoryService');
 const { todayInHrmsTimezone } = require('../utils/dateRangeParser');
+const { assertFinalLeaveReviewer, assertLeaveSubmissionReviewer, resolveFinalLeaveReviewers } = require('../services/leaveFinalReviewerService');
 
 const router = express.Router();
 
@@ -152,6 +153,31 @@ function broadcastDtrLeaveRefresh(action, { userId, leaveRequestId, dateFrom, da
   }
 }
 const protect = [authMiddleware];
+
+router.get('/final-reviewer/me', protect, requireAdminOrHr, async (req, res) => {
+  try {
+    const reviewers = await resolveFinalLeaveReviewers(pool);
+    return res.json({
+      can_review: reviewers.some((reviewer) => String(reviewer.id) === String(req.user.id)),
+    });
+  } catch (err) {
+    console.error('[leave GET final-reviewer/me]', err);
+    return res.status(500).json({ error: 'Failed to check final leave reviewer assignment' });
+  }
+});
+
+router.get('/submission-availability', protect, async (req, res) => {
+  try {
+    await assertLeaveSubmissionReviewer(pool, req.user.id);
+    return res.json({ can_submit: true });
+  } catch (err) {
+    if (err.statusCode === 409) {
+      return res.json({ can_submit: false, reason: err.message });
+    }
+    console.error('[leave GET submission-availability]', err);
+    return res.status(500).json({ error: 'Failed to check leave reviewer availability' });
+  }
+});
 
 async function findAssignmentProfileByUserIdAtDate(db, userId, effectiveDate = null) {
   if (!userId) return null;
@@ -2113,6 +2139,7 @@ router.post('/submit', protect, async (req, res) => {
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
+      await assertLeaveSubmissionReviewer(client, userId);
       const workingDayResult = await computeEmployeeLeaveWorkingDays(client, userId, startStr, endStr);
       const leaveTypeId = await ensureLeaveTypeIdByName(client, leave_type);
       if (!leaveTypeId) {
@@ -2352,6 +2379,7 @@ router.post('/submit-with-attachment', protect, uploadLeaveAttachmentMemoryMw, a
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
+      await assertLeaveSubmissionReviewer(client, userId);
       const workingDayResult = await computeEmployeeLeaveWorkingDays(client, userId, startStr, endStr);
       const leaveTypeId = await ensureLeaveTypeIdByName(client, leave_type);
       if (!leaveTypeId) {
@@ -2591,7 +2619,8 @@ router.put('/:id', protect, async (req, res) => {
     const existing = await pool.query(
       `SELECT id, status, employee_official_snapshot
        FROM leave_requests
-       WHERE id = $1 AND (user_id = $2 OR employee_id = $2)`,
+       WHERE id = $1 AND (user_id = $2 OR employee_id = $2)
+         AND discarded_at IS NULL`,
       [id, userId]
     );
     if (existing.rows.length === 0) return res.status(404).json({ error: 'Leave request not found' });
@@ -2635,6 +2664,7 @@ router.put('/:id', protect, async (req, res) => {
           error: 'Leave type, start date, and end date are required before submission.',
         });
       }
+      if (submitting) await assertLeaveSubmissionReviewer(client, userId);
       const leaveTypeId = await ensureLeaveTypeIdByName(client, leave_type);
       // FIX #1: isNotEmpty is Dart/Swift, not JS. Use .length > 0 instead.
       if (leave_type != null && String(leave_type).trim().length > 0 && !leaveTypeId) {
@@ -2882,6 +2912,54 @@ router.put('/:id', protect, async (req, res) => {
   }
 });
 
+// PATCH /api/leave/:id/discard - hide an unsubmitted draft while retaining its audit trail.
+router.patch('/:id/discard', protect, async (req, res) => {
+  const userId = req.user?.id;
+  if (!userId) return res.status(401).json({ error: 'Not authenticated' });
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const current = await client.query(
+      `SELECT id, status, discarded_at
+         FROM leave_requests
+        WHERE id = $1::uuid AND (user_id = $2::uuid OR employee_id = $2::uuid)
+        FOR UPDATE`,
+      [req.params.id, userId]
+    );
+    if (!current.rows.length || current.rows[0].discarded_at) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Draft not found' });
+    }
+    if (current.rows[0].status !== 'draft') {
+      await client.query('ROLLBACK');
+      return res.status(409).json({ error: 'Only unsubmitted drafts can be discarded' });
+    }
+    await client.query(
+      'UPDATE leave_requests SET discarded_at = now(), updated_at = now() WHERE id = $1::uuid',
+      [req.params.id]
+    );
+    await insertLeaveRequestHistory(client, {
+      leaveRequestId: req.params.id,
+      action: 'discarded_draft',
+      fromStatus: 'draft',
+      toStatus: 'draft',
+      actedBy: userId,
+      remarks: null,
+      metadataJson: null,
+    });
+    await client.query('COMMIT');
+    broadcastLeaveUpdated('discarded_draft', { id: req.params.id, user_id: userId });
+    return res.json({ discarded: true });
+  } catch (err) {
+    try { await client.query('ROLLBACK'); } catch (_) {}
+    if (err.code === '22P02') return res.status(400).json({ error: 'Invalid draft ID' });
+    console.error('[leave PATCH /:id/discard]', err);
+    return res.status(500).json({ error: 'Failed to discard draft' });
+  } finally {
+    client.release();
+  }
+});
+
 // PATCH /api/leave/:id/cancel
 router.patch('/:id/cancel', protect, async (req, res) => {
   const userId = req.user?.id;
@@ -2895,7 +2973,8 @@ router.patch('/:id/cancel', protect, async (req, res) => {
     const q = await client.query(
       `SELECT id, status, reserved_credit_days
        FROM leave_requests
-       WHERE id = $1 AND (user_id = $2 OR employee_id = $2)`,
+       WHERE id = $1 AND (user_id = $2 OR employee_id = $2)
+         AND discarded_at IS NULL`,
       [id, userId]
     );
     if (q.rows.length === 0) {
@@ -3047,6 +3126,7 @@ router.get('/my', protect, async (req, res) => {
          LIMIT 1
        ) dhh ON true
        WHERE (lr.user_id = $1 OR lr.employee_id = $1)
+         AND lr.discarded_at IS NULL
          AND ($2::text IS NULL OR lr.status = $2)
        ORDER BY lr.updated_at DESC NULLS LAST, lr.created_at DESC, lr.id DESC
        LIMIT $3 OFFSET $4`,
@@ -3060,6 +3140,7 @@ router.get('/my', protect, async (req, res) => {
         `SELECT COUNT(*)::int AS total
          FROM leave_requests lr
          WHERE (lr.user_id = $1 OR lr.employee_id = $1)
+           AND lr.discarded_at IS NULL
            AND ($2::text IS NULL OR lr.status = $2)`,
         [userId, status]
       );
@@ -4225,6 +4306,7 @@ router.patch('/:id/approve', protect, requireAdminOrHr, async (req, res) => {
         currentStatus: r.status,
         desiredStatus: 'approved',
       });
+      await assertFinalLeaveReviewer(client, targetUserId, reviewerId);
       await requireHrApprovalSignature(client, id, reviewerId);
       const approvingAuthority = await resolveActiveMayor(
         client,
@@ -4403,6 +4485,8 @@ router.patch('/:id/reject', protect, requireAdminOrHr, async (req, res) => {
       return res.status(404).json({ error: 'Leave request not found' });
     }
     const currentRow = current.rows[0];
+
+    await assertFinalLeaveReviewer(client, currentRow.user_id || currentRow.employee_id, reviewerId);
 
     const { nextStatus: rejectNextStatus, historyAction } = validateAdminTransition({
       currentStatus: currentRow.status,
@@ -4717,6 +4801,7 @@ router.patch('/:id/return', protect, requireAdminOrHr, async (req, res) => {
       await client.query('ROLLBACK');
       return res.status(400).json({ error: `Cannot return request with status '${currentRow.status}'` });
     }
+    await assertFinalLeaveReviewer(client, currentRow.user_id || currentRow.employee_id, reviewerId);
     const historyAction = 'returned';
 
     await client.query(
@@ -5529,6 +5614,7 @@ router.get('/:id', protect, async (req, res) => {
          LIMIT 1
        ) dhh ON true
        WHERE lr.id = $1
+         AND lr.discarded_at IS NULL
          AND (
            $2::boolean = true
            OR (lr.user_id = $3 OR lr.employee_id = $3)

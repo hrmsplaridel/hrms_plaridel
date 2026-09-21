@@ -24,6 +24,7 @@ class AdminLeaveDetailsSideSheet extends StatelessWidget {
     required this.initial,
     required this.isDepartmentHead,
     this.canReviewPending = true,
+    this.currentReviewerId,
     required this.onApprove,
     required this.onReturn,
     required this.onReject,
@@ -35,6 +36,7 @@ class AdminLeaveDetailsSideSheet extends StatelessWidget {
   final LeaveRequest initial;
   final bool isDepartmentHead;
   final bool canReviewPending;
+  final String? currentReviewerId;
   final Future<void> Function(LeaveRequest) onApprove;
   final Future<void> Function(LeaveRequest) onReturn;
   final Future<void> Function(LeaveRequest) onReject;
@@ -91,10 +93,12 @@ class AdminLeaveDetailsSideSheet extends StatelessWidget {
                           .toList();
                   if (hit.isNotEmpty) req = hit.first;
                 }
-                final canReview = isDepartmentHead
+                final isOwnRequest = currentReviewerId != null &&
+                    currentReviewerId == req.userId;
+                final canReview = !isOwnRequest && (isDepartmentHead
                     ? canReviewPending &&
                           req.status == LeaveRequestStatus.pendingDepartmentHead
-                    : req.status.isPending;
+                    : canReviewPending && req.status.isPending);
                 final approved = req.status == LeaveRequestStatus.approved;
                 final revokeDisabledReason = approved && onRevoke != null
                     ? adminLeaveRevokeDisabledReason(req)
