@@ -20,3 +20,11 @@
 1. On the backend, call `insertNotification` / `insertNotificationForUsers` from `notificationService.js`.
 2. Use a distinct `category` and `type` (not `docutracker`).
 3. Extend `NotificationTapResult` and dashboard `_applyNotificationTapResult` for deep links.
+
+## Form e-sign (RSP / L&D source signatures)
+
+- **Category:** `form_signature` (not `docutracker`)
+- **Type:** `source_signature_assigned`
+- **Created when:** an RSP/L&D form auto-assigns or an admin assigns a signer
+- **Tap target:** DocuTracker Documents → opens the matching Required action sign dialog when metadata includes `source_table` + `reference_id`
+- **Live badge:** `DocuTrackerProvider.pendingSourceSignatureActionCount` on the DocuTracker sidebar / mobile Menu drawer

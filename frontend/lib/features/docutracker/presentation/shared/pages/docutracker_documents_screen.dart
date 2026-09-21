@@ -55,10 +55,18 @@ class DocuTrackerDocumentsScreen extends StatefulWidget {
     super.key,
     this.isAdmin = false,
     this.showHeader = true,
+    this.openSourceModule,
+    this.openSourceTable,
+    this.openSourceRecordId,
+    this.onSourceDeepLinkConsumed,
   });
 
   final bool isAdmin;
   final bool showHeader;
+  final String? openSourceModule;
+  final String? openSourceTable;
+  final String? openSourceRecordId;
+  final VoidCallback? onSourceDeepLinkConsumed;
 
   @override
   State<DocuTrackerDocumentsScreen> createState() =>
@@ -74,11 +82,29 @@ class _DocuTrackerDocumentsScreenState
   bool _showMobileFilters = false;
   bool? _canCreateDocuments;
   List<DocumentType> _creatableDocumentTypes = const [];
+  bool _deepLinkHandled = false;
+  bool _deepLinkOpening = false;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) => _load());
+  }
+
+  @override
+  void didUpdateWidget(covariant DocuTrackerDocumentsScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final deepLinkChanged =
+        widget.openSourceRecordId != oldWidget.openSourceRecordId ||
+        widget.openSourceTable != oldWidget.openSourceTable ||
+        widget.openSourceModule != oldWidget.openSourceModule;
+    if (deepLinkChanged &&
+        (widget.openSourceRecordId?.trim().isNotEmpty ?? false)) {
+      _deepLinkHandled = false;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _tryOpenSourceDeepLink();
+      });
+    }
   }
 
   Future<void> _load() async {
@@ -101,6 +127,51 @@ class _DocuTrackerDocumentsScreenState
       _creatableDocumentTypes = creatableTypes;
       _canCreateDocuments = creatableTypes.isNotEmpty;
     });
+    await _tryOpenSourceDeepLink();
+  }
+
+  Future<void> _tryOpenSourceDeepLink() async {
+    final table = widget.openSourceTable?.trim() ?? '';
+    final recordId = widget.openSourceRecordId?.trim() ?? '';
+    if (_deepLinkHandled ||
+        _deepLinkOpening ||
+        table.isEmpty ||
+        recordId.isEmpty) {
+      return;
+    }
+    _deepLinkOpening = true;
+    try {
+      final provider = context.read<DocuTrackerProvider>();
+      if (provider.sourceSignatureRequests.isEmpty) {
+        await provider.loadSourceSignatureRequests();
+      }
+      if (!mounted) return;
+      final module = widget.openSourceModule?.trim().toLowerCase();
+      DocuTrackerRspSignatureRequest? match;
+      for (final request in provider.sourceSignatureRequests) {
+        final moduleMatches =
+            module == null ||
+            module.isEmpty ||
+            request.sourceModule.toLowerCase() == module;
+        if (moduleMatches &&
+            request.sourceTable == table &&
+            request.sourceRecordId == recordId) {
+          match = request;
+          break;
+        }
+      }
+      _deepLinkHandled = true;
+      widget.onSourceDeepLinkConsumed?.call();
+      if (match == null || !mounted) return;
+      await showDocuTrackerSourceSignatureRequestDialog(
+        context,
+        request: match,
+      );
+      if (!mounted) return;
+      await provider.loadSourceSignatureRequests();
+    } finally {
+      _deepLinkOpening = false;
+    }
   }
 
   @override
@@ -118,11 +189,11 @@ class _DocuTrackerDocumentsScreenState
       userId: userId,
     );
     final pendingSourceRequests = provider.sourceSignatureRequests
-        .where(
-          (request) =>
-              request.hasUnsignedAssignedSlot ||
-              (widget.isAdmin && request.requiresSetup),
-        )
+        .where((request) {
+          if (request.isAssignedToViewer) return true;
+          if (!widget.isAdmin) return false;
+          return request.requiresSetup || request.hasPendingAssignedSignature;
+        })
         .toList(growable: false);
 
     return Column(
@@ -203,22 +274,60 @@ class _DocuTrackerDocumentsScreenState
     onCreated: _load,
   );
 
+  List<DocumentType> _availableFilterTypes(DocuTrackerProvider provider) {
+    final byKey = <String, DocumentType>{};
+    void add(DocumentType type) {
+      final key = type.value.toLowerCase().replaceAll(RegExp(r'[\s_-]'), '');
+      byKey.putIfAbsent(key, () => type);
+    }
+
+    for (final type in DocumentType.values) {
+      add(type);
+    }
+    for (final type in _creatableDocumentTypes) {
+      add(type);
+    }
+    for (final config in provider.routingConfigs) {
+      add(config.documentType);
+    }
+    for (final doc in provider.documents) {
+      final raw = doc.documentType.trim();
+      if (raw.isNotEmpty) add(DocumentType.fromValue(raw));
+    }
+    // Source-backed modules always appear in the documents table.
+    add(DocumentType.fromValue('dtr'));
+    add(DocumentType.fromValue('ld'));
+
+    final types = byKey.values.toList(growable: false)
+      ..sort(
+        (a, b) =>
+            a.displayName.toLowerCase().compareTo(b.displayName.toLowerCase()),
+      );
+    return types;
+  }
+
   Widget _buildDocumentToolbar(
     DocuTrackerProvider provider,
     AuthProvider auth,
   ) {
+    final filterTypes = _availableFilterTypes(provider);
+    final filterTypeValues = filterTypes.map((type) => type.value).toSet();
+    final selectedFilterType =
+        _filterType != null && filterTypeValues.contains(_filterType)
+        ? _filterType
+        : null;
     final filterControls = <Widget>[
       _warmDropdown(
         context,
         DropdownButton<String?>(
-          value: _filterType,
+          value: selectedFilterType,
           hint: const Text('Type'),
           underline: const SizedBox.shrink(),
           isDense: true,
           isExpanded: true,
           items: [
             const DropdownMenuItem(value: null, child: Text('All types')),
-            ...DocumentType.values.map(
+            ...filterTypes.map(
               (type) => DropdownMenuItem(
                 value: type.value,
                 child: Text(type.displayName),
@@ -581,11 +690,73 @@ class _RequiredActionsPanelState extends State<_RequiredActionsPanel> {
         ? 'DTR · Leave'
         : 'DocuTracker';
     final title = request?.title ?? document?.title ?? 'Required action';
+    final needsSetup = request?.requiresSetup == true;
+    final canSignNow = request?.hasUnsignedAssignedSlot == true;
+    final alreadySigned =
+        request != null &&
+        !needsSetup &&
+        !canSignNow &&
+        request.viewerHasCompletedAssignedSlots;
+    final awaitingOthers =
+        request != null &&
+        !needsSetup &&
+        !canSignNow &&
+        !alreadySigned &&
+        request.hasPendingAssignedSignature;
+    final documentActionPending =
+        document != null &&
+        request == null &&
+        (document.sourceAction ?? '').trim().isNotEmpty;
+    final documentAlreadyHandled =
+        document != null &&
+        request == null &&
+        !documentActionPending &&
+        (document.viewerParticipatedInSource ||
+            document.viewerIsRoutingAssignee ||
+            document.signatureSignerIds.isNotEmpty);
+    final unassignedCount = request == null
+        ? 0
+        : request.signatureBundle.signatures
+              .where((signature) => signature.assignedSignerId.trim().isEmpty)
+              .length;
     final actionLabel = request != null
-        ? request.requiresSetup
+        ? needsSetup
               ? 'Assign required signers'
+              : canSignNow
+              ? 'Review and sign'
+              : alreadySigned
+              ? 'View signed form'
+              : awaitingOthers
+              ? 'View signature status'
               : 'Review and sign'
+        : documentAlreadyHandled
+        ? 'View completed form'
         : document?.sourceActionLabel ?? 'Review document';
+    final statusHint = request == null
+        ? (documentAlreadyHandled
+              ? 'You already acted on this — reopen to review'
+              : null)
+        : needsSetup
+        ? unassignedCount > 0
+              ? '$unassignedCount signer${unassignedCount == 1 ? '' : 's'} still unassigned'
+              : 'Assign required signers before this form can be completed'
+        : canSignNow
+        ? 'Awaiting your e-signature'
+        : alreadySigned
+        ? 'You already signed — reopen to review'
+        : awaitingOthers
+        ? 'Assigned signer has not signed yet'
+        : 'Awaiting your e-signature';
+    final chipLabel = needsSetup
+        ? 'Needs setup'
+        : canSignNow || documentActionPending
+        ? 'Sign'
+        : alreadySigned || documentAlreadyHandled
+        ? 'Signed'
+        : awaitingOthers
+        ? 'Pending'
+        : 'Sign';
+    final showChip = request != null || documentAlreadyHandled || documentActionPending;
 
     return InkWell(
       borderRadius: BorderRadius.circular(12),
@@ -603,33 +774,79 @@ class _RequiredActionsPanelState extends State<_RequiredActionsPanel> {
       child: Container(
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
-          border: Border.all(color: DocuTrackerTokens.borderSubtleOf(context)),
+          border: Border.all(
+            color: needsSetup
+                ? const Color(0xFFF59E0B).withValues(alpha: 0.55)
+                : DocuTrackerTokens.borderSubtleOf(context),
+          ),
           borderRadius: BorderRadius.circular(12),
+          color: needsSetup
+              ? const Color(0xFFFFFBEB).withValues(alpha: 0.65)
+              : null,
         ),
         child: Row(
           children: [
             Icon(
               request != null
-                  ? Icons.draw_outlined
+                  ? (needsSetup
+                        ? Icons.person_add_alt_1_rounded
+                        : Icons.draw_outlined)
                   : isDtr
                   ? Icons.event_note_rounded
                   : Icons.description_outlined,
-              color: DocuTrackerTokens.brand,
+              color: needsSetup
+                  ? const Color(0xFFB45309)
+                  : DocuTrackerTokens.brand,
             ),
             const SizedBox(width: 10),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    sourceLabel,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      color: DocuTrackerTokens.textMuted,
-                      fontSize: 11,
-                      fontWeight: FontWeight.w700,
-                    ),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          sourceLabel,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: DocuTrackerTokens.textMuted,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                      if (showChip) ...[
+                        const SizedBox(width: 6),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 7,
+                            vertical: 2,
+                          ),
+                          decoration: BoxDecoration(
+                            color: needsSetup
+                                ? const Color(0xFFF59E0B).withValues(
+                                    alpha: 0.16,
+                                  )
+                                : DocuTrackerTokens.brand.withValues(
+                                    alpha: 0.12,
+                                  ),
+                            borderRadius: BorderRadius.circular(999),
+                          ),
+                          child: Text(
+                            chipLabel,
+                            style: TextStyle(
+                              color: needsSetup
+                                  ? const Color(0xFFB45309)
+                                  : DocuTrackerTokens.brand,
+                              fontSize: 10,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ],
                   ),
                   const SizedBox(height: 2),
                   Text(
@@ -641,14 +858,28 @@ class _RequiredActionsPanelState extends State<_RequiredActionsPanel> {
                   const SizedBox(height: 3),
                   Text(
                     actionLabel,
-                    maxLines: 2,
+                    maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      color: DocuTrackerTokens.brand,
+                    style: TextStyle(
+                      color: needsSetup
+                          ? const Color(0xFFB45309)
+                          : DocuTrackerTokens.brand,
                       fontSize: 12,
                       fontWeight: FontWeight.w700,
                     ),
                   ),
+                  if (statusHint != null) ...[
+                    const SizedBox(height: 2),
+                    Text(
+                      statusHint,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: DocuTrackerTokens.textMuted,
+                        fontSize: 11,
+                      ),
+                    ),
+                  ],
                 ],
               ),
             ),

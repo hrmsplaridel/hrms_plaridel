@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/features/dashboard/presentation/employee/mobile/widgets/employee_dashboard_mobile_nav_items.dart';
+import 'package:hrms_plaridel/features/docutracker/data/providers/docutracker_provider.dart';
 import 'package:hrms_plaridel/shared/widgets/collapsible_dashboard_sidebar.dart';
 import 'package:hrms_plaridel/shared/widgets/portal_sidebar_brand.dart';
 import 'package:hrms_plaridel/shared/widgets/user_avatar.dart';
@@ -35,6 +37,9 @@ class EmployeeDashboardMobileDrawer extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final hairline = AppTheme.dashHairlineOf(context);
+    final pendingSignatures = context.select<DocuTrackerProvider, int>(
+      (p) => p.pendingSourceSignatureActionCount,
+    );
 
     return Drawer(
       backgroundColor: AppTheme.dashPanelOf(context),
@@ -69,6 +74,7 @@ class EmployeeDashboardMobileDrawer extends StatelessWidget {
                       icon: employeeDashboardMobileNavItems[i].icon,
                       label: employeeDashboardMobileNavItems[i].label,
                       selected: selectedIndex == i,
+                      badgeCount: i == 6 ? pendingSignatures : 0,
                       onTap: () => _select(context, i),
                     ),
                 ],

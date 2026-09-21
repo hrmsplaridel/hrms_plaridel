@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 
 import 'package:hrms_plaridel/features/docutracker/data/repositories/docutracker_repository.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document.dart';
-import 'package:hrms_plaridel/features/docutracker/models/document_status.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/pages/docutracker_document_detail_screen.dart';
 import 'package:hrms_plaridel/features/docutracker/services/docutracker_document_visibility.dart';
 
@@ -16,9 +15,8 @@ List<DocuTrackerDocument> docuTrackerDocumentsForDisplay({
   return DocuTrackerDocumentVisibility.filterForUser(documents, userId: userId);
 }
 
-/// Documents for which the signed-in user has a current, server-authorized
-/// action. Source-module actions are supplied by the backend adapter; native
-/// DocuTracker actions use current-step assignment metadata.
+/// Documents for Required actions: current work plus forms the viewer already
+/// signed/reviewed (kept visible so they do not vanish after completing).
 List<DocuTrackerDocument> docuTrackerRequiredActionDocuments({
   required List<DocuTrackerDocument> documents,
   required String userId,
@@ -27,19 +25,20 @@ List<DocuTrackerDocument> docuTrackerRequiredActionDocuments({
   return documents
       .where((document) {
         if (document.sourceOnly) {
-          return (document.sourceAction ?? '').trim().isNotEmpty;
+          if ((document.sourceAction ?? '').trim().isNotEmpty) return true;
+          return document.viewerParticipatedInSource;
         }
         if (uid.isEmpty) return false;
-        if (document.status == DocumentStatus.approved ||
-            document.status == DocumentStatus.rejected ||
-            document.status == DocumentStatus.cancelled) {
-          return false;
-        }
         if (DocuTrackerDocumentVisibility.isWorkInProgressDraft(document)) {
           return false;
         }
-        return document.currentHolderId?.trim() == uid ||
+        final isSignatureAssignee = document.signatureSignerIds.any(
+          (id) => id.trim() == uid,
+        );
+        final isAssignedNow =
+            document.currentHolderId?.trim() == uid ||
             document.viewerIsRoutingAssignee;
+        return isSignatureAssignee || isAssignedNow;
       })
       .toList(growable: false);
 }

@@ -35,6 +35,7 @@ class DocuTrackerDocument {
     this.sourceOnly = false,
     this.signatureSignerIds = const <String>[],
     this.viewerIsRoutingAssignee = false,
+    this.viewerParticipatedInSource = false,
   });
 
   final String? id;
@@ -100,6 +101,10 @@ class DocuTrackerDocument {
   /// Whether the signed-in viewer is assigned to this document's routing.
   /// This is computed by the backend without exposing other assignees' IDs.
   final bool viewerIsRoutingAssignee;
+
+  /// Source-backed leave (and similar): viewer already reviewed/signed or is
+  /// the assigned department reviewer — kept for Required actions after acting.
+  final bool viewerParticipatedInSource;
 
   static const String tableName = 'docutracker_documents';
 
@@ -172,6 +177,8 @@ class DocuTrackerDocument {
               .toList(growable: false) ??
           const <String>[],
       viewerIsRoutingAssignee: json['viewer_is_routing_assignee'] == true,
+      viewerParticipatedInSource:
+          json['viewer_participated_in_source'] == true,
     );
   }
 
@@ -203,6 +210,7 @@ class DocuTrackerDocument {
     'source_only': sourceOnly,
     'signature_signer_ids': signatureSignerIds,
     'viewer_is_routing_assignee': viewerIsRoutingAssignee,
+    'viewer_participated_in_source': viewerParticipatedInSource,
     'updated_at': DateTime.now().toIso8601String(),
   };
 
@@ -238,6 +246,7 @@ class DocuTrackerDocument {
     bool? sourceOnly,
     List<String>? signatureSignerIds,
     bool? viewerIsRoutingAssignee,
+    bool? viewerParticipatedInSource,
   }) {
     return DocuTrackerDocument(
       id: id ?? this.id,
@@ -273,6 +282,8 @@ class DocuTrackerDocument {
       signatureSignerIds: signatureSignerIds ?? this.signatureSignerIds,
       viewerIsRoutingAssignee:
           viewerIsRoutingAssignee ?? this.viewerIsRoutingAssignee,
+      viewerParticipatedInSource:
+          viewerParticipatedInSource ?? this.viewerParticipatedInSource,
     );
   }
 }

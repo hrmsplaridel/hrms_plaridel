@@ -251,6 +251,7 @@ class DashboardSidebarNavTile extends StatefulWidget {
     required this.label,
     required this.selected,
     required this.onTap,
+    this.badgeCount = 0,
     @Deprecated('Reads collapse progress from SidebarCollapseScope')
     this.collapsed = false,
   });
@@ -259,6 +260,7 @@ class DashboardSidebarNavTile extends StatefulWidget {
   final String label;
   final bool selected;
   final VoidCallback onTap;
+  final int badgeCount;
   final bool collapsed;
 
   @override
@@ -334,6 +336,13 @@ class _DashboardSidebarNavTileState extends State<DashboardSidebarNavTile> {
                                   overflow: TextOverflow.ellipsis,
                                 ),
                               ),
+                              if (widget.badgeCount > 0) ...[
+                                const SizedBox(width: 8),
+                                _NavBadge(
+                                  count: widget.badgeCount,
+                                  onSelected: selected,
+                                ),
+                              ],
                             ],
                           ),
                         ),
@@ -354,6 +363,7 @@ class _DashboardSidebarNavTileState extends State<DashboardSidebarNavTile> {
                     icon: widget.icon,
                     selected: selected,
                     hovered: _hover,
+                    badgeCount: widget.badgeCount,
                     onTap: widget.onTap,
                     onHover: (v) => setState(() => _hover = v),
                   ),
@@ -375,6 +385,7 @@ class _CollapsedNavOrb extends StatelessWidget {
     required this.hovered,
     required this.onTap,
     required this.onHover,
+    this.badgeCount = 0,
   });
 
   final IconData icon;
@@ -382,6 +393,7 @@ class _CollapsedNavOrb extends StatelessWidget {
   final bool hovered;
   final VoidCallback onTap;
   final ValueChanged<bool> onHover;
+  final int badgeCount;
 
   @override
   Widget build(BuildContext context) {
@@ -399,60 +411,114 @@ class _CollapsedNavOrb extends StatelessWidget {
           child: SizedBox(
             height: 48,
             child: Center(
-              child: Container(
-                width: kDashboardSidebarCollapsedOrbSize,
-                height: kDashboardSidebarCollapsedOrbSize,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  gradient: selected
-                      ? const LinearGradient(
-                          begin: Alignment.topLeft,
-                          end: Alignment.bottomRight,
-                          colors: [
-                            AppTheme.primaryNavyLight,
-                            AppTheme.primaryNavy,
-                          ],
-                        )
-                      : null,
-                  color: selected
-                      ? null
-                      : (hovered
-                            ? AppTheme.primaryNavy.withValues(
-                                alpha: dark ? 0.14 : 0.06,
-                              )
-                            : Colors.white),
-                  border: selected
-                      ? null
-                      : Border.all(
-                          color: hovered
-                              ? AppTheme.primaryNavy.withValues(alpha: 0.4)
-                              : AppTheme.dashHairlineOf(context),
-                          width: 1.5,
-                        ),
-                  boxShadow: selected
-                      ? [
-                          BoxShadow(
-                            color: AppTheme.primaryNavy.withValues(alpha: 0.4),
-                            blurRadius: 14,
-                            offset: const Offset(0, 4),
-                          ),
-                        ]
-                      : [
-                          BoxShadow(
-                            color: Colors.black.withValues(alpha: 0.04),
-                            blurRadius: 6,
-                            offset: const Offset(0, 2),
-                          ),
-                        ],
-                ),
-                child: Icon(
-                  icon,
-                  size: 20,
-                  color: selected ? Colors.white : inactive,
-                ),
+              child: Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  Container(
+                    width: kDashboardSidebarCollapsedOrbSize,
+                    height: kDashboardSidebarCollapsedOrbSize,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      gradient: selected
+                          ? const LinearGradient(
+                              begin: Alignment.topLeft,
+                              end: Alignment.bottomRight,
+                              colors: [
+                                AppTheme.primaryNavyLight,
+                                AppTheme.primaryNavy,
+                              ],
+                            )
+                          : null,
+                      color: selected
+                          ? null
+                          : (hovered
+                                ? AppTheme.primaryNavy.withValues(
+                                    alpha: dark ? 0.14 : 0.06,
+                                  )
+                                : Colors.white),
+                      border: selected
+                          ? null
+                          : Border.all(
+                              color: hovered
+                                  ? AppTheme.primaryNavy.withValues(alpha: 0.4)
+                                  : AppTheme.dashHairlineOf(context),
+                              width: 1.5,
+                            ),
+                      boxShadow: selected
+                          ? [
+                              BoxShadow(
+                                color: AppTheme.primaryNavy.withValues(
+                                  alpha: 0.4,
+                                ),
+                                blurRadius: 14,
+                                offset: const Offset(0, 4),
+                              ),
+                            ]
+                          : [
+                              BoxShadow(
+                                color: Colors.black.withValues(alpha: 0.04),
+                                blurRadius: 6,
+                                offset: const Offset(0, 2),
+                              ),
+                            ],
+                    ),
+                    child: Icon(
+                      icon,
+                      size: 20,
+                      color: selected ? Colors.white : inactive,
+                    ),
+                  ),
+                  if (badgeCount > 0)
+                    Positioned(
+                      right: -4,
+                      top: -4,
+                      child: _NavBadge(count: badgeCount, compact: true),
+                    ),
+                ],
               ),
             ),
           ),
+        ),
+      ),
+    );
+  }
+}
+
+class _NavBadge extends StatelessWidget {
+  const _NavBadge({
+    required this.count,
+    this.onSelected = false,
+    this.compact = false,
+  });
+
+  final int count;
+  final bool onSelected;
+  final bool compact;
+
+  @override
+  Widget build(BuildContext context) {
+    final label = count > 99 ? '99+' : '$count';
+    return Container(
+      padding: EdgeInsets.symmetric(
+        horizontal: compact ? 4 : 6,
+        vertical: compact ? 1 : 2,
+      ),
+      constraints: BoxConstraints(
+        minWidth: compact ? 16 : 18,
+        minHeight: compact ? 16 : 18,
+      ),
+      decoration: BoxDecoration(
+        color: onSelected ? Colors.white : const Color(0xFFDC2626),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      alignment: Alignment.center,
+      child: Text(
+        label,
+        style: TextStyle(
+          color: onSelected ? const Color(0xFFDC2626) : Colors.white,
+          fontSize: compact ? 9 : 10,
+          fontWeight: FontWeight.w700,
+          height: 1,
         ),
       ),
     );

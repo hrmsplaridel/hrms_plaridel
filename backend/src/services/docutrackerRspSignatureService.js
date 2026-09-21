@@ -7,6 +7,7 @@ const {
   resolveActiveMayor,
 } = require('./officialSignatoryService');
 const { todayInHrmsTimezone } = require('../utils/dateRangeParser');
+const { insertNotification } = require('./notificationService');
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const SOURCE_SIGNATURE_CONFIGS = Object.freeze({
@@ -253,6 +254,53 @@ async function syncSourcePrintNameIfEmpty(
   return updated.rowCount > 0;
 }
 
+/**
+ * Global bell notification when someone is assigned to e-sign an RSP/L&D form.
+ * Skips self-assignment. Failures are logged and never block signing setup.
+ */
+async function notifyAssignedSigner(db, {
+  assignedSignerId,
+  actorId,
+  sourceModule,
+  sourceTable,
+  sourceRecordId,
+  slotKey,
+  label,
+  formTitle = null,
+}) {
+  if (!UUID_RE.test(String(assignedSignerId || ''))) return;
+  if (String(assignedSignerId) === String(actorId || '')) return;
+  const moduleConfig = SOURCE_SIGNATURE_CONFIGS[sourceModule];
+  const formName =
+    moduleConfig?.formNames?.[sourceTable] ||
+    (sourceModule === 'ld' ? 'L&D form' : 'RSP form');
+  const slotLabel = String(label || slotKey || 'Signature').trim();
+  const detail = String(formTitle || '').trim();
+  const body = detail
+    ? `${slotLabel} is waiting on ${formName}: ${detail}. Open DocuTracker → Required actions to sign.`
+    : `${slotLabel} is waiting on ${formName}. Open DocuTracker → Required actions to sign.`;
+  try {
+    await insertNotification(db, {
+      userId: assignedSignerId,
+      category: 'form_signature',
+      type: 'source_signature_assigned',
+      title: `${slotLabel} needed`,
+      body,
+      referenceType: 'source_form',
+      referenceId: sourceRecordId,
+      metadata: {
+        source_module: sourceModule,
+        source_table: sourceTable,
+        slot_key: slotKey,
+        form_name: formName,
+        form_title: detail || null,
+      },
+    });
+  } catch (err) {
+    console.error('[docutrackerRspSignatureService] notifyAssignedSigner', err);
+  }
+}
+
 async function insertSourceSignatureAssignment(
   db,
   {
@@ -308,6 +356,34 @@ async function insertSourceSignatureAssignment(
       assignment_source: assignmentSource,
       recovery_remarks: recoveryRemarks,
     },
+  });
+  let formTitle = null;
+  try {
+    const formResult = await db.query(
+      `SELECT to_jsonb(source_row) AS source_record
+       FROM "${sourceTable}" source_row
+       WHERE id = $1::uuid`,
+      [sourceRecordId]
+    );
+    if (formResult.rowCount) {
+      formTitle = requestTitle(
+        sourceModule,
+        sourceTable,
+        formResult.rows[0].source_record
+      );
+    }
+  } catch (_) {
+    // Title is optional for the notification body.
+  }
+  await notifyAssignedSigner(db, {
+    assignedSignerId,
+    actorId,
+    sourceModule,
+    sourceTable,
+    sourceRecordId,
+    slotKey,
+    label,
+    formTitle,
   });
   return true;
 }
@@ -515,20 +591,27 @@ async function listSourceSignatureRequests(pool, user, sourceModule) {
     const requests = [];
     for (const assignment of assignedRows) {
       sourceConfig(normalizedModule, assignment.source_table, assignment.source_record_id);
-      const context = await loadContext(
-        pool,
-        user,
-        normalizedModule,
-        assignment.source_table,
-        assignment.source_record_id
-      );
       const source = await pool.query(
         `SELECT to_jsonb(source_row) AS source_record
          FROM "${assignment.source_table}" source_row
          WHERE id = $1::uuid`,
         [assignment.source_record_id]
       );
+      // Orphaned signature rows (form deleted) must not fail the whole feed.
       if (!source.rowCount) continue;
+      let context;
+      try {
+        context = await loadContext(
+          pool,
+          user,
+          normalizedModule,
+          assignment.source_table,
+          assignment.source_record_id
+        );
+      } catch (error) {
+        if (error?.code === 'NOT_FOUND' || error?.code === 'FORBIDDEN') continue;
+        throw error;
+      }
       const record = source.rows[0].source_record;
       const signatureBundle = serialize(
         context,
@@ -546,7 +629,29 @@ async function listSourceSignatureRequests(pool, user, sourceModule) {
           signature.can_sign &&
           !(signature.signature_asset_id && signature.signed_at)
       );
-      if (!requiresSetup && !hasPendingSignature) continue;
+      // Admins still need to see forms waiting on someone else's signature
+      // (e.g. Action Brainstorming certified_by after auto-assign).
+      const hasPendingAssignedSignature =
+        context.isAdmin &&
+        signatureBundle.signatures.some(
+          (signature) =>
+            Boolean(signature.assigned_signer_id) &&
+            !(signature.signature_asset_id && signature.signed_at)
+        );
+      // Keep forms visible for the assigned signer after they sign so they can
+      // reopen / confirm their ink (otherwise the card disappears immediately).
+      const isAssignedToViewer = signatureBundle.signatures.some(
+        (signature) =>
+          String(signature.assigned_signer_id || '') === String(user.id)
+      );
+      if (
+        !requiresSetup &&
+        !hasPendingSignature &&
+        !hasPendingAssignedSignature &&
+        !isAssignedToViewer
+      ) {
+        continue;
+      }
       requests.push({
         source_module: normalizedModule,
         source_table: assignment.source_table,
@@ -657,6 +762,36 @@ async function assignSourceSigner(pool, user, sourceModule, sourceTable, sourceR
       signerId
     );
     await client.query('COMMIT');
+    let formTitle = null;
+    try {
+      const formResult = await pool.query(
+        `SELECT to_jsonb(source_row) AS source_record
+         FROM "${sourceTable}" source_row
+         WHERE id = $1::uuid`,
+        [sourceRecordId]
+      );
+      if (formResult.rowCount) {
+        formTitle = requestTitle(
+          sourceModule,
+          sourceTable,
+          formResult.rows[0].source_record
+        );
+      }
+    } catch (_) {
+      // Title is optional for the notification body.
+    }
+    if (!previous || String(previous.assigned_signer_id) !== signerId) {
+      await notifyAssignedSigner(pool, {
+        assignedSignerId: signerId,
+        actorId: user.id,
+        sourceModule,
+        sourceTable,
+        sourceRecordId,
+        slotKey,
+        label,
+        formTitle,
+      });
+    }
   } catch (error) {
     try { await client.query('ROLLBACK'); } catch (_) {}
     throw error;

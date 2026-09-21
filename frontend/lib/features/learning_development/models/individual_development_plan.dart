@@ -224,9 +224,13 @@ class IdpRepo {
     return row == null ? null : IdpEntry.fromJson(row);
   }
 
-  Future<void> insert(IdpEntry entry) async {
+  Future<IdpEntry> insert(IdpEntry entry) async {
     final payload = Map<String, dynamic>.from(entry.toJson())..remove('id');
-    await RspLdSavedEntriesApi.insertRow(IdpEntry.tableName, payload);
+    final row = await RspLdSavedEntriesApi.insertRowReturning(
+      IdpEntry.tableName,
+      payload,
+    );
+    return IdpEntry.fromJson(row);
   }
 
   Future<void> update(IdpEntry entry) async {

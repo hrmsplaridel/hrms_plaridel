@@ -14,6 +14,10 @@ class DocuTrackerMain extends StatefulWidget {
     this.isAdmin = false,
     this.tutorialHeaderKey,
     this.tutorialContentKey,
+    this.openSourceModule,
+    this.openSourceTable,
+    this.openSourceRecordId,
+    this.onSourceDeepLinkConsumed,
   });
 
   /// Active section when driven by sidebar; null uses internal navigation.
@@ -21,6 +25,12 @@ class DocuTrackerMain extends StatefulWidget {
   final bool isAdmin;
   final GlobalKey? tutorialHeaderKey;
   final GlobalKey? tutorialContentKey;
+
+  /// Optional deep link into a specific RSP/L&D source-signature request.
+  final String? openSourceModule;
+  final String? openSourceTable;
+  final String? openSourceRecordId;
+  final VoidCallback? onSourceDeepLinkConsumed;
 
   @override
   State<DocuTrackerMain> createState() => _DocuTrackerMainState();
@@ -150,6 +160,10 @@ class _DocuTrackerMainState extends State<DocuTrackerMain> {
       DocuTrackerSection.documents => DocuTrackerDocumentsScreen(
         isAdmin: widget.isAdmin,
         showHeader: false,
+        openSourceModule: widget.openSourceModule,
+        openSourceTable: widget.openSourceTable,
+        openSourceRecordId: widget.openSourceRecordId,
+        onSourceDeepLinkConsumed: widget.onSourceDeepLinkConsumed,
       ),
       DocuTrackerSection.admin => const DocuTrackerAdminScreen(),
     },

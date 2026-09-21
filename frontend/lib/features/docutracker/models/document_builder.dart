@@ -226,6 +226,33 @@ class DocuTrackerRspSignatureRequest {
   bool get hasUnsignedAssignedSlot => signatureBundle.signatures.any(
     (signature) => signature.canSign && !signature.isSigned,
   );
+
+  /// True when any assigned slot is still unsigned (for admin monitoring).
+  bool get hasPendingAssignedSignature => signatureBundle.signatures.any(
+    (signature) =>
+        signature.assignedSignerId.trim().isNotEmpty && !signature.isSigned,
+  );
+
+  /// Current user is assigned to at least one slot (pending or already signed).
+  bool get isAssignedToViewer =>
+      signatureBundle.signatures.any((signature) => signature.canSign);
+
+  /// Viewer already signed every slot they can sign.
+  bool get viewerHasCompletedAssignedSlots {
+    final mine = signatureBundle.signatures
+        .where((signature) => signature.canSign)
+        .toList(growable: false);
+    if (mine.isEmpty) return false;
+    return mine.every((signature) => signature.isSigned);
+  }
+
+  /// Still needs attention (unsigned / setup). Used for sidebar badges.
+  bool get hasActionableRequiredAction =>
+      hasUnsignedAssignedSlot || requiresSetup || hasPendingAssignedSignature;
+
+  /// Include in Required actions list (keeps signed forms visible for reopen).
+  bool get shouldShowInRequiredActions =>
+      hasActionableRequiredAction || isAssignedToViewer;
 }
 
 class DocuTrackerSignatureField {

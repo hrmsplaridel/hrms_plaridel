@@ -301,6 +301,18 @@ class DocuTrackerProvider extends ChangeNotifier {
   int get unreadNotificationsCount =>
       _notificationService.unreadCount(_notifications);
 
+  /// Pending RSP/L&D e-sign tasks for the current user (and admin setup /
+  /// still-unsigned assigned forms). Completed signatures stay in the list
+  /// but do not inflate this badge count.
+  int get pendingSourceSignatureActionCount =>
+      _sourceSignatureRequests
+          .where((request) => request.hasActionableRequiredAction)
+          .length;
+
+  /// DocuTracker sidebar attention: unread workflow notices + pending e-signs.
+  int get docuTrackerAttentionCount =>
+      unreadNotificationsCount + pendingSourceSignatureActionCount;
+
   /// WIP drafts created by [userId], not yet submitted into workflow.
   List<DocuTrackerDocument> myDraftsForUser(String userId) => _documents
       .where(

@@ -812,10 +812,14 @@ class FormPdf {
   );
 
   /// Print IDP on Philippine long bond (Mayor's office layout).
-  static Future<void> printIdpPdf(BuildContext context, IdpEntry entry) async {
+  static Future<void> printIdpPdf(
+    BuildContext context,
+    IdpEntry entry, {
+    DocuTrackerSourceSignatureBundle? signatures,
+  }) async {
     await printForm(
       context: context,
-      buildDocument: () => buildIdpPdf(entry),
+      buildDocument: () => buildIdpPdf(entry, signatures: signatures),
       filename: 'Individual_Development_Plan.pdf',
       format: idpLayoutPrintFormat,
       dynamicLayout: false,

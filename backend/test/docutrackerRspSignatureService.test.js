@@ -292,7 +292,7 @@ test('RSP admins can discover unassigned signature-bearing forms for setup', asy
   );
 });
 
-test('completed source signature requests are omitted', async () => {
+test('completed source signature requests stay visible for the assigned signer', async () => {
   const pool = {
     async query(sql, params = []) {
       if (sql.includes('SELECT DISTINCT source_table')) {
@@ -342,8 +342,94 @@ test('completed source signature requests are omitted', async () => {
     id: signerId,
     role: 'employee',
   });
+  assert.equal(result.length, 1);
+  assert.equal(result[0].source_record_id, formId);
+  assert.equal(result[0].signature_bundle.signatures[0].can_sign, true);
+  assert.ok(result[0].signature_bundle.signatures[0].signed_at);
+});
 
-  assert.deepEqual(result, []);
+test('completed source signature requests are omitted for unrelated viewers', async () => {
+  const pool = {
+    async query(sql, params = []) {
+      if (sql.includes('SELECT DISTINCT source_table')) {
+        assert.equal(params[0], otherId);
+        return { rowCount: 0, rows: [] };
+      }
+      throw new Error(`Unexpected query: ${sql}`);
+    },
+  };
+
+  const result = await listRspSignatureRequests(pool, {
+    id: otherId,
+    role: 'employee',
+  });
+  assert.equal(result.length, 0);
+});
+
+test('orphaned source signature rows for deleted forms are skipped', async () => {
+  const missingFormId = '77777777-7777-4777-8777-777777777777';
+  const pool = {
+    async query(sql, params = []) {
+      if (sql.includes('SELECT DISTINCT source_table')) {
+        return {
+          rowCount: 2,
+          rows: [
+            {
+              source_table: 'action_brainstorming_coaching_entries',
+              source_record_id: missingFormId,
+            },
+            {
+              source_table: 'action_brainstorming_coaching_entries',
+              source_record_id: formId,
+            },
+          ],
+        };
+      }
+      if (sql.includes('SELECT to_jsonb(source_row)')) {
+        if (params[0] === missingFormId) return { rowCount: 0, rows: [] };
+        return {
+          rowCount: 1,
+          rows: [{
+            source_record: {
+              id: formId,
+              department: 'HR Office',
+              date: '2026-09-21',
+            },
+          }],
+        };
+      }
+      if (
+        sql.includes('SELECT id FROM "action_brainstorming_coaching_entries"') ||
+        sql.includes('SELECT id, created_by FROM "action_brainstorming_coaching_entries"')
+      ) {
+        return sourceRow();
+      }
+      if (sql.includes('FROM docutracker_rsp_source_signatures s')) {
+        return {
+          rowCount: 1,
+          rows: [
+            signatureRow({
+              slot_key: 'certified_by',
+              label: 'Certified by',
+              assigned_signer_id: signerId,
+              assigned_signer_name: 'Department Head',
+              assignment_source: 'automatic',
+            }),
+          ],
+        };
+      }
+      throw new Error(`Unexpected query: ${sql}`);
+    },
+  };
+
+  const result = await listLdSignatureRequests(pool, {
+    id: signerId,
+    role: 'employee',
+  });
+  assert.equal(result.length, 1);
+  assert.equal(result[0].source_table, 'action_brainstorming_coaching_entries');
+  assert.equal(result[0].source_record_id, formId);
+  assert.equal(result[0].signature_bundle.signatures[0].can_sign, true);
 });
 
 test('missing source form tables fail instead of appearing as no required actions', async () => {

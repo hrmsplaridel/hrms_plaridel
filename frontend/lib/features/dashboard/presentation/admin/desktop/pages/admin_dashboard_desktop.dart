@@ -365,6 +365,10 @@ class _AdminDashboardState extends State<AdminDashboard>
 
   Widget _settingsPanel() => _settingsPanelWidget;
   Timer? _notificationPollTimer;
+  String? _pendingSourceModule;
+  String? _pendingSourceTable;
+  String? _pendingSourceRecordId;
+  int _docuTrackerDeepLinkKey = 0;
 
   @override
   void initState() {
@@ -379,11 +383,13 @@ class _AdminDashboardState extends State<AdminDashboard>
       if (!mounted) return;
       context.read<NotificationProvider>().refreshUnreadCount();
       context.read<DocuTrackerProvider>().loadNotifications();
+      context.read<DocuTrackerProvider>().loadSourceSignatureRequests();
       _notificationPollTimer?.cancel();
       _notificationPollTimer = Timer.periodic(const Duration(seconds: 30), (_) {
         if (!mounted) return;
         context.read<NotificationProvider>().refreshUnreadCount();
         context.read<DocuTrackerProvider>().loadNotifications();
+        context.read<DocuTrackerProvider>().loadSourceSignatureRequests();
       });
     });
   }
@@ -393,6 +399,7 @@ class _AdminDashboardState extends State<AdminDashboard>
     if (state == AppLifecycleState.resumed && mounted) {
       context.read<NotificationProvider>().refreshUnreadCount();
       context.read<DocuTrackerProvider>().loadNotifications();
+      context.read<DocuTrackerProvider>().loadSourceSignatureRequests();
     }
   }
 
@@ -439,6 +446,18 @@ class _AdminDashboardState extends State<AdminDashboard>
         break;
       case NotificationTapKind.adminTrainingReports:
         setState(() => _selectedMenu = AdminMenu.ld);
+        DashboardContentNavigator.showHome(_contentNavKey);
+        break;
+      case NotificationTapKind.docuTrackerDocuments:
+        setState(() {
+          _selectedMenu = AdminMenu.docutracker;
+          if (result.hasSourceSignatureDeepLink) {
+            _pendingSourceModule = result.sourceModule;
+            _pendingSourceTable = result.sourceTable;
+            _pendingSourceRecordId = result.sourceRecordId;
+            _docuTrackerDeepLinkKey++;
+          }
+        });
         DashboardContentNavigator.showHome(_contentNavKey);
         break;
       case NotificationTapKind.none:
@@ -572,7 +591,21 @@ class _AdminDashboardState extends State<AdminDashboard>
       case AdminMenu.ld:
         return const _LdContent();
       case AdminMenu.docutracker:
-        return const DocuTrackerMain(isAdmin: true);
+        return DocuTrackerMain(
+          key: ValueKey('admin-docutracker-$_docuTrackerDeepLinkKey'),
+          isAdmin: true,
+          openSourceModule: _pendingSourceModule,
+          openSourceTable: _pendingSourceTable,
+          openSourceRecordId: _pendingSourceRecordId,
+          onSourceDeepLinkConsumed: () {
+            if (!mounted) return;
+            setState(() {
+              _pendingSourceModule = null;
+              _pendingSourceTable = null;
+              _pendingSourceRecordId = null;
+            });
+          },
+        );
       case AdminMenu.createAccount:
         return const _AdminSignUpContent();
     }
@@ -746,6 +779,9 @@ class _Sidebar extends StatelessWidget {
   final bool collapsed;
 
   Widget _buildNavList(BuildContext context, {required bool compact}) {
+    final pendingSignatures = context.select<DocuTrackerProvider, int>(
+      (p) => p.pendingSourceSignatureActionCount,
+    );
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -801,6 +837,7 @@ class _Sidebar extends StatelessWidget {
           icon: Icons.folder_outlined,
           label: 'DocuTracker',
           selected: selectedMenu == AdminMenu.docutracker,
+          badgeCount: pendingSignatures,
           onTap: () => onTap(AdminMenu.docutracker),
         ),
         DashboardSidebarNavTile(

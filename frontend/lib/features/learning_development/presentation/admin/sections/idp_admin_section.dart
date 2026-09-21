@@ -1,9 +1,12 @@
 ﻿import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 
 import 'package:hrms_plaridel/core/api/client.dart';
 import 'package:hrms_plaridel/core/api/user_facing_api_error.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/core/utils/form_pdf.dart';
+import 'package:hrms_plaridel/features/docutracker/data/providers/docutracker_provider.dart';
+import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_rsp_signature_section.dart';
 import 'package:hrms_plaridel/features/learning_development/models/individual_development_plan.dart';
 import 'package:hrms_plaridel/features/recruitment/presentation/admin/widgets/rsp_records_list_table.dart';
 import 'package:hrms_plaridel/shared/widgets/read_only_saved_entry_dialog.dart';
@@ -146,16 +149,19 @@ class _IdpAdminSectionState extends State<IdpAdminSection> {
 
   Future<void> _onSave(IdpEntry entry) async {
     try {
+      final IdpEntry saved;
       if (entry.id == null) {
-        await IdpRepo.instance.insert(entry);
+        saved = await IdpRepo.instance.insert(entry);
       } else {
         await IdpRepo.instance.update(entry);
+        saved = entry;
       }
       if (!mounted) return;
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(const SnackBar(content: Text('IDP saved.')));
-      setState(() => _editing = null);
+      // Keep the editor open so the DocuTracker signature panel is available.
+      setState(() => _editing = saved);
       _load();
     } catch (e) {
       if (!mounted) return;
@@ -183,13 +189,47 @@ class _IdpAdminSectionState extends State<IdpAdminSection> {
 
   Future<void> _printIdp(IdpEntry entry) async {
     try {
-      await FormPdf.printIdpPdf(context, entry);
-    } catch (_) {}
+      final signatureProvider = context.read<DocuTrackerProvider>();
+      final signatures = entry.id == null
+          ? null
+          : await signatureProvider.loadSourceSignatures(
+              sourceModule: 'ld',
+              sourceTable: IdpEntry.tableName,
+              sourceRecordId: entry.id!,
+            );
+      if (entry.id != null && signatures == null) {
+        throw StateError(
+          signatureProvider.sourceSignatureError ??
+              'The form signatures could not be loaded.',
+        );
+      }
+      if (!mounted) return;
+      await FormPdf.printIdpPdf(context, entry, signatures: signatures);
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Print failed. ${userFacingApiError(error)}')),
+      );
+    }
   }
 
   Future<void> _downloadIdp(IdpEntry entry) async {
     try {
-      final doc = await FormPdf.buildIdpPdf(entry);
+      final signatureProvider = context.read<DocuTrackerProvider>();
+      final signatures = entry.id == null
+          ? null
+          : await signatureProvider.loadSourceSignatures(
+              sourceModule: 'ld',
+              sourceTable: IdpEntry.tableName,
+              sourceRecordId: entry.id!,
+            );
+      if (entry.id != null && signatures == null) {
+        throw StateError(
+          signatureProvider.sourceSignatureError ??
+              'The form signatures could not be loaded.',
+        );
+      }
+      final doc = await FormPdf.buildIdpPdf(entry, signatures: signatures);
       await FormPdf.sharePdf(doc, name: 'IDP.pdf');
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -197,9 +237,9 @@ class _IdpAdminSectionState extends State<IdpAdminSection> {
       );
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Download failed: $e')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Download failed. ${userFacingApiError(e)}')),
+      );
     }
   }
 
@@ -298,6 +338,22 @@ class _IdpAdminSectionState extends State<IdpAdminSection> {
             onPrint: _printIdp,
             onDownloadPdf: _downloadIdp,
           ),
+          if (_editing?.id != null) ...[
+            const SizedBox(height: 16),
+            DocuTrackerRspSignatureSection(
+              sourceModule: 'ld',
+              sourceTable: IdpEntry.tableName,
+              sourceRecordId: _editing!.id!,
+              helperText:
+                  'Prepared by is the form creator. Reviewed by is the department head; Noted by is HRMDO; Approved by is the Mayor.',
+              slots: const [
+                DocuTrackerRspSignatureSlot('prepared_by', 'Prepared by'),
+                DocuTrackerRspSignatureSlot('reviewed_by', 'Reviewed by'),
+                DocuTrackerRspSignatureSlot('noted_by', 'Noted by'),
+                DocuTrackerRspSignatureSlot('approved_by', 'Approved by'),
+              ],
+            ),
+          ],
           const SizedBox(height: 24),
         ],
         _toolbar(context),

@@ -138,6 +138,7 @@ function mapDocumentRow(row) {
       ? row.signature_signer_ids.map(String)
       : [],
     viewer_is_routing_assignee: row.viewer_is_routing_assignee === true,
+    viewer_participated_in_source: row.viewer_participated_in_source === true,
     source_only: row.source_only === true,
     created_at: row.created_at,
     updated_at: row.updated_at,
@@ -452,6 +453,21 @@ async function listSourceBackedDocuments(pool, user, filters = {}) {
     .map((row) => {
       const mappedStatus = mapSourceStatusToDocuTracker(row.source_module, row.source_status);
       const sourceAction = sourceActionForRow(row, user);
+      const viewerId = String(user?.id || '').trim();
+      const role = String(user?.role || '').trim().toLowerCase();
+      const isDepartmentReviewer =
+        sameEntityId(row.assigned_department_head_id, viewerId) ||
+        row.viewer_is_department_reviewer === true;
+      const isHrOrAdmin = role === 'hr' || role === 'admin';
+      // Keep leave (and similar) visible for reviewers after they sign/act so
+      // the card does not vanish from Required actions while admins still see it.
+      const viewerParticipatedInSource =
+        row.source_table === 'leave_requests' &&
+        (isDepartmentReviewer ||
+          (isHrOrAdmin &&
+            ['pending_hr', 'pending', 'approved', 'rejected', 'returned'].includes(
+              String(row.source_status || '').toLowerCase()
+            )));
       return {
         id: `source:${row.source_module}:${row.source_record_id}`,
         document_number: null,
@@ -478,6 +494,7 @@ async function listSourceBackedDocuments(pool, user, filters = {}) {
         escalation_level: 0,
         needs_admin_intervention: false,
         source_only: true,
+        viewer_participated_in_source: viewerParticipatedInSource,
         created_at: row.created_at,
         updated_at: row.updated_at,
       };

@@ -74,6 +74,10 @@ class _EmployeeDashboardState extends State<EmployeeDashboardDesktopPage>
   int _leaveNavKey = 0;
   Timer? _notificationPollTimer;
   bool? _isDepartmentHead;
+  String? _pendingSourceModule;
+  String? _pendingSourceTable;
+  String? _pendingSourceRecordId;
+  int _docuTrackerDeepLinkKey = 0;
 
   static const _navItems = [
     'Dashboard',
@@ -131,6 +135,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboardDesktopPage>
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       context.read<NotificationProvider>().refreshUnreadCount();
+      context.read<DocuTrackerProvider>().loadSourceSignatureRequests();
       EmployeeTutorialController.showDashboardCoachIfNeeded(
         context,
         userId: context.read<AuthProvider>().user?.id,
@@ -140,6 +145,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboardDesktopPage>
       _notificationPollTimer = Timer.periodic(const Duration(seconds: 30), (_) {
         if (!mounted) return;
         context.read<NotificationProvider>().refreshUnreadCount();
+        context.read<DocuTrackerProvider>().loadSourceSignatureRequests();
       });
     });
   }
@@ -321,6 +327,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboardDesktopPage>
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed && mounted) {
       context.read<NotificationProvider>().refreshUnreadCount();
+      context.read<DocuTrackerProvider>().loadSourceSignatureRequests();
     }
   }
 
@@ -337,6 +344,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboardDesktopPage>
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       context.read<DocuTrackerProvider>().loadNotifications(forceRefresh: true);
+      context.read<DocuTrackerProvider>().loadSourceSignatureRequests();
     });
   }
 
@@ -372,6 +380,18 @@ class _EmployeeDashboardState extends State<EmployeeDashboardDesktopPage>
       case NotificationTapKind.employeeLocatorApprovals:
       case NotificationTapKind.employeeLocatorRequests:
         setState(() => _selectedNavIndex = 3);
+        DashboardContentNavigator.showHome(_contentNavKey);
+        break;
+      case NotificationTapKind.docuTrackerDocuments:
+        setState(() {
+          _selectedNavIndex = 6;
+          if (result.hasSourceSignatureDeepLink) {
+            _pendingSourceModule = result.sourceModule;
+            _pendingSourceTable = result.sourceTable;
+            _pendingSourceRecordId = result.sourceRecordId;
+            _docuTrackerDeepLinkKey++;
+          }
+        });
         DashboardContentNavigator.showHome(_contentNavKey);
         break;
       case NotificationTapKind.adminDtrLocatorManagement:
@@ -562,9 +582,21 @@ class _EmployeeDashboardState extends State<EmployeeDashboardDesktopPage>
         );
       case 6:
         return DocuTrackerMain(
+          key: ValueKey('employee-docutracker-$_docuTrackerDeepLinkKey'),
           isAdmin: false,
           tutorialHeaderKey: _docuTrackerHeaderKey,
           tutorialContentKey: _docuTrackerContentKey,
+          openSourceModule: _pendingSourceModule,
+          openSourceTable: _pendingSourceTable,
+          openSourceRecordId: _pendingSourceRecordId,
+          onSourceDeepLinkConsumed: () {
+            if (!mounted) return;
+            setState(() {
+              _pendingSourceModule = null;
+              _pendingSourceTable = null;
+              _pendingSourceRecordId = null;
+            });
+          },
         );
       case _profileNavIndex:
         return const SizedBox.shrink();
@@ -964,7 +996,10 @@ class _EmployeeSidebar extends StatelessWidget {
   final bool railMode;
   final bool collapsed;
 
-  Widget _buildNavList({required bool compact}) {
+  Widget _buildNavList(BuildContext context, {required bool compact}) {
+    final pendingSignatures = context.select<DocuTrackerProvider, int>(
+      (p) => p.pendingSourceSignatureActionCount,
+    );
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -1009,6 +1044,7 @@ class _EmployeeSidebar extends StatelessWidget {
           icon: Icons.description_outlined,
           label: 'DocuTracker',
           selected: selectedIndex == 6,
+          badgeCount: pendingSignatures,
           onTap: () => onTap(6),
         ),
         const SizedBox(height: 12),
@@ -1138,7 +1174,7 @@ class _EmployeeSidebar extends StatelessWidget {
                     children: [
                       Expanded(
                         child: SingleChildScrollView(
-                          child: _buildNavList(compact: false),
+                          child: _buildNavList(context, compact: false),
                         ),
                       ),
                       _buildFooter(context, compact: false),
@@ -1183,7 +1219,9 @@ class _EmployeeSidebar extends StatelessWidget {
         children: [
           if (showBrand) const PortalSidebarBrand(),
           Expanded(
-            child: SingleChildScrollView(child: _buildNavList(compact: false)),
+            child: SingleChildScrollView(
+              child: _buildNavList(context, compact: false),
+            ),
           ),
           _buildFooter(context, compact: false),
         ],
