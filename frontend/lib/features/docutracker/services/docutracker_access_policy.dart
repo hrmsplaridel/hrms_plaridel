@@ -40,7 +40,12 @@ abstract final class DocuTrackerAccessPolicy {
   }) {
     final uid = userId.trim();
     if (uid.isEmpty) return false;
+    // Source-only rows are already relationship-filtered by the backend.
+    if (document.sourceOnly) return true;
     return document.createdBy == uid ||
+        document.currentHolderId == uid ||
+        document.viewerIsRoutingAssignee ||
+        document.viewerParticipatedInSource ||
         document.signatureSignerIds.any((id) => id == uid);
   }
 

@@ -196,8 +196,18 @@ class _DocuTrackerDashboardScreenState
     final returned = provider.returnedDocuments
         .where((d) => d.createdBy == userId)
         .toList();
+    // Include past reviewers / signers already relationship-filtered by the
+    // backend (viewerIsRoutingAssignee covers any-step assignees + history
+    // actors; signatureSignerIds covers e-sign placeholders).
     final completed = provider.completedDocuments
-        .where((d) => d.createdBy == userId || d.currentHolderId == userId)
+        .where(
+          (d) =>
+              d.createdBy == userId ||
+              d.currentHolderId == userId ||
+              d.viewerIsRoutingAssignee ||
+              d.viewerParticipatedInSource ||
+              d.signatureSignerIds.any((id) => id == userId),
+        )
         .toList();
     final inReview = myDocs
         .where((d) => d.status == DocumentStatus.inReview)

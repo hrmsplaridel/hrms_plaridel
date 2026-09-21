@@ -438,6 +438,69 @@ async function initializeCreatorSourceSignatures(db, user, sourceTable, sourceRe
   return assignedAny;
 }
 
+/**
+ * Admin backfill: re-run automatic signer resolution for existing forms.
+ * Only fills empty slots (ON CONFLICT DO NOTHING); never overrides assigned/signed rows.
+ */
+async function reResolveAutomaticSourceSignatures(pool, user, sourceModule = null) {
+  if (String(user?.role || '').toLowerCase() !== 'admin') {
+    throw serviceError('FORBIDDEN', 'Only an administrator can re-resolve source form signers');
+  }
+  const normalizedModule =
+    sourceModule == null || String(sourceModule).trim() === ''
+      ? null
+      : String(sourceModule).trim().toLowerCase();
+  const modules = normalizedModule
+    ? [normalizedModule]
+    : Object.keys(SOURCE_SIGNATURE_CONFIGS);
+  const summary = {
+    processed: 0,
+    assigned_forms: 0,
+    skipped_forms: 0,
+    by_table: {},
+  };
+
+  for (const moduleKey of modules) {
+    const moduleConfig = SOURCE_SIGNATURE_CONFIGS[moduleKey];
+    if (!moduleConfig) {
+      throw serviceError('NOT_FOUND', 'Source signature module was not found');
+    }
+    for (const sourceTable of Object.keys(moduleConfig.slots)) {
+      if (!automaticSlotRules(sourceTable)) continue;
+      const hasCreatorColumn = creatorOwnedSlotKeys(sourceTable).length > 0;
+      const forms = await pool.query(
+        hasCreatorColumn
+          ? `SELECT id, created_by FROM "${sourceTable}" ORDER BY created_at ASC NULLS LAST, id`
+          : `SELECT id FROM "${sourceTable}" ORDER BY created_at ASC NULLS LAST, id`
+      );
+      const tableStats = { processed: 0, assigned: 0, skipped: 0 };
+      for (const form of forms.rows) {
+        const actorId =
+          hasCreatorColumn && UUID_RE.test(String(form.created_by || ''))
+            ? form.created_by
+            : user.id;
+        const assigned = await initializeCreatorSourceSignatures(
+          pool,
+          { id: actorId, role: user.role },
+          sourceTable,
+          form.id
+        );
+        tableStats.processed += 1;
+        summary.processed += 1;
+        if (assigned) {
+          tableStats.assigned += 1;
+          summary.assigned_forms += 1;
+        } else {
+          tableStats.skipped += 1;
+          summary.skipped_forms += 1;
+        }
+      }
+      summary.by_table[sourceTable] = tableStats;
+    }
+  }
+  return summary;
+}
+
 async function loadContext(db, user, sourceModule, sourceTable, sourceRecordId, { forUpdate = false } = {}) {
   const config = sourceConfig(sourceModule, sourceTable, sourceRecordId);
   const creatorColumn = creatorOwnedSlotKeys(sourceTable).length ? ', created_by' : '';
@@ -873,6 +936,7 @@ module.exports = {
   AUTOMATIC_SOURCE_SLOT_RULES,
   creatorOwnedSlotKeys,
   initializeCreatorSourceSignatures,
+  reResolveAutomaticSourceSignatures,
   getSourceSignatures,
   getRspSourceSignatures,
   listSourceSignatureRequests,

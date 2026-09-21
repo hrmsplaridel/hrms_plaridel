@@ -18,6 +18,7 @@ class DocuTrackerSourceSignatureCard extends StatefulWidget {
     this.unsignedMessage = 'No applicant signature yet',
     this.waitingMessage = 'Waiting for the applicant to sign.',
     this.savedMessage = 'Signature saved.',
+    this.initialBundle,
     this.onChanged,
   });
 
@@ -29,6 +30,8 @@ class DocuTrackerSourceSignatureCard extends StatefulWidget {
   final String unsignedMessage;
   final String waitingMessage;
   final String savedMessage;
+  /// When provided (e.g. from Required actions), skip the extra network fetch.
+  final DocuTrackerSourceSignatureBundle? initialBundle;
   final ValueChanged<DocuTrackerSourceSignatureBundle>? onChanged;
 
   @override
@@ -47,6 +50,12 @@ class _DocuTrackerSourceSignatureCardState
   @override
   void initState() {
     super.initState();
+    final seeded = widget.initialBundle;
+    if (seeded != null) {
+      _bundle = seeded;
+      _loading = false;
+      return;
+    }
     WidgetsBinding.instance.addPostFrameCallback((_) => _load());
   }
 

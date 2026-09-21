@@ -52,6 +52,7 @@ const {
   listLdSignatureRequests,
   assignSourceSigner,
   signSourceSlot,
+  reResolveAutomaticSourceSignatures,
 } = require('../services/docutrackerRspSignatureService');
 const {
   getLinkedSourceDocument,
@@ -585,6 +586,50 @@ router.get('/sources/ld/signature-requests', protect, async (req, res) => {
     res.status(mapped.status).json({ error: mapped.error });
   }
 });
+
+/**
+ * Admin backfill: re-resolve automatic RSP/L&D signers on existing forms.
+ * Only fills empty slots; does not override assigned or signed rows.
+ * Optional :sourceModule = rsp | ld (omit via /sources/signature-assignments/re-resolve for both).
+ */
+router.post(
+  '/sources/signature-assignments/re-resolve',
+  protect,
+  requireAdmin,
+  async (req, res) => {
+    try {
+      res.json(await reResolveAutomaticSourceSignatures(pool, req.user, null));
+    } catch (err) {
+      console.error('[docutracker POST signature-assignments/re-resolve]', err);
+      const mapped = mapWorkflowServiceError(err);
+      res.status(mapped.status).json({ error: mapped.error });
+    }
+  }
+);
+
+router.post(
+  '/sources/:sourceModule/signature-assignments/re-resolve',
+  protect,
+  requireAdmin,
+  async (req, res) => {
+    try {
+      res.json(
+        await reResolveAutomaticSourceSignatures(
+          pool,
+          req.user,
+          req.params.sourceModule
+        )
+      );
+    } catch (err) {
+      console.error(
+        '[docutracker POST /sources/:sourceModule/signature-assignments/re-resolve]',
+        err
+      );
+      const mapped = mapWorkflowServiceError(err);
+      res.status(mapped.status).json({ error: mapped.error });
+    }
+  }
+);
 
 /** GET fixed signature slots for an authorized linked source form. */
 router.get(

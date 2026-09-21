@@ -44,11 +44,13 @@ same geometry can be rendered on different screen sizes and in PDF output.
 | POST | `/api/docutracker/sources/dtr/leave_requests/{leaveRequestId}/signatures/department_head/sign` | Add or replace the assigned department head signature before endorsement |
 | POST | `/api/docutracker/sources/dtr/leave_requests/{leaveRequestId}/signatures/hr_approver/sign` | Add or replace the authenticated HR/admin signature before final approval |
 | GET | `/api/docutracker/sources/rsp/{table}/{recordId}/signatures` | Load the configured signature fields for an authorized saved RSP form |
-| GET | `/api/docutracker/sources/rsp/signature-requests` | List saved RSP forms needing admin signer setup or a signature from the authenticated user, including the protected form preview payload; completed forms are omitted |
+| GET | `/api/docutracker/sources/rsp/signature-requests` | List saved RSP forms needing admin signer setup or a signature from the authenticated user, including the protected form preview payload; assigned signers keep completed forms visible |
 | PUT | `/api/docutracker/sources/rsp/{table}/{recordId}/signatures/{slot}/assignment` | Admin-only assignment of an active HRMS user to an RSP signature field; overriding `creator` or `automatic` assignments requires `recovery_remarks` (min 5 characters) |
 | POST | `/api/docutracker/sources/rsp/{table}/{recordId}/signatures/{slot}/sign` | Add or replace the authenticated assigned user's RSP form signature |
 | GET | `/api/docutracker/sources/ld/{table}/{recordId}/signatures` | Load configured signature fields for an authorized saved L&D form |
 | GET | `/api/docutracker/sources/ld/signature-requests` | List L&D forms needing admin signer setup or a signature from the authenticated user |
+| POST | `/api/docutracker/sources/signature-assignments/re-resolve` | Admin-only backfill: re-resolve automatic signers for all RSP+L&D forms; fills empty slots only |
+| POST | `/api/docutracker/sources/{module}/signature-assignments/re-resolve` | Same backfill scoped to `rsp` or `ld` |
 | PUT | `/api/docutracker/sources/ld/{table}/{recordId}/signatures/{slot}/assignment` | Admin-only assignment of an active HRMS user to an L&D signature field; overriding `creator` or `automatic` assignments requires `recovery_remarks` (min 5 characters) |
 | POST | `/api/docutracker/sources/ld/{table}/{recordId}/signatures/{slot}/sign` | Add or replace the authenticated assigned user's L&D form signature |
 

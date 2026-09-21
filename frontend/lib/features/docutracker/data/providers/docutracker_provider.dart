@@ -493,12 +493,13 @@ class DocuTrackerProvider extends ChangeNotifier {
           _error = 'Could not load documents.';
         }
       } else {
+        // Do not pass createdBy for mobile: assignees / routing reviewers must
+        // still receive relationship-visible docs; client policy filters further.
         final r = await _repo.listDocumentsForUser(
           userId: userId,
           userRoleId: roleId,
           userDepartmentId: departmentId,
           userOfficeId: officeId,
-          createdBy: mobileRestricted ? userId : null,
           documentType: documentType,
           status: status,
           limit: 100,

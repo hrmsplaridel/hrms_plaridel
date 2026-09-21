@@ -556,54 +556,364 @@ class _RequiredActionsPanel extends StatefulWidget {
 }
 
 class _RequiredActionsPanelState extends State<_RequiredActionsPanel> {
-  bool _showAll = false;
+  bool _showSecondary = false;
+  bool _collapsed = false;
+  final _searchController = TextEditingController();
+  String _searchQuery = '';
+  String? _moduleFilter; // RSP | L&D | DTR | DocuTracker
+  String? _formFilter; // form name / document type label
+
+  static final _isoStamp = RegExp(
+    r'\s*\d{4}-\d{2}-\d{2}T[\d:\.\-]+Z?\s*$',
+    caseSensitive: false,
+  );
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  String _cleanTitle(String raw) {
+    var title = raw.trim();
+    title = title.replaceFirst(_isoStamp, '').trim();
+    title = title.replaceAll(RegExp(r'\s{2,}'), ' ');
+    return title.isEmpty ? raw.trim() : title;
+  }
+
+  _ActionPriority _priorityFor(_RequiredActionEntry entry) {
+    final request = entry.sourceRequest;
+    final document = entry.document;
+    if (request != null) {
+      if (request.requiresSetup) return _ActionPriority.needsSetup;
+      if (request.hasUnsignedAssignedSlot) return _ActionPriority.needsSignature;
+      if (request.viewerHasCompletedAssignedSlots) {
+        return _ActionPriority.completed;
+      }
+      if (request.hasPendingAssignedSignature) {
+        return _ActionPriority.waiting;
+      }
+      return _ActionPriority.waiting;
+    }
+    // Native / leave documents in this panel are already action-only.
+    final action = (document?.sourceAction ?? '').trim();
+    if (action.isNotEmpty) return _ActionPriority.needsSignature;
+    return _ActionPriority.needsSignature;
+  }
+
+  String _moduleKey(_RequiredActionEntry entry) {
+    final request = entry.sourceRequest;
+    if (request != null) {
+      return request.sourceModule == 'ld' ? 'L&D' : 'RSP';
+    }
+    final module = entry.document?.sourceModule?.toLowerCase();
+    if (module == 'dtr') return 'DTR';
+    if (module == 'ld') return 'L&D';
+    if (module == 'rsp') return 'RSP';
+    return 'DocuTracker';
+  }
+
+  String _formKey(_RequiredActionEntry entry) {
+    final request = entry.sourceRequest;
+    if (request != null) {
+      final name = request.formName.trim();
+      if (name.isNotEmpty) return name;
+    }
+    final document = entry.document;
+    if (document?.sourceOnly == true && document?.sourceModule == 'dtr') {
+      return 'Leave';
+    }
+    final type = (document?.documentType ?? '').trim();
+    if (type.isEmpty) return 'Document';
+    return type
+        .replaceAllMapped(
+          RegExp(r'([a-z0-9])([A-Z])'),
+          (m) => '${m.group(1)} ${m.group(2)}',
+        )
+        .split(RegExp(r'[\s_-]+'))
+        .where((p) => p.isNotEmpty)
+        .map(
+          (p) => p.length == 1
+              ? p.toUpperCase()
+              : '${p[0].toUpperCase()}${p.substring(1).toLowerCase()}',
+        )
+        .join(' ');
+  }
+
+  String _sortTitle(_RequiredActionEntry entry) {
+    final raw =
+        entry.sourceRequest?.title ??
+        entry.document?.title ??
+        entry.sourceRequest?.formName ??
+        '';
+    return _cleanTitle(raw).toLowerCase();
+  }
+
+  bool _matchesFilters(_RequiredActionEntry entry) {
+    if (_moduleFilter != null && _moduleKey(entry) != _moduleFilter) {
+      return false;
+    }
+    if (_formFilter != null && _formKey(entry) != _formFilter) {
+      return false;
+    }
+    final q = _searchQuery.trim().toLowerCase();
+    if (q.isEmpty) return true;
+    final haystack = [
+      _cleanTitle(
+        entry.sourceRequest?.title ?? entry.document?.title ?? '',
+      ),
+      entry.sourceRequest?.formName ?? '',
+      _moduleKey(entry),
+      _formKey(entry),
+      entry.document?.documentNumber ?? '',
+      entry.document?.creatorName ?? '',
+    ].join(' ').toLowerCase();
+    return haystack.contains(q);
+  }
+
+  List<_RequiredActionEntry> _sorted(List<_RequiredActionEntry> input) {
+    final copy = List<_RequiredActionEntry>.from(input);
+    copy.sort((a, b) {
+      final module = _moduleKey(a).compareTo(_moduleKey(b));
+      if (module != 0) return module;
+      final form = _formKey(a).toLowerCase().compareTo(_formKey(b).toLowerCase());
+      if (form != 0) return form;
+      return _sortTitle(a).compareTo(_sortTitle(b));
+    });
+    return copy;
+  }
+
+  Widget _buildFindBar(
+    BuildContext context, {
+    required List<_RequiredActionEntry> allEntries,
+  }) {
+    final modules =
+        allEntries.map(_moduleKey).toSet().toList(growable: false)
+          ..sort();
+    final forms = allEntries.map(_formKey).toSet().toList(growable: false)
+      ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+    final hasFilters =
+        _searchQuery.trim().isNotEmpty ||
+        _moduleFilter != null ||
+        _formFilter != null;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const SizedBox(height: 12),
+        TextField(
+          controller: _searchController,
+          onChanged: (value) {
+            setState(() {
+              _searchQuery = value;
+              // Searching signed forms should reveal them automatically.
+              if (value.trim().isNotEmpty) _showSecondary = true;
+            });
+          },
+          decoration: InputDecoration(
+            isDense: true,
+            hintText: 'Find a form by title, type, or module…',
+            prefixIcon: const Icon(Icons.search_rounded, size: 20),
+            suffixIcon: hasFilters
+                ? IconButton(
+                    tooltip: 'Clear filters',
+                    onPressed: () {
+                      _searchController.clear();
+                      setState(() {
+                        _searchQuery = '';
+                        _moduleFilter = null;
+                        _formFilter = null;
+                      });
+                    },
+                    icon: const Icon(Icons.close_rounded, size: 18),
+                  )
+                : null,
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(10),
+            ),
+            contentPadding: const EdgeInsets.symmetric(
+              horizontal: 12,
+              vertical: 10,
+            ),
+          ),
+        ),
+        if (modules.length > 1 || forms.length > 1) ...[
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              FilterChip(
+                label: const Text('All modules'),
+                selected: _moduleFilter == null,
+                onSelected: (_) => setState(() => _moduleFilter = null),
+              ),
+              ...modules.map(
+                (module) => FilterChip(
+                  label: Text(module),
+                  selected: _moduleFilter == module,
+                  onSelected: (selected) {
+                    setState(() {
+                      _moduleFilter = selected ? module : null;
+                      if (_formFilter != null &&
+                          !allEntries.any(
+                            (e) =>
+                                _moduleKey(e) == _moduleFilter &&
+                                _formKey(e) == _formFilter,
+                          )) {
+                        _formFilter = null;
+                      }
+                      if (_moduleFilter != null) _showSecondary = true;
+                    });
+                  },
+                ),
+              ),
+              if (forms.length > 1)
+                DropdownButtonHideUnderline(
+                  child: DropdownButton<String?>(
+                    value: _formFilter,
+                    hint: const Text('All form types'),
+                    isDense: true,
+                    items: [
+                      const DropdownMenuItem<String?>(
+                        value: null,
+                        child: Text('All form types'),
+                      ),
+                      ...forms.map(
+                        (form) => DropdownMenuItem<String?>(
+                          value: form,
+                          child: Text(form),
+                        ),
+                      ),
+                    ],
+                    onChanged: (value) {
+                      setState(() {
+                        _formFilter = value;
+                        if (value != null) _showSecondary = true;
+                      });
+                    },
+                  ),
+                ),
+            ],
+          ),
+        ],
+      ],
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
-    final entries = <_RequiredActionEntry>[
+    final allEntries = <_RequiredActionEntry>[
       ...widget.sourceRequests.map(_RequiredActionEntry.source),
       ...widget.documents.map(_RequiredActionEntry.document),
     ];
-    final shownEntries = _showAll ? entries : entries.take(4).toList();
+    final entries = allEntries.where(_matchesFilters).toList(growable: false);
+    final needsSignature = <_RequiredActionEntry>[];
+    final needsSetup = <_RequiredActionEntry>[];
+    final waiting = <_RequiredActionEntry>[];
+    final completed = <_RequiredActionEntry>[];
+    for (final entry in entries) {
+      switch (_priorityFor(entry)) {
+        case _ActionPriority.needsSignature:
+          needsSignature.add(entry);
+        case _ActionPriority.needsSetup:
+          needsSetup.add(entry);
+        case _ActionPriority.waiting:
+          waiting.add(entry);
+        case _ActionPriority.completed:
+          completed.add(entry);
+      }
+    }
+    final primary = [
+      ..._sorted(needsSignature),
+      ..._sorted(needsSetup),
+    ];
+    final secondary = [
+      ..._sorted(waiting),
+      ..._sorted(completed),
+    ];
+    final actionableCount = allEntries
+        .where(
+          (e) =>
+              _priorityFor(e) == _ActionPriority.needsSignature ||
+              _priorityFor(e) == _ActionPriority.needsSetup,
+        )
+        .length;
+    final filtering =
+        _searchQuery.trim().isNotEmpty ||
+        _moduleFilter != null ||
+        _formFilter != null;
+
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: DocuTrackerTokens.cardDecoration(context: context),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Row(
-            children: [
-              const Icon(Icons.task_alt_rounded, size: 21),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  'Required actions',
-                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.w800,
+          InkWell(
+            borderRadius: BorderRadius.circular(8),
+            onTap: () => setState(() => _collapsed = !_collapsed),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 2),
+              child: Row(
+                children: [
+                  Icon(
+                    _collapsed
+                        ? Icons.expand_more_rounded
+                        : Icons.expand_less_rounded,
+                    size: 22,
+                    color: DocuTrackerTokens.textMuted,
                   ),
-                ),
-              ),
-              if (entries.isNotEmpty)
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 9,
-                    vertical: 4,
-                  ),
-                  decoration: BoxDecoration(
-                    color: DocuTrackerTokens.brand.withValues(alpha: 0.12),
-                    borderRadius: BorderRadius.circular(999),
-                  ),
-                  child: Text(
-                    '${entries.length}',
-                    style: const TextStyle(
-                      color: DocuTrackerTokens.brand,
-                      fontWeight: FontWeight.w700,
-                      fontSize: 12,
+                  const SizedBox(width: 4),
+                  const Icon(Icons.task_alt_rounded, size: 21),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Required actions',
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.w800,
+                      ),
                     ),
                   ),
-                ),
-            ],
+                  if (actionableCount > 0)
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 9,
+                        vertical: 4,
+                      ),
+                      decoration: BoxDecoration(
+                        color: DocuTrackerTokens.brand.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(999),
+                      ),
+                      child: Text(
+                        '$actionableCount',
+                        style: const TextStyle(
+                          color: DocuTrackerTokens.brand,
+                          fontWeight: FontWeight.w700,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
           ),
+          if (!_collapsed) ...[
+          if (allEntries.isNotEmpty) _buildFindBar(context, allEntries: allEntries),
+          if (filtering)
+            Padding(
+              padding: const EdgeInsets.only(top: 6),
+              child: Text(
+                entries.isEmpty
+                    ? 'No forms match your search or filters.'
+                    : 'Showing ${entries.length} matching',
+                style: const TextStyle(
+                  color: DocuTrackerTokens.textMuted,
+                  fontSize: 12,
+                ),
+              ),
+            ),
           if (widget.loading) ...[
             const SizedBox(height: 10),
             const LinearProgressIndicator(minHeight: 2),
@@ -628,44 +938,64 @@ class _RequiredActionsPanelState extends State<_RequiredActionsPanel> {
               ],
             ),
           ],
-          if (shownEntries.isNotEmpty) ...[
-            const SizedBox(height: 12),
-            LayoutBuilder(
-              builder: (context, constraints) {
-                final itemWidth = constraints.maxWidth >= 720
-                    ? (constraints.maxWidth - 12) / 2
-                    : constraints.maxWidth;
-                return Wrap(
-                  spacing: 12,
-                  runSpacing: 10,
-                  children: shownEntries
-                      .map(
-                        (entry) => SizedBox(
-                          width: itemWidth,
-                          child: _buildActionCard(context, entry),
-                        ),
-                      )
-                      .toList(growable: false),
-                );
-              },
+          if (primary.isEmpty &&
+              secondary.isEmpty &&
+              !widget.loading &&
+              allEntries.isEmpty)
+            const Padding(
+              padding: EdgeInsets.only(top: 12),
+              child: Text(
+                'Nothing needs your attention right now.',
+                style: TextStyle(color: DocuTrackerTokens.textMuted),
+              ),
             ),
-          ],
-          if (entries.length > 4) ...[
-            const SizedBox(height: 6),
+          if (needsSignature.isNotEmpty)
+            _buildSection(
+              context,
+              title: 'Needs your signature',
+              entries: _sorted(needsSignature),
+            ),
+          if (needsSetup.isNotEmpty)
+            _buildSection(
+              context,
+              title: 'Needs setup',
+              entries: _sorted(needsSetup),
+            ),
+          if (secondary.isNotEmpty) ...[
+            const SizedBox(height: 8),
             Align(
               alignment: Alignment.centerLeft,
               child: TextButton.icon(
-                onPressed: () => setState(() => _showAll = !_showAll),
+                onPressed: () =>
+                    setState(() => _showSecondary = !_showSecondary),
                 icon: Icon(
-                  _showAll
+                  _showSecondary
                       ? Icons.expand_less_rounded
                       : Icons.expand_more_rounded,
                 ),
-                label: Text(_showAll ? 'Show less' : 'Show all actions'),
+                label: Text(
+                  _showSecondary
+                      ? 'Hide waiting & signed'
+                      : 'Show waiting & signed (${secondary.length})',
+                ),
               ),
             ),
+            if (_showSecondary) ...[
+              if (waiting.isNotEmpty)
+                _buildSection(
+                  context,
+                  title: 'Waiting on others',
+                  entries: _sorted(waiting),
+                ),
+              if (completed.isNotEmpty)
+                _buildSection(
+                  context,
+                  title: 'Signed / completed',
+                  entries: _sorted(completed),
+                ),
+            ],
           ],
-          if (entries.isNotEmpty) ...[
+          if (allEntries.isNotEmpty) ...[
             const SizedBox(height: 4),
             const Text(
               'DTR, RSP, and L&D records remain managed by their source modules.',
@@ -675,8 +1005,74 @@ class _RequiredActionsPanelState extends State<_RequiredActionsPanel> {
               ),
             ),
           ],
+          ],
         ],
       ),
+    );
+  }
+
+  Widget _buildSection(
+    BuildContext context, {
+    required String title,
+    required List<_RequiredActionEntry> entries,
+  }) {
+    // Group cards under module labels within the section.
+    final byModule = <String, List<_RequiredActionEntry>>{};
+    for (final entry in entries) {
+      byModule.putIfAbsent(_moduleKey(entry), () => []).add(entry);
+    }
+    final moduleOrder = ['RSP', 'L&D', 'DTR', 'DocuTracker'];
+    final modules = byModule.keys.toList()
+      ..sort((a, b) {
+        final ai = moduleOrder.indexOf(a);
+        final bi = moduleOrder.indexOf(b);
+        return (ai < 0 ? 99 : ai).compareTo(bi < 0 ? 99 : bi);
+      });
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const SizedBox(height: 14),
+        Text(
+          title,
+          style: const TextStyle(
+            fontWeight: FontWeight.w800,
+            fontSize: 13,
+            color: DocuTrackerTokens.textMuted,
+            letterSpacing: 0.2,
+          ),
+        ),
+        for (final module in modules) ...[
+          const SizedBox(height: 8),
+          Text(
+            module,
+            style: const TextStyle(
+              fontWeight: FontWeight.w700,
+              fontSize: 12,
+            ),
+          ),
+          const SizedBox(height: 6),
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final itemWidth = constraints.maxWidth >= 720
+                  ? (constraints.maxWidth - 12) / 2
+                  : constraints.maxWidth;
+              return Wrap(
+                spacing: 12,
+                runSpacing: 10,
+                children: byModule[module]!
+                    .map(
+                      (entry) => SizedBox(
+                        width: itemWidth,
+                        child: _buildActionCard(context, entry),
+                      ),
+                    )
+                    .toList(growable: false),
+              );
+            },
+          ),
+        ],
+      ],
     );
   }
 
@@ -689,7 +1085,9 @@ class _RequiredActionsPanelState extends State<_RequiredActionsPanel> {
         : isDtr
         ? 'DTR · Leave'
         : 'DocuTracker';
-    final title = request?.title ?? document?.title ?? 'Required action';
+    final title = _cleanTitle(
+      request?.title ?? document?.title ?? 'Required action',
+    );
     final needsSetup = request?.requiresSetup == true;
     final canSignNow = request?.hasUnsignedAssignedSlot == true;
     final alreadySigned =
@@ -707,13 +1105,7 @@ class _RequiredActionsPanelState extends State<_RequiredActionsPanel> {
         document != null &&
         request == null &&
         (document.sourceAction ?? '').trim().isNotEmpty;
-    final documentAlreadyHandled =
-        document != null &&
-        request == null &&
-        !documentActionPending &&
-        (document.viewerParticipatedInSource ||
-            document.viewerIsRoutingAssignee ||
-            document.signatureSignerIds.isNotEmpty);
+    final isNativeDocumentCard = document != null && request == null;
     final unassignedCount = request == null
         ? 0
         : request.signatureBundle.signatures
@@ -729,13 +1121,9 @@ class _RequiredActionsPanelState extends State<_RequiredActionsPanel> {
               : awaitingOthers
               ? 'View signature status'
               : 'Review and sign'
-        : documentAlreadyHandled
-        ? 'View completed form'
         : document?.sourceActionLabel ?? 'Review document';
     final statusHint = request == null
-        ? (documentAlreadyHandled
-              ? 'You already acted on this — reopen to review'
-              : null)
+        ? null
         : needsSetup
         ? unassignedCount > 0
               ? '$unassignedCount signer${unassignedCount == 1 ? '' : 's'} still unassigned'
@@ -751,12 +1139,12 @@ class _RequiredActionsPanelState extends State<_RequiredActionsPanel> {
         ? 'Needs setup'
         : canSignNow || documentActionPending
         ? 'Sign'
-        : alreadySigned || documentAlreadyHandled
+        : alreadySigned
         ? 'Signed'
         : awaitingOthers
         ? 'Pending'
         : 'Sign';
-    final showChip = request != null || documentAlreadyHandled || documentActionPending;
+    final showEsignChip = request != null || documentActionPending;
 
     return InkWell(
       borderRadius: BorderRadius.circular(12),
@@ -817,7 +1205,14 @@ class _RequiredActionsPanelState extends State<_RequiredActionsPanel> {
                           ),
                         ),
                       ),
-                      if (showChip) ...[
+                      if (isNativeDocumentCard) ...[
+                        const SizedBox(width: 6),
+                        DocuTrackerStatusBadge(
+                          status: document.status,
+                          compact: true,
+                          label: _statusLabel(document, document.status),
+                        ),
+                      ] else if (showEsignChip) ...[
                         const SizedBox(width: 6),
                         Container(
                           padding: const EdgeInsets.symmetric(
@@ -899,6 +1294,8 @@ class _RequiredActionEntry {
   final DocuTrackerDocument? document;
   final DocuTrackerRspSignatureRequest? sourceRequest;
 }
+
+enum _ActionPriority { needsSignature, needsSetup, waiting, completed }
 
 class _EmptyState extends StatelessWidget {
   const _EmptyState({this.onCreateTap});

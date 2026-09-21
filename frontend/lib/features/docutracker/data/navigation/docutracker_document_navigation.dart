@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import 'package:hrms_plaridel/features/docutracker/data/repositories/docutracker_repository.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document.dart';
+import 'package:hrms_plaridel/features/docutracker/models/document_status.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/pages/docutracker_document_detail_screen.dart';
 import 'package:hrms_plaridel/features/docutracker/services/docutracker_document_visibility.dart';
 
@@ -15,8 +16,8 @@ List<DocuTrackerDocument> docuTrackerDocumentsForDisplay({
   return DocuTrackerDocumentVisibility.filterForUser(documents, userId: userId);
 }
 
-/// Documents for Required actions: current work plus forms the viewer already
-/// signed/reviewed (kept visible so they do not vanish after completing).
+/// Documents for Required actions: only items that still need the viewer to act.
+/// Completed / past-participant native docs stay in the Documents table instead.
 List<DocuTrackerDocument> docuTrackerRequiredActionDocuments({
   required List<DocuTrackerDocument> documents,
   required String userId,
@@ -25,20 +26,32 @@ List<DocuTrackerDocument> docuTrackerRequiredActionDocuments({
   return documents
       .where((document) {
         if (document.sourceOnly) {
-          if ((document.sourceAction ?? '').trim().isNotEmpty) return true;
-          return document.viewerParticipatedInSource;
+          // Leave/DTR: only while a source action is still available.
+          return (document.sourceAction ?? '').trim().isNotEmpty;
         }
         if (uid.isEmpty) return false;
         if (DocuTrackerDocumentVisibility.isWorkInProgressDraft(document)) {
           return false;
         }
+        final status = document.status;
+        if (status == DocumentStatus.approved ||
+            status == DocumentStatus.rejected ||
+            status == DocumentStatus.cancelled) {
+          return false;
+        }
+        final isCurrentHolder = document.currentHolderId?.trim() == uid;
+        final isActiveReview =
+            status == DocumentStatus.pending ||
+            status == DocumentStatus.inReview ||
+            status == DocumentStatus.escalated ||
+            status == DocumentStatus.overdue ||
+            status == DocumentStatus.returned;
+        final isRoutingOnActive =
+            document.viewerIsRoutingAssignee && isActiveReview;
         final isSignatureAssignee = document.signatureSignerIds.any(
           (id) => id.trim() == uid,
         );
-        final isAssignedNow =
-            document.currentHolderId?.trim() == uid ||
-            document.viewerIsRoutingAssignee;
-        return isSignatureAssignee || isAssignedNow;
+        return isCurrentHolder || isRoutingOnActive || isSignatureAssignee;
       })
       .toList(growable: false);
 }

@@ -22,12 +22,68 @@ class _DocuTrackerOfficialSignatoriesScreenState
   List<OfficialSignatoryPeriod> _periods = const [];
   AutomaticMayorSignatory? _mayor;
   bool _loading = true;
+  bool _reResolving = false;
   String? _error;
 
   @override
   void initState() {
     super.initState();
     _load();
+  }
+
+  Future<void> _reResolveSigners() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Re-resolve form signers?'),
+        content: const Text(
+          'This fills empty automatic e-sign slots on existing RSP and L&D forms '
+          '(Prepared by, Checked by, Dept Head, Mayor, etc.). '
+          'Already assigned or signed slots are not changed.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Run backfill'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+
+    setState(() => _reResolving = true);
+    try {
+      final summary = await _repository.reResolveSourceSignatureAssignments();
+      if (!mounted) return;
+      final processed = summary['processed'] ?? 0;
+      final assigned = summary['assigned_forms'] ?? 0;
+      final skipped = summary['skipped_forms'] ?? 0;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          behavior: SnackBarBehavior.floating,
+          content: Text(
+            'Backfill done: $assigned form(s) updated, '
+            '$skipped already complete ($processed scanned).',
+          ),
+        ),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          behavior: SnackBarBehavior.floating,
+          content: Text(
+            error.toString().replaceFirst('Exception: ', ''),
+          ),
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _reResolving = false);
+    }
   }
 
   Future<void> _load() async {
@@ -100,6 +156,17 @@ class _DocuTrackerOfficialSignatoriesScreenState
       appBar: AppBar(
         title: const Text('Official Signatories'),
         actions: [
+          TextButton.icon(
+            onPressed: (_loading || _reResolving) ? null : _reResolveSigners,
+            icon: _reResolving
+                ? const SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.manage_history_rounded),
+            label: Text(_reResolving ? 'Backfilling…' : 'Re-resolve signers'),
+          ),
           IconButton(
             tooltip: 'Refresh',
             onPressed: _loading ? null : _load,
@@ -134,9 +201,69 @@ class _DocuTrackerOfficialSignatoriesScreenState
                   ),
                   const SizedBox(height: 16),
                   _AutomaticMayorSection(mayor: _mayor),
+                  const SizedBox(height: 16),
+                  _BackfillHintCard(onRun: _reResolveSigners, busy: _reResolving),
                 ],
               ),
             ),
+    );
+  }
+}
+
+class _BackfillHintCard extends StatelessWidget {
+  const _BackfillHintCard({required this.onRun, required this.busy});
+
+  final VoidCallback onRun;
+  final bool busy;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Container(
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        border: Border.all(color: theme.dividerColor),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Icon(Icons.manage_history_rounded),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Existing RSP / L&D forms',
+                  style: theme.textTheme.titleMedium,
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  'Forms saved before auto-assign may still have empty e-sign '
+                  'slots. Re-resolve fills only empty automatic slots '
+                  '(creator, HRMDO, department head, mayor).',
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                FilledButton.tonalIcon(
+                  onPressed: busy ? null : onRun,
+                  icon: busy
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.manage_history_rounded),
+                  label: Text(busy ? 'Backfilling…' : 'Re-resolve signers'),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

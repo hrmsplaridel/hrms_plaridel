@@ -9,6 +9,7 @@ const {
   assignRspSourceSigner,
   signRspSourceSlot,
   initializeCreatorSourceSignatures,
+  reResolveAutomaticSourceSignatures,
 } = require('../src/services/docutrackerRspSignatureService');
 
 const formId = '11111111-1111-4111-8111-111111111111';
@@ -709,6 +710,73 @@ test('assigned signer can sign with an owned saved signature and the action is a
       params.includes('source_signed')
     )
   );
+});
+
+test('re-resolve backfill only inserts empty automatic slots', async () => {
+  const formId2 = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
+  const inserts = [];
+  const pool = {
+    async query(sql, params = []) {
+      if (sql.includes('SELECT id, created_by FROM "selection_lineup_entries"')) {
+        return {
+          rowCount: 2,
+          rows: [
+            { id: formId, created_by: signerId },
+            { id: formId2, created_by: signerId },
+          ],
+        };
+      }
+      if (sql.includes('SELECT * FROM "selection_lineup_entries"')) {
+        return {
+          rowCount: 1,
+          rows: [{ id: params[0], created_by: signerId, department: null }],
+        };
+      }
+      if (sql.includes('FROM users') && sql.includes('is_active = true')) {
+        return { rowCount: 1, rows: [{ id: params[0] }] };
+      }
+      if (sql.includes('INSERT INTO docutracker_rsp_source_signatures')) {
+        // First form already has prepared_by → DO NOTHING; second inserts.
+        if (params[1] === formId) {
+          return { rowCount: 0, rows: [] };
+        }
+        inserts.push({ table: params[0], form: params[1], slot: params[2] });
+        return { rowCount: 1, rows: [{ id: 'new-sig' }] };
+      }
+      if (sql.includes('UPDATE "selection_lineup_entries"')) {
+        return { rowCount: 1, rows: [] };
+      }
+      if (sql.includes('INSERT INTO docutracker_governance_audit')) {
+        return { rowCount: 1, rows: [] };
+      }
+      if (sql.includes('SELECT to_jsonb(source_row)')) {
+        return {
+          rowCount: 1,
+          rows: [{ source_record: { id: params[0], vacant_position: 'AO' } }],
+        };
+      }
+      if (sql.includes('INSERT INTO notifications')) {
+        return { rowCount: 1, rows: [] };
+      }
+      // Other RSP/L&D tables with automatic rules: empty.
+      if (sql.includes('SELECT id, created_by FROM "')) {
+        return { rowCount: 0, rows: [] };
+      }
+      throw new Error(`Unexpected query: ${sql}`);
+    },
+  };
+
+  const result = await reResolveAutomaticSourceSignatures(
+    pool,
+    { id: adminId, role: 'admin' },
+    'rsp'
+  );
+  assert.equal(result.processed, 2);
+  assert.equal(result.assigned_forms, 1);
+  assert.equal(result.skipped_forms, 1);
+  assert.deepEqual(inserts, [
+    { table: 'selection_lineup_entries', form: formId2, slot: 'prepared_by' },
+  ]);
 });
 
 test('IDP create snapshots automatic reviewed/noted/approved signers when resolvable', async () => {

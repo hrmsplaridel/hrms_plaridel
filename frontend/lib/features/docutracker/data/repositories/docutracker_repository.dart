@@ -126,6 +126,24 @@ class DocuTrackerRepository implements DocuTrackerPermissionsDataSource {
     }
   }
 
+  /// Admin backfill: fill empty automatic RSP/L&D signature slots on existing forms.
+  /// Does not override already assigned or signed slots.
+  /// [sourceModule] may be `rsp`, `ld`, or null for both.
+  Future<Map<String, dynamic>> reResolveSourceSignatureAssignments({
+    String? sourceModule,
+  }) async {
+    try {
+      final module = sourceModule?.trim().toLowerCase() ?? '';
+      final path = module.isEmpty
+          ? '$_base/sources/signature-assignments/re-resolve'
+          : '$_base/sources/${Uri.encodeComponent(module)}/signature-assignments/re-resolve';
+      final response = await ApiClient.instance.post<Map<String, dynamic>>(path);
+      return response.data ?? const <String, dynamic>{};
+    } catch (error) {
+      throw Exception(_apiErrorMessage(error));
+    }
+  }
+
   Future<DocuTrackerResult<DocuTrackerLinkedSourceDocument>>
   getLinkedSourceDocument({
     required String sourceModule,
