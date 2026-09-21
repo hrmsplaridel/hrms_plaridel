@@ -316,15 +316,7 @@ class _AdminLeaveRequestDetailsPanel extends StatelessWidget {
         (request.departmentHeadReviewerName ?? '').trim().isNotEmpty
         ? request.departmentHeadReviewerName!.trim()
         : 'Department Head';
-    final departmentHeadReviewedAt =
-        request.departmentHeadReviewedAt ??
-        (request.status == LeaveRequestStatus.pendingHr ||
-                request.status == LeaveRequestStatus.approved ||
-                request.status == LeaveRequestStatus.rejected ||
-                request.status == LeaveRequestStatus.rejectedByHr ||
-                request.status == LeaveRequestStatus.rejectedByDepartmentHead
-            ? request.reviewedAt
-            : null);
+    final departmentHeadReviewedAt = request.departmentHeadReviewedAt;
     final departmentHeadRemarks =
         (request.departmentHeadRemarks ?? '').trim().isNotEmpty
         ? request.departmentHeadRemarks
@@ -335,11 +327,7 @@ class _AdminLeaveRequestDetailsPanel extends StatelessWidget {
     final departmentHeadAction = request.departmentHeadAction;
 
     final deptHeadApprovedStage =
-        departmentHeadAction == 'department_head_approved' ||
-        status == LeaveRequestStatus.pendingHr ||
-        status == LeaveRequestStatus.approved ||
-        status == LeaveRequestStatus.rejected ||
-        status == LeaveRequestStatus.rejectedByHr;
+        departmentHeadAction == 'department_head_approved';
 
     final deptHeadRejected =
         departmentHeadAction == 'department_head_rejected' ||
