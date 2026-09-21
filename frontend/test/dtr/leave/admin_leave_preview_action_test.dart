@@ -30,7 +30,7 @@ void main() {
         onPrint: (_) async {},
       ))),
     ));
-    expect(find.text('Approved by Department Head'), findsNothing);
+    expect(find.text('Approved by Department Reviewer'), findsNothing);
     expect(find.text('Forwarded to HR'), findsNothing);
     expect(find.text('HR Final Review'), findsOneWidget);
   });
@@ -60,7 +60,7 @@ void main() {
         onPrint: (_) async {},
       ))),
     ));
-    expect(find.text('Approved by Department Head'), findsOneWidget);
+    expect(find.text('Approved by Department Reviewer'), findsOneWidget);
     expect(find.text('Forwarded to HR'), findsOneWidget);
     expect(find.textContaining('Backup Reviewer'), findsWidgets);
   });

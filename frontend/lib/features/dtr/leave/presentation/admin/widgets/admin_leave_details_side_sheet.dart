@@ -315,7 +315,7 @@ class _AdminLeaveRequestDetailsPanel extends StatelessWidget {
     final departmentHeadReviewer =
         (request.departmentHeadReviewerName ?? '').trim().isNotEmpty
         ? request.departmentHeadReviewerName!.trim()
-        : 'Department Head';
+        : 'Department Reviewer';
     final departmentHeadReviewedAt = request.departmentHeadReviewedAt;
     final departmentHeadRemarks =
         (request.departmentHeadRemarks ?? '').trim().isNotEmpty
@@ -351,7 +351,7 @@ class _AdminLeaveRequestDetailsPanel extends StatelessWidget {
       ),
       if (deptHeadApprovedStage)
         LeaveHistoryEvent(
-          label: 'Approved by Department Head',
+          label: 'Approved by Department Reviewer',
           dateTime: departmentHeadReviewedAt,
           actor: departmentHeadReviewer,
           remarks: departmentHeadRemarks,
@@ -366,7 +366,7 @@ class _AdminLeaveRequestDetailsPanel extends StatelessWidget {
         ),
       if (deptHeadRejected)
         LeaveHistoryEvent(
-          label: 'Rejected by Department Head',
+          label: 'Rejected by Department Reviewer',
           dateTime: departmentHeadReviewedAt,
           actor: departmentHeadReviewer,
           remarks:
@@ -384,7 +384,7 @@ class _AdminLeaveRequestDetailsPanel extends StatelessWidget {
         ),
       if (deptHeadReturned)
         LeaveHistoryEvent(
-          label: 'Returned by Department Head',
+          label: 'Returned by Department Reviewer',
           dateTime: departmentHeadReviewedAt,
           actor: departmentHeadReviewer,
           remarks: departmentHeadRemarks,
