@@ -825,30 +825,36 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
         }
       }
 
-      final signerInfo = await _loadSignatureInfoByUserId(
-        userId: target.reviewerId ?? auth.user?.id,
-        fallbackName: (target.reviewerName?.trim().isNotEmpty == true)
-            ? target.reviewerName!.trim()
-            : (auth.displayName.trim().isNotEmpty
-                  ? auth.displayName.trim()
-                  : 'Authorized Officer'),
-        fallbackTitle: (target.reviewerTitle?.trim().isNotEmpty == true)
-            ? target.reviewerTitle!.trim()
-            : _reviewerTitleFromRole(target.reviewerRole ?? auth.user?.role),
-      );
+      // Run the three independent lookups concurrently — they all depend on
+      // `target` but not on each other, so there is no reason to wait for
+      // one before starting the next.
+      if (id == null || id.isEmpty) {
+        throw StateError('A saved leave request is required to print the form');
+      }
+      final results = await Future.wait([
+        _loadSignatureInfoByUserId(
+          userId: target.reviewerId ?? auth.user?.id,
+          fallbackName: (target.reviewerName?.trim().isNotEmpty == true)
+              ? target.reviewerName!.trim()
+              : (auth.displayName.trim().isNotEmpty
+                    ? auth.displayName.trim()
+                    : 'Authorized Officer'),
+          fallbackTitle: (target.reviewerTitle?.trim().isNotEmpty == true)
+              ? target.reviewerTitle!.trim()
+              : _reviewerTitleFromRole(target.reviewerRole ?? auth.user?.role),
+        ),
+        loadLeaveFormSignatories(request: target),
+        provider.fetchFormCreditsForRequestStrict(id),
+      ]);
+
+      final signerInfo = results[0] as ({String name, String? title});
+      final formSignatories = results[1] as LeaveFormSignatories;
+      final balances = results[2] as List<LeaveBalance>;
+
       target = target.copyWith(
         reviewerName: signerInfo.name,
         reviewerTitle: signerInfo.title,
       );
-      final formSignatories = await loadLeaveFormSignatories(request: target);
-
-      // Use the strict variant so any balance API failure throws rather than
-      // returning an empty list that would silently produce zero credit figures
-      // on the printed certification.
-      if (id == null || id.isEmpty) {
-        throw StateError('A saved leave request is required to print the form');
-      }
-      final balances = await provider.fetchFormCreditsForRequestStrict(id);
 
       if (!preview && mounted) {
         ScaffoldMessenger.of(
