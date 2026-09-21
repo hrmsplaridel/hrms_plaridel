@@ -1,9 +1,12 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 
 import 'package:hrms_plaridel/core/api/client.dart';
 import 'package:hrms_plaridel/core/api/user_facing_api_error.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/core/utils/form_pdf.dart';
+import 'package:hrms_plaridel/features/docutracker/data/providers/docutracker_provider.dart';
+import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_rsp_signature_section.dart';
 import 'package:hrms_plaridel/features/learning_development/models/action_brainstorming_coaching.dart';
 import 'package:hrms_plaridel/features/recruitment/presentation/admin/widgets/rsp_records_list_table.dart';
 import 'package:hrms_plaridel/shared/widgets/read_only_saved_entry_dialog.dart';
@@ -272,10 +275,12 @@ class _ActionBrainstormingAdminSectionState
 
   Future<void> _onSave(ActionBrainstormingEntry entry) async {
     try {
+      final ActionBrainstormingEntry saved;
       if (entry.id == null) {
-        await ActionBrainstormingRepo.instance.insert(entry);
+        saved = await ActionBrainstormingRepo.instance.insert(entry);
       } else {
         await ActionBrainstormingRepo.instance.update(entry);
+        saved = entry;
       }
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -283,7 +288,8 @@ class _ActionBrainstormingAdminSectionState
           content: Text('Action Brainstorming worksheet saved.'),
         ),
       );
-      setState(() => _editing = null);
+      // Keep the editor open so the DocuTracker signature panel is available.
+      setState(() => _editing = saved);
       _load();
     } catch (e) {
       if (!mounted) return;
@@ -311,20 +317,60 @@ class _ActionBrainstormingAdminSectionState
 
   Future<void> _print(ActionBrainstormingEntry entry) async {
     try {
+      final signatureProvider = context.read<DocuTrackerProvider>();
+      final signatures = entry.id == null
+          ? null
+          : await signatureProvider.loadSourceSignatures(
+              sourceModule: 'ld',
+              sourceTable: ActionBrainstormingEntry.tableName,
+              sourceRecordId: entry.id!,
+            );
+      if (entry.id != null && signatures == null) {
+        throw StateError(
+          signatureProvider.sourceSignatureError ??
+              'The form signatures could not be loaded.',
+        );
+      }
+      if (!mounted) return;
       await FormPdf.printForm(
         context: context,
-        buildDocument: () => FormPdf.buildActionBrainstormingCoachingPdf(entry),
+        buildDocument: () => FormPdf.buildActionBrainstormingCoachingPdf(
+          entry,
+          signatures: signatures,
+        ),
         filename: 'Action_Brainstorming_Coaching.pdf',
         format: FormPdf.pageLetterLandscape,
         printModule: 'ld',
         printFormKey: 'action_brainstorming',
       );
-    } catch (_) {}
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Print failed. ${userFacingApiError(error)}')),
+      );
+    }
   }
 
   Future<void> _download(ActionBrainstormingEntry entry) async {
     try {
-      final doc = await FormPdf.buildActionBrainstormingCoachingPdf(entry);
+      final signatureProvider = context.read<DocuTrackerProvider>();
+      final signatures = entry.id == null
+          ? null
+          : await signatureProvider.loadSourceSignatures(
+              sourceModule: 'ld',
+              sourceTable: ActionBrainstormingEntry.tableName,
+              sourceRecordId: entry.id!,
+            );
+      if (entry.id != null && signatures == null) {
+        throw StateError(
+          signatureProvider.sourceSignatureError ??
+              'The form signatures could not be loaded.',
+        );
+      }
+      final doc = await FormPdf.buildActionBrainstormingCoachingPdf(
+        entry,
+        signatures: signatures,
+      );
       await FormPdf.sharePdf(doc, name: 'Action_Brainstorming_Coaching.pdf');
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -332,9 +378,9 @@ class _ActionBrainstormingAdminSectionState
       );
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Download failed: $e')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Download failed. ${userFacingApiError(e)}')),
+      );
     }
   }
 
@@ -434,6 +480,19 @@ class _ActionBrainstormingAdminSectionState
             onPrint: _print,
             onDownloadPdf: _download,
           ),
+          if (_editing?.id != null) ...[
+            const SizedBox(height: 16),
+            DocuTrackerRspSignatureSection(
+              sourceModule: 'ld',
+              sourceTable: ActionBrainstormingEntry.tableName,
+              sourceRecordId: _editing!.id!,
+              helperText:
+                  'Certified by is assigned to the department head who must sign.',
+              slots: const [
+                DocuTrackerRspSignatureSlot('certified_by', 'Certified by'),
+              ],
+            ),
+          ],
           const SizedBox(height: 24),
         ],
         _toolbar(context),

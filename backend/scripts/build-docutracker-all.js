@@ -35,6 +35,7 @@ const postSections = [
   ["24 - EFFECTIVE-DATED OFFICIAL SIGNATORIES", "migrate-docutracker-official-signatories-v1.sql"],
   ["25 - AUTOMATIC MAYOR LEAVE SIGNATORY", "migrate-docutracker-automatic-mayor-signatory-v2.sql"],
   ["26 - SOURCE FORM PREPARER OWNERSHIP", "migrate-docutracker-source-preparer-ownership-v1.sql"],
+  ["27 - SOURCE SIGNATURE ASSIGNMENT SOURCE", "migrate-docutracker-source-signature-assignment-source-v1.sql"],
 ];
 
 function readBody(file) {

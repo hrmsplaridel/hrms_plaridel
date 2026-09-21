@@ -659,6 +659,8 @@ router.post('/:table', async (req, res) => {
     const values = keys.map((k) => payload[k]);
     const q = `INSERT INTO ${quoteIdent(table)} (${colsList}) VALUES (${phList}) RETURNING *`;
     const result = await client.query(q, values);
+    // Snapshots automatic RSP/L&D signers (creator, dept head, HRMDO, mayor)
+    // in the same transaction. Unresolved roles stay empty for admin recovery.
     await initializeCreatorSourceSignatures(
       client,
       req.user,
@@ -713,16 +715,29 @@ router.put('/:table/:id', async (req, res) => {
       .join(', ');
     const values = keys.map((k) => payload[k]);
     values.push(id);
-    const q = `UPDATE ${quoteIdent(table)} SET ${setClause} WHERE id = $${values.length} RETURNING *`;
-    const result = await pool.query(q, values);
-    if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'Not found' });
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const q = `UPDATE ${quoteIdent(table)} SET ${setClause} WHERE id = $${values.length} RETURNING *`;
+      const result = await client.query(q, values);
+      if (result.rows.length === 0) {
+        await client.query('ROLLBACK');
+        return res.status(404).json({ error: 'Not found' });
+      }
+      // Fill any still-missing automatic signature slots (does not override existing).
+      await initializeCreatorSourceSignatures(client, req.user, table, id);
+      await client.query('COMMIT');
+      return res.json(result.rows[0]);
+    } catch (inner) {
+      try { await client.query('ROLLBACK'); } catch (_) {}
+      throw inner;
+    } finally {
+      client.release();
     }
-    return res.json(result.rows[0]);
   } catch (err) {
-    if (err.code === '42P01') {
+    if (err.code === '42P01' || err.code === '42703') {
       return res.status(503).json({
-        error: 'Form table not found in database. Run init-schema.sql.',
+        error: 'Form signatures are not initialized. Apply the latest DocuTracker migrations.',
       });
     }
     console.error('[rspLdSavedEntries PUT]', err);

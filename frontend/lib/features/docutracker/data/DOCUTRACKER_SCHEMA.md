@@ -172,6 +172,8 @@ entry to `leave_request_history`.
 | slot_key | TEXT | Fixed field such as `prepared_by`, `checked_by`, `applicant`, `noted_by`, `reviewed_by`, `approved_by`, or `certified_by` |
 | label | TEXT | Human-readable signature field label |
 | assigned_signer_id | UUID | Active HRMS user authorized to sign the field |
+| assignment_source | TEXT | How the assignee was set: `creator`, `automatic`, `admin_recovery`, or `manual` |
+| recovery_remarks | TEXT | Required remarks when an admin overrides a creator or automatic assignment |
 | signature_asset_id | UUID | Private signature asset selected by that user |
 | signed_by | UUID | Authenticated user who last signed the field |
 | signer_name_snapshot | TEXT | Signer name retained for print and audit display |
@@ -191,9 +193,12 @@ user. Assignment and signing events are also appended to
 The source tables `applicants_profile_entries`, `selection_lineup_entries`,
 `computation_of_points_entries`, `turn_around_time_entries`, and `idp_entries`
 have a nullable `created_by` foreign key to `users`. New rows set it from the
-authenticated server user and create the matching `prepared_by` assignment in
-the same transaction. It remains null on legacy rows so their established
-manual signer assignments continue to work.
+authenticated server user and create matching automatic signature assignments in
+the same transaction (`prepared_by` for the creator; department head, HRMDO
+official signatory / Leave Credit Certifier, and Mayor where configured). It
+remains null on legacy rows so their established manual signer assignments
+continue to work. Unresolved automatic roles leave the slot empty for
+administrator recovery with remarks.
 
 The RSP and L&D signature-request feeds expose unassigned forms to
 administrators for signer setup. Non-admin users receive only forms assigned to

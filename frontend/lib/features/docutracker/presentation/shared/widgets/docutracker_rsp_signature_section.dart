@@ -13,14 +13,19 @@ class DocuTrackerRspSignatureSlot {
 class DocuTrackerRspSignatureSection extends StatelessWidget {
   const DocuTrackerRspSignatureSection({
     super.key,
+    this.sourceModule = 'rsp',
     required this.sourceTable,
     required this.sourceRecordId,
     required this.slots,
+    this.helperText =
+        'Prepared by is assigned to the form creator. Other fields are assigned to the person who must sign.',
   });
 
+  final String sourceModule;
   final String sourceTable;
   final String sourceRecordId;
   final List<DocuTrackerRspSignatureSlot> slots;
+  final String helperText;
 
   @override
   Widget build(BuildContext context) {
@@ -38,7 +43,7 @@ class DocuTrackerRspSignatureSection extends StatelessWidget {
           ),
           const SizedBox(height: 4),
           Text(
-            'Prepared by is assigned to the form creator. Other fields are assigned to the person who must sign.',
+            helperText,
             style: DocuTrackerTokens.subtitleStyle(context),
           ),
           const SizedBox(height: 12),
@@ -56,9 +61,9 @@ class DocuTrackerRspSignatureSection extends StatelessWidget {
                         width: width,
                         child: DocuTrackerSourceSignatureCard(
                           key: ValueKey(
-                            'rsp-signature-$sourceTable-$sourceRecordId-${slot.key}',
+                            'rsp-signature-$sourceModule-$sourceTable-$sourceRecordId-${slot.key}',
                           ),
-                          sourceModule: 'rsp',
+                          sourceModule: sourceModule,
                           sourceTable: sourceTable,
                           sourceRecordId: sourceRecordId,
                           slotKey: slot.key,

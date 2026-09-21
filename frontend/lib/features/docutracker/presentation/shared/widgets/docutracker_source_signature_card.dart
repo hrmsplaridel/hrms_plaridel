@@ -160,6 +160,25 @@ class _DocuTrackerSourceSignatureCardState
       ),
     );
     if (!mounted || signerId == null) return;
+
+    final current = _bundle?.signatureFor(widget.slotKey);
+    final needsRecoveryRemarks =
+        current != null &&
+        current.assignedSignerId.trim().isNotEmpty &&
+        current.assignedSignerId != signerId &&
+        (current.assignmentSource == 'creator' ||
+            current.assignmentSource == 'automatic');
+
+    String? recoveryRemarks;
+    if (needsRecoveryRemarks) {
+      recoveryRemarks = await _promptRecoveryRemarks(
+        current.assignmentSource == 'creator'
+            ? 'This field belongs to the form creator. Enter recovery remarks to reassign it.'
+            : 'This signer was assigned automatically. Enter recovery remarks to override it.',
+      );
+      if (!mounted || recoveryRemarks == null) return;
+    }
+
     setState(() {
       _assigning = true;
       _error = null;
@@ -171,6 +190,7 @@ class _DocuTrackerSourceSignatureCardState
       sourceRecordId: widget.sourceRecordId,
       slotKey: widget.slotKey,
       assignedSignerId: signerId,
+      recoveryRemarks: recoveryRemarks,
     );
     if (!mounted) return;
     setState(() {
@@ -183,6 +203,52 @@ class _DocuTrackerSourceSignatureCardState
       }
     });
     if (bundle != null) widget.onChanged?.call(bundle);
+  }
+
+  Future<String?> _promptRecoveryRemarks(String message) async {
+    final controller = TextEditingController();
+    final remarks = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: const Text('Recovery remarks required'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(message),
+              const SizedBox(height: 12),
+              TextField(
+                controller: controller,
+                autofocus: true,
+                maxLength: 500,
+                minLines: 2,
+                maxLines: 4,
+                decoration: const InputDecoration(
+                  labelText: 'Remarks (min 5 characters)',
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () {
+                final value = controller.text.trim();
+                if (value.length < 5) return;
+                Navigator.pop(dialogContext, value);
+              },
+              child: const Text('Reassign'),
+            ),
+          ],
+        );
+      },
+    );
+    controller.dispose();
+    return remarks;
   }
 
   Future<void> _sign() async {
@@ -343,6 +409,8 @@ class _DocuTrackerSourceSignatureCardState
               Text(
                 isCreatorAssigned
                     ? 'Prepared by ${signature!.assignedSignerName}'
+                    : signature?.assignmentSource == 'automatic'
+                    ? 'Automatically assigned to ${signature!.assignedSignerName}'
                     : 'Assigned to ${signature!.assignedSignerName}',
                 textAlign: TextAlign.center,
                 style: const TextStyle(

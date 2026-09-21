@@ -45,11 +45,11 @@ same geometry can be rendered on different screen sizes and in PDF output.
 | POST | `/api/docutracker/sources/dtr/leave_requests/{leaveRequestId}/signatures/hr_approver/sign` | Add or replace the authenticated HR/admin signature before final approval |
 | GET | `/api/docutracker/sources/rsp/{table}/{recordId}/signatures` | Load the configured signature fields for an authorized saved RSP form |
 | GET | `/api/docutracker/sources/rsp/signature-requests` | List saved RSP forms needing admin signer setup or a signature from the authenticated user, including the protected form preview payload; completed forms are omitted |
-| PUT | `/api/docutracker/sources/rsp/{table}/{recordId}/signatures/{slot}/assignment` | Admin-only assignment of an active HRMS user to an RSP signature field; creator-owned `prepared_by` recovery reassignment requires `recovery_remarks` |
+| PUT | `/api/docutracker/sources/rsp/{table}/{recordId}/signatures/{slot}/assignment` | Admin-only assignment of an active HRMS user to an RSP signature field; overriding `creator` or `automatic` assignments requires `recovery_remarks` (min 5 characters) |
 | POST | `/api/docutracker/sources/rsp/{table}/{recordId}/signatures/{slot}/sign` | Add or replace the authenticated assigned user's RSP form signature |
 | GET | `/api/docutracker/sources/ld/{table}/{recordId}/signatures` | Load configured signature fields for an authorized saved L&D form |
 | GET | `/api/docutracker/sources/ld/signature-requests` | List L&D forms needing admin signer setup or a signature from the authenticated user |
-| PUT | `/api/docutracker/sources/ld/{table}/{recordId}/signatures/{slot}/assignment` | Admin-only assignment of an active HRMS user to an L&D signature field; creator-owned `prepared_by` recovery reassignment requires `recovery_remarks` |
+| PUT | `/api/docutracker/sources/ld/{table}/{recordId}/signatures/{slot}/assignment` | Admin-only assignment of an active HRMS user to an L&D signature field; overriding `creator` or `automatic` assignments requires `recovery_remarks` (min 5 characters) |
 | POST | `/api/docutracker/sources/ld/{table}/{recordId}/signatures/{slot}/sign` | Add or replace the authenticated assigned user's L&D form signature |
 
 The RSP and L&D signature-request feeds return `503` when their required source
@@ -70,27 +70,44 @@ Saved RSP forms use fixed signature slots defined by the official form layout.
 Supported records are Applicants Profile (`prepared_by`, `checked_by`),
 Selection Line-Up (`prepared_by`), Computation of Points (`prepared_by`), Work
 Experience Sheet (`applicant`), and Turn Around Time (`prepared_by`,
-`noted_by`). For newly created records, `prepared_by` is atomically assigned to
-the authenticated form creator. Other fields retain administrator assignment.
-Only that authenticated account receives `can_sign: true` and may draw, select,
-or replace its own saved signature. Assignment changes and signature changes
-are transactional and recorded in the DocuTracker governance audit. The BI
-Form has no signature field in its current official layout.
+`noted_by`). On create, DocuTracker snapshots automatic assignments in the same
+transaction:
+
+- `prepared_by` → authenticated form creator
+- Applicants Profile `checked_by` → configured HRMDO official signatory
+  (`leave_credit_certifier`)
+- Turn Around Time `noted_by` → configured HRMDO official signatory
+
+Only the assigned active account receives `can_sign: true` and may draw, select,
+or replace its own saved signature. If a required automatic signer cannot be
+resolved, that slot stays unassigned for administrator recovery. Assignment
+changes and signature changes are transactional and recorded in the DocuTracker
+governance audit. The BI Form has no signature field in its current official
+layout.
 
 Saved L&D forms use the same server-authorized assignment and signing rules.
 Supported records are Individual Development Plan (`prepared_by`,
 `reviewed_by`, `noted_by`, and `approved_by`) and Action Brainstorming and
-Coaching (`certified_by`). A new IDP assigns `prepared_by` to its authenticated
-creator; remaining fields still require administrator assignment. Administrators can discover forms with unassigned
-fields through the L&D signature-request endpoint. Assigned users see only
-their own requests. Training Needs Analysis and Performance Evaluation are not
-given artificial signature fields because their current print layouts contain
-none.
+Coaching (`certified_by`). On create:
+
+- IDP `prepared_by` → authenticated form creator
+- IDP `reviewed_by` → active Department Head for the form department name
+- IDP `noted_by` → configured HRMDO official signatory
+- IDP `approved_by` → active Mayor
+- Action Brainstorming `certified_by` → active Department Head for the selected
+  department
+
+Administrators can discover forms with unassigned fields through the signature-
+request endpoints. Assigned users see only their own requests. Training Needs
+Analysis and Performance Evaluation are not given artificial signature fields
+because their current print layouts contain none.
 
 Each returned signature includes field-level `can_assign` and
-`assignment_source`. A creator-owned field reports `assignment_source:
-"creator"` and is hidden from normal reassignment controls. Existing records
-without creator ownership keep the legacy manual-assignment behavior.
+`assignment_source` (`creator`, `automatic`, `admin_recovery`, or `manual`). A
+creator-owned field reports `assignment_source: "creator"` and hides casual
+reassignment. Automatic fields report `assignment_source: "automatic"` and allow
+admin recovery with `recovery_remarks`. Existing records without creator
+ownership keep the legacy manual-assignment behavior.
 
 Builder responses also include `format_version`. New builder content uses
 version `2`, which renders the official `assets/forms/a4_letter.pdf` full-page

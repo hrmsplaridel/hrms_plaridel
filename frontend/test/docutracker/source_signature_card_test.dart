@@ -126,4 +126,28 @@ void main() {
       expect(find.text('Add Signature'), findsOneWidget);
     },
   );
+
+  testWidgets('automatic assignment shows recovery-capable change control', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      _subject(
+        _bundle(
+          canAssign: true,
+          assignedSignerId: 'head-1',
+          assignedSignerName: 'Department Head',
+          canSign: false,
+          fieldCanAssign: true,
+          assignmentSource: 'automatic',
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(
+      find.text('Automatically assigned to Department Head'),
+      findsOneWidget,
+    );
+    expect(find.text('Change signer'), findsOneWidget);
+  });
 }

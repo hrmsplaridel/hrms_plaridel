@@ -656,11 +656,16 @@ class DocuTrackerRepository implements DocuTrackerPermissionsDataSource {
     required String sourceRecordId,
     required String slotKey,
     required String assignedSignerId,
+    String? recoveryRemarks,
   }) async {
     try {
       final response = await ApiClient.instance.put<Map<String, dynamic>>(
         '${_sourceSignaturePath(sourceModule: sourceModule, sourceTable: sourceTable, sourceRecordId: sourceRecordId)}/${Uri.encodeComponent(slotKey)}/assignment',
-        data: <String, dynamic>{'assigned_signer_id': assignedSignerId},
+        data: <String, dynamic>{
+          'assigned_signer_id': assignedSignerId,
+          if (recoveryRemarks != null && recoveryRemarks.trim().isNotEmpty)
+            'recovery_remarks': recoveryRemarks.trim(),
+        },
       );
       final data = response.data;
       if (data == null) {

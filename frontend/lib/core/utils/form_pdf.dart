@@ -895,21 +895,14 @@ class FormPdf {
     String value, {
     DocuTrackerSourceSignature? signature,
   }) => pw.Column(
-    crossAxisAlignment: pw.CrossAxisAlignment.start,
+    crossAxisAlignment: pw.CrossAxisAlignment.center,
     mainAxisSize: pw.MainAxisSize.min,
     children: [
-      pw.Text(label, style: const pw.TextStyle(fontSize: 10)),
-      pw.SizedBox(
-        height: 28,
-        child: signature?.isSigned == true
-            ? pw.Center(
-                child: pw.Image(
-                  pw.MemoryImage(signature!.signatureImageBytes!),
-                  fit: pw.BoxFit.contain,
-                ),
-              )
-            : null,
+      pw.Align(
+        alignment: pw.Alignment.centerLeft,
+        child: pw.Text(label, style: const pw.TextStyle(fontSize: 10)),
       ),
+      _signatureImage(signature, height: 28),
       pw.Text(
         _signatureName(signature, value),
         textAlign: pw.TextAlign.center,
@@ -930,20 +923,32 @@ class FormPdf {
         : assignedSignerName;
   }
 
+  /// Renders cropped signature ink without expanding to the parent width.
+  ///
+  /// When [width] is set (e.g. matching a printed-name line), the ink is
+  /// centered inside that band so it sits over the name instead of the
+  /// full column (which previously made signatures look shifted right).
   static pw.Widget _signatureImage(
     DocuTrackerSourceSignature? signature, {
     double height = 26,
+    double? width,
   }) {
-    if (signature?.isSigned != true) return pw.SizedBox(height: height);
-    return pw.SizedBox(
+    if (signature?.isSigned != true) {
+      return pw.SizedBox(height: height, width: width);
+    }
+    final image = pw.Image(
+      pw.MemoryImage(signature!.signatureImageBytes!),
+      fit: pw.BoxFit.contain,
       height: height,
-      child: pw.Center(
-        child: pw.Image(
-          pw.MemoryImage(signature!.signatureImageBytes!),
-          fit: pw.BoxFit.contain,
-        ),
-      ),
     );
+    if (width != null) {
+      return pw.SizedBox(
+        width: width,
+        height: height,
+        child: pw.Center(child: image),
+      );
+    }
+    return pw.SizedBox(height: height, child: image);
   }
 
   /// Signature line with extra blank space for a pen signature, a printed
@@ -962,7 +967,7 @@ class FormPdf {
         label,
         style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold),
       ),
-      _signatureImage(signature, height: 30),
+      _signatureImage(signature, height: 30, width: lineWidth),
       pw.Container(
         width: lineWidth,
         decoration: const pw.BoxDecoration(
@@ -976,7 +981,10 @@ class FormPdf {
       ),
       if (caption != null) ...[
         pw.SizedBox(height: 4),
-        pw.Text(caption, style: const pw.TextStyle(fontSize: 8)),
+        pw.SizedBox(
+          width: lineWidth,
+          child: pw.Text(caption, style: const pw.TextStyle(fontSize: 8)),
+        ),
       ],
     ],
   );
@@ -2792,20 +2800,27 @@ class FormPdf {
                   fontWeight: pw.FontWeight.bold,
                 ),
               ),
-              _signatureImage(signatures?.signatureFor('prepared_by')),
-              pw.Text(
-                _signatureName(
-                  signatures?.signatureFor('prepared_by'),
-                  _idpField(e.preparedByName),
-                ),
-                style: pw.TextStyle(
-                  fontSize: 10,
-                  fontWeight: pw.FontWeight.bold,
-                ),
-              ),
-              pw.Text(
-                _idpField(e.preparedByTitle),
-                style: const pw.TextStyle(fontSize: 9),
+              pw.Column(
+                crossAxisAlignment: pw.CrossAxisAlignment.center,
+                children: [
+                  _signatureImage(signatures?.signatureFor('prepared_by')),
+                  pw.Text(
+                    _signatureName(
+                      signatures?.signatureFor('prepared_by'),
+                      _idpField(e.preparedByName),
+                    ),
+                    textAlign: pw.TextAlign.center,
+                    style: pw.TextStyle(
+                      fontSize: 10,
+                      fontWeight: pw.FontWeight.bold,
+                    ),
+                  ),
+                  pw.Text(
+                    _idpField(e.preparedByTitle),
+                    textAlign: pw.TextAlign.center,
+                    style: const pw.TextStyle(fontSize: 9),
+                  ),
+                ],
               ),
             ],
           ),
@@ -3171,6 +3186,7 @@ class FormPdf {
               pw.SizedBox(height: 28),
               pw.Center(
                 child: pw.Column(
+                  crossAxisAlignment: pw.CrossAxisAlignment.center,
                   children: [
                     pw.Text(
                       'Submitted by:',
@@ -3182,6 +3198,7 @@ class FormPdf {
                     _signatureImage(
                       signatures?.signatureFor('applicant'),
                       height: 28,
+                      width: 220,
                     ),
                     pw.Container(
                       width: 220,
@@ -3198,9 +3215,13 @@ class FormPdf {
                       ),
                     ),
                     pw.SizedBox(height: 4),
-                    pw.Text(
-                      'Name of Applicant',
-                      style: const pw.TextStyle(fontSize: 8),
+                    pw.SizedBox(
+                      width: 220,
+                      child: pw.Text(
+                        'Name of Applicant',
+                        textAlign: pw.TextAlign.center,
+                        style: const pw.TextStyle(fontSize: 8),
+                      ),
                     ),
                   ],
                 ),
@@ -3331,11 +3352,14 @@ class FormPdf {
                       children: [
                         pw.Expanded(
                           child: pw.Column(
-                            crossAxisAlignment: pw.CrossAxisAlignment.start,
+                            crossAxisAlignment: pw.CrossAxisAlignment.center,
                             children: [
-                              pw.Text(
-                                'Prepared by:',
-                                style: const pw.TextStyle(fontSize: 9),
+                              pw.Align(
+                                alignment: pw.Alignment.centerLeft,
+                                child: pw.Text(
+                                  'Prepared by:',
+                                  style: const pw.TextStyle(fontSize: 9),
+                                ),
                               ),
                               _signatureImage(
                                 signatures?.signatureFor('prepared_by'),
@@ -3345,6 +3369,7 @@ class FormPdf {
                                   signatures?.signatureFor('prepared_by'),
                                   _s(e.preparedByName),
                                 ),
+                                textAlign: pw.TextAlign.center,
                                 style: pw.TextStyle(
                                   fontSize: 9,
                                   fontWeight: pw.FontWeight.bold,
@@ -3352,6 +3377,7 @@ class FormPdf {
                               ),
                               pw.Text(
                                 _s(e.preparedByTitle),
+                                textAlign: pw.TextAlign.center,
                                 style: const pw.TextStyle(fontSize: 8),
                               ),
                             ],
@@ -3359,11 +3385,14 @@ class FormPdf {
                         ),
                         pw.Expanded(
                           child: pw.Column(
-                            crossAxisAlignment: pw.CrossAxisAlignment.start,
+                            crossAxisAlignment: pw.CrossAxisAlignment.center,
                             children: [
-                              pw.Text(
-                                'Noted by:',
-                                style: const pw.TextStyle(fontSize: 9),
+                              pw.Align(
+                                alignment: pw.Alignment.centerLeft,
+                                child: pw.Text(
+                                  'Noted by:',
+                                  style: const pw.TextStyle(fontSize: 9),
+                                ),
                               ),
                               _signatureImage(
                                 signatures?.signatureFor('noted_by'),
@@ -3373,6 +3402,7 @@ class FormPdf {
                                   signatures?.signatureFor('noted_by'),
                                   _s(e.notedByName),
                                 ),
+                                textAlign: pw.TextAlign.center,
                                 style: pw.TextStyle(
                                   fontSize: 9,
                                   fontWeight: pw.FontWeight.bold,
@@ -3380,6 +3410,7 @@ class FormPdf {
                               ),
                               pw.Text(
                                 _s(e.notedByTitle),
+                                textAlign: pw.TextAlign.center,
                                 style: const pw.TextStyle(fontSize: 8),
                               ),
                             ],

@@ -2326,6 +2326,13 @@ CREATE TABLE IF NOT EXISTS docutracker_rsp_source_signatures (
   )),
   label TEXT NOT NULL,
   assigned_signer_id UUID NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+  assignment_source TEXT NOT NULL DEFAULT 'manual' CHECK (
+    assignment_source IN ('creator', 'automatic', 'admin_recovery', 'manual')
+  ),
+  recovery_remarks TEXT CHECK (
+    recovery_remarks IS NULL
+    OR length(btrim(recovery_remarks)) BETWEEN 5 AND 500
+  ),
   signature_asset_id UUID REFERENCES docutracker_signature_assets(id) ON DELETE RESTRICT,
   signed_by UUID REFERENCES users(id) ON DELETE RESTRICT,
   signer_name_snapshot TEXT,

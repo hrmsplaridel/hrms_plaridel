@@ -1014,6 +1014,7 @@ class DocuTrackerProvider extends ChangeNotifier {
     required String sourceRecordId,
     required String slotKey,
     required String assignedSignerId,
+    String? recoveryRemarks,
   }) async {
     if (_sourceSignatureLoading) return null;
     final authGeneration = _authGeneration;
@@ -1026,6 +1027,7 @@ class DocuTrackerProvider extends ChangeNotifier {
       sourceRecordId: sourceRecordId,
       slotKey: slotKey,
       assignedSignerId: assignedSignerId,
+      recoveryRemarks: recoveryRemarks,
     );
     if (!_isCurrentAuthGeneration(authGeneration)) return null;
     _sourceSignatureLoading = false;
