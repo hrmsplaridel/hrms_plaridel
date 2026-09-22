@@ -24,8 +24,14 @@
 -- Source file: init-schema-docutracker.sql
 -- #############################################################################
 
--- HRMS Plaridel - DocuTracker Module
--- Run AFTER init-schema.sql (requires: users, departments)
+-- HRMS Plaridel - DocuTracker Module (legacy subset for DocuTracker rollup phase 1)
+--
+-- For new deploys, prefer the FULL schema in:
+--   backend/scripts/init-schema.sql  (DocuTracker section includes e-sign,
+--   official signatories, assignment_source, leave signatures, etc.)
+--
+-- This file remains as section 01 of docutracker-install-core.sql for older
+-- DocuTracker-only upgrade paths. Run AFTER scripts/init-schema.sql when used alone.
 -- Run: psql -d hrms_plaridel -f backend/scripts/migrations/docutracker/init-schema-docutracker.sql
 
 -- =========================
