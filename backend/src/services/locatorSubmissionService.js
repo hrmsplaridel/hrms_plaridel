@@ -35,6 +35,7 @@ function createLocatorSubmissionService({
   broadcastSubmitted,
   recordHistory,
   snapshotReviewers,
+  assertSubmissionReviewer,
   nowProvider = () => new Date(),
   logger = console,
 }) {
@@ -51,6 +52,7 @@ function createLocatorSubmissionService({
   assertDependency('broadcastSubmitted', broadcastSubmitted);
   assertDependency('recordHistory', recordHistory);
   assertDependency('snapshotReviewers', snapshotReviewers);
+  assertDependency('assertSubmissionReviewer', assertSubmissionReviewer);
   assertDependency('nowProvider', nowProvider);
 
   async function submit({
@@ -97,6 +99,7 @@ function createLocatorSubmissionService({
 
     try {
       await client.query('BEGIN');
+      await assertSubmissionReviewer(client, employeeUserId);
 
       const reviewSnapshot = await getReviewSnapshot(
         client,

@@ -1850,6 +1850,33 @@ class EmployeeLocatorSlipContentState extends State<EmployeeLocatorSlipContent>
     final userId = _authenticatedUserId;
     if (userId == null) return;
     final authGeneration = _authGeneration;
+    try {
+      final availability = await ApiClient.instance.get<Map<String, dynamic>>(
+        '/api/locator-slips/submission-availability',
+      );
+      if (!_isCurrentAuthSession(userId, authGeneration) || !context.mounted) {
+        return;
+      }
+      if (availability.data?['can_submit'] != true) {
+        await _showLocatorErrorDialog(
+          availability.data?['reason']?.toString() ??
+              'No eligible final reviewer is available. Contact HR before filing.',
+        );
+        return;
+      }
+    } on DioException catch (error) {
+      if (!_isCurrentAuthSession(userId, authGeneration) || !context.mounted) {
+        return;
+      }
+      final data = error.response?.data;
+      await _showLocatorErrorDialog(
+        data is Map && data['error'] != null
+            ? data['error'].toString()
+            : 'Could not check reviewer availability. Please try again.',
+      );
+      return;
+    }
+    if (!context.mounted) return;
     final typesReady = await _refreshLocatorTypesForForm(
       context,
       userId: userId,

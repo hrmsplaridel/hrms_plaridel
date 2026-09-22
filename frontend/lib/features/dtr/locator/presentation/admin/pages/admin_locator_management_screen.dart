@@ -78,6 +78,7 @@ class _AdminLocatorManagementScreenState
   int _loadVersion = 0;
   StreamSubscription<AppRealtimeEvent>? _locatorRealtimeSub;
   DateTime? _officialHrmsDate;
+  bool _canFinalReview = false;
 
   bool _isDark(BuildContext context) => AppTheme.dashIsDark(context);
 
@@ -92,7 +93,21 @@ class _AdminLocatorManagementScreenState
     super.initState();
     _loadLocatorTypes();
     _loadOfficialDate();
+    _loadFinalReviewerAccess();
     _load();
+  }
+
+  Future<void> _loadFinalReviewerAccess() async {
+    try {
+      final response = await ApiClient.instance.get<Map<String, dynamic>>(
+        '/api/locator-slips/final-reviewer/me',
+      );
+      if (mounted) {
+        setState(() => _canFinalReview = response.data?['can_review'] == true);
+      }
+    } catch (_) {
+      if (mounted) setState(() => _canFinalReview = false);
+    }
   }
 
   @override
@@ -793,7 +808,7 @@ class _AdminLocatorManagementScreenState
   }
 
   void _showDetailsDialog(_LocatorAdminRecord item) {
-    final canReview = item.canHrReview;
+    final canReview = _canFinalReview && item.canHrReview;
     final slipDate = item.slipDateValue;
     final returnBlockedByPastDate =
         canReview &&

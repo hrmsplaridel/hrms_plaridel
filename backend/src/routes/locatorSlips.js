@@ -6,6 +6,11 @@ const { pool } = require('../config/db');
 const { authMiddleware } = require('../middleware/auth');
 const { requireAdminOrHr } = require('../middleware/rbac');
 const {
+  assertFinalLeaveReviewer,
+  assertLeaveSubmissionReviewer,
+  resolveFinalLeaveReviewers,
+} = require('../services/leaveFinalReviewerService');
+const {
   findDepartmentHeadUserId,
   getDepartmentReviewSnapshotForDate,
   isDepartmentHead,
@@ -709,6 +714,28 @@ const locatorSubmissionService = createLocatorSubmissionService({
   broadcastSubmitted: (row) => broadcastLocatorUpdated('submitted', row),
   recordHistory: recordLocatorWorkflowEvent,
   snapshotReviewers: replaceRequestReviewerSnapshot,
+  assertSubmissionReviewer: (db, applicantId) => assertLeaveSubmissionReviewer(db, applicantId, 'locator'),
+});
+
+router.get('/final-reviewer/me', protect, requireAdminOrHr, async (req, res) => {
+  try {
+    const reviewers = await resolveFinalLeaveReviewers(pool);
+    res.json({ can_review: reviewers.some((reviewer) => String(reviewer.id) === String(req.user.id)) });
+  } catch (err) {
+    console.error('[locator GET final-reviewer/me]', err);
+    res.status(500).json({ error: 'Failed to check locator final reviewer assignment' });
+  }
+});
+
+router.get('/submission-availability', protect, async (req, res) => {
+  try {
+    await assertLeaveSubmissionReviewer(pool, req.user.id, 'locator');
+    res.json({ can_submit: true });
+  } catch (err) {
+    if (err.statusCode === 409) return res.json({ can_submit: false, reason: err.message });
+    console.error('[locator GET submission-availability]', err);
+    res.status(500).json({ error: 'Failed to check locator reviewer availability' });
+  }
 });
 
 function isValidStatus(status) {
@@ -1516,6 +1543,7 @@ router.patch('/:id/resubmit', protect, async (req, res) => {
       userId,
       correction.slipDate
     );
+    await assertLeaveSubmissionReviewer(client, userId, 'locator');
     const departmentHeadUserId =
       reviewSnapshot?.departmentHeadUserId || null;
     const submitStatus = departmentHeadUserId
@@ -1619,6 +1647,7 @@ router.patch('/:id/resubmit', protect, async (req, res) => {
       await client.query('ROLLBACK');
     } catch (_) {}
     console.error('[locator PATCH /:id/resubmit]', err);
+    if (err.statusCode) return res.status(err.statusCode).json({ error: err.message });
     res.status(500).json({ error: 'Failed to resubmit locator slip' });
   } finally {
     client.release();
@@ -2330,6 +2359,16 @@ router.get('/admin', protect, requireAdminOrHr, async (req, res) => {
       LEFT JOIN users corrector ON corrector.id = ls.retroactive_corrected_by
       LEFT JOIN users revoker ON revoker.id = ls.revoked_by
       WHERE ($1::text[] IS NULL OR ls.status = ANY($1::text[]))
+        AND (
+          ls.status IN ('pending', 'pending_hr')
+          OR ls.is_retroactive_correction = true
+          OR EXISTS (
+            SELECT 1 FROM locator_slip_history review_history
+            WHERE review_history.locator_slip_id = ls.id
+              AND (review_history.to_status IN ('pending', 'pending_hr')
+                   OR review_history.from_status IN ('pending', 'pending_hr'))
+          )
+        )
         AND ($2::text IS NULL OR ls.request_type = $2::text)
         AND ($3::uuid IS NULL OR ls.department_id = $3::uuid)
         AND ($4::uuid IS NULL OR ls.employee_id = $4::uuid)
@@ -2460,6 +2499,7 @@ router.patch('/:id/return-for-correction', protect, requireAdminOrHr, async (req
         error: `Cannot return locator slip with status '${row.status}'`,
       });
     }
+    await assertFinalLeaveReviewer(client, row.employee_id, reviewerId, 'locator');
     const returnWindow = evaluateLocatorReturnWindow({
       slipDate: row.slip_date_text,
     });
@@ -2510,6 +2550,7 @@ router.patch('/:id/return-for-correction', protect, requireAdminOrHr, async (req
       await client.query('ROLLBACK');
     } catch (_) {}
     console.error('[locator PATCH /:id/return-for-correction]', err);
+    if (err.statusCode) return res.status(err.statusCode).json({ error: err.message });
     res.status(500).json({ error: 'Failed to return locator slip for correction' });
   } finally {
     client.release();
@@ -2553,6 +2594,7 @@ router.patch('/:id/approve', protect, requireAdminOrHr, async (req, res) => {
         error: `Cannot approve locator slip with status '${current.rows[0].status}'`,
       });
     }
+    await assertFinalLeaveReviewer(client, current.rows[0].employee_id, reviewerId, 'locator');
     const attachmentError = locatorReviewAttachmentError(current.rows[0]);
     if (attachmentError) {
       await client.query('ROLLBACK');
@@ -2635,6 +2677,7 @@ router.patch('/:id/approve', protect, requireAdminOrHr, async (req, res) => {
       await client.query('ROLLBACK');
     } catch (_) {}
     console.error('[locator PATCH /:id/approve]', err);
+    if (err.statusCode) return res.status(err.statusCode).json({ error: err.message });
     res.status(500).json({ error: 'Failed to approve locator slip' });
   } finally {
     client.release();
@@ -2791,6 +2834,7 @@ router.patch('/:id/reject', protect, requireAdminOrHr, async (req, res) => {
         error: `Cannot reject locator slip with status '${current.rows[0].status}'`,
       });
     }
+    await assertFinalLeaveReviewer(client, current.rows[0].employee_id, reviewerId, 'locator');
     await client.query(
       `UPDATE locator_slips
        SET status = 'rejected_by_hr',
@@ -2857,6 +2901,7 @@ router.patch('/:id/reject', protect, requireAdminOrHr, async (req, res) => {
       await client.query('ROLLBACK');
     } catch (_) {}
     console.error('[locator PATCH /:id/reject]', err);
+    if (err.statusCode) return res.status(err.statusCode).json({ error: err.message });
     res.status(500).json({ error: 'Failed to reject locator slip' });
   } finally {
     client.release();

@@ -47,23 +47,23 @@ async function resolveFinalLeaveReviewers(db, date = todayInHrmsTimezone()) {
   });
 }
 
-async function assertFinalLeaveReviewer(db, applicantId, actorId) {
+async function assertFinalLeaveReviewer(db, applicantId, actorId, requestType = 'leave') {
   if (String(applicantId) === String(actorId)) {
-    throw reviewError('You cannot review your own leave request', 403);
+    throw reviewError(`You cannot review your own ${requestType} request`, 403);
   }
   const reviewers = await resolveFinalLeaveReviewers(db);
   if (!reviewers.length) {
-    throw reviewError('No final leave reviewer is configured or available', 409);
+    throw reviewError(`No final ${requestType} reviewer is configured or available`, 409);
   }
   if (!reviewers.some((reviewer) => String(reviewer.id) === String(actorId))) {
-    throw reviewError('Only an assigned final leave reviewer can decide this request', 403);
+    throw reviewError(`Only an assigned final ${requestType} reviewer can decide this request`, 403);
   }
 }
 
-async function assertLeaveSubmissionReviewer(db, applicantId) {
+async function assertLeaveSubmissionReviewer(db, applicantId, requestType = 'leave') {
   const reviewers = await resolveFinalLeaveReviewers(db);
   if (!reviewers.some((reviewer) => String(reviewer.id) !== String(applicantId))) {
-    throw reviewError('No eligible final leave reviewer is configured or available for this request. Contact HR before submitting.', 409);
+    throw reviewError(`No eligible final ${requestType} reviewer is configured or available for this request. Contact HR before submitting.`, 409);
   }
 }
 
