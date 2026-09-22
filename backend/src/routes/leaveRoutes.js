@@ -3584,6 +3584,16 @@ router.post('/admin/monthly-accrual', protect, requireAdminOrHr, async (req, res
 // GET /api/leave (admin/HR list)
 // Query params: status, leave_type, user_id, limit,
 //               start_date_from, start_date_to, created_from, created_to
+const HR_REVIEW_SCOPE_SQL = `(
+  lr.status IN ('pending', 'pending_hr')
+  OR EXISTS (
+    SELECT 1 FROM leave_request_history review_history
+    WHERE review_history.leave_request_id = lr.id
+      AND (review_history.to_status IN ('pending', 'pending_hr')
+           OR review_history.from_status IN ('pending', 'pending_hr'))
+  )
+)`;
+
 async function listLeaveReviewFilterOptions(db, scopeSql, params) {
   const result = await db.query(
     `SELECT DISTINCT COALESCE(lr.user_id, lr.employee_id) AS user_id,
@@ -3602,7 +3612,7 @@ router.get('/filter-options', protect, requireAdminOrHr, async (_req, res) => {
   try {
     const items = await listLeaveReviewFilterOptions(
       pool,
-      "lr.status <> 'pending_department_head'",
+      HR_REVIEW_SCOPE_SQL,
       []
     );
     res.json(items);
@@ -3663,7 +3673,7 @@ router.get('/', protect, requireAdminOrHr, async (req, res) => {
          AND ($6::timestamptz IS NULL OR lr.created_at >= $6)
          AND ($7::date IS NULL OR lr.created_at < ($7::date + interval '1 day'))
          AND ($8::text IS NULL OR d.name = $8)
-         ${paginated ? "AND lr.status <> 'pending_department_head'" : ''}`;
+         AND ${HR_REVIEW_SCOPE_SQL}`;
     const params = [status, leaveType, userId, startDateFrom, startDateTo, createdFrom, createdTo, department];
     const rows = await pool.query(
       `SELECT lr.*, lt.name AS leave_type_name, u.full_name AS employee_full_name,
