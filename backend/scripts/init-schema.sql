@@ -3196,3 +3196,97 @@ EXECUTE PROCEDURE set_updated_at();
 -- independently for upgrades while making this file the one-command installer.
 \ir migrations/docutracker/docutracker-install-all-in-order.sql
 \ir rsp-storage-attachment-policy.sql
+
+-- =========================================
+-- DOCUTRACKER WORKFLOW VERSIONING TABLES
+-- Added 2026-09-22: docutracker_workflows, docutracker_workflow_versions,
+-- and docutracker_workflow_step_assignments were applied via targeted
+-- migrations but were not yet in the fresh-install path.
+-- These depend on docutracker_document_types (created above via
+-- docutracker-install-post-production-hardening.sql), docutracker_roles
+-- and docutracker_workflow_steps (created inline above).
+-- =========================================
+
+CREATE TABLE IF NOT EXISTS docutracker_workflows (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  document_type TEXT NOT NULL UNIQUE,
+  active_version INT,
+  default_review_deadline_hours INT,
+  is_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  CONSTRAINT docutracker_workflows_document_type_fk
+    FOREIGN KEY (document_type)
+    REFERENCES docutracker_document_types(document_type)
+    ON UPDATE CASCADE ON DELETE RESTRICT,
+  CONSTRAINT docutracker_workflows_deadline_check
+    CHECK (default_review_deadline_hours IS NULL OR default_review_deadline_hours > 0),
+  CONSTRAINT docutracker_workflows_active_version_check
+    CHECK (active_version IS NULL OR active_version > 0)
+);
+
+DROP TRIGGER IF EXISTS trg_docutracker_workflows_updated_at ON docutracker_workflows;
+CREATE TRIGGER trg_docutracker_workflows_updated_at
+BEFORE UPDATE ON docutracker_workflows
+FOR EACH ROW EXECUTE FUNCTION docutracker_set_updated_at();
+
+CREATE TABLE IF NOT EXISTS docutracker_workflow_versions (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  workflow_id UUID NOT NULL,
+  version INT NOT NULL,
+  review_deadline_hours INT,
+  status TEXT NOT NULL DEFAULT 'draft',
+  notes TEXT,
+  snapshot JSONB,
+  created_by UUID,
+  published_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  CONSTRAINT docutracker_workflow_versions_workflow_fk
+    FOREIGN KEY (workflow_id) REFERENCES docutracker_workflows(id) ON DELETE CASCADE,
+  CONSTRAINT docutracker_workflow_versions_version_positive CHECK (version > 0),
+  CONSTRAINT docutracker_workflow_versions_deadline_check
+    CHECK (review_deadline_hours IS NULL OR review_deadline_hours > 0),
+  CONSTRAINT docutracker_workflow_versions_status_check
+    CHECK (status IN ('draft', 'published', 'retired')),
+  CONSTRAINT docutracker_workflow_versions_unique UNIQUE (workflow_id, version)
+);
+
+CREATE INDEX IF NOT EXISTS idx_docutracker_workflow_versions_workflow
+  ON docutracker_workflow_versions(workflow_id, version DESC);
+
+CREATE TABLE IF NOT EXISTS docutracker_workflow_step_assignments (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  step_id UUID NOT NULL,
+  assignee_type TEXT NOT NULL,
+  user_id UUID,
+  role_id TEXT,
+  department_id UUID,
+  is_primary BOOLEAN NOT NULL DEFAULT FALSE,
+  backup_rank INT,
+  is_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+  allowed_actions TEXT[] NOT NULL DEFAULT ARRAY['view','approve','reject','return']::TEXT[],
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  CONSTRAINT docutracker_step_assignments_step_fk
+    FOREIGN KEY (step_id) REFERENCES docutracker_workflow_steps(id) ON DELETE CASCADE,
+  CONSTRAINT docutracker_step_assignments_role_fk
+    FOREIGN KEY (role_id) REFERENCES docutracker_roles(role_id) ON UPDATE CASCADE ON DELETE RESTRICT,
+  CONSTRAINT docutracker_step_assignments_type_check
+    CHECK (assignee_type IN ('user','role','department','department_head','sender_supervisor','document_creator')),
+  CONSTRAINT docutracker_step_assignments_backup_rank_check
+    CHECK (backup_rank IS NULL OR backup_rank >= 0)
+);
+
+CREATE INDEX IF NOT EXISTS idx_docutracker_step_assignments_step
+  ON docutracker_workflow_step_assignments(step_id);
+CREATE INDEX IF NOT EXISTS idx_docutracker_step_assignments_user
+  ON docutracker_workflow_step_assignments(user_id) WHERE user_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_docutracker_step_assignments_role
+  ON docutracker_workflow_step_assignments(role_id) WHERE role_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_docutracker_step_assignments_department
+  ON docutracker_workflow_step_assignments(department_id) WHERE department_id IS NOT NULL;
+
+DROP TRIGGER IF EXISTS trg_docutracker_step_assignments_updated_at ON docutracker_workflow_step_assignments;
+CREATE TRIGGER trg_docutracker_step_assignments_updated_at
+BEFORE UPDATE ON docutracker_workflow_step_assignments
+FOR EACH ROW EXECUTE FUNCTION docutracker_set_updated_at();
