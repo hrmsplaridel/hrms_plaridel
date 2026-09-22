@@ -2,7 +2,6 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:hrms_plaridel/features/dtr/leave/presentation/shared/widgets/leave_days_card.dart';
 
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/providers/auth_provider.dart';
@@ -16,7 +15,6 @@ import 'package:hrms_plaridel/features/dtr/leave/presentation/employee/mobile/wi
 import 'package:hrms_plaridel/features/dtr/leave/presentation/employee/shared/widgets/employee_leave_requests_panel.dart';
 import 'package:hrms_plaridel/features/dtr/leave/presentation/employee/shared/utils/employee_leave_actions.dart';
 import 'package:hrms_plaridel/features/dtr/leave/presentation/shared/pages/leave_balance_history_screen.dart';
-import 'package:hrms_plaridel/features/dtr/leave/presentation/shared/widgets/leave_balance_card.dart';
 import 'package:hrms_plaridel/features/dtr/leave/presentation/shared/widgets/my_leave_loading_skeleton.dart';
 
 /// Employee-facing leave screen.
@@ -274,34 +272,54 @@ class _EmployeeLeaveScreenState extends State<EmployeeLeaveScreen>
           const SizedBox(height: 24),
           Column(
             children: [
-              _BalancesPanel(
-                balances: provider.balances
-                    .where(
-                      (b) =>
-                          b.effectiveLeaveTypeName == 'vacationLeave' ||
-                          b.effectiveLeaveTypeName == 'sickLeave',
-                    )
-                    .toList(),
-                loading: provider.myBalancesLoading,
-                error: provider.myBalancesError,
-                onRetry: _retryBalances,
-                onBalanceHistory: () {
-                  Navigator.of(context).push(
-                    MaterialPageRoute<void>(
-                      builder: (_) =>
-                          const LeaveBalanceHistoryScreen(isAdmin: false),
-                    ),
+              LayoutBuilder(
+                builder: (context, constraints) {
+                  final credits = _BalancesPanel(
+                    balances: provider.balances
+                        .where(
+                          (b) =>
+                              b.effectiveLeaveTypeName == 'vacationLeave' ||
+                              b.effectiveLeaveTypeName == 'sickLeave',
+                        )
+                        .toList(),
+                    loading: provider.myBalancesLoading,
+                    error: provider.myBalancesError,
+                    onRetry: _retryBalances,
+                    onBalanceHistory: () {
+                      Navigator.of(context).push(
+                        MaterialPageRoute<void>(
+                          builder: (_) =>
+                              const LeaveBalanceHistoryScreen(isAdmin: false),
+                        ),
+                      );
+                    },
+                  );
+                  final entitlements = _LeaveDaysPanel(
+                    balances: provider.balances,
+                    loading: provider.myBalancesLoading,
+                  );
+                  if (constraints.maxWidth < 1100) {
+                    return Column(
+                      children: [
+                        credits,
+                        const SizedBox(height: 16),
+                        entitlements,
+                      ],
+                    );
+                  }
+                  return Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(child: credits),
+                      const SizedBox(width: 32),
+                      Expanded(child: entitlements),
+                    ],
                   );
                 },
               ),
               const SizedBox(height: 16),
-              _LeaveDaysPanel(
-                balances: provider.balances,
-                loading: provider.myBalancesLoading,
-              ),
-              const SizedBox(height: 16),
               EmployeeLeaveRequestsPanel(
-                requests: provider.requests,
+                requests: provider.myRequests,
                 loading: provider.myRequestsLoading,
                 error: provider.myRequestsError,
                 onRetry: _retryRequests,
@@ -312,6 +330,8 @@ class _EmployeeLeaveScreenState extends State<EmployeeLeaveScreen>
                 onLoadMore: _loadMoreRequests,
                 onEdit: _leaveActions.editRequest,
                 onCancel: _leaveActions.cancelRequest,
+                onDiscard: _leaveActions.discardDraft,
+                onPreview: _leaveActions.previewLeaveForm,
                 onPrint: _leaveActions.printLeaveForm,
               ),
             ],
@@ -359,7 +379,7 @@ class _EmployeeLeaveScreenState extends State<EmployeeLeaveScreen>
         },
       ),
       requestsPanel: EmployeeLeaveRequestsPanel(
-        requests: provider.requests,
+        requests: provider.myRequests,
         loading: provider.myRequestsLoading,
         error: provider.myRequestsError,
         onRetry: _retryRequests,
@@ -370,6 +390,8 @@ class _EmployeeLeaveScreenState extends State<EmployeeLeaveScreen>
         onLoadMore: _loadMoreRequests,
         onEdit: _leaveActions.editRequest,
         onCancel: _leaveActions.cancelRequest,
+        onDiscard: _leaveActions.discardDraft,
+        onPreview: _leaveActions.previewLeaveForm,
         onPrint: _leaveActions.printLeaveForm,
       ),
     );
@@ -532,10 +554,8 @@ class _BalancesPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return _SectionCard(
+    return _BalanceSection(
       title: 'Leave Credits',
-      subtitle: 'Earned and available credits for Sick and Vacation Leave.',
-      icon: Icons.account_balance_wallet_rounded,
       headerTrailing: OutlinedButton.icon(
         onPressed: onBalanceHistory,
         icon: const Icon(Icons.receipt_long_outlined, size: 18),
@@ -554,27 +574,8 @@ class _BalancesPanel extends StatelessWidget {
                   _SectionLoadError(message: error!, onRetry: onRetry),
                   const SizedBox(height: 12),
                 ],
-                LayoutBuilder(
-                  builder: (context, constraints) {
-                    final crossAxisCount = constraints.maxWidth < 600
-                        ? 1
-                        : (constraints.maxWidth < 960 ? 2 : 3);
-                    final cardWidth =
-                        (constraints.maxWidth - (crossAxisCount - 1) * 12) /
-                        crossAxisCount;
-                    return Wrap(
-                      spacing: 12,
-                      runSpacing: 12,
-                      children: balances
-                          .map(
-                            (balance) => SizedBox(
-                              width: cardWidth,
-                              child: LeaveBalanceCard(balance: balance),
-                            ),
-                          )
-                          .toList(),
-                    );
-                  },
+                ...balances.map(
+                  (balance) => _CompactBalanceRow(balance: balance),
                 ),
               ],
             ),
@@ -596,75 +597,146 @@ class _LeaveDaysPanel extends StatelessWidget {
     if (!loading && entitlementBalances.isEmpty) {
       return const SizedBox.shrink();
     }
-    return _SectionCard(
+    return _BalanceSection(
       title: 'Annual Leave Entitlements',
-      subtitle: 'Quota-based leave only. Eligibility and approval rules apply.',
-      icon: Icons.calendar_today_rounded,
       child: loading && entitlementBalances.isEmpty
           ? const _CenteredState(message: 'Loading leave days...')
-          : LayoutBuilder(
-              builder: (context, constraints) {
-                final crossAxisCount = constraints.maxWidth < 600
-                    ? 1
-                    : (constraints.maxWidth < 960 ? 2 : 3);
-                final cardWidth =
-                    (constraints.maxWidth - (crossAxisCount - 1) * 12) /
-                    crossAxisCount;
-                return Wrap(
-                  spacing: 12,
-                  runSpacing: 12,
-                  children: entitlementBalances
-                      .map(
-                        (balance) => SizedBox(
-                          width: cardWidth,
-                          child: LeaveDaysCard(balance: balance),
-                        ),
-                      )
-                      .toList(),
-                );
-              },
+          : Column(
+              children: entitlementBalances
+                  .map(
+                    (balance) =>
+                        _CompactBalanceRow(balance: balance, annual: true),
+                  )
+                  .toList(),
             ),
     );
   }
 }
 
-class _SectionCard extends StatelessWidget {
-  const _SectionCard({
+class _CompactBalanceRow extends StatelessWidget {
+  const _CompactBalanceRow({required this.balance, this.annual = false});
+
+  final LeaveBalance balance;
+  final bool annual;
+
+  String _days(double value) => value == value.truncateToDouble()
+      ? value.toStringAsFixed(0)
+      : value.toStringAsFixed(1);
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 12),
+      decoration: BoxDecoration(
+        border: Border(
+          bottom: BorderSide(color: AppTheme.dashHairlineOf(context)),
+        ),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            flex: 3,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  balance.leaveTypeLabel,
+                  style: TextStyle(
+                    color: AppTheme.dashTextPrimaryOf(context),
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                if (annual && balance.entitlementYear != null)
+                  Text(
+                    '${balance.entitlementYear}',
+                    style: TextStyle(
+                      color: AppTheme.dashTextSecondaryOf(context),
+                      fontSize: 11,
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          _BalanceAmount(
+            label: annual ? 'Entitled' : 'Earned',
+            value: _days(balance.earnedDays),
+          ),
+          _BalanceAmount(label: 'Used', value: _days(balance.usedDays)),
+          _BalanceAmount(label: 'Pending', value: _days(balance.pendingDays)),
+          _BalanceAmount(
+            label: 'Available',
+            value: _days(balance.availableDays),
+            emphasized: true,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _BalanceAmount extends StatelessWidget {
+  const _BalanceAmount({
+    required this.label,
+    required this.value,
+    this.emphasized = false,
+  });
+
+  final String label;
+  final String value;
+  final bool emphasized;
+
+  @override
+  Widget build(BuildContext context) {
+    return Expanded(
+      flex: 2,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          Text(
+            label,
+            style: TextStyle(
+              color: AppTheme.dashTextSecondaryOf(context),
+              fontSize: 10,
+            ),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            value,
+            style: TextStyle(
+              color: emphasized
+                  ? AppTheme.primaryNavy
+                  : AppTheme.dashTextPrimaryOf(context),
+              fontSize: 13,
+              fontWeight: emphasized ? FontWeight.w700 : FontWeight.w500,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _BalanceSection extends StatelessWidget {
+  const _BalanceSection({
     required this.title,
-    required this.subtitle,
-    required this.icon,
     required this.child,
     this.headerTrailing,
   });
 
   final String title;
-  final String subtitle;
-  final IconData icon;
   final Widget child;
   final Widget? headerTrailing;
 
-  static const double _mobileBreakpoint = 600;
-
   @override
   Widget build(BuildContext context) {
-    final isMobile = MediaQuery.sizeOf(context).width < _mobileBreakpoint;
-    final dark = AppTheme.dashIsDark(context);
     return Container(
       width: double.infinity,
-      padding: EdgeInsets.all(isMobile ? 16 : 24),
+      padding: const EdgeInsets.only(top: 12),
       decoration: BoxDecoration(
-        color: AppTheme.dashPanelOf(context),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppTheme.dashHairlineOf(context)),
-        boxShadow: dark
-            ? null
-            : [
-                BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.05),
-                  blurRadius: 16,
-                  offset: const Offset(0, 4),
-                ),
-              ],
+        border: Border(
+          top: BorderSide(color: AppTheme.dashHairlineOf(context)),
+        ),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -672,47 +744,23 @@ class _SectionCard extends StatelessWidget {
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Icon(icon, color: AppTheme.primaryNavy, size: 22),
-              const SizedBox(width: 10),
               Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      title,
-                      style: TextStyle(
-                        color: AppTheme.dashTextPrimaryOf(context),
-                        fontWeight: FontWeight.w700,
-                        fontSize: 18,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      subtitle,
-                      style: TextStyle(
-                        color: AppTheme.dashTextSecondaryOf(context),
-                        fontSize: 13,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              if (!isMobile && headerTrailing != null) ...[
-                const SizedBox(width: 12),
-                Flexible(
-                  child: Align(
-                    alignment: Alignment.topRight,
-                    child: headerTrailing!,
+                child: Text(
+                  title,
+                  style: TextStyle(
+                    color: AppTheme.dashTextPrimaryOf(context),
+                    fontWeight: FontWeight.w700,
+                    fontSize: 16,
                   ),
                 ),
+              ),
+              if (headerTrailing != null) ...[
+                const SizedBox(width: 12),
+                headerTrailing!,
               ],
             ],
           ),
-          if (isMobile && headerTrailing != null) ...[
-            const SizedBox(height: 12),
-            SizedBox(width: double.infinity, child: headerTrailing!),
-          ],
-          const SizedBox(height: 20),
+          const SizedBox(height: 12),
           child,
         ],
       ),

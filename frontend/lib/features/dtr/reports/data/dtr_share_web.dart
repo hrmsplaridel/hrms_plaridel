@@ -16,6 +16,15 @@ Future<void> shareOrDownloadFile(
   _triggerDownload(bytes, filename, mimeType);
 }
 
+Future<bool> saveOrDownloadFile(
+  Uint8List bytes,
+  String filename,
+  String mimeType,
+) async {
+  _triggerDownload(bytes, filename, mimeType);
+  return true;
+}
+
 void _triggerDownload(Uint8List bytes, String filename, String mimeType) {
   final jsBytes = JSUint8Array(
     bytes.buffer.toJS,

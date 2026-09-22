@@ -23,18 +23,24 @@ class AdminLeaveDetailsSideSheet extends StatelessWidget {
     super.key,
     required this.initial,
     required this.isDepartmentHead,
+    this.canReviewPending = true,
+    this.currentReviewerId,
     required this.onApprove,
     required this.onReturn,
     required this.onReject,
+    this.onPreview,
     required this.onPrint,
     this.onRevoke,
   });
 
   final LeaveRequest initial;
   final bool isDepartmentHead;
+  final bool canReviewPending;
+  final String? currentReviewerId;
   final Future<void> Function(LeaveRequest) onApprove;
   final Future<void> Function(LeaveRequest) onReturn;
   final Future<void> Function(LeaveRequest) onReject;
+  final Future<void> Function(LeaveRequest)? onPreview;
   final Future<void> Function(LeaveRequest)? onRevoke;
   final Future<void> Function(LeaveRequest) onPrint;
 
@@ -79,14 +85,20 @@ class AdminLeaveDetailsSideSheet extends StatelessWidget {
                 var req = initial;
                 final id = initial.id;
                 if (id != null && id.isNotEmpty) {
-                  final hit = provider.requests
-                      .where((r) => r.id == id)
-                      .toList();
+                  final hit =
+                      (isDepartmentHead
+                              ? provider.departmentHeadRequests
+                              : provider.requests)
+                          .where((r) => r.id == id)
+                          .toList();
                   if (hit.isNotEmpty) req = hit.first;
                 }
-                final canReview = isDepartmentHead
-                    ? req.status == LeaveRequestStatus.pendingDepartmentHead
-                    : req.status.isPending;
+                final isOwnRequest = currentReviewerId != null &&
+                    currentReviewerId == req.userId;
+                final canReview = !isOwnRequest && (isDepartmentHead
+                    ? canReviewPending &&
+                          req.status == LeaveRequestStatus.pendingDepartmentHead
+                    : canReviewPending && req.status.isPending);
                 final approved = req.status == LeaveRequestStatus.approved;
                 final revokeDisabledReason = approved && onRevoke != null
                     ? adminLeaveRevokeDisabledReason(req)
@@ -100,6 +112,7 @@ class AdminLeaveDetailsSideSheet extends StatelessWidget {
                     onApprove: canReview ? () => onApprove(req) : null,
                     onReturn: canReview ? () => onReturn(req) : null,
                     onReject: canReview ? () => onReject(req) : null,
+                    onPreview: onPreview == null ? null : () => onPreview!(req),
                     onRevoke:
                         approved &&
                             onRevoke != null &&
@@ -130,6 +143,7 @@ class _AdminLeaveRequestDetailsPanel extends StatelessWidget {
     this.onReturn,
     this.onReject,
     this.onRevoke, // #15
+    this.onPreview,
     this.revokeDisabledReason,
     this.onPrint,
   });
@@ -141,6 +155,7 @@ class _AdminLeaveRequestDetailsPanel extends StatelessWidget {
   final VoidCallback? onReturn;
   final VoidCallback? onReject;
   final VoidCallback? onRevoke; // #15
+  final VoidCallback? onPreview;
   final String? revokeDisabledReason;
   final VoidCallback? onPrint;
 
@@ -232,7 +247,7 @@ class _AdminLeaveRequestDetailsPanel extends StatelessWidget {
         const SizedBox(height: 8),
         HistoryTimeline(events: _buildHistoryEvents(request!)),
         const SizedBox(height: 10),
-        AdminLeaveSubsectionTitle(title: 'Review Actions'),
+        AdminLeaveSubsectionTitle(title: 'Actions'),
         const SizedBox(height: 10),
         Wrap(
           spacing: 12,
@@ -270,6 +285,12 @@ class _AdminLeaveRequestDetailsPanel extends StatelessWidget {
                 ),
                 label: const Text('Revoke Approval'),
               ),
+            if (onPreview != null)
+              OutlinedButton.icon(
+                onPressed: reviewing ? null : onPreview,
+                icon: const Icon(Icons.visibility_outlined),
+                label: const Text('Preview Form'),
+              ),
             if (onPrint != null)
               OutlinedButton.icon(
                 onPressed: reviewing ? null : onPrint,
@@ -294,16 +315,8 @@ class _AdminLeaveRequestDetailsPanel extends StatelessWidget {
     final departmentHeadReviewer =
         (request.departmentHeadReviewerName ?? '').trim().isNotEmpty
         ? request.departmentHeadReviewerName!.trim()
-        : 'Department Head';
-    final departmentHeadReviewedAt =
-        request.departmentHeadReviewedAt ??
-        (request.status == LeaveRequestStatus.pendingHr ||
-                request.status == LeaveRequestStatus.approved ||
-                request.status == LeaveRequestStatus.rejected ||
-                request.status == LeaveRequestStatus.rejectedByHr ||
-                request.status == LeaveRequestStatus.rejectedByDepartmentHead
-            ? request.reviewedAt
-            : null);
+        : 'Department Reviewer';
+    final departmentHeadReviewedAt = request.departmentHeadReviewedAt;
     final departmentHeadRemarks =
         (request.departmentHeadRemarks ?? '').trim().isNotEmpty
         ? request.departmentHeadRemarks
@@ -314,11 +327,7 @@ class _AdminLeaveRequestDetailsPanel extends StatelessWidget {
     final departmentHeadAction = request.departmentHeadAction;
 
     final deptHeadApprovedStage =
-        departmentHeadAction == 'department_head_approved' ||
-        status == LeaveRequestStatus.pendingHr ||
-        status == LeaveRequestStatus.approved ||
-        status == LeaveRequestStatus.rejected ||
-        status == LeaveRequestStatus.rejectedByHr;
+        departmentHeadAction == 'department_head_approved';
 
     final deptHeadRejected =
         departmentHeadAction == 'department_head_rejected' ||
@@ -342,7 +351,7 @@ class _AdminLeaveRequestDetailsPanel extends StatelessWidget {
       ),
       if (deptHeadApprovedStage)
         LeaveHistoryEvent(
-          label: 'Approved by Department Head',
+          label: 'Approved by Department Reviewer',
           dateTime: departmentHeadReviewedAt,
           actor: departmentHeadReviewer,
           remarks: departmentHeadRemarks,
@@ -357,7 +366,7 @@ class _AdminLeaveRequestDetailsPanel extends StatelessWidget {
         ),
       if (deptHeadRejected)
         LeaveHistoryEvent(
-          label: 'Rejected by Department Head',
+          label: 'Rejected by Department Reviewer',
           dateTime: departmentHeadReviewedAt,
           actor: departmentHeadReviewer,
           remarks:
@@ -375,7 +384,7 @@ class _AdminLeaveRequestDetailsPanel extends StatelessWidget {
         ),
       if (deptHeadReturned)
         LeaveHistoryEvent(
-          label: 'Returned by Department Head',
+          label: 'Returned by Department Reviewer',
           dateTime: departmentHeadReviewedAt,
           actor: departmentHeadReviewer,
           remarks: departmentHeadRemarks,

@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 
 import 'package:hrms_plaridel/core/api/user_facing_api_error.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
+import 'package:hrms_plaridel/features/recruitment/data/hire_credentials_email_copy.dart';
 import 'package:hrms_plaridel/features/recruitment/data/recruitment_hire_prefill.dart';
 import 'package:hrms_plaridel/features/recruitment/presentation/applicant/widgets/rsp_applicant_exam_ui.dart';
 
@@ -37,7 +38,6 @@ class _RspHireApplicantEmailDialogState
   final _userCtrl = TextEditingController();
   final _passCtrl = TextEditingController();
   final _formKey = GlobalKey<FormState>();
-  bool _obscurePass = true;
   bool _sending = false;
 
   static const _accent = RspApplicantExamUi.accent;
@@ -53,7 +53,7 @@ class _RspHireApplicantEmailDialogState
         : widget.applicantEmail.trim();
     _passCtrl.text = (pass != null && pass.isNotEmpty)
         ? pass
-        : kDefaultEmployeeAccountPassword;
+        : generateTemporaryAccountPassword();
     _userCtrl.addListener(_onCredentialsChanged);
     _passCtrl.addListener(_onCredentialsChanged);
   }
@@ -70,24 +70,11 @@ class _RspHireApplicantEmailDialogState
   }
 
   String get _messagePreview {
-    final name = widget.applicantName.trim().isEmpty
-        ? 'Applicant'
-        : widget.applicantName.trim();
-    final user = _userCtrl.text.trim();
-    final pass = _passCtrl.text;
-    final credBlock = user.isNotEmpty || pass.isNotEmpty
-        ? '\n\nYour login details:\n'
-              '${user.isNotEmpty ? 'Username: $user\n' : ''}'
-              '${pass.isNotEmpty ? 'Password: $pass\n' : ''}'
-        : '\n\nYour login details:\nUsername: …\nPassword: …\n';
-    return 'Dear $name,\n\n'
-        'Congratulations! We are pleased to inform you that you have passed '
-        'the final interview and are hired by LGU Plaridel.$credBlock\n'
-        'Please sign in to the HRMS and change your password after first login '
-        'if prompted.\n\n'
-        'Best regards,\n'
-        'Human Resources\n'
-        'LGU Plaridel';
+    return buildHireCredentialsEmailPreview(
+      applicantName: widget.applicantName,
+      username: _userCtrl.text,
+      password: _passCtrl.text,
+    );
   }
 
   Future<void> _copyEmail() async {
@@ -96,6 +83,16 @@ class _RspHireApplicantEmailDialogState
     ScaffoldMessenger.of(
       context,
     ).showSnackBar(const SnackBar(content: Text('Email address copied.')));
+  }
+
+  Future<void> _copyField(String value, String label) async {
+    final text = value.trim();
+    if (text.isEmpty) return;
+    await Clipboard.setData(ClipboardData(text: text));
+    if (!mounted) return;
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text('$label copied.')));
   }
 
   Future<void> _submit() async {
@@ -202,8 +199,7 @@ class _RspHireApplicantEmailDialogState
                         const SizedBox(height: 12),
                         TextFormField(
                           controller: _userCtrl,
-                          textInputAction: TextInputAction.next,
-                          autofillHints: const [AutofillHints.username],
+                          readOnly: true,
                           style: const TextStyle(
                             fontWeight: FontWeight.w600,
                             fontSize: 15,
@@ -215,10 +211,17 @@ class _RspHireApplicantEmailDialogState
                             prefixIcon: const Icon(
                               Icons.person_outline_rounded,
                             ),
+                          ).copyWith(
+                            suffixIcon: IconButton(
+                              tooltip: 'Copy username',
+                              onPressed: () =>
+                                  _copyField(_userCtrl.text, 'Username'),
+                              icon: const Icon(Icons.copy_rounded, size: 20),
+                            ),
                           ),
                           validator: (v) {
                             if (v == null || v.trim().isEmpty) {
-                              return 'Enter the username';
+                              return 'Username is missing';
                             }
                             return null;
                           },
@@ -226,33 +229,31 @@ class _RspHireApplicantEmailDialogState
                         const SizedBox(height: 12),
                         TextFormField(
                           controller: _passCtrl,
-                          obscureText: _obscurePass,
-                          autofillHints: const [AutofillHints.password],
+                          readOnly: true,
                           style: const TextStyle(
-                            fontWeight: FontWeight.w600,
+                            fontWeight: FontWeight.w700,
                             fontSize: 15,
                           ),
                           decoration: AppTheme.dashInputDecoration(
                             context,
-                            labelText: 'Password',
-                            hintText: 'Temporary password',
+                            labelText: 'Temporary password',
+                            hintText: 'Generated on Create Account',
                             prefixIcon: const Icon(Icons.lock_outline_rounded),
+                          ).copyWith(
+                            helperText:
+                                'Same randomized password from Create Account. '
+                                'This is what the applicant will receive.',
+                            helperMaxLines: 2,
                             suffixIcon: IconButton(
-                              tooltip: _obscurePass
-                                  ? 'Show password'
-                                  : 'Hide password',
+                              tooltip: 'Copy password',
                               onPressed: () =>
-                                  setState(() => _obscurePass = !_obscurePass),
-                              icon: Icon(
-                                _obscurePass
-                                    ? Icons.visibility_outlined
-                                    : Icons.visibility_off_outlined,
-                              ),
+                                  _copyField(_passCtrl.text, 'Password'),
+                              icon: const Icon(Icons.copy_rounded, size: 20),
                             ),
                           ),
                           validator: (v) {
                             if (v == null || v.isEmpty) {
-                              return 'Enter the password';
+                              return 'Temporary password is missing';
                             }
                             return null;
                           },

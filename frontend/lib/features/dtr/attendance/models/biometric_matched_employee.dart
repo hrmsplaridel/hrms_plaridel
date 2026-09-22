@@ -5,6 +5,10 @@ class BiometricMatchedEmployee {
     required this.biometricUserId,
     required this.fullName,
     this.employeeNumber,
+    this.isActive = true,
+    this.employmentStatus = 'active',
+    this.dateHired,
+    this.separationDate,
   });
 
   /// User UUID from users table (for import FK).
@@ -12,6 +16,13 @@ class BiometricMatchedEmployee {
   final String biometricUserId;
   final String fullName;
   final int? employeeNumber;
+  final bool isActive;
+  final String employmentStatus;
+  final String? dateHired;
+  final String? separationDate;
+
+  bool get isCurrentlyActive =>
+      isActive && employmentStatus.trim().toLowerCase() == 'active';
 
   factory BiometricMatchedEmployee.fromJson(Map<String, dynamic> json) {
     final empNum = json['employee_number'];
@@ -22,6 +33,10 @@ class BiometricMatchedEmployee {
       employeeNumber: empNum is int
           ? empNum
           : (empNum != null ? int.tryParse(empNum.toString()) : null),
+      isActive: json['is_active'] != false,
+      employmentStatus: (json['employment_status'] ?? 'active').toString(),
+      dateHired: json['date_hired']?.toString().split('T').first,
+      separationDate: json['separation_date']?.toString().split('T').first,
     );
   }
 }

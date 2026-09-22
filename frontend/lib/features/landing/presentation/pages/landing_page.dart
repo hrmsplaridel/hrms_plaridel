@@ -23,7 +23,7 @@ class LandingPage extends StatefulWidget {
 
 class _LandingPageState extends State<LandingPage>
     with RouteAware, WidgetsBindingObserver {
-  static const _vacancyPollInterval = Duration(seconds: 5);
+  static const _vacancyPollInterval = Duration(minutes: 5);
 
   final GlobalKey _headerKey = GlobalKey();
   final GlobalKey _heroKey = GlobalKey();
@@ -38,11 +38,15 @@ class _LandingPageState extends State<LandingPage>
   bool _vacancyReloadInFlight = false;
   final ScrollController _scrollController = ScrollController();
   bool _didInitialScrollReset = false;
+  bool _headerCompact = false;
+  bool _mobileMenuOpen = false;
+  LandingNavSection _activeNavSection = LandingNavSection.home;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _scrollController.addListener(_onLandingScroll);
     _reloadVacancies();
     _vacancyPollTimer = Timer.periodic(
       _vacancyPollInterval,
@@ -59,6 +63,17 @@ class _LandingPageState extends State<LandingPage>
     });
   }
 
+  void _onLandingScroll() {
+    if (!_scrollController.hasClients) return;
+    final nextCompact = _scrollController.offset > 28;
+    if (nextCompact != _headerCompact || _mobileMenuOpen) {
+      setState(() {
+        _headerCompact = nextCompact;
+        if (_mobileMenuOpen) _mobileMenuOpen = false;
+      });
+    }
+  }
+
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
@@ -73,6 +88,7 @@ class _LandingPageState extends State<LandingPage>
     _vacancyPollTimer?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     app.routeObserver.unsubscribe(this);
+    _scrollController.removeListener(_onLandingScroll);
     _scrollController.dispose();
     super.dispose();
   }
@@ -165,64 +181,130 @@ class _LandingPageState extends State<LandingPage>
         children: [
           HeaderSection(
             key: _headerKey,
-            onHomeTap: () => _scrollTo(_heroKey),
-            onJobVacanciesTap: () => _scrollTo(_jobVacanciesKey),
+            compact: _headerCompact,
+            menuOpen: _mobileMenuOpen,
+            onMenuOpenChanged: (open) {
+              setState(() => _mobileMenuOpen = open);
+            },
+            onHomeTap: () {
+              setState(() => _activeNavSection = LandingNavSection.home);
+              _scrollTo(_heroKey);
+            },
+            onJobVacanciesTap: () {
+              setState(
+                () => _activeNavSection = LandingNavSection.jobVacancies,
+              );
+              _scrollTo(_jobVacanciesKey);
+            },
             onRecruitmentProcessTap: () => Navigator.of(context).push(
               MaterialPageRoute(
                 builder: (context) => const ApplicationFlowPage(),
               ),
             ),
-            onContactTap: () => _scrollTo(_contactKey),
+            onContactTap: () {
+              setState(() => _activeNavSection = LandingNavSection.contact);
+              _scrollTo(_contactKey);
+            },
           ),
           Expanded(
             child: LayoutBuilder(
               builder: (context, constraints) {
-                return SingleChildScrollView(
-                  controller: _scrollController,
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      HeroSection(
-                        key: _heroKey,
-                        height: constraints.maxHeight,
-                        onViewVacanciesTap: () => _scrollTo(_jobVacanciesKey),
-                        onScrollToVacancies: () => _scrollTo(_jobVacanciesKey),
-                        onTrackApplicationTap: _onTrackApplication,
-                      ),
-                      const SizedBox(height: 8),
-                      KeyedSubtree(
-                        key: _jobVacanciesKey,
-                        child: _loadingAnnouncement
-                            ? const Padding(
-                                padding: EdgeInsets.symmetric(vertical: 48),
-                                child: Center(
-                                  child: SizedBox(
-                                    width: 28,
-                                    height: 28,
-                                    child: CircularProgressIndicator(
-                                      strokeWidth: 2.5,
+                final isMobile =
+                    MediaQuery.of(context).size.width < 768;
+                return Stack(
+                  children: [
+                    SingleChildScrollView(
+                      controller: _scrollController,
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          HeroSection(
+                            key: _heroKey,
+                            height: constraints.maxHeight,
+                            onViewVacanciesTap: () =>
+                                _scrollTo(_jobVacanciesKey),
+                            onScrollToVacancies: () =>
+                                _scrollTo(_jobVacanciesKey),
+                            onTrackApplicationTap: _onTrackApplication,
+                          ),
+                          const SizedBox(height: 8),
+                          KeyedSubtree(
+                            key: _jobVacanciesKey,
+                            child: _loadingAnnouncement
+                                ? const Padding(
+                                    padding: EdgeInsets.symmetric(vertical: 48),
+                                    child: Center(
+                                      child: SizedBox(
+                                        width: 28,
+                                        height: 28,
+                                        child: CircularProgressIndicator(
+                                          strokeWidth: 2.5,
+                                        ),
+                                      ),
                                     ),
+                                  )
+                                : JobVacanciesSection(
+                                    hasVacancies: _announcement.hasVacancies,
+                                    headline: _announcement.headline,
+                                    body: _announcement.body,
+                                    vacancies:
+                                        _announcement.listedVacancies.isEmpty
+                                        ? null
+                                        : _announcement.listedVacancies,
+                                    onGoToRecruitmentTap: null,
+                                    onApplyForVacancyTap:
+                                        _announcement.isAcceptingApplications
+                                        ? _onApplyForVacancy
+                                        : null,
                                   ),
-                                ),
-                              )
-                            : JobVacanciesSection(
-                                hasVacancies: _announcement.hasVacancies,
-                                headline: _announcement.headline,
-                                body: _announcement.body,
-                                vacancies: _announcement.listedVacancies.isEmpty
-                                    ? null
-                                    : _announcement.listedVacancies,
-                                onGoToRecruitmentTap: null,
-                                onApplyForVacancyTap:
-                                    _announcement.isAcceptingApplications
-                                    ? _onApplyForVacancy
-                                    : null,
-                              ),
+                          ),
+                          ContactSection(key: _contactKey),
+                          const FooterSection(),
+                        ],
                       ),
-                      ContactSection(key: _contactKey),
-                      const FooterSection(),
+                    ),
+                    if (isMobile && _mobileMenuOpen) ...[
+                      Positioned.fill(
+                        child: GestureDetector(
+                          behavior: HitTestBehavior.opaque,
+                          onTap: () => setState(() => _mobileMenuOpen = false),
+                          child: Container(
+                            color: Colors.black.withValues(alpha: 0.18),
+                          ),
+                        ),
+                      ),
+                      Positioned(
+                        top: 0,
+                        left: 0,
+                        right: 0,
+                        child: LandingMobileNavPanel(
+                          activeSection: _activeNavSection,
+                          onHome: () {
+                            setState(() {
+                              _activeNavSection = LandingNavSection.home;
+                              _mobileMenuOpen = false;
+                            });
+                            _scrollTo(_heroKey);
+                          },
+                          onJobVacancies: () {
+                            setState(() {
+                              _activeNavSection =
+                                  LandingNavSection.jobVacancies;
+                              _mobileMenuOpen = false;
+                            });
+                            _scrollTo(_jobVacanciesKey);
+                          },
+                          onContact: () {
+                            setState(() {
+                              _activeNavSection = LandingNavSection.contact;
+                              _mobileMenuOpen = false;
+                            });
+                            _scrollTo(_contactKey);
+                          },
+                        ),
+                      ),
                     ],
-                  ),
+                  ],
                 );
               },
             ),

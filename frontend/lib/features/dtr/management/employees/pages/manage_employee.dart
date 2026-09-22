@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:math';
 
 import 'package:dio/dio.dart';
 import 'package:file_picker/file_picker.dart';
@@ -133,31 +132,6 @@ const String kDefaultEmployeePassword = kDefaultEmployeeAccountPassword;
 
 String defaultPasswordForRoleKey(String role) =>
     role == 'admin' ? kDefaultAdminPassword : kDefaultEmployeePassword;
-
-String generateTemporaryAccountPassword({int length = 12}) {
-  final random = Random.secure();
-  const lower = 'abcdefghijkmnopqrstuvwxyz';
-  const upper = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
-  const numbers = '23456789';
-  const symbols = '!@#%';
-  const all = '$lower$upper$numbers$symbols';
-  final chars = <String>[
-    lower[random.nextInt(lower.length)],
-    upper[random.nextInt(upper.length)],
-    numbers[random.nextInt(numbers.length)],
-    symbols[random.nextInt(symbols.length)],
-  ];
-  while (chars.length < length) {
-    chars.add(all[random.nextInt(all.length)]);
-  }
-  for (var i = chars.length - 1; i > 0; i--) {
-    final j = random.nextInt(i + 1);
-    final tmp = chars[i];
-    chars[i] = chars[j];
-    chars[j] = tmp;
-  }
-  return chars.join();
-}
 
 /// Create Account form. Use inline in Dashboard. Single place for adding employees.
 /// Prefer JSON `error` from API responses (Dio), then Dio message.
@@ -770,11 +744,11 @@ class _ManageEmployeeState extends State<ManageEmployee> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: Text('Deactivate ${targets.length} employees?'),
+        title: Text('Disable login for ${targets.length} employees?'),
         content: Text(
           targets.length <= 3
               ? targets.map((e) => e.fullName).join(', ')
-              : 'This will deactivate ${targets.length} selected accounts. They will no longer be able to sign in.',
+              : 'This will disable login for ${targets.length} selected accounts. Employment and assignments will not change.',
         ),
         actions: [
           TextButton(
@@ -784,7 +758,7 @@ class _ManageEmployeeState extends State<ManageEmployee> {
           FilledButton(
             onPressed: () => Navigator.of(ctx).pop(true),
             style: FilledButton.styleFrom(backgroundColor: Colors.red),
-            child: const Text('Deactivate'),
+            child: const Text('Disable login'),
           ),
         ],
       ),
@@ -819,7 +793,7 @@ class _ManageEmployeeState extends State<ManageEmployee> {
     } catch (e) {
       if (mounted) {
         messenger.showSnackBar(
-          SnackBar(content: Text('Bulk deactivate failed: $e')),
+          SnackBar(content: Text('Bulk login disable failed: $e')),
         );
         setState(() => _bulkWorking = false);
       }
@@ -828,17 +802,22 @@ class _ManageEmployeeState extends State<ManageEmployee> {
 
   Future<void> _confirmBulkActivate() async {
     final targets = _employees
-        .where((e) => _selectedBulkIds.contains(e.id) && !e.isActive)
+        .where(
+          (e) =>
+              _selectedBulkIds.contains(e.id) &&
+              !e.isActive &&
+              (e.employmentStatus ?? 'active') == 'active',
+        )
         .toList();
     if (targets.isEmpty) return;
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: Text('Activate ${targets.length} employees?'),
+        title: Text('Enable login for ${targets.length} employees?'),
         content: Text(
           targets.length <= 3
               ? targets.map((e) => e.fullName).join(', ')
-              : 'This will reactivate ${targets.length} selected accounts. They will be able to sign in again.',
+              : 'This will enable login for ${targets.length} selected accounts. Employment and assignments will not change.',
         ),
         actions: [
           TextButton(
@@ -850,7 +829,7 @@ class _ManageEmployeeState extends State<ManageEmployee> {
             style: FilledButton.styleFrom(
               backgroundColor: const Color(0xFF4CAF50),
             ),
-            child: const Text('Activate'),
+            child: const Text('Enable login'),
           ),
         ],
       ),
@@ -898,7 +877,10 @@ class _ManageEmployeeState extends State<ManageEmployee> {
       (e) => _selectedBulkIds.contains(e.id) && e.isActive,
     );
     final canActivate = _employees.any(
-      (e) => _selectedBulkIds.contains(e.id) && !e.isActive,
+      (e) =>
+          _selectedBulkIds.contains(e.id) &&
+          !e.isActive &&
+          (e.employmentStatus ?? 'active') == 'active',
     );
     final dark = _isDark(context);
     return Material(
@@ -940,7 +922,7 @@ class _ManageEmployeeState extends State<ManageEmployee> {
                 ),
               ),
               icon: const Icon(Icons.person_off_rounded, size: 18),
-              label: const Text('Deactivate'),
+              label: const Text('Disable login'),
             ),
             FilledButton.icon(
               onPressed: _bulkWorking || !canActivate
@@ -955,7 +937,7 @@ class _ManageEmployeeState extends State<ManageEmployee> {
                 ),
               ),
               icon: const Icon(Icons.person_add_rounded, size: 18),
-              label: const Text('Activate'),
+              label: const Text('Enable login'),
             ),
           ],
         ),
@@ -1472,7 +1454,7 @@ class _ManageEmployeeState extends State<ManageEmployee> {
       mainAxisSize: MainAxisSize.min,
       children: [
         Text(
-          e.isActive ? 'Active' : 'Inactive',
+          e.isActive ? 'Login enabled' : 'Login disabled',
           style: TextStyle(
             fontSize: 12,
             fontWeight: FontWeight.w600,
@@ -2330,43 +2312,40 @@ class _ManageEmployeeState extends State<ManageEmployee> {
             ),
           ),
           const SizedBox(height: 12),
-          SizedBox(
-            width: double.infinity,
-            child: FilledButton.icon(
-              onPressed: hasSelection
-                  ? () {
-                      final p = sel;
-                      p.isActive ? _confirmDeactivate(p) : _confirmActivate(p);
-                    }
-                  : null,
-              icon: Icon(
-                (hasSelection && !sel.isActive)
-                    ? Icons.person_add_rounded
-                    : Icons.person_off_rounded,
-                size: 20,
-                color: hasSelection
-                    ? Colors.white
-                    : Colors.white.withValues(alpha: 0.5),
-              ),
-              label: Text(
-                hasSelection && !sel.isActive ? 'Activate' : 'Deactivate',
-              ),
-              style: FilledButton.styleFrom(
-                backgroundColor: (hasSelection && !sel.isActive)
-                    ? const Color(0xFF4CAF50)
-                    : const Color(0xFFE53935),
-                disabledBackgroundColor: Colors.red.shade200.withValues(
-                  alpha: 0.5,
+          if (hasSelection &&
+              !_requiresSeparationDate(sel.employmentStatus)) ...[
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton.icon(
+                onPressed: () => _confirmEndEmployment(sel),
+                icon: const Icon(Icons.event_busy_outlined, size: 20),
+                label: const Text('End employment'),
+                style: FilledButton.styleFrom(
+                  backgroundColor: const Color(0xFFE53935),
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 12),
                 ),
-                foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(vertical: 12),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                elevation: 0,
               ),
             ),
-          ),
+            const SizedBox(height: 12),
+          ],
+          if (hasSelection &&
+              (sel.isActive || sel.employmentStatus == 'active'))
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: () => sel.isActive
+                    ? _confirmDisableLogin(sel)
+                    : _confirmActivate(sel),
+                icon: Icon(
+                  sel.isActive
+                      ? Icons.lock_outline_rounded
+                      : Icons.lock_open_rounded,
+                  size: 20,
+                ),
+                label: Text(sel.isActive ? 'Disable login' : 'Enable login'),
+              ),
+            ),
         ],
       ),
     );
@@ -2376,7 +2355,7 @@ class _ManageEmployeeState extends State<ManageEmployee> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Activate employee?'),
+        title: const Text('Enable employee login?'),
         content: Text(
           'This will reactivate the account of ${profile.fullName}. They will be able to sign in again.',
         ),
@@ -2390,7 +2369,7 @@ class _ManageEmployeeState extends State<ManageEmployee> {
             style: FilledButton.styleFrom(
               backgroundColor: const Color(0xFF4CAF50),
             ),
-            child: const Text('Activate'),
+            child: const Text('Enable login'),
           ),
         ],
       ),
@@ -2435,6 +2414,119 @@ class _ManageEmployeeState extends State<ManageEmployee> {
     dtr.loadEmployees(forceRefresh: true);
   }
 
+  Future<void> _confirmEndEmployment(_EmployeeProfile profile) async {
+    String status = 'resigned';
+    DateTime? lastDay;
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final decision = await showDialog<({String status, DateTime lastDay})>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, update) => AlertDialog(
+          title: const Text('End employment'),
+          content: SizedBox(
+            width: 400,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(profile.fullName),
+                const SizedBox(height: 16),
+                DropdownButtonFormField<String>(
+                  initialValue: status,
+                  decoration: const InputDecoration(labelText: 'Reason'),
+                  items: const [
+                    DropdownMenuItem(
+                      value: 'resigned',
+                      child: Text('Resigned'),
+                    ),
+                    DropdownMenuItem(value: 'retired', child: Text('Retired')),
+                    DropdownMenuItem(
+                      value: 'terminated',
+                      child: Text('Terminated'),
+                    ),
+                  ],
+                  onChanged: (value) {
+                    if (value != null) update(() => status = value);
+                  },
+                ),
+                const SizedBox(height: 12),
+                OutlinedButton.icon(
+                  onPressed: () async {
+                    final hireDate = profile.dateHired;
+                    final hired = hireDate == null
+                        ? null
+                        : DateTime(hireDate.year, hireDate.month, hireDate.day);
+                    final firstDate =
+                        hired != null && hired.isAfter(DateTime(1900))
+                        ? hired
+                        : DateTime(1900);
+                    if (firstDate.isAfter(today)) return;
+                    final picked = await showDatePicker(
+                      context: ctx,
+                      initialDate: lastDay ?? today,
+                      firstDate: firstDate,
+                      lastDate: today,
+                    );
+                    if (picked != null) update(() => lastDay = picked);
+                  },
+                  icon: const Icon(Icons.event_outlined),
+                  label: Text(
+                    lastDay == null
+                        ? 'Select last day of service'
+                        : _employeeDateText(lastDay!),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                const Text(
+                  'Login will be disabled and assignments will end on this date. Earlier attendance and leave history will remain.',
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: lastDay == null
+                  ? null
+                  : () => Navigator.of(
+                      ctx,
+                    ).pop((status: status, lastDay: lastDay!)),
+              child: const Text('End employment'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (decision == null || !mounted) return;
+    try {
+      await ApiClient.instance.put(
+        '/api/employees/${profile.id}',
+        data: {
+          'employment_status': decision.status,
+          'separation_date': _employeeDateText(decision.lastDay),
+        },
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Employment ended for ${profile.fullName}.')),
+      );
+      await _loadEmployees();
+      if (!mounted) return;
+      final dtr = context.read<DtrProvider>();
+      dtr.invalidateCachedDtrData(includeReferenceData: true);
+      dtr.loadEmployees(forceRefresh: true);
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not end employment: $error')),
+      );
+    }
+  }
+
   void _showImportDialog(BuildContext context) async {
     await showDialog<void>(
       context: context,
@@ -2457,13 +2549,13 @@ class _ManageEmployeeState extends State<ManageEmployee> {
     );
   }
 
-  Future<void> _confirmDeactivate(_EmployeeProfile profile) async {
+  Future<void> _confirmDisableLogin(_EmployeeProfile profile) async {
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Deactivate employee?'),
+        title: const Text('Disable employee login?'),
         content: Text(
-          'This will deactivate the account of ${profile.fullName}. They will no longer be able to sign in.',
+          '${profile.fullName} will no longer be able to sign in. Employment and assignments will not change.',
         ),
         actions: [
           TextButton(
@@ -2473,7 +2565,7 @@ class _ManageEmployeeState extends State<ManageEmployee> {
           FilledButton(
             onPressed: () => Navigator.of(ctx).pop(true),
             style: FilledButton.styleFrom(backgroundColor: Colors.red),
-            child: const Text('Deactivate'),
+            child: const Text('Disable login'),
           ),
         ],
       ),
@@ -2483,7 +2575,7 @@ class _ManageEmployeeState extends State<ManageEmployee> {
       await ApiClient.instance.delete('/api/employees/${profile.id}');
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('${profile.fullName} has been deactivated.')),
+        SnackBar(content: Text('Login disabled for ${profile.fullName}.')),
       );
       await _loadEmployees();
       if (!mounted) return;
@@ -2494,7 +2586,7 @@ class _ManageEmployeeState extends State<ManageEmployee> {
       if (!mounted) return;
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(SnackBar(content: Text('Failed to deactivate: $e')));
+      ).showSnackBar(SnackBar(content: Text('Failed to disable login: $e')));
     }
   }
 }

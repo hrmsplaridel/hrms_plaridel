@@ -23,7 +23,7 @@ void main() {
       await provider.loadMyLeaveData('employee-a');
       await provider.loadRequestById('request-a');
 
-      expect(provider.requests, hasLength(1));
+      expect(provider.myRequests, hasLength(1));
       expect(provider.balances, hasLength(1));
       expect(provider.selectedRequest?.userId, 'employee-a');
       expect(provider.filterStatus, LeaveRequestStatus.approved);
@@ -32,6 +32,8 @@ void main() {
       provider.onAuthUserChanged(null);
 
       expect(provider.requests, isEmpty);
+      expect(provider.myRequests, isEmpty);
+      expect(provider.departmentHeadRequests, isEmpty);
       expect(provider.balances, isEmpty);
       expect(provider.selectedRequest, isNull);
       expect(provider.filterStatus, isNull);
@@ -64,6 +66,7 @@ void main() {
     await pendingLoad;
 
     expect(provider.requests, isEmpty);
+    expect(provider.myRequests, isEmpty);
     expect(provider.balances, isEmpty);
     expect(provider.selectedRequest, isNull);
     expect(provider.loading, isFalse);
@@ -88,6 +91,7 @@ void main() {
 
       expect(await pendingSave, isNull);
       expect(provider.requests, isEmpty);
+      expect(provider.myRequests, isEmpty);
       expect(provider.selectedRequest, isNull);
       expect(provider.submitting, isFalse);
       expect(provider.error, isNull);

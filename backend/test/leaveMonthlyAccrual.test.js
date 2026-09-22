@@ -12,6 +12,7 @@ const {
   round3,
   startOfMonth,
   serviceMonthAssignmentExistsSql,
+  servedDuringTargetMonthSql,
 } = require('../src/services/leaveMonthlyAccrual');
 const {
   manilaCompletedYearMonthNow,
@@ -29,6 +30,13 @@ test('completed-month accrual accepts an assignment closed by a later transfer',
   assert.match(sql, /a\.effective_from/);
   assert.match(sql, /a\.effective_to/);
   assert.doesNotMatch(sql, /a\.is_active/i);
+});
+
+test('month-end eligibility uses employment dates, not login access', () => {
+  const sql = servedDuringTargetMonthSql('u', '$2', '$3');
+  assert.match(sql, /u\.separation_date >= \$2::date/);
+  assert.match(sql, /u\.employment_status/);
+  assert.doesNotMatch(sql, /u\.is_active/);
 });
 
 // ─── Mock pool factory ────────────────────────────────────────────────────────

@@ -42,21 +42,13 @@ Create the database (if needed):
 createdb hrms_plaridel
 ```
 
-Run the schema (Schema v2 — core HR/DTR plus **L&D** and **RSP** tables):
+Run the complete fresh-install schema (core HR/DTR, **L&D**, **RSP**, DocuTracker, and the RSP attachment policy):
 
 ```bash
-psql -d hrms_plaridel -f scripts/init-schema.sql
+psql -d hrms_plaridel -v ON_ERROR_STOP=1 -f scripts/init-schema.sql
 ```
 
-(Or use pgAdmin: create DB, then run the SQL file.)
-
-**RSP file uploads:** after `init-schema.sql`, apply the **attachment access policy** (required so `/api/rsp/storage/view-token` only allows paths tied to `recruitment_applications`). Files are stored under `uploads/rsp-attachments/`.
-
-```bash
-psql -d hrms_plaridel -f scripts/rsp-storage-attachment-policy.sql
-```
-
-**DocuTracker (optional):** after `init-schema.sql`, run `scripts/migrations/docutracker/docutracker-install-all-in-order.sql`. Individual DocuTracker migrations and SQL utilities are kept in `scripts/migrations/docutracker/`.
+Use `psql` for this command because `init-schema.sql` uses relative include commands to install its DocuTracker and RSP policy components. The component scripts remain available for targeted upgrades to existing databases. RSP files are stored under `uploads/rsp-attachments/`.
 
 `init-schema-ld.sql` and `init-schema-rsp.sql` are deprecated stubs; new installs only need `init-schema.sql`.
 

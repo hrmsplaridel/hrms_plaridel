@@ -38,7 +38,12 @@ if env_path.exists():
 POLL_INTERVAL        = int(os.environ.get("ZK_POLL_INTERVAL", "10"))
 API_URL              = os.environ.get("HRMS_API_URL", "http://localhost:3000").rstrip("/")
 API_KEY              = os.environ.get("BIO_SYNC_API_KEY")
-STATE_FILE           = Path(__file__).resolve().parent.parent / ".zkteco-sync-state.json"
+STATE_FILE           = Path(
+    os.environ.get(
+        "ZK_SYNC_STATE_FILE",
+        str(Path(__file__).resolve().parent.parent / ".zkteco-sync-state.json"),
+    )
+).expanduser()
 TIMEOUT              = 60
 TZ_OFFSET            = os.environ.get("ZK_TIMEZONE_OFFSET", "+08:00")
 REALTIME_ENABLED     = os.environ.get("ZK_REALTIME", "1").strip().lower() not in ("0", "false", "no", "off")
@@ -210,6 +215,7 @@ def load_last_sync(key, identity_fingerprint):
 def save_last_sync(key, iso_str, identity_fingerprint):
     with STATE_LOCK:
         try:
+            STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
             d = {}
             if STATE_FILE.exists():
                 try:

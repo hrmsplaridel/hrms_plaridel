@@ -1,6 +1,6 @@
 {
-    "name": "HRMS Plaridel",
-    "short_name": "HRMS Plaridel",
+    "name": "HRMS",
+    "short_name": "HRMS",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#1E2A3D",
@@ -11,7 +11,7 @@
     "icons": [
         {
             "src": "icons/favicon.png",
-            "sizes": "192x192",
+            "sizes": "48x48",
             "type": "image/png"
         },
         {

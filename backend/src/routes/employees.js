@@ -32,6 +32,9 @@ const { csvEscape } = require('../utils/csv');
 const {
   invalidateAttendancePolicyCache,
 } = require('../services/attendancePolicyCache');
+const {
+  closeEmployeeAssignmentsForSeparation,
+} = require('../services/employeeSeparation');
 
 const router = express.Router();
 const protect = [authMiddleware];
@@ -844,8 +847,9 @@ router.post('/', protect, requireAdmin, async (req, res) => {
 
     let accountEmailSent = false;
     let accountEmailError = null;
+    const skipAccountEmail = req.body?.skip_account_email === true;
 
-    if (createdEmployee.is_active && isSmtpConfigured()) {
+    if (createdEmployee.is_active && isSmtpConfigured() && !skipAccountEmail) {
       try {
         const employeeEmail = String(createdEmployee.email || '').trim();
         await sendSmtpMail({
@@ -1148,47 +1152,10 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
         shouldUpdateSeparation &&
         SEPARATION_EMPLOYMENT_STATUSES.has(effectiveEmploymentStatus)
       ) {
-        await client.query(
-          `UPDATE assignments
-              SET is_active = false,
-                  updated_at = now()
-            WHERE employee_id = $1::uuid
-              AND is_active = true
-              AND effective_from > $2::date`,
-          [id, effectiveSeparationDate]
-        );
-        await client.query(
-          `WITH target AS (
-             SELECT id
-               FROM assignments
-              WHERE employee_id = $1::uuid
-                AND effective_from <= $2::date
-                AND (
-                  effective_to IS NULL
-                  OR effective_to >= $2::date
-                  OR effective_to = $3::date
-                )
-              ORDER BY effective_from DESC, created_at DESC, id DESC
-              LIMIT 1
-           )
-           UPDATE assignments a
-              SET effective_to = $2::date,
-                  updated_at = now()
-             FROM target
-            WHERE a.id = target.id`,
-          [id, effectiveSeparationDate, existingRes.rows[0].separation_date]
-        );
-        await client.query(
-          `UPDATE policy_assignments
-              SET is_active = false,
-                  effective_to = CASE
-                    WHEN effective_from <= $2::date THEN $2::date
-                    ELSE effective_to
-                  END,
-                  updated_at = now()
-            WHERE employee_id = $1::uuid
-              AND is_active = true`,
-          [id, effectiveSeparationDate]
+        await closeEmployeeAssignmentsForSeparation(
+          client,
+          id,
+          effectiveSeparationDate
         );
       }
 

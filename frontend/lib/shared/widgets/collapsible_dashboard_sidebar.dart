@@ -634,7 +634,6 @@ class CollapsedSidebarProfileOrb extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final panel = AppTheme.dashPanelOf(context);
     final primary = AppTheme.primaryNavy;
 
     return Tooltip(
@@ -648,17 +647,17 @@ class CollapsedSidebarProfileOrb extends StatelessWidget {
             Container(
               width: 48,
               height: 48,
-              padding: const EdgeInsets.all(3.5),
+              padding: const EdgeInsets.all(3),
               decoration: BoxDecoration(
-                color: panel,
+                color: Colors.white,
                 shape: BoxShape.circle,
                 border: Border.all(
-                  color: primary.withValues(alpha: 0.4),
-                  width: 1.8,
+                  color: primary,
+                  width: 3,
                 ),
                 boxShadow: [
                   BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.1),
+                    color: primary.withValues(alpha: 0.28),
                     blurRadius: 10,
                     offset: const Offset(0, 2),
                   ),

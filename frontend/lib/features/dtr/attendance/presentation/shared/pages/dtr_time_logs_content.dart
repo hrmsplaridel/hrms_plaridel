@@ -2548,8 +2548,12 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
   }
 
   Future<void> _showImportBiometricLogsDialog() async {
-    final ok = await showDialog<bool>(
+    final ok = await openResponsiveRightSidePanel<bool>(
       context: context,
+      barrierLabel: 'Close biometric attendance import',
+      breakpoint: 900,
+      minWidth: 560,
+      initialWidthFraction: 0.48,
       builder: (ctx) => ImportBiometricAttendanceLogsDialog(
         onCancel: () => Navigator.of(ctx).pop(),
         onImportSuccess: () => Navigator.of(ctx).pop(true),

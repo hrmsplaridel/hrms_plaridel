@@ -27,7 +27,7 @@ class EmployeeTrainingRequirementsTutorial {
       key: preTrainingKey,
       title: 'Complete pre-training requirements',
       body:
-          'Upload the required invitation letter and wait for HR approval before proceeding.',
+          'Upload the required invitation letter and travel order, then wait for HR approval before proceeding.',
     ),
     EmployeeTutorialTarget(
       key: postTrainingKey,

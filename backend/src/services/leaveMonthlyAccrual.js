@@ -205,10 +205,7 @@ function servedDuringTargetMonthSql(
       OR ${userAlias}.separation_date >= ${targetStartParam}::date
     )
     AND (
-      (
-        (${userAlias}.is_active IS NULL OR ${userAlias}.is_active = true)
-        AND COALESCE(${userAlias}.employment_status, 'active') = 'active'
-      )
+      COALESCE(${userAlias}.employment_status, 'active') = 'active'
       OR ${userAlias}.separation_date >= ${targetStartParam}::date
     )
   )`;
@@ -948,13 +945,8 @@ async function runLeaveMonthlyAccrual(pgPool, options = {}) {
            INNER JOIN users u ON u.id = lb.user_id
            WHERE lb.leave_type = ANY($1::text[])
              AND u.leave_credit_eligible = true
-             AND (
-               (u.date_hired IS NULL OR u.date_hired <= $3::date)
-               AND (
-                 (u.is_active IS NULL OR u.is_active = true)
-                 AND COALESCE(u.employment_status, 'active') = 'active'
-               )
-             )
+             AND (u.date_hired IS NULL OR u.date_hired <= $3::date)
+             AND COALESCE(u.employment_status, 'active') = 'active'
              AND ${serviceMonthAssignmentExistsSql('u', '$2', '$3')}
            ${dryRun ? '' : 'FOR UPDATE OF lb'}`,
           [accrualLeaveTypes, targetMonthStartStr, targetMonthEndStr]
@@ -1285,4 +1277,5 @@ module.exports = {
   completedMonthStartInTimeZone,
   round3,
   serviceMonthAssignmentExistsSql,
+  servedDuringTargetMonthSql,
 };

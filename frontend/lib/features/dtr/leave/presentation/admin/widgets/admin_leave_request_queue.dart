@@ -456,16 +456,34 @@ class AdminLeaveRequestQueuePanel extends StatefulWidget {
   const AdminLeaveRequestQueuePanel({
     super.key,
     required this.requests,
+    required this.filterKey,
     required this.isDepartmentHead,
     required this.loading,
+    required this.initialLoadComplete,
+    required this.initialLoadAttempted,
+    required this.onRetry,
+    required this.totalCount,
+    required this.hasMore,
+    required this.loadingMore,
+    required this.loadMoreError,
+    required this.onLoadMore,
     required this.selectedRequest,
     required this.filterBar,
     required this.onSelect,
   });
 
   final List<LeaveRequest> requests;
+  final String filterKey;
   final bool isDepartmentHead;
   final bool loading;
+  final bool initialLoadComplete;
+  final bool initialLoadAttempted;
+  final VoidCallback onRetry;
+  final int totalCount;
+  final bool hasMore;
+  final bool loadingMore;
+  final String? loadMoreError;
+  final VoidCallback onLoadMore;
   final LeaveRequest? selectedRequest;
   final Widget filterBar;
   final ValueChanged<LeaveRequest> onSelect;
@@ -486,7 +504,7 @@ class _AdminLeaveRequestQueuePanelState
   @override
   void didUpdateWidget(covariant AdminLeaveRequestQueuePanel oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.requests != widget.requests) {
+    if (oldWidget.filterKey != widget.filterKey) {
       _page = 0;
     } else {
       _clampPage();
@@ -542,8 +560,27 @@ class _AdminLeaveRequestQueuePanelState
         children: [
           widget.filterBar,
           const SizedBox(height: 14),
-          if (widget.loading && widget.requests.isEmpty)
+          if (widget.requests.isEmpty &&
+              (widget.loading ||
+                  (!widget.initialLoadComplete &&
+                      !widget.initialLoadAttempted)))
             const AdminLeaveCenteredState(message: 'Loading leave requests...')
+          else if (widget.requests.isEmpty && !widget.initialLoadComplete)
+            Center(
+              child: Column(
+                children: [
+                  const AdminLeaveCenteredState(
+                    message:
+                        'Requests unavailable. Please check your connection.',
+                  ),
+                  OutlinedButton.icon(
+                    onPressed: widget.onRetry,
+                    icon: const Icon(Icons.refresh_rounded),
+                    label: const Text('Retry'),
+                  ),
+                ],
+              ),
+            )
           else if (widget.requests.isEmpty)
             const AdminLeaveCenteredState(
               message: 'No leave requests matched the filters.',
@@ -660,6 +697,45 @@ class _AdminLeaveRequestQueuePanelState
                   ? () => _goToPage(_page + 1)
                   : null,
             ),
+            if (widget.hasMore ||
+                widget.loadingMore ||
+                widget.loadMoreError != null) ...[
+              const SizedBox(height: 12),
+              Wrap(
+                spacing: 12,
+                runSpacing: 8,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: [
+                  Text(
+                    '${widget.requests.length} of ${widget.totalCount} loaded',
+                    style: TextStyle(
+                      color: AppTheme.dashTextSecondaryOf(context),
+                    ),
+                  ),
+                  if (widget.hasMore)
+                    OutlinedButton.icon(
+                      onPressed: widget.loadingMore ? null : widget.onLoadMore,
+                      icon: widget.loadingMore
+                          ? const SizedBox(
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Icon(Icons.expand_more_rounded),
+                      label: Text(
+                        widget.loadingMore ? 'Loading...' : 'Load More',
+                      ),
+                    ),
+                  if (widget.loadMoreError != null)
+                    Text(
+                      'Could not load more requests. Please retry.',
+                      style: TextStyle(
+                        color: Theme.of(context).colorScheme.error,
+                      ),
+                    ),
+                ],
+              ),
+            ],
           ],
         ],
       ),

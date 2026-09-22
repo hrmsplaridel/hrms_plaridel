@@ -421,7 +421,7 @@ class _SidebarAvatarRing extends StatelessWidget {
             shape: BoxShape.circle,
             border: Border.all(
               color: AppTheme.primaryNavy.withValues(alpha: ringOpacity),
-              width: 2.5,
+              width: 3,
             ),
             boxShadow: [
               BoxShadow(
@@ -438,7 +438,7 @@ class _SidebarAvatarRing extends StatelessWidget {
       child: UserAvatar(
         avatarPath: avatarPath,
         radius: radius,
-        backgroundColor: AppTheme.dashHairlineOf(context),
+        backgroundColor: Colors.white,
         placeholderIconColor: AppTheme.primaryNavy,
       ),
     );

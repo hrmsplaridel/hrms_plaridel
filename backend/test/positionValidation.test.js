@@ -64,7 +64,8 @@ test('position creation trims values and supplies safe defaults', () => {
       name: 'Administrative Assistant',
       description: 'Records support',
       department_id: DEPARTMENT_ID,
-      is_department_head: false,
+    is_department_head: false,
+    is_leave_final_reviewer: false,
       is_active: true,
     }
   );

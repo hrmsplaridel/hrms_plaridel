@@ -103,6 +103,7 @@ const {
   resolveOfficialSignatory,
 } = require('../services/officialSignatoryService');
 const { todayInHrmsTimezone } = require('../utils/dateRangeParser');
+const { assertFinalLeaveReviewer, assertLeaveSubmissionReviewer, resolveFinalLeaveReviewers } = require('../services/leaveFinalReviewerService');
 
 const router = express.Router();
 
@@ -152,6 +153,31 @@ function broadcastDtrLeaveRefresh(action, { userId, leaveRequestId, dateFrom, da
   }
 }
 const protect = [authMiddleware];
+
+router.get('/final-reviewer/me', protect, requireAdminOrHr, async (req, res) => {
+  try {
+    const reviewers = await resolveFinalLeaveReviewers(pool);
+    return res.json({
+      can_review: reviewers.some((reviewer) => String(reviewer.id) === String(req.user.id)),
+    });
+  } catch (err) {
+    console.error('[leave GET final-reviewer/me]', err);
+    return res.status(500).json({ error: 'Failed to check final leave reviewer assignment' });
+  }
+});
+
+router.get('/submission-availability', protect, async (req, res) => {
+  try {
+    await assertLeaveSubmissionReviewer(pool, req.user.id);
+    return res.json({ can_submit: true });
+  } catch (err) {
+    if (err.statusCode === 409) {
+      return res.json({ can_submit: false, reason: err.message });
+    }
+    console.error('[leave GET submission-availability]', err);
+    return res.status(500).json({ error: 'Failed to check leave reviewer availability' });
+  }
+});
 
 async function findAssignmentProfileByUserIdAtDate(db, userId, effectiveDate = null) {
   if (!userId) return null;
@@ -2113,6 +2139,7 @@ router.post('/submit', protect, async (req, res) => {
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
+      await assertLeaveSubmissionReviewer(client, userId);
       const workingDayResult = await computeEmployeeLeaveWorkingDays(client, userId, startStr, endStr);
       const leaveTypeId = await ensureLeaveTypeIdByName(client, leave_type);
       if (!leaveTypeId) {
@@ -2352,6 +2379,7 @@ router.post('/submit-with-attachment', protect, uploadLeaveAttachmentMemoryMw, a
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
+      await assertLeaveSubmissionReviewer(client, userId);
       const workingDayResult = await computeEmployeeLeaveWorkingDays(client, userId, startStr, endStr);
       const leaveTypeId = await ensureLeaveTypeIdByName(client, leave_type);
       if (!leaveTypeId) {
@@ -2591,7 +2619,8 @@ router.put('/:id', protect, async (req, res) => {
     const existing = await pool.query(
       `SELECT id, status, employee_official_snapshot
        FROM leave_requests
-       WHERE id = $1 AND (user_id = $2 OR employee_id = $2)`,
+       WHERE id = $1 AND (user_id = $2 OR employee_id = $2)
+         AND discarded_at IS NULL`,
       [id, userId]
     );
     if (existing.rows.length === 0) return res.status(404).json({ error: 'Leave request not found' });
@@ -2635,6 +2664,7 @@ router.put('/:id', protect, async (req, res) => {
           error: 'Leave type, start date, and end date are required before submission.',
         });
       }
+      if (submitting) await assertLeaveSubmissionReviewer(client, userId);
       const leaveTypeId = await ensureLeaveTypeIdByName(client, leave_type);
       // FIX #1: isNotEmpty is Dart/Swift, not JS. Use .length > 0 instead.
       if (leave_type != null && String(leave_type).trim().length > 0 && !leaveTypeId) {
@@ -2882,6 +2912,54 @@ router.put('/:id', protect, async (req, res) => {
   }
 });
 
+// PATCH /api/leave/:id/discard - hide an unsubmitted draft while retaining its audit trail.
+router.patch('/:id/discard', protect, async (req, res) => {
+  const userId = req.user?.id;
+  if (!userId) return res.status(401).json({ error: 'Not authenticated' });
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const current = await client.query(
+      `SELECT id, status, discarded_at
+         FROM leave_requests
+        WHERE id = $1::uuid AND (user_id = $2::uuid OR employee_id = $2::uuid)
+        FOR UPDATE`,
+      [req.params.id, userId]
+    );
+    if (!current.rows.length || current.rows[0].discarded_at) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Draft not found' });
+    }
+    if (current.rows[0].status !== 'draft') {
+      await client.query('ROLLBACK');
+      return res.status(409).json({ error: 'Only unsubmitted drafts can be discarded' });
+    }
+    await client.query(
+      'UPDATE leave_requests SET discarded_at = now(), updated_at = now() WHERE id = $1::uuid',
+      [req.params.id]
+    );
+    await insertLeaveRequestHistory(client, {
+      leaveRequestId: req.params.id,
+      action: 'discarded_draft',
+      fromStatus: 'draft',
+      toStatus: 'draft',
+      actedBy: userId,
+      remarks: null,
+      metadataJson: null,
+    });
+    await client.query('COMMIT');
+    broadcastLeaveUpdated('discarded_draft', { id: req.params.id, user_id: userId });
+    return res.json({ discarded: true });
+  } catch (err) {
+    try { await client.query('ROLLBACK'); } catch (_) {}
+    if (err.code === '22P02') return res.status(400).json({ error: 'Invalid draft ID' });
+    console.error('[leave PATCH /:id/discard]', err);
+    return res.status(500).json({ error: 'Failed to discard draft' });
+  } finally {
+    client.release();
+  }
+});
+
 // PATCH /api/leave/:id/cancel
 router.patch('/:id/cancel', protect, async (req, res) => {
   const userId = req.user?.id;
@@ -2895,7 +2973,8 @@ router.patch('/:id/cancel', protect, async (req, res) => {
     const q = await client.query(
       `SELECT id, status, reserved_credit_days
        FROM leave_requests
-       WHERE id = $1 AND (user_id = $2 OR employee_id = $2)`,
+       WHERE id = $1 AND (user_id = $2 OR employee_id = $2)
+         AND discarded_at IS NULL`,
       [id, userId]
     );
     if (q.rows.length === 0) {
@@ -3047,6 +3126,7 @@ router.get('/my', protect, async (req, res) => {
          LIMIT 1
        ) dhh ON true
        WHERE (lr.user_id = $1 OR lr.employee_id = $1)
+         AND lr.discarded_at IS NULL
          AND ($2::text IS NULL OR lr.status = $2)
        ORDER BY lr.updated_at DESC NULLS LAST, lr.created_at DESC, lr.id DESC
        LIMIT $3 OFFSET $4`,
@@ -3060,6 +3140,7 @@ router.get('/my', protect, async (req, res) => {
         `SELECT COUNT(*)::int AS total
          FROM leave_requests lr
          WHERE (lr.user_id = $1 OR lr.employee_id = $1)
+           AND lr.discarded_at IS NULL
            AND ($2::text IS NULL OR lr.status = $2)`,
         [userId, status]
       );
@@ -3503,13 +3584,48 @@ router.post('/admin/monthly-accrual', protect, requireAdminOrHr, async (req, res
 // GET /api/leave (admin/HR list)
 // Query params: status, leave_type, user_id, limit,
 //               start_date_from, start_date_to, created_from, created_to
+async function listLeaveReviewFilterOptions(db, scopeSql, params) {
+  const result = await db.query(
+    `SELECT DISTINCT COALESCE(lr.user_id, lr.employee_id) AS user_id,
+            u.full_name AS employee_name, d.name AS department
+     FROM leave_requests lr
+     LEFT JOIN users u ON u.id = COALESCE(lr.user_id, lr.employee_id)
+     ${SQL_LEAVE_ASSIGNMENT_DEPT_JOIN}
+     WHERE ${scopeSql}
+     ORDER BY department, employee_name, user_id`,
+    params
+  );
+  return result.rows;
+}
+
+router.get('/filter-options', protect, requireAdminOrHr, async (_req, res) => {
+  try {
+    const items = await listLeaveReviewFilterOptions(
+      pool,
+      "lr.status <> 'pending_department_head'",
+      []
+    );
+    res.json(items);
+  } catch (err) {
+    console.error('[leave GET /filter-options]', err);
+    res.status(500).json({ error: 'Failed to fetch leave review filters' });
+  }
+});
+
 router.get('/', protect, requireAdminOrHr, async (req, res) => {
   try {
+    const paginated = req.query?.paginated === 'true';
     const status = (req.query?.status || '').toString().trim() || null;
     const leaveType = (req.query?.leave_type || '').toString().trim() || null;
     const userId = (req.query?.user_id || '').toString().trim() || null;
-    const limitRaw = req.query?.limit ? parseInt(req.query.limit, 10) : null;
-    const safeLimit = Number.isFinite(limitRaw) && limitRaw > 0 ? Math.min(limitRaw, 500) : null;
+    const department = (req.query?.department || '').toString().trim() || null;
+    const limitRaw = req.query?.limit ? Number(req.query.limit) : null;
+    const safeLimit = Number.isInteger(limitRaw) && limitRaw > 0 ? Math.min(limitRaw, 500) : (paginated ? 50 : null);
+    const offsetRaw = req.query?.offset == null ? 0 : Number(req.query.offset);
+    if (paginated && (!Number.isInteger(offsetRaw) || offsetRaw < 0)) {
+      return res.status(400).json({ error: 'offset must be a non-negative integer' });
+    }
+    const offset = paginated ? offsetRaw : 0;
 
     // FIX #12 (Phase 4 preview wired here): Date range filters.
     const startDateFrom = (req.query?.start_date_from || '').toString().trim() || null;
@@ -3517,17 +3633,7 @@ router.get('/', protect, requireAdminOrHr, async (req, res) => {
     const createdFrom = (req.query?.created_from || '').toString().trim() || null;
     const createdTo = (req.query?.created_to || '').toString().trim() || null;
 
-    const rows = await pool.query(
-      `SELECT lr.*, lt.name AS leave_type_name, u.full_name AS employee_full_name,
-              d.name AS assignment_department_name,
-              rv.full_name AS reviewer_name,
-              rv.role AS reviewer_role,
-              dhh.department_head_action,
-              dhh.department_head_reviewer_id,
-              dhh.department_head_reviewer_name,
-              dhh.department_head_reviewed_at,
-              dhh.department_head_remarks
-       FROM leave_requests lr
+    const fromWhere = `FROM leave_requests lr
        LEFT JOIN leave_types lt ON lt.id = lr.leave_type_id
        LEFT JOIN users u ON u.id = COALESCE(lr.user_id, lr.employee_id)
        ${SQL_LEAVE_ASSIGNMENT_DEPT_JOIN}
@@ -3556,11 +3662,30 @@ router.get('/', protect, requireAdminOrHr, async (req, res) => {
          AND ($5::date IS NULL OR lr.start_date <= $5)
          AND ($6::timestamptz IS NULL OR lr.created_at >= $6)
          AND ($7::date IS NULL OR lr.created_at < ($7::date + interval '1 day'))
-       ORDER BY lr.updated_at DESC NULLS LAST, lr.created_at DESC
-       ${safeLimit ? 'LIMIT ' + safeLimit : ''}`,
-      [status, leaveType, userId, startDateFrom, startDateTo, createdFrom, createdTo]
+         AND ($8::text IS NULL OR d.name = $8)
+         ${paginated ? "AND lr.status <> 'pending_department_head'" : ''}`;
+    const params = [status, leaveType, userId, startDateFrom, startDateTo, createdFrom, createdTo, department];
+    const rows = await pool.query(
+      `SELECT lr.*, lt.name AS leave_type_name, u.full_name AS employee_full_name,
+              d.name AS assignment_department_name,
+              rv.full_name AS reviewer_name,
+              rv.role AS reviewer_role,
+              dhh.department_head_action,
+              dhh.department_head_reviewer_id,
+              dhh.department_head_reviewer_name,
+              dhh.department_head_reviewed_at,
+              dhh.department_head_remarks
+       ${fromWhere}
+       ORDER BY lr.updated_at DESC NULLS LAST, lr.created_at DESC, lr.id DESC
+       ${safeLimit ? `LIMIT ${safeLimit}` : ''}
+       ${paginated ? `OFFSET ${offset}` : ''}`,
+      params
     );
-    res.json(rows.rows.map(mapLeaveRowToApi));
+    const items = rows.rows.map(mapLeaveRowToApi);
+    if (!paginated) return res.json(items);
+    const count = await pool.query(`SELECT COUNT(*)::int AS total ${fromWhere}`, params);
+    const total = count.rows[0]?.total || 0;
+    res.json({ items, total, limit: safeLimit, offset, has_more: offset + items.length < total });
   } catch (err) {
     console.error('[leave GET /]', err);
     res.status(500).json({ error: 'Failed to fetch leave requests' });
@@ -3628,20 +3753,38 @@ router.get('/department-head/check', protect, async (req, res) => {
       `SELECT lr.review_department_id AS department_id,
               d.name AS department_name
        FROM leave_requests lr
-       JOIN leave_request_department_reviewers lrr
-         ON lrr.leave_request_id = lr.id
        LEFT JOIN departments d ON d.id = lr.review_department_id
-       WHERE lrr.reviewer_id = $1::uuid
-         AND lr.status = 'pending_department_head'
+       WHERE lr.status = 'pending_department_head'
+         AND (
+           lr.assigned_department_head_id = $1::uuid
+           OR EXISTS (
+             SELECT 1 FROM leave_request_department_reviewers lrr
+             WHERE lrr.leave_request_id = lr.id AND lrr.reviewer_id = $1::uuid
+           )
+         )
        ORDER BY lr.updated_at DESC
        LIMIT 1`,
       [userId]
     );
     const assignedDepartment = assigned.rows[0] || null;
+
+    const hasHistoryResult = await client.query(
+      `SELECT EXISTS (
+         SELECT 1 FROM leave_request_history h
+         WHERE h.acted_by = $1::uuid
+           AND h.action IN ('department_head_approved', 'department_head_rejected', 'department_head_returned')
+       )`,
+      [userId]
+    );
+
+    const canReviewPending = result.isDeptHead || Boolean(assignedDepartment);
     res.json({
-      isDeptHead: result.isDeptHead || Boolean(assignedDepartment),
+      isDeptHead: canReviewPending,
+      canReviewPending,
+      canViewReviewHistory: hasHistoryResult.rows[0].exists,
       departmentId: result.departmentId || assignedDepartment?.department_id || null,
       departmentName: result.departmentName || assignedDepartment?.department_name || null,
+      hasHistory: hasHistoryResult.rows[0].exists
     });
   } catch (err) {
     console.error('[leave GET /department-head/check]', err);
@@ -3653,32 +3796,54 @@ router.get('/department-head/check', protect, async (req, res) => {
 
 // GET /api/leave/department-head — list requests pending dept head approval
 // plus requests already handled by the current department head.
+router.get('/department-head/filter-options', protect, async (req, res) => {
+  const userId = req.user?.id;
+  if (!userId) return res.status(401).json({ error: 'Not authenticated' });
+  try {
+    const items = await listLeaveReviewFilterOptions(
+      pool,
+      `((lr.status = 'pending_department_head' AND (
+         lr.assigned_department_head_id = $1::uuid OR EXISTS (
+           SELECT 1 FROM leave_request_department_reviewers lrr
+           WHERE lrr.leave_request_id = lr.id AND lrr.reviewer_id = $1::uuid
+         )
+       )) OR EXISTS (
+         SELECT 1 FROM leave_request_history h
+         WHERE h.leave_request_id = lr.id AND h.acted_by = $1::uuid
+           AND h.action IN ('department_head_approved', 'department_head_rejected', 'department_head_returned')
+       ))`,
+      [userId]
+    );
+    res.json(items);
+  } catch (err) {
+    console.error('[leave GET /department-head/filter-options]', err);
+    res.status(500).json({ error: 'Failed to fetch department-head leave filters' });
+  }
+});
+
 router.get('/department-head', protect, async (req, res) => {
   const userId = req.user?.id;
   if (!userId) return res.status(401).json({ error: 'Not authenticated' });
   const client = await pool.connect();
   try {
+    const paginated = req.query?.paginated === 'true';
     const status = (req.query?.status || '').toString().trim() || null;
     const leaveType = (req.query?.leave_type || '').toString().trim() || null;
     const employeeUserId = (req.query?.user_id || '').toString().trim() || null;
+    const department = (req.query?.department || '').toString().trim() || null;
     const startDateFrom = (req.query?.start_date_from || '').toString().trim() || null;
     const startDateTo = (req.query?.start_date_to || '').toString().trim() || null;
     const createdFrom = (req.query?.created_from || '').toString().trim() || null;
     const createdTo = (req.query?.created_to || '').toString().trim() || null;
-    const limitRaw = req.query?.limit ? parseInt(req.query.limit, 10) : 200;
-    const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? Math.min(limitRaw, 500) : 200;
+    const limitRaw = req.query?.limit ? Number(req.query.limit) : 200;
+    const limit = Number.isInteger(limitRaw) && limitRaw > 0 ? Math.min(limitRaw, 500) : 200;
+    const offsetRaw = req.query?.offset == null ? 0 : Number(req.query.offset);
+    if (paginated && (!Number.isInteger(offsetRaw) || offsetRaw < 0)) {
+      return res.status(400).json({ error: 'offset must be a non-negative integer' });
+    }
+    const offset = paginated ? offsetRaw : 0;
 
-    const rows = await client.query(
-      `SELECT lr.*, lt.name AS leave_type_name, u.full_name AS employee_full_name,
-              d.name AS assignment_department_name,
-              rv.full_name AS reviewer_name,
-              rv.role AS reviewer_role,
-              dhh.department_head_action,
-              dhh.department_head_reviewer_id,
-              dhh.department_head_reviewer_name,
-              dhh.department_head_reviewed_at,
-              dhh.department_head_remarks
-       FROM leave_requests lr
+    const fromWhere = `FROM leave_requests lr
        LEFT JOIN leave_types lt ON lt.id = lr.leave_type_id
        LEFT JOIN users u ON u.id = COALESCE(lr.user_id, lr.employee_id)
        ${SQL_LEAVE_ASSIGNMENT_DEPT_JOIN}
@@ -3723,20 +3888,29 @@ router.get('/department-head', protect, async (req, res) => {
           AND ($6::date IS NULL OR lr.start_date <= $6)
           AND ($7::timestamptz IS NULL OR lr.created_at >= $7)
           AND ($8::date IS NULL OR lr.created_at < ($8::date + interval '1 day'))
-       ORDER BY lr.updated_at DESC NULLS LAST, lr.created_at DESC
-       LIMIT ${limit}`,
-      [
-        userId,
-        status,
-        leaveType,
-        employeeUserId,
-        startDateFrom,
-        startDateTo,
-        createdFrom,
-        createdTo,
-      ]
+          AND ($9::text IS NULL OR d.name = $9)`;
+    const params = [userId, status, leaveType, employeeUserId, startDateFrom, startDateTo, createdFrom, createdTo, department];
+    const rows = await client.query(
+      `SELECT lr.*, lt.name AS leave_type_name, u.full_name AS employee_full_name,
+              d.name AS assignment_department_name,
+              rv.full_name AS reviewer_name,
+              rv.role AS reviewer_role,
+              dhh.department_head_action,
+              dhh.department_head_reviewer_id,
+              dhh.department_head_reviewer_name,
+              dhh.department_head_reviewed_at,
+              dhh.department_head_remarks
+       ${fromWhere}
+       ORDER BY lr.updated_at DESC NULLS LAST, lr.created_at DESC, lr.id DESC
+       LIMIT ${limit}
+       ${paginated ? `OFFSET ${offset}` : ''}`,
+      params
     );
-    res.json(rows.rows.map(mapLeaveRowToApi));
+    const items = rows.rows.map(mapLeaveRowToApi);
+    if (!paginated) return res.json(items);
+    const count = await client.query(`SELECT COUNT(*)::int AS total ${fromWhere}`, params);
+    const total = count.rows[0]?.total || 0;
+    res.json({ items, total, limit, offset, has_more: offset + items.length < total });
   } catch (err) {
     console.error('[leave GET /department-head]', err);
     res.status(500).json({ error: 'Failed to fetch department head leave requests' });
@@ -4132,6 +4306,7 @@ router.patch('/:id/approve', protect, requireAdminOrHr, async (req, res) => {
         currentStatus: r.status,
         desiredStatus: 'approved',
       });
+      await assertFinalLeaveReviewer(client, targetUserId, reviewerId);
       await requireHrApprovalSignature(client, id, reviewerId);
       const approvingAuthority = await resolveActiveMayor(
         client,
@@ -4301,7 +4476,8 @@ router.patch('/:id/reject', protect, requireAdminOrHr, async (req, res) => {
               lr.user_id, lr.employee_id, lt.name AS leave_type_name
        FROM leave_requests lr
        LEFT JOIN leave_types lt ON lt.id = lr.leave_type_id
-       WHERE lr.id = $1`,
+       WHERE lr.id = $1
+       FOR UPDATE OF lr`,
       [id]
     );
     if (current.rows.length === 0) {
@@ -4310,12 +4486,9 @@ router.patch('/:id/reject', protect, requireAdminOrHr, async (req, res) => {
     }
     const currentRow = current.rows[0];
 
-    const { historyAction } = validateAdminTransition({
-      currentStatus: currentRow.status,
-      desiredStatus: 'rejected',
-    });
+    await assertFinalLeaveReviewer(client, currentRow.user_id || currentRow.employee_id, reviewerId);
 
-    const { nextStatus: rejectNextStatus } = validateAdminTransition({
+    const { nextStatus: rejectNextStatus, historyAction } = validateAdminTransition({
       currentStatus: currentRow.status,
       desiredStatus: 'rejected',
     });
@@ -4613,7 +4786,8 @@ router.patch('/:id/return', protect, requireAdminOrHr, async (req, res) => {
               lr.user_id, lr.employee_id, lt.name AS leave_type_name
        FROM leave_requests lr
        LEFT JOIN leave_types lt ON lt.id = lr.leave_type_id
-       WHERE lr.id = $1`,
+       WHERE lr.id = $1
+       FOR UPDATE OF lr`,
       [id]
     );
     if (current.rows.length === 0) {
@@ -4627,6 +4801,7 @@ router.patch('/:id/return', protect, requireAdminOrHr, async (req, res) => {
       await client.query('ROLLBACK');
       return res.status(400).json({ error: `Cannot return request with status '${currentRow.status}'` });
     }
+    await assertFinalLeaveReviewer(client, currentRow.user_id || currentRow.employee_id, reviewerId);
     const historyAction = 'returned';
 
     await client.query(
@@ -4846,6 +5021,55 @@ router.get('/ledger', protect, async (req, res) => {
       return res.status(503).json({ error: 'Leave ledger table not ready yet' });
     }
     res.status(500).json({ error: 'Failed to fetch leave ledger' });
+  }
+});
+
+// PDF certification credits for one request; this does not grant general balance access.
+router.get('/:id/form-credits', protect, async (req, res) => {
+  const viewerId = req.user?.id;
+  if (!viewerId) return res.status(401).json({ error: 'Not authenticated' });
+  try {
+    const privileged = req.user.role === 'admin' || req.user.role === 'hr';
+    const access = await pool.query(
+      `SELECT COALESCE(lr.user_id, lr.employee_id) AS employee_id,
+              ($2::boolean = true
+                OR lr.user_id = $3::uuid OR lr.employee_id = $3::uuid
+                OR (lr.status = 'pending_department_head'
+                    AND lr.assigned_department_head_id = $3::uuid)
+                OR EXISTS (
+                  SELECT 1 FROM leave_request_history h
+                  WHERE h.leave_request_id = lr.id AND h.acted_by = $3::uuid
+                    AND h.action IN ('department_head_approved',
+                      'department_head_rejected', 'department_head_returned')
+                )) AS can_view
+       FROM leave_requests lr WHERE lr.id = $1::uuid LIMIT 1`,
+      [req.params.id, privileged, viewerId]
+    );
+    const request = access.rows[0];
+    if (!request) return res.status(404).json({ error: 'Leave request not found' });
+    if (!request.can_view) return res.status(403).json({ error: 'Not allowed to view this leave form' });
+
+    const result = await pool.query(
+      `SELECT lb.id, lb.user_id, lb.leave_type, lb.earned_days,
+              lb.used_days, lb.pending_days, lb.adjusted_days,
+              lb.as_of_date, lb.last_accrual_date, lb.created_at, lb.updated_at
+       FROM leave_balances lb
+       WHERE lb.user_id = $1::uuid
+         AND lb.leave_type IN ('vacationLeave', 'sickLeave')
+       ORDER BY CASE lb.leave_type WHEN 'vacationLeave' THEN 0 ELSE 1 END`,
+      [request.employee_id]
+    );
+    res.json(result.rows.map((row) => ({
+      ...row,
+      record_kind: 'credit_balance',
+      earned_days: Number(row.earned_days || 0),
+      used_days: Number(row.used_days || 0),
+      pending_days: Number(row.pending_days || 0),
+      adjusted_days: Number(row.adjusted_days || 0),
+    })));
+  } catch (err) {
+    console.error('[leave GET /:id/form-credits]', err);
+    res.status(500).json({ error: 'Failed to fetch leave form credits' });
   }
 });
 
@@ -5390,6 +5614,7 @@ router.get('/:id', protect, async (req, res) => {
          LIMIT 1
        ) dhh ON true
        WHERE lr.id = $1
+         AND lr.discarded_at IS NULL
          AND (
            $2::boolean = true
            OR (lr.user_id = $3 OR lr.employee_id = $3)

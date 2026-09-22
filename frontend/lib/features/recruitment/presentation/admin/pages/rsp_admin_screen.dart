@@ -42,10 +42,25 @@ import 'package:hrms_plaridel/shared/widgets/structured_address_fields.dart';
 
 /// RSP module: hub with buttons for each RSP feature (Job Vacancies, Applications, Exam Results).
 class RspAdminContent extends StatefulWidget {
-  const RspAdminContent({super.key, this.onOpenCreateAccount});
+  const RspAdminContent({
+    super.key,
+    this.onOpenCreateAccount,
+    this.initialApplicationId,
+    this.initialFinalRequirementsApplicationId,
+    this.onInitialApplicationConsumed,
+  });
+
+  static const applicantDetailsRoute = 'rsp_applicant_details';
 
   /// Switches the admin shell to **Create Account** (sidebar) so the hire form opens.
   final VoidCallback? onOpenCreateAccount;
+
+  /// Opens Applications and the matching applicant drawer (notification deep-link).
+  final String? initialApplicationId;
+
+  /// Opens Final Requirements with this applicant expanded (after Create Account).
+  final String? initialFinalRequirementsApplicationId;
+  final VoidCallback? onInitialApplicationConsumed;
 
   @override
   State<RspAdminContent> createState() => _RspAdminContentState();
@@ -54,6 +69,68 @@ class RspAdminContent extends StatefulWidget {
 class _RspAdminContentState extends State<RspAdminContent> {
   /// 0 = menu, 1 = Job Vacancies, 2 = Applications, 16 = Exam Results, 15 = Scheduling.
   int _rspSectionIndex = 0;
+  String? _openApplicationId;
+  String? _openFinalRequirementsApplicationId;
+
+  @override
+  void initState() {
+    super.initState();
+    final finalReqId = widget.initialFinalRequirementsApplicationId?.trim();
+    if (finalReqId != null && finalReqId.isNotEmpty) {
+      _rspSectionIndex = 19;
+      _openFinalRequirementsApplicationId = finalReqId;
+      return;
+    }
+    final id = widget.initialApplicationId?.trim();
+    if (id != null && id.isNotEmpty) {
+      _rspSectionIndex = 2;
+      _openApplicationId = id;
+    }
+  }
+
+  @override
+  void didUpdateWidget(covariant RspAdminContent oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final nextFinal = widget.initialFinalRequirementsApplicationId?.trim();
+    final prevFinal = oldWidget.initialFinalRequirementsApplicationId?.trim();
+    if (nextFinal != null && nextFinal.isNotEmpty && nextFinal != prevFinal) {
+      setState(() {
+        _rspSectionIndex = 19;
+        _openFinalRequirementsApplicationId = nextFinal;
+        _openApplicationId = null;
+      });
+      return;
+    }
+    final next = widget.initialApplicationId?.trim();
+    final prev = oldWidget.initialApplicationId?.trim();
+    if (next != null && next.isNotEmpty && next != prev) {
+      setState(() {
+        _rspSectionIndex = 2;
+        _openApplicationId = next;
+      });
+    }
+  }
+
+  void _onOpenApplicationConsumed() {
+    if (_openApplicationId == null && _rspSectionIndex == 0) {
+      widget.onInitialApplicationConsumed?.call();
+      return;
+    }
+    setState(() {
+      _openApplicationId = null;
+      _rspSectionIndex = 0;
+    });
+    widget.onInitialApplicationConsumed?.call();
+  }
+
+  void _onFinalRequirementsExpandConsumed() {
+    if (_openFinalRequirementsApplicationId == null) {
+      widget.onInitialApplicationConsumed?.call();
+      return;
+    }
+    setState(() => _openFinalRequirementsApplicationId = null);
+    widget.onInitialApplicationConsumed?.call();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -89,8 +166,10 @@ class _RspAdminContentState extends State<RspAdminContent> {
               else if (_rspSectionIndex == 1)
                 const RspJobVacanciesSection()
               else if (_rspSectionIndex == 2)
-                const _RspApplicationsMonitor(
+                _RspApplicationsMonitor(
                   view: _RspMonitorView.applications,
+                  openApplicationId: _openApplicationId,
+                  onOpenApplicationConsumed: _onOpenApplicationConsumed,
                 )
               else if (_rspSectionIndex == 16)
                 const _RspApplicationsMonitor(view: _RspMonitorView.examResults)
@@ -107,6 +186,9 @@ class _RspAdminContentState extends State<RspAdminContent> {
               else if (_rspSectionIndex == 19)
                 RspFinalRequirementsSection(
                   onGoToCreateAccount: widget.onOpenCreateAccount,
+                  expandApplicationId: _openFinalRequirementsApplicationId,
+                  onExpandApplicationConsumed:
+                      _onFinalRequirementsExpandConsumed,
                 )
               else
                 const SizedBox.shrink(),
@@ -7225,9 +7307,15 @@ enum _RspMonitorView { applications, examResults }
 
 /// RSP: Applications monitor or exam-results monitor (shared data loader).
 class _RspApplicationsMonitor extends StatefulWidget {
-  const _RspApplicationsMonitor({required this.view});
+  const _RspApplicationsMonitor({
+    required this.view,
+    this.openApplicationId,
+    this.onOpenApplicationConsumed,
+  });
 
   final _RspMonitorView view;
+  final String? openApplicationId;
+  final VoidCallback? onOpenApplicationConsumed;
 
   @override
   State<_RspApplicationsMonitor> createState() =>
@@ -7247,6 +7335,7 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
   bool _syncing = false;
   bool _exportingReport = false;
   String? _adminPassingApplicantId;
+  String? _openedApplicationId;
   final ScrollController _horizontalScrollController = ScrollController();
   final ScrollController _scoreBreakdownVScrollController = ScrollController();
 
@@ -7865,6 +7954,17 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
   }
 
   @override
+  void didUpdateWidget(covariant _RspApplicationsMonitor oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final next = widget.openApplicationId?.trim();
+    final prev = oldWidget.openApplicationId?.trim();
+    if (next != null && next.isNotEmpty && next != prev) {
+      _openedApplicationId = null;
+      _openPendingApplicationIfNeeded();
+    }
+  }
+
+  @override
   void dispose() {
     _searchController.dispose();
     _horizontalScrollController.dispose();
@@ -7884,10 +7984,42 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
           _examResults = results;
           _loading = false;
         });
+        _openPendingApplicationIfNeeded();
       }
     } catch (_) {
       if (mounted) setState(() => _loading = false);
     }
+  }
+
+  void _openPendingApplicationIfNeeded() {
+    if (widget.view != _RspMonitorView.applications) return;
+    final id = widget.openApplicationId?.trim();
+    if (id == null || id.isEmpty) return;
+    if (_openedApplicationId != null &&
+        _openedApplicationId!.toLowerCase() == id.toLowerCase()) {
+      return;
+    }
+    if (_loading && _applications.isEmpty) return;
+
+    RecruitmentApplication? match;
+    for (final app in _applications) {
+      if (app.id.toLowerCase() == id.toLowerCase()) {
+        match = app;
+        break;
+      }
+    }
+    _openedApplicationId = id;
+    if (match == null || !mounted) {
+      widget.onOpenApplicationConsumed?.call();
+      return;
+    }
+    final app = match;
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!mounted) return;
+      await _openApplicantDetails(app);
+      if (!mounted) return;
+      widget.onOpenApplicationConsumed?.call();
+    });
   }
 
   Future<void> _deleteApplicant(String applicationId) async {
@@ -8464,6 +8596,10 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
   }) async {
     await showGeneralDialog<void>(
       context: context,
+      useRootNavigator: true,
+      routeSettings: const RouteSettings(
+        name: RspAdminContent.applicantDetailsRoute,
+      ),
       barrierLabel: 'Applicant details',
       barrierDismissible: true,
       barrierColor: Colors.black.withValues(alpha: 0.35),

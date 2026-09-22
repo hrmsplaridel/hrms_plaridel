@@ -1,4 +1,5 @@
 import 'package:file_picker/file_picker.dart';
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -56,6 +57,8 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
   List<LeaveTypeDefinition> _leaveTypeDefinitions = const [];
   List<LeaveBalance> _creditBalances = const [];
   bool _loadingLeaveTypes = false;
+  bool _leaveTypesLoaded = false;
+  String? _leaveTypesError;
   LeaveLocationOption? _locationOption;
   SickLeaveNature? _sickLeaveNature;
   MaternityDeliveryType? _maternityDeliveryType;
@@ -517,10 +520,14 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
   }
 
   Future<void> _loadLeaveTypes() async {
-    setState(() => _loadingLeaveTypes = true);
+    setState(() {
+      _loadingLeaveTypes = true;
+      _leaveTypesLoaded = false;
+      _leaveTypesError = null;
+    });
     try {
       final items = await LeaveTypeDefinitionCache.instance
-          .listActiveEmployeeTypes();
+          .listActiveEmployeeTypes(forceRefresh: true);
       if (!mounted) return;
       setState(() {
         final allowedItems = items
@@ -528,6 +535,7 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
             .toList();
         _leaveTypeDefinitions = allowedItems;
         _loadingLeaveTypes = false;
+        _leaveTypesLoaded = true;
         final selectedExists = allowedItems.any(
           (item) => item.name == _leaveTypeName,
         );
@@ -543,7 +551,12 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
         _syncWorkingDaysFromDates();
       }
     } catch (_) {
-      if (mounted) setState(() => _loadingLeaveTypes = false);
+      if (mounted) {
+        setState(() {
+          _loadingLeaveTypes = false;
+          _leaveTypesError = 'Could not load active leave types.';
+        });
+      }
     }
   }
 
@@ -592,36 +605,18 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
   }
 
   List<DropdownMenuItem<String>> _leaveTypeDropdownItems() {
-    if (_leaveTypeDefinitions.isNotEmpty) {
-      final items = _leaveTypeDefinitions
-          .where(
-            (item) =>
-                _isLeaveTypeDefinitionAllowedForAccount(item) &&
-                (item.employeeCanFile && !item.adminOnly),
-          )
-          .map(
-            (item) => DropdownMenuItem<String>(
-              value: item.name,
-              child: Text(item.displayName),
-            ),
-          )
-          .toList();
-      if (!items.any((item) => item.value == _leaveTypeName)) {
-        items.add(
-          DropdownMenuItem<String>(
-            value: _leaveTypeName,
-            child: Text(_selectedLeaveTypeLabel),
-          ),
-        );
-      }
-      return items;
-    }
-    return LeaveType.values
-        .where((t) => t.employeeCanFile && _isLeaveTypeAllowedForAccount(t))
+    return _leaveTypeDefinitions
+        .where(
+          (item) =>
+              item.isActive &&
+              _isLeaveTypeDefinitionAllowedForAccount(item) &&
+              item.employeeCanFile &&
+              !item.adminOnly,
+        )
         .map(
-          (t) => DropdownMenuItem<String>(
-            value: t.value,
-            child: Text(t.displayName),
+          (item) => DropdownMenuItem<String>(
+            value: item.name,
+            child: Text(item.displayName),
           ),
         )
         .toList();
@@ -677,6 +672,10 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
     if (_submitFlowInFlight || _busy || _checkingStatus || !_canEditRequest) {
       return;
     }
+    if (!_leaveTypesLoaded || _definitionForName(_leaveTypeName) == null) {
+      _showMessage('Choose an active leave type before submitting.');
+      return;
+    }
     setState(() => _submitFlowInFlight = true);
     try {
       if (!await _refreshSavedStatus() || !mounted) return;
@@ -729,11 +728,34 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
         return;
       }
 
+      if (!await _checkSubmissionAvailability()) return;
       if (!await _ensureApplicantSignature()) return;
       await _submit(isDraft: false);
     } finally {
       if (mounted) setState(() => _submitFlowInFlight = false);
     }
+  }
+
+  Future<bool> _checkSubmissionAvailability() async {
+    try {
+      final response = await ApiClient.instance.get<Map<String, dynamic>>(
+        '/api/leave/submission-availability',
+      );
+      if (!mounted) return false;
+      if (response.data?['can_submit'] == true) return true;
+      _showMessage(
+        response.data?['reason']?.toString() ??
+            'No eligible final leave reviewer is available. Contact HR before submitting.',
+      );
+    } on DioException catch (error) {
+      final data = error.response?.data;
+      _showMessage(
+        data is Map && data['error'] != null
+            ? data['error'].toString()
+            : 'Could not check reviewer availability. Please try again.',
+      );
+    }
+    return false;
   }
 
   double? get _currentWorkingDaysApplied =>
@@ -1425,49 +1447,55 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
 
     if (_checkingStatus &&
         ((_savedRequest ?? widget.initialRequest)?.id ?? '').isNotEmpty) {
-      return Scaffold(
-        backgroundColor: AppTheme.dashCanvasOf(context),
-        appBar: AppBar(title: const Text('Leave Request')),
-        body: const Center(child: CircularProgressIndicator()),
+      return ScaffoldMessenger(
+        key: _messengerKey,
+        child: Scaffold(
+          backgroundColor: AppTheme.dashCanvasOf(context),
+          appBar: AppBar(title: const Text('Leave Request')),
+          body: const Center(child: CircularProgressIndicator()),
+        ),
       );
     }
 
     if (_statusError != null || (!_checkingStatus && !_canEditRequest)) {
       final status = (_savedRequest ?? widget.initialRequest)?.status;
-      return Scaffold(
-        backgroundColor: AppTheme.dashCanvasOf(context),
-        appBar: AppBar(title: const Text('Leave Request')),
-        body: SingleChildScrollView(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              if (_statusError != null) ...[
-                Text(_statusError!),
-                TextButton(
-                  onPressed: _refreshSavedStatus,
-                  child: const Text('Retry'),
-                ),
-              ] else ...[
-                Text(
-                  _submissionCompleted
-                      ? 'Request submitted'
-                      : 'Status: ${status?.displayName}',
-                  style: Theme.of(context).textTheme.titleLarge,
-                ),
-                const SizedBox(height: 12),
-                Text(
-                  status?.isPending == true || _submissionCompleted
-                      ? 'This request has already been submitted. You can track its progress in the leave list.'
-                      : 'This request cannot be edited in its current status.',
-                ),
-                const SizedBox(height: 24),
-                FilledButton(
-                  onPressed: () => Navigator.of(context).pop(),
-                  child: const Text('Close'),
-                ),
+      return ScaffoldMessenger(
+        key: _messengerKey,
+        child: Scaffold(
+          backgroundColor: AppTheme.dashCanvasOf(context),
+          appBar: AppBar(title: const Text('Leave Request')),
+          body: SingleChildScrollView(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                if (_statusError != null) ...[
+                  Text(_statusError!),
+                  TextButton(
+                    onPressed: _refreshSavedStatus,
+                    child: const Text('Retry'),
+                  ),
+                ] else ...[
+                  Text(
+                    _submissionCompleted
+                        ? 'Request submitted'
+                        : 'Status: ${status?.displayName}',
+                    style: Theme.of(context).textTheme.titleLarge,
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    status?.isPending == true || _submissionCompleted
+                        ? 'This request has already been submitted. You can track its progress in the leave list.'
+                        : 'This request cannot be edited in its current status.',
+                  ),
+                  const SizedBox(height: 24),
+                  FilledButton(
+                    onPressed: () => Navigator.of(context).pop(),
+                    child: const Text('Close'),
+                  ),
+                ],
               ],
-            ],
+            ),
           ),
         ),
       );
@@ -1531,34 +1559,49 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
                             _buildSectionTitle('1. Leave Type'),
                             const SizedBox(height: 16),
                             DropdownButtonFormField<String>(
-                              initialValue: _leaveTypeName,
+                              key: ValueKey('$_leaveTypesLoaded:$_leaveTypeName'),
+                              initialValue: _leaveTypesLoaded &&
+                                      _definitionForName(_leaveTypeName) != null
+                                  ? _leaveTypeName
+                                  : null,
                               isExpanded: true,
                               decoration: _inputDecoration('Select Leave Type'),
                               items: _leaveTypeDropdownItems(),
-                              onChanged: (val) {
-                                if (val != null) {
-                                  setState(() {
-                                    final def = _definitionForName(val);
-                                    if (def != null) {
-                                      _selectLeaveTypeDefinition(def);
-                                    } else {
-                                      _leaveTypeName = val;
-                                      _leaveType = leaveTypeFromString(val);
-                                      _resetConditionalSelectionsForType(
-                                        _leaveType,
-                                      );
-                                    }
-                                    _annualEntitlementPreview = null;
-                                  });
-                                  if (_startDate != null && _endDate != null) {
-                                    _syncWorkingDaysFromDates();
-                                  }
-                                }
-                              },
+                              onChanged: !_leaveTypesLoaded
+                                  ? null
+                                  : (val) {
+                                      if (val != null) {
+                                        setState(() {
+                                          final def = _definitionForName(val);
+                                          if (def != null) {
+                                            _selectLeaveTypeDefinition(def);
+                                          } else {
+                                            _leaveTypeName = val;
+                                            _leaveType = leaveTypeFromString(val);
+                                            _resetConditionalSelectionsForType(
+                                              _leaveType,
+                                            );
+                                          }
+                                          _annualEntitlementPreview = null;
+                                        });
+                                        if (_startDate != null &&
+                                            _endDate != null) {
+                                          _syncWorkingDaysFromDates();
+                                        }
+                                      }
+                                    },
                             ),
                             if (_loadingLeaveTypes) ...[
                               const SizedBox(height: 8),
                               const LinearProgressIndicator(minHeight: 2),
+                            ],
+                            if (_leaveTypesError != null) ...[
+                              const SizedBox(height: 8),
+                              TextButton.icon(
+                                onPressed: _loadLeaveTypes,
+                                icon: const Icon(Icons.refresh),
+                                label: Text('$_leaveTypesError Retry'),
+                              ),
                             ],
 
                             // B. Dynamic leave-type guidance
@@ -1765,7 +1808,9 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
                               onPressed:
                                   _busy ||
                                       _submitFlowInFlight ||
-                                      _checkingStatus
+                                      _checkingStatus ||
+                                      !_leaveTypesLoaded ||
+                                      _definitionForName(_leaveTypeName) == null
                                   ? null
                                   : _submitRequest,
                               style: FilledButton.styleFrom(

@@ -118,6 +118,32 @@ test('assigned head sees a signable department head slot', async () => {
   assert.equal(signature.assigned_signer_name, 'Department Head One');
 });
 
+test('an HR applicant does not see a signable final approval slot', async () => {
+  const pool = {
+    async query(sql) {
+      if (sql.includes('FROM leave_requests lr')) {
+        return { rowCount: 1, rows: [{
+          id: leaveId,
+          status: 'pending_hr',
+          employee_user_id: employeeId,
+          employee_name: 'HR Applicant',
+          assigned_department_head_id: null,
+          is_snapshotted_reviewer: false,
+          was_department_reviewer: false,
+        }] };
+      }
+      if (sql.includes('FROM docutracker_leave_signatures s')) {
+        return { rowCount: 0, rows: [] };
+      }
+      throw new Error(`Unexpected query: ${sql}`);
+    },
+  };
+  const result = await getLeaveSourceSignatures(
+    pool, { id: employeeId, role: 'admin' }, 'dtr', 'leave_requests', leaveId
+  );
+  assert.equal(result.signatures.find((item) => item.slot_key === 'hr_approver').can_sign, false);
+});
+
 test('department head approval requires that same reviewer signature', async () => {
   await assert.rejects(
     requireDepartmentHeadApprovalSignature(

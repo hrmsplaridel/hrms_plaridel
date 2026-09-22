@@ -22,9 +22,11 @@ const {
 const {
   endDepartmentHeadPeriod,
   getManagedDepartmentHeadPeriod,
+  cleanDate,
   saveDepartmentHeadPeriod,
 } = require('../services/positionDepartmentHeadPeriods');
 const { todayInHrmsTimezone } = require('../utils/dateRangeParser');
+const { resolveFinalLeaveReviewers } = require('../services/leaveFinalReviewerService');
 const {
   PositionValidationError,
   normalizePositionWrite,
@@ -35,6 +37,41 @@ const {
 
 const router = express.Router();
 const protect = [authMiddleware];
+
+router.get('/department-head-conflict', protect, async (req, res) => {
+  try {
+    const { department_id: departmentId, exclude_position_id: excludeId } = req.query;
+    const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (!uuid.test(departmentId || '') || (excludeId && !uuid.test(excludeId))) {
+      return res.status(400).json({ error: 'A valid department and position ID are required' });
+    }
+    const from = cleanDate(req.query.effective_from || todayInHrmsTimezone(), 'Effective from');
+    const to = cleanDate(req.query.effective_to, 'Effective to');
+    if (to && to < from) {
+      return res.status(400).json({ error: 'Effective to cannot precede effective from' });
+    }
+    const result = await pool.query(
+      `SELECT period.position_id, p.name AS position_name
+         FROM position_department_head_periods period
+         JOIN positions p ON p.id = period.position_id
+        WHERE period.department_id = $1::uuid
+          AND period.position_id <> COALESCE($2::uuid, '00000000-0000-0000-0000-000000000000'::uuid)
+          AND period.is_active = true
+          AND daterange(period.effective_from, period.effective_to, '[]')
+              && daterange($3::date, $4::date, '[]')
+        ORDER BY period.effective_from DESC
+        LIMIT 1`,
+      [departmentId, excludeId || null, from, to]
+    );
+    return res.json(result.rows[0] || { position_id: null, position_name: null });
+  } catch (err) {
+    if (err instanceof PositionLifecycleError) {
+      return res.status(err.statusCode).json({ error: err.message });
+    }
+    console.error('[positions GET department-head-conflict]', err);
+    return res.status(500).json({ error: 'Failed to check Department Head designation' });
+  }
+});
 
 // GET /api/positions - bounded legacy list or paginated management response
 router.get('/', protect, async (req, res) => {
@@ -95,7 +132,7 @@ router.get('/', protect, async (req, res) => {
     const result = await pool.query(
       `WITH selected_positions AS (
          SELECT p.id, p.position_number, p.name, p.description,
-                p.department_id, p.is_active
+                p.department_id, p.is_active, p.is_leave_final_reviewer
            FROM positions p
            LEFT JOIN departments d ON d.id = p.department_id
            ${where}
@@ -103,6 +140,7 @@ router.get('/', protect, async (req, res) => {
           LIMIT ${limitPlaceholder} OFFSET ${offsetPlaceholder}
        )
        SELECT p.id, p.position_number, p.name, p.description, p.department_id,
+              p.is_leave_final_reviewer,
                (managed_period.id IS NOT NULL) AS is_department_head, p.is_active,
               managed_period.id AS department_head_period_id,
               managed_period.effective_from::text AS department_head_effective_from,
@@ -154,6 +192,7 @@ router.get('/', protect, async (req, res) => {
         department_id: r.department_id,
         department_name: r.department_name,
         is_department_head: r.is_department_head === true,
+        is_leave_final_reviewer: r.is_leave_final_reviewer === true,
         department_head_period_id: r.department_head_period_id || null,
         department_head_effective_from: r.department_head_effective_from || null,
         department_head_effective_to: r.department_head_effective_to || null,
@@ -187,6 +226,116 @@ router.get('/', protect, async (req, res) => {
   }
 });
 
+// Final leave reviewers are a separate office-wide assignment, not department backups.
+router.get('/leave-final-reviewers', protect, requireAdmin, async (req, res) => {
+  try {
+    const date = String(req.query?.effective_date || todayInHrmsTimezone());
+    const parsedDate = new Date(`${date}T00:00:00Z`);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date) ||
+        !Number.isFinite(parsedDate.getTime()) ||
+        parsedDate.toISOString().slice(0, 10) !== date) {
+      return res.status(400).json({ error: 'effective_date must be a valid YYYY-MM-DD date' });
+    }
+    const [reviewers, roster, primary] = await Promise.all([
+      resolveFinalLeaveReviewers(pool, date),
+      pool.query(`SELECT id, full_name AS name FROM users
+                  WHERE is_active = true AND role IN ('admin', 'hr')
+                  ORDER BY full_name, id`),
+      pool.query(`SELECT u.id, u.full_name AS name
+                  FROM positions p
+                  JOIN assignments a ON a.position_id = p.id
+                  JOIN users u ON u.id = a.employee_id
+                  WHERE p.is_leave_final_reviewer = true AND p.is_active = true
+                    AND a.is_active = true AND u.is_active = true
+                    AND u.role IN ('admin', 'hr')
+                    AND a.effective_from <= $1::date
+                    AND (a.effective_to IS NULL OR a.effective_to >= $1::date)
+                  ORDER BY a.effective_from DESC, a.created_at DESC, a.id DESC
+                  LIMIT 1`, [date]),
+    ]);
+    return res.json({
+      effective_date: date,
+      primary: primary.rows[0] || null,
+      backups: reviewers.filter((row) => row.id !== primary.rows[0]?.id),
+      eligible_employees: roster.rows,
+    });
+  } catch (err) {
+    console.error('[positions GET leave-final-reviewers]', err);
+    return res.status(500).json({ error: 'Failed to load final leave reviewers' });
+  }
+});
+
+router.put('/leave-final-reviewers', protect, requireAdmin, async (req, res) => {
+  const date = String(req.body?.effective_from || todayInHrmsTimezone());
+  const ids = req.body?.employee_ids;
+  const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  const parsedDate = new Date(`${date}T00:00:00Z`);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) ||
+      !Number.isFinite(parsedDate.getTime()) ||
+      parsedDate.toISOString().slice(0, 10) !== date) {
+    return res.status(400).json({ error: 'effective_from must be a valid YYYY-MM-DD date' });
+  }
+  if (!Array.isArray(ids) || ids.length > 5 || ids.some((id) => typeof id !== 'string' || !uuid.test(id)) || new Set(ids).size !== ids.length) {
+    return res.status(400).json({ error: 'Provide up to five distinct backup employee IDs' });
+  }
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const primary = await client.query(
+      `SELECT a.employee_id AS id FROM positions p
+       JOIN assignments a ON a.position_id = p.id
+       WHERE p.is_leave_final_reviewer = true AND p.is_active = true
+         AND a.is_active = true AND a.effective_from <= $1::date
+         AND (a.effective_to IS NULL OR a.effective_to >= $1::date)
+       LIMIT 1`, [date]
+    );
+    if (ids.includes(String(primary.rows[0]?.id))) {
+      throw Object.assign(new Error('The official final reviewer cannot also be a backup'), { statusCode: 409 });
+    }
+    if (ids.length) {
+      const eligible = await client.query(
+        `SELECT id::text AS id FROM users
+         WHERE id = ANY($1::uuid[]) AND is_active = true AND role IN ('admin', 'hr')`,
+        [ids]
+      );
+      if (eligible.rows.length !== ids.length) {
+        throw Object.assign(new Error('Backups must be active HR or admin accounts'), { statusCode: 409 });
+      }
+    }
+    const previousDate = new Date(`${date}T00:00:00Z`);
+    previousDate.setUTCDate(previousDate.getUTCDate() - 1);
+    const previousDay = previousDate.toISOString().slice(0, 10);
+    await client.query(
+      `UPDATE leave_final_reviewer_backups
+       SET effective_to = $1::date, updated_at = now()
+       WHERE is_active = true AND effective_from < $2::date
+         AND (effective_to IS NULL OR effective_to >= $2::date)`,
+      [previousDay, date]
+    );
+    await client.query(
+      `UPDATE leave_final_reviewer_backups SET is_active = false, updated_at = now()
+       WHERE is_active = true AND effective_from >= $1::date`, [date]
+    );
+    for (let index = 0; index < ids.length; index += 1) {
+      await client.query(
+        `INSERT INTO leave_final_reviewer_backups
+           (employee_id, backup_rank, effective_from, created_by)
+         VALUES ($1::uuid, $2, $3::date, $4::uuid)`,
+        [ids[index], index + 1, date, req.user.id]
+      );
+    }
+    await client.query('COMMIT');
+    return res.json({ effective_date: date, backup_employee_ids: ids });
+  } catch (err) {
+    try { await client.query('ROLLBACK'); } catch (_) { }
+    if (err.statusCode) return res.status(err.statusCode).json({ error: err.message });
+    console.error('[positions PUT leave-final-reviewers]', err);
+    return res.status(500).json({ error: 'Failed to save final leave reviewers' });
+  } finally {
+    client.release();
+  }
+});
+
 // POST /api/positions - create (admin only)
 router.post('/', protect, requireAdmin, async (req, res) => {
   let client;
@@ -196,6 +345,7 @@ router.post('/', protect, requireAdmin, async (req, res) => {
       description,
       department_id,
       is_department_head = false,
+      is_leave_final_reviewer = false,
       department_head_effective_from,
       department_head_effective_to,
       is_active,
@@ -214,14 +364,15 @@ router.post('/', protect, requireAdmin, async (req, res) => {
     });
     const result = await client.query(
       `INSERT INTO positions (
-         name, description, department_id, is_department_head, is_active
-       ) VALUES ($1, $2, $3, false, $4)
+         name, description, department_id, is_department_head, is_leave_final_reviewer, is_active
+       ) VALUES ($1, $2, $3, false, $4, $5)
        RETURNING id, position_number, name, description, department_id,
-                 is_department_head, is_active`,
+                 is_department_head, is_leave_final_reviewer, is_active`,
       [
         name,
         description,
         department_id,
+        is_leave_final_reviewer,
         is_active,
       ]
     );
@@ -250,6 +401,7 @@ router.post('/', protect, requireAdmin, async (req, res) => {
       description: r.description,
       department_id: r.department_id,
       is_department_head: period !== null,
+      is_leave_final_reviewer: r.is_leave_final_reviewer === true,
       department_head_period_id: period?.id || null,
       department_head_effective_from: period?.effective_from || null,
       department_head_effective_to: period?.effective_to || null,
@@ -276,6 +428,9 @@ router.post('/', protect, requireAdmin, async (req, res) => {
       return res.status(409).json({
         error: 'This department already has an official Department Head during the selected effective period',
       });
+    }
+    if (err.code === '23505' && err.constraint === 'uq_active_leave_final_reviewer_position') {
+      return res.status(409).json({ error: 'Another active position is already the official final leave reviewer' });
     }
     if (
       err.code === '23505' &&
@@ -308,6 +463,7 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
       description,
       department_id,
       is_department_head,
+      is_leave_final_reviewer,
       is_active,
       department_head_period_id,
       department_head_effective_from,
@@ -328,6 +484,11 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
     if (description !== undefined) { updates.push(`description = $${i++}`); values.push(description); }
     if (department_id !== undefined) { updates.push(`department_id = $${i++}`); values.push(department_id); }
     if (is_active !== undefined) { updates.push(`is_active = $${i++}`); values.push(is_active); }
+
+    if (is_leave_final_reviewer !== undefined) {
+      updates.push(`is_leave_final_reviewer = $${i++}`);
+      values.push(is_leave_final_reviewer);
+    }
 
     if (updates.length === 0 && is_department_head === undefined) {
       return res.status(400).json({ error: 'No fields to update' });
@@ -372,7 +533,7 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
       result = await client.query(
         `UPDATE positions SET ${updates.join(', ')} WHERE id = $${i}
          RETURNING id, position_number, name, description, department_id,
-                   is_department_head, is_active`,
+                   is_department_head, is_leave_final_reviewer, is_active`,
         values
       );
     }
@@ -410,6 +571,7 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
       description: r.description,
       department_id: r.department_id,
       is_department_head: period !== null,
+      is_leave_final_reviewer: r.is_leave_final_reviewer === true,
       department_head_period_id: period?.id || null,
       department_head_effective_from: period?.effective_from || null,
       department_head_effective_to: period?.effective_to || null,
@@ -436,6 +598,9 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
       return res.status(409).json({
         error: 'This department already has an official Department Head during the selected effective period',
       });
+    }
+    if (err.code === '23505' && err.constraint === 'uq_active_leave_final_reviewer_position') {
+      return res.status(409).json({ error: 'Another active position is already the official final leave reviewer' });
     }
     if (
       err.code === '23505' &&

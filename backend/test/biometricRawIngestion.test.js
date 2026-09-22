@@ -15,7 +15,14 @@ async function invokeIngestionRoute({
   insertRowCount = 1,
   hasStoredPunch = false,
   processError = null,
-  userLookupRows = [{ id: userId, biometric_user_id: '1001' }],
+  userLookupRows = [{
+    id: userId,
+    biometric_user_id: '1001',
+    is_active: true,
+    employment_status: 'active',
+    date_hired: null,
+    separation_date: null,
+  }],
 }) {
   const events = [];
   const processCalls = [];
@@ -35,7 +42,10 @@ async function invokeIngestionRoute({
           rowCount: 1,
         };
       }
-      if (text.includes('FROM users WHERE biometric_user_id = ANY')) {
+      if (
+        text.includes('FROM users') &&
+        text.includes('WHERE biometric_user_id = ANY')
+      ) {
         return {
           rows: userLookupRows,
           rowCount: userLookupRows.length,
@@ -217,6 +227,65 @@ test('manual import skips a biometric ID without a current employee mapping', as
   assert.equal(res.body.skipped_unmatched, 1);
   assert.deepEqual(rawInserts, []);
   assert.deepEqual(processCalls, []);
+});
+
+test('manual import skips punches after an inactive employee separation date', async () => {
+  const { res, rawInserts, processCalls } = await invokeIngestionRoute({
+    path: '/import',
+    gateReason: null,
+    userLookupRows: [{
+      id: userId,
+      biometric_user_id: '1001',
+      is_active: false,
+      employment_status: 'inactive',
+      date_hired: '2025-01-01',
+      separation_date: '2026-08-31',
+    }],
+    body: {
+      rows: [{
+        user_id: userId,
+        biometric_user_id: '1001',
+        logged_at: loggedAt,
+        raw_line: `1001\t${loggedAt}`,
+      }],
+      source_file_name: 'attlog.dat',
+    },
+  });
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.inserted, 0);
+  assert.equal(res.body.skipped_outside_employment, 1);
+  assert.deepEqual(rawInserts, []);
+  assert.deepEqual(processCalls, []);
+});
+
+test('manual import accepts historical punches within an inactive employee employment period', async () => {
+  const { res, rawInserts } = await invokeIngestionRoute({
+    path: '/import',
+    gateReason: null,
+    userLookupRows: [{
+      id: userId,
+      biometric_user_id: '1001',
+      is_active: false,
+      employment_status: 'inactive',
+      date_hired: '2025-01-01',
+      separation_date: '2026-09-30',
+    }],
+    body: {
+      rows: [{
+        user_id: userId,
+        biometric_user_id: '1001',
+        logged_at: loggedAt,
+        raw_line: `1001\t${loggedAt}`,
+      }],
+      source_file_name: 'attlog.dat',
+    },
+  });
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.inserted, 1);
+  assert.equal(res.body.skipped_outside_employment, 0);
+  assert.equal(rawInserts.length, 1);
 });
 
 test('device push reprocesses duplicate punches after a prior processing failure', async () => {

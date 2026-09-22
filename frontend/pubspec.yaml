@@ -88,7 +88,7 @@ flutter:
   # To add assets to your application, add an assets section, like this:
   assets:
     - assets/images/
-    - assets/images/hrmslogo.png
+    - assets/images/logo.png
     - assets/images/SETTINGS.jpg
     - assets/forms/a4_letter.pdf
     - assets/forms/long_letter.pdf
@@ -117,12 +117,20 @@ flutter:
 flutter_launcher_icons:
   android: true
   ios: true
-  image_path: "assets/images/Plaridel Logo.jpg"
+  image_path: "assets/images/logo.png"
   min_sdk_android: 21
+  web:
+    generate: true
+    image_path: "assets/images/logo.png"
+    background_color: "#1E2A3D"
+    theme_color: "#1E2A3D"
   windows:
     generate: true
-    image_path: "assets/images/hrmslogo.png"
+    image_path: "assets/images/logo.png"
     icon_size: 48
+  macos:
+    generate: true
+    image_path: "assets/images/logo.png"
 
   # To add custom fonts to your application, add a fonts section here,
   # in this "flutter" section. Each entry in this list should have a

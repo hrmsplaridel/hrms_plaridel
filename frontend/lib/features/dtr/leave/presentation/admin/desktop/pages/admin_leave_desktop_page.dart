@@ -1,10 +1,12 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:printing/printing.dart';
 import 'package:provider/provider.dart';
 
 import 'package:hrms_plaridel/core/api/client.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
+import 'package:hrms_plaridel/core/widgets/form_pdf_preview.dart';
 import 'package:hrms_plaridel/providers/auth_provider.dart';
 import 'package:hrms_plaridel/core/services/app_realtime_provider.dart';
 import 'package:hrms_plaridel/features/dtr/leave/data/providers/leave_provider.dart';
@@ -43,12 +45,14 @@ class AdminLeaveScreen extends StatefulWidget {
   const AdminLeaveScreen({
     super.key,
     this.isDepartmentHead = false,
+    this.canReviewPending = true,
     this.onApprove,
     this.onReturnRequest,
     this.onRejectRequest,
   });
 
   final bool isDepartmentHead;
+  final bool canReviewPending;
   final LeaveApproveAction? onApprove;
   final LeaveDecisionAction? onReturnRequest;
   final LeaveDecisionAction? onRejectRequest;
@@ -64,6 +68,8 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
   LeaveRequestStatus? _statusFilter;
   String? _leaveTypeFilter;
   List<AdminLeaveLeaveTypeFilterOption> _configuredLeaveTypeOptions = const [];
+  List<LeaveReviewFilterOption> _reviewFilterOptions = const [];
+  String? _reviewFilterOptionsError;
   String? _departmentFilter;
   String? _employeeFilter;
   List<LeaveTypeDefinition> _leaveTypeDefinitions = const [];
@@ -78,6 +84,20 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
   Future<void>? _requestLoadInFlight;
   bool _requestReloadQueued = false;
   bool _queuedForceRefresh = false;
+  bool _canReviewFinal = false;
+
+  Future<void> _loadFinalReviewerEligibility() async {
+    if (widget.isDepartmentHead) return;
+    try {
+      final response = await ApiClient.instance.get<Map<String, dynamic>>(
+        '/api/leave/final-reviewer/me',
+      );
+      if (!mounted) return;
+      setState(() => _canReviewFinal = response.data?['can_review'] == true);
+    } catch (_) {
+      if (mounted) setState(() => _canReviewFinal = false);
+    }
+  }
 
   Future<({String name, String? title})> _loadReviewerSignatureInfo(
     AuthProvider auth,
@@ -154,6 +174,7 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
         _startAutoRefresh();
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (mounted && _isScreenActive) {
+            unawaited(_loadFinalReviewerEligibility());
             unawaited(_safeAutoRefresh(forceRefresh: true));
           }
         });
@@ -165,11 +186,17 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
     }
     _initialized = true;
     _isScreenActive = isScreenActive;
+    WidgetsBinding.instance.addPostFrameCallback(
+      (_) => _loadFinalReviewerEligibility(),
+    );
     if (_isScreenActive) {
       WidgetsBinding.instance.addPostFrameCallback((_) => _loadRequests());
     }
     WidgetsBinding.instance.addPostFrameCallback(
       (_) => _loadLeaveTypeFilterOptions(),
+    );
+    WidgetsBinding.instance.addPostFrameCallback(
+      (_) => _loadReviewFilterOptions(),
     );
     WidgetsBinding.instance.addObserver(this);
     if (_isScreenActive) _startAutoRefresh();
@@ -204,6 +231,27 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
     _autoRefreshTimer = Timer.periodic(const Duration(seconds: 20), (_) {
       _safeAutoRefresh();
     });
+  }
+
+  Future<void> _loadReviewFilterOptions() async {
+    if (!mounted) return;
+    try {
+      final options = await context
+          .read<LeaveProvider>()
+          .repository
+          .listReviewFilterOptions(departmentHead: widget.isDepartmentHead);
+      if (!mounted) return;
+      setState(() {
+        _reviewFilterOptions = options;
+        _reviewFilterOptionsError = null;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(
+        () => _reviewFilterOptionsError =
+            'Could not load all employee filters. Refresh to try again.',
+      );
+    }
   }
 
   Future<void> _loadLeaveTypeFilterOptions({bool forceRefresh = false}) async {
@@ -407,10 +455,21 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
   @override
   Widget build(BuildContext context) {
     final provider = context.watch<LeaveProvider>();
-    final requests = provider.requests;
+    final requests = widget.isDepartmentHead
+        ? provider.departmentHeadRequests
+        : provider.requests;
+    final filterOptions = _reviewFilterOptions.isNotEmpty
+        ? _reviewFilterOptions
+        : requests.map(
+            (request) => LeaveReviewFilterOption(
+              userId: request.userId,
+              employeeName: request.employeeName ?? '',
+              department: request.officeDepartment,
+            ),
+          );
     final departmentMap = <String, String>{};
-    for (final request in requests) {
-      final raw = (request.officeDepartment ?? '').trim();
+    for (final option in filterOptions) {
+      final raw = (option.department ?? '').trim();
       if (raw.isEmpty) continue;
       final normalized = raw
           .toLowerCase()
@@ -421,19 +480,20 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
     }
     final departments = departmentMap.values.toList()..sort();
     final employeeDirectory = <String, String>{};
-    for (final r in requests) {
-      final name = (r.employeeName ?? '').trim();
+    for (final option in filterOptions) {
+      final name = option.employeeName.trim();
       if (name.isEmpty) continue;
-      employeeDirectory[r.userId] = name;
+      employeeDirectory[option.userId] = name;
     }
     final employees =
         employeeDirectory.entries.map((e) => (id: e.key, name: e.value)).where((
           e,
         ) {
           if (_departmentFilter == null) return true;
-          final req = requests.where((r) => r.userId == e.id);
-          return req.any(
-            (r) => (r.officeDepartment ?? '').trim() == _departmentFilter,
+          return filterOptions.any(
+            (option) =>
+                option.userId == e.id &&
+                (option.department ?? '').trim() == _departmentFilter,
           );
         }).toList()..sort((a, b) => a.name.compareTo(b.name));
     final leaveTypeOptions = _leaveTypeFilterOptions(requests);
@@ -509,7 +569,12 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         _AdminHeaderCard(
-          totalRequests: filteredRequests.length,
+          totalRequests: provider.reviewTotal(
+            departmentHead: widget.isDepartmentHead,
+          ),
+          hasMore: provider.reviewHasMore(
+            departmentHead: widget.isDepartmentHead,
+          ),
           pendingCount: filteredRequests
               .where(
                 (r) => widget.isDepartmentHead
@@ -518,7 +583,12 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
               )
               .length,
           reviewing: provider.reviewing,
-          onRefresh: () => _loadRequests(forceRefresh: true),
+          onRefresh: () async {
+            await Future.wait([
+              _loadReviewFilterOptions(),
+              _loadRequests(forceRefresh: true),
+            ]);
+          },
           onManageSignatures: _openSignatureLibrary,
           onForcedLeaveDeduction: widget.isDepartmentHead
               ? null
@@ -538,18 +608,63 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
               ? null
               : _openLeaveTypeRules,
         ),
-        if (provider.error != null) ...[
+        if (provider.reviewError(departmentHead: widget.isDepartmentHead) !=
+            null) ...[
           const SizedBox(height: 16),
           AdminLeaveErrorBanner(
-            message: provider.error!,
-            onDismiss: provider.clearError,
+            message: provider.reviewError(
+              departmentHead: widget.isDepartmentHead,
+            )!,
+            onDismiss: () => provider.clearReviewError(
+              departmentHead: widget.isDepartmentHead,
+            ),
+          ),
+        ],
+        if (_reviewFilterOptionsError != null) ...[
+          const SizedBox(height: 12),
+          AdminLeaveErrorBanner(
+            message: _reviewFilterOptionsError!,
+            onDismiss: () => setState(() => _reviewFilterOptionsError = null),
           ),
         ],
         const SizedBox(height: 24),
         AdminLeaveRequestQueuePanel(
           requests: filteredRequests,
+          filterKey: [
+            _statusFilter?.value ?? '',
+            _leaveTypeFilter ?? '',
+            _departmentFilter ?? '',
+            _employeeFilter ?? '',
+            _startDateFrom?.toIso8601String() ?? '',
+            _startDateTo?.toIso8601String() ?? '',
+          ].join('|'),
           isDepartmentHead: widget.isDepartmentHead,
-          loading: provider.loading,
+          loading: provider.reviewLoading(
+            departmentHead: widget.isDepartmentHead,
+          ),
+          initialLoadComplete: provider.reviewInitialLoadComplete(
+            departmentHead: widget.isDepartmentHead,
+          ),
+          initialLoadAttempted: provider.reviewLoadAttempted(
+            departmentHead: widget.isDepartmentHead,
+          ),
+          onRetry: () => _loadRequests(forceRefresh: true),
+          totalCount: provider.reviewTotal(
+            departmentHead: widget.isDepartmentHead,
+          ),
+          hasMore: provider.reviewHasMore(
+            departmentHead: widget.isDepartmentHead,
+          ),
+          loadingMore: provider.reviewLoadingMore(
+            departmentHead: widget.isDepartmentHead,
+          ),
+          loadMoreError: provider.reviewLoadMoreError(
+            departmentHead: widget.isDepartmentHead,
+          ),
+          onLoadMore: () => provider.loadMoreReviewRequests(
+            query: _currentReviewQuery(),
+            departmentHead: widget.isDepartmentHead,
+          ),
           selectedRequest: selected,
           filterBar: AdminLeaveFilterBar(
             isDepartmentHead: widget.isDepartmentHead,
@@ -574,12 +689,17 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
               setState(() => _leaveTypeFilter = value);
               _loadRequests();
             },
-            onDepartmentChanged: (value) => setState(() {
-              _departmentFilter = value;
-              _employeeFilter = null;
-            }),
-            onEmployeeChanged: (value) =>
-                setState(() => _employeeFilter = value),
+            onDepartmentChanged: (value) {
+              setState(() {
+                _departmentFilter = value;
+                _employeeFilter = null;
+              });
+              _loadRequests();
+            },
+            onEmployeeChanged: (value) {
+              setState(() => _employeeFilter = value);
+              _loadRequests();
+            },
             onStartDateFromChanged: (value) {
               setState(() => _startDateFrom = value);
               _loadRequests();
@@ -637,13 +757,7 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
   Future<void> _performLoadRequests({bool forceRefresh = false}) async {
     if (!mounted) return;
     final provider = context.read<LeaveProvider>();
-    final query = LeaveRequestQuery(
-      status: _statusFilter,
-      leaveTypeName: _leaveTypeFilter,
-      startDateFrom: _startDateFrom,
-      startDateTo: _startDateTo,
-      limit: 200,
-    );
+    final query = _currentReviewQuery();
     if (widget.isDepartmentHead) {
       await provider.loadDepartmentHeadRequests(
         query: query,
@@ -654,6 +768,16 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
     }
     if (!mounted) return;
   }
+
+  LeaveRequestQuery _currentReviewQuery() => LeaveRequestQuery(
+    userId: _employeeFilter,
+    department: _departmentFilter,
+    status: _statusFilter,
+    leaveTypeName: _leaveTypeFilter,
+    startDateFrom: _startDateFrom,
+    startDateTo: _startDateTo,
+    limit: 200,
+  );
 
   /// Same UX as filing leave: wide = resizable right sheet; narrow = full-screen route.
   /// Opens immediately; refresh runs in background so tap is not blocked on the network.
@@ -672,64 +796,101 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
         builder: (ctx) => AdminLeaveDetailsSideSheet(
           initial: request,
           isDepartmentHead: widget.isDepartmentHead,
+          currentReviewerId: context.read<AuthProvider>().user?.id,
+          canReviewPending: widget.canReviewPending &&
+              (widget.isDepartmentHead || _canReviewFinal),
           onApprove: widget.isDepartmentHead ? _deptHeadApprove : _approve,
           onReturn: widget.isDepartmentHead ? _deptHeadReturn : _returnRequest,
           onReject: widget.isDepartmentHead ? _deptHeadReject : _rejectRequest,
           onRevoke: widget.isDepartmentHead ? null : _revokeApproval,
+          onPreview: _previewLeaveForm,
           onPrint: _printLeaveForm,
         ),
       );
     });
   }
 
-  Future<void> _printLeaveForm(LeaveRequest request) async {
+  Future<void> _printLeaveForm(LeaveRequest request) =>
+      _openLeaveForm(request, preview: false);
+
+  Future<void> _previewLeaveForm(LeaveRequest request) =>
+      _openLeaveForm(request, preview: true);
+
+  Future<void> _openLeaveForm(
+    LeaveRequest request, {
+    required bool preview,
+  }) async {
     final provider = context.read<LeaveProvider>();
     final auth = context.read<AuthProvider>();
     if (!mounted) return;
 
+    // Show a loading indicator immediately so the user gets instant feedback
+    // before any of the network calls begin.
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(preview ? 'Loading preview...' : 'Loading form data...'),
+      ),
+    );
+
     try {
-      // Best-effort refresh so we print the latest snapshot (e.g. after HR changes).
+      // Refresh the request so we print the latest snapshot (e.g. after HR
+      // changes). If the refresh fails, block the print — printing a stale
+      // snapshot with potentially outdated status or balance figures risks
+      // producing an invalid formal document.
       LeaveRequest target = request;
       final id = request.id;
       if (id != null && id.isNotEmpty) {
         final fresh = await provider.refreshRequestById(id);
-        if (fresh != null) {
-          target = fresh;
-          if (_selectedRequest?.id == id) {
-            setState(() => _selectedRequest = fresh);
-          }
+        if (fresh == null) {
+          throw Exception(
+            'Could not load the latest request data. '
+            'Please check your connection and try again.',
+          );
+        }
+        target = fresh;
+        if (mounted && _selectedRequest?.id == id) {
+          setState(() => _selectedRequest = fresh);
         }
       }
 
-      final signerInfo = await _loadSignatureInfoByUserId(
-        userId: target.reviewerId ?? auth.user?.id,
-        fallbackName: (target.reviewerName?.trim().isNotEmpty == true)
-            ? target.reviewerName!.trim()
-            : (auth.displayName.trim().isNotEmpty
-                  ? auth.displayName.trim()
-                  : 'Authorized Officer'),
-        fallbackTitle: (target.reviewerTitle?.trim().isNotEmpty == true)
-            ? target.reviewerTitle!.trim()
-            : _reviewerTitleFromRole(target.reviewerRole ?? auth.user?.role),
-      );
+      // Run the three independent lookups concurrently — they all depend on
+      // `target` but not on each other, so there is no reason to wait for
+      // one before starting the next.
+      if (id == null || id.isEmpty) {
+        throw StateError('A saved leave request is required to print the form');
+      }
+      final results = await Future.wait([
+        _loadSignatureInfoByUserId(
+          userId: target.reviewerId ?? auth.user?.id,
+          fallbackName: (target.reviewerName?.trim().isNotEmpty == true)
+              ? target.reviewerName!.trim()
+              : (auth.displayName.trim().isNotEmpty
+                    ? auth.displayName.trim()
+                    : 'Authorized Officer'),
+          fallbackTitle: (target.reviewerTitle?.trim().isNotEmpty == true)
+              ? target.reviewerTitle!.trim()
+              : _reviewerTitleFromRole(target.reviewerRole ?? auth.user?.role),
+        ),
+        loadLeaveFormSignatories(request: target),
+        provider.fetchFormCreditsForRequestStrict(id),
+      ]);
+
+      final signerInfo = results[0] as ({String name, String? title});
+      final formSignatories = results[1] as LeaveFormSignatories;
+      final balances = results[2] as List<LeaveBalance>;
+
       target = target.copyWith(
         reviewerName: signerInfo.name,
         reviewerTitle: signerInfo.title,
       );
-      final formSignatories = await loadLeaveFormSignatories(request: target);
 
-      final balances = await provider.fetchBalancesForUser(
-        target.userId,
-        forceRefresh: true,
-      );
-
-      if (mounted) {
+      if (!preview && mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(const SnackBar(content: Text('Preparing print...')));
       }
 
-      await LeaveRequestPdf.printLeaveRequest(
+      final document = await LeaveRequestPdf.buildPdf(
         request: target,
         balances: balances,
         certificationOfficerName: formSignatories.certificationOfficer?.name,
@@ -745,13 +906,34 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
             formSignatories.departmentHeadSignature?.signatureImageBytes,
         hrApproverSignatureBytes:
             formSignatories.hrApproverSignature?.signatureImageBytes,
-        name: 'Leave_Application_${target.id ?? target.userId}.pdf',
       );
+      final filename = 'Leave_Application_${target.id ?? target.userId}.pdf';
+      if (preview) {
+        final bytes = await document.save();
+        if (!mounted) return;
+        await showFormPdfPreview(
+          context: context,
+          bytes: bytes,
+          title: 'Leave Form Preview',
+          filename: filename,
+        );
+      } else {
+        await Printing.layoutPdf(
+          onLayout: (_) => document.save(),
+          name: filename,
+        );
+      }
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Print failed: $e')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            '${preview ? 'Preview' : 'Print'} failed — balance or request data could not be verified. '
+            'Please retry when the server is reachable.\n($e)',
+          ),
+          duration: const Duration(seconds: 6),
+        ),
+      );
     }
   }
 
@@ -1248,6 +1430,7 @@ class _HeaderMenuAction {
 class _AdminHeaderCard extends StatelessWidget {
   const _AdminHeaderCard({
     required this.totalRequests,
+    required this.hasMore,
     required this.pendingCount,
     required this.reviewing,
     required this.onRefresh,
@@ -1262,6 +1445,7 @@ class _AdminHeaderCard extends StatelessWidget {
   });
 
   final int totalRequests;
+  final bool hasMore;
   final int pendingCount;
   final bool reviewing;
   final Future<void> Function() onRefresh;
@@ -1391,10 +1575,13 @@ class _AdminHeaderCard extends StatelessWidget {
                   spacing: 10,
                   runSpacing: 6,
                   children: [
-                    _CompactHeaderCount(value: totalRequests, label: 'loaded'),
+                    _CompactHeaderCount(
+                      value: totalRequests,
+                      label: 'matching',
+                    ),
                     _CompactHeaderCount(
                       value: pendingCount,
-                      label: 'pending',
+                      label: hasMore ? 'pending loaded' : 'pending',
                       emphasize: true,
                     ),
                   ],
@@ -1433,11 +1620,11 @@ class _AdminHeaderCard extends StatelessWidget {
                         runSpacing: 10,
                         children: [
                           AdminLeaveHeaderChip(
-                            label: 'Total Loaded',
+                            label: 'Total Matching',
                             value: '$totalRequests',
                           ),
                           AdminLeaveHeaderChip(
-                            label: 'Pending',
+                            label: hasMore ? 'Pending Loaded' : 'Pending',
                             value: '$pendingCount',
                             emphasize: true,
                           ),

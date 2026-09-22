@@ -84,7 +84,7 @@ class _ResizableRightPanelState extends State<_ResizableRightPanel> {
     return Align(
       alignment: Alignment.centerRight,
       child: Material(
-        color: Colors.white,
+        color: Theme.of(context).colorScheme.surface,
         elevation: 12,
         child: SizedBox(
           width: _width,
@@ -124,7 +124,9 @@ class _ResizableRightPanelState extends State<_ResizableRightPanel> {
                         width: 3,
                         height: 56,
                         decoration: BoxDecoration(
-                          color: Colors.black.withValues(alpha: 0.12),
+                          color: Theme.of(
+                            context,
+                          ).colorScheme.onSurface.withValues(alpha: 0.18),
                           borderRadius: BorderRadius.circular(999),
                         ),
                       ),

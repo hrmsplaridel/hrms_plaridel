@@ -4,6 +4,7 @@ import 'package:hrms_plaridel/core/api/user_facing_api_error.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/features/recruitment/models/recruitment_application.dart';
 import 'package:hrms_plaridel/features/recruitment/presentation/admin/widgets/rsp_employee_account_setup_panel.dart';
+import 'package:hrms_plaridel/features/recruitment/presentation/admin/widgets/rsp_final_requirements_ui.dart';
 import 'package:hrms_plaridel/features/recruitment/presentation/shared/widgets/rsp_attachment_actions.dart';
 
 enum _FinalReqStatusFilter { all, incomplete, readyForReview, approved, hired }
@@ -11,10 +12,19 @@ enum _FinalReqStatusFilter { all, incomplete, readyForReview, approved, hired }
 /// Admin: track medical certificate, drug test, and NBI clearance for applicants
 /// who passed deliberation, then proceed to employee account setup.
 class RspFinalRequirementsSection extends StatefulWidget {
-  const RspFinalRequirementsSection({super.key, this.onGoToCreateAccount});
+  const RspFinalRequirementsSection({
+    super.key,
+    this.onGoToCreateAccount,
+    this.expandApplicationId,
+    this.onExpandApplicationConsumed,
+  });
 
   /// Opens the admin **Create Account** screen (sidebar); parent supplies navigation.
   final VoidCallback? onGoToCreateAccount;
+
+  /// Expands this applicant after returning from Create Account.
+  final String? expandApplicationId;
+  final VoidCallback? onExpandApplicationConsumed;
 
   @override
   State<RspFinalRequirementsSection> createState() =>
@@ -33,8 +43,6 @@ class _RspFinalRequirementsSectionState
   DateTime? _selectedAppliedDate;
   _FinalReqStatusFilter _statusFilter = _FinalReqStatusFilter.all;
 
-  static const _kCardPadding = 24.0;
-
   @override
   void initState() {
     super.initState();
@@ -43,7 +51,29 @@ class _RspFinalRequirementsSectionState
         () => _searchQuery = _searchController.text.trim().toLowerCase(),
       );
     });
+    _queueExpandApplication(widget.expandApplicationId);
     _load();
+  }
+
+  @override
+  void didUpdateWidget(covariant RspFinalRequirementsSection oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final next = widget.expandApplicationId?.trim();
+    final prev = oldWidget.expandApplicationId?.trim();
+    if (next != null && next.isNotEmpty && next != prev) {
+      _queueExpandApplication(next);
+    }
+  }
+
+  void _queueExpandApplication(String? id) {
+    final trimmed = id?.trim();
+    if (trimmed == null || trimmed.isEmpty) return;
+    _expandedIds.add(trimmed);
+    _statusFilter = _FinalReqStatusFilter.all;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      widget.onExpandApplicationConsumed?.call();
+    });
   }
 
   @override
@@ -72,16 +102,22 @@ class _RspFinalRequirementsSectionState
     }
   }
 
+  /// Newest application first (`created_at DESC`, then `id DESC`).
   static int _compareLatestAppliedFirst(
     RecruitmentApplication a,
     RecruitmentApplication b,
   ) {
-    final ad = a.createdAt ?? a.updatedAt;
-    final bd = b.createdAt ?? b.updatedAt;
-    if (ad != null && bd != null) return bd.compareTo(ad);
-    if (ad != null) return -1;
-    if (bd != null) return 1;
-    return a.fullName.toLowerCase().compareTo(b.fullName.toLowerCase());
+    final ad = a.createdAt;
+    final bd = b.createdAt;
+    if (ad != null && bd != null) {
+      final byDate = bd.compareTo(ad);
+      if (byDate != 0) return byDate;
+    } else if (ad != null) {
+      return -1;
+    } else if (bd != null) {
+      return 1;
+    }
+    return b.id.toLowerCase().compareTo(a.id.toLowerCase());
   }
 
   static bool _isHired(RecruitmentApplication a) {
@@ -97,10 +133,10 @@ class _RspFinalRequirementsSectionState
   }
 
   static Color _complianceColor(RecruitmentApplication app) {
-    if (_isHired(app)) return const Color(0xFF2E7D32);
-    if (app.finalRequirementsApproved) return const Color(0xFF2E7D32);
-    if (app.hasAllFinalRequirementsUploaded) return const Color(0xFF1565C0);
-    return Colors.orange.shade800;
+    if (_isHired(app)) return RspFinalReqUi.success;
+    if (app.finalRequirementsApproved) return RspFinalReqUi.success;
+    if (app.hasAllFinalRequirementsUploaded) return RspFinalReqUi.readyBlue;
+    return RspFinalReqUi.warning;
   }
 
   bool _matchesStatusFilter(RecruitmentApplication app) {
@@ -136,6 +172,7 @@ class _RspFinalRequirementsSectionState
   }
 
   List<RecruitmentApplication> get _filteredApplications {
+    // Preserve newest-first order from [_applications].
     return _applications.where((a) {
       final position = (a.positionAppliedFor ?? '').trim();
       if (_selectedPositionFilter != null &&
@@ -180,25 +217,6 @@ class _RspFinalRequirementsSectionState
       .length;
 
   int get _hiredCount => _applications.where(_isHired).length;
-
-  String _formatDateShort(DateTime date) {
-    const monthNames = <String>[
-      'Jan',
-      'Feb',
-      'Mar',
-      'Apr',
-      'May',
-      'Jun',
-      'Jul',
-      'Aug',
-      'Sep',
-      'Oct',
-      'Nov',
-      'Dec',
-    ];
-    final d = date.toLocal();
-    return '${monthNames[d.month - 1]} ${d.day}, ${d.year}';
-  }
 
   Future<void> _setApproved(RecruitmentApplication app, bool approved) async {
     setState(() => _savingIds.add(app.id));
@@ -263,115 +281,6 @@ class _RspFinalRequirementsSectionState
     return '$dateStr · $timeStr';
   }
 
-  Widget _buildOrientationAttendancePanel(RecruitmentApplication app) {
-    final saving = _savingIds.contains(app.id);
-    final attended = app.orientationAttended;
-    final selected = attended == null ? 0 : (attended ? 1 : 2);
-    final scheduled = app.orientationAt;
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            Container(
-              width: 30,
-              height: 30,
-              alignment: Alignment.center,
-              decoration: BoxDecoration(
-                color: const Color(0xFFE85D04).withValues(alpha: 0.15),
-                shape: BoxShape.circle,
-              ),
-              child: const Text(
-                '2',
-                style: TextStyle(
-                  fontWeight: FontWeight.w800,
-                  color: Color(0xFFE85D04),
-                ),
-              ),
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    'Orientation attendance',
-                    style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    scheduled == null
-                        ? 'Schedule orientation in Scheduling, then record attendance.'
-                        : 'Scheduled: ${_formatScheduleDateTime(scheduled, context)}',
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: AppTheme.dashTextSecondaryOf(context),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 14),
-        IgnorePointer(
-          ignoring: saving,
-          child: Opacity(
-            opacity: saving ? 0.45 : 1,
-            child: SegmentedButton<int>(
-              segments: const [
-                ButtonSegment<int>(
-                  value: 0,
-                  label: Text('Pending'),
-                  icon: Icon(Icons.schedule_rounded, size: 18),
-                ),
-                ButtonSegment<int>(
-                  value: 1,
-                  label: Text('Attended'),
-                  icon: Icon(Icons.check_rounded, size: 18),
-                ),
-                ButtonSegment<int>(
-                  value: 2,
-                  label: Text('No show'),
-                  icon: Icon(Icons.person_off_rounded, size: 18),
-                ),
-              ],
-              selected: {selected},
-              onSelectionChanged: (s) {
-                if (saving) return;
-                final v = s.first;
-                final want = v == 0 ? null : (v == 1);
-                if (want == attended) return;
-                _setOrientationAttendance(app, want);
-              },
-              style: ButtonStyle(
-                visualDensity: VisualDensity.compact,
-                padding: WidgetStateProperty.all(
-                  const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
-                ),
-              ),
-            ),
-          ),
-        ),
-        const SizedBox(height: 8),
-        Text(
-          attended == true
-              ? 'Applicant attended orientation.'
-              : attended == false
-              ? 'Applicant did not attend orientation.'
-              : scheduled == null
-              ? 'Waiting for orientation schedule.'
-              : 'Orientation scheduled — record attendance after the session.',
-          style: TextStyle(
-            fontSize: 12,
-            color: AppTheme.dashTextSecondaryOf(context),
-          ),
-        ),
-      ],
-    );
-  }
-
   void _clearFilters() {
     setState(() {
       _selectedPositionFilter = null;
@@ -381,417 +290,37 @@ class _RspFinalRequirementsSectionState
     });
   }
 
-  BoxDecoration _shellCardDecoration(BuildContext context) {
-    return BoxDecoration(
-      color: AppTheme.dashPanelOf(context),
-      borderRadius: BorderRadius.circular(18),
-      border: Border.all(color: AppTheme.dashHairlineOf(context)),
-      boxShadow: [
-        BoxShadow(
-          color: AppTheme.primaryNavy.withValues(alpha: 0.06),
-          blurRadius: 18,
-          offset: const Offset(0, 6),
-        ),
-      ],
-    );
-  }
-
-  Widget _shellTopAccent() => Container(
-    height: 4,
-    decoration: const BoxDecoration(
-      gradient: LinearGradient(colors: [Color(0xFFE85D04), Color(0xFFFFB74D)]),
-    ),
-  );
-
-  Widget _applicantInitials(BuildContext context, String fullName) {
-    final parts = fullName.trim().split(RegExp(r'\s+'));
-    final initials = parts.isEmpty
-        ? '?'
-        : parts.length == 1
-        ? parts.first[0].toUpperCase()
-        : '${parts.first[0]}${parts.last[0]}'.toUpperCase();
-    return Container(
-      width: 44,
-      height: 44,
-      decoration: BoxDecoration(
-        color: AppTheme.primaryNavy.withValues(alpha: 0.1),
-        shape: BoxShape.circle,
-        border: Border.all(color: AppTheme.primaryNavy.withValues(alpha: 0.2)),
-      ),
-      alignment: Alignment.center,
-      child: Text(
-        initials,
-        style: TextStyle(
-          fontWeight: FontWeight.w800,
-          fontSize: 15,
-          color: AppTheme.dashIsDark(context)
-              ? AppTheme.primaryNavyLight
-              : AppTheme.primaryNavy,
-        ),
-      ),
-    );
-  }
-
-  Widget _statPill({
-    required String label,
-    required int count,
-    required Color color,
-    VoidCallback? onTap,
-    bool selected = false,
-  }) {
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(12),
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-          decoration: BoxDecoration(
-            color: selected
-                ? color.withValues(alpha: 0.16)
-                : color.withValues(alpha: 0.08),
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(
-              color: selected
-                  ? color.withValues(alpha: 0.55)
-                  : color.withValues(alpha: 0.25),
-            ),
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                '$count',
-                style: TextStyle(
-                  fontWeight: FontWeight.w800,
-                  fontSize: 16,
-                  color: color,
-                ),
-              ),
-              const SizedBox(width: 8),
-              Text(
-                label,
-                style: TextStyle(
-                  fontSize: 12.5,
-                  fontWeight: FontWeight.w600,
-                  color: color.withValues(alpha: 0.95),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
+  void _toggleExpanded(RecruitmentApplication app, {required bool needsAttention}) {
+    setState(() {
+      if (_expandedIds.contains(app.id)) {
+        if (!needsAttention) _expandedIds.remove(app.id);
+      } else {
+        _expandedIds.add(app.id);
+      }
+    });
   }
 
   @override
   Widget build(BuildContext context) {
-    final hairline = AppTheme.dashHairlineOf(context);
-    final accentNavy = AppTheme.dashIsDark(context)
-        ? AppTheme.primaryNavyLight
-        : AppTheme.primaryNavy;
     final filtered = _filteredApplications;
     final hasActiveFilters =
         _selectedPositionFilter != null ||
         _selectedAppliedDate != null ||
         _statusFilter != _FinalReqStatusFilter.all ||
         _searchQuery.isNotEmpty;
-
-    final refreshBtn = FilledButton.icon(
-      onPressed: _loading ? null : _load,
-      icon: const Icon(Icons.refresh_rounded, size: 20),
-      label: const Text('Refresh list'),
-      style: FilledButton.styleFrom(
-        backgroundColor: AppTheme.primaryNavy,
-        foregroundColor: Colors.white,
-        elevation: 0,
-        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      ),
-    );
-
-    final dateFilterBtn = OutlinedButton.icon(
-      onPressed: _loading
-          ? null
-          : () async {
-              final now = DateTime.now();
-              final picked = await showDatePicker(
-                context: context,
-                initialDate: _selectedAppliedDate ?? now,
-                firstDate: DateTime(now.year - 10),
-                lastDate: DateTime(now.year + 1),
-                helpText: 'Filter by applied date',
-              );
-              if (picked == null || !mounted) return;
-              setState(() => _selectedAppliedDate = picked);
-            },
-      icon: const Icon(Icons.event_outlined, size: 18),
-      label: Text(
-        _selectedAppliedDate == null
-            ? 'Applied date'
-            : _formatDateShort(_selectedAppliedDate!),
-      ),
-      style: OutlinedButton.styleFrom(
-        side: BorderSide(color: hairline),
-        foregroundColor: AppTheme.dashTextPrimaryOf(context),
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-      ),
-    );
+    final ac = RspFinalReqUi.accentOf(context);
 
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Container(
-              width: 48,
-              height: 48,
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(14),
-                gradient: LinearGradient(
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                  colors: [
-                    const Color(0xFFE85D04).withValues(alpha: 0.18),
-                    const Color(0xFFFFB74D).withValues(alpha: 0.1),
-                  ],
-                ),
-                border: Border.all(
-                  color: const Color(0xFFE85D04).withValues(alpha: 0.28),
-                ),
-              ),
-              child: Icon(
-                Icons.health_and_safety_outlined,
-                size: 26,
-                color: accentNavy,
-              ),
-            ),
-            const SizedBox(width: 16),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Final Requirements',
-                    style: TextStyle(
-                      fontFamily: 'NotoSans',
-                      color: AppTheme.dashTextPrimaryOf(context),
-                      fontSize: 26,
-                      fontWeight: FontWeight.w800,
-                      letterSpacing: -0.4,
-                      height: 1.15,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(width: 12),
-            refreshBtn,
-          ],
-        ),
-        if (!_loading && _applications.isNotEmpty) ...[
-          const SizedBox(height: 18),
-          Wrap(
-            spacing: 10,
-            runSpacing: 10,
-            children: [
-              _statPill(
-                label: 'Total',
-                count: _applications.length,
-                color: accentNavy,
-                selected: _statusFilter == _FinalReqStatusFilter.all,
-                onTap: () =>
-                    setState(() => _statusFilter = _FinalReqStatusFilter.all),
-              ),
-              _statPill(
-                label: 'Incomplete',
-                count: _incompleteCount,
-                color: Colors.orange.shade800,
-                selected: _statusFilter == _FinalReqStatusFilter.incomplete,
-                onTap: () => setState(
-                  () => _statusFilter = _FinalReqStatusFilter.incomplete,
-                ),
-              ),
-              _statPill(
-                label: 'Ready for review',
-                count: _readyCount,
-                color: const Color(0xFF1565C0),
-                selected: _statusFilter == _FinalReqStatusFilter.readyForReview,
-                onTap: () => setState(
-                  () => _statusFilter = _FinalReqStatusFilter.readyForReview,
-                ),
-              ),
-              _statPill(
-                label: 'Approved',
-                count: _approvedCount,
-                color: const Color(0xFF2E7D32),
-                selected: _statusFilter == _FinalReqStatusFilter.approved,
-                onTap: () => setState(
-                  () => _statusFilter = _FinalReqStatusFilter.approved,
-                ),
-              ),
-              _statPill(
-                label: 'Hired',
-                count: _hiredCount,
-                color: const Color(0xFF6A1B9A),
-                selected: _statusFilter == _FinalReqStatusFilter.hired,
-                onTap: () =>
-                    setState(() => _statusFilter = _FinalReqStatusFilter.hired),
-              ),
-            ],
-          ),
-        ],
+        _buildHeader(ac),
         const SizedBox(height: 16),
-        TextField(
-          controller: _searchController,
-          decoration: InputDecoration(
-            hintText: 'Search by applicant ID, name, email, or position…',
-            prefixIcon: const Icon(Icons.search_rounded),
-            suffixIcon: _searchQuery.isEmpty
-                ? null
-                : IconButton(
-                    tooltip: 'Clear search',
-                    onPressed: _searchController.clear,
-                    icon: const Icon(Icons.close_rounded, size: 20),
-                  ),
-            filled: true,
-            fillColor: AppTheme.dashMutedSurfaceOf(context),
-            border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: BorderSide(color: hairline),
-            ),
-            enabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: BorderSide(color: hairline),
-            ),
-            focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: const BorderSide(
-                color: AppTheme.primaryNavy,
-                width: 2,
-              ),
-            ),
-            contentPadding: const EdgeInsets.symmetric(
-              horizontal: 16,
-              vertical: 14,
-            ),
-          ),
-        ),
-        const SizedBox(height: 14),
-        Wrap(
-          spacing: 10,
-          runSpacing: 10,
-          crossAxisAlignment: WrapCrossAlignment.center,
-          children: [
-            SizedBox(
-              width: 240,
-              child: DropdownButtonFormField<String>(
-                initialValue: _selectedPositionFilter,
-                decoration: InputDecoration(
-                  labelText: 'Position',
-                  isDense: true,
-                  contentPadding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 12,
-                  ),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(10),
-                    borderSide: BorderSide(color: hairline),
-                  ),
-                ),
-                items: <DropdownMenuItem<String>>[
-                  const DropdownMenuItem<String>(
-                    value: null,
-                    child: Text('All positions'),
-                  ),
-                  ...(_positionFilterOptions.toList()..sort(
-                        (a, b) => a.toLowerCase().compareTo(b.toLowerCase()),
-                      ))
-                      .map(
-                        (p) =>
-                            DropdownMenuItem<String>(value: p, child: Text(p)),
-                      ),
-                ],
-                onChanged: _loading
-                    ? null
-                    : (value) {
-                        setState(() => _selectedPositionFilter = value);
-                      },
-              ),
-            ),
-            SizedBox(
-              width: 220,
-              child: DropdownButtonFormField<_FinalReqStatusFilter>(
-                initialValue: _statusFilter,
-                decoration: InputDecoration(
-                  labelText: 'Compliance status',
-                  isDense: true,
-                  contentPadding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 12,
-                  ),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(10),
-                    borderSide: BorderSide(color: hairline),
-                  ),
-                ),
-                items: const [
-                  DropdownMenuItem(
-                    value: _FinalReqStatusFilter.all,
-                    child: Text('All statuses'),
-                  ),
-                  DropdownMenuItem(
-                    value: _FinalReqStatusFilter.incomplete,
-                    child: Text('Incomplete'),
-                  ),
-                  DropdownMenuItem(
-                    value: _FinalReqStatusFilter.readyForReview,
-                    child: Text('Ready for review'),
-                  ),
-                  DropdownMenuItem(
-                    value: _FinalReqStatusFilter.approved,
-                    child: Text('Approved'),
-                  ),
-                  DropdownMenuItem(
-                    value: _FinalReqStatusFilter.hired,
-                    child: Text('Hired'),
-                  ),
-                ],
-                onChanged: _loading
-                    ? null
-                    : (value) {
-                        if (value != null) {
-                          setState(() => _statusFilter = value);
-                        }
-                      },
-              ),
-            ),
-            dateFilterBtn,
-            TextButton.icon(
-              onPressed: _loading
-                  ? null
-                  : () => setState(() => _selectedAppliedDate = DateTime.now()),
-              icon: const Icon(Icons.today_outlined, size: 18),
-              label: const Text('Today'),
-            ),
-            TextButton.icon(
-              onPressed: _loading || !hasActiveFilters ? null : _clearFilters,
-              icon: const Icon(Icons.clear_all_rounded, size: 18),
-              label: const Text('Clear filters'),
-            ),
-            Text(
-              '${filtered.length} shown',
-              style: TextStyle(
-                color: AppTheme.dashTextSecondaryOf(context),
-                fontSize: 12.5,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 24),
+        if (!_loading && _applications.isNotEmpty) ...[
+          _buildStatsRow(ac),
+          const SizedBox(height: 14),
+        ],
+        _buildToolbar(hasActiveFilters: hasActiveFilters, shown: filtered.length),
+        const SizedBox(height: 16),
         if (_loading)
           const Padding(
             padding: EdgeInsets.symmetric(vertical: 48),
@@ -814,15 +343,465 @@ class _RspFinalRequirementsSectionState
             body:
                 'Try clearing filters, choosing a different status, or refreshing the list.',
           )
-        else
+        else ...[
           ListView.separated(
             shrinkWrap: true,
             physics: const NeverScrollableScrollPhysics(),
             itemCount: filtered.length,
-            separatorBuilder: (_, __) => const SizedBox(height: 16),
+            separatorBuilder: (_, __) => const SizedBox(height: 10),
             itemBuilder: (context, i) => _buildApplicantCard(filtered[i]),
           ),
+          const SizedBox(height: 14),
+          _sortHintBanner(),
+        ],
       ],
+    );
+  }
+
+  Widget _buildHeader(Color ac) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Icon(Icons.verified_user_outlined, size: 22, color: ac),
+                  const SizedBox(width: 8),
+                  Flexible(
+                    child: Text(
+                      'Final Requirements',
+                      style: TextStyle(
+                        fontFamily: 'NotoSans',
+                        color: RspFinalReqUi.primaryTextOf(context),
+                        fontSize: 24,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: -0.3,
+                        height: 1.15,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 6),
+              Text(
+                'Review applicant documents, monitor orientation attendance, and manage employee account setup.',
+                style: TextStyle(
+                  fontSize: 13,
+                  height: 1.4,
+                  color: RspFinalReqUi.secondaryTextOf(context),
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(width: 12),
+        FilledButton.icon(
+          onPressed: _loading ? null : _load,
+          icon: const Icon(Icons.refresh_rounded, size: 18),
+          label: const Text('Refresh List'),
+          style: FilledButton.styleFrom(
+            backgroundColor: ac,
+            foregroundColor: Colors.white,
+            elevation: 0,
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(10),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildStatsRow(Color ac) {
+    return LayoutBuilder(
+      builder: (context, c) {
+        final wide = c.maxWidth >= 900;
+        final cards = [
+          _statCard(
+            label: 'Total Applicants',
+            count: _applications.length,
+            icon: Icons.groups_rounded,
+            color: ac,
+            selected: _statusFilter == _FinalReqStatusFilter.all,
+            onTap: () =>
+                setState(() => _statusFilter = _FinalReqStatusFilter.all),
+          ),
+          _statCard(
+            label: 'Incomplete',
+            count: _incompleteCount,
+            icon: Icons.assignment_late_outlined,
+            color: const Color(0xFFEA580C),
+            selected: _statusFilter == _FinalReqStatusFilter.incomplete,
+            onTap: () => setState(
+              () => _statusFilter = _FinalReqStatusFilter.incomplete,
+            ),
+          ),
+          _statCard(
+            label: 'Ready for Review',
+            count: _readyCount,
+            icon: Icons.hourglass_top_rounded,
+            color: RspFinalReqUi.readyBlue,
+            selected: _statusFilter == _FinalReqStatusFilter.readyForReview,
+            onTap: () => setState(
+              () => _statusFilter = _FinalReqStatusFilter.readyForReview,
+            ),
+          ),
+          _statCard(
+            label: 'Approved',
+            count: _approvedCount,
+            icon: Icons.check_circle_outline_rounded,
+            color: RspFinalReqUi.success,
+            selected: _statusFilter == _FinalReqStatusFilter.approved,
+            onTap: () => setState(
+              () => _statusFilter = _FinalReqStatusFilter.approved,
+            ),
+          ),
+          _statCard(
+            label: 'Hired',
+            count: _hiredCount,
+            icon: Icons.badge_outlined,
+            color: RspFinalReqUi.hiredPurple,
+            selected: _statusFilter == _FinalReqStatusFilter.hired,
+            onTap: () =>
+                setState(() => _statusFilter = _FinalReqStatusFilter.hired),
+          ),
+        ];
+
+        if (wide) {
+          return Row(
+            children: [
+              for (var i = 0; i < cards.length; i++) ...[
+                if (i > 0) const SizedBox(width: 10),
+                Expanded(child: cards[i]),
+              ],
+            ],
+          );
+        }
+
+        return Wrap(
+          spacing: 10,
+          runSpacing: 10,
+          children: cards
+              .map(
+                (card) => SizedBox(
+                  width: c.maxWidth >= 560
+                      ? (c.maxWidth - 10) / 2
+                      : c.maxWidth,
+                  child: card,
+                ),
+              )
+              .toList(),
+        );
+      },
+    );
+  }
+
+  Widget _statCard({
+    required String label,
+    required int count,
+    required IconData icon,
+    required Color color,
+    required bool selected,
+    VoidCallback? onTap,
+  }) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(12),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 160),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          decoration: BoxDecoration(
+            color: color.withValues(alpha: selected ? 0.14 : 0.07),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: color.withValues(alpha: selected ? 0.50 : 0.22),
+            ),
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 36,
+                height: 36,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: color.withValues(alpha: 0.16),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Icon(icon, size: 18, color: color),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      '$count',
+                      style: TextStyle(
+                        fontFamily: 'NotoSans',
+                        fontWeight: FontWeight.w800,
+                        fontSize: 18,
+                        color: color,
+                        height: 1.1,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      label,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w600,
+                        color: color.withValues(alpha: 0.9),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildToolbar({
+    required bool hasActiveFilters,
+    required int shown,
+  }) {
+    final hairline = RspFinalReqUi.hairlineOf(context);
+
+    final search = TextField(
+      controller: _searchController,
+      decoration: RspFinalReqUi.filterDecoration(
+        context,
+        hint: 'Search by applicant ID, name, email, or position...',
+        prefixIcon: const Icon(Icons.search_rounded, size: 20),
+        suffixIcon: _searchQuery.isEmpty
+            ? null
+            : IconButton(
+                tooltip: 'Clear search',
+                onPressed: _searchController.clear,
+                icon: const Icon(Icons.close_rounded, size: 18),
+              ),
+      ),
+    );
+
+    final positionDd = DropdownButtonFormField<String>(
+      initialValue: _selectedPositionFilter,
+      isExpanded: true,
+      decoration: RspFinalReqUi.filterDecoration(
+        context,
+        label: 'Position',
+      ),
+      items: <DropdownMenuItem<String>>[
+        const DropdownMenuItem<String>(
+          value: null,
+          child: Text('All positions'),
+        ),
+        ...(_positionFilterOptions.toList()
+              ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase())))
+            .map(
+              (p) => DropdownMenuItem<String>(
+                value: p,
+                child: RspFinalReqUi.ddText(p),
+              ),
+            ),
+      ],
+      onChanged: _loading
+          ? null
+          : (value) => setState(() => _selectedPositionFilter = value),
+    );
+
+    final statusDd = DropdownButtonFormField<_FinalReqStatusFilter>(
+      initialValue: _statusFilter,
+      isExpanded: true,
+      decoration: RspFinalReqUi.filterDecoration(
+        context,
+        label: 'Compliance status',
+      ),
+      items: const [
+        DropdownMenuItem(
+          value: _FinalReqStatusFilter.all,
+          child: Text('All statuses'),
+        ),
+        DropdownMenuItem(
+          value: _FinalReqStatusFilter.incomplete,
+          child: Text('Incomplete'),
+        ),
+        DropdownMenuItem(
+          value: _FinalReqStatusFilter.readyForReview,
+          child: Text('Ready for review'),
+        ),
+        DropdownMenuItem(
+          value: _FinalReqStatusFilter.approved,
+          child: Text('Approved'),
+        ),
+        DropdownMenuItem(
+          value: _FinalReqStatusFilter.hired,
+          child: Text('Hired'),
+        ),
+      ],
+      onChanged: _loading
+          ? null
+          : (value) {
+              if (value != null) setState(() => _statusFilter = value);
+            },
+    );
+
+    final dateBtn = OutlinedButton.icon(
+      onPressed: _loading
+          ? null
+          : () async {
+              final now = DateTime.now();
+              final picked = await showDatePicker(
+                context: context,
+                initialDate: _selectedAppliedDate ?? now,
+                firstDate: DateTime(now.year - 10),
+                lastDate: DateTime(now.year + 1),
+                helpText: 'Filter by applied date',
+              );
+              if (picked == null || !mounted) return;
+              setState(() => _selectedAppliedDate = picked);
+            },
+      icon: const Icon(Icons.event_outlined, size: 16),
+      label: Text(
+        _selectedAppliedDate == null
+            ? 'Applied date'
+            : RspFinalReqUi.formatDateShort(_selectedAppliedDate!),
+      ),
+      style: OutlinedButton.styleFrom(
+        side: BorderSide(color: hairline),
+        foregroundColor: RspFinalReqUi.primaryTextOf(context),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      ),
+    );
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: RspFinalReqUi.toolbarDecoration(context),
+      child: LayoutBuilder(
+        builder: (context, c) {
+          final wide = c.maxWidth >= 980;
+          if (wide) {
+            return Row(
+              children: [
+                Expanded(flex: 35, child: search),
+                const SizedBox(width: 10),
+                Expanded(flex: 16, child: positionDd),
+                const SizedBox(width: 10),
+                Expanded(flex: 16, child: statusDd),
+                const SizedBox(width: 10),
+                dateBtn,
+                const SizedBox(width: 4),
+                TextButton.icon(
+                  onPressed: _loading
+                      ? null
+                      : () =>
+                            setState(() => _selectedAppliedDate = DateTime.now()),
+                  icon: const Icon(Icons.today_outlined, size: 16),
+                  label: const Text('Today'),
+                ),
+                TextButton(
+                  onPressed: _loading || !hasActiveFilters ? null : _clearFilters,
+                  child: const Text('Clear filters'),
+                ),
+                const SizedBox(width: 6),
+                Text(
+                  '$shown shown',
+                  style: TextStyle(
+                    color: RspFinalReqUi.secondaryTextOf(context),
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            );
+          }
+
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              search,
+              const SizedBox(height: 10),
+              Wrap(
+                spacing: 10,
+                runSpacing: 10,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: [
+                  SizedBox(width: 200, child: positionDd),
+                  SizedBox(width: 200, child: statusDd),
+                  dateBtn,
+                  TextButton.icon(
+                    onPressed: _loading
+                        ? null
+                        : () => setState(
+                              () => _selectedAppliedDate = DateTime.now(),
+                            ),
+                    icon: const Icon(Icons.today_outlined, size: 16),
+                    label: const Text('Today'),
+                  ),
+                  TextButton(
+                    onPressed:
+                        _loading || !hasActiveFilters ? null : _clearFilters,
+                    child: const Text('Clear filters'),
+                  ),
+                  Text(
+                    '$shown shown',
+                    style: TextStyle(
+                      color: RspFinalReqUi.secondaryTextOf(context),
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _sortHintBanner() {
+    return Center(
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+        decoration: BoxDecoration(
+          color: RspFinalReqUi.accentOf(context).withValues(alpha: 0.08),
+          borderRadius: BorderRadius.circular(999),
+          border: Border.all(
+            color: RspFinalReqUi.accentOf(context).withValues(alpha: 0.18),
+          ),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              Icons.swap_vert_rounded,
+              size: 16,
+              color: RspFinalReqUi.accentOf(context),
+            ),
+            const SizedBox(width: 8),
+            Text(
+              'Showing newest applicants first — Latest applications appear at the top of the list.',
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: RspFinalReqUi.secondaryTextOf(context),
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -834,42 +813,29 @@ class _RspFinalRequirementsSectionState
   }) {
     return Container(
       width: double.infinity,
-      decoration: _shellCardDecoration(context),
-      clipBehavior: Clip.antiAlias,
+      padding: const EdgeInsets.all(28),
+      decoration: RspFinalReqUi.cardDecoration(context),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          _shellTopAccent(),
-          Padding(
-            padding: const EdgeInsets.all(28),
-            child: Column(
-              children: [
-                Icon(
-                  icon,
-                  size: 40,
-                  color: AppTheme.dashTextSecondaryOf(context),
-                ),
-                const SizedBox(height: 14),
-                Text(
-                  title,
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    fontWeight: FontWeight.w800,
-                    fontSize: 16,
-                    color: AppTheme.dashTextPrimaryOf(context),
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  body,
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    fontSize: 14,
-                    height: 1.45,
-                    color: AppTheme.dashTextSecondaryOf(context),
-                  ),
-                ),
-              ],
+          Icon(icon, size: 36, color: RspFinalReqUi.secondaryTextOf(context)),
+          const SizedBox(height: 12),
+          Text(
+            title,
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontWeight: FontWeight.w800,
+              fontSize: 15,
+              color: RspFinalReqUi.primaryTextOf(context),
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            body,
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontSize: 13,
+              height: 1.45,
+              color: RspFinalReqUi.secondaryTextOf(context),
             ),
           ),
         ],
@@ -884,7 +850,6 @@ class _RspFinalRequirementsSectionState
     final hired = _isHired(app);
     final statusLabel = _complianceLabel(app);
     final statusColor = _complianceColor(app);
-    // Same as Scheduling: keep open while work remains; otherwise collapsed.
     final needsAttention =
         !hired &&
         (!allUploaded ||
@@ -892,322 +857,845 @@ class _RspFinalRequirementsSectionState
             app.hasRejectedFinalRequirement ||
             saving);
     final expanded = needsAttention || _expandedIds.contains(app.id);
+    final isNew = RspFinalReqUi.isNewApplication(app.createdAt);
+    final ac = RspFinalReqUi.accentOf(context);
 
-    final header = Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
+    return Container(
+      decoration: RspFinalReqUi.cardDecoration(context),
+      clipBehavior: Clip.antiAlias,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // Orange top accent (matches reference image 2).
+          Container(height: 4, color: ac),
+          Material(
+            color: Colors.transparent,
+            child: InkWell(
+              onTap: () =>
+                  _toggleExpanded(app, needsAttention: needsAttention),
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(14, 12, 10, 12),
+                child: _buildCardHeader(
+                  app: app,
+                  statusLabel: statusLabel,
+                  statusColor: statusColor,
+                  expanded: expanded,
+                  isNew: isNew,
+                  canCollapse: !needsAttention,
+                ),
+              ),
+            ),
+          ),
+          if (expanded)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+              child: _buildExpandedBody(
+                app: app,
+                saving: saving,
+                allUploaded: allUploaded,
+                approved: approved,
+                hired: hired,
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildCardHeader({
+    required RecruitmentApplication app,
+    required String statusLabel,
+    required Color statusColor,
+    required bool expanded,
+    required bool isNew,
+    required bool canCollapse,
+  }) {
+    final position = (app.positionAppliedFor ?? '').trim();
+    final id = (app.applicantNumber ?? '').trim();
+    final applied = app.createdAt;
+    final metaParts = <InlineSpan>[];
+    if (id.isNotEmpty) {
+      metaParts.add(
+        TextSpan(
+          text: id,
+          style: TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.w700,
+            color: RspFinalReqUi.accentOf(context),
+          ),
+        ),
+      );
+    }
+    void addSep() {
+      if (metaParts.isEmpty) return;
+      metaParts.add(
+        TextSpan(
+          text: '  •  ',
+          style: TextStyle(
+            fontSize: 12,
+            color: RspFinalReqUi.secondaryTextOf(context),
+          ),
+        ),
+      );
+    }
+
+    if (app.email.trim().isNotEmpty) {
+      addSep();
+      metaParts.add(
+        TextSpan(
+          text: app.email.trim(),
+          style: TextStyle(
+            fontSize: 12,
+            color: RspFinalReqUi.secondaryTextOf(context),
+          ),
+        ),
+      );
+    }
+    if (position.isNotEmpty) {
+      addSep();
+      metaParts.add(
+        TextSpan(
+          text: position,
+          style: TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+            color: RspFinalReqUi.primaryTextOf(context).withValues(alpha: 0.85),
+          ),
+        ),
+      );
+    }
+
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.center,
       children: [
-        _applicantInitials(context, app.fullName),
-        const SizedBox(width: 14),
+        RspFinalReqUi.initialsAvatar(context, app.fullName, size: 42),
+        const SizedBox(width: 12),
         Expanded(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                app.fullName,
-                style: TextStyle(
-                  fontWeight: FontWeight.w800,
-                  fontSize: expanded ? 18 : 16,
-                  color: AppTheme.dashTextPrimaryOf(context),
-                ),
+              Row(
+                children: [
+                  Flexible(
+                    child: Text(
+                      app.fullName,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontFamily: 'NotoSans',
+                        fontWeight: FontWeight.w800,
+                        fontSize: 15.5,
+                        color: RspFinalReqUi.primaryTextOf(context),
+                      ),
+                    ),
+                  ),
+                  if (isNew) ...[
+                    const SizedBox(width: 8),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 7,
+                        vertical: 2,
+                      ),
+                      decoration: BoxDecoration(
+                        color: RspFinalReqUi.orange.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(999),
+                        border: Border.all(
+                          color: RspFinalReqUi.orange.withValues(alpha: 0.35),
+                        ),
+                      ),
+                      child: const Text(
+                        'NEW',
+                        style: TextStyle(
+                          fontSize: 10,
+                          fontWeight: FontWeight.w800,
+                          color: RspFinalReqUi.orange,
+                          letterSpacing: 0.4,
+                        ),
+                      ),
+                    ),
+                  ],
+                ],
               ),
-              if ((app.applicantNumber ?? '').trim().isNotEmpty) ...[
+              if (metaParts.isNotEmpty) ...[
                 const SizedBox(height: 3),
-                Text(
-                  app.applicantNumber!.trim(),
-                  style: const TextStyle(
-                    fontSize: 12.5,
-                    fontWeight: FontWeight.w800,
-                    letterSpacing: 0.4,
-                    color: Color(0xFFE85D04),
-                  ),
-                ),
-              ],
-              const SizedBox(height: 4),
-              Text(
-                app.email,
-                style: TextStyle(
-                  fontSize: 13,
-                  color: AppTheme.dashTextSecondaryOf(context),
-                ),
-              ),
-              if (app.positionAppliedFor != null &&
-                  app.positionAppliedFor!.trim().isNotEmpty) ...[
-                const SizedBox(height: 6),
-                Text(
-                  'Position: ${app.positionAppliedFor!.trim()}',
-                  style: TextStyle(
-                    fontSize: 12.5,
-                    fontWeight: FontWeight.w600,
-                    color: AppTheme.primaryNavy.withValues(alpha: 0.85),
-                  ),
-                ),
-              ],
-              if (app.createdAt != null) ...[
-                const SizedBox(height: 4),
-                Text(
-                  'Applied: ${_formatDateShort(app.createdAt!)}',
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: AppTheme.dashTextSecondaryOf(context),
-                  ),
+                Text.rich(
+                  TextSpan(children: metaParts),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                 ),
               ],
             ],
           ),
         ),
-        Column(
-          crossAxisAlignment: CrossAxisAlignment.end,
-          children: [
-            _statusChip(label: statusLabel, color: statusColor),
-            if (!expanded) ...[
-              const SizedBox(height: 10),
+        if (applied != null) ...[
+          const SizedBox(width: 10),
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
               Icon(
-                Icons.expand_more_rounded,
-                color: AppTheme.dashTextSecondaryOf(context),
+                Icons.calendar_today_outlined,
+                size: 14,
+                color: RspFinalReqUi.accentOf(context),
+              ),
+              const SizedBox(width: 6),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Applied: ${RspFinalReqUi.formatDateShort(applied)}',
+                    style: TextStyle(
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.w600,
+                      color: RspFinalReqUi.primaryTextOf(context),
+                    ),
+                  ),
+                  Text(
+                    RspFinalReqUi.relativeApplied(applied),
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: RspFinalReqUi.secondaryTextOf(context),
+                    ),
+                  ),
+                ],
               ),
             ],
+          ),
+        ],
+        const SizedBox(width: 10),
+        RspFinalReqUi.statusBadge(label: statusLabel, color: statusColor),
+        const SizedBox(width: 4),
+        Icon(
+          expanded ? Icons.keyboard_arrow_up_rounded : Icons.keyboard_arrow_down_rounded,
+          color: canCollapse || !expanded
+              ? RspFinalReqUi.accentOf(context)
+              : RspFinalReqUi.secondaryTextOf(context),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildExpandedBody({
+    required RecruitmentApplication app,
+    required bool saving,
+    required bool allUploaded,
+    required bool approved,
+    required bool hired,
+  }) {
+    final uploadedCount = RspFinalRequirementDocKind.values
+        .where((k) {
+          final p = app.finalRequirementPath(k)?.trim();
+          return p != null && p.isNotEmpty;
+        })
+        .length;
+    final step3Enabled = app.orientationAttended == true || hired;
+    final showStep8 = approved;
+
+    final docsCol = _buildDocsColumn(
+      app: app,
+      uploadedCount: uploadedCount,
+      allUploaded: allUploaded,
+      approved: approved,
+      hired: hired,
+      saving: saving,
+      forceDocRow: true,
+    );
+
+    if (!approved) {
+      return Column(
+        children: [
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: AppTheme.dashIsDark(context)
+                  ? AppTheme.dashMutedSurfaceOf(context)
+                  : const Color(0xFFF8FAFC),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: RspFinalReqUi.hairlineOf(context)),
+            ),
+            child: _buildDocsColumn(
+              app: app,
+              uploadedCount: uploadedCount,
+              allUploaded: allUploaded,
+              approved: approved,
+              hired: hired,
+              saving: saving,
+              forceDocRow: false,
+            ),
+          ),
+        ],
+      );
+    }
+
+    final orientCol = _buildOrientationAttendancePanel(app);
+    final accountCol = Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Icon(
+              Icons.person_outline_rounded,
+              size: 16,
+              color: RspFinalReqUi.readyBlue,
+            ),
+            const SizedBox(width: 6),
+            Text(
+              'Employee Account',
+              style: TextStyle(
+                fontFamily: 'NotoSans',
+                fontWeight: FontWeight.w800,
+                fontSize: 13,
+                color: RspFinalReqUi.primaryTextOf(context),
+              ),
+            ),
           ],
+        ),
+        const SizedBox(height: 8),
+        RspEmployeeAccountSetupPanel(
+          app: app,
+          enabled: step3Enabled,
+          busy: saving,
+          compact: true,
+          showApplicantStatus: false,
+          onBusyChanged: (v) {
+            if (v) {
+              setState(() => _savingIds.add(app.id));
+            } else {
+              setState(() => _savingIds.remove(app.id));
+            }
+          },
+          onReload: _load,
+          onGoToCreateAccount: widget.onGoToCreateAccount,
         ),
       ],
     );
 
-    if (!expanded) {
-      return Container(
-        decoration: _shellCardDecoration(context),
-        clipBehavior: Clip.antiAlias,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
+    Widget threeColShell(Widget child) => Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: AppTheme.dashIsDark(context)
+            ? AppTheme.dashMutedSurfaceOf(context)
+            : const Color(0xFFF8FAFC),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: RspFinalReqUi.hairlineOf(context)),
+      ),
+      child: child,
+    );
+
+    Widget divider() => Container(
+      width: 1,
+      margin: const EdgeInsets.symmetric(horizontal: 10),
+      color: RspFinalReqUi.hairlineOf(context),
+    );
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        threeColShell(
+          LayoutBuilder(
+            builder: (context, c) {
+              if (c.maxWidth >= 860) {
+                return Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(flex: 5, child: docsCol),
+                    divider(),
+                    Expanded(flex: 3, child: orientCol),
+                    divider(),
+                    Expanded(flex: 3, child: accountCol),
+                  ],
+                );
+              }
+              if (c.maxWidth >= 640) {
+                return Column(
+                  children: [
+                    docsCol,
+                    const SizedBox(height: 10),
+                    Divider(height: 1, color: RspFinalReqUi.hairlineOf(context)),
+                    const SizedBox(height: 10),
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Expanded(child: orientCol),
+                        divider(),
+                        Expanded(child: accountCol),
+                      ],
+                    ),
+                  ],
+                );
+              }
+              return Column(
+                children: [
+                  docsCol,
+                  const SizedBox(height: 10),
+                  Divider(height: 1, color: RspFinalReqUi.hairlineOf(context)),
+                  const SizedBox(height: 10),
+                  orientCol,
+                  const SizedBox(height: 10),
+                  Divider(height: 1, color: RspFinalReqUi.hairlineOf(context)),
+                  const SizedBox(height: 10),
+                  accountCol,
+                ],
+              );
+            },
+          ),
+        ),
+        if (showStep8) ...[
+          const SizedBox(height: 10),
+          _buildStep8Footer(app: app, saving: saving, locked: !step3Enabled),
+        ],
+      ],
+    );
+  }
+
+  Widget _buildDocsColumn({
+    required RecruitmentApplication app,
+    required int uploadedCount,
+    required bool allUploaded,
+    required bool approved,
+    required bool hired,
+    required bool saving,
+    required bool forceDocRow,
+  }) {
+    final ac = RspFinalReqUi.accentOf(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Row(
           children: [
-            _shellTopAccent(),
-            Material(
-              color: Colors.transparent,
-              child: InkWell(
-                onTap: () => setState(() => _expandedIds.add(app.id)),
-                child: Padding(
-                  padding: const EdgeInsets.all(18),
-                  child: header,
+            Icon(Icons.description_outlined, size: 16, color: ac),
+            const SizedBox(width: 6),
+            Expanded(
+              child: Text(
+                'Document Requirements',
+                style: TextStyle(
+                  fontFamily: 'NotoSans',
+                  fontWeight: FontWeight.w800,
+                  fontSize: 13,
+                  color: RspFinalReqUi.primaryTextOf(context),
+                ),
+              ),
+            ),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+              decoration: BoxDecoration(
+                color: (allUploaded
+                        ? RspFinalReqUi.success
+                        : RspFinalReqUi.warning)
+                    .withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(999),
+                border: Border.all(
+                  color: (allUploaded
+                          ? RspFinalReqUi.success
+                          : RspFinalReqUi.warning)
+                      .withValues(alpha: 0.35),
+                ),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (allUploaded) ...[
+                    const Icon(
+                      Icons.check_rounded,
+                      size: 12,
+                      color: RspFinalReqUi.success,
+                    ),
+                    const SizedBox(width: 3),
+                  ],
+                  Text(
+                    '$uploadedCount/3 Completed',
+                    style: TextStyle(
+                      fontSize: 10.5,
+                      fontWeight: FontWeight.w800,
+                      color: allUploaded
+                          ? RspFinalReqUi.success
+                          : RspFinalReqUi.warning,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        LayoutBuilder(
+          builder: (context, c) {
+            final tiles = RspFinalRequirementDocKind.values
+                .map((kind) => _docTile(app: app, kind: kind))
+                .toList();
+            if (forceDocRow || c.maxWidth >= 280) {
+              return Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  for (var i = 0; i < tiles.length; i++) ...[
+                    if (i > 0) const SizedBox(width: 6),
+                    Expanded(child: tiles[i]),
+                  ],
+                ],
+              );
+            }
+            return Column(
+              children: [
+                for (var i = 0; i < tiles.length; i++) ...[
+                  if (i > 0) const SizedBox(height: 6),
+                  tiles[i],
+                ],
+              ],
+            );
+          },
+        ),
+        if (!approved) ...[
+          const SizedBox(height: 8),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: FilledButton.icon(
+              onPressed: saving || !allUploaded || approved
+                  ? null
+                  : () => _setApproved(app, true),
+              icon: saving
+                  ? const SizedBox(
+                      width: 14,
+                      height: 14,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.verified_rounded, size: 16),
+              label: const Text('Mark approved'),
+              style: FilledButton.styleFrom(
+                backgroundColor: ac,
+                foregroundColor: Colors.white,
+                visualDensity: VisualDensity.compact,
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 8,
+                ),
+              ),
+            ),
+          ),
+        ] else if (!hired)
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton.icon(
+              onPressed: saving ? null : () => _setApproved(app, false),
+              icon: const Icon(Icons.undo_rounded, size: 15),
+              label: const Text('Clear approval'),
+              style: TextButton.styleFrom(
+                visualDensity: VisualDensity.compact,
+                padding: EdgeInsets.zero,
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+
+  Future<void> _setHrAccountMonitoring(
+    RecruitmentApplication app,
+    bool done,
+  ) async {
+    setState(() => _savingIds.add(app.id));
+    try {
+      await RecruitmentRepo.instance.updateHrAccountSetupMonitoring(
+        app.id,
+        done,
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            done
+                ? 'Applicants will see: account setup complete.'
+                : 'Applicants will see: still setting up account.',
+          ),
+        ),
+      );
+      await _load();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(userFacingApiError(e))));
+    } finally {
+      if (mounted) setState(() => _savingIds.remove(app.id));
+    }
+  }
+
+  Widget _buildStep8Footer({
+    required RecruitmentApplication app,
+    required bool saving,
+    required bool locked,
+  }) {
+    final monitoringDone = app.hrAccountSetupDone;
+    final ac = RspFinalReqUi.accentOf(context);
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+      decoration: BoxDecoration(
+        color: AppTheme.dashPanelOf(context),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: RspFinalReqUi.hairlineOf(context)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              Text(
+                'Applicant status (Step 8)',
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w800,
+                  color: RspFinalReqUi.primaryTextOf(context),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  monitoringDone
+                      ? 'Shown to applicant: account setup complete.'
+                      : 'Shown to applicant: still setting up account.',
+                  style: TextStyle(
+                    fontSize: 11.5,
+                    color: RspFinalReqUi.secondaryTextOf(context),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          IgnorePointer(
+            ignoring: saving || locked,
+            child: Opacity(
+              opacity: saving || locked ? 0.45 : 1,
+              child: Container(
+                padding: const EdgeInsets.all(3),
+                decoration: BoxDecoration(
+                  color: AppTheme.dashMutedSurfaceOf(context),
+                  borderRadius: BorderRadius.circular(999),
+                  border: Border.all(color: RspFinalReqUi.hairlineOf(context)),
+                ),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: _step8Chip(
+                        label: 'Not yet',
+                        icon: Icons.schedule_rounded,
+                        active: !monitoringDone,
+                        accent: ac,
+                        onTap: () {
+                          if (saving || locked || !monitoringDone) return;
+                          _setHrAccountMonitoring(app, false);
+                        },
+                      ),
+                    ),
+                    Expanded(
+                      child: _step8Chip(
+                        label: 'Done',
+                        icon: Icons.check_rounded,
+                        active: monitoringDone,
+                        accent: ac,
+                        onTap: () {
+                          if (saving || locked || monitoringDone) return;
+                          _setHrAccountMonitoring(app, true);
+                        },
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _step8Chip({
+    required String label,
+    required IconData icon,
+    required bool active,
+    required Color accent,
+    required VoidCallback onTap,
+  }) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(999),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 150),
+          padding: const EdgeInsets.symmetric(vertical: 10),
+          decoration: BoxDecoration(
+            color: active ? accent.withValues(alpha: 0.16) : Colors.transparent,
+            borderRadius: BorderRadius.circular(999),
+            border: active
+                ? Border.all(color: accent.withValues(alpha: 0.45))
+                : null,
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(
+                icon,
+                size: 16,
+                color: active
+                    ? accent
+                    : RspFinalReqUi.secondaryTextOf(context),
+              ),
+              const SizedBox(width: 6),
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w700,
+                  color: active
+                      ? accent
+                      : RspFinalReqUi.primaryTextOf(context),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildOrientationAttendancePanel(RecruitmentApplication app) {
+    final saving = _savingIds.contains(app.id);
+    final attended = app.orientationAttended;
+    final selected = attended == null ? 0 : (attended ? 1 : 2);
+    final scheduled = app.orientationAt;
+    final ac = RspFinalReqUi.accentOf(context);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Icon(Icons.event_available_outlined, size: 16, color: ac),
+            const SizedBox(width: 6),
+            Expanded(
+              child: Text(
+                'Orientation Attendance',
+                style: TextStyle(
+                  fontFamily: 'NotoSans',
+                  fontWeight: FontWeight.w800,
+                  fontSize: 13,
+                  color: RspFinalReqUi.primaryTextOf(context),
                 ),
               ),
             ),
           ],
         ),
-      );
-    }
-
-    return Container(
-      decoration: _shellCardDecoration(context),
-      clipBehavior: Clip.antiAlias,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          _shellTopAccent(),
-          Padding(
-            padding: const EdgeInsets.all(_kCardPadding),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+        const SizedBox(height: 4),
+        Text(
+          scheduled == null
+              ? 'Schedule orientation in Scheduling, then record attendance.'
+              : 'Scheduled: ${_formatScheduleDateTime(scheduled, context)}',
+          style: TextStyle(
+            fontSize: 11,
+            height: 1.3,
+            color: RspFinalReqUi.secondaryTextOf(context),
+          ),
+        ),
+        const SizedBox(height: 10),
+        IgnorePointer(
+          ignoring: saving,
+          child: Opacity(
+            opacity: saving ? 0.45 : 1,
+            child: Row(
               children: [
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Expanded(child: header),
-                    if (!needsAttention)
-                      TextButton.icon(
-                        onPressed: () =>
-                            setState(() => _expandedIds.remove(app.id)),
-                        icon: const Icon(Icons.unfold_less_rounded, size: 18),
-                        label: const Text('Show less'),
-                      ),
-                  ],
-                ),
-                const SizedBox(height: 18),
-                Text(
-                  'REQUIREMENTS',
-                  style: TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w800,
-                    letterSpacing: 0.65,
-                    color: AppTheme.dashTextSecondaryOf(context),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                LayoutBuilder(
-                  builder: (context, c) {
-                    final wide = c.maxWidth >= 720;
-                    final tiles = RspFinalRequirementDocKind.values
-                        .map((kind) => _docTile(app: app, kind: kind))
-                        .toList();
-                    if (wide) {
-                      return Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: tiles
-                            .map(
-                              (t) => Expanded(
-                                child: Padding(
-                                  padding: const EdgeInsets.only(right: 10),
-                                  child: t,
-                                ),
-                              ),
-                            )
-                            .toList(),
-                      );
-                    }
-                    return Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        for (var i = 0; i < tiles.length; i++) ...[
-                          if (i > 0) const SizedBox(height: 12),
-                          tiles[i],
-                        ],
-                      ],
-                    );
-                  },
-                ),
-                if (!approved) ...[
-                  const SizedBox(height: 16),
-                  Row(
-                    children: [
-                      FilledButton.icon(
-                        onPressed: saving || !allUploaded || approved
-                            ? null
-                            : () => _setApproved(app, true),
-                        icon: saving
-                            ? const SizedBox(
-                                width: 18,
-                                height: 18,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                ),
-                              )
-                            : const Icon(Icons.verified_rounded, size: 20),
-                        label: const Text('Mark approved'),
-                        style: FilledButton.styleFrom(
-                          backgroundColor: AppTheme.primaryNavy,
-                          foregroundColor: Colors.white,
-                        ),
-                      ),
-                    ],
-                  ),
-                ] else ...[
-                  const SizedBox(height: 12),
-                  Row(
-                    children: [
-                      if (!hired)
-                        TextButton.icon(
-                          onPressed: saving
-                              ? null
-                              : () => _setApproved(app, false),
-                          icon: const Icon(Icons.undo_rounded, size: 18),
-                          label: const Text('Clear approval'),
-                        ),
-                    ],
-                  ),
-                  const SizedBox(height: 20),
-                  Divider(height: 1, color: AppTheme.dashHairlineOf(context)),
-                  const SizedBox(height: 20),
-                  _buildOrientationAttendancePanel(app),
-                  const SizedBox(height: 20),
-                  Divider(height: 1, color: AppTheme.dashHairlineOf(context)),
-                  const SizedBox(height: 20),
-                  Builder(
-                    builder: (context) {
-                      final step3Enabled =
-                          app.orientationAttended == true || hired;
-                      String step3Subtitle;
-                      if (hired) {
-                        step3Subtitle = 'Account linked.';
-                      } else if (step3Enabled) {
-                        step3Subtitle = 'Create login, then email credentials.';
-                      } else if (app.orientationAttended == false) {
-                        step3Subtitle =
-                            'Disabled until orientation is marked attended.';
-                      } else {
-                        step3Subtitle =
-                            'Mark orientation as attended in Step 2 first.';
-                      }
-
-                      return Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            children: [
-                              Container(
-                                width: 30,
-                                height: 30,
-                                alignment: Alignment.center,
-                                decoration: BoxDecoration(
-                                  color: const Color(
-                                    0xFFE85D04,
-                                  ).withValues(alpha: 0.15),
-                                  shape: BoxShape.circle,
-                                ),
-                                child: Text(
-                                  '3',
-                                  style: TextStyle(
-                                    fontWeight: FontWeight.w800,
-                                    color: step3Enabled
-                                        ? const Color(0xFFE85D04)
-                                        : AppTheme.dashTextSecondaryOf(context),
-                                  ),
-                                ),
-                              ),
-                              const SizedBox(width: 10),
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(
-                                      'Employee account',
-                                      style: TextStyle(
-                                        fontWeight: FontWeight.w800,
-                                        fontSize: 15,
-                                        color: step3Enabled
-                                            ? AppTheme.dashTextPrimaryOf(
-                                                context,
-                                              )
-                                            : AppTheme.dashTextSecondaryOf(
-                                                context,
-                                              ),
-                                      ),
-                                    ),
-                                    const SizedBox(height: 2),
-                                    Text(
-                                      step3Subtitle,
-                                      style: TextStyle(
-                                        fontSize: 12,
-                                        color: AppTheme.dashTextSecondaryOf(
-                                          context,
-                                        ),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 16),
-                          RspEmployeeAccountSetupPanel(
-                            app: app,
-                            enabled: step3Enabled,
-                            busy: saving,
-                            onBusyChanged: (v) {
-                              if (v) {
-                                setState(() => _savingIds.add(app.id));
-                              } else {
-                                setState(() => _savingIds.remove(app.id));
-                              }
-                            },
-                            onReload: _load,
-                            onGoToCreateAccount: widget.onGoToCreateAccount,
-                          ),
-                        ],
-                      );
-                    },
+                for (final entry in [
+                  (0, 'Pending', Icons.schedule_rounded),
+                  (1, 'Attended', Icons.check_rounded),
+                  (2, 'No Show', Icons.person_off_rounded),
+                ]) ...[
+                  if (entry.$1 > 0) const SizedBox(width: 4),
+                  Expanded(
+                    child: _orientChip(
+                      label: entry.$2,
+                      icon: entry.$3,
+                      active: selected == entry.$1,
+                      accent: ac,
+                      onTap: () {
+                        if (saving) return;
+                        final want = entry.$1 == 0 ? null : (entry.$1 == 1);
+                        if (want == attended) return;
+                        _setOrientationAttendance(app, want);
+                      },
+                    ),
                   ),
                 ],
               ],
             ),
           ),
-        ],
+        ),
+        const SizedBox(height: 8),
+        Text(
+          attended == true
+              ? 'Applicant attended orientation.'
+              : attended == false
+              ? 'Applicant did not attend orientation.'
+              : scheduled == null
+              ? 'Waiting for orientation schedule.'
+              : 'Orientation scheduled — record attendance after the session.',
+          style: TextStyle(
+            fontSize: 11,
+            color: RspFinalReqUi.secondaryTextOf(context),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _orientChip({
+    required String label,
+    required IconData icon,
+    required bool active,
+    required Color accent,
+    required VoidCallback onTap,
+  }) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(999),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 150),
+          padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
+          decoration: BoxDecoration(
+            color: active ? accent.withValues(alpha: 0.14) : Colors.transparent,
+            borderRadius: BorderRadius.circular(999),
+            border: Border.all(
+              color: active ? accent : RspFinalReqUi.hairlineOf(context),
+            ),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                icon,
+                size: 14,
+                color: active
+                    ? accent
+                    : RspFinalReqUi.secondaryTextOf(context),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 10.5,
+                  fontWeight: FontWeight.w700,
+                  color: active
+                      ? accent
+                      : RspFinalReqUi.primaryTextOf(context),
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -1331,16 +1819,24 @@ class _RspFinalRequirementsSectionState
     final rejectReason = app.finalRequirementRejectReason(kind)?.trim();
     final saving = _savingIds.contains(app.id);
     final canReject = hasFile && !_isHired(app) && !saving;
+    final rejected =
+        rejectReason != null && rejectReason.isNotEmpty && !hasFile;
+
+    final statusColor = hasFile
+        ? RspFinalReqUi.success
+        : rejected
+        ? RspFinalReqUi.error
+        : RspFinalReqUi.warning;
 
     return Container(
-      padding: const EdgeInsets.all(14),
+      padding: const EdgeInsets.all(8),
       decoration: BoxDecoration(
-        color: AppTheme.dashMutedSurfaceOf(context),
-        borderRadius: BorderRadius.circular(12),
+        color: AppTheme.dashPanelOf(context),
+        borderRadius: BorderRadius.circular(8),
         border: Border.all(
-          color: rejectReason != null && rejectReason.isNotEmpty && !hasFile
-              ? const Color(0xFFC62828).withValues(alpha: 0.45)
-              : AppTheme.dashHairlineOf(context),
+          color: rejected
+              ? RspFinalReqUi.error.withValues(alpha: 0.45)
+              : RspFinalReqUi.hairlineOf(context),
         ),
       ),
       child: Column(
@@ -1350,93 +1846,83 @@ class _RspFinalRequirementsSectionState
             children: [
               Icon(
                 hasFile
-                    ? Icons.check_circle_rounded
-                    : (rejectReason != null && rejectReason.isNotEmpty)
+                    ? Icons.picture_as_pdf_rounded
+                    : rejected
                     ? Icons.cancel_rounded
                     : Icons.pending_rounded,
-                size: 16,
-                color: hasFile
-                    ? const Color(0xFF2E7D32)
-                    : (rejectReason != null && rejectReason.isNotEmpty)
-                    ? const Color(0xFFC62828)
-                    : AppTheme.dashTextSecondaryOf(context),
+                size: 15,
+                color: statusColor,
               ),
-              const SizedBox(width: 6),
+              const SizedBox(width: 4),
               Expanded(
                 child: Text(
                   _kindLabel(kind),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
                     fontWeight: FontWeight.w700,
-                    fontSize: 13,
+                    fontSize: 11,
                   ),
                 ),
               ),
+              Icon(
+                hasFile
+                    ? Icons.check_circle_rounded
+                    : rejected
+                    ? Icons.error_rounded
+                    : Icons.schedule_rounded,
+                size: 13,
+                color: statusColor,
+              ),
             ],
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 6),
           if (hasFile) ...[
             RspAttachmentActions(path: path, fileName: displayName),
-            const SizedBox(height: 8),
             Align(
               alignment: Alignment.centerRight,
-              child: TextButton.icon(
+              child: IconButton(
+                tooltip: 'Reject',
                 onPressed: canReject
                     ? () => _rejectRequirement(app, kind)
                     : null,
-                icon: const Icon(Icons.highlight_off_rounded, size: 18),
-                label: const Text('Reject'),
-                style: TextButton.styleFrom(
-                  foregroundColor: const Color(0xFFC62828),
-                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                icon: const Icon(Icons.close_rounded, size: 16),
+                style: IconButton.styleFrom(
+                  foregroundColor: RspFinalReqUi.error,
+                  padding: const EdgeInsets.all(2),
+                  minimumSize: const Size(26, 26),
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  visualDensity: VisualDensity.compact,
                 ),
               ),
             ),
-          ] else if (rejectReason != null && rejectReason.isNotEmpty) ...[
+          ] else if (rejected) ...[
             Text(
               'Rejected — awaiting resubmit',
               style: TextStyle(
-                fontSize: 12,
+                fontSize: 10.5,
                 fontWeight: FontWeight.w700,
-                color: const Color(0xFFC62828).withValues(alpha: 0.95),
+                color: RspFinalReqUi.error.withValues(alpha: 0.95),
               ),
             ),
-            const SizedBox(height: 4),
+            const SizedBox(height: 2),
             Text(
               rejectReason,
               style: TextStyle(
-                fontSize: 12,
-                height: 1.35,
-                color: AppTheme.dashTextSecondaryOf(context),
+                fontSize: 10.5,
+                height: 1.3,
+                color: RspFinalReqUi.secondaryTextOf(context),
               ),
             ),
           ] else
             Text(
               'Not submitted',
               style: TextStyle(
-                fontSize: 12,
-                color: AppTheme.dashTextSecondaryOf(context),
+                fontSize: 11,
+                color: RspFinalReqUi.secondaryTextOf(context),
               ),
             ),
         ],
-      ),
-    );
-  }
-
-  Widget _statusChip({required String label, required Color color}) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: color.withValues(alpha: 0.35)),
-      ),
-      child: Text(
-        label,
-        style: TextStyle(
-          color: color,
-          fontSize: 12,
-          fontWeight: FontWeight.w700,
-        ),
       ),
     );
   }

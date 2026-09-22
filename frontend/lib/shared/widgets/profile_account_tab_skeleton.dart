@@ -79,7 +79,7 @@ class DeferredProfileMount extends StatefulWidget {
 }
 
 class _DeferredProfileMountState extends State<DeferredProfileMount> {
-  Widget? _child;
+  bool _ready = false;
   int _framesLeft = 0;
 
   @override
@@ -92,7 +92,7 @@ class _DeferredProfileMountState extends State<DeferredProfileMount> {
   void didUpdateWidget(DeferredProfileMount oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.key != widget.key) {
-      _child = null;
+      _ready = false;
       _scheduleMount();
     }
   }
@@ -109,11 +109,13 @@ class _DeferredProfileMountState extends State<DeferredProfileMount> {
       WidgetsBinding.instance.addPostFrameCallback(_onFrame);
       return;
     }
-    setState(() => _child = widget.builder());
+    setState(() => _ready = true);
   }
 
   @override
   Widget build(BuildContext context) {
-    return _child ?? widget.placeholder;
+    // Defer the first mount only. Rebuild with the latest parent state so
+    // validation, loading indicators, and action buttons stay current.
+    return _ready ? widget.builder() : widget.placeholder;
   }
 }

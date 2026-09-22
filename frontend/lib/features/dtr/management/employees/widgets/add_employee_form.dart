@@ -347,6 +347,12 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
           );
       if (initialSetup != null) body['setup'] = initialSetup;
 
+      final hire = context.read<RecruitmentHirePrefill>();
+      final isRspHire = hire.hasPendingLink && hire.applicationId != null;
+      if (isRspHire) {
+        body['skip_account_email'] = true;
+      }
+
       final res = await ApiClient.instance.post<Map<String, dynamic>>(
         '/api/employees',
         data: body,
@@ -360,17 +366,22 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
 
       final userId = data['id'] as String;
       final postCommitWarnings = <String>[];
-      final hire = context.read<RecruitmentHirePrefill>();
-      if (hire.hasPendingLink && hire.applicationId != null) {
+      final createdPassword =
+          data['temporary_password']?.toString().trim().isNotEmpty == true
+          ? data['temporary_password'].toString()
+          : password;
+      if (isRspHire) {
         try {
           await RecruitmentRepo.instance.linkHiredUser(
             hire.applicationId!,
             userId,
+            loginEmail: email,
+            loginPassword: createdPassword,
           );
           hire.recordCreatedCredentials(
             applicationId: hire.applicationId!,
             loginEmail: email,
-            password: data['temporary_password']?.toString() ?? password,
+            password: createdPassword,
           );
           hire.clear();
           _lastAppliedPrefillStamp = null;
@@ -404,7 +415,10 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
       final emailSent = data['account_email_sent'] == true;
       final accountIsActive = data['is_active'] != false;
       final temporaryPassword = data['temporary_password']?.toString() ?? '';
-      if (accountIsActive && !emailSent && temporaryPassword.isNotEmpty) {
+      if (!isRspHire &&
+          accountIsActive &&
+          !emailSent &&
+          temporaryPassword.isNotEmpty) {
         await _showTemporaryPasswordDialog(
           email: email,
           password: temporaryPassword,
@@ -1105,7 +1119,6 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
             decoration: _fieldDecoration('Employment Status'),
             items: [
               'active',
-              'inactive',
               'resigned',
               'retired',
               'terminated',

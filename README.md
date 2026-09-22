@@ -82,9 +82,12 @@ Initialize a new database:
 
 ```bash
 createdb hrms_plaridel
-psql -d hrms_plaridel -f scripts/init-schema.sql
-psql -d hrms_plaridel -f scripts/rsp-storage-attachment-policy.sql
+psql -d hrms_plaridel -v ON_ERROR_STOP=1 -f scripts/init-schema.sql
 ```
+
+The initialization script is the single fresh-install entry point and includes
+the DocuTracker schema plus the RSP attachment access policy. Run it with
+`psql` so its relative include commands are processed.
 
 Start the API:
 

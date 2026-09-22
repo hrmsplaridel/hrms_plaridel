@@ -172,7 +172,7 @@ class _EmployeeLeaveMobilePageState extends State<EmployeeLeaveMobilePage>
         onBalanceHistory: _openBalanceHistory,
       ),
       requestsPanel: EmployeeLeaveRequestsPanel(
-        requests: provider.requests,
+        requests: provider.myRequests,
         loading: provider.myRequestsLoading,
         error: provider.myRequestsError,
         onRetry: _retryRequests,
@@ -183,6 +183,8 @@ class _EmployeeLeaveMobilePageState extends State<EmployeeLeaveMobilePage>
         onLoadMore: _loadMoreRequests,
         onEdit: _leaveActions.editRequest,
         onCancel: _leaveActions.cancelRequest,
+        onDiscard: _leaveActions.discardDraft,
+        onPreview: _leaveActions.previewLeaveForm,
         onPrint: _leaveActions.printLeaveForm,
       ),
     );

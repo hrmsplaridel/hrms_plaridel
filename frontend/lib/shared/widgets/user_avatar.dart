@@ -6,7 +6,7 @@ import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/providers/auth_provider.dart';
 
 /// Reusable avatar that shows the user's profile image (from API /api/files/avatar/:userId)
-/// when available, and falls back to the orange/person icon when not.
+/// when available, and falls back to the HRMS [logo.png] filling the circle.
 class UserAvatar extends StatelessWidget {
   const UserAvatar({
     super.key,
@@ -27,6 +27,8 @@ class UserAvatar extends StatelessWidget {
   final Color? backgroundColor;
   final Color? placeholderIconColor;
 
+  static const _logoAsset = 'assets/images/logo.png';
+
   @override
   Widget build(BuildContext context) {
     final auth = context.watch<AuthProvider>();
@@ -40,12 +42,23 @@ class UserAvatar extends StatelessWidget {
       return passed;
     }();
 
-    final bg = backgroundColor ?? AppTheme.primaryNavy;
-    final iconColor = placeholderIconColor ?? Colors.white;
+    final bg = backgroundColor ?? Colors.white;
     final diameter = radius * 2;
 
     if (resolvedUserId.isEmpty || resolvedPath.isEmpty) {
-      return _placeholder(radius, bg, iconColor);
+      return _circularImage(
+        diameter: diameter,
+        background: bg,
+        child: Image.asset(
+          _logoAsset,
+          width: diameter,
+          height: diameter,
+          fit: BoxFit.cover,
+          alignment: Alignment.center,
+          filterQuality: FilterQuality.high,
+          errorBuilder: (_, __, ___) => _personFallback(radius),
+        ),
+      );
     }
 
     final imageUrl = userAvatarImageUrl(
@@ -53,28 +66,56 @@ class UserAvatar extends StatelessWidget {
       avatarPath: resolvedPath,
     );
 
-    return CircleAvatar(
-      radius: radius,
-      backgroundColor: bg.withValues(alpha: 0.15),
-      child: ClipOval(
-        child: Image.network(
-          imageUrl,
-          key: ValueKey(imageUrl),
+    return _circularImage(
+      diameter: diameter,
+      background: bg,
+      child: Image.network(
+        imageUrl,
+        key: ValueKey(imageUrl),
+        width: diameter,
+        height: diameter,
+        fit: BoxFit.cover,
+        alignment: Alignment.center,
+        errorBuilder: (_, __, ___) => Image.asset(
+          _logoAsset,
           width: diameter,
           height: diameter,
           fit: BoxFit.cover,
-          errorBuilder: (_, __, ___) =>
-              Icon(Icons.person_rounded, color: iconColor, size: radius * 1.2),
+          alignment: Alignment.center,
+          filterQuality: FilterQuality.high,
+          errorBuilder: (_, __, ___) => _personFallback(radius),
         ),
       ),
     );
   }
 
-  Widget _placeholder(double radius, Color bg, Color iconColor) {
-    return CircleAvatar(
-      radius: radius,
-      backgroundColor: bg,
-      child: Icon(Icons.person_rounded, color: iconColor, size: radius * 1.2),
+  Widget _circularImage({
+    required double diameter,
+    required Color background,
+    required Widget child,
+  }) {
+    return Container(
+      width: diameter,
+      height: diameter,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        color: background,
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: child,
+    );
+  }
+
+  Widget _personFallback(double radius) {
+    return ColoredBox(
+      color: AppTheme.primaryNavy,
+      child: Center(
+        child: Icon(
+          Icons.person_rounded,
+          color: placeholderIconColor ?? Colors.white,
+          size: radius * 1.2,
+        ),
+      ),
     );
   }
 }

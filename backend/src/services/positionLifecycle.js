@@ -38,7 +38,7 @@ function nullableId(value) {
 async function lockPositionForUpdate(db, positionId) {
   const result = await db.query(
     `SELECT id, position_number, name, description, department_id,
-            is_department_head, is_active
+            is_department_head, is_leave_final_reviewer, is_active
        FROM positions
       WHERE id = $1::uuid
       FOR UPDATE`,
@@ -157,6 +157,7 @@ function positionAuditSnapshot(position, departmentHeadPeriod = null) {
     description: position.description ?? null,
     department_id: nullableId(position.department_id),
     is_department_head: departmentHeadPeriod !== null,
+    is_leave_final_reviewer: position.is_leave_final_reviewer === true,
     department_head_period: departmentHeadPeriod
       ? {
           id: departmentHeadPeriod.id,
@@ -186,6 +187,9 @@ function positionAuditAction(before, after) {
       JSON.stringify(after?.department_head_period ?? null)
   ) {
     return 'position_department_head_changed';
+  }
+  if (before?.is_leave_final_reviewer !== after?.is_leave_final_reviewer) {
+    return 'position_leave_final_reviewer_changed';
   }
   return 'position_updated';
 }

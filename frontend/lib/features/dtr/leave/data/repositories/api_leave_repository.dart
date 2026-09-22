@@ -324,6 +324,48 @@ class ApiLeaveRepository implements LeaveRepository {
   }
 
   @override
+  Future<LeaveRequestPage> listReviewRequestsPage({
+    required LeaveRequestQuery query,
+    required bool departmentHead,
+  }) async {
+    try {
+      final res = await ApiClient.instance.get<Map<String, dynamic>>(
+        departmentHead ? '/api/leave/department-head' : '/api/leave',
+        queryParameters: {...query.toQueryParams(), 'paginated': 'true'},
+      );
+      final data = res.data ?? const <String, dynamic>{};
+      return LeaveRequestPage(
+        items: (data['items'] as List<dynamic>? ?? const [])
+            .map((item) => LeaveRequest.fromJson(_asMap(item)))
+            .toList(),
+        total: (data['total'] as num?)?.toInt() ?? 0,
+        limit: (data['limit'] as num?)?.toInt() ?? query.limit ?? 50,
+        offset: (data['offset'] as num?)?.toInt() ?? query.offset ?? 0,
+      );
+    } on DioException catch (e) {
+      throw Exception(_messageFromDio(e));
+    }
+  }
+
+  @override
+  Future<List<LeaveReviewFilterOption>> listReviewFilterOptions({
+    required bool departmentHead,
+  }) async {
+    try {
+      final res = await ApiClient.instance.get<List<dynamic>>(
+        departmentHead
+            ? '/api/leave/department-head/filter-options'
+            : '/api/leave/filter-options',
+      );
+      return (res.data ?? const [])
+          .map((item) => LeaveReviewFilterOption.fromJson(_asMap(item)))
+          .toList();
+    } on DioException catch (e) {
+      throw Exception(_messageFromDio(e));
+    }
+  }
+
+  @override
   Future<List<LeaveRequest>> listPendingRequests() async {
     final res = await ApiClient.instance.get<List<dynamic>>(
       '/api/leave/pending',
@@ -345,6 +387,25 @@ class ApiLeaveRepository implements LeaveRepository {
         _employeeReadMessageFromDio(
           e,
           'Unable to load leave credits. Please try again.',
+        ),
+      );
+    }
+  }
+
+  @override
+  Future<List<LeaveBalance>> getFormCreditsForRequest(String requestId) async {
+    try {
+      final res = await ApiClient.instance.get<List<dynamic>>(
+        '/api/leave/$requestId/form-credits',
+      );
+      return (res.data ?? const [])
+          .map((row) => LeaveBalance.fromJson(_asMap(row)))
+          .toList();
+    } on DioException catch (e) {
+      throw Exception(
+        _employeeReadMessageFromDio(
+          e,
+          'Unable to verify leave form credits. Please try again.',
         ),
       );
     }
@@ -474,6 +535,20 @@ class ApiLeaveRepository implements LeaveRepository {
       final data = res.data;
       if (data == null) throw Exception('No data returned');
       return LeaveRequest.fromJson(data);
+    } on DioException catch (e) {
+      throw Exception(_messageFromDio(e));
+    }
+  }
+
+  @override
+  Future<void> discardDraft({
+    required String requestId,
+    required String userId,
+  }) async {
+    try {
+      await ApiClient.instance.patch<Map<String, dynamic>>(
+        '/api/leave/${Uri.encodeComponent(requestId)}/discard',
+      );
     } on DioException catch (e) {
       throw Exception(_messageFromDio(e));
     }

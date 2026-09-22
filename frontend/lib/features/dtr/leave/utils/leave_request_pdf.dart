@@ -1710,14 +1710,8 @@ class _LeaveRequestPdfFixedEngine {
         ? _s(request.employeeName)
         : request.userId;
     final n = _nameParts(fullName);
-    final reviewerName = _s(approvingAuthorityName).isNotEmpty
-        ? _s(approvingAuthorityName)
-        : _s(request.reviewerName);
-    final reviewerTitle = _s(approvingAuthorityTitle).isNotEmpty
-        ? _s(approvingAuthorityTitle)
-        : _s(request.reviewerTitle).isNotEmpty
-        ? _s(request.reviewerTitle)
-        : _s(request.reviewerRole);
+    final reviewerName = _s(approvingAuthorityName);
+    final reviewerTitle = _s(approvingAuthorityTitle);
     final certifierName = _s(certificationOfficerName);
     final certifierTitle = _s(certificationOfficerTitle);
     final recommendationName = _s(recommendationOfficerName);
@@ -1731,10 +1725,8 @@ class _LeaveRequestPdfFixedEngine {
             departmentHeadSignatureBytes.isEmpty
         ? null
         : pw.MemoryImage(departmentHeadSignatureBytes);
-    final hasAutomaticMayor = _s(approvingAuthorityName).isNotEmpty;
     final hrApproverSignatureImage =
-        hasAutomaticMayor ||
-            hrApproverSignatureBytes == null ||
+        hrApproverSignatureBytes == null ||
             hrApproverSignatureBytes.isEmpty
         ? null
         : pw.MemoryImage(hrApproverSignatureBytes);
