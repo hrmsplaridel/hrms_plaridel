@@ -1117,8 +1117,7 @@ class EmployeeLocatorSlipContentState extends State<EmployeeLocatorSlipContent>
                                 : _formatDateTime(step.date!);
                             if (actor != null && actor.isNotEmpty) {
                               subtitle = '$subtitle by $actor';
-                            } else if (step.title.contains('Department Head') &&
-                                step.title != 'Pending Department Head') {
+                            } else if (step.title.contains('Department Head')) {
                               subtitle = '$subtitle by Department Head';
                             } else if (step.title.contains('HR')) {
                               subtitle = '$subtitle by HR Admin';
@@ -3740,7 +3739,7 @@ class _LocatorSlipDraft {
 
 enum _LocatorSlipStatus {
   draft('Draft'),
-  pendingDepartmentHead('Pending Dept Head'),
+  pendingDepartmentHead('Pending Department Review'),
   pendingHr('Pending HR Admin'),
   returnedForCorrection('Returned for Correction'),
   approved('Approved'),

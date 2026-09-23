@@ -30,7 +30,7 @@ typedef _LocatorHistoryStep = ({
 
 enum _LocatorAdminQueue {
   all('All'),
-  pendingDeptHead('Pending Dept Head'),
+  pendingDeptHead('Pending Department Review'),
   pendingHrAdmin('Pending HR Admin'),
   returned('Returned for Correction'),
   approved('Approved'),
@@ -1287,7 +1287,7 @@ class _AdminLocatorManagementScreenState
             .toList();
         if (item.status == 'pending_department_head') {
           history.add((
-            title: 'Pending Department Head',
+            title: 'Pending Department Review',
             actor: item.deptHeadReviewerName,
             date: null,
             remarks: null,
@@ -1596,7 +1596,7 @@ class _AdminLocatorManagementScreenState
       ),
       if (item.status == 'pending_department_head')
         (
-          title: 'Pending Department Head',
+          title: 'Pending Department Review',
           actor: item.deptHeadReviewerName,
           date: null,
           remarks: null,
@@ -2269,7 +2269,7 @@ class _LocatorAdminRecord {
   String get statusLabel {
     switch (status.toLowerCase()) {
       case 'pending_department_head':
-        return 'Pending Dept Head';
+        return 'Pending Department Review';
       case 'pending_hr':
       case 'pending':
         return 'Pending HR Admin';
