@@ -71,6 +71,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboardDesktopPage>
   int _selectedNavIndex = 0;
   bool _sidebarCollapsed = false;
   LeaveSection? _leaveInitialSection;
+  bool _showMobileLeaveFab = true;
   int _leaveNavKey = 0;
   Timer? _notificationPollTimer;
   bool? _isDepartmentHead;
@@ -558,6 +559,12 @@ class _EmployeeDashboardState extends State<EmployeeDashboardDesktopPage>
           initialSection: _leaveInitialSection,
           onFileLeavePressed: _openEmployeeLeaveRequestForm,
           hideFileLeaveAction: useMobileLeaveFab,
+          onSectionChanged: (section) {
+            final show = section == LeaveSection.requests;
+            if (_showMobileLeaveFab != show && mounted) {
+              setState(() => _showMobileLeaveFab = show);
+            }
+          },
           tutorialHeaderKey: _leaveHeaderKey,
           tutorialContentKey: _leaveContentKey,
         );
@@ -651,6 +658,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboardDesktopPage>
         onFileLocator: _openEmployeeLocatorRequestForm,
         onHrmsAssistant: _openHrmsAssistant,
         onTutorial: _openDashboardTutorial,
+        showMobileLeaveFab: _showMobileLeaveFab,
       );
     }
 
@@ -911,6 +919,7 @@ class _EmployeeLeaveMainEntry extends StatefulWidget {
     this.hideFileLeaveAction = false,
     this.tutorialHeaderKey,
     this.tutorialContentKey,
+    this.onSectionChanged,
   });
 
   final LeaveSection? initialSection;
@@ -918,6 +927,7 @@ class _EmployeeLeaveMainEntry extends StatefulWidget {
   final bool hideFileLeaveAction;
   final GlobalKey? tutorialHeaderKey;
   final GlobalKey? tutorialContentKey;
+  final ValueChanged<LeaveSection>? onSectionChanged;
 
   @override
   State<_EmployeeLeaveMainEntry> createState() =>
@@ -974,6 +984,7 @@ class _EmployeeLeaveMainEntryState extends State<_EmployeeLeaveMainEntry> {
           hideEmployeeFileLeaveAction: widget.hideFileLeaveAction,
           tutorialHeaderKey: widget.tutorialHeaderKey,
           tutorialContentKey: widget.tutorialContentKey,
+          onSectionChanged: widget.onSectionChanged,
         );
       },
     );

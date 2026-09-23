@@ -40,6 +40,7 @@ class LeaveMain extends StatefulWidget {
     this.adminApprovalsContent,
     this.onFileLeavePressed,
     this.hideEmployeeFileLeaveAction = false,
+    this.onSectionChanged,
     this.tutorialHeaderKey,
     this.tutorialContentKey,
   });
@@ -72,6 +73,7 @@ class LeaveMain extends StatefulWidget {
 
   /// Hide the in-page File Leave button when the parent shell shows its own.
   final bool hideEmployeeFileLeaveAction;
+  final ValueChanged<LeaveSection>? onSectionChanged;
   final GlobalKey? tutorialHeaderKey;
   final GlobalKey? tutorialContentKey;
 
@@ -93,6 +95,9 @@ class _LeaveMainState extends State<LeaveMain> {
     if (widget.initialSection != null) {
       _currentSection = widget.initialSection!;
     }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) widget.onSectionChanged?.call(_activeSection);
+    });
   }
 
   LeaveSection get _activeSection {
@@ -176,7 +181,10 @@ class _LeaveMainState extends State<LeaveMain> {
                     : AppTheme.lightGray.withValues(alpha: 0.6)),
           borderRadius: BorderRadius.circular(10),
           child: InkWell(
-            onTap: () => setState(() => _currentSection = section),
+            onTap: () {
+              setState(() => _currentSection = section);
+              widget.onSectionChanged?.call(section);
+            },
             borderRadius: BorderRadius.circular(10),
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
