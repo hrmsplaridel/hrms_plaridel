@@ -870,6 +870,7 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
                             'Minimum advance days',
                             helperText: 'Blank means no advance rule',
                           ),
+                          validator: _validateNonNegativeInteger,
                         ),
                       ),
                       const SizedBox(width: 12),
@@ -884,6 +885,10 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
                           decoration: _inputDecoration(
                             'Max working days',
                             helperText: 'Blank means no limit',
+                          ),
+                          validator: (value) => _validatePositiveNumber(
+                            value,
+                            label: 'Maximum working days',
                           ),
                         ),
                       ),
@@ -904,6 +909,12 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
                           ? 'Optional threshold'
                           : 'Turn on Require attachment first',
                     ),
+                    validator: _requiresAttachment
+                        ? (value) => _validatePositiveNumber(
+                            value,
+                            label: 'Attachment threshold days',
+                          )
+                        : null,
                   ),
                   if (!systemLocked) ...[
                     const SizedBox(height: 24),
@@ -1401,6 +1412,24 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
     final text = value.trim();
     if (text.isEmpty) return null;
     return double.tryParse(text);
+  }
+
+  String? _validatePositiveNumber(String? value, {required String label}) {
+    final text = value?.trim() ?? '';
+    if (text.isEmpty) return null;
+    final parsed = double.tryParse(text);
+    if (parsed == null) return '$label must be a valid number';
+    if (!parsed.isFinite || parsed <= 0) return '$label must be greater than 0';
+    return null;
+  }
+
+  String? _validateNonNegativeInteger(String? value) {
+    final text = value?.trim() ?? '';
+    if (text.isEmpty) return null;
+    if (!RegExp(r'^\d+$').hasMatch(text)) {
+      return 'Minimum advance days must be a whole number';
+    }
+    return null;
   }
 
   int? _intOrNull(String value) {

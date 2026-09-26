@@ -607,6 +607,15 @@ CREATE TABLE IF NOT EXISTS leave_types (
   ),
   CONSTRAINT chk_leave_type_entitlement_basis CHECK (
     entitlement_basis IN ('accrual', 'annual', 'per_event', 'per_request', 'compliance')
+  ),
+  CONSTRAINT chk_leave_type_max_days_positive CHECK (
+    max_days IS NULL OR max_days > 0
+  ),
+  CONSTRAINT chk_leave_type_attachment_threshold_positive CHECK (
+    requires_attachment_when_over_days IS NULL OR requires_attachment_when_over_days > 0
+  ),
+  CONSTRAINT chk_leave_type_minimum_advance_days_nonnegative CHECK (
+    minimum_advance_days IS NULL OR minimum_advance_days >= 0
   )
 );
 

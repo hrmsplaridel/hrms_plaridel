@@ -1362,20 +1362,53 @@ function leaveTypePayloadFromBody(body = {}, existing = null) {
     return ['true', '1', 'yes', 'y'].includes(String(value).trim().toLowerCase());
   }
 
-  function numberField(key, fallback = null) {
-    const value = bodyField(key);
-    if (value === undefined) return fallback;
-    if (value == null || value === '') return null;
-    const n = parseFloat(value);
-    return Number.isFinite(n) ? n : fallback;
+  function invalidNumericField(label, requirement) {
+    const err = new Error(`${label} ${requirement}.`);
+    err.statusCode = 400;
+    throw err;
   }
 
-  function integerField(key, fallback = null) {
+  function numberField(
+    key,
+    fallback = null,
+    { label = key, minimum = null, exclusiveMinimum = false } = {}
+  ) {
     const value = bodyField(key);
     if (value === undefined) return fallback;
     if (value == null || value === '') return null;
-    const n = parseInt(value, 10);
-    return Number.isFinite(n) && n >= 0 ? n : fallback;
+    const text = String(value).trim();
+    if (!/^-?(?:\d+(?:\.\d+)?|\.\d+)$/.test(text)) {
+      invalidNumericField(label, 'must be a valid number');
+    }
+    const n = Number(text);
+    if (!Number.isFinite(n)) invalidNumericField(label, 'must be a valid number');
+    if (minimum != null) {
+      const invalid = exclusiveMinimum ? n <= minimum : n < minimum;
+      if (invalid) {
+        invalidNumericField(
+          label,
+          exclusiveMinimum
+            ? `must be greater than ${minimum}`
+            : `must be at least ${minimum}`
+        );
+      }
+    }
+    return n;
+  }
+
+  function integerField(key, fallback = null, { label = key, minimum = 0 } = {}) {
+    const value = bodyField(key);
+    if (value === undefined) return fallback;
+    if (value == null || value === '') return null;
+    const text = String(value).trim();
+    if (!/^\d+$/.test(text)) {
+      invalidNumericField(label, 'must be a whole number');
+    }
+    const n = Number(text);
+    if (!Number.isSafeInteger(n) || n < minimum) {
+      invalidNumericField(label, `must be a whole number of ${minimum} or more`);
+    }
+    return n;
   }
 
   return {
@@ -1390,12 +1423,22 @@ function leaveTypePayloadFromBody(body = {}, existing = null) {
     requiresAttachment: boolField('requires_attachment', existing?.requires_attachment ?? base.requires_attachment === true),
     requiresAttachmentWhenOverDays: numberField(
       'requires_attachment_when_over_days',
-      existing?.requires_attachment_when_over_days ?? base.requires_attachment_when_over_days ?? null
+      existing?.requires_attachment_when_over_days ?? base.requires_attachment_when_over_days ?? null,
+      {
+        label: 'Attachment threshold days',
+        minimum: 0,
+        exclusiveMinimum: true,
+      }
     ),
-    maxDays: numberField('max_days', existing?.max_days ?? base.max_days ?? null),
+    maxDays: numberField(
+      'max_days',
+      existing?.max_days ?? base.max_days ?? null,
+      { label: 'Maximum working days', minimum: 0, exclusiveMinimum: true }
+    ),
     minimumAdvanceDays: integerField(
       'minimum_advance_days',
-      existing?.minimum_advance_days ?? base.minimum_advance_days ?? null
+      existing?.minimum_advance_days ?? base.minimum_advance_days ?? null,
+      { label: 'Minimum advance days', minimum: 0 }
     ),
     affectsDtrNormally: boolField('affects_dtr_normally', existing?.affects_dtr_normally ?? base.affects_dtr_normally !== false),
     balanceLedgerType: normalizeLedgerType(body.balance_ledger_type ?? body.balanceLedgerType ?? existing?.balance_ledger_type, name),
