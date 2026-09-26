@@ -379,8 +379,8 @@ pool
 
     await pool.query(`
       UPDATE leave_types
-      SET employee_can_file = CASE WHEN name = 'mandatoryForcedLeave' THEN false ELSE true END,
-          admin_only = CASE WHEN name = 'mandatoryForcedLeave' THEN true ELSE false END,
+      SET employee_can_file = true,
+          admin_only = false,
           allows_past_dates = CASE WHEN name IN ('vacationLeave', 'specialPrivilegeLeave') THEN false ELSE true END,
           requires_attachment = CASE
             WHEN name IN (

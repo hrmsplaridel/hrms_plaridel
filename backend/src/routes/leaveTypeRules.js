@@ -28,8 +28,8 @@ const LEAVE_TYPE_RULES = {
     sex_eligibility: 'any',
   },
   mandatoryForcedLeave: {
-    employee_can_file: false,
-    admin_only: true,
+    employee_can_file: true,
+    admin_only: false,
     allows_past_dates: true,
     requires_attachment: false,
     max_days: 5,

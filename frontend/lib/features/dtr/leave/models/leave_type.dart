@@ -58,11 +58,8 @@ extension LeaveTypeExtension on LeaveType {
 
   bool get requiresCustomDescription => this == LeaveType.others;
 
-  /// Employee can file this leave type; false = admin-only.
-  bool get employeeCanFile => switch (this) {
-    LeaveType.mandatoryForcedLeave => false,
-    _ => true,
-  };
+  /// All built-in leave types, including Mandatory/Forced Leave, are fileable.
+  bool get employeeCanFile => true;
 
   /// Row key in [LeaveBalance] / `leave_balances`: mandatory/forced leave uses vacation credits (CSC).
   LeaveType get balanceLedgerType =>
