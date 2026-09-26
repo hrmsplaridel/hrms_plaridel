@@ -7,7 +7,7 @@
  * - admin_only: Only admin/HR can create; blocks employee submission
  * - allows_past_dates: Past-date filing allowed
  * - requires_attachment: Supporting document required (TODO: enforce when upload is implemented)
- * - requires_attachment_when_over_days: Sick leave only — medical certificate required if working days >= this value (default 5)
+ * - requires_attachment_when_over_days: Supporting document required if working days >= this value
  * - max_days: Maximum working days for this leave type (null = no limit)
  * - minimum_advance_days: Minimum calendar days before start date for employee filing (null = no limit)
  * - special_process_only: Not normal DTR leave; HR/admin process (e.g. monetization, terminal)
@@ -818,12 +818,19 @@ function validateEmployeeLeaveRequest(opts) {
 function mustBlockMissingAttachment(rule, leaveType, days, hasAttachment) {
   if (hasAttachment) return false;
   if (!rule) return false;
-  const d = parseFloat(days);
-  if (leaveType === 'sickLeave') {
-    const threshold = rule.requires_attachment_when_over_days ?? 5;
-    if (Number.isNaN(d)) return false;
-    return d >= threshold;
+
+  const configuredThreshold =
+    rule.requires_attachment_when_over_days
+    ?? (leaveType === 'sickLeave' ? 5 : null);
+  if (configuredThreshold != null) {
+    const requestedDays = Number(days);
+    const threshold = Number(configuredThreshold);
+    if (!Number.isFinite(requestedDays) || !Number.isFinite(threshold)) {
+      return false;
+    }
+    return requestedDays >= threshold;
   }
+
   return !!rule.requires_attachment;
 }
 

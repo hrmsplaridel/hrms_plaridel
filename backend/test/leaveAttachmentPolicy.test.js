@@ -96,3 +96,44 @@ test('final approval applies the sick-leave attachment threshold', () => {
     /requires a supporting document/i
   );
 });
+
+test('custom leave attachment threshold applies below, at, and above its boundary', () => {
+  const rule = {
+    requires_attachment: true,
+    requires_attachment_when_over_days: 3,
+  };
+
+  assert.doesNotThrow(() => assertRequiredLeaveAttachment({
+    rule,
+    leaveType: 'trainingLeave',
+    days: 2,
+    hasAttachment: false,
+  }));
+
+  for (const days of [3, 4]) {
+    assert.throws(
+      () => assertRequiredLeaveAttachment({
+        rule,
+        leaveType: 'trainingLeave',
+        days,
+        hasAttachment: false,
+      }),
+      /requires a supporting document/i
+    );
+  }
+});
+
+test('custom leave without a threshold keeps its general attachment requirement', () => {
+  assert.throws(
+    () => assertRequiredLeaveAttachment({
+      rule: {
+        requires_attachment: true,
+        requires_attachment_when_over_days: null,
+      },
+      leaveType: 'trainingLeave',
+      days: 1,
+      hasAttachment: false,
+    }),
+    /requires a supporting document/i
+  );
+});
