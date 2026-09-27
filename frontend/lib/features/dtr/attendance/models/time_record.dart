@@ -192,10 +192,7 @@ class TimeRecord {
       _nonEmpty(locatorSlipDtrPrintLabel) ?? locatorRequestType.dtrPrintLabel;
 
   String get locatorSlipDisplayLabel =>
-      _nonEmpty(locatorSlipRequestTypeLabel) ??
-      (locatorRequestType == LocatorRequestType.workFromHome
-          ? locatorRequestType.shortLabel
-          : locatorRequestType.label);
+      _nonEmpty(locatorSlipRequestTypeLabel) ?? locatorRequestType.label;
 
   static String? _nonEmpty(String? value) {
     final normalized = value?.trim();

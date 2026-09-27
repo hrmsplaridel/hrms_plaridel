@@ -39,20 +39,7 @@ class LocatorRequestType {
     sortOrder: 20,
   );
 
-  static const workFromHome = LocatorRequestType(
-    code: 'work_from_home',
-    label: 'Work From Home',
-    shortLabel: 'WFH',
-    locationLabel: 'Work Location',
-    locationHint: 'Enter work location',
-    dtrSlotLabel: 'WFH',
-    dtrPrintLabel: 'WFH',
-    coverageMode: 'wfh',
-    isSystem: true,
-    sortOrder: 30,
-  );
-
-  static const values = <LocatorRequestType>[locator, passSlip, workFromHome];
+  static const values = <LocatorRequestType>[locator, passSlip];
 
   final String? id;
   final String code;
@@ -68,7 +55,7 @@ class LocatorRequestType {
   final bool isSystem;
   final int sortOrder;
 
-  bool get usesWfhCoverage => coverageMode == 'wfh' || code == 'work_from_home';
+  bool get usesWfhCoverage => coverageMode == 'wfh';
 
   LocatorRequestType copyWith({
     String? id,
