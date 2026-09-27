@@ -1101,7 +1101,7 @@ CREATE INDEX IF NOT EXISTS idx_user_push_tokens_user_active
   WHERE revoked_at IS NULL;
 
 -- =========================================
--- LOCATOR / PASS SLIP / WFH REQUESTS
+-- LOCATOR REQUESTS
 -- =========================================
 CREATE TABLE IF NOT EXISTS locator_request_types (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -1133,10 +1133,7 @@ INSERT INTO locator_request_types (
    'On Field', 'ON FIELD', false, 'manual', true, true, 10),
   ('pass_slip', 'Pass Slip', 'Pass Slip',
    'Destination / Location', 'Enter destination or location',
-   'Pass Slip', 'PASS SLIP', false, 'manual', true, true, 20),
-  ('work_from_home', 'Work From Home', 'WFH',
-   'Work Location', 'Enter work location',
-   'WFH', 'WFH', false, 'wfh', true, true, 30)
+   'Pass Slip', 'PASS SLIP', false, 'manual', true, true, 20)
 ON CONFLICT (code) DO UPDATE SET
   is_system = true,
   updated_at = now();

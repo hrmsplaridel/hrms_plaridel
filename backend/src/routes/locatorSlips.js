@@ -97,18 +97,6 @@ const DEFAULT_LOCATOR_TYPES = [
     coverage_mode: 'manual',
     sort_order: 20,
   },
-  {
-    code: 'work_from_home',
-    label: 'Work From Home',
-    short_label: 'WFH',
-    location_label: 'Work Location',
-    location_hint: 'Enter work location',
-    dtr_slot_label: 'WFH',
-    dtr_print_label: 'WFH',
-    requires_attachment: false,
-    coverage_mode: 'wfh',
-    sort_order: 30,
-  },
 ];
 const DEFAULT_LOCATOR_TYPE_CODES = new Set(DEFAULT_LOCATOR_TYPES.map((t) => t.code));
 const LOCATOR_ATTACHMENT_SUBDIR = 'locator-attachments';
