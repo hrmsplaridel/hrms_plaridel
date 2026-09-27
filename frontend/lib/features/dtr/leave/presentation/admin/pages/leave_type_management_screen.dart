@@ -1207,18 +1207,21 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
             child: Text(field.key, style: AppTheme.dashFieldTextStyle(context)),
           ),
           const SizedBox(height: 10),
-          CheckboxListTile(
-            contentPadding: EdgeInsets.zero,
-            dense: true,
-            controlAffinity: ListTileControlAffinity.leading,
-            title: const Text('Required'),
-            value: field.required,
-            onChanged: _saving
-                ? null
-                : (value) => _replaceCustomField(
-                    index,
-                    _updatedCustomField(field, required: value == true),
-                  ),
+          Material(
+            type: MaterialType.transparency,
+            child: CheckboxListTile(
+              contentPadding: EdgeInsets.zero,
+              dense: true,
+              controlAffinity: ListTileControlAffinity.leading,
+              title: const Text('Required'),
+              value: field.required,
+              onChanged: _saving
+                  ? null
+                  : (value) => _replaceCustomField(
+                      index,
+                      _updatedCustomField(field, required: value == true),
+                    ),
+            ),
           ),
           if (isText) ...[
             const SizedBox(height: 8),
