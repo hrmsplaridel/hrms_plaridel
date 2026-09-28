@@ -142,19 +142,46 @@ function boolField(value, fallback = false) {
   return fallback;
 }
 
+function locatorTypeValidationError(message) {
+  const error = new Error(message);
+  error.statusCode = 400;
+  throw error;
+}
+
+function locatorTypeBooleanField(value, fallback, label) {
+  if (value === undefined || value === null) return fallback;
+  if (value === true || value === 'true' || value === 1 || value === '1') return true;
+  if (value === false || value === 'false' || value === 0 || value === '0') return false;
+  return locatorTypeValidationError(`${label} must be a boolean.`);
+}
+
 function textField(value, fallback = '') {
   const text = (value ?? '').toString().trim();
   return text || fallback;
 }
 
 function intField(value, fallback = 0) {
-  const parsed = Number.parseInt(value, 10);
-  return Number.isFinite(parsed) ? parsed : fallback;
+  if (value === undefined || value === null) return fallback;
+  const text = String(value).trim();
+  if (!/^\d+$/.test(text)) {
+    return locatorTypeValidationError(
+      'Sort order must be a whole number between 0 and 2147483647.'
+    );
+  }
+  const parsed = Number(text);
+  if (!Number.isSafeInteger(parsed) || parsed > 2147483647) {
+    return locatorTypeValidationError(
+      'Sort order must be a whole number between 0 and 2147483647.'
+    );
+  }
+  return parsed;
 }
 
 function normalizeCoverageMode(value) {
-  const mode = (value || 'manual').toString().trim().toLowerCase();
-  return mode === 'wfh' ? 'wfh' : 'manual';
+  if (value === undefined || value === null) return 'manual';
+  const mode = value.toString().trim().toLowerCase();
+  if (mode === 'manual' || mode === 'wfh') return mode;
+  return locatorTypeValidationError('Coverage mode must be manual or wfh.');
 }
 
 function locatorTypePayloadFromBody(body, existing = null) {
@@ -180,13 +207,18 @@ function locatorTypePayloadFromBody(body, existing = null) {
       body.dtr_print_label ?? body.dtrPrintLabel,
       existing?.dtr_print_label || label.toUpperCase()
     ),
-    requires_attachment: boolField(
+    requires_attachment: locatorTypeBooleanField(
       body.requires_attachment ?? body.requiresAttachment,
-      existing?.requires_attachment === true
+      existing?.requires_attachment === true,
+      'Requires attachment'
     ),
     coverage_mode: normalizeCoverageMode(body.coverage_mode ?? body.coverageMode ?? existing?.coverage_mode),
-    is_active: boolField(body.is_active ?? body.isActive, existing?.is_active !== false),
-    sort_order: intField(body.sort_order ?? body.sortOrder, existing?.sort_order || 0),
+    is_active: locatorTypeBooleanField(
+      body.is_active ?? body.isActive,
+      existing?.is_active !== false,
+      'Available for filing'
+    ),
+    sort_order: intField(body.sort_order ?? body.sortOrder, existing?.sort_order ?? 0),
   };
 }
 

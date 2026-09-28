@@ -131,7 +131,7 @@ class _LocatorTypeManagementScreenState
         'requires_attachment': _requiresAttachment,
         'coverage_mode': _coverageMode,
         'is_active': _isActive,
-        'sort_order': int.tryParse(_sortOrderController.text.trim()) ?? 0,
+        'sort_order': int.parse(_sortOrderController.text.trim()),
       };
       final selected = _selected;
       if (selected?.id == null || selected!.id!.isEmpty) {
@@ -444,7 +444,12 @@ class _LocatorTypeManagementScreenState
                       _field(_codeController, 'System code', enabled: isNew),
                       _field(_labelController, 'Request type name'),
                       _field(_shortLabelController, 'Short display name'),
-                      _field(_sortOrderController, 'Sort order', number: true),
+                      _field(
+                        _sortOrderController,
+                        'Sort order',
+                        number: true,
+                        validator: _validateSortOrder,
+                      ),
                     ],
                   ),
                   const SizedBox(height: 16),
@@ -693,6 +698,7 @@ class _LocatorTypeManagementScreenState
     String label, {
     bool enabled = true,
     bool number = false,
+    String? Function(String?)? validator,
   }) {
     return SizedBox(
       width: 300,
@@ -701,11 +707,26 @@ class _LocatorTypeManagementScreenState
         enabled: enabled,
         keyboardType: number ? TextInputType.number : TextInputType.text,
         decoration: AppTheme.dashInputDecoration(context, labelText: label),
-        validator: (value) => (value == null || value.trim().isEmpty)
-            ? '$label is required'
-            : null,
+        validator:
+            validator ??
+            (value) => (value == null || value.trim().isEmpty)
+                ? '$label is required'
+                : null,
       ),
     );
+  }
+
+  String? _validateSortOrder(String? value) {
+    final text = value?.trim() ?? '';
+    if (text.isEmpty) return 'Sort order is required';
+    if (!RegExp(r'^\d+$').hasMatch(text)) {
+      return 'Sort order must be a whole number from 0 to 2147483647';
+    }
+    final parsed = int.tryParse(text);
+    if (parsed == null || parsed > 2147483647) {
+      return 'Sort order must be a whole number from 0 to 2147483647';
+    }
+    return null;
   }
 
   Widget _miniStatusChip(String label, Color color) {

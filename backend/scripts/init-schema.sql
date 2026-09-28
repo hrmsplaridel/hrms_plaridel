@@ -1118,7 +1118,9 @@ CREATE TABLE IF NOT EXISTS locator_request_types (
     CHECK (coverage_mode IN ('manual', 'wfh')),
   is_active BOOLEAN NOT NULL DEFAULT true,
   is_system BOOLEAN NOT NULL DEFAULT false,
-  sort_order INTEGER NOT NULL DEFAULT 0,
+  sort_order INTEGER NOT NULL DEFAULT 0
+    CONSTRAINT chk_locator_request_types_sort_order_nonnegative
+    CHECK (sort_order >= 0),
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );

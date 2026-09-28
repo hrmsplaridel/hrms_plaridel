@@ -46,6 +46,28 @@ test('upgrade migration preserves WFH while removing system ownership', () => {
   assert.doesNotMatch(migration, /is_active\s*=/i);
 });
 
+test('fresh schema and upgrade migration reject negative sort orders', () => {
+  const schema = readBackendFile('scripts/init-schema.sql');
+  const migration = readBackendFile(
+    'scripts/migrations/dtr/20260927_locator_type_rule_constraints.sql'
+  );
+  const locatorTypeTable = requiredMatch(
+    schema,
+    /CREATE TABLE IF NOT EXISTS locator_request_types \([\s\S]*?\n\);/,
+    'locator_request_types table must exist in init-schema.sql'
+  );
+
+  assert.match(
+    locatorTypeTable,
+    /chk_locator_request_types_sort_order_nonnegative[\s\S]*CHECK \(sort_order >= 0\)/i
+  );
+  assert.match(migration, /WHERE sort_order < 0/i);
+  assert.match(
+    migration,
+    /ADD CONSTRAINT chk_locator_request_types_sort_order_nonnegative[\s\S]*CHECK \(sort_order >= 0\)/i
+  );
+});
+
 test('DTR coverage behavior does not override the configured mode by type code', () => {
   const route = readBackendFile('src/routes/dtrDailySummary.js');
 
