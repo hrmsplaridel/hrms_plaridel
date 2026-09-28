@@ -116,6 +116,11 @@ class _AdminLocatorManagementScreenState
     _locatorRealtimeSub ??= context.read<AppRealtimeProvider>().events.listen((
       event,
     ) {
+      if (event.name == 'locator_type_updated') {
+        LocatorSlipDataCache.instance.invalidateTypes();
+        unawaited(_loadLocatorTypes(forceRefresh: true));
+        return;
+      }
       if (event.name != 'locator_updated') return;
       unawaited(_load(forceRefresh: true));
     });

@@ -1,8 +1,12 @@
+import 'dart:async';
+
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:provider/provider.dart';
 
 import 'package:hrms_plaridel/core/api/client.dart';
+import 'package:hrms_plaridel/core/services/app_realtime_provider.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/features/dtr/locator/data/repositories/locator_slip_data_cache.dart';
 import 'package:hrms_plaridel/features/dtr/locator/models/locator_request_type.dart';
@@ -43,6 +47,7 @@ class _LocatorTypeManagementScreenState
   bool _requiresAttachment = false;
   bool _isActive = true;
   String _coverageMode = 'manual';
+  StreamSubscription<AppRealtimeEvent>? _locatorTypeRealtimeSub;
 
   @override
   void initState() {
@@ -51,7 +56,21 @@ class _LocatorTypeManagementScreenState
   }
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _locatorTypeRealtimeSub ??= context
+        .read<AppRealtimeProvider>()
+        .events
+        .listen((event) {
+          if (event.name != 'locator_type_updated') return;
+          LocatorSlipDataCache.instance.invalidateTypes();
+          if (!_saving) unawaited(_load(forceRefresh: true));
+        });
+  }
+
+  @override
   void dispose() {
+    _locatorTypeRealtimeSub?.cancel();
     _codeController.dispose();
     _labelController.dispose();
     _shortLabelController.dispose();

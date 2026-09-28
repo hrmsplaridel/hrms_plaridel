@@ -206,6 +206,11 @@ class EmployeeLocatorSlipContentState extends State<EmployeeLocatorSlipContent>
       realtimeProvider.addListener(_handleRealtimeConnectionChanged);
     }
     _locatorRealtimeSub ??= realtimeProvider.events.listen((event) {
+      if (event.name == 'locator_type_updated') {
+        LocatorSlipDataCache.instance.invalidateTypes();
+        unawaited(_loadLocatorTypes(forceRefresh: true));
+        return;
+      }
       if (event.name != 'locator_updated') return;
       final userId = _authenticatedUserId;
       if (event.affectsUser(userId) ||

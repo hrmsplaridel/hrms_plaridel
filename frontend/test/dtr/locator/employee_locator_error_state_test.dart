@@ -193,6 +193,18 @@ void main() {
       previousCount = adapter.myRequestCount;
       realtime.setConnected(true);
       await _pumpUntil(tester, () => adapter.myRequestCount > previousCount);
+
+      final previousTypeCount = adapter.typeRequestCount;
+      realtime.emit(
+        const AppRealtimeEvent(
+          name: 'locator_type_updated',
+          payload: {'action': 'updated', 'code': 'locator'},
+        ),
+      );
+      await _pumpUntil(
+        tester,
+        () => adapter.typeRequestCount > previousTypeCount,
+      );
     },
   );
 
@@ -338,6 +350,7 @@ class _LocatorErrorStateAdapter implements HttpClientAdapter {
 
 class _LocatorRefreshAdapter implements HttpClientAdapter {
   int myRequestCount = 0;
+  int typeRequestCount = 0;
 
   @override
   Future<ResponseBody> fetch(
@@ -347,6 +360,7 @@ class _LocatorRefreshAdapter implements HttpClientAdapter {
   ) async {
     switch (options.uri.path) {
       case '/api/locator-slips/types':
+        typeRequestCount += 1;
         return _jsonResponse([
           {
             'code': 'locator',
@@ -375,7 +389,11 @@ class _LocatorRefreshAdapter implements HttpClientAdapter {
 }
 
 class _FakeRealtimeProvider extends AppRealtimeProvider {
+  final _events = StreamController<AppRealtimeEvent>.broadcast();
   bool _connected = false;
+
+  @override
+  Stream<AppRealtimeEvent> get events => _events.stream;
 
   @override
   bool get connected => _connected;
@@ -384,6 +402,14 @@ class _FakeRealtimeProvider extends AppRealtimeProvider {
     if (_connected == value) return;
     _connected = value;
     notifyListeners();
+  }
+
+  void emit(AppRealtimeEvent event) => _events.add(event);
+
+  @override
+  void dispose() {
+    _events.close();
+    super.dispose();
   }
 }
 

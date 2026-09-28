@@ -1,9 +1,13 @@
+import 'dart:async';
+
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hrms_plaridel/core/api/client.dart';
+import 'package:hrms_plaridel/core/services/app_realtime_provider.dart';
 import 'package:hrms_plaridel/features/dtr/locator/data/repositories/locator_slip_data_cache.dart';
 import 'package:hrms_plaridel/features/dtr/locator/presentation/admin/pages/locator_type_management_screen.dart';
+import 'package:provider/provider.dart';
 
 void main() {
   final requests = <RequestOptions>[];
@@ -77,7 +81,12 @@ void main() {
         widget.decoration.labelText == 'Time coverage behavior',
   );
 
-  Future<void> mount(WidgetTester tester) async {
+  Future<_FakeRealtimeProvider> mount(
+    WidgetTester tester, {
+    _FakeRealtimeProvider? realtime,
+  }) async {
+    final provider = realtime ?? _FakeRealtimeProvider();
+    addTearDown(provider.dispose);
     tester.view.devicePixelRatio = 1;
     tester.view.physicalSize = const Size(1600, 1000);
     addTearDown(() {
@@ -85,9 +94,15 @@ void main() {
       tester.view.resetPhysicalSize();
     });
     await tester.pumpWidget(
-      const MaterialApp(home: Scaffold(body: LocatorTypeManagementScreen())),
+      ChangeNotifierProvider<AppRealtimeProvider>.value(
+        value: provider,
+        child: const MaterialApp(
+          home: Scaffold(body: LocatorTypeManagementScreen()),
+        ),
+      ),
     );
     await tester.pumpAndSettle();
+    return provider;
   }
 
   Future<void> enterRequiredFields(WidgetTester tester) async {
@@ -156,4 +171,49 @@ void main() {
     );
     expect(requests.where((request) => request.method == 'POST'), isEmpty);
   });
+
+  testWidgets('remote locator type event refreshes the visible catalog', (
+    tester,
+  ) async {
+    final realtime = await mount(tester);
+    final before = requests
+        .where(
+          (request) =>
+              request.method == 'GET' &&
+              request.path == '/api/locator-slips/types?include_inactive=true',
+        )
+        .length;
+
+    realtime.emit(
+      const AppRealtimeEvent(
+        name: 'locator_type_updated',
+        payload: {'action': 'updated', 'code': 'remote_work'},
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final after = requests
+        .where(
+          (request) =>
+              request.method == 'GET' &&
+              request.path == '/api/locator-slips/types?include_inactive=true',
+        )
+        .length;
+    expect(after, greaterThan(before));
+  });
+}
+
+class _FakeRealtimeProvider extends AppRealtimeProvider {
+  final _events = StreamController<AppRealtimeEvent>.broadcast();
+
+  @override
+  Stream<AppRealtimeEvent> get events => _events.stream;
+
+  void emit(AppRealtimeEvent event) => _events.add(event);
+
+  @override
+  void dispose() {
+    _events.close();
+    super.dispose();
+  }
 }
