@@ -113,6 +113,68 @@ void main() {
     await tester.enterText(textField('DTR print text'), 'REMOTE');
   }
 
+  testWidgets(
+    'empty API result stays empty instead of showing local defaults',
+    (tester) async {
+      await mount(tester);
+
+      expect(find.text('0 locator types'), findsOneWidget);
+      expect(find.text('No locator types configured'), findsOneWidget);
+      expect(find.text('Locator / Official Business'), findsNothing);
+      expect(find.text('Pass Slip'), findsNothing);
+      expect(find.text('Create Type'), findsOneWidget);
+    },
+  );
+
+  testWidgets('catalog load failure stays visible and can be retried', (
+    tester,
+  ) async {
+    var attempts = 0;
+    ApiClient.instance.dio.interceptors
+      ..clear()
+      ..add(
+        InterceptorsWrapper(
+          onRequest: (options, handler) {
+            requests.add(options);
+            attempts += 1;
+            if (attempts == 1) {
+              handler.reject(
+                DioException(
+                  requestOptions: options,
+                  response: Response<Map<String, dynamic>>(
+                    requestOptions: options,
+                    statusCode: 503,
+                    data: const {'error': 'Catalog unavailable'},
+                  ),
+                ),
+              );
+              return;
+            }
+            handler.resolve(
+              Response<List<dynamic>>(
+                requestOptions: options,
+                statusCode: 200,
+                data: const [],
+              ),
+            );
+          },
+        ),
+      );
+
+    await mount(tester);
+
+    expect(find.text('Could not load locator types'), findsOneWidget);
+    expect(find.text('Catalog unavailable'), findsOneWidget);
+    expect(find.text('Retry'), findsOneWidget);
+
+    await tester.tap(find.text('Retry'));
+    await tester.pumpAndSettle();
+
+    expect(attempts, 2);
+    expect(find.text('Could not load locator types'), findsNothing);
+    expect(find.text('No locator types configured'), findsOneWidget);
+  });
+
   testWidgets('invalid sort order blocks creation before the API call', (
     tester,
   ) async {

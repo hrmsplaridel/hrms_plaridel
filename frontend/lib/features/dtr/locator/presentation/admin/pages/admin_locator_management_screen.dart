@@ -67,7 +67,7 @@ class _AdminLocatorManagementScreenState
   DateTime? _toDate;
   bool _loading = false;
   String? _error;
-  List<LocatorRequestType> _locatorTypes = LocatorRequestType.values;
+  List<LocatorRequestType> _locatorTypes = [];
   List<LocatorAdminFilterOption> _departmentOptions = [];
   List<LocatorAdminFilterOption> _employeeOptions = [];
   List<_LocatorAdminRecord> _items = [];
@@ -1782,10 +1782,21 @@ class _AdminLocatorManagementScreenState
         includeInactive: true,
         forceRefresh: forceRefresh,
       );
-      if (!mounted || items.isEmpty) return;
-      setState(() => _locatorTypes = items);
+      if (!mounted) return;
+      final selectedType = _requestTypeFilter;
+      final clearMissingFilter =
+          selectedType != null && !items.contains(selectedType);
+      setState(() {
+        _locatorTypes = items;
+        if (clearMissingFilter) {
+          _requestTypeFilter = null;
+          _selectedItemId = null;
+          _page = 0;
+        }
+      });
+      if (clearMissingFilter) unawaited(_load(forceRefresh: true));
     } catch (_) {
-      // Keep built-in fallback types when configuration cannot be loaded.
+      // Keep the last persisted catalog rather than inventing local types.
     }
   }
 
