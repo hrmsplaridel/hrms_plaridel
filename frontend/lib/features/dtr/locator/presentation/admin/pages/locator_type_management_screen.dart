@@ -1,5 +1,6 @@
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import 'package:hrms_plaridel/core/api/client.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
@@ -17,6 +18,12 @@ class LocatorTypeManagementScreen extends StatefulWidget {
 class _LocatorTypeManagementScreenState
     extends State<LocatorTypeManagementScreen> {
   static const int _typesPerPage = 8;
+  static const int _codeMaxLength = 64;
+  static const int _labelMaxLength = 100;
+  static const int _shortLabelMaxLength = 40;
+  static const int _locationLabelMaxLength = 100;
+  static const int _locationHintMaxLength = 200;
+  static const int _dtrLabelMaxLength = 40;
 
   final _formKey = GlobalKey<FormState>();
   final _codeController = TextEditingController();
@@ -121,7 +128,7 @@ class _LocatorTypeManagementScreenState
     setState(() => _saving = true);
     try {
       final data = {
-        'code': _codeController.text.trim(),
+        'code': _codeController.text.trim().toLowerCase(),
         'label': _labelController.text.trim(),
         'short_label': _shortLabelController.text.trim(),
         'location_label': _locationLabelController.text.trim(),
@@ -441,9 +448,23 @@ class _LocatorTypeManagementScreenState
                     title: 'Basic Information',
                     icon: Icons.edit_note_rounded,
                     children: [
-                      _field(_codeController, 'System code', enabled: isNew),
-                      _field(_labelController, 'Request type name'),
-                      _field(_shortLabelController, 'Short display name'),
+                      _field(
+                        _codeController,
+                        'System code',
+                        enabled: isNew,
+                        maxLength: _codeMaxLength,
+                        validator: _validateSystemCode,
+                      ),
+                      _field(
+                        _labelController,
+                        'Request type name',
+                        maxLength: _labelMaxLength,
+                      ),
+                      _field(
+                        _shortLabelController,
+                        'Short display name',
+                        maxLength: _shortLabelMaxLength,
+                      ),
                       _field(
                         _sortOrderController,
                         'Sort order',
@@ -460,13 +481,23 @@ class _LocatorTypeManagementScreenState
                       _field(
                         _locationLabelController,
                         'Destination field name',
+                        maxLength: _locationLabelMaxLength,
                       ),
                       _field(
                         _locationHintController,
                         'Destination placeholder',
+                        maxLength: _locationHintMaxLength,
                       ),
-                      _field(_dtrSlotLabelController, 'DTR display text'),
-                      _field(_dtrPrintLabelController, 'DTR print text'),
+                      _field(
+                        _dtrSlotLabelController,
+                        'DTR display text',
+                        maxLength: _dtrLabelMaxLength,
+                      ),
+                      _field(
+                        _dtrPrintLabelController,
+                        'DTR print text',
+                        maxLength: _dtrLabelMaxLength,
+                      ),
                     ],
                   ),
                   const SizedBox(height: 16),
@@ -698,6 +729,7 @@ class _LocatorTypeManagementScreenState
     String label, {
     bool enabled = true,
     bool number = false,
+    int? maxLength,
     String? Function(String?)? validator,
   }) {
     return SizedBox(
@@ -706,14 +738,34 @@ class _LocatorTypeManagementScreenState
         controller: controller,
         enabled: enabled,
         keyboardType: number ? TextInputType.number : TextInputType.text,
+        maxLength: maxLength,
+        maxLengthEnforcement: maxLength == null
+            ? null
+            : MaxLengthEnforcement.none,
         decoration: AppTheme.dashInputDecoration(context, labelText: label),
         validator:
             validator ??
-            (value) => (value == null || value.trim().isEmpty)
-                ? '$label is required'
-                : null,
+            (value) => _validateRequiredText(value, label, maxLength),
       ),
     );
+  }
+
+  String? _validateRequiredText(String? value, String label, int? maxLength) {
+    final text = value?.trim() ?? '';
+    if (text.isEmpty) return '$label is required';
+    if (maxLength != null && text.length > maxLength) {
+      return '$label must be $maxLength characters or less';
+    }
+    return null;
+  }
+
+  String? _validateSystemCode(String? value) {
+    final text = value?.trim().toLowerCase() ?? '';
+    if (text.isEmpty) return 'System code is required';
+    if (!RegExp(r'^[a-z0-9_][a-z0-9_-]{1,63}$').hasMatch(text)) {
+      return 'Use 2-64 letters, numbers, underscores, or hyphens';
+    }
+    return null;
   }
 
   String? _validateSortOrder(String? value) {

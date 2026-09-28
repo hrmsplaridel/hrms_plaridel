@@ -1105,13 +1105,28 @@ CREATE INDEX IF NOT EXISTS idx_user_push_tokens_user_active
 -- =========================================
 CREATE TABLE IF NOT EXISTS locator_request_types (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  code TEXT NOT NULL UNIQUE,
-  label TEXT NOT NULL,
-  short_label TEXT NOT NULL,
-  location_label TEXT NOT NULL DEFAULT 'Office / Destination',
-  location_hint TEXT NOT NULL DEFAULT 'Enter office or destination',
-  dtr_slot_label TEXT NOT NULL DEFAULT 'On Field',
-  dtr_print_label TEXT NOT NULL DEFAULT 'ON FIELD',
+  code TEXT NOT NULL
+    CONSTRAINT chk_locator_request_types_code_format
+    CHECK (code ~ '^[a-z0-9_][a-z0-9_-]{1,63}$')
+    UNIQUE,
+  label TEXT NOT NULL
+    CONSTRAINT chk_locator_request_types_label_length
+    CHECK (label = btrim(label) AND char_length(label) BETWEEN 1 AND 100),
+  short_label TEXT NOT NULL
+    CONSTRAINT chk_locator_request_types_short_label_length
+    CHECK (short_label = btrim(short_label) AND char_length(short_label) BETWEEN 1 AND 40),
+  location_label TEXT NOT NULL DEFAULT 'Office / Destination'
+    CONSTRAINT chk_locator_request_types_location_label_length
+    CHECK (location_label = btrim(location_label) AND char_length(location_label) BETWEEN 1 AND 100),
+  location_hint TEXT NOT NULL DEFAULT 'Enter office or destination'
+    CONSTRAINT chk_locator_request_types_location_hint_length
+    CHECK (location_hint = btrim(location_hint) AND char_length(location_hint) BETWEEN 1 AND 200),
+  dtr_slot_label TEXT NOT NULL DEFAULT 'On Field'
+    CONSTRAINT chk_locator_request_types_dtr_slot_label_length
+    CHECK (dtr_slot_label = btrim(dtr_slot_label) AND char_length(dtr_slot_label) BETWEEN 1 AND 40),
+  dtr_print_label TEXT NOT NULL DEFAULT 'ON FIELD'
+    CONSTRAINT chk_locator_request_types_dtr_print_label_length
+    CHECK (dtr_print_label = btrim(dtr_print_label) AND char_length(dtr_print_label) BETWEEN 1 AND 40),
   requires_attachment BOOLEAN NOT NULL DEFAULT false,
   coverage_mode TEXT NOT NULL DEFAULT 'manual'
     CONSTRAINT locator_request_types_coverage_mode_check

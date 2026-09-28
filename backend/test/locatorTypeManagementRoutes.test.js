@@ -62,6 +62,10 @@ const basePayload = {
   label: 'Remote Work',
 };
 
+function repeated(length) {
+  return 'x'.repeat(length);
+}
+
 test('locator type creation rejects malformed rules without writing', async () => {
   await withCreateRoute(async (handler, inserts) => {
     const cases = [
@@ -105,5 +109,57 @@ test('locator type creation persists valid explicit rules', async () => {
     assert.equal(inserts[0].params[8], 'wfh');
     assert.equal(inserts[0].params[9], false);
     assert.equal(inserts[0].params[10], 30);
+  });
+});
+
+test('locator type creation rejects invalid codes and oversized text', async () => {
+  await withCreateRoute(async (handler, inserts) => {
+    const cases = [
+      [{ code: '' }, /System code is required/],
+      [{ code: 'a' }, /System code must be 2 to 64/],
+      [{ code: `a${repeated(64)}` }, /System code must be 2 to 64/],
+      [{ label: '' }, /Request type name is required/],
+      [{ label: repeated(101) }, /Request type name must be 100 characters or less/],
+      [{ short_label: repeated(41) }, /Short display name must be 40 characters or less/],
+      [{ location_label: repeated(101) }, /Destination field name must be 100 characters or less/],
+      [{ location_hint: repeated(201) }, /Destination placeholder must be 200 characters or less/],
+      [{ dtr_slot_label: repeated(41) }, /DTR display text must be 40 characters or less/],
+      [{ dtr_print_label: repeated(41) }, /DTR print text must be 40 characters or less/],
+    ];
+
+    for (const [override, message] of cases) {
+      const res = responseRecorder();
+      await handler({ body: { ...basePayload, ...override } }, res);
+      assert.equal(res.statusCode, 400);
+      assert.match(res.body.error, message);
+    }
+    assert.equal(inserts.length, 0);
+  });
+});
+
+test('locator type creation accepts text at every maximum length', async () => {
+  await withCreateRoute(async (handler, inserts) => {
+    const res = responseRecorder();
+    await handler({
+      body: {
+        code: `a${repeated(63)}`,
+        label: repeated(100),
+        short_label: repeated(40),
+        location_label: repeated(100),
+        location_hint: repeated(200),
+        dtr_slot_label: repeated(40),
+        dtr_print_label: repeated(40),
+      },
+    }, res);
+
+    assert.equal(res.statusCode, 201);
+    assert.equal(inserts.length, 1);
+    assert.equal(inserts[0].params[0].length, 64);
+    assert.equal(inserts[0].params[1].length, 100);
+    assert.equal(inserts[0].params[2].length, 40);
+    assert.equal(inserts[0].params[3].length, 100);
+    assert.equal(inserts[0].params[4].length, 200);
+    assert.equal(inserts[0].params[5].length, 40);
+    assert.equal(inserts[0].params[6].length, 40);
   });
 });

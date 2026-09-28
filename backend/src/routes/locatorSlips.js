@@ -72,6 +72,14 @@ const {
 
 const router = express.Router();
 const protect = [authMiddleware];
+const LOCATOR_TYPE_TEXT_LIMITS = Object.freeze({
+  label: 100,
+  shortLabel: 40,
+  locationLabel: 100,
+  locationHint: 200,
+  dtrSlotLabel: 40,
+  dtrPrintLabel: 40,
+});
 const DEFAULT_LOCATOR_TYPES = [
   {
     code: 'locator',
@@ -155,9 +163,18 @@ function locatorTypeBooleanField(value, fallback, label) {
   return locatorTypeValidationError(`${label} must be a boolean.`);
 }
 
-function textField(value, fallback = '') {
-  const text = (value ?? '').toString().trim();
-  return text || fallback;
+function locatorTypeTextField(value, fallback, label, maximumLength) {
+  const source = value === undefined || value === null ? fallback : value;
+  const text = (source ?? '').toString().trim();
+  if (!text) {
+    return locatorTypeValidationError(`${label} is required.`);
+  }
+  if (text.length > maximumLength) {
+    return locatorTypeValidationError(
+      `${label} must be ${maximumLength} characters or less.`
+    );
+  }
+  return text;
 }
 
 function intField(value, fallback = 0) {
@@ -185,27 +202,54 @@ function normalizeCoverageMode(value) {
 }
 
 function locatorTypePayloadFromBody(body, existing = null) {
-  const rawCode = existing?.code || body.code;
+  const rawCode = existing?.code ?? body.code;
+  if (rawCode === undefined || rawCode === null || !String(rawCode).trim()) {
+    return locatorTypeValidationError('System code is required.');
+  }
   const code = normalizeRequestType(rawCode);
-  if (!code) throw new Error('Valid code is required.');
-  const label = textField(body.label, existing?.label || '');
-  if (!label) throw new Error('Label is required.');
+  if (!code) {
+    return locatorTypeValidationError(
+      'System code must be 2 to 64 letters, numbers, underscores, or hyphens.'
+    );
+  }
+  const label = locatorTypeTextField(
+    body.label,
+    existing?.label,
+    'Request type name',
+    LOCATOR_TYPE_TEXT_LIMITS.label
+  );
   return {
     code,
     label,
-    short_label: textField(body.short_label ?? body.shortLabel, existing?.short_label || label),
-    location_label: textField(
+    short_label: locatorTypeTextField(
+      body.short_label ?? body.shortLabel,
+      existing?.short_label ?? label,
+      'Short display name',
+      LOCATOR_TYPE_TEXT_LIMITS.shortLabel
+    ),
+    location_label: locatorTypeTextField(
       body.location_label ?? body.locationLabel,
-      existing?.location_label || 'Office / Destination'
+      existing?.location_label ?? 'Office / Destination',
+      'Destination field name',
+      LOCATOR_TYPE_TEXT_LIMITS.locationLabel
     ),
-    location_hint: textField(
+    location_hint: locatorTypeTextField(
       body.location_hint ?? body.locationHint,
-      existing?.location_hint || 'Enter office or destination'
+      existing?.location_hint ?? 'Enter office or destination',
+      'Destination placeholder',
+      LOCATOR_TYPE_TEXT_LIMITS.locationHint
     ),
-    dtr_slot_label: textField(body.dtr_slot_label ?? body.dtrSlotLabel, existing?.dtr_slot_label || label),
-    dtr_print_label: textField(
+    dtr_slot_label: locatorTypeTextField(
+      body.dtr_slot_label ?? body.dtrSlotLabel,
+      existing?.dtr_slot_label ?? label,
+      'DTR display text',
+      LOCATOR_TYPE_TEXT_LIMITS.dtrSlotLabel
+    ),
+    dtr_print_label: locatorTypeTextField(
       body.dtr_print_label ?? body.dtrPrintLabel,
-      existing?.dtr_print_label || label.toUpperCase()
+      existing?.dtr_print_label ?? label.toUpperCase(),
+      'DTR print text',
+      LOCATOR_TYPE_TEXT_LIMITS.dtrPrintLabel
     ),
     requires_attachment: locatorTypeBooleanField(
       body.requires_attachment ?? body.requiresAttachment,

@@ -133,4 +133,27 @@ void main() {
     expect(data['coverage_mode'], 'wfh');
     expect(find.text('Locator type added.'), findsOneWidget);
   });
+
+  testWidgets('invalid code and oversized text block creation', (tester) async {
+    await mount(tester);
+    await enterRequiredFields(tester);
+    await tester.enterText(textField('System code'), 'a');
+    await tester.enterText(
+      textField('Request type name'),
+      List<String>.filled(101, 'x').join(),
+    );
+
+    await tester.tap(find.text('Create Type'));
+    await tester.pump();
+
+    expect(
+      find.text('Use 2-64 letters, numbers, underscores, or hyphens'),
+      findsOneWidget,
+    );
+    expect(
+      find.text('Request type name must be 100 characters or less'),
+      findsOneWidget,
+    );
+    expect(requests.where((request) => request.method == 'POST'), isEmpty);
+  });
 }

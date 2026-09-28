@@ -68,6 +68,34 @@ test('fresh schema and upgrade migration reject negative sort orders', () => {
   );
 });
 
+test('fresh schema and upgrade migration enforce locator type text limits', () => {
+  const schema = readBackendFile('scripts/init-schema.sql');
+  const migration = readBackendFile(
+    'scripts/migrations/dtr/20260928_locator_type_text_constraints.sql'
+  );
+  const locatorTypeTable = requiredMatch(
+    schema,
+    /CREATE TABLE IF NOT EXISTS locator_request_types \([\s\S]*?\n\);/,
+    'locator_request_types table must exist in init-schema.sql'
+  );
+  const constraints = [
+    'chk_locator_request_types_code_format',
+    'chk_locator_request_types_label_length',
+    'chk_locator_request_types_short_label_length',
+    'chk_locator_request_types_location_label_length',
+    'chk_locator_request_types_location_hint_length',
+    'chk_locator_request_types_dtr_slot_label_length',
+    'chk_locator_request_types_dtr_print_label_length',
+  ];
+
+  for (const constraint of constraints) {
+    assert.match(locatorTypeTable, new RegExp(constraint, 'i'));
+    assert.match(migration, new RegExp(`ADD CONSTRAINT ${constraint}`, 'i'));
+  }
+  assert.match(migration, /RAISE EXCEPTION[\s\S]*violate the required format or length limits/i);
+  assert.doesNotMatch(migration, /UPDATE\s+locator_request_types/i);
+});
+
 test('DTR coverage behavior does not override the configured mode by type code', () => {
   const route = readBackendFile('src/routes/dtrDailySummary.js');
 
