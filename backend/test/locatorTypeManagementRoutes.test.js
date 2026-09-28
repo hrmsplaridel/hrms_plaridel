@@ -33,6 +33,7 @@ function rowFromCreateParams(params) {
 
 async function withCreateRoute(run) {
   const inserts = [];
+  const events = [];
   const query = async (sql, params = []) => {
     const statement = String(sql).replace(/\s+/g, ' ').trim();
     if (statement.startsWith('INSERT INTO locator_request_types') && params.length === 11) {
@@ -44,15 +45,95 @@ async function withCreateRoute(run) {
   const restoreDb = withMockedModule('../src/config/db', {
     pool: { query, connect: async () => ({ query, release() {} }) },
   });
+  const restoreAppEvents = withMockedModule('../src/websockets/appEvents', {
+    broadcastAppEvent: (name, payload, options) => {
+      events.push({ name, payload, options });
+      return 1;
+    },
+  });
   clearModule('../src/routes/locatorSlips');
   try {
     const router = require('../src/routes/locatorSlips');
     const route = router.stack.find((entry) =>
       entry.route?.path === '/types' && entry.route.methods.post
     );
-    await run(route.route.stack.at(-1).handle, inserts);
+    await run(route.route.stack.at(-1).handle, inserts, events);
   } finally {
     clearModule('../src/routes/locatorSlips');
+    restoreAppEvents();
+    restoreDb();
+  }
+}
+
+async function withMutationRoute({ method, used = false, isSystem = false }, run) {
+  const events = [];
+  const existing = {
+    id: '22222222-2222-4222-8222-222222222222',
+    code: 'remote_work',
+    label: 'Remote Work',
+    short_label: 'Remote',
+    location_label: 'Work Location',
+    location_hint: 'Enter work location',
+    dtr_slot_label: 'Remote',
+    dtr_print_label: 'REMOTE',
+    requires_attachment: false,
+    coverage_mode: 'wfh',
+    is_active: true,
+    is_system: isSystem,
+    sort_order: 30,
+  };
+  const query = async (sql, params = []) => {
+    const statement = String(sql).replace(/\s+/g, ' ').trim();
+    if (statement.startsWith('SELECT * FROM locator_request_types WHERE id')) {
+      return { rows: [existing] };
+    }
+    if (statement.startsWith('SELECT 1 FROM locator_slips')) {
+      return { rows: used ? [{ exists: 1 }] : [] };
+    }
+    if (statement.startsWith('UPDATE locator_request_types SET label =')) {
+      return {
+        rows: [{
+          ...existing,
+          label: params[0],
+          short_label: params[1],
+          location_label: params[2],
+          location_hint: params[3],
+          dtr_slot_label: params[4],
+          dtr_print_label: params[5],
+          requires_attachment: params[6],
+          coverage_mode: params[7],
+          is_active: params[8],
+          sort_order: params[9],
+        }],
+      };
+    }
+    if (statement.startsWith('UPDATE locator_request_types SET is_active = false')) {
+      return { rows: [{ ...existing, is_active: false }] };
+    }
+    if (statement.startsWith('DELETE FROM locator_request_types')) {
+      return { rows: [] };
+    }
+    return { rows: [] };
+  };
+  const restoreDb = withMockedModule('../src/config/db', {
+    pool: { query, connect: async () => ({ query, release() {} }) },
+  });
+  const restoreAppEvents = withMockedModule('../src/websockets/appEvents', {
+    broadcastAppEvent: (name, payload, options) => {
+      events.push({ name, payload, options });
+      return 1;
+    },
+  });
+  clearModule('../src/routes/locatorSlips');
+  try {
+    const router = require('../src/routes/locatorSlips');
+    const route = router.stack.find((entry) =>
+      entry.route?.path === '/types/:id' && entry.route.methods[method]
+    );
+    await run(route.route.stack.at(-1).handle, events, existing);
+  } finally {
+    clearModule('../src/routes/locatorSlips');
+    restoreAppEvents();
     restoreDb();
   }
 }
@@ -91,7 +172,7 @@ test('locator type creation rejects malformed rules without writing', async () =
 });
 
 test('locator type creation persists valid explicit rules', async () => {
-  await withCreateRoute(async (handler, inserts) => {
+  await withCreateRoute(async (handler, inserts, events) => {
     const res = responseRecorder();
     await handler({
       body: {
@@ -109,6 +190,10 @@ test('locator type creation persists valid explicit rules', async () => {
     assert.equal(inserts[0].params[8], 'wfh');
     assert.equal(inserts[0].params[9], false);
     assert.equal(inserts[0].params[10], 30);
+    assert.equal(events.length, 1);
+    assert.equal(events[0].name, 'locator_type_updated');
+    assert.equal(events[0].payload.action, 'created');
+    assert.equal(events[0].payload.code, 'remote_work');
   });
 });
 
@@ -162,4 +247,49 @@ test('locator type creation accepts text at every maximum length', async () => {
     assert.equal(inserts[0].params[5].length, 40);
     assert.equal(inserts[0].params[6].length, 40);
   });
+});
+
+test('locator type update broadcasts the changed catalog entry', async () => {
+  await withMutationRoute({ method: 'put' }, async (handler, events, existing) => {
+    const res = responseRecorder();
+    await handler({
+      params: { id: existing.id },
+      body: { label: 'Remote Work Updated' },
+    }, res);
+
+    assert.equal(res.statusCode, 200);
+    assert.equal(events.length, 1);
+    assert.equal(events[0].name, 'locator_type_updated');
+    assert.equal(events[0].payload.action, 'updated');
+    assert.equal(events[0].payload.locatorTypeId, existing.id);
+  });
+});
+
+test('locator type removal broadcasts deactivation or deletion', async () => {
+  await withMutationRoute(
+    { method: 'delete', used: true },
+    async (handler, events, existing) => {
+      const res = responseRecorder();
+      await handler({ params: { id: existing.id } }, res);
+
+      assert.equal(res.statusCode, 200);
+      assert.equal(res.body.deleted, false);
+      assert.equal(events[0].payload.action, 'deactivated');
+      assert.equal(events[0].payload.isActive, false);
+      assert.equal(events[0].payload.deleted, false);
+    }
+  );
+
+  await withMutationRoute(
+    { method: 'delete' },
+    async (handler, events, existing) => {
+      const res = responseRecorder();
+      await handler({ params: { id: existing.id } }, res);
+
+      assert.equal(res.statusCode, 200);
+      assert.equal(res.body.deleted, true);
+      assert.equal(events[0].payload.action, 'deleted');
+      assert.equal(events[0].payload.deleted, true);
+    }
+  );
 });

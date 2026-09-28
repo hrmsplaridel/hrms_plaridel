@@ -139,6 +139,24 @@ function broadcastLocatorUpdated(action, row = {}, extra = {}) {
   }
 }
 
+function broadcastLocatorTypeUpdated(action, row = {}, extra = {}) {
+  try {
+    broadcastAppEvent('locator_type_updated', {
+      action,
+      locatorTypeId: row.id || extra.locatorTypeId || null,
+      code: row.code || extra.code || null,
+      isActive:
+        typeof row.is_active === 'boolean'
+          ? row.is_active
+          : extra.isActive ?? null,
+      updatedAt: new Date().toISOString(),
+      ...extra,
+    });
+  } catch (e) {
+    console.error('[locator type websocket]', e);
+  }
+}
+
 function normalizeRequestType(value) {
   const type = (value || 'locator').toString().trim().toLowerCase();
   return /^[a-z0-9_][a-z0-9_-]{1,63}$/.test(type) ? type : null;
@@ -927,7 +945,9 @@ router.post('/types', protect, requireAdminOrHr, async (req, res) => {
         payload.sort_order,
       ]
     );
-    res.status(201).json(mapLocatorTypeRow(inserted.rows[0]));
+    const item = mapLocatorTypeRow(inserted.rows[0]);
+    broadcastLocatorTypeUpdated('created', inserted.rows[0]);
+    res.status(201).json(item);
   } catch (err) {
     const message = err.code === '23505' ? 'A locator type with that code already exists.' : err.message;
     res.status(400).json({ error: message || 'Failed to create locator type' });
@@ -973,7 +993,9 @@ router.put('/types/:id', protect, requireAdminOrHr, async (req, res) => {
         req.params.id,
       ]
     );
-    res.json(mapLocatorTypeRow(updated.rows[0]));
+    const item = mapLocatorTypeRow(updated.rows[0]);
+    broadcastLocatorTypeUpdated('updated', updated.rows[0]);
+    res.json(item);
   } catch (err) {
     res.status(400).json({ error: err.message || 'Failed to update locator type' });
   }
@@ -1000,9 +1022,14 @@ router.delete('/types/:id', protect, requireAdminOrHr, async (req, res) => {
          RETURNING *`,
         [req.params.id]
       );
-      return res.json({ deleted: false, item: mapLocatorTypeRow(updated.rows[0]) });
+      const item = mapLocatorTypeRow(updated.rows[0]);
+      broadcastLocatorTypeUpdated('deactivated', updated.rows[0], {
+        deleted: false,
+      });
+      return res.json({ deleted: false, item });
     }
     await pool.query('DELETE FROM locator_request_types WHERE id = $1::uuid', [req.params.id]);
+    broadcastLocatorTypeUpdated('deleted', existing, { deleted: true });
     res.json({ deleted: true });
   } catch (err) {
     res.status(400).json({ error: err.message || 'Failed to delete locator type' });
