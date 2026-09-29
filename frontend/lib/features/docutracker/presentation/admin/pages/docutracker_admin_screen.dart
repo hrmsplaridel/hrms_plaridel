@@ -672,82 +672,103 @@ class _DocuTrackerAdminScreenState extends State<DocuTrackerAdminScreen> {
         : '${effectiveDate.year.toString().padLeft(4, '0')}-'
               '${effectiveDate.month.toString().padLeft(2, '0')}-'
               '${effectiveDate.day.toString().padLeft(2, '0')}';
-    showModalBottomSheet<void>(
+    showDialog<void>(
       context: context,
-      isScrollControlled: true,
-      builder: (sheetContext) {
-        return SafeArea(
+      builder: (dialogContext) {
+        final screenSize = MediaQuery.sizeOf(dialogContext);
+        return Dialog(
+          insetPadding: const EdgeInsets.symmetric(
+            horizontal: 16,
+            vertical: 24,
+          ),
+          backgroundColor: DocuTrackerTokens.surfaceOf(dialogContext),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+          clipBehavior: Clip.antiAlias,
           child: SizedBox(
-            height: MediaQuery.sizeOf(sheetContext).height * 0.78,
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(24, 20, 24, 24),
+            width: 760,
+            child: ConstrainedBox(
+              constraints: BoxConstraints(maxHeight: screenSize.height * 0.82),
               child: Column(
+                mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              workflow.title,
-                              style: TextStyle(
-                                color: DocuTrackerTokens.textPrimaryOf(
-                                  sheetContext,
-                                ),
-                                fontSize: 20,
-                                fontWeight: FontWeight.w800,
-                              ),
-                            ),
-                            const SizedBox(height: 4),
-                            Text(
-                              '${workflow.sourceLabel} · Effective $dateLabel',
-                              style: DocuTrackerTokens.subtitleStyle(
-                                sheetContext,
-                              ),
-                            ),
-                          ],
+                  Container(
+                    padding: const EdgeInsets.fromLTRB(24, 18, 16, 18),
+                    color: DocuTrackerTokens.surfaceOf(dialogContext),
+                    child: Row(
+                      children: [
+                        Container(
+                          width: 40,
+                          height: 40,
+                          decoration: BoxDecoration(
+                            color: DocuTrackerTokens.brandSoft,
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Icon(
+                            workflow.key == 'locator'
+                                ? Icons.pin_drop_outlined
+                                : Icons.event_note_outlined,
+                            color: DocuTrackerTokens.brand,
+                            size: 21,
+                          ),
                         ),
-                      ),
-                      IconButton(
-                        tooltip: 'Close',
-                        onPressed: () => Navigator.of(sheetContext).pop(),
-                        icon: const Icon(Icons.close_rounded),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 16),
-                  Expanded(
-                    child: ListView.separated(
-                      itemCount: workflow.steps.length,
-                      separatorBuilder: (_, _) => const SizedBox(height: 20),
-                      itemBuilder: (context, index) {
-                        final step = workflow.steps[index];
-                        return Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              '${step.stepOrder}. ${step.label}',
-                              style: TextStyle(
-                                color: DocuTrackerTokens.textPrimaryOf(context),
-                                fontSize: 15,
-                                fontWeight: FontWeight.w800,
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                workflow.title,
+                                style: TextStyle(
+                                  color: DocuTrackerTokens.textPrimaryOf(
+                                    dialogContext,
+                                  ),
+                                  fontSize: 20,
+                                  fontWeight: FontWeight.w800,
+                                ),
                               ),
+                              const SizedBox(height: 3),
+                              Text(
+                                '${workflow.sourceLabel} · Effective $dateLabel',
+                                style: DocuTrackerTokens.metaStyle(
+                                  dialogContext,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        IconButton(
+                          tooltip: 'Close',
+                          onPressed: () => Navigator.of(dialogContext).pop(),
+                          icon: const Icon(Icons.close_rounded),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Divider(
+                    height: 1,
+                    color: DocuTrackerTokens.borderSubtleOf(dialogContext),
+                  ),
+                  Flexible(
+                    child: SingleChildScrollView(
+                      padding: const EdgeInsets.fromLTRB(24, 20, 24, 24),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          for (
+                            var index = 0;
+                            index < workflow.steps.length;
+                            index++
+                          ) ...[
+                            _buildHrWorkflowStepDetails(
+                              dialogContext,
+                              workflow.steps[index],
                             ),
-                            const SizedBox(height: 4),
-                            Text(
-                              step.assigneeSummary,
-                              style: DocuTrackerTokens.subtitleStyle(context),
-                            ),
-                            const SizedBox(height: 10),
-                            ...step.groups.map(
-                              (group) =>
-                                  _buildHrWorkflowReviewerGroup(context, group),
-                            ),
+                            if (index < workflow.steps.length - 1)
+                              const SizedBox(height: 24),
                           ],
-                        );
-                      },
+                        ],
+                      ),
                     ),
                   ),
                 ],
@@ -759,40 +780,283 @@ class _DocuTrackerAdminScreenState extends State<DocuTrackerAdminScreen> {
     );
   }
 
-  Widget _buildHrWorkflowReviewerGroup(
+  Widget _buildHrWorkflowStepDetails(
     BuildContext context,
-    HrWorkflowMirrorGroup group,
+    HrWorkflowMirrorStep step,
   ) {
-    final primaryName = group.primary?.name ?? 'Not configured';
-    final backupNames = group.backups
-        .map((reviewer) => reviewer.name)
-        .join(', ');
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            group.scopeName,
-            style: TextStyle(
-              color: DocuTrackerTokens.textPrimaryOf(context),
-              fontWeight: FontWeight.w700,
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Row(
+          children: [
+            Container(
+              width: 28,
+              height: 28,
+              alignment: Alignment.center,
+              decoration: const BoxDecoration(
+                color: DocuTrackerTokens.brand,
+                shape: BoxShape.circle,
+              ),
+              child: Text(
+                '${step.stepOrder}',
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
             ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    step.label,
+                    style: TextStyle(
+                      color: DocuTrackerTokens.textPrimaryOf(context),
+                      fontSize: 15,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    step.assigneeSummary,
+                    style: DocuTrackerTokens.metaStyle(context),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        LayoutBuilder(
+          builder: (context, constraints) {
+            final stacked = constraints.maxWidth < 560;
+            return stacked
+                ? _buildStackedHrReviewerGroups(context, step.groups)
+                : _buildHrReviewerTable(context, step.groups);
+          },
+        ),
+      ],
+    );
+  }
+
+  Widget _buildHrReviewerTable(
+    BuildContext context,
+    List<HrWorkflowMirrorGroup> groups,
+  ) {
+    if (groups.isEmpty) return _buildEmptyReviewerState(context);
+    final border = DocuTrackerTokens.borderSubtleOf(context);
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(8),
+      child: DecoratedBox(
+        decoration: BoxDecoration(border: Border.all(color: border)),
+        child: Column(
+          children: [
+            Container(
+              color: DocuTrackerTokens.isDark(context)
+                  ? DocuTrackerTokens.canvasDark
+                  : DocuTrackerTokens.surfaceCream,
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              child: Row(
+                children: [
+                  _buildReviewerTableCell(
+                    context,
+                    'Scope',
+                    flex: 3,
+                    header: true,
+                  ),
+                  _buildReviewerTableCell(
+                    context,
+                    'Primary reviewer',
+                    flex: 3,
+                    header: true,
+                  ),
+                  _buildReviewerTableCell(
+                    context,
+                    'Backup reviewers',
+                    flex: 4,
+                    header: true,
+                  ),
+                ],
+              ),
+            ),
+            for (var index = 0; index < groups.length; index++) ...[
+              if (index > 0) Divider(height: 1, color: border),
+              Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 14,
+                  vertical: 12,
+                ),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _buildReviewerTableCell(
+                      context,
+                      groups[index].scopeName,
+                      flex: 3,
+                      strong: true,
+                    ),
+                    _buildReviewerTableCell(
+                      context,
+                      groups[index].primary?.name ?? 'Not configured',
+                      flex: 3,
+                      muted: groups[index].primary == null,
+                    ),
+                    _buildReviewerTableCell(
+                      context,
+                      _backupReviewerNames(groups[index]),
+                      flex: 4,
+                      muted: groups[index].backups.isEmpty,
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildReviewerTableCell(
+    BuildContext context,
+    String text, {
+    required int flex,
+    bool header = false,
+    bool strong = false,
+    bool muted = false,
+  }) {
+    return Expanded(
+      flex: flex,
+      child: Padding(
+        padding: const EdgeInsets.only(right: 12),
+        child: Text(
+          text,
+          style: TextStyle(
+            color: muted
+                ? DocuTrackerTokens.textMutedOf(context)
+                : DocuTrackerTokens.textPrimaryOf(context),
+            fontSize: header ? 11 : 13,
+            height: 1.35,
+            fontWeight: header || strong ? FontWeight.w700 : FontWeight.w500,
           ),
-          const SizedBox(height: 4),
-          Text(
-            'Primary: $primaryName',
-            style: DocuTrackerTokens.metaStyle(context),
-          ),
-          Text(
-            'Backups: ${backupNames.isEmpty ? 'None' : backupNames}',
-            style: DocuTrackerTokens.metaStyle(context),
-          ),
-          const SizedBox(height: 10),
-          Divider(height: 1, color: DocuTrackerTokens.borderSubtle),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildStackedHrReviewerGroups(
+    BuildContext context,
+    List<HrWorkflowMirrorGroup> groups,
+  ) {
+    if (groups.isEmpty) return _buildEmptyReviewerState(context);
+    final border = DocuTrackerTokens.borderSubtleOf(context);
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        border: Border.all(color: border),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Column(
+        children: [
+          for (var index = 0; index < groups.length; index++) ...[
+            if (index > 0) Divider(height: 1, color: border),
+            Padding(
+              padding: const EdgeInsets.all(14),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Text(
+                    groups[index].scopeName,
+                    style: TextStyle(
+                      color: DocuTrackerTokens.textPrimaryOf(context),
+                      fontSize: 13,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  _buildStackedReviewerLine(
+                    context,
+                    'Primary',
+                    groups[index].primary?.name ?? 'Not configured',
+                    muted: groups[index].primary == null,
+                  ),
+                  const SizedBox(height: 5),
+                  _buildStackedReviewerLine(
+                    context,
+                    'Backups',
+                    _backupReviewerNames(groups[index]),
+                    muted: groups[index].backups.isEmpty,
+                  ),
+                ],
+              ),
+            ),
+          ],
         ],
       ),
     );
+  }
+
+  Widget _buildStackedReviewerLine(
+    BuildContext context,
+    String label,
+    String value, {
+    required bool muted,
+  }) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SizedBox(
+          width: 72,
+          child: Text(label, style: DocuTrackerTokens.metaStyle(context)),
+        ),
+        Expanded(
+          child: Text(
+            value,
+            style: TextStyle(
+              color: muted
+                  ? DocuTrackerTokens.textMutedOf(context)
+                  : DocuTrackerTokens.textPrimaryOf(context),
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildEmptyReviewerState(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: DocuTrackerTokens.isDark(context)
+            ? DocuTrackerTokens.canvasDark
+            : DocuTrackerTokens.surfaceCream,
+        border: Border.all(color: DocuTrackerTokens.borderSubtleOf(context)),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Row(
+        children: [
+          Icon(
+            Icons.info_outline_rounded,
+            size: 18,
+            color: DocuTrackerTokens.textMutedOf(context),
+          ),
+          const SizedBox(width: 8),
+          Text(
+            'No reviewer assignments are available.',
+            style: DocuTrackerTokens.metaStyle(context),
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _backupReviewerNames(HrWorkflowMirrorGroup group) {
+    if (group.backups.isEmpty) return 'None';
+    return group.backups.map((reviewer) => reviewer.name).join(', ');
   }
 
   Widget _buildAdminMoreMenu(DocuTrackerProvider provider) {
