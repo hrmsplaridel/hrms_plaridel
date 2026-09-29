@@ -52,6 +52,7 @@ const {
   listLdSignatureRequests,
   assignSourceSigner,
   signSourceSlot,
+  reResolveAutomaticSourceSignatures,
 } = require('../services/docutrackerRspSignatureService');
 const {
   getLinkedSourceDocument,
@@ -352,6 +353,7 @@ function mapDocumentRow(row) {
     created_by: row.created_by,
     creator_name: row.creator_name,
     current_holder_id: row.current_holder_id,
+    assignee_name: row.assignee_name ?? null,
     current_step: row.current_step,
     status: row.status,
     sent_time: row.sent_time,
@@ -584,6 +586,50 @@ router.get('/sources/ld/signature-requests', protect, async (req, res) => {
     res.status(mapped.status).json({ error: mapped.error });
   }
 });
+
+/**
+ * Admin backfill: re-resolve automatic RSP/L&D signers on existing forms.
+ * Only fills empty slots; does not override assigned or signed rows.
+ * Optional :sourceModule = rsp | ld (omit via /sources/signature-assignments/re-resolve for both).
+ */
+router.post(
+  '/sources/signature-assignments/re-resolve',
+  protect,
+  requireAdmin,
+  async (req, res) => {
+    try {
+      res.json(await reResolveAutomaticSourceSignatures(pool, req.user, null));
+    } catch (err) {
+      console.error('[docutracker POST signature-assignments/re-resolve]', err);
+      const mapped = mapWorkflowServiceError(err);
+      res.status(mapped.status).json({ error: mapped.error });
+    }
+  }
+);
+
+router.post(
+  '/sources/:sourceModule/signature-assignments/re-resolve',
+  protect,
+  requireAdmin,
+  async (req, res) => {
+    try {
+      res.json(
+        await reResolveAutomaticSourceSignatures(
+          pool,
+          req.user,
+          req.params.sourceModule
+        )
+      );
+    } catch (err) {
+      console.error(
+        '[docutracker POST /sources/:sourceModule/signature-assignments/re-resolve]',
+        err
+      );
+      const mapped = mapWorkflowServiceError(err);
+      res.status(mapped.status).json({ error: mapped.error });
+    }
+  }
+);
 
 /** GET fixed signature slots for an authorized linked source form. */
 router.get(
@@ -1028,7 +1074,7 @@ router.get('/governance-audit', protect, requireAdmin, async (req, res) => {
     const result = await pool.query(
       `SELECT a.*, u.full_name AS actor_name
        FROM docutracker_governance_audit a
-       JOIN users u ON u.id = a.actor_id
+       LEFT JOIN users u ON u.id = a.actor_id
        ${filter}
        ORDER BY a.created_at DESC
        LIMIT $${params.length - 1} OFFSET $${params.length}`,
@@ -1369,9 +1415,12 @@ router.get('/documents/:id', protect, async (req, res) => {
       return res.status(403).json({ error: 'Forbidden' });
     }
     const docResult = await pool.query(
-      `SELECT d.*, creator.full_name AS creator_name
+      `SELECT d.*,
+              creator.full_name AS creator_name,
+              holder.full_name AS assignee_name
        FROM docutracker_documents d
        LEFT JOIN users creator ON creator.id = d.created_by
+       LEFT JOIN users holder ON holder.id = d.current_holder_id
        WHERE d.id = $1`,
       [id]
     );

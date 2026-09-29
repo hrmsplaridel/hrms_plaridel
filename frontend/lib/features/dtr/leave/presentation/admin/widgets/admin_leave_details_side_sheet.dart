@@ -24,6 +24,7 @@ class AdminLeaveDetailsSideSheet extends StatelessWidget {
     required this.initial,
     required this.isDepartmentHead,
     this.canReviewPending = true,
+    this.currentReviewerId,
     required this.onApprove,
     required this.onReturn,
     required this.onReject,
@@ -35,6 +36,7 @@ class AdminLeaveDetailsSideSheet extends StatelessWidget {
   final LeaveRequest initial;
   final bool isDepartmentHead;
   final bool canReviewPending;
+  final String? currentReviewerId;
   final Future<void> Function(LeaveRequest) onApprove;
   final Future<void> Function(LeaveRequest) onReturn;
   final Future<void> Function(LeaveRequest) onReject;
@@ -91,10 +93,12 @@ class AdminLeaveDetailsSideSheet extends StatelessWidget {
                           .toList();
                   if (hit.isNotEmpty) req = hit.first;
                 }
-                final canReview = isDepartmentHead
+                final isOwnRequest = currentReviewerId != null &&
+                    currentReviewerId == req.userId;
+                final canReview = !isOwnRequest && (isDepartmentHead
                     ? canReviewPending &&
                           req.status == LeaveRequestStatus.pendingDepartmentHead
-                    : req.status.isPending;
+                    : canReviewPending && req.status.isPending);
                 final approved = req.status == LeaveRequestStatus.approved;
                 final revokeDisabledReason = approved && onRevoke != null
                     ? adminLeaveRevokeDisabledReason(req)
@@ -311,16 +315,8 @@ class _AdminLeaveRequestDetailsPanel extends StatelessWidget {
     final departmentHeadReviewer =
         (request.departmentHeadReviewerName ?? '').trim().isNotEmpty
         ? request.departmentHeadReviewerName!.trim()
-        : 'Department Head';
-    final departmentHeadReviewedAt =
-        request.departmentHeadReviewedAt ??
-        (request.status == LeaveRequestStatus.pendingHr ||
-                request.status == LeaveRequestStatus.approved ||
-                request.status == LeaveRequestStatus.rejected ||
-                request.status == LeaveRequestStatus.rejectedByHr ||
-                request.status == LeaveRequestStatus.rejectedByDepartmentHead
-            ? request.reviewedAt
-            : null);
+        : 'Department Reviewer';
+    final departmentHeadReviewedAt = request.departmentHeadReviewedAt;
     final departmentHeadRemarks =
         (request.departmentHeadRemarks ?? '').trim().isNotEmpty
         ? request.departmentHeadRemarks
@@ -331,11 +327,7 @@ class _AdminLeaveRequestDetailsPanel extends StatelessWidget {
     final departmentHeadAction = request.departmentHeadAction;
 
     final deptHeadApprovedStage =
-        departmentHeadAction == 'department_head_approved' ||
-        status == LeaveRequestStatus.pendingHr ||
-        status == LeaveRequestStatus.approved ||
-        status == LeaveRequestStatus.rejected ||
-        status == LeaveRequestStatus.rejectedByHr;
+        departmentHeadAction == 'department_head_approved';
 
     final deptHeadRejected =
         departmentHeadAction == 'department_head_rejected' ||
@@ -359,7 +351,7 @@ class _AdminLeaveRequestDetailsPanel extends StatelessWidget {
       ),
       if (deptHeadApprovedStage)
         LeaveHistoryEvent(
-          label: 'Approved by Department Head',
+          label: 'Approved by Department Reviewer',
           dateTime: departmentHeadReviewedAt,
           actor: departmentHeadReviewer,
           remarks: departmentHeadRemarks,
@@ -374,7 +366,7 @@ class _AdminLeaveRequestDetailsPanel extends StatelessWidget {
         ),
       if (deptHeadRejected)
         LeaveHistoryEvent(
-          label: 'Rejected by Department Head',
+          label: 'Rejected by Department Reviewer',
           dateTime: departmentHeadReviewedAt,
           actor: departmentHeadReviewer,
           remarks:
@@ -392,7 +384,7 @@ class _AdminLeaveRequestDetailsPanel extends StatelessWidget {
         ),
       if (deptHeadReturned)
         LeaveHistoryEvent(
-          label: 'Returned by Department Head',
+          label: 'Returned by Department Reviewer',
           dateTime: departmentHeadReviewedAt,
           actor: departmentHeadReviewer,
           remarks: departmentHeadRemarks,

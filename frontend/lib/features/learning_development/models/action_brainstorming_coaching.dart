@@ -127,12 +127,13 @@ class ActionBrainstormingRepo {
     return row == null ? null : ActionBrainstormingEntry.fromJson(row);
   }
 
-  Future<void> insert(ActionBrainstormingEntry entry) async {
+  Future<ActionBrainstormingEntry> insert(ActionBrainstormingEntry entry) async {
     final payload = Map<String, dynamic>.from(entry.toJson())..remove('id');
-    await RspLdSavedEntriesApi.insertRow(
+    final row = await RspLdSavedEntriesApi.insertRowReturning(
       ActionBrainstormingEntry.tableName,
       payload,
     );
+    return ActionBrainstormingEntry.fromJson(row);
   }
 
   Future<void> update(ActionBrainstormingEntry entry) async {

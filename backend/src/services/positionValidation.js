@@ -94,7 +94,7 @@ function normalizePositionWrite(body, { creating = false } = {}) {
     normalized.department_id = null;
   }
 
-  for (const field of ['is_department_head', 'is_active']) {
+  for (const field of ['is_department_head', 'is_leave_final_reviewer', 'is_active']) {
     if (hasOwn(input, field)) {
       if (typeof input[field] !== 'boolean') {
         throw new PositionValidationError(`${field} must be a Boolean value`);

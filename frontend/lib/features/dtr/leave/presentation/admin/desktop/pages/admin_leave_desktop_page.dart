@@ -84,6 +84,20 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
   Future<void>? _requestLoadInFlight;
   bool _requestReloadQueued = false;
   bool _queuedForceRefresh = false;
+  bool _canReviewFinal = false;
+
+  Future<void> _loadFinalReviewerEligibility() async {
+    if (widget.isDepartmentHead) return;
+    try {
+      final response = await ApiClient.instance.get<Map<String, dynamic>>(
+        '/api/leave/final-reviewer/me',
+      );
+      if (!mounted) return;
+      setState(() => _canReviewFinal = response.data?['can_review'] == true);
+    } catch (_) {
+      if (mounted) setState(() => _canReviewFinal = false);
+    }
+  }
 
   Future<({String name, String? title})> _loadReviewerSignatureInfo(
     AuthProvider auth,
@@ -160,6 +174,7 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
         _startAutoRefresh();
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (mounted && _isScreenActive) {
+            unawaited(_loadFinalReviewerEligibility());
             unawaited(_safeAutoRefresh(forceRefresh: true));
           }
         });
@@ -171,6 +186,9 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
     }
     _initialized = true;
     _isScreenActive = isScreenActive;
+    WidgetsBinding.instance.addPostFrameCallback(
+      (_) => _loadFinalReviewerEligibility(),
+    );
     if (_isScreenActive) {
       WidgetsBinding.instance.addPostFrameCallback((_) => _loadRequests());
     }
@@ -778,7 +796,9 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
         builder: (ctx) => AdminLeaveDetailsSideSheet(
           initial: request,
           isDepartmentHead: widget.isDepartmentHead,
-          canReviewPending: widget.canReviewPending,
+          currentReviewerId: context.read<AuthProvider>().user?.id,
+          canReviewPending: widget.canReviewPending &&
+              (widget.isDepartmentHead || _canReviewFinal),
           onApprove: widget.isDepartmentHead ? _deptHeadApprove : _approve,
           onReturn: widget.isDepartmentHead ? _deptHeadReturn : _returnRequest,
           onReject: widget.isDepartmentHead ? _deptHeadReject : _rejectRequest,
@@ -804,6 +824,14 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
     final auth = context.read<AuthProvider>();
     if (!mounted) return;
 
+    // Show a loading indicator immediately so the user gets instant feedback
+    // before any of the network calls begin.
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(preview ? 'Loading preview...' : 'Loading form data...'),
+      ),
+    );
+
     try {
       // Refresh the request so we print the latest snapshot (e.g. after HR
       // changes). If the refresh fails, block the print — printing a stale
@@ -825,30 +853,36 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
         }
       }
 
-      final signerInfo = await _loadSignatureInfoByUserId(
-        userId: target.reviewerId ?? auth.user?.id,
-        fallbackName: (target.reviewerName?.trim().isNotEmpty == true)
-            ? target.reviewerName!.trim()
-            : (auth.displayName.trim().isNotEmpty
-                  ? auth.displayName.trim()
-                  : 'Authorized Officer'),
-        fallbackTitle: (target.reviewerTitle?.trim().isNotEmpty == true)
-            ? target.reviewerTitle!.trim()
-            : _reviewerTitleFromRole(target.reviewerRole ?? auth.user?.role),
-      );
+      // Run the three independent lookups concurrently — they all depend on
+      // `target` but not on each other, so there is no reason to wait for
+      // one before starting the next.
+      if (id == null || id.isEmpty) {
+        throw StateError('A saved leave request is required to print the form');
+      }
+      final results = await Future.wait([
+        _loadSignatureInfoByUserId(
+          userId: target.reviewerId ?? auth.user?.id,
+          fallbackName: (target.reviewerName?.trim().isNotEmpty == true)
+              ? target.reviewerName!.trim()
+              : (auth.displayName.trim().isNotEmpty
+                    ? auth.displayName.trim()
+                    : 'Authorized Officer'),
+          fallbackTitle: (target.reviewerTitle?.trim().isNotEmpty == true)
+              ? target.reviewerTitle!.trim()
+              : _reviewerTitleFromRole(target.reviewerRole ?? auth.user?.role),
+        ),
+        loadLeaveFormSignatories(request: target),
+        provider.fetchFormCreditsForRequestStrict(id),
+      ]);
+
+      final signerInfo = results[0] as ({String name, String? title});
+      final formSignatories = results[1] as LeaveFormSignatories;
+      final balances = results[2] as List<LeaveBalance>;
+
       target = target.copyWith(
         reviewerName: signerInfo.name,
         reviewerTitle: signerInfo.title,
       );
-      final formSignatories = await loadLeaveFormSignatories(request: target);
-
-      // Use the strict variant so any balance API failure throws rather than
-      // returning an empty list that would silently produce zero credit figures
-      // on the printed certification.
-      if (id == null || id.isEmpty) {
-        throw StateError('A saved leave request is required to print the form');
-      }
-      final balances = await provider.fetchFormCreditsForRequestStrict(id);
 
       if (!preview && mounted) {
         ScaffoldMessenger.of(

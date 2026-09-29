@@ -17,11 +17,26 @@ void main() {
       'metadata_json': {'number_of_days': 2},
     });
 
-    expect(entry.actionLabel, 'Returned by Department Head');
+    expect(entry.actionLabel, 'Returned by Department Reviewer');
     expect(entry.actorLabel, 'Department Head');
     expect(entry.fromStatus, 'pending_department_head');
     expect(entry.toStatus, 'returned');
     expect(entry.remarks, 'Correct the inclusive dates.');
+  });
+
+  test('backup reviewer actions do not claim the actor is the department head', () {
+    final entry = LeaveRequestHistoryEntry.fromJson({
+      'id': 'history-backup',
+      'leave_request_id': 'request-1',
+      'action': 'department_head_returned',
+      'to_status': 'returned',
+      'actor_name': 'Edgar C Jr. Jr.',
+      'actor_role': 'employee',
+      'acted_at': '2026-09-22T00:10:00Z',
+    });
+
+    expect(entry.actionLabel, 'Returned by Department Reviewer');
+    expect(entry.actorLabel, 'Edgar C Jr. Jr.');
   });
 
   test('maps resubmission as its own workflow event', () {

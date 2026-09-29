@@ -138,6 +138,7 @@ function mapDocumentRow(row) {
       ? row.signature_signer_ids.map(String)
       : [],
     viewer_is_routing_assignee: row.viewer_is_routing_assignee === true,
+    viewer_participated_in_source: row.viewer_participated_in_source === true,
     source_only: row.source_only === true,
     created_at: row.created_at,
     updated_at: row.updated_at,
@@ -452,6 +453,21 @@ async function listSourceBackedDocuments(pool, user, filters = {}) {
     .map((row) => {
       const mappedStatus = mapSourceStatusToDocuTracker(row.source_module, row.source_status);
       const sourceAction = sourceActionForRow(row, user);
+      const viewerId = String(user?.id || '').trim();
+      const role = String(user?.role || '').trim().toLowerCase();
+      const isDepartmentReviewer =
+        sameEntityId(row.assigned_department_head_id, viewerId) ||
+        row.viewer_is_department_reviewer === true;
+      const isHrOrAdmin = role === 'hr' || role === 'admin';
+      // Keep leave (and similar) visible for reviewers after they sign/act so
+      // the card does not vanish from Required actions while admins still see it.
+      const viewerParticipatedInSource =
+        row.source_table === 'leave_requests' &&
+        (isDepartmentReviewer ||
+          (isHrOrAdmin &&
+            ['pending_hr', 'pending', 'approved', 'rejected', 'returned'].includes(
+              String(row.source_status || '').toLowerCase()
+            )));
       return {
         id: `source:${row.source_module}:${row.source_record_id}`,
         document_number: null,
@@ -478,6 +494,7 @@ async function listSourceBackedDocuments(pool, user, filters = {}) {
         escalation_level: 0,
         needs_admin_intervention: false,
         source_only: true,
+        viewer_participated_in_source: viewerParticipatedInSource,
         created_at: row.created_at,
         updated_at: row.updated_at,
       };
@@ -1935,31 +1952,10 @@ async function insertNotification(client, payload) {
   );
 }
 
-function buildNotificationEventKey(payload = {}) {
-  const docId = payload.document_id || 'unknown-doc';
-  const type = payload.type || 'unknown';
-  if (type === 'assigned') {
-    return `assigned:doc:${docId}:step:${payload.step_order ?? 'na'}`;
-  }
-  if (type === 'returned') {
-    return `returned:doc:${docId}:step:${payload.step_order ?? 'na'}`;
-  }
-  if (type === 'rejected') {
-    return `rejected:doc:${docId}:step:${payload.step_order ?? 'na'}`;
-  }
-  if (type === 'escalated') {
-    return `escalated:doc:${docId}:level:${payload.escalation_level ?? 'na'}`;
-  }
-  if (type === 'overdue') {
-    return `overdue:doc:${docId}:level:${payload.escalation_level ?? 'na'}`;
-  }
-  return `${type}:doc:${docId}`;
-}
-
 async function insertNotificationIfNotRecent(client, payload, dedupeMinutes = 15) {
   if (!payload.user_id) return false;
-  const eventKey = payload.event_key || buildNotificationEventKey(payload);
-  if (eventKey) {
+  const explicitEventKey = String(payload.event_key || '').trim() || null;
+  if (explicitEventKey) {
     const byKey = await client.query(
       `SELECT id
        FROM docutracker_notifications
@@ -1968,9 +1964,18 @@ async function insertNotificationIfNotRecent(client, payload, dedupeMinutes = 15
          AND type = $3
          AND event_key = $4
        LIMIT 1`,
-      [payload.document_id, payload.user_id, payload.type, eventKey]
+      [payload.document_id, payload.user_id, payload.type, explicitEventKey]
     );
     if (byKey.rowCount > 0) return false;
+
+    // A caller-supplied event key identifies one logical workflow event.
+    // Different keys must remain distinct even when their title/body match,
+    // such as assignment to the same step after a return/resume cycle.
+    await insertNotification(client, {
+      ...payload,
+      event_key: explicitEventKey,
+    });
+    return true;
   }
   const existing = await client.query(
     `SELECT id
@@ -1992,7 +1997,7 @@ async function insertNotificationIfNotRecent(client, payload, dedupeMinutes = 15
     ]
   );
   if (existing.rowCount > 0) return false;
-  await insertNotification(client, { ...payload, event_key: eventKey });
+  await insertNotification(client, { ...payload, event_key: null });
   return true;
 }
 
@@ -2879,6 +2884,7 @@ module.exports = {
   getDocumentBundle,
   createDocument,
   transitionDocument,
+  insertNotificationIfNotRecent,
   updateDocumentMetadata,
   recoverDocumentAssignment,
   addDocumentRemark,

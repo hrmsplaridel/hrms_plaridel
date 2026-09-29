@@ -54,8 +54,6 @@ function locatorRequestTypeLabel(value) {
   switch (normalizeLocatorRequestType(value)) {
     case 'pass_slip':
       return 'Pass Slip';
-    case 'work_from_home':
-      return 'WFH';
     case 'locator':
       return 'Locator Slip';
     default:
@@ -69,10 +67,7 @@ function locatorRequestTypeLabel(value) {
 
 function locatorAttendanceRemark(locator) {
   const dtrLabel = String(locator?.dtr_slot_label || '').trim();
-  if (
-    locator?.coverage_mode === 'wfh' ||
-    normalizeLocatorRequestType(locator?.request_type) === 'work_from_home'
-  ) {
+  if (locator?.coverage_mode === 'wfh') {
     return dtrLabel || 'WFH';
   }
   const segText =
@@ -634,11 +629,7 @@ async function computeAttendanceRemark(
     const locatorDtrLabel = String(
       record.locator_slip_dtr_slot_label || ''
     ).trim();
-    if (
-      record.locator_slip_coverage_mode === 'wfh' ||
-      normalizeLocatorRequestType(record.locator_slip_request_type) ===
-      'work_from_home'
-    ) {
+    if (record.locator_slip_coverage_mode === 'wfh') {
       return locatorDtrLabel || 'WFH';
     }
     const segments = Array.from(locatorSegSet);

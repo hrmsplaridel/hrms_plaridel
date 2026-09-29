@@ -18,6 +18,7 @@ class DocuTrackerSourceSignatureCard extends StatefulWidget {
     this.unsignedMessage = 'No applicant signature yet',
     this.waitingMessage = 'Waiting for the applicant to sign.',
     this.savedMessage = 'Signature saved.',
+    this.initialBundle,
     this.onChanged,
   });
 
@@ -29,6 +30,8 @@ class DocuTrackerSourceSignatureCard extends StatefulWidget {
   final String unsignedMessage;
   final String waitingMessage;
   final String savedMessage;
+  /// When provided (e.g. from Required actions), skip the extra network fetch.
+  final DocuTrackerSourceSignatureBundle? initialBundle;
   final ValueChanged<DocuTrackerSourceSignatureBundle>? onChanged;
 
   @override
@@ -47,6 +50,12 @@ class _DocuTrackerSourceSignatureCardState
   @override
   void initState() {
     super.initState();
+    final seeded = widget.initialBundle;
+    if (seeded != null) {
+      _bundle = seeded;
+      _loading = false;
+      return;
+    }
     WidgetsBinding.instance.addPostFrameCallback((_) => _load());
   }
 
@@ -160,6 +169,25 @@ class _DocuTrackerSourceSignatureCardState
       ),
     );
     if (!mounted || signerId == null) return;
+
+    final current = _bundle?.signatureFor(widget.slotKey);
+    final needsRecoveryRemarks =
+        current != null &&
+        current.assignedSignerId.trim().isNotEmpty &&
+        current.assignedSignerId != signerId &&
+        (current.assignmentSource == 'creator' ||
+            current.assignmentSource == 'automatic');
+
+    String? recoveryRemarks;
+    if (needsRecoveryRemarks) {
+      recoveryRemarks = await _promptRecoveryRemarks(
+        current.assignmentSource == 'creator'
+            ? 'This field belongs to the form creator. Enter recovery remarks to reassign it.'
+            : 'This signer was assigned automatically. Enter recovery remarks to override it.',
+      );
+      if (!mounted || recoveryRemarks == null) return;
+    }
+
     setState(() {
       _assigning = true;
       _error = null;
@@ -171,6 +199,7 @@ class _DocuTrackerSourceSignatureCardState
       sourceRecordId: widget.sourceRecordId,
       slotKey: widget.slotKey,
       assignedSignerId: signerId,
+      recoveryRemarks: recoveryRemarks,
     );
     if (!mounted) return;
     setState(() {
@@ -183,6 +212,52 @@ class _DocuTrackerSourceSignatureCardState
       }
     });
     if (bundle != null) widget.onChanged?.call(bundle);
+  }
+
+  Future<String?> _promptRecoveryRemarks(String message) async {
+    final controller = TextEditingController();
+    final remarks = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: const Text('Recovery remarks required'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(message),
+              const SizedBox(height: 12),
+              TextField(
+                controller: controller,
+                autofocus: true,
+                maxLength: 500,
+                minLines: 2,
+                maxLines: 4,
+                decoration: const InputDecoration(
+                  labelText: 'Remarks (min 5 characters)',
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () {
+                final value = controller.text.trim();
+                if (value.length < 5) return;
+                Navigator.pop(dialogContext, value);
+              },
+              child: const Text('Reassign'),
+            ),
+          ],
+        );
+      },
+    );
+    controller.dispose();
+    return remarks;
   }
 
   Future<void> _sign() async {
@@ -234,8 +309,9 @@ class _DocuTrackerSourceSignatureCardState
   @override
   Widget build(BuildContext context) {
     final signature = _bundle?.signatureFor(widget.slotKey);
-    final canAssign = _bundle?.canAssign == true;
+    final canAssign = signature?.canAssign ?? (_bundle?.canAssign == true);
     final canSign = signature?.canSign == true;
+    final isCreatorAssigned = signature?.assignmentSource == 'creator';
     final hasAssignedSigner = (signature?.assignedSignerId ?? '')
         .trim()
         .isNotEmpty;
@@ -340,7 +416,11 @@ class _DocuTrackerSourceSignatureCardState
             if ((signature?.assignedSignerName ?? '').isNotEmpty) ...[
               const SizedBox(height: 8),
               Text(
-                'Assigned to ${signature!.assignedSignerName}',
+                isCreatorAssigned
+                    ? 'Prepared by ${signature!.assignedSignerName}'
+                    : signature?.assignmentSource == 'automatic'
+                    ? 'Automatically assigned to ${signature!.assignedSignerName}'
+                    : 'Assigned to ${signature!.assignedSignerName}',
                 textAlign: TextAlign.center,
                 style: const TextStyle(
                   color: DocuTrackerTokens.textMuted,
@@ -379,7 +459,18 @@ class _DocuTrackerSourceSignatureCardState
                   fontSize: 12,
                 ),
               ),
-            if (_bundle?.canAssign == true) ...[
+            if (isCreatorAssigned) ...[
+              const SizedBox(height: 8),
+              const Text(
+                'This field belongs to the person who created the form.',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: DocuTrackerTokens.textMuted,
+                  fontSize: 12,
+                ),
+              ),
+            ],
+            if (canAssign) ...[
               const SizedBox(height: 8),
               OutlinedButton.icon(
                 onPressed: _assigning || _signing ? null : _assignSigner,

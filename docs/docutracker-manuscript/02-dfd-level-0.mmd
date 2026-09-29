@@ -1,0 +1,18 @@
+---
+title: Figure 2. DocuTracker Data Flow Diagram - Level 0
+config:
+  flowchart:
+    curve: stepAfter
+---
+flowchart LR
+    E[Employee] -->|Document details, drafts, attachments, submissions| P((0.0<br/>DocuTracker System))
+    P -->|Document list, status, notifications, history| E
+    R[Reviewer / Assigned Signer] -->|Review actions, remarks, signatures| P
+    P -->|Assigned documents, deadlines, action results| R
+    A[Administrator] -->|Workflow, assignee, permission, escalation configuration| P
+    P -->|Configuration results, audit and overdue information| A
+
+    classDef entity fill:#fff2cc,stroke:#b8860b,color:#222,stroke-width:2px;
+    classDef process fill:#dbeafe,stroke:#2563eb,color:#111,stroke-width:2px;
+    class E,R,A entity;
+    class P process;

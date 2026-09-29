@@ -1,0 +1,45 @@
+---
+title: Figure 7. DocuTracker Use Case Diagram
+config:
+  securityLevel: loose
+  flowchart:
+    curve: stepAfter
+    htmlLabels: true
+---
+flowchart LR
+    EMP["<svg width='54' height='70' viewBox='0 0 54 70' xmlns='http://www.w3.org/2000/svg'><circle cx='27' cy='11' r='9' fill='#ede9fe' stroke='#c4b5fd' stroke-width='1.5'/><path d='M27 20 V43 M11 31 H43 M27 43 L13 65 M27 43 L41 65' fill='none' stroke='#c4b5fd' stroke-width='1.7' stroke-linecap='round'/></svg><br/><b>Employee</b>"]:::actor
+    REV["<svg width='54' height='70' viewBox='0 0 54 70' xmlns='http://www.w3.org/2000/svg'><circle cx='27' cy='11' r='9' fill='#ede9fe' stroke='#c4b5fd' stroke-width='1.5'/><path d='M27 20 V43 M11 31 H43 M27 43 L13 65 M27 43 L41 65' fill='none' stroke='#c4b5fd' stroke-width='1.7' stroke-linecap='round'/></svg><br/><b>Reviewer / Signer</b>"]:::actor
+    ADM["<svg width='54' height='70' viewBox='0 0 54 70' xmlns='http://www.w3.org/2000/svg'><circle cx='27' cy='11' r='9' fill='#ede9fe' stroke='#c4b5fd' stroke-width='1.5'/><path d='M27 20 V43 M11 31 H43 M27 43 L13 65 M27 43 L41 65' fill='none' stroke='#c4b5fd' stroke-width='1.7' stroke-linecap='round'/></svg><br/><b>Administrator</b>"]:::actor
+
+    subgraph SYS[DocuTracker System]
+        U1([View authorized documents])
+        U2([Create and edit draft])
+        U3([Manage attachments and content])
+        U4([Submit document])
+        U5([Track status and history])
+        U6([View notifications])
+        U7([Open assigned document])
+        U8([Add remarks])
+        U9([Approve / Forward / Return / Reject])
+        U10([Apply assigned e-signature])
+        U11([Configure workflows and assignees])
+        U12([Manage system permissions])
+        U13([Configure escalation rules])
+        U14([View governance audit])
+        U15([Perform controlled recovery reassignment])
+        AUTH([Validate access and action permission])
+    end
+
+    EMP --> U1 & U2 & U3 & U4 & U5 & U6
+    REV --> U1 & U5 & U6 & U7 & U8 & U9 & U10
+    ADM --> U1 & U6 & U11 & U12 & U13 & U14 & U15
+    U1 -. include .-> AUTH
+    U4 -. include .-> AUTH
+    U7 -. include .-> AUTH
+    U9 -. include .-> AUTH
+    U10 -. include .-> AUTH
+    U11 -. include .-> AUTH
+    U12 -. include .-> AUTH
+    U15 -. include .-> AUTH
+
+    classDef actor fill:transparent,stroke:transparent,color:#111;

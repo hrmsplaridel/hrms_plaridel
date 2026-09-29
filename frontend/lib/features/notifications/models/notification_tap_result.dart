@@ -26,15 +26,37 @@ enum NotificationTapKind {
 
   /// Admin: Learning & development / training daily reports.
   adminTrainingReports,
+
+  /// Open DocuTracker Documents (Required actions for form e-sign).
+  docuTrackerDocuments,
 }
 
 class NotificationTapResult {
-  const NotificationTapResult(this.kind, {this.referenceId});
+  const NotificationTapResult(
+    this.kind, {
+    this.referenceId,
+    this.sourceModule,
+    this.sourceTable,
+    this.sourceRecordId,
+    this.slotKey,
+  });
 
   final NotificationTapKind kind;
 
   /// Backend `reference_id` (leave request, locator slip, application, …).
   final String? referenceId;
+
+  /// Optional RSP/L&D source-signature deep link (from `form_signature` notifications).
+  final String? sourceModule;
+  final String? sourceTable;
+  final String? sourceRecordId;
+  final String? slotKey;
+
+  bool get hasSourceSignatureDeepLink {
+    final table = sourceTable?.trim() ?? '';
+    final recordId = sourceRecordId?.trim() ?? '';
+    return table.isNotEmpty && recordId.isNotEmpty;
+  }
 
   /// Maps backend [AppNotification.type] + user [role] to a navigation target.
   static NotificationTapResult fromNotification(
@@ -63,6 +85,17 @@ class NotificationTapResult {
     if (cat == 'training' && isPrivileged) {
       return const NotificationTapResult(
         NotificationTapKind.adminTrainingReports,
+      );
+    }
+    if (cat == 'form_signature') {
+      final meta = n.metadata;
+      return NotificationTapResult(
+        NotificationTapKind.docuTrackerDocuments,
+        sourceModule: meta?['source_module']?.toString(),
+        sourceTable: meta?['source_table']?.toString(),
+        sourceRecordId:
+            n.referenceId ?? meta?['source_record_id']?.toString(),
+        slotKey: meta?['slot_key']?.toString(),
       );
     }
     if (cat == 'overtime') {

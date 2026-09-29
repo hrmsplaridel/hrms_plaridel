@@ -206,6 +206,11 @@ class EmployeeLocatorSlipContentState extends State<EmployeeLocatorSlipContent>
       realtimeProvider.addListener(_handleRealtimeConnectionChanged);
     }
     _locatorRealtimeSub ??= realtimeProvider.events.listen((event) {
+      if (event.name == 'locator_type_updated') {
+        LocatorSlipDataCache.instance.invalidateTypes();
+        unawaited(_loadLocatorTypes(forceRefresh: true));
+        return;
+      }
       if (event.name != 'locator_updated') return;
       final userId = _authenticatedUserId;
       if (event.affectsUser(userId) ||
@@ -1117,8 +1122,7 @@ class EmployeeLocatorSlipContentState extends State<EmployeeLocatorSlipContent>
                                 : _formatDateTime(step.date!);
                             if (actor != null && actor.isNotEmpty) {
                               subtitle = '$subtitle by $actor';
-                            } else if (step.title.contains('Department Head') &&
-                                step.title != 'Pending Department Head') {
+                            } else if (step.title.contains('Department Head')) {
                               subtitle = '$subtitle by Department Head';
                             } else if (step.title.contains('HR')) {
                               subtitle = '$subtitle by HR Admin';
@@ -1850,6 +1854,33 @@ class EmployeeLocatorSlipContentState extends State<EmployeeLocatorSlipContent>
     final userId = _authenticatedUserId;
     if (userId == null) return;
     final authGeneration = _authGeneration;
+    try {
+      final availability = await ApiClient.instance.get<Map<String, dynamic>>(
+        '/api/locator-slips/submission-availability',
+      );
+      if (!_isCurrentAuthSession(userId, authGeneration) || !context.mounted) {
+        return;
+      }
+      if (availability.data?['can_submit'] != true) {
+        await _showLocatorErrorDialog(
+          availability.data?['reason']?.toString() ??
+              'No eligible final reviewer is available. Contact HR before filing.',
+        );
+        return;
+      }
+    } on DioException catch (error) {
+      if (!_isCurrentAuthSession(userId, authGeneration) || !context.mounted) {
+        return;
+      }
+      final data = error.response?.data;
+      await _showLocatorErrorDialog(
+        data is Map && data['error'] != null
+            ? data['error'].toString()
+            : 'Could not check reviewer availability. Please try again.',
+      );
+      return;
+    }
+    if (!context.mounted) return;
     final typesReady = await _refreshLocatorTypesForForm(
       context,
       userId: userId,
@@ -3713,7 +3744,7 @@ class _LocatorSlipDraft {
 
 enum _LocatorSlipStatus {
   draft('Draft'),
-  pendingDepartmentHead('Pending Dept Head'),
+  pendingDepartmentHead('Pending Department Review'),
   pendingHr('Pending HR Admin'),
   returnedForCorrection('Returned for Correction'),
   approved('Approved'),

@@ -583,7 +583,7 @@ class _TrainingNeedAnalysisEditorState
     final yearField = ro
         ? _readOnlyValueBox(context, 'Report Year', _cyYear ?? '—')
         : DropdownButtonFormField<String>(
-            value: _cyYear,
+            initialValue: _cyYear,
             items: [
               for (final y in _tnaYearOptions(include: _cyYear))
                 DropdownMenuItem(value: y, child: Text(y)),
@@ -600,7 +600,7 @@ class _TrainingNeedAnalysisEditorState
         ? _readOnlyValueBox(context, 'Department', _department ?? '—')
         : (_officesLoaded
               ? DropdownButtonFormField<String>(
-                  value: _department,
+                  initialValue: _department,
                   items: [
                     for (final name in <String>{
                       ..._officeNames,
@@ -1364,7 +1364,9 @@ class _TnaEmployeeEditorDialogState extends State<_TnaEmployeeEditorDialog> {
                             color: AppTheme.dashHairlineOf(context),
                           ),
                         ),
-                        child: ListView(
+                        child: Material(
+                          type: MaterialType.transparency,
+                          child: ListView(
                           shrinkWrap: true,
                           padding: const EdgeInsets.symmetric(vertical: 4),
                           children: [
@@ -1387,6 +1389,7 @@ class _TnaEmployeeEditorDialogState extends State<_TnaEmployeeEditorDialog> {
                                 onTap: () => _selectEmployee(m),
                               ),
                           ],
+                          ),
                         ),
                       ),
                     const SizedBox(height: 12),

@@ -1,5 +1,13 @@
 const { createSignatureAsset } = require('./docutrackerDocumentBuilderService');
 const { writeGovernanceAudit } = require('./docutrackerGovernanceAudit');
+const { findDepartmentHeadUserId } = require('./departmentHeadService');
+const {
+  ROLE_KEYS,
+  resolveOfficialSignatory,
+  resolveActiveMayor,
+} = require('./officialSignatoryService');
+const { todayInHrmsTimezone } = require('../utils/dateRangeParser');
+const { insertNotification } = require('./notificationService');
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const SOURCE_SIGNATURE_CONFIGS = Object.freeze({
@@ -50,6 +58,61 @@ const SOURCE_SIGNATURE_CONFIGS = Object.freeze({
 
 const RSP_SIGNATURE_SLOTS = SOURCE_SIGNATURE_CONFIGS.rsp.slots;
 const LD_SIGNATURE_SLOTS = SOURCE_SIGNATURE_CONFIGS.ld.slots;
+const CREATOR_OWNED_SOURCE_SLOTS = Object.freeze({
+  applicants_profile_entries: Object.freeze(['prepared_by']),
+  selection_lineup_entries: Object.freeze(['prepared_by']),
+  computation_of_points_entries: Object.freeze(['prepared_by']),
+  turn_around_time_entries: Object.freeze(['prepared_by']),
+  idp_entries: Object.freeze(['prepared_by']),
+});
+
+/** Create-time automatic assignment rules. Unresolved roles leave the slot empty. */
+const AUTOMATIC_SOURCE_SLOT_RULES = Object.freeze({
+  applicants_profile_entries: Object.freeze({
+    prepared_by: 'creator',
+    checked_by: 'hrmdo',
+  }),
+  selection_lineup_entries: Object.freeze({ prepared_by: 'creator' }),
+  computation_of_points_entries: Object.freeze({ prepared_by: 'creator' }),
+  turn_around_time_entries: Object.freeze({
+    prepared_by: 'creator',
+    noted_by: 'hrmdo',
+  }),
+  idp_entries: Object.freeze({
+    prepared_by: 'creator',
+    reviewed_by: 'department_head',
+    noted_by: 'hrmdo',
+    approved_by: 'mayor',
+  }),
+  action_brainstorming_coaching_entries: Object.freeze({
+    certified_by: 'department_head',
+  }),
+});
+
+const PROTECTED_ASSIGNMENT_SOURCES = new Set(['creator', 'automatic']);
+
+/** Print-label columns filled from the auto-assigned user's display name. */
+const SOURCE_PRINT_NAME_COLUMNS = Object.freeze({
+  applicants_profile_entries: Object.freeze({
+    prepared_by: 'prepared_by',
+    checked_by: 'checked_by',
+  }),
+  selection_lineup_entries: Object.freeze({ prepared_by: 'prepared_by_name' }),
+  computation_of_points_entries: Object.freeze({ prepared_by: 'prepared_by_name' }),
+  turn_around_time_entries: Object.freeze({
+    prepared_by: 'prepared_by_name',
+    noted_by: 'noted_by_name',
+  }),
+  idp_entries: Object.freeze({
+    prepared_by: 'prepared_by',
+    reviewed_by: 'reviewed_by',
+    noted_by: 'noted_by',
+    approved_by: 'approved_by',
+  }),
+  action_brainstorming_coaching_entries: Object.freeze({
+    certified_by: 'certified_by',
+  }),
+});
 
 function serviceError(code, message) {
   const error = new Error(message);
@@ -77,16 +140,379 @@ function sourceConfig(sourceModule, sourceTable, sourceRecordId, slotKey = null)
   };
 }
 
+function sourceModuleForTable(sourceTable) {
+  return Object.keys(SOURCE_SIGNATURE_CONFIGS).find((sourceModule) =>
+    Object.hasOwn(SOURCE_SIGNATURE_CONFIGS[sourceModule].slots, sourceTable)
+  ) || null;
+}
+
+function creatorOwnedSlotKeys(sourceTable) {
+  return CREATOR_OWNED_SOURCE_SLOTS[sourceTable] || [];
+}
+
+function isCreatorOwnedSlot(sourceTable, slotKey) {
+  return creatorOwnedSlotKeys(sourceTable).includes(slotKey);
+}
+
+function automaticSlotRules(sourceTable) {
+  return AUTOMATIC_SOURCE_SLOT_RULES[sourceTable] || null;
+}
+
+function isAutomaticSlot(sourceTable, slotKey) {
+  return Boolean(automaticSlotRules(sourceTable)?.[slotKey]);
+}
+
+async function resolveActiveUserId(db, userId) {
+  if (!UUID_RE.test(String(userId || ''))) return null;
+  const result = await db.query(
+    `SELECT id
+     FROM users
+     WHERE id = $1::uuid
+       AND is_active = true
+     LIMIT 1`,
+    [userId]
+  );
+  return result.rows[0]?.id || null;
+}
+
+async function resolveDepartmentIdByName(db, departmentName) {
+  const name = String(departmentName || '').trim();
+  if (!name) return null;
+  const result = await db.query(
+    `SELECT id
+     FROM departments
+     WHERE lower(btrim(name)) = lower(btrim($1))
+     LIMIT 1`,
+    [name]
+  );
+  return result.rows[0]?.id || null;
+}
+
+async function resolveDepartmentHeadSignerId(db, departmentName) {
+  const departmentId = await resolveDepartmentIdByName(db, departmentName);
+  if (!departmentId) return null;
+  const headId = await findDepartmentHeadUserId(db, departmentId);
+  return resolveActiveUserId(db, headId);
+}
+
+async function resolveHrmdoSignerId(db, effectiveDate) {
+  const signatory = await resolveOfficialSignatory(
+    db,
+    ROLE_KEYS.LEAVE_CREDIT_CERTIFIER,
+    effectiveDate
+  );
+  return resolveActiveUserId(db, signatory?.employee_id);
+}
+
+async function resolveMayorSignerId(db, effectiveDate) {
+  const mayor = await resolveActiveMayor(db, effectiveDate);
+  return resolveActiveUserId(db, mayor?.employee_id);
+}
+
+async function resolveAutomaticSignerId(db, rule, { creatorUserId, departmentName, effectiveDate }) {
+  switch (rule) {
+    case 'creator':
+      return resolveActiveUserId(db, creatorUserId);
+    case 'department_head':
+      return resolveDepartmentHeadSignerId(db, departmentName);
+    case 'hrmdo':
+      return resolveHrmdoSignerId(db, effectiveDate);
+    case 'mayor':
+      return resolveMayorSignerId(db, effectiveDate);
+    default:
+      return null;
+  }
+}
+
+async function syncSourcePrintNameIfEmpty(
+  db,
+  sourceTable,
+  sourceRecordId,
+  slotKey,
+  assignedSignerId
+) {
+  const column = SOURCE_PRINT_NAME_COLUMNS[sourceTable]?.[slotKey];
+  if (!column) return false;
+  const named = await db.query(
+    `SELECT full_name
+     FROM users
+     WHERE id = $1::uuid
+       AND is_active = true
+     LIMIT 1`,
+    [assignedSignerId]
+  );
+  const fullName = String(named.rows[0]?.full_name || '').trim();
+  if (!fullName) return false;
+  const updated = await db.query(
+    `UPDATE "${sourceTable}"
+     SET "${column}" = $1
+     WHERE id = $2::uuid
+       AND length(btrim(COALESCE("${column}", ''))) = 0
+     RETURNING id`,
+    [fullName, sourceRecordId]
+  );
+  return updated.rowCount > 0;
+}
+
+/**
+ * Global bell notification when someone is assigned to e-sign an RSP/L&D form.
+ * Skips self-assignment. Failures are logged and never block signing setup.
+ */
+async function notifyAssignedSigner(db, {
+  assignedSignerId,
+  actorId,
+  sourceModule,
+  sourceTable,
+  sourceRecordId,
+  slotKey,
+  label,
+  formTitle = null,
+}) {
+  if (!UUID_RE.test(String(assignedSignerId || ''))) return;
+  if (String(assignedSignerId) === String(actorId || '')) return;
+  const moduleConfig = SOURCE_SIGNATURE_CONFIGS[sourceModule];
+  const formName =
+    moduleConfig?.formNames?.[sourceTable] ||
+    (sourceModule === 'ld' ? 'L&D form' : 'RSP form');
+  const slotLabel = String(label || slotKey || 'Signature').trim();
+  const detail = String(formTitle || '').trim();
+  const body = detail
+    ? `${slotLabel} is waiting on ${formName}: ${detail}. Open DocuTracker → Required actions to sign.`
+    : `${slotLabel} is waiting on ${formName}. Open DocuTracker → Required actions to sign.`;
+  try {
+    await insertNotification(db, {
+      userId: assignedSignerId,
+      category: 'form_signature',
+      type: 'source_signature_assigned',
+      title: `${slotLabel} needed`,
+      body,
+      referenceType: 'source_form',
+      referenceId: sourceRecordId,
+      metadata: {
+        source_module: sourceModule,
+        source_table: sourceTable,
+        slot_key: slotKey,
+        form_name: formName,
+        form_title: detail || null,
+      },
+    });
+  } catch (err) {
+    console.error('[docutrackerRspSignatureService] notifyAssignedSigner', err);
+  }
+}
+
+async function insertSourceSignatureAssignment(
+  db,
+  {
+    sourceModule,
+    sourceTable,
+    sourceRecordId,
+    slotKey,
+    label,
+    assignedSignerId,
+    createdBy,
+    assignmentSource,
+    recoveryRemarks = null,
+    actorId,
+  }
+) {
+  const inserted = await db.query(
+    `INSERT INTO docutracker_rsp_source_signatures
+       (source_table, source_record_id, slot_key, label, assigned_signer_id,
+        assignment_source, recovery_remarks, created_by)
+     VALUES ($1, $2::uuid, $3, $4, $5::uuid, $6, $7, $8::uuid)
+     ON CONFLICT (source_table, source_record_id, slot_key) DO NOTHING
+     RETURNING id`,
+    [
+      sourceTable,
+      sourceRecordId,
+      slotKey,
+      label,
+      assignedSignerId,
+      assignmentSource,
+      recoveryRemarks,
+      createdBy,
+    ]
+  );
+  await syncSourcePrintNameIfEmpty(
+    db,
+    sourceTable,
+    sourceRecordId,
+    slotKey,
+    assignedSignerId
+  );
+  if (!inserted.rowCount) return false;
+  await writeGovernanceAudit(db, {
+    actorId,
+    eventType: 'source_signer_assigned',
+    entityType: `${sourceModule}_source_signature`,
+    entityId: sourceRecordId,
+    documentType: sourceModule,
+    targetUserId: assignedSignerId,
+    afterState: {
+      source_table: sourceTable,
+      slot_key: slotKey,
+      assigned_signer_id: assignedSignerId,
+      assignment_source: assignmentSource,
+      recovery_remarks: recoveryRemarks,
+    },
+  });
+  let formTitle = null;
+  try {
+    const formResult = await db.query(
+      `SELECT to_jsonb(source_row) AS source_record
+       FROM "${sourceTable}" source_row
+       WHERE id = $1::uuid`,
+      [sourceRecordId]
+    );
+    if (formResult.rowCount) {
+      formTitle = requestTitle(
+        sourceModule,
+        sourceTable,
+        formResult.rows[0].source_record
+      );
+    }
+  } catch (_) {
+    // Title is optional for the notification body.
+  }
+  await notifyAssignedSigner(db, {
+    assignedSignerId,
+    actorId,
+    sourceModule,
+    sourceTable,
+    sourceRecordId,
+    slotKey,
+    label,
+    formTitle,
+  });
+  return true;
+}
+
+/**
+ * Resolve and snapshot automatic RSP/L&D signers when a form is created.
+ * Unresolved required roles are left unassigned for admin recovery.
+ */
+async function initializeCreatorSourceSignatures(db, user, sourceTable, sourceRecordId) {
+  const sourceModule = sourceModuleForTable(sourceTable);
+  const rules = automaticSlotRules(sourceTable);
+  if (!sourceModule || !rules) return false;
+  if (!UUID_RE.test(String(user?.id || ''))) {
+    throw serviceError('FORBIDDEN', 'An authenticated form creator is required');
+  }
+
+  const config = sourceConfig(sourceModule, sourceTable, sourceRecordId);
+  const formResult = await db.query(
+    `SELECT * FROM "${sourceTable}" WHERE id = $1::uuid`,
+    [sourceRecordId]
+  );
+  if (!formResult.rowCount) {
+    throw serviceError('NOT_FOUND', `${config.moduleConfig.label} form was not found`);
+  }
+  const form = formResult.rows[0];
+  const creatorUserId = form.created_by || user.id;
+  const departmentName = form.department || null;
+  const effectiveDate = todayInHrmsTimezone();
+
+  let assignedAny = false;
+  for (const [slotKey, rule] of Object.entries(rules)) {
+    const signerId = await resolveAutomaticSignerId(db, rule, {
+      creatorUserId,
+      departmentName,
+      effectiveDate,
+    });
+    if (!signerId) continue;
+    const assignmentSource = rule === 'creator' ? 'creator' : 'automatic';
+    const inserted = await insertSourceSignatureAssignment(db, {
+      sourceModule,
+      sourceTable,
+      sourceRecordId,
+      slotKey,
+      label: config.slots[slotKey],
+      assignedSignerId: signerId,
+      createdBy: user.id,
+      assignmentSource,
+      actorId: user.id,
+    });
+    assignedAny = assignedAny || inserted;
+  }
+  return assignedAny;
+}
+
+/**
+ * Admin backfill: re-run automatic signer resolution for existing forms.
+ * Only fills empty slots (ON CONFLICT DO NOTHING); never overrides assigned/signed rows.
+ */
+async function reResolveAutomaticSourceSignatures(pool, user, sourceModule = null) {
+  if (String(user?.role || '').toLowerCase() !== 'admin') {
+    throw serviceError('FORBIDDEN', 'Only an administrator can re-resolve source form signers');
+  }
+  const normalizedModule =
+    sourceModule == null || String(sourceModule).trim() === ''
+      ? null
+      : String(sourceModule).trim().toLowerCase();
+  const modules = normalizedModule
+    ? [normalizedModule]
+    : Object.keys(SOURCE_SIGNATURE_CONFIGS);
+  const summary = {
+    processed: 0,
+    assigned_forms: 0,
+    skipped_forms: 0,
+    by_table: {},
+  };
+
+  for (const moduleKey of modules) {
+    const moduleConfig = SOURCE_SIGNATURE_CONFIGS[moduleKey];
+    if (!moduleConfig) {
+      throw serviceError('NOT_FOUND', 'Source signature module was not found');
+    }
+    for (const sourceTable of Object.keys(moduleConfig.slots)) {
+      if (!automaticSlotRules(sourceTable)) continue;
+      const hasCreatorColumn = creatorOwnedSlotKeys(sourceTable).length > 0;
+      const forms = await pool.query(
+        hasCreatorColumn
+          ? `SELECT id, created_by FROM "${sourceTable}" ORDER BY created_at ASC NULLS LAST, id`
+          : `SELECT id FROM "${sourceTable}" ORDER BY created_at ASC NULLS LAST, id`
+      );
+      const tableStats = { processed: 0, assigned: 0, skipped: 0 };
+      for (const form of forms.rows) {
+        const actorId =
+          hasCreatorColumn && UUID_RE.test(String(form.created_by || ''))
+            ? form.created_by
+            : user.id;
+        const assigned = await initializeCreatorSourceSignatures(
+          pool,
+          { id: actorId, role: user.role },
+          sourceTable,
+          form.id
+        );
+        tableStats.processed += 1;
+        summary.processed += 1;
+        if (assigned) {
+          tableStats.assigned += 1;
+          summary.assigned_forms += 1;
+        } else {
+          tableStats.skipped += 1;
+          summary.skipped_forms += 1;
+        }
+      }
+      summary.by_table[sourceTable] = tableStats;
+    }
+  }
+  return summary;
+}
+
 async function loadContext(db, user, sourceModule, sourceTable, sourceRecordId, { forUpdate = false } = {}) {
   const config = sourceConfig(sourceModule, sourceTable, sourceRecordId);
+  const creatorColumn = creatorOwnedSlotKeys(sourceTable).length ? ', created_by' : '';
   const source = await db.query(
-    `SELECT id FROM "${sourceTable}" WHERE id = $1::uuid${forUpdate ? ' FOR UPDATE' : ''}`,
+    `SELECT id${creatorColumn} FROM "${sourceTable}" WHERE id = $1::uuid${forUpdate ? ' FOR UPDATE' : ''}`,
     [sourceRecordId]
   );
   if (!source.rowCount) throw serviceError('NOT_FOUND', `${config.moduleConfig.label} form was not found`);
   const rows = await db.query(
     `SELECT s.id, s.slot_key, s.label, s.assigned_signer_id,
             assigned.full_name AS assigned_signer_name,
+            s.assignment_source, s.recovery_remarks,
             s.signature_asset_id, s.signed_by, s.signer_name_snapshot,
             s.signed_at, a.mime_type,
             encode(a.image_bytes, 'base64') AS signature_image_base64
@@ -104,7 +530,26 @@ async function loadContext(db, user, sourceModule, sourceTable, sourceRecordId, 
   if (!isAdmin && !isAssigned) {
     throw serviceError('FORBIDDEN', 'Only an assigned signer can open these signature fields');
   }
-  return { ...config, rows: rows.rows, isAdmin };
+  return {
+    ...config,
+    rows: rows.rows,
+    isAdmin,
+    sourceCreatorId: source.rows[0].created_by || null,
+  };
+}
+
+function serializeAssignmentSource(row, sourceTable, sourceCreatorId) {
+  if (row?.assignment_source) return row.assignment_source;
+  const creatorOwned =
+    isCreatorOwnedSlot(sourceTable, row?.slot_key) && Boolean(sourceCreatorId);
+  if (
+    creatorOwned &&
+    String(row?.assigned_signer_id || '') === String(sourceCreatorId)
+  ) {
+    return 'creator';
+  }
+  if (isAutomaticSlot(sourceTable, row?.slot_key)) return 'automatic';
+  return 'manual';
 }
 
 function serialize(context, user, sourceTable, sourceRecordId) {
@@ -116,12 +561,19 @@ function serialize(context, user, sourceTable, sourceRecordId) {
     can_assign: context.isAdmin,
     signatures: Object.entries(context.slots).map(([slotKey, label]) => {
       const row = context.rows.find((candidate) => candidate.slot_key === slotKey);
+      const assignmentSource = row
+        ? serializeAssignmentSource(row, sourceTable, context.sourceCreatorId)
+        : 'manual';
+      const creatorAssigned = assignmentSource === 'creator';
       return {
         id: row?.id || null,
         slot_key: slotKey,
         label,
         assigned_signer_id: row?.assigned_signer_id || '',
         assigned_signer_name: row?.assigned_signer_name || null,
+        assignment_source: assignmentSource,
+        recovery_remarks: row?.recovery_remarks || null,
+        can_assign: context.isAdmin && !creatorAssigned,
         can_sign: String(row?.assigned_signer_id || '') === String(user.id),
         signature_asset_id: row?.signature_asset_id || null,
         signature_image_base64: row?.signature_image_base64 || null,
@@ -139,7 +591,7 @@ async function getSourceSignatures(pool, user, sourceModule, sourceTable, source
     const context = await loadContext(pool, user, sourceModule, sourceTable, sourceRecordId);
     return serialize(context, user, sourceTable, sourceRecordId);
   } catch (error) {
-    if (error?.code === '42P01') {
+    if (error?.code === '42P01' || error?.code === '42703') {
       throw serviceError('UNAVAILABLE', 'Source form e-signatures are not initialized');
     }
     throw error;
@@ -202,20 +654,27 @@ async function listSourceSignatureRequests(pool, user, sourceModule) {
     const requests = [];
     for (const assignment of assignedRows) {
       sourceConfig(normalizedModule, assignment.source_table, assignment.source_record_id);
-      const context = await loadContext(
-        pool,
-        user,
-        normalizedModule,
-        assignment.source_table,
-        assignment.source_record_id
-      );
       const source = await pool.query(
         `SELECT to_jsonb(source_row) AS source_record
          FROM "${assignment.source_table}" source_row
          WHERE id = $1::uuid`,
         [assignment.source_record_id]
       );
+      // Orphaned signature rows (form deleted) must not fail the whole feed.
       if (!source.rowCount) continue;
+      let context;
+      try {
+        context = await loadContext(
+          pool,
+          user,
+          normalizedModule,
+          assignment.source_table,
+          assignment.source_record_id
+        );
+      } catch (error) {
+        if (error?.code === 'NOT_FOUND' || error?.code === 'FORBIDDEN') continue;
+        throw error;
+      }
       const record = source.rows[0].source_record;
       const signatureBundle = serialize(
         context,
@@ -225,13 +684,37 @@ async function listSourceSignatureRequests(pool, user, sourceModule) {
       );
       const requiresSetup =
         context.isAdmin &&
-        signatureBundle.signatures.some((signature) => !signature.assigned_signer_id);
+        signatureBundle.signatures.some(
+          (signature) => !signature.assigned_signer_id
+        );
       const hasPendingSignature = signatureBundle.signatures.some(
         (signature) =>
           signature.can_sign &&
           !(signature.signature_asset_id && signature.signed_at)
       );
-      if (!requiresSetup && !hasPendingSignature) continue;
+      // Admins still need to see forms waiting on someone else's signature
+      // (e.g. Action Brainstorming certified_by after auto-assign).
+      const hasPendingAssignedSignature =
+        context.isAdmin &&
+        signatureBundle.signatures.some(
+          (signature) =>
+            Boolean(signature.assigned_signer_id) &&
+            !(signature.signature_asset_id && signature.signed_at)
+        );
+      // Keep forms visible for the assigned signer after they sign so they can
+      // reopen / confirm their ink (otherwise the card disappears immediately).
+      const isAssignedToViewer = signatureBundle.signatures.some(
+        (signature) =>
+          String(signature.assigned_signer_id || '') === String(user.id)
+      );
+      if (
+        !requiresSetup &&
+        !hasPendingSignature &&
+        !hasPendingAssignedSignature &&
+        !isAssignedToViewer
+      ) {
+        continue;
+      }
       requests.push({
         source_module: normalizedModule,
         source_table: assignment.source_table,
@@ -245,7 +728,7 @@ async function listSourceSignatureRequests(pool, user, sourceModule) {
     }
     return requests;
   } catch (error) {
-    if (error?.code === '42P01') {
+    if (error?.code === '42P01' || error?.code === '42703') {
       throw serviceError(
         'UNAVAILABLE',
         'Source form e-signatures are not initialized'
@@ -262,30 +745,57 @@ async function assignSourceSigner(pool, user, sourceModule, sourceTable, sourceR
   }
   const signerId = String(input.assigned_signer_id || '').trim();
   if (!UUID_RE.test(signerId)) throw serviceError('VALIDATION', 'Select an active signer');
+  const recoveryRemarks = String(input.recovery_remarks || '').trim();
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
     const context = await loadContext(client, user, sourceModule, sourceTable, sourceRecordId, { forUpdate: true });
+    const previous = context.rows.find((row) => row.slot_key === slotKey) || null;
+    const previousSource = previous
+      ? serializeAssignmentSource(previous, sourceTable, context.sourceCreatorId)
+      : null;
+    const overridesProtected =
+      previous &&
+      PROTECTED_ASSIGNMENT_SOURCES.has(previousSource) &&
+      String(previous.assigned_signer_id) !== signerId;
+    if (overridesProtected && recoveryRemarks.length < 5) {
+      throw serviceError(
+        'VALIDATION',
+        previousSource === 'creator'
+          ? 'Prepared by is assigned to the form creator. Recovery reassignment requires remarks.'
+          : 'This signer was assigned automatically. Recovery reassignment requires remarks.'
+      );
+    }
     const active = await client.query(
       'SELECT id, full_name FROM users WHERE id = $1::uuid AND is_active = true',
       [signerId]
     );
     if (!active.rowCount) throw serviceError('VALIDATION', 'Select an active signer');
-    const previous = context.rows.find((row) => row.slot_key === slotKey) || null;
     const label = context.slots[slotKey];
     await client.query(
       `INSERT INTO docutracker_rsp_source_signatures
-         (source_table, source_record_id, slot_key, label, assigned_signer_id, created_by)
-       VALUES ($1, $2::uuid, $3, $4, $5::uuid, $6::uuid)
+         (source_table, source_record_id, slot_key, label, assigned_signer_id,
+          assignment_source, recovery_remarks, created_by)
+       VALUES ($1, $2::uuid, $3, $4, $5::uuid, 'admin_recovery', $6, $7::uuid)
        ON CONFLICT (source_table, source_record_id, slot_key) DO UPDATE SET
          label = EXCLUDED.label,
          assigned_signer_id = EXCLUDED.assigned_signer_id,
+         assignment_source = 'admin_recovery',
+         recovery_remarks = EXCLUDED.recovery_remarks,
          signature_asset_id = CASE WHEN docutracker_rsp_source_signatures.assigned_signer_id = EXCLUDED.assigned_signer_id THEN docutracker_rsp_source_signatures.signature_asset_id ELSE NULL END,
          signed_by = CASE WHEN docutracker_rsp_source_signatures.assigned_signer_id = EXCLUDED.assigned_signer_id THEN docutracker_rsp_source_signatures.signed_by ELSE NULL END,
          signer_name_snapshot = CASE WHEN docutracker_rsp_source_signatures.assigned_signer_id = EXCLUDED.assigned_signer_id THEN docutracker_rsp_source_signatures.signer_name_snapshot ELSE NULL END,
          signed_at = CASE WHEN docutracker_rsp_source_signatures.assigned_signer_id = EXCLUDED.assigned_signer_id THEN docutracker_rsp_source_signatures.signed_at ELSE NULL END,
          updated_at = now()`,
-      [sourceTable, sourceRecordId, slotKey, label, signerId, user.id]
+      [
+        sourceTable,
+        sourceRecordId,
+        slotKey,
+        label,
+        signerId,
+        recoveryRemarks || null,
+        user.id,
+      ]
     );
     await writeGovernanceAudit(client, {
       actorId: user.id,
@@ -294,10 +804,57 @@ async function assignSourceSigner(pool, user, sourceModule, sourceTable, sourceR
       entityId: sourceRecordId,
       documentType: config.sourceModule,
       targetUserId: signerId,
-      beforeState: previous && { slot_key: slotKey, assigned_signer_id: previous.assigned_signer_id },
-      afterState: { source_table: sourceTable, slot_key: slotKey, assigned_signer_id: signerId },
+      beforeState: previous && {
+        slot_key: slotKey,
+        assigned_signer_id: previous.assigned_signer_id,
+        assignment_source: previousSource,
+      },
+      afterState: {
+        source_table: sourceTable,
+        slot_key: slotKey,
+        assigned_signer_id: signerId,
+        assignment_source: 'admin_recovery',
+        recovery_remarks: recoveryRemarks || null,
+      },
     });
+    await syncSourcePrintNameIfEmpty(
+      client,
+      sourceTable,
+      sourceRecordId,
+      slotKey,
+      signerId
+    );
     await client.query('COMMIT');
+    let formTitle = null;
+    try {
+      const formResult = await pool.query(
+        `SELECT to_jsonb(source_row) AS source_record
+         FROM "${sourceTable}" source_row
+         WHERE id = $1::uuid`,
+        [sourceRecordId]
+      );
+      if (formResult.rowCount) {
+        formTitle = requestTitle(
+          sourceModule,
+          sourceTable,
+          formResult.rows[0].source_record
+        );
+      }
+    } catch (_) {
+      // Title is optional for the notification body.
+    }
+    if (!previous || String(previous.assigned_signer_id) !== signerId) {
+      await notifyAssignedSigner(pool, {
+        assignedSignerId: signerId,
+        actorId: user.id,
+        sourceModule,
+        sourceTable,
+        sourceRecordId,
+        slotKey,
+        label,
+        formTitle,
+      });
+    }
   } catch (error) {
     try { await client.query('ROLLBACK'); } catch (_) {}
     throw error;
@@ -376,6 +933,10 @@ function listLdSignatureRequests(pool, user) {
 module.exports = {
   RSP_SIGNATURE_SLOTS,
   LD_SIGNATURE_SLOTS,
+  AUTOMATIC_SOURCE_SLOT_RULES,
+  creatorOwnedSlotKeys,
+  initializeCreatorSourceSignatures,
+  reResolveAutomaticSourceSignatures,
   getSourceSignatures,
   getRspSourceSignatures,
   listSourceSignatureRequests,

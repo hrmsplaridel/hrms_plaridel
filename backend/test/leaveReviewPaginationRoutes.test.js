@@ -49,6 +49,7 @@ test('HR and department-head queues page past 200 and expose complete filter cho
       return { rows: [{ total }] };
     }
     if (statement.startsWith('SELECT DISTINCT COALESCE(')) {
+      seen.push({ statement, params });
       return { rows: rows.map((row) => ({
         user_id: row.user_id,
         employee_name: row.employee_full_name,
@@ -81,6 +82,13 @@ test('HR and department-head queues page past 200 and expose complete filter cho
       assert.equal(first.items.length, 200);
       assert.equal(first.total, 251);
       assert.equal(first.has_more, true);
+      if (!departmentHead) {
+        const reviewQuery = seen.at(-1).statement;
+        assert.match(reviewQuery, /lr\.status IN \('pending', 'pending_hr'\)/);
+        assert.match(reviewQuery, /review_history\.to_status IN \('pending', 'pending_hr'\)/);
+        assert.match(reviewQuery, /review_history\.from_status IN \('pending', 'pending_hr'\)/);
+        assert.doesNotMatch(reviewQuery, /lr\.status <> 'pending_department_head'/);
+      }
 
       const second = await run({ paginated: 'true', limit: '200', offset: '200' });
       assert.equal(second.items.length, 51);
@@ -105,6 +113,9 @@ test('HR and department-head queues page past 200 and expose complete filter cho
       await handler(optionsPath)({ user: { id: 'reviewer' } }, optionsRes);
       assert.equal(optionsRes.body.length, 251);
       assert.equal(optionsRes.body.at(-1).user_id, 'employee-250');
+      if (!departmentHead) {
+        assert.match(seen.at(-1).statement, /review_history\.to_status IN \('pending', 'pending_hr'\)/);
+      }
     }
   } finally {
     clearModule('../src/routes/leaveRoutes');

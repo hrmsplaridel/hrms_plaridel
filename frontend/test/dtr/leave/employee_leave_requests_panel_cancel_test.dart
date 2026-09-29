@@ -6,7 +6,6 @@ import 'package:hrms_plaridel/features/dtr/leave/presentation/employee/shared/wi
 
 void main() {
   const cancellableStatuses = {
-    LeaveRequestStatus.draft,
     LeaveRequestStatus.pending,
     LeaveRequestStatus.pendingDepartmentHead,
     LeaveRequestStatus.pendingHr,
@@ -33,6 +32,7 @@ void main() {
         status: status,
       );
       final cancelled = <LeaveRequest>[];
+      final discarded = <LeaveRequest>[];
       await tester.pumpWidget(
         MaterialApp(
           home: Scaffold(
@@ -49,7 +49,9 @@ void main() {
                 onLoadMore: () {},
                 onEdit: (_) {},
                 onCancel: cancelled.add,
+                onDiscard: discarded.add,
                 onPrint: (_) {},
+                onPreview: (_) {},
               ),
             ),
           ),
@@ -60,6 +62,17 @@ void main() {
       expect(find.text('Leave details'), findsOneWidget);
 
       final cancel = find.widgetWithText(OutlinedButton, 'Cancel');
+      final discard = find.widgetWithText(OutlinedButton, 'Discard');
+      if (status == LeaveRequestStatus.draft) {
+        expect(cancel, findsNothing);
+        expect(discard, findsOneWidget);
+        await tester.tap(discard);
+        await tester.pumpAndSettle();
+        expect(discarded, [same(request)]);
+        expect(cancelled, isEmpty);
+        return;
+      }
+      expect(discard, findsNothing);
       if (cancellableStatuses.contains(status)) {
         expect(cancel, findsOneWidget);
         if (status == LeaveRequestStatus.returned) {

@@ -13,6 +13,7 @@ import 'package:hrms_plaridel/features/dtr/attendance/models/time_record.dart';
 import 'package:hrms_plaridel/features/dtr/reports/data/dtr_export.dart';
 import 'package:hrms_plaridel/features/dtr/reports/data/official_time.dart';
 import 'package:hrms_plaridel/features/dtr/reports/data/dtr_report_readiness.dart';
+import 'package:hrms_plaridel/features/dtr/reports/data/dtr_summary_equivalent_day.dart';
 import 'package:hrms_plaridel/features/dtr/reports/data/dtr_report_request_guard.dart';
 import 'package:hrms_plaridel/features/dtr/reports/data/dtr_report_employee_status.dart';
 import 'package:hrms_plaridel/features/dtr/dtr_provider.dart';
@@ -3217,21 +3218,24 @@ class _DtrReportsState extends State<DtrReports> {
   }) {
     final dark = AppTheme.dashIsDark(context);
     final compactPanel = dense || !fullWidth;
-    final equivalentDay = _hasUnverifiedInactiveAttendance
-        ? null
-        : DtrExport.calculateOfficialTotals(
-            year: _selectedYear,
-            month: _selectedMonth,
-            start: start,
-            end: end,
-            recordsByDate: recordsByDate,
-            scheduledWorkHoursPerDay: _shiftWorkHoursPerDay,
-            workingDays: _shiftWorkingDays,
-            assignmentEffectiveFrom: _assignmentEffectiveFrom,
-            assignmentEffectiveTo: _assignmentEffectiveTo,
-            assignmentSegments: _exportAssignmentSegments,
-            reportableThrough: _reportableThrough,
-          ).equivalentDay;
+    final equivalentDay = summaryEquivalentDay(
+      employeeId: _selectedEmployeeId,
+      hasRecords: hasRecords,
+      hasUnverifiedInactiveAttendance: _hasUnverifiedInactiveAttendance,
+      calculate: () => DtrExport.calculateOfficialTotals(
+        year: _selectedYear,
+        month: _selectedMonth,
+        start: start,
+        end: end,
+        recordsByDate: recordsByDate,
+        scheduledWorkHoursPerDay: _shiftWorkHoursPerDay,
+        workingDays: _shiftWorkingDays,
+        assignmentEffectiveFrom: _assignmentEffectiveFrom,
+        assignmentEffectiveTo: _assignmentEffectiveTo,
+        assignmentSegments: _exportAssignmentSegments,
+        reportableThrough: _reportableThrough,
+      ).equivalentDay,
+    );
     return Container(
       width: fullWidth ? null : 200,
       constraints: fullWidth

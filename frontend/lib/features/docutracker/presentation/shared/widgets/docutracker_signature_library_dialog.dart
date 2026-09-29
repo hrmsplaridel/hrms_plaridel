@@ -59,44 +59,13 @@ class _SignatureLibraryDialogState extends State<_SignatureLibraryDialog> {
   }
 
   Future<String?> _askName({String? initialValue}) async {
-    final controller = TextEditingController(
-      text: initialValue ?? 'Signature ${_assets.length + 1}',
-    );
-    final result = await showDialog<String>(
+    return showDialog<String>(
       context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: Text(initialValue == null ? 'Name Signature' : 'Rename Signature'),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          maxLength: 120,
-          textInputAction: TextInputAction.done,
-          decoration: const InputDecoration(
-            labelText: 'Signature name',
-            hintText: 'Example: Official Signature',
-          ),
-          onSubmitted: (value) {
-            final name = value.trim();
-            if (name.isNotEmpty) Navigator.of(dialogContext).pop(name);
-          },
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () {
-              final name = controller.text.trim();
-              if (name.isNotEmpty) Navigator.of(dialogContext).pop(name);
-            },
-            child: const Text('Save'),
-          ),
-        ],
+      builder: (_) => _SignatureNameDialog(
+        initialValue: initialValue ?? 'Signature ${_assets.length + 1}',
+        isRename: initialValue != null,
       ),
     );
-    controller.dispose();
-    return result;
   }
 
   Future<void> _add() async {
@@ -206,10 +175,7 @@ class _SignatureLibraryDialogState extends State<_SignatureLibraryDialog> {
               ),
               const SizedBox(height: 16),
               if (_error != null) ...[
-                Text(
-                  _error!,
-                  style: const TextStyle(color: Color(0xFFB91C1C)),
-                ),
+                Text(_error!, style: const TextStyle(color: Color(0xFFB91C1C))),
                 const SizedBox(height: 12),
               ],
               Flexible(child: _buildContent()),
@@ -253,7 +219,9 @@ class _SignatureLibraryDialogState extends State<_SignatureLibraryDialog> {
         return Container(
           padding: const EdgeInsets.all(12),
           decoration: BoxDecoration(
-            border: Border.all(color: DocuTrackerTokens.borderSubtleOf(context)),
+            border: Border.all(
+              color: DocuTrackerTokens.borderSubtleOf(context),
+            ),
             borderRadius: BorderRadius.circular(12),
           ),
           child: Row(
@@ -290,6 +258,65 @@ class _SignatureLibraryDialogState extends State<_SignatureLibraryDialog> {
           ),
         );
       },
+    );
+  }
+}
+
+class _SignatureNameDialog extends StatefulWidget {
+  const _SignatureNameDialog({
+    required this.initialValue,
+    required this.isRename,
+  });
+
+  final String initialValue;
+  final bool isRename;
+
+  @override
+  State<_SignatureNameDialog> createState() => _SignatureNameDialogState();
+}
+
+class _SignatureNameDialogState extends State<_SignatureNameDialog> {
+  late final TextEditingController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = TextEditingController(text: widget.initialValue);
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _submit() {
+    final name = _controller.text.trim();
+    if (name.isNotEmpty) Navigator.of(context).pop(name);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Text(widget.isRename ? 'Rename Signature' : 'Name Signature'),
+      content: TextField(
+        controller: _controller,
+        autofocus: true,
+        maxLength: 120,
+        textInputAction: TextInputAction.done,
+        decoration: const InputDecoration(
+          labelText: 'Signature name',
+          hintText: 'Example: Official Signature',
+        ),
+        onSubmitted: (_) => _submit(),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(onPressed: _submit, child: const Text('Save')),
+      ],
     );
   }
 }

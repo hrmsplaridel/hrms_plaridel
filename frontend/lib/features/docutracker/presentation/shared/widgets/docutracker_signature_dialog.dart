@@ -1,13 +1,13 @@
 import 'dart:typed_data';
-import 'dart:ui' as ui;
 
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/rendering.dart';
 
 import 'package:hrms_plaridel/features/docutracker/data/providers/docutracker_provider.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document_builder.dart';
 import 'package:hrms_plaridel/features/docutracker/theme/docutracker_tokens.dart';
+import 'package:hrms_plaridel/features/docutracker/utils/docutracker_signature_ink.dart';
 
 class DocuTrackerSignatureChoice {
   const DocuTrackerSignatureChoice.saved(this.signatureAssetId)
@@ -69,8 +69,8 @@ class _SignatureDialog extends StatefulWidget {
 }
 
 class _SignatureDialogState extends State<_SignatureDialog> {
-  final GlobalKey _drawingKey = GlobalKey();
-  final List<Offset?> _points = <Offset?>[];
+  final DocuTrackerSignatureStrokeController _strokes =
+      DocuTrackerSignatureStrokeController();
   _SignatureMode _mode = _SignatureMode.draw;
   Uint8List? _uploadedBytes;
   String _uploadedMimeType = 'image/png';
@@ -80,12 +80,28 @@ class _SignatureDialogState extends State<_SignatureDialog> {
   bool _saveForReuse = false;
   bool _loadingSaved = false;
   bool _submitting = false;
+  bool _hasInk = false;
   String? _error;
 
   @override
   void initState() {
     super.initState();
+    _strokes.addListener(_onStrokesChanged);
     if (widget.allowSavedSelection) _loadSaved();
+  }
+
+  @override
+  void dispose() {
+    _strokes.removeListener(_onStrokesChanged);
+    _strokes.dispose();
+    super.dispose();
+  }
+
+  void _onStrokesChanged() {
+    final hasInk = _strokes.hasInk;
+    if (hasInk != _hasInk && mounted) {
+      setState(() => _hasInk = hasInk);
+    }
   }
 
   Future<void> _loadSaved() async {
@@ -131,15 +147,19 @@ class _SignatureDialogState extends State<_SignatureDialog> {
     });
   }
 
-  Future<Uint8List?> _captureDrawing() async {
-    final boundary =
-        _drawingKey.currentContext?.findRenderObject()
-            as RenderRepaintBoundary?;
-    if (boundary == null || _points.whereType<Offset>().isEmpty) return null;
-    final image = await boundary.toImage(pixelRatio: 3);
-    final data = await image.toByteData(format: ui.ImageByteFormat.png);
-    return data?.buffer.asUint8List();
+  void _undoLastStroke() {
+    if (!_hasInk) return;
+    _strokes.undoLastStroke();
+    if (_error != null) setState(() => _error = null);
   }
+
+  void _clearDrawing() {
+    _strokes.clear();
+    if (_error != null) setState(() => _error = null);
+  }
+
+  Future<Uint8List?> _captureDrawing() =>
+      encodeDocuTrackerSignaturePng(_strokes.points);
 
   Future<void> _submit() async {
     setState(() {
@@ -198,72 +218,92 @@ class _SignatureDialogState extends State<_SignatureDialog> {
     }
   }
 
+  double _drawingPadHeight(Size mediaSize) {
+    final isCompact = mediaSize.width < 600;
+    if (isCompact) {
+      return (mediaSize.height * 0.28).clamp(200.0, 280.0);
+    }
+    return (mediaSize.height * 0.36).clamp(300.0, 420.0);
+  }
+
+  double _dialogWidth(Size mediaSize) {
+    if (mediaSize.width < 480) {
+      return mediaSize.width - 32;
+    }
+    return mediaSize.width < 900 ? 640.0 : 720.0;
+  }
+
   @override
   Widget build(BuildContext context) {
+    final mediaSize = MediaQuery.sizeOf(context);
+    final dialogWidth = _dialogWidth(mediaSize);
+
     return AlertDialog(
       title: Text(widget.title),
       content: SizedBox(
-        width: 620,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            SegmentedButton<_SignatureMode>(
-              segments: <ButtonSegment<_SignatureMode>>[
-                const ButtonSegment(
-                  value: _SignatureMode.draw,
-                  icon: Icon(Icons.draw_outlined),
-                  label: Text('Draw'),
-                ),
-                const ButtonSegment(
-                  value: _SignatureMode.upload,
-                  icon: Icon(Icons.upload_file_outlined),
-                  label: Text('Upload'),
-                ),
-                if (widget.allowSavedSelection)
+        width: dialogWidth,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              SegmentedButton<_SignatureMode>(
+                segments: <ButtonSegment<_SignatureMode>>[
                   const ButtonSegment(
-                    value: _SignatureMode.saved,
-                    icon: Icon(Icons.bookmark_outline),
-                    label: Text('Saved'),
+                    value: _SignatureMode.draw,
+                    icon: Icon(Icons.draw_outlined),
+                    label: Text('Draw'),
                   ),
-              ],
-              selected: <_SignatureMode>{_mode},
-              onSelectionChanged: (selection) {
-                setState(() {
-                  _mode = selection.first;
-                  _error = null;
-                });
-              },
-            ),
-            const SizedBox(height: 18),
-            if (_mode == _SignatureMode.draw) _buildDrawing(),
-            if (_mode == _SignatureMode.upload) _buildUpload(),
-            if (_mode == _SignatureMode.saved) _buildSaved(),
-            if (_mode != _SignatureMode.saved &&
-                !widget.forceSaveForReuse) ...[
-              const SizedBox(height: 12),
-              CheckboxListTile(
-                contentPadding: EdgeInsets.zero,
-                value: _saveForReuse,
-                onChanged: (value) =>
-                    setState(() => _saveForReuse = value == true),
-                title: const Text('Save this signature for future use'),
-                subtitle: const Text(
-                  'Only your authenticated account can reuse it.',
+                  const ButtonSegment(
+                    value: _SignatureMode.upload,
+                    icon: Icon(Icons.upload_file_outlined),
+                    label: Text('Upload'),
+                  ),
+                  if (widget.allowSavedSelection)
+                    const ButtonSegment(
+                      value: _SignatureMode.saved,
+                      icon: Icon(Icons.bookmark_outline),
+                      label: Text('Saved'),
+                    ),
+                ],
+                selected: <_SignatureMode>{_mode},
+                onSelectionChanged: (selection) {
+                  setState(() {
+                    _mode = selection.first;
+                    _error = null;
+                  });
+                },
+              ),
+              const SizedBox(height: 18),
+              if (_mode == _SignatureMode.draw) _buildDrawing(mediaSize),
+              if (_mode == _SignatureMode.upload) _buildUpload(),
+              if (_mode == _SignatureMode.saved) _buildSaved(),
+              if (_mode != _SignatureMode.saved &&
+                  !widget.forceSaveForReuse) ...[
+                const SizedBox(height: 12),
+                CheckboxListTile(
+                  contentPadding: EdgeInsets.zero,
+                  value: _saveForReuse,
+                  onChanged: (value) =>
+                      setState(() => _saveForReuse = value == true),
+                  title: const Text('Save this signature for future use'),
+                  subtitle: const Text(
+                    'Only your authenticated account can reuse it.',
+                  ),
+                  controlAffinity: ListTileControlAffinity.leading,
                 ),
-                controlAffinity: ListTileControlAffinity.leading,
-              ),
-            ] else if (widget.forceSaveForReuse) ...[
-              const SizedBox(height: 12),
-              const Text(
-                'This signature will be saved in My Signatures for future use.',
-              ),
+              ] else if (widget.forceSaveForReuse) ...[
+                const SizedBox(height: 12),
+                const Text(
+                  'This signature will be saved in My Signatures for future use.',
+                ),
+              ],
+              if (_error != null) ...[
+                const SizedBox(height: 10),
+                Text(_error!, style: const TextStyle(color: Colors.red)),
+              ],
             ],
-            if (_error != null) ...[
-              const SizedBox(height: 10),
-              Text(_error!, style: const TextStyle(color: Colors.red)),
-            ],
-          ],
+          ),
         ),
       ),
       actions: [
@@ -280,12 +320,20 @@ class _SignatureDialogState extends State<_SignatureDialog> {
     );
   }
 
-  Widget _buildDrawing() {
+  Widget _buildDrawing(Size mediaSize) {
+    final padHeight = _drawingPadHeight(mediaSize);
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
+        Text(
+          'Draw with your pen or mouse anywhere in the pad.',
+          style: TextStyle(color: DocuTrackerTokens.textMuted, fontSize: 13),
+        ),
+        const SizedBox(height: 8),
         Container(
-          height: 190,
+          key: const Key('docutracker_signature_pad'),
+          height: padHeight,
           decoration: BoxDecoration(
             color: Colors.white,
             border: Border.all(color: DocuTrackerTokens.borderSubtle),
@@ -294,26 +342,69 @@ class _SignatureDialogState extends State<_SignatureDialog> {
           clipBehavior: Clip.antiAlias,
           child: GestureDetector(
             behavior: HitTestBehavior.opaque,
-            onPanStart: (details) =>
-                setState(() => _points.add(details.localPosition)),
-            onPanUpdate: (details) =>
-                setState(() => _points.add(details.localPosition)),
-            onPanEnd: (_) => setState(() => _points.add(null)),
+            dragStartBehavior: DragStartBehavior.down,
+            onPanStart: (details) {
+              if (_error != null) setState(() => _error = null);
+              _strokes.beginStroke(details.localPosition);
+            },
+            onPanUpdate: (details) {
+              _strokes.appendStroke(details.localPosition);
+            },
+            onPanEnd: (_) => _strokes.endStroke(),
+            onPanCancel: _strokes.endStroke,
             child: RepaintBoundary(
-              key: _drawingKey,
               child: CustomPaint(
-                painter: _SignaturePainter(_points),
+                painter: _SignaturePadPainter(_strokes),
+                isComplex: true,
+                willChange: true,
                 child: const SizedBox.expand(),
               ),
             ),
           ),
         ),
-        Align(
-          alignment: Alignment.centerRight,
-          child: TextButton.icon(
-            onPressed: () => setState(_points.clear),
-            icon: const Icon(Icons.refresh_rounded),
-            label: const Text('Clear'),
+        const SizedBox(height: 10),
+        Wrap(
+          spacing: 4,
+          runSpacing: 0,
+          children: [
+            TextButton.icon(
+              key: const Key('docutracker_signature_undo'),
+              onPressed: _hasInk ? _undoLastStroke : null,
+              icon: const Icon(Icons.undo_rounded),
+              label: const Text('Undo Last Stroke'),
+            ),
+            TextButton.icon(
+              key: const Key('docutracker_signature_clear'),
+              onPressed: _hasInk ? _clearDrawing : null,
+              icon: const Icon(Icons.refresh_rounded),
+              label: const Text('Clear'),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        Text(
+          'Preview (cropped & centered)',
+          style: TextStyle(
+            color: DocuTrackerTokens.textMuted,
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        const SizedBox(height: 6),
+        Container(
+          key: const Key('docutracker_signature_preview'),
+          height: 96,
+          decoration: BoxDecoration(
+            color: const Color(0xFFF3F4F6),
+            border: Border.all(color: DocuTrackerTokens.borderSubtle),
+            borderRadius: BorderRadius.circular(10),
+          ),
+          clipBehavior: Clip.antiAlias,
+          child: RepaintBoundary(
+            child: CustomPaint(
+              painter: _SignaturePreviewPainter(_strokes),
+              child: const SizedBox.expand(),
+            ),
           ),
         ),
       ],
@@ -398,27 +489,37 @@ class _SignatureDialogState extends State<_SignatureDialog> {
   }
 }
 
-class _SignaturePainter extends CustomPainter {
-  const _SignaturePainter(this.points);
+class _SignaturePadPainter extends CustomPainter {
+  _SignaturePadPainter(this.controller) : super(repaint: controller);
 
-  final List<Offset?> points;
+  final DocuTrackerSignatureStrokeController controller;
 
   @override
   void paint(Canvas canvas, Size size) {
-    final paint = Paint()
-      ..color = const Color(0xFF111827)
-      ..strokeCap = StrokeCap.round
-      ..strokeJoin = StrokeJoin.round
-      ..strokeWidth = 2.4;
-    for (var index = 0; index < points.length - 1; index++) {
-      final current = points[index];
-      final next = points[index + 1];
-      if (current != null && next != null) {
-        canvas.drawLine(current, next, paint);
-      }
-    }
+    paintDocuTrackerSignatureInk(canvas, controller.points);
   }
 
   @override
-  bool shouldRepaint(covariant _SignaturePainter oldDelegate) => true;
+  bool shouldRepaint(covariant _SignaturePadPainter oldDelegate) =>
+      oldDelegate.controller != controller;
+}
+
+class _SignaturePreviewPainter extends CustomPainter {
+  _SignaturePreviewPainter(this.controller)
+    : super(repaint: controller.previewListenable);
+
+  final DocuTrackerSignatureStrokeController controller;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final bounds = docuTrackerSignatureInkBounds(controller.points);
+    if (bounds == null) return;
+    final layout = docuTrackerSignatureInkLayout(bounds, size);
+    if (layout == null) return;
+    paintDocuTrackerSignatureInk(canvas, controller.points, layout: layout);
+  }
+
+  @override
+  bool shouldRepaint(covariant _SignaturePreviewPainter oldDelegate) =>
+      oldDelegate.controller != controller;
 }

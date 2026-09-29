@@ -702,6 +702,7 @@ String? notificationCategoryLabel(String category) {
   if (c == 'training') return 'Training';
   if (c == 'overtime') return 'Overtime';
   if (c == 'dtr') return 'DTR';
+  if (c == 'form_signature') return 'E-Sign';
   return null;
 }
 
@@ -709,6 +710,13 @@ NotificationTypeVisual notificationVisualFor(String type, String category) {
   final t = type.toLowerCase();
   final cat = category.toLowerCase();
 
+  if (cat == 'form_signature' || t.contains('source_signature')) {
+    return const NotificationTypeVisual(
+      icon: Icons.draw_rounded,
+      iconColor: Color(0xFFC2410C),
+      accentBg: Color(0xFFFFF7ED),
+    );
+  }
   if (cat.contains('mayor') ||
       cat.contains('endorsement') ||
       t.contains('endorsement') ||

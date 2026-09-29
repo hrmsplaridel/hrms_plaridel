@@ -34,6 +34,7 @@ void main() {
               onEdit: (_) {},
               onCancel: (_) {},
               onPrint: (_) {},
+              onPreview: (_) {},
             ),
           ),
         ),

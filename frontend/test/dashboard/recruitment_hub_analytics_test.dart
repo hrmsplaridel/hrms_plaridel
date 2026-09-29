@@ -1,7 +1,11 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:hrms_plaridel/features/dashboard/presentation/admin/desktop/pages/admin_dashboard_desktop.dart';
 import 'package:hrms_plaridel/features/dashboard/presentation/admin/desktop/widgets/recruitment_hub_analytics.dart';
 import 'package:hrms_plaridel/features/dashboard/presentation/admin/desktop/widgets/recruitment_monitoring_stats.dart';
+import 'package:hrms_plaridel/features/recruitment/models/job_vacancy_announcement.dart';
 import 'package:hrms_plaridel/features/recruitment/models/recruitment_application.dart';
 
 void main() {
@@ -54,5 +58,41 @@ void main() {
     expect(find.text('Documenter'), findsWidgets);
     expect(find.text('Requires Attention'), findsOneWidget);
     expect(find.text('Pending document review'), findsOneWidget);
+  });
+
+  testWidgets('overview does not wait for optional vacancy request', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1400, 1600);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final vacancyRequest = Completer<JobVacancyAnnouncement>();
+    addTearDown(() {
+      if (!vacancyRequest.isCompleted) {
+        vacancyRequest.complete(
+          const JobVacancyAnnouncement(hasVacancies: false),
+        );
+      }
+    });
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SingleChildScrollView(
+            child: RecruitmentOverviewCard(
+              loadApplications: () async => const [],
+              loadAnnouncement: () => vacancyRequest.future,
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    expect(find.text('Recruitment Overview'), findsOneWidget);
+    expect(find.text('Total Applicants'), findsOneWidget);
+    expect(find.byType(RecruitmentHubAnalyticsPanel), findsOneWidget);
   });
 }

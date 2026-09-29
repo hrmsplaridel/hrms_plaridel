@@ -32,6 +32,7 @@ function positionRow() {
     description: null,
     department_id: IDS.oldDepartment,
     is_department_head: false,
+    is_leave_final_reviewer: false,
     is_active: true,
   };
 }
@@ -68,6 +69,7 @@ test('position audit snapshot includes the managed Department Head period', () =
     description: null,
     department_id: IDS.oldDepartment,
     is_department_head: true,
+    is_leave_final_reviewer: false,
     department_head_period: {
       id: period.id,
       department_id: IDS.oldDepartment,
@@ -81,6 +83,10 @@ test('position audit snapshot includes the managed Department Head period', () =
 
 test('position audit distinguishes lifecycle and authority changes', () => {
   const before = positionAuditSnapshot(positionRow());
+  assert.equal(
+    positionAuditAction(before, { ...before, is_leave_final_reviewer: true }),
+    'position_leave_final_reviewer_changed'
+  );
   const headPeriod = {
     id: '55555555-5555-4555-8555-555555555555',
     department_id: IDS.oldDepartment,

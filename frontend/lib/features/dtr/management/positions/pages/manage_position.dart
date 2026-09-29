@@ -16,6 +16,7 @@ class _PositionRecord {
     this.departmentId,
     this.departmentName,
     required this.isDepartmentHead,
+    required this.isLeaveFinalReviewer,
     required this.isActive,
     required this.canPermanentlyDelete,
     this.departmentHeadPeriodId,
@@ -31,6 +32,7 @@ class _PositionRecord {
   final String? departmentId;
   final String? departmentName;
   final bool isDepartmentHead;
+  final bool isLeaveFinalReviewer;
   final bool isActive;
   final bool canPermanentlyDelete;
   final String? departmentHeadPeriodId;
@@ -74,6 +76,18 @@ class _ManagePositionState extends State<ManagePosition> {
   _PositionRecord? _selectedPosition;
   String? _selectedDepartmentId;
   bool _isDepartmentHead = false;
+  bool _headConflictLoading = false;
+  String? _headConflictName;
+  String? _headConflictError;
+  int _headConflictRequest = 0;
+  bool _isLeaveFinalReviewer = false;
+  bool _finalReviewersLoading = false;
+  bool _finalReviewersSaving = false;
+  String? _finalReviewerEffectiveDate;
+  String? _finalPrimaryId;
+  String? _finalPrimaryName;
+  List<String> _finalBackupIds = [];
+  List<Map<String, dynamic>> _finalReviewerCandidates = [];
   String? _departmentHeadPeriodId;
   DateTime? _departmentHeadEffectiveFrom;
   DateTime? _departmentHeadEffectiveTo;
@@ -114,6 +128,43 @@ class _ManagePositionState extends State<ManagePosition> {
   String _displayDate(DateTime? value) =>
       _apiDate(value) ?? 'Official HRMS date';
 
+  Future<void> _loadDepartmentHeadConflict() async {
+    final request = ++_headConflictRequest;
+    final departmentId = _selectedDepartmentId;
+    _updatePositionFormState(() {
+      _headConflictName = null;
+      _headConflictError = null;
+      _headConflictLoading = departmentId != null;
+    });
+    if (departmentId == null) return;
+    try {
+      final response = await ApiClient.instance.get<Map<String, dynamic>>(
+        '/api/positions/department-head-conflict',
+        queryParameters: {
+          'department_id': departmentId,
+          if (_selectedPosition != null)
+            'exclude_position_id': _selectedPosition!.id,
+          if (_departmentHeadEffectiveFrom != null)
+            'effective_from': _apiDate(_departmentHeadEffectiveFrom),
+          if (_departmentHeadEffectiveTo != null)
+            'effective_to': _apiDate(_departmentHeadEffectiveTo),
+        },
+      );
+      if (!mounted || request != _headConflictRequest) return;
+      _updatePositionFormState(() {
+        _headConflictName = response.data?['position_name'] as String?;
+        _headConflictLoading = false;
+      });
+    } catch (_) {
+      if (!mounted || request != _headConflictRequest) return;
+      _updatePositionFormState(() {
+        _headConflictError =
+            'Could not check the current designation. Try again.';
+        _headConflictLoading = false;
+      });
+    }
+  }
+
   Future<void> _pickDepartmentHeadDate({required bool isStart}) async {
     final current = isStart
         ? _departmentHeadEffectiveFrom
@@ -136,6 +187,7 @@ class _ManagePositionState extends State<ManagePosition> {
         _departmentHeadEffectiveTo = picked;
       }
     });
+    unawaited(_loadDepartmentHeadConflict());
   }
 
   BoxDecoration _filterDecoration(BuildContext context) => BoxDecoration(
@@ -158,6 +210,95 @@ class _ManagePositionState extends State<ManagePosition> {
       drawerSetState(() {});
     } catch (_) {
       _drawerSetState = null;
+    }
+  }
+
+  Future<void> _loadFinalReviewers() async {
+    _updatePositionFormState(() => _finalReviewersLoading = true);
+    try {
+      final response = await ApiClient.instance.get<Map<String, dynamic>>(
+        '/api/positions/leave-final-reviewers',
+        queryParameters: _finalReviewerEffectiveDate == null
+            ? null
+            : {'effective_date': _finalReviewerEffectiveDate},
+      );
+      final data = response.data ?? const <String, dynamic>{};
+      if (!mounted) return;
+      _updatePositionFormState(() {
+        _finalReviewerEffectiveDate = data['effective_date']?.toString();
+        final primary = data['primary'];
+        _finalPrimaryId = primary is Map ? primary['id']?.toString() : null;
+        _finalPrimaryName = primary is Map ? primary['name']?.toString() : null;
+        _finalBackupIds = (data['backups'] as List<dynamic>? ?? const [])
+            .whereType<Map>()
+            .map((row) => row['id']?.toString() ?? '')
+            .where((id) => id.isNotEmpty)
+            .toList();
+        _finalReviewerCandidates =
+            (data['eligible_employees'] as List<dynamic>? ?? const [])
+                .whereType<Map>()
+                .map((row) => Map<String, dynamic>.from(row))
+                .toList();
+      });
+    } on DioException catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              _apiErrorMessage(error, 'Failed to load final reviewers'),
+            ),
+          ),
+        );
+      }
+    } finally {
+      _updatePositionFormState(() => _finalReviewersLoading = false);
+    }
+  }
+
+  Future<void> _pickFinalReviewerDate() async {
+    final initial =
+        DateTime.tryParse(_finalReviewerEffectiveDate ?? '') ?? DateTime.now();
+    final selected = await showDatePicker(
+      context: context,
+      initialDate: initial,
+      firstDate: DateTime(2000),
+      lastDate: DateTime(2100),
+    );
+    if (selected == null) return;
+    _updatePositionFormState(
+      () => _finalReviewerEffectiveDate = _apiDate(selected),
+    );
+    await _loadFinalReviewers();
+  }
+
+  Future<void> _saveFinalReviewerBackups() async {
+    if (_finalReviewersSaving || _finalReviewerEffectiveDate == null) return;
+    _updatePositionFormState(() => _finalReviewersSaving = true);
+    try {
+      await ApiClient.instance.put(
+        '/api/positions/leave-final-reviewers',
+        data: {
+          'effective_from': _finalReviewerEffectiveDate,
+          'employee_ids': _finalBackupIds,
+        },
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Final leave reviewer backups saved.')),
+      );
+      await _loadFinalReviewers();
+    } on DioException catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              _apiErrorMessage(error, 'Failed to save final reviewers'),
+            ),
+          ),
+        );
+      }
+    } finally {
+      _updatePositionFormState(() => _finalReviewersSaving = false);
     }
   }
 
@@ -275,6 +416,7 @@ class _ManagePositionState extends State<ManagePosition> {
           departmentId: m['department_id'] as String?,
           departmentName: deptName,
           isDepartmentHead: m['is_department_head'] as bool? ?? false,
+          isLeaveFinalReviewer: m['is_leave_final_reviewer'] as bool? ?? false,
           departmentHeadPeriodId: m['department_head_period_id'] as String?,
           departmentHeadEffectiveFrom: _parseDate(
             m['department_head_effective_from'],
@@ -348,6 +490,8 @@ class _ManagePositionState extends State<ManagePosition> {
       _descriptionController.text = p.description ?? '';
       _selectedDepartmentId = p.departmentId;
       _isDepartmentHead = p.isDepartmentHead;
+      _isLeaveFinalReviewer = p.isLeaveFinalReviewer;
+      _finalReviewerEffectiveDate = null;
       _departmentHeadPeriodId = p.departmentHeadPeriodId;
       _departmentHeadEffectiveFrom = p.departmentHeadEffectiveFrom;
       _departmentHeadEffectiveTo = p.departmentHeadEffectiveTo;
@@ -362,6 +506,12 @@ class _ManagePositionState extends State<ManagePosition> {
       _descriptionController.clear();
       _selectedDepartmentId = null;
       _isDepartmentHead = false;
+      _isLeaveFinalReviewer = false;
+      _finalReviewerEffectiveDate = null;
+      _finalPrimaryId = null;
+      _finalPrimaryName = null;
+      _finalBackupIds = [];
+      _finalReviewerCandidates = [];
       _departmentHeadPeriodId = null;
       _departmentHeadEffectiveFrom = null;
       _departmentHeadEffectiveTo = null;
@@ -410,6 +560,7 @@ class _ManagePositionState extends State<ManagePosition> {
               : _descriptionController.text.trim(),
           'department_id': _selectedDepartmentId,
           'is_department_head': _isDepartmentHead,
+          'is_leave_final_reviewer': _isLeaveFinalReviewer,
           'department_head_effective_from': _isDepartmentHead
               ? _apiDate(_departmentHeadEffectiveFrom)
               : null,
@@ -487,6 +638,7 @@ class _ManagePositionState extends State<ManagePosition> {
               : _descriptionController.text.trim(),
           'department_id': _selectedDepartmentId,
           'is_department_head': _isDepartmentHead,
+          'is_leave_final_reviewer': _isLeaveFinalReviewer,
           'department_head_period_id': _departmentHeadPeriodId,
           'department_head_effective_from': _isDepartmentHead
               ? _apiDate(_departmentHeadEffectiveFrom)
@@ -747,6 +899,10 @@ class _ManagePositionState extends State<ManagePosition> {
     } else {
       _selectPosition(position);
     }
+    if (position?.isLeaveFinalReviewer == true) {
+      _loadFinalReviewers();
+    }
+    unawaited(_loadDepartmentHeadConflict());
 
     try {
       final result = await showGeneralDialog<bool>(
@@ -795,6 +951,7 @@ class _ManagePositionState extends State<ManagePosition> {
       );
       positionDeleted = result ?? false;
     } finally {
+      _headConflictRequest++;
       _drawerSetState = null;
     }
     if (positionDeleted && mounted) {
@@ -1403,16 +1560,24 @@ class _ManagePositionState extends State<ManagePosition> {
               ),
             ),
           ],
-          onChanged: (v) => _updatePositionFormState(() {
-            _selectedDepartmentId = v;
-            if (v == null) _isDepartmentHead = false;
-          }),
+          onChanged: (v) {
+            _updatePositionFormState(() {
+              _selectedDepartmentId = v;
+              if (v == null) _isDepartmentHead = false;
+            });
+            unawaited(_loadDepartmentHeadConflict());
+          },
         ),
         const SizedBox(height: 14),
         SwitchListTile.adaptive(
           contentPadding: EdgeInsets.zero,
           value: _isDepartmentHead,
-          onChanged: _selectedDepartmentId == null
+          onChanged:
+              _selectedDepartmentId == null ||
+                  (!_isDepartmentHead &&
+                      (_headConflictLoading ||
+                          _headConflictError != null ||
+                          _headConflictName != null))
               ? null
               : (value) => _updatePositionFormState(() {
                   _isDepartmentHead = value;
@@ -1426,11 +1591,16 @@ class _ManagePositionState extends State<ManagePosition> {
             style: AppTheme.dashFieldTextStyle(context),
           ),
           subtitle: Text(
-            'The employee assigned to this position becomes the primary reviewer.',
+            _headConflictName != null
+                ? '${_headConflictName!} already holds this department designation for the selected dates. Choose a non-overlapping effective date or end that designation first.'
+                : _headConflictError ??
+                      (_headConflictLoading
+                          ? 'Checking department designation...'
+                          : 'The employee assigned to this position becomes the primary reviewer.'),
             style: TextStyle(fontSize: 12, color: _mutedColor(context)),
           ),
         ),
-        if (_isDepartmentHead) ...[
+        if (_isDepartmentHead || _headConflictName != null) ...[
           const SizedBox(height: 12),
           Row(
             children: [
@@ -1440,9 +1610,12 @@ class _ManagePositionState extends State<ManagePosition> {
                   value: _departmentHeadEffectiveFrom,
                   onTap: () => _pickDepartmentHeadDate(isStart: true),
                   allowClear: _departmentHeadEffectiveFrom != null,
-                  onClear: () => _updatePositionFormState(
-                    () => _departmentHeadEffectiveFrom = null,
-                  ),
+                  onClear: () {
+                    _updatePositionFormState(
+                      () => _departmentHeadEffectiveFrom = null,
+                    );
+                    unawaited(_loadDepartmentHeadConflict());
+                  },
                 ),
               ),
               const SizedBox(width: 12),
@@ -1452,9 +1625,12 @@ class _ManagePositionState extends State<ManagePosition> {
                   value: _departmentHeadEffectiveTo,
                   onTap: () => _pickDepartmentHeadDate(isStart: false),
                   allowClear: _departmentHeadEffectiveTo != null,
-                  onClear: () => _updatePositionFormState(
-                    () => _departmentHeadEffectiveTo = null,
-                  ),
+                  onClear: () {
+                    _updatePositionFormState(
+                      () => _departmentHeadEffectiveTo = null,
+                    );
+                    unawaited(_loadDepartmentHeadConflict());
+                  },
                 ),
               ),
             ],
@@ -1489,6 +1665,90 @@ class _ManagePositionState extends State<ManagePosition> {
                 visualDensity: VisualDensity.compact,
               );
             }).toList(),
+          ),
+        ],
+        const SizedBox(height: 12),
+        SwitchListTile.adaptive(
+          contentPadding: EdgeInsets.zero,
+          value: _isLeaveFinalReviewer,
+          onChanged: (value) =>
+              _updatePositionFormState(() => _isLeaveFinalReviewer = value),
+          title: Text(
+            'Official Leave Final Reviewer',
+            style: AppTheme.dashFieldTextStyle(context),
+          ),
+        ),
+        if (_isLeaveFinalReviewer &&
+            _selectedPosition?.isLeaveFinalReviewer == true) ...[
+          const SizedBox(height: 16),
+          Text(
+            'Final Leave Reviewers',
+            style: TextStyle(
+              color: _headingColor(context),
+              fontSize: 16,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 12),
+          OutlinedButton.icon(
+            onPressed: _pickFinalReviewerDate,
+            icon: const Icon(Icons.calendar_today_outlined),
+            label: Text(_finalReviewerEffectiveDate ?? 'Effective date'),
+          ),
+          const SizedBox(height: 10),
+          Text(
+            'Primary reviewer',
+            style: TextStyle(color: _mutedColor(context)),
+          ),
+          Text(
+            _finalPrimaryName ?? 'No active employee assigned',
+            style: AppTheme.dashFieldTextStyle(context),
+          ),
+          const SizedBox(height: 14),
+          Text(
+            'Backup reviewers',
+            style: TextStyle(color: _headingColor(context)),
+          ),
+          const SizedBox(height: 8),
+          if (_finalReviewersLoading)
+            const Center(child: CircularProgressIndicator())
+          else
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: _finalReviewerCandidates
+                  .where(
+                    (candidate) =>
+                        candidate['id']?.toString() != _finalPrimaryId,
+                  )
+                  .map((candidate) {
+                    final id = candidate['id'].toString();
+                    final rank = _finalBackupIds.indexOf(id);
+                    return FilterChip(
+                      label: Text(
+                        rank < 0
+                            ? candidate['name']?.toString() ?? id
+                            : '${rank + 1} ${candidate['name'] ?? id}',
+                      ),
+                      selected: rank >= 0,
+                      onSelected: (selected) => _updatePositionFormState(() {
+                        if (selected && _finalBackupIds.length < 5) {
+                          _finalBackupIds.add(id);
+                        } else if (!selected) {
+                          _finalBackupIds.remove(id);
+                        }
+                      }),
+                    );
+                  })
+                  .toList(),
+            ),
+          const SizedBox(height: 12),
+          FilledButton.icon(
+            onPressed: _finalReviewersSaving || _finalReviewersLoading
+                ? null
+                : _saveFinalReviewerBackups,
+            icon: const Icon(Icons.save_outlined),
+            label: const Text('Save Reviewers'),
           ),
         ],
         const SizedBox(height: 20),

@@ -541,6 +541,20 @@ class ApiLeaveRepository implements LeaveRepository {
   }
 
   @override
+  Future<void> discardDraft({
+    required String requestId,
+    required String userId,
+  }) async {
+    try {
+      await ApiClient.instance.patch<Map<String, dynamic>>(
+        '/api/leave/${Uri.encodeComponent(requestId)}/discard',
+      );
+    } on DioException catch (e) {
+      throw Exception(_messageFromDio(e));
+    }
+  }
+
+  @override
   Future<LeaveRequest> attachFile({
     required String requestId,
     required List<int> fileBytes,

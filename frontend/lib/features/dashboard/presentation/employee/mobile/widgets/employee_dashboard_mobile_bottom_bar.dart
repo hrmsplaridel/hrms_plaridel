@@ -38,7 +38,11 @@ class EmployeeDashboardMobileBottomBar extends StatelessWidget {
     final docUnread = context.select<DocuTrackerProvider, int>(
       (p) => p.unreadNotificationsCount,
     );
+    final pendingSignatures = context.select<DocuTrackerProvider, int>(
+      (p) => p.pendingSourceSignatureActionCount,
+    );
     final unread = hrmsUnread + docUnread;
+    final menuBadge = pendingSignatures;
 
     return ColoredBox(
       color: canvas,
@@ -74,6 +78,7 @@ class EmployeeDashboardMobileBottomBar extends StatelessWidget {
                       icon: Icons.menu_rounded,
                       label: 'Menu',
                       selected: menuActive,
+                      badgeCount: menuBadge,
                       onTap: onMenu,
                     ),
                   ),

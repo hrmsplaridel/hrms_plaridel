@@ -16,7 +16,7 @@ import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/d
 /// Mobile behavior:
 /// - no admin surfaces
 /// - no heavy data tables
-/// - only current user's own documents
+/// - creator, current holder, routing assignees, and signature assignees only
 class MobileEmployeePortal extends StatefulWidget {
   const MobileEmployeePortal({super.key});
 

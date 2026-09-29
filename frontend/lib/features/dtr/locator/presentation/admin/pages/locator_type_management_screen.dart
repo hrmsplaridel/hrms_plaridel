@@ -1,7 +1,12 @@
+import 'dart:async';
+
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:provider/provider.dart';
 
 import 'package:hrms_plaridel/core/api/client.dart';
+import 'package:hrms_plaridel/core/services/app_realtime_provider.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/features/dtr/locator/data/repositories/locator_slip_data_cache.dart';
 import 'package:hrms_plaridel/features/dtr/locator/models/locator_request_type.dart';
@@ -17,6 +22,12 @@ class LocatorTypeManagementScreen extends StatefulWidget {
 class _LocatorTypeManagementScreenState
     extends State<LocatorTypeManagementScreen> {
   static const int _typesPerPage = 8;
+  static const int _codeMaxLength = 64;
+  static const int _labelMaxLength = 100;
+  static const int _shortLabelMaxLength = 40;
+  static const int _locationLabelMaxLength = 100;
+  static const int _locationHintMaxLength = 200;
+  static const int _dtrLabelMaxLength = 40;
 
   final _formKey = GlobalKey<FormState>();
   final _codeController = TextEditingController();
@@ -28,14 +39,16 @@ class _LocatorTypeManagementScreenState
   final _dtrPrintLabelController = TextEditingController();
   final _sortOrderController = TextEditingController();
 
-  List<LocatorRequestType> _items = LocatorRequestType.values;
+  List<LocatorRequestType> _items = [];
   LocatorRequestType? _selected;
   int _page = 0;
   bool _loading = true;
   bool _saving = false;
+  String? _loadError;
   bool _requiresAttachment = false;
   bool _isActive = true;
   String _coverageMode = 'manual';
+  StreamSubscription<AppRealtimeEvent>? _locatorTypeRealtimeSub;
 
   @override
   void initState() {
@@ -44,7 +57,21 @@ class _LocatorTypeManagementScreenState
   }
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _locatorTypeRealtimeSub ??= context
+        .read<AppRealtimeProvider>()
+        .events
+        .listen((event) {
+          if (event.name != 'locator_type_updated') return;
+          LocatorSlipDataCache.instance.invalidateTypes();
+          if (!_saving) unawaited(_load(forceRefresh: true));
+        });
+  }
+
+  @override
   void dispose() {
+    _locatorTypeRealtimeSub?.cancel();
     _codeController.dispose();
     _labelController.dispose();
     _shortLabelController.dispose();
@@ -57,23 +84,46 @@ class _LocatorTypeManagementScreenState
   }
 
   Future<void> _load({bool forceRefresh = false}) async {
-    setState(() => _loading = true);
+    setState(() {
+      _loading = true;
+      _loadError = null;
+    });
     try {
       final items = await LocatorSlipDataCache.instance.listTypes(
         includeInactive: true,
         forceRefresh: forceRefresh,
       );
       if (!mounted) return;
+      final selected = _selected;
+      final selectedStillExists =
+          selected == null ||
+          items.any(
+            (item) => selected.id != null
+                ? item.id == selected.id
+                : item.code == selected.code,
+          );
       setState(() {
-        _items = items.isEmpty ? LocatorRequestType.values : items;
+        _items = items;
+        if (!selectedStillExists) _selected = null;
         _loading = false;
       });
       if (_selected == null) _newType();
     } catch (e) {
       if (!mounted) return;
-      setState(() => _loading = false);
-      _showMessage('Could not load locator types: $e');
+      setState(() {
+        _loading = false;
+        _loadError = _loadErrorMessage(e);
+      });
     }
+  }
+
+  String _loadErrorMessage(Object error) {
+    if (error is DioException && error.response?.data is Map) {
+      final data = error.response!.data as Map;
+      final message = (data['error'] ?? data['message'])?.toString().trim();
+      if (message != null && message.isNotEmpty) return message;
+    }
+    return 'The locator type catalog is currently unavailable.';
   }
 
   void _newType() {
@@ -121,7 +171,7 @@ class _LocatorTypeManagementScreenState
     setState(() => _saving = true);
     try {
       final data = {
-        'code': _codeController.text.trim(),
+        'code': _codeController.text.trim().toLowerCase(),
         'label': _labelController.text.trim(),
         'short_label': _shortLabelController.text.trim(),
         'location_label': _locationLabelController.text.trim(),
@@ -131,7 +181,7 @@ class _LocatorTypeManagementScreenState
         'requires_attachment': _requiresAttachment,
         'coverage_mode': _coverageMode,
         'is_active': _isActive,
-        'sort_order': int.tryParse(_sortOrderController.text.trim()) ?? 0,
+        'sort_order': int.parse(_sortOrderController.text.trim()),
       };
       final selected = _selected;
       if (selected?.id == null || selected!.id!.isEmpty) {
@@ -285,6 +335,7 @@ class _LocatorTypeManagementScreenState
 
   Widget _buildList() {
     if (_loading) return const Center(child: CircularProgressIndicator());
+    if (_loadError != null) return _buildLoadError();
     _clampPage(_items.length);
     final pageStart = _items.isEmpty ? 0 : _page * _typesPerPage;
     final pageEnd = (pageStart + _typesPerPage).clamp(0, _items.length);
@@ -328,15 +379,17 @@ class _LocatorTypeManagementScreenState
           ),
           Divider(height: 1, color: AppTheme.dashHairlineOf(context)),
           Expanded(
-            child: ListView.separated(
-              padding: const EdgeInsets.all(10),
-              itemCount: pageItems.length,
-              separatorBuilder: (_, __) => const SizedBox(height: 6),
-              itemBuilder: (context, index) {
-                final item = pageItems[index];
-                return _typeListItem(item, item == _selected);
-              },
-            ),
+            child: pageItems.isEmpty
+                ? _buildEmptyState()
+                : ListView.separated(
+                    padding: const EdgeInsets.all(10),
+                    itemCount: pageItems.length,
+                    separatorBuilder: (_, __) => const SizedBox(height: 6),
+                    itemBuilder: (context, index) {
+                      final item = pageItems[index];
+                      return _typeListItem(item, item == _selected);
+                    },
+                  ),
           ),
           _TypeListPager(
             page: _page,
@@ -349,6 +402,91 @@ class _LocatorTypeManagementScreenState
                 : () => setState(() => _page++),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildEmptyState() {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              Icons.playlist_add_rounded,
+              size: 34,
+              color: AppTheme.dashTextSecondaryOf(context),
+            ),
+            const SizedBox(height: 10),
+            Text(
+              'No locator types configured',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: AppTheme.dashTextPrimaryOf(context),
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              'Create the first locator type to make it available for filing.',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: AppTheme.dashTextSecondaryOf(context),
+                fontSize: 12,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildLoadError() {
+    return Container(
+      decoration: BoxDecoration(
+        color: AppTheme.dashPanelOf(context),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: AppTheme.dashHairlineOf(context)),
+      ),
+      child: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                Icons.cloud_off_outlined,
+                size: 34,
+                color: Colors.red.shade600,
+              ),
+              const SizedBox(height: 10),
+              Text(
+                'Could not load locator types',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: AppTheme.dashTextPrimaryOf(context),
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                _loadError!,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: AppTheme.dashTextSecondaryOf(context),
+                  fontSize: 12,
+                ),
+              ),
+              const SizedBox(height: 14),
+              OutlinedButton.icon(
+                onPressed: () => _load(forceRefresh: true),
+                icon: const Icon(Icons.refresh_rounded, size: 18),
+                label: const Text('Retry'),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -421,57 +559,93 @@ class _LocatorTypeManagementScreenState
 
   Widget _buildForm() {
     final isNew = _selected == null;
-    return Container(
-      decoration: BoxDecoration(
-        color: AppTheme.dashPanelOf(context),
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: AppTheme.dashHairlineOf(context)),
-      ),
-      child: Form(
-        key: _formKey,
-        child: Column(
-          children: [
-            _formHeader(isNew),
-            Divider(height: 1, color: AppTheme.dashHairlineOf(context)),
-            Expanded(
-              child: ListView(
-                padding: const EdgeInsets.all(20),
-                children: [
-                  _formSection(
-                    title: 'Basic Information',
-                    icon: Icons.edit_note_rounded,
+    final catalogReady = !_loading && _loadError == null;
+    return IgnorePointer(
+      ignoring: !catalogReady,
+      child: Opacity(
+        opacity: catalogReady ? 1 : 0.55,
+        child: Container(
+          decoration: BoxDecoration(
+            color: AppTheme.dashPanelOf(context),
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: AppTheme.dashHairlineOf(context)),
+          ),
+          child: Form(
+            key: _formKey,
+            child: Column(
+              children: [
+                _formHeader(isNew),
+                Divider(height: 1, color: AppTheme.dashHairlineOf(context)),
+                Expanded(
+                  child: ListView(
+                    padding: const EdgeInsets.all(20),
                     children: [
-                      _field(_codeController, 'System code', enabled: isNew),
-                      _field(_labelController, 'Request type name'),
-                      _field(_shortLabelController, 'Short display name'),
-                      _field(_sortOrderController, 'Sort order', number: true),
+                      _formSection(
+                        title: 'Basic Information',
+                        icon: Icons.edit_note_rounded,
+                        children: [
+                          _field(
+                            _codeController,
+                            'System code',
+                            enabled: isNew,
+                            maxLength: _codeMaxLength,
+                            validator: _validateSystemCode,
+                          ),
+                          _field(
+                            _labelController,
+                            'Request type name',
+                            maxLength: _labelMaxLength,
+                          ),
+                          _field(
+                            _shortLabelController,
+                            'Short display name',
+                            maxLength: _shortLabelMaxLength,
+                          ),
+                          _field(
+                            _sortOrderController,
+                            'Sort order',
+                            number: true,
+                            validator: _validateSortOrder,
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 16),
+                      _formSection(
+                        title: 'Form and DTR Wording',
+                        icon: Icons.article_outlined,
+                        children: [
+                          _field(
+                            _locationLabelController,
+                            'Destination field name',
+                            maxLength: _locationLabelMaxLength,
+                          ),
+                          _field(
+                            _locationHintController,
+                            'Destination placeholder',
+                            maxLength: _locationHintMaxLength,
+                          ),
+                          _field(
+                            _dtrSlotLabelController,
+                            'DTR display text',
+                            maxLength: _dtrLabelMaxLength,
+                          ),
+                          _field(
+                            _dtrPrintLabelController,
+                            'DTR print text',
+                            maxLength: _dtrLabelMaxLength,
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 16),
+                      _rulesSection(),
                     ],
                   ),
-                  const SizedBox(height: 16),
-                  _formSection(
-                    title: 'Form and DTR Wording',
-                    icon: Icons.article_outlined,
-                    children: [
-                      _field(
-                        _locationLabelController,
-                        'Destination field name',
-                      ),
-                      _field(
-                        _locationHintController,
-                        'Destination placeholder',
-                      ),
-                      _field(_dtrSlotLabelController, 'DTR display text'),
-                      _field(_dtrPrintLabelController, 'DTR print text'),
-                    ],
-                  ),
-                  const SizedBox(height: 16),
-                  _rulesSection(),
-                ],
-              ),
+                ),
+                Divider(height: 1, color: AppTheme.dashHairlineOf(context)),
+                _formActions(isNew),
+              ],
             ),
-            Divider(height: 1, color: AppTheme.dashHairlineOf(context)),
-            _formActions(isNew),
-          ],
+          ),
         ),
       ),
     );
@@ -693,6 +867,8 @@ class _LocatorTypeManagementScreenState
     String label, {
     bool enabled = true,
     bool number = false,
+    int? maxLength,
+    String? Function(String?)? validator,
   }) {
     return SizedBox(
       width: 300,
@@ -700,12 +876,47 @@ class _LocatorTypeManagementScreenState
         controller: controller,
         enabled: enabled,
         keyboardType: number ? TextInputType.number : TextInputType.text,
+        maxLength: maxLength,
+        maxLengthEnforcement: maxLength == null
+            ? null
+            : MaxLengthEnforcement.none,
         decoration: AppTheme.dashInputDecoration(context, labelText: label),
-        validator: (value) => (value == null || value.trim().isEmpty)
-            ? '$label is required'
-            : null,
+        validator:
+            validator ??
+            (value) => _validateRequiredText(value, label, maxLength),
       ),
     );
+  }
+
+  String? _validateRequiredText(String? value, String label, int? maxLength) {
+    final text = value?.trim() ?? '';
+    if (text.isEmpty) return '$label is required';
+    if (maxLength != null && text.length > maxLength) {
+      return '$label must be $maxLength characters or less';
+    }
+    return null;
+  }
+
+  String? _validateSystemCode(String? value) {
+    final text = value?.trim().toLowerCase() ?? '';
+    if (text.isEmpty) return 'System code is required';
+    if (!RegExp(r'^[a-z0-9_][a-z0-9_-]{1,63}$').hasMatch(text)) {
+      return 'Use 2-64 letters, numbers, underscores, or hyphens';
+    }
+    return null;
+  }
+
+  String? _validateSortOrder(String? value) {
+    final text = value?.trim() ?? '';
+    if (text.isEmpty) return 'Sort order is required';
+    if (!RegExp(r'^\d+$').hasMatch(text)) {
+      return 'Sort order must be a whole number from 0 to 2147483647';
+    }
+    final parsed = int.tryParse(text);
+    if (parsed == null || parsed > 2147483647) {
+      return 'Sort order must be a whole number from 0 to 2147483647';
+    }
+    return null;
   }
 
   Widget _miniStatusChip(String label, Color color) {

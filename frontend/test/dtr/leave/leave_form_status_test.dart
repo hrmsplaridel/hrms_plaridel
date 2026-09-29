@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:provider/provider.dart';
@@ -7,10 +8,12 @@ import 'package:hrms_plaridel/providers/auth_provider.dart';
 import 'package:hrms_plaridel/features/docutracker/data/providers/docutracker_provider.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document_builder.dart';
 import 'package:hrms_plaridel/features/dtr/leave/data/providers/leave_provider.dart';
+import 'package:hrms_plaridel/features/dtr/leave/data/repositories/leave_type_definition_cache.dart';
 import 'package:hrms_plaridel/features/dtr/leave/data/repositories/mock_leave_repository.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_request.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_type.dart';
 import 'package:hrms_plaridel/features/dtr/leave/presentation/shared/pages/leave_request_form_screen.dart';
+import 'package:hrms_plaridel/core/api/client.dart';
 
 const draft = LeaveRequest(
   id: 'leave-1',
@@ -27,6 +30,13 @@ class _Repository extends MockLeaveRepository {
 }
 
 class _Signatures extends DocuTrackerProvider {
+  _Signatures({this.canSign = false});
+
+  final bool canSign;
+
+  @override
+  Future<List<DocuTrackerSignatureAsset>> listSavedSignatures() async => [];
+
   @override
   Future<DocuTrackerSourceSignatureBundle?> loadSourceSignatures({
     required String sourceModule,
@@ -37,7 +47,16 @@ class _Signatures extends DocuTrackerProvider {
     sourceTable: sourceTable,
     sourceRecordId: sourceRecordId,
     sourceStatus: 'pending_hr',
-    signatures: const [],
+    signatures: canSign
+        ? const [
+            DocuTrackerSourceSignature(
+              slotKey: 'applicant',
+              label: 'Applicant',
+              assignedSignerId: 'employee-1',
+              canSign: true,
+            ),
+          ]
+        : const [],
   );
 }
 
@@ -45,16 +64,45 @@ Future<void> _openForm(
   WidgetTester tester,
   _Repository repository, {
   LeaveRequest initial = draft,
+  bool loadOfficialDate = false,
+  bool canSign = false,
 }) async {
+  ApiClient.instance.init();
+  ApiClient.instance.dio.interceptors.insert(
+    0,
+    InterceptorsWrapper(
+      onRequest: (options, handler) {
+        if (options.path == '/api/leave/types') {
+          handler.resolve(
+            Response<List<dynamic>>(
+              requestOptions: options,
+              statusCode: 200,
+              data: [
+                {'name': 'vacationLeave', 'display_name': 'Vacation Leave'},
+                {'name': 'sickLeave', 'display_name': 'Sick Leave'},
+              ],
+            ),
+          );
+          return;
+        }
+        handler.next(options);
+      },
+    ),
+  );
   await tester.pumpWidget(
     MultiProvider(
       providers: [
         ChangeNotifierProvider(create: (_) => AuthProvider()),
         ChangeNotifierProvider(
-          create: (_) => LeaveProvider(repository: repository),
+          lazy: false,
+          create: (_) {
+            final provider = LeaveProvider(repository: repository);
+            if (loadOfficialDate) unawaited(provider.loadOfficialDate());
+            return provider;
+          },
         ),
         ChangeNotifierProvider<DocuTrackerProvider>(
-          create: (_) => _Signatures(),
+          create: (_) => _Signatures(canSign: canSign),
         ),
       ],
       child: MaterialApp(
@@ -70,22 +118,230 @@ Future<void> _openForm(
 }
 
 void main() {
+  testWidgets('deactivated draft type is not offered for a new filing', (
+    tester,
+  ) async {
+    final repository = _Repository();
+    final oldDraft = draft.copyWith(
+      leaveType: LeaveType.others,
+      leaveTypeName: 'earlLeave',
+      leaveTypeDisplayName: 'Earl leave',
+    );
+    repository.read = () async => oldDraft;
+    ApiClient.instance.init();
+    ApiClient.instance.dio.interceptors.clear();
+    LeaveTypeDefinitionCache.instance.invalidate();
+    var activeTypes = <Map<String, dynamic>>[
+      {'name': 'vacationLeave', 'display_name': 'Vacation Leave'},
+      {'name': 'earlLeave', 'display_name': 'Earl leave'},
+    ];
+    ApiClient.instance.dio.interceptors.add(
+      InterceptorsWrapper(
+        onRequest: (options, handler) {
+          if (options.path == '/api/leave/types') {
+            handler.resolve(
+              Response<List<dynamic>>(
+                requestOptions: options,
+                statusCode: 200,
+                data: activeTypes,
+              ),
+            );
+            return;
+          }
+          handler.reject(DioException(requestOptions: options));
+        },
+      ),
+    );
+    await tester.runAsync(
+      () => LeaveTypeDefinitionCache.instance.listActiveEmployeeTypes(),
+    );
+    activeTypes = [
+      {'name': 'vacationLeave', 'display_name': 'Vacation Leave'},
+    ];
+
+    await _openForm(tester, repository, initial: oldDraft);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 500));
+    final dropdown = tester.widget<DropdownButtonFormField<String>>(
+      find.byType(DropdownButtonFormField<String>),
+    );
+    expect(
+      find.byWidgetPredicate(
+        (widget) =>
+            widget is DropdownMenuItem<String> && widget.value == 'earlLeave',
+        skipOffstage: false,
+      ),
+      findsNothing,
+    );
+    expect(dropdown.initialValue, 'vacationLeave');
+    LeaveTypeDefinitionCache.instance.invalidate();
+  });
+
+  testWidgets('missing final reviewer blocks submit before signing or saving', (
+    tester,
+  ) async {
+    final date = DateTime.now().add(const Duration(days: 2));
+    final validDraft = draft.copyWith(
+      startDate: date,
+      endDate: date,
+      workingDaysApplied: 1,
+      sickLeaveNature: SickLeaveNature.outPatient,
+      sickIllnessDetails: 'Fever',
+    );
+    final repository = _Repository()..read = () async => validDraft;
+    ApiClient.instance.init();
+    ApiClient.instance.dio.interceptors.clear();
+    var availabilityChecks = 0;
+    ApiClient.instance.dio.interceptors.add(
+      InterceptorsWrapper(
+        onRequest: (options, handler) {
+          if (options.path == '/api/leave/submission-availability') {
+            availabilityChecks++;
+            handler.resolve(
+              Response<Map<String, dynamic>>(
+                requestOptions: options,
+                statusCode: 200,
+                data: {
+                  'can_submit': false,
+                  'reason': 'No eligible final leave reviewer is configured.',
+                },
+              ),
+            );
+            return;
+          }
+          handler.reject(DioException(requestOptions: options));
+        },
+      ),
+    );
+    await _openForm(
+      tester,
+      repository,
+      initial: validDraft,
+      loadOfficialDate: true,
+    );
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Submit Request'));
+    await tester.tap(find.text('Submit Request'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(
+      availabilityChecks,
+      1,
+      reason: find
+          .byType(Text)
+          .evaluate()
+          .map((element) => (element.widget as Text).data)
+          .whereType<String>()
+          .join(' | '),
+    );
+    expect(
+      find.textContaining('No eligible final leave reviewer'),
+      findsOneWidget,
+    );
+    expect(find.text('Submit Request'), findsOneWidget);
+  });
+
+  testWidgets('cancelling applicant signature leaves the request as a draft', (
+    tester,
+  ) async {
+    final date = DateTime.now().add(const Duration(days: 2));
+    final validDraft = draft.copyWith(
+      startDate: date,
+      endDate: date,
+      workingDaysApplied: 1,
+      sickLeaveNature: SickLeaveNature.outPatient,
+      sickIllnessDetails: 'Fever',
+    );
+    final repository = _Repository()..read = () async => validDraft;
+    ApiClient.instance.init();
+    ApiClient.instance.dio.interceptors.clear();
+    ApiClient.instance.dio.interceptors.add(
+      InterceptorsWrapper(
+        onRequest: (options, handler) {
+          if (options.path == '/api/leave/submission-availability') {
+            handler.resolve(
+              Response<Map<String, dynamic>>(
+                requestOptions: options,
+                statusCode: 200,
+                data: {'can_submit': true},
+              ),
+            );
+            return;
+          }
+          handler.reject(DioException(requestOptions: options));
+        },
+      ),
+    );
+    await _openForm(
+      tester,
+      repository,
+      initial: validDraft,
+      loadOfficialDate: true,
+      canSign: true,
+    );
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Submit Request'));
+    await tester.tap(find.text('Submit Request'));
+    for (
+      var i = 0;
+      i < 40 && find.text('Insert E-Signature').evaluate().isEmpty;
+      i++
+    ) {
+      await tester.pump(const Duration(milliseconds: 100));
+    }
+    expect(find.text('Insert E-Signature'), findsOneWidget);
+    await tester.tap(find.text('Cancel'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.textContaining('Request remains a draft'), findsOneWidget);
+    expect(find.text('Submit Request'), findsOneWidget);
+  });
+
+  testWidgets('failed write message survives the saved-status refresh', (
+    tester,
+  ) async {
+    final repository = _Repository();
+    await _openForm(tester, repository);
+    await tester.pumpAndSettle();
+    final finalStatus = Completer<LeaveRequest?>();
+    var checks = 0;
+    repository.read = () {
+      checks++;
+      return checks == 2 ? finalStatus.future : Future.value(draft);
+    };
+    await tester.ensureVisible(find.text('Save Draft'));
+    await tester.tap(find.text('Save Draft'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(checks, 2);
+    expect(
+      find.byKey(const Key('leave-status-check-progress')),
+      findsOneWidget,
+    );
+    expect(find.textContaining('Error:'), findsOneWidget);
+    finalStatus.complete(draft);
+    await tester.pump();
+    expect(find.text('Save Draft'), findsOneWidget);
+  });
+
   testWidgets('draft submission can validate after a delayed status check', (
     tester,
   ) async {
     final repository = _Repository();
     await _openForm(tester, repository);
     await tester.pumpAndSettle();
+    final formElement = tester.element(find.byType(Form));
     final response = Completer<LeaveRequest?>();
     repository.read = () => response.future;
     await tester.ensureVisible(find.text('Submit Request'));
     await tester.tap(find.text('Submit Request'));
     await tester.pump();
+    expect(tester.element(find.byType(Form)), same(formElement));
     response.complete(draft);
     await tester.pumpAndSettle();
-      expect(tester.takeException(), isNull);
-      expect(find.text('Submit Request'), findsOneWidget);
-      expect(find.text('Required'), findsWidgets);
+    expect(tester.takeException(), isNull);
+    expect(find.text('Submit Request'), findsOneWidget);
+    expect(find.text('Required'), findsWidgets);
   });
 
   testWidgets(
@@ -173,18 +429,34 @@ void main() {
     expect(find.text('Submit Request'), findsNothing);
   });
 
-  testWidgets('no write controls are exposed while checking a saved request', (
-    tester,
-  ) async {
-    final response = Completer<LeaveRequest?>();
-    final repository = _Repository()..read = () => response.future;
-    await _openForm(tester, repository);
-    await tester.pump();
-    expect(find.text('Submit Request'), findsNothing);
-    expect(find.text('Save Draft'), findsNothing);
-    response.complete(draft.copyWith(status: LeaveRequestStatus.approved));
-    await tester.pumpAndSettle();
-    expect(find.text('Status: Approved'), findsOneWidget);
-    expect(find.text('Submit Request'), findsNothing);
-  });
+  testWidgets(
+    'saved form stays mounted but cannot be edited during status check',
+    (tester) async {
+      final response = Completer<LeaveRequest?>();
+      final repository = _Repository()..read = () => response.future;
+      await _openForm(tester, repository);
+      await tester.pump();
+      expect(find.byType(Form), findsOneWidget);
+      expect(
+        tester
+            .widget<FilledButton>(
+              find.widgetWithText(FilledButton, 'Submit Request'),
+            )
+            .onPressed,
+        isNull,
+      );
+      expect(
+        tester
+            .widget<OutlinedButton>(
+              find.widgetWithText(OutlinedButton, 'Save Draft'),
+            )
+            .onPressed,
+        isNull,
+      );
+      response.complete(draft.copyWith(status: LeaveRequestStatus.approved));
+      await tester.pumpAndSettle();
+      expect(find.text('Status: Approved'), findsOneWidget);
+      expect(find.text('Submit Request'), findsNothing);
+    },
+  );
 }

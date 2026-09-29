@@ -41,6 +41,22 @@ class RspLdSavedEntriesApi {
     );
   }
 
+  static Future<Map<String, dynamic>> insertRowReturning(
+    String table,
+    Map<String, dynamic> payload,
+  ) async {
+    final res = await ApiClient.instance.post<Map<String, dynamic>>(
+      '$_prefix/$table',
+      data: _jsonBody(payload),
+      options: Options(contentType: Headers.jsonContentType),
+    );
+    final data = res.data;
+    if (data == null) {
+      throw StateError('The form was saved but no record was returned.');
+    }
+    return data;
+  }
+
   static Future<void> updateRow(
     String table,
     String id,

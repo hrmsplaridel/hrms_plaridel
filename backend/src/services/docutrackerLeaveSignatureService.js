@@ -1,6 +1,7 @@
 const {
   createSignatureAsset,
 } = require('./docutrackerDocumentBuilderService');
+const { assertFinalLeaveReviewer, resolveFinalLeaveReviewers } = require('./leaveFinalReviewerService');
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -150,17 +151,17 @@ function mapApplicantSignature(context, row, user) {
   };
 }
 
-function mapHrApproverSignature(context, row, user) {
-  const canSign = context.isHrOrAdmin && canHrApproverSignStatus(context.status);
+function mapHrApproverSignature(context, row, user, canReview) {
+  const canSign = canReview && canHrApproverSignStatus(context.status);
   return {
     id: row?.id || null,
     slot_key: HR_APPROVER_SLOT,
     label: 'Final Approver Signature',
     assigned_signer_id:
-      row?.assigned_signer_id || (context.isHrOrAdmin ? user.id : null),
+      row?.assigned_signer_id || (canReview ? user.id : null),
     assigned_signer_name:
       row?.signer_name_snapshot ||
-      (context.isHrOrAdmin ? context.viewer_name : null) ||
+      (canReview ? context.viewer_name : null) ||
       null,
     can_sign: canSign,
     signature_asset_id: row?.signature_asset_id || null,
@@ -181,6 +182,10 @@ async function getLeaveSourceSignatures(
 ) {
   assertSupportedLeaveSource(sourceModule, sourceTable);
   const context = await loadLeaveContext(pool, leaveRequestId, user);
+  const canReview = context.isHrOrAdmin && !context.isOwner &&
+    canHrApproverSignStatus(context.status) &&
+    (await resolveFinalLeaveReviewers(pool)).some((reviewer) =>
+      String(reviewer.id) === String(user.id));
   let result;
   try {
     result = await pool.query(
@@ -227,7 +232,8 @@ async function getLeaveSourceSignatures(
       mapHrApproverSignature(
         context,
         result.rows.find((row) => row.slot_key === HR_APPROVER_SLOT),
-        user
+        user,
+        canReview
       ),
     ],
   };
@@ -285,6 +291,7 @@ async function signLeaveSourceSlot(
           'The final approver signature can only be added while awaiting HR review'
         );
       }
+      await assertFinalLeaveReviewer(client, context.employee_user_id, user.id);
     } else {
       throw serviceError('NOT_FOUND', 'Leave signature field not found');
     }

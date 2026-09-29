@@ -117,13 +117,11 @@ class _AdminSectionHeader extends StatelessWidget {
     required this.title,
     this.icon,
     this.subtitle,
-    this.trailing,
   });
 
   final String title;
   final IconData? icon;
   final String? subtitle;
-  final Widget? trailing;
 
   @override
   Widget build(BuildContext context) {
@@ -182,7 +180,6 @@ class _AdminSectionHeader extends StatelessWidget {
             ],
           ),
         ),
-        if (trailing != null) trailing!,
       ],
     );
   }
@@ -369,6 +366,10 @@ class _AdminDashboardState extends State<AdminDashboard>
 
   Widget _settingsPanel() => _settingsPanelWidget;
   Timer? _notificationPollTimer;
+  String? _pendingSourceModule;
+  String? _pendingSourceTable;
+  String? _pendingSourceRecordId;
+  int _docuTrackerDeepLinkKey = 0;
 
   @override
   void initState() {
@@ -383,11 +384,13 @@ class _AdminDashboardState extends State<AdminDashboard>
       if (!mounted) return;
       context.read<NotificationProvider>().refreshUnreadCount();
       context.read<DocuTrackerProvider>().loadNotifications();
+      context.read<DocuTrackerProvider>().loadSourceSignatureRequests();
       _notificationPollTimer?.cancel();
       _notificationPollTimer = Timer.periodic(const Duration(seconds: 30), (_) {
         if (!mounted) return;
         context.read<NotificationProvider>().refreshUnreadCount();
         context.read<DocuTrackerProvider>().loadNotifications();
+        context.read<DocuTrackerProvider>().loadSourceSignatureRequests();
       });
     });
   }
@@ -397,6 +400,7 @@ class _AdminDashboardState extends State<AdminDashboard>
     if (state == AppLifecycleState.resumed && mounted) {
       context.read<NotificationProvider>().refreshUnreadCount();
       context.read<DocuTrackerProvider>().loadNotifications();
+      context.read<DocuTrackerProvider>().loadSourceSignatureRequests();
     }
   }
 
@@ -451,6 +455,18 @@ class _AdminDashboardState extends State<AdminDashboard>
         break;
       case NotificationTapKind.adminTrainingReports:
         setState(() => _selectedMenu = AdminMenu.ld);
+        DashboardContentNavigator.showHome(_contentNavKey);
+        break;
+      case NotificationTapKind.docuTrackerDocuments:
+        setState(() {
+          _selectedMenu = AdminMenu.docutracker;
+          if (result.hasSourceSignatureDeepLink) {
+            _pendingSourceModule = result.sourceModule;
+            _pendingSourceTable = result.sourceTable;
+            _pendingSourceRecordId = result.sourceRecordId;
+            _docuTrackerDeepLinkKey++;
+          }
+        });
         DashboardContentNavigator.showHome(_contentNavKey);
         break;
       case NotificationTapKind.none:
@@ -655,7 +671,21 @@ class _AdminDashboardState extends State<AdminDashboard>
       case AdminMenu.ld:
         return const _LdContent();
       case AdminMenu.docutracker:
-        return const DocuTrackerMain(isAdmin: true);
+        return DocuTrackerMain(
+          key: ValueKey('admin-docutracker-$_docuTrackerDeepLinkKey'),
+          isAdmin: true,
+          openSourceModule: _pendingSourceModule,
+          openSourceTable: _pendingSourceTable,
+          openSourceRecordId: _pendingSourceRecordId,
+          onSourceDeepLinkConsumed: () {
+            if (!mounted) return;
+            setState(() {
+              _pendingSourceModule = null;
+              _pendingSourceTable = null;
+              _pendingSourceRecordId = null;
+            });
+          },
+        );
       case AdminMenu.createAccount:
         return _AdminSignUpContent(
           onAccountCreated: _rspHireReturnApplicationId != null
@@ -835,6 +865,9 @@ class _Sidebar extends StatelessWidget {
   final bool collapsed;
 
   Widget _buildNavList(BuildContext context, {required bool compact}) {
+    final pendingSignatures = context.select<DocuTrackerProvider, int>(
+      (p) => p.pendingSourceSignatureActionCount,
+    );
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -890,6 +923,7 @@ class _Sidebar extends StatelessWidget {
           icon: Icons.folder_outlined,
           label: 'DocuTracker',
           selected: selectedMenu == AdminMenu.docutracker,
+          badgeCount: pendingSignatures,
           onTap: () => onTap(AdminMenu.docutracker),
         ),
         DashboardSidebarNavTile(
@@ -1232,7 +1266,7 @@ class _DashboardContent extends StatelessWidget {
           ),
         if (showWelcome) _AdminWelcomeBanner(isNarrow: isNarrow),
         if (showWelcome && showRspMonitoring) const SizedBox(height: 20),
-        if (showRspMonitoring) const _RecruitmentHubCard(),
+        if (showRspMonitoring) const RecruitmentOverviewCard(),
         if ((showWelcome || showRspMonitoring) && showDocu)
           const SizedBox(height: 28),
         if (showDocu) ...[
@@ -1294,17 +1328,14 @@ class _AdminDashboardShimmer extends StatelessWidget {
 class _AdminDashboardBone extends StatelessWidget {
   const _AdminDashboardBone({
     required this.height,
-    this.width,
     this.radius = 7,
   });
 
   final double height;
-  final double? width;
   final double radius;
 
   @override
   Widget build(BuildContext context) => Container(
-    width: width,
     height: height,
     decoration: BoxDecoration(
       color: AppTheme.dashMutedSurfaceOf(context),
@@ -1352,14 +1383,22 @@ class _RecruitmentHubLoadingSkeleton extends StatelessWidget {
   }
 }
 
-class _RecruitmentHubCard extends StatefulWidget {
-  const _RecruitmentHubCard();
+class RecruitmentOverviewCard extends StatefulWidget {
+  const RecruitmentOverviewCard({
+    super.key,
+    this.loadApplications,
+    this.loadAnnouncement,
+  });
+
+  final Future<List<RecruitmentApplication>> Function()? loadApplications;
+  final Future<JobVacancyAnnouncement> Function()? loadAnnouncement;
 
   @override
-  State<_RecruitmentHubCard> createState() => _RecruitmentHubCardState();
+  State<RecruitmentOverviewCard> createState() =>
+      _RecruitmentOverviewCardState();
 }
 
-class _RecruitmentHubCardState extends State<_RecruitmentHubCard> {
+class _RecruitmentOverviewCardState extends State<RecruitmentOverviewCard> {
   bool _loading = true;
   bool _refreshing = false;
   String? _error;
@@ -1396,8 +1435,11 @@ class _RecruitmentHubCardState extends State<_RecruitmentHubCard> {
       });
     }
 
+    unawaited(_loadVacancyAnnouncement());
+
     try {
-      final apps = await RecruitmentRepo.instance.listApplications();
+      final apps = await (widget.loadApplications?.call() ??
+          RecruitmentRepo.instance.listApplications());
       if (!mounted) return;
       setState(() {
         _all = apps.where((a) => !a.isFromMayorModule).toList();
@@ -1406,10 +1448,20 @@ class _RecruitmentHubCardState extends State<_RecruitmentHubCard> {
     } catch (e) {
       if (!mounted) return;
       setState(() => _error = userFacingApiError(e));
+    } finally {
+      if (mounted) {
+        setState(() {
+          _loading = false;
+          _refreshing = false;
+        });
+      }
     }
+  }
 
+  Future<void> _loadVacancyAnnouncement() async {
     try {
-      final announcement = await JobVacancyAnnouncementRepo.instance.fetch();
+      final announcement = await (widget.loadAnnouncement?.call() ??
+          JobVacancyAnnouncementRepo.instance.fetch());
       if (!mounted) return;
       setState(() {
         _announcement = announcement;
@@ -1418,13 +1470,6 @@ class _RecruitmentHubCardState extends State<_RecruitmentHubCard> {
     } catch (_) {
       if (!mounted) return;
       setState(() => _vacancyLoadFailed = true);
-    } finally {
-      if (mounted) {
-        setState(() {
-          _loading = false;
-          _refreshing = false;
-        });
-      }
     }
   }
 

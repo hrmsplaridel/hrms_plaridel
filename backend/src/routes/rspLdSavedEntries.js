@@ -8,6 +8,10 @@ const express = require('express');
 const { pool } = require('../config/db');
 const { authMiddleware } = require('../middleware/auth');
 const { requireAdmin } = require('../middleware/rbac');
+const {
+  creatorOwnedSlotKeys,
+  initializeCreatorSourceSignatures,
+} = require('../services/docutrackerRspSignatureService');
 
 const router = express.Router();
 
@@ -381,6 +385,7 @@ async function ensureRspLdSavedEntryTables() {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS public.turn_around_time_entries (
       id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+      created_by UUID REFERENCES public.users(id) ON DELETE SET NULL,
       position TEXT,
       office TEXT,
       no_of_vacant_position TEXT,
@@ -421,6 +426,7 @@ async function ensureRspLdSavedEntryTables() {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS public.idp_entries (
       id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+      created_by UUID REFERENCES public.users(id) ON DELETE SET NULL,
       name TEXT,
       position TEXT,
       category TEXT,
@@ -453,6 +459,7 @@ async function ensureRspLdSavedEntryTables() {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS public.selection_lineup_entries (
       id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+      created_by UUID REFERENCES public.users(id) ON DELETE SET NULL,
       date TEXT,
       name_of_agency_office TEXT,
       vacant_position TEXT,
@@ -468,6 +475,7 @@ async function ensureRspLdSavedEntryTables() {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS public.computation_of_points_entries (
       id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+      created_by UUID REFERENCES public.users(id) ON DELETE SET NULL,
       date TEXT,
       position_level TEXT,
       position TEXT,
@@ -504,6 +512,7 @@ async function ensureRspLdSavedEntryTables() {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS public.applicants_profile_entries (
       id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+      created_by UUID REFERENCES public.users(id) ON DELETE SET NULL,
       position_applied_for TEXT,
       minimum_requirements TEXT,
       date_of_posting TEXT,
@@ -630,12 +639,18 @@ router.post('/:table', async (req, res) => {
   let payload = pickPayload(table, req.body);
   delete payload.id;
   payload = stringifyJsonbForPg(table, payload);
-  const keys = Object.keys(payload);
-  if (keys.length === 0) {
+  if (Object.keys(payload).length === 0) {
     return res.status(400).json({ error: 'Empty body' });
   }
+  if (creatorOwnedSlotKeys(table).length) {
+    payload.created_by = req.user.id;
+  }
+  const keys = Object.keys(payload);
+  let client;
   try {
     await ensureRspLdSavedEntryTables();
+    client = await pool.connect();
+    await client.query('BEGIN');
     const jsonbSet = new Set(TABLE_JSONB_COLUMNS[table] || []);
     const colsList = keys.map((k) => quoteIdent(k)).join(', ');
     const phList = keys
@@ -643,12 +658,24 @@ router.post('/:table', async (req, res) => {
       .join(', ');
     const values = keys.map((k) => payload[k]);
     const q = `INSERT INTO ${quoteIdent(table)} (${colsList}) VALUES (${phList}) RETURNING *`;
-    const result = await pool.query(q, values);
+    const result = await client.query(q, values);
+    // Snapshots automatic RSP/L&D signers (creator, dept head, HRMDO, mayor)
+    // in the same transaction. Unresolved roles stay empty for admin recovery.
+    await initializeCreatorSourceSignatures(
+      client,
+      req.user,
+      table,
+      result.rows[0].id
+    );
+    await client.query('COMMIT');
     return res.status(201).json(result.rows[0]);
   } catch (err) {
-    if (err.code === '42P01') {
+    if (client) {
+      try { await client.query('ROLLBACK'); } catch (_) {}
+    }
+    if (err.code === '42P01' || err.code === '42703') {
       return res.status(503).json({
-        error: 'Form table not found in database. Run init-schema.sql.',
+        error: 'Form signatures are not initialized. Apply the latest DocuTracker migrations.',
       });
     }
     console.error('[rspLdSavedEntries POST]', err);
@@ -656,6 +683,8 @@ router.post('/:table', async (req, res) => {
     return res.status(500).json({
       error: hint ? `Failed to save record (${hint})` : 'Failed to save record',
     });
+  } finally {
+    client?.release();
   }
 });
 
@@ -686,16 +715,29 @@ router.put('/:table/:id', async (req, res) => {
       .join(', ');
     const values = keys.map((k) => payload[k]);
     values.push(id);
-    const q = `UPDATE ${quoteIdent(table)} SET ${setClause} WHERE id = $${values.length} RETURNING *`;
-    const result = await pool.query(q, values);
-    if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'Not found' });
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const q = `UPDATE ${quoteIdent(table)} SET ${setClause} WHERE id = $${values.length} RETURNING *`;
+      const result = await client.query(q, values);
+      if (result.rows.length === 0) {
+        await client.query('ROLLBACK');
+        return res.status(404).json({ error: 'Not found' });
+      }
+      // Fill any still-missing automatic signature slots (does not override existing).
+      await initializeCreatorSourceSignatures(client, req.user, table, id);
+      await client.query('COMMIT');
+      return res.json(result.rows[0]);
+    } catch (inner) {
+      try { await client.query('ROLLBACK'); } catch (_) {}
+      throw inner;
+    } finally {
+      client.release();
     }
-    return res.json(result.rows[0]);
   } catch (err) {
-    if (err.code === '42P01') {
+    if (err.code === '42P01' || err.code === '42703') {
       return res.status(503).json({
-        error: 'Form table not found in database. Run init-schema.sql.',
+        error: 'Form signatures are not initialized. Apply the latest DocuTracker migrations.',
       });
     }
     console.error('[rspLdSavedEntries PUT]', err);

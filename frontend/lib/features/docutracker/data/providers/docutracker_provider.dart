@@ -146,12 +146,19 @@ class DocuTrackerProvider extends ChangeNotifier {
     required String documentId,
     required int fromStep,
     required String actorId,
+    required String stateToken,
     String? remarks,
     String? targetHolderId,
   }) {
     final r = (remarks ?? '').trim();
     final t = (targetHolderId ?? '').trim();
-    return '$action:$actorId:$documentId:$fromStep:${_fnv1aHash(r)}:${_fnv1aHash(t)}';
+    return '$action:$actorId:$documentId:$fromStep:${_fnv1aHash(stateToken)}:${_fnv1aHash(r)}:${_fnv1aHash(t)}';
+  }
+
+  String _transitionStateToken(DocuTrackerDocument doc) {
+    final updatedAt = doc.updatedAt?.toUtc().toIso8601String() ?? '';
+    final sentTime = doc.sentTime?.toUtc().toIso8601String() ?? '';
+    return '${doc.status.value}|${doc.currentStep ?? 0}|${doc.currentHolderId ?? ''}|$updatedAt|$sentTime';
   }
 
   Future<bool> _transitionWithAction({
@@ -177,6 +184,7 @@ class DocuTrackerProvider extends ChangeNotifier {
           documentId: documentId,
           fromStep: fromStep,
           actorId: actionBy,
+          stateToken: _transitionStateToken(doc),
           remarks: remarks,
           targetHolderId: targetHolderId,
         );
@@ -292,6 +300,18 @@ class DocuTrackerProvider extends ChangeNotifier {
 
   int get unreadNotificationsCount =>
       _notificationService.unreadCount(_notifications);
+
+  /// Pending RSP/L&D e-sign tasks for the current user (and admin setup /
+  /// still-unsigned assigned forms). Completed signatures stay in the list
+  /// but do not inflate this badge count.
+  int get pendingSourceSignatureActionCount =>
+      _sourceSignatureRequests
+          .where((request) => request.hasActionableRequiredAction)
+          .length;
+
+  /// DocuTracker sidebar attention: unread workflow notices + pending e-signs.
+  int get docuTrackerAttentionCount =>
+      unreadNotificationsCount + pendingSourceSignatureActionCount;
 
   /// WIP drafts created by [userId], not yet submitted into workflow.
   List<DocuTrackerDocument> myDraftsForUser(String userId) => _documents
@@ -473,12 +493,13 @@ class DocuTrackerProvider extends ChangeNotifier {
           _error = 'Could not load documents.';
         }
       } else {
+        // Do not pass createdBy for mobile: assignees / routing reviewers must
+        // still receive relationship-visible docs; client policy filters further.
         final r = await _repo.listDocumentsForUser(
           userId: userId,
           userRoleId: roleId,
           userDepartmentId: departmentId,
           userOfficeId: officeId,
-          createdBy: mobileRestricted ? userId : null,
           documentType: documentType,
           status: status,
           limit: 100,
@@ -1006,6 +1027,7 @@ class DocuTrackerProvider extends ChangeNotifier {
     required String sourceRecordId,
     required String slotKey,
     required String assignedSignerId,
+    String? recoveryRemarks,
   }) async {
     if (_sourceSignatureLoading) return null;
     final authGeneration = _authGeneration;
@@ -1018,6 +1040,7 @@ class DocuTrackerProvider extends ChangeNotifier {
       sourceRecordId: sourceRecordId,
       slotKey: slotKey,
       assignedSignerId: assignedSignerId,
+      recoveryRemarks: recoveryRemarks,
     );
     if (!_isCurrentAuthGeneration(authGeneration)) return null;
     _sourceSignatureLoading = false;

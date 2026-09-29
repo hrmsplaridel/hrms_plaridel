@@ -9,7 +9,7 @@ const EMPLOYEE_ID = '00000000-0000-0000-0000-000000000101';
 const DEPARTMENT_ID = '00000000-0000-0000-0000-000000000201';
 const HEAD_ID = '00000000-0000-0000-0000-000000000301';
 
-function createHarness() {
+function createHarness({ reviewerAvailable = true } = {}) {
   const state = {
     queries: [],
     inserts: [],
@@ -129,11 +129,25 @@ function createHarness() {
     snapshotReviewers: async (_client, snapshot) => {
       state.reviewerSnapshots.push(snapshot);
     },
+    assertSubmissionReviewer: async () => {
+      if (!reviewerAvailable) {
+        const error = new Error('No eligible final reviewer is configured');
+        error.statusCode = 409;
+        throw error;
+      }
+    },
     nowProvider: () => new Date('2026-08-11T00:00:00.000Z'),
     logger: { error() {} },
   });
   return { service, state };
 }
+
+test('locator filing is blocked before insertion when no final reviewer is available', async () => {
+  const { service, state } = createHarness({ reviewerAvailable: false });
+  await assert.rejects(service.submit(validInput()), /No eligible final reviewer/);
+  assert.equal(state.inserts.length, 0);
+  assert.equal(state.notifications.length, 0);
+});
 
 function validInput(overrides = {}) {
   return {

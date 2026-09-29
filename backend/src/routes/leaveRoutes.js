@@ -103,6 +103,7 @@ const {
   resolveOfficialSignatory,
 } = require('../services/officialSignatoryService');
 const { todayInHrmsTimezone } = require('../utils/dateRangeParser');
+const { assertFinalLeaveReviewer, assertLeaveSubmissionReviewer, resolveFinalLeaveReviewers } = require('../services/leaveFinalReviewerService');
 
 const router = express.Router();
 
@@ -152,6 +153,31 @@ function broadcastDtrLeaveRefresh(action, { userId, leaveRequestId, dateFrom, da
   }
 }
 const protect = [authMiddleware];
+
+router.get('/final-reviewer/me', protect, requireAdminOrHr, async (req, res) => {
+  try {
+    const reviewers = await resolveFinalLeaveReviewers(pool);
+    return res.json({
+      can_review: reviewers.some((reviewer) => String(reviewer.id) === String(req.user.id)),
+    });
+  } catch (err) {
+    console.error('[leave GET final-reviewer/me]', err);
+    return res.status(500).json({ error: 'Failed to check final leave reviewer assignment' });
+  }
+});
+
+router.get('/submission-availability', protect, async (req, res) => {
+  try {
+    await assertLeaveSubmissionReviewer(pool, req.user.id);
+    return res.json({ can_submit: true });
+  } catch (err) {
+    if (err.statusCode === 409) {
+      return res.json({ can_submit: false, reason: err.message });
+    }
+    console.error('[leave GET submission-availability]', err);
+    return res.status(500).json({ error: 'Failed to check leave reviewer availability' });
+  }
+});
 
 async function findAssignmentProfileByUserIdAtDate(db, userId, effectiveDate = null) {
   if (!userId) return null;
@@ -353,8 +379,8 @@ pool
 
     await pool.query(`
       UPDATE leave_types
-      SET employee_can_file = CASE WHEN name = 'mandatoryForcedLeave' THEN false ELSE true END,
-          admin_only = CASE WHEN name = 'mandatoryForcedLeave' THEN true ELSE false END,
+      SET employee_can_file = true,
+          admin_only = false,
           allows_past_dates = CASE WHEN name IN ('vacationLeave', 'specialPrivilegeLeave') THEN false ELSE true END,
           requires_attachment = CASE
             WHEN name IN (
@@ -1336,20 +1362,53 @@ function leaveTypePayloadFromBody(body = {}, existing = null) {
     return ['true', '1', 'yes', 'y'].includes(String(value).trim().toLowerCase());
   }
 
-  function numberField(key, fallback = null) {
-    const value = bodyField(key);
-    if (value === undefined) return fallback;
-    if (value == null || value === '') return null;
-    const n = parseFloat(value);
-    return Number.isFinite(n) ? n : fallback;
+  function invalidNumericField(label, requirement) {
+    const err = new Error(`${label} ${requirement}.`);
+    err.statusCode = 400;
+    throw err;
   }
 
-  function integerField(key, fallback = null) {
+  function numberField(
+    key,
+    fallback = null,
+    { label = key, minimum = null, exclusiveMinimum = false } = {}
+  ) {
     const value = bodyField(key);
     if (value === undefined) return fallback;
     if (value == null || value === '') return null;
-    const n = parseInt(value, 10);
-    return Number.isFinite(n) && n >= 0 ? n : fallback;
+    const text = String(value).trim();
+    if (!/^-?(?:\d+(?:\.\d+)?|\.\d+)$/.test(text)) {
+      invalidNumericField(label, 'must be a valid number');
+    }
+    const n = Number(text);
+    if (!Number.isFinite(n)) invalidNumericField(label, 'must be a valid number');
+    if (minimum != null) {
+      const invalid = exclusiveMinimum ? n <= minimum : n < minimum;
+      if (invalid) {
+        invalidNumericField(
+          label,
+          exclusiveMinimum
+            ? `must be greater than ${minimum}`
+            : `must be at least ${minimum}`
+        );
+      }
+    }
+    return n;
+  }
+
+  function integerField(key, fallback = null, { label = key, minimum = 0 } = {}) {
+    const value = bodyField(key);
+    if (value === undefined) return fallback;
+    if (value == null || value === '') return null;
+    const text = String(value).trim();
+    if (!/^\d+$/.test(text)) {
+      invalidNumericField(label, 'must be a whole number');
+    }
+    const n = Number(text);
+    if (!Number.isSafeInteger(n) || n < minimum) {
+      invalidNumericField(label, `must be a whole number of ${minimum} or more`);
+    }
+    return n;
   }
 
   return {
@@ -1364,12 +1423,22 @@ function leaveTypePayloadFromBody(body = {}, existing = null) {
     requiresAttachment: boolField('requires_attachment', existing?.requires_attachment ?? base.requires_attachment === true),
     requiresAttachmentWhenOverDays: numberField(
       'requires_attachment_when_over_days',
-      existing?.requires_attachment_when_over_days ?? base.requires_attachment_when_over_days ?? null
+      existing?.requires_attachment_when_over_days ?? base.requires_attachment_when_over_days ?? null,
+      {
+        label: 'Attachment threshold days',
+        minimum: 0,
+        exclusiveMinimum: true,
+      }
     ),
-    maxDays: numberField('max_days', existing?.max_days ?? base.max_days ?? null),
+    maxDays: numberField(
+      'max_days',
+      existing?.max_days ?? base.max_days ?? null,
+      { label: 'Maximum working days', minimum: 0, exclusiveMinimum: true }
+    ),
     minimumAdvanceDays: integerField(
       'minimum_advance_days',
-      existing?.minimum_advance_days ?? base.minimum_advance_days ?? null
+      existing?.minimum_advance_days ?? base.minimum_advance_days ?? null,
+      { label: 'Minimum advance days', minimum: 0 }
     ),
     affectsDtrNormally: boolField('affects_dtr_normally', existing?.affects_dtr_normally ?? base.affects_dtr_normally !== false),
     balanceLedgerType: normalizeLedgerType(body.balance_ledger_type ?? body.balanceLedgerType ?? existing?.balance_ledger_type, name),
@@ -2113,6 +2182,7 @@ router.post('/submit', protect, async (req, res) => {
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
+      await assertLeaveSubmissionReviewer(client, userId);
       const workingDayResult = await computeEmployeeLeaveWorkingDays(client, userId, startStr, endStr);
       const leaveTypeId = await ensureLeaveTypeIdByName(client, leave_type);
       if (!leaveTypeId) {
@@ -2352,6 +2422,7 @@ router.post('/submit-with-attachment', protect, uploadLeaveAttachmentMemoryMw, a
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
+      await assertLeaveSubmissionReviewer(client, userId);
       const workingDayResult = await computeEmployeeLeaveWorkingDays(client, userId, startStr, endStr);
       const leaveTypeId = await ensureLeaveTypeIdByName(client, leave_type);
       if (!leaveTypeId) {
@@ -2591,7 +2662,8 @@ router.put('/:id', protect, async (req, res) => {
     const existing = await pool.query(
       `SELECT id, status, employee_official_snapshot
        FROM leave_requests
-       WHERE id = $1 AND (user_id = $2 OR employee_id = $2)`,
+       WHERE id = $1 AND (user_id = $2 OR employee_id = $2)
+         AND discarded_at IS NULL`,
       [id, userId]
     );
     if (existing.rows.length === 0) return res.status(404).json({ error: 'Leave request not found' });
@@ -2635,6 +2707,7 @@ router.put('/:id', protect, async (req, res) => {
           error: 'Leave type, start date, and end date are required before submission.',
         });
       }
+      if (submitting) await assertLeaveSubmissionReviewer(client, userId);
       const leaveTypeId = await ensureLeaveTypeIdByName(client, leave_type);
       // FIX #1: isNotEmpty is Dart/Swift, not JS. Use .length > 0 instead.
       if (leave_type != null && String(leave_type).trim().length > 0 && !leaveTypeId) {
@@ -2882,6 +2955,54 @@ router.put('/:id', protect, async (req, res) => {
   }
 });
 
+// PATCH /api/leave/:id/discard - hide an unsubmitted draft while retaining its audit trail.
+router.patch('/:id/discard', protect, async (req, res) => {
+  const userId = req.user?.id;
+  if (!userId) return res.status(401).json({ error: 'Not authenticated' });
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const current = await client.query(
+      `SELECT id, status, discarded_at
+         FROM leave_requests
+        WHERE id = $1::uuid AND (user_id = $2::uuid OR employee_id = $2::uuid)
+        FOR UPDATE`,
+      [req.params.id, userId]
+    );
+    if (!current.rows.length || current.rows[0].discarded_at) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Draft not found' });
+    }
+    if (current.rows[0].status !== 'draft') {
+      await client.query('ROLLBACK');
+      return res.status(409).json({ error: 'Only unsubmitted drafts can be discarded' });
+    }
+    await client.query(
+      'UPDATE leave_requests SET discarded_at = now(), updated_at = now() WHERE id = $1::uuid',
+      [req.params.id]
+    );
+    await insertLeaveRequestHistory(client, {
+      leaveRequestId: req.params.id,
+      action: 'discarded_draft',
+      fromStatus: 'draft',
+      toStatus: 'draft',
+      actedBy: userId,
+      remarks: null,
+      metadataJson: null,
+    });
+    await client.query('COMMIT');
+    broadcastLeaveUpdated('discarded_draft', { id: req.params.id, user_id: userId });
+    return res.json({ discarded: true });
+  } catch (err) {
+    try { await client.query('ROLLBACK'); } catch (_) {}
+    if (err.code === '22P02') return res.status(400).json({ error: 'Invalid draft ID' });
+    console.error('[leave PATCH /:id/discard]', err);
+    return res.status(500).json({ error: 'Failed to discard draft' });
+  } finally {
+    client.release();
+  }
+});
+
 // PATCH /api/leave/:id/cancel
 router.patch('/:id/cancel', protect, async (req, res) => {
   const userId = req.user?.id;
@@ -2895,7 +3016,8 @@ router.patch('/:id/cancel', protect, async (req, res) => {
     const q = await client.query(
       `SELECT id, status, reserved_credit_days
        FROM leave_requests
-       WHERE id = $1 AND (user_id = $2 OR employee_id = $2)`,
+       WHERE id = $1 AND (user_id = $2 OR employee_id = $2)
+         AND discarded_at IS NULL`,
       [id, userId]
     );
     if (q.rows.length === 0) {
@@ -3047,6 +3169,7 @@ router.get('/my', protect, async (req, res) => {
          LIMIT 1
        ) dhh ON true
        WHERE (lr.user_id = $1 OR lr.employee_id = $1)
+         AND lr.discarded_at IS NULL
          AND ($2::text IS NULL OR lr.status = $2)
        ORDER BY lr.updated_at DESC NULLS LAST, lr.created_at DESC, lr.id DESC
        LIMIT $3 OFFSET $4`,
@@ -3060,6 +3183,7 @@ router.get('/my', protect, async (req, res) => {
         `SELECT COUNT(*)::int AS total
          FROM leave_requests lr
          WHERE (lr.user_id = $1 OR lr.employee_id = $1)
+           AND lr.discarded_at IS NULL
            AND ($2::text IS NULL OR lr.status = $2)`,
         [userId, status]
       );
@@ -3503,6 +3627,16 @@ router.post('/admin/monthly-accrual', protect, requireAdminOrHr, async (req, res
 // GET /api/leave (admin/HR list)
 // Query params: status, leave_type, user_id, limit,
 //               start_date_from, start_date_to, created_from, created_to
+const HR_REVIEW_SCOPE_SQL = `(
+  lr.status IN ('pending', 'pending_hr')
+  OR EXISTS (
+    SELECT 1 FROM leave_request_history review_history
+    WHERE review_history.leave_request_id = lr.id
+      AND (review_history.to_status IN ('pending', 'pending_hr')
+           OR review_history.from_status IN ('pending', 'pending_hr'))
+  )
+)`;
+
 async function listLeaveReviewFilterOptions(db, scopeSql, params) {
   const result = await db.query(
     `SELECT DISTINCT COALESCE(lr.user_id, lr.employee_id) AS user_id,
@@ -3521,7 +3655,7 @@ router.get('/filter-options', protect, requireAdminOrHr, async (_req, res) => {
   try {
     const items = await listLeaveReviewFilterOptions(
       pool,
-      "lr.status <> 'pending_department_head'",
+      HR_REVIEW_SCOPE_SQL,
       []
     );
     res.json(items);
@@ -3582,7 +3716,7 @@ router.get('/', protect, requireAdminOrHr, async (req, res) => {
          AND ($6::timestamptz IS NULL OR lr.created_at >= $6)
          AND ($7::date IS NULL OR lr.created_at < ($7::date + interval '1 day'))
          AND ($8::text IS NULL OR d.name = $8)
-         ${paginated ? "AND lr.status <> 'pending_department_head'" : ''}`;
+         AND ${HR_REVIEW_SCOPE_SQL}`;
     const params = [status, leaveType, userId, startDateFrom, startDateTo, createdFrom, createdTo, department];
     const rows = await pool.query(
       `SELECT lr.*, lt.name AS leave_type_name, u.full_name AS employee_full_name,
@@ -4225,6 +4359,7 @@ router.patch('/:id/approve', protect, requireAdminOrHr, async (req, res) => {
         currentStatus: r.status,
         desiredStatus: 'approved',
       });
+      await assertFinalLeaveReviewer(client, targetUserId, reviewerId);
       await requireHrApprovalSignature(client, id, reviewerId);
       const approvingAuthority = await resolveActiveMayor(
         client,
@@ -4403,6 +4538,8 @@ router.patch('/:id/reject', protect, requireAdminOrHr, async (req, res) => {
       return res.status(404).json({ error: 'Leave request not found' });
     }
     const currentRow = current.rows[0];
+
+    await assertFinalLeaveReviewer(client, currentRow.user_id || currentRow.employee_id, reviewerId);
 
     const { nextStatus: rejectNextStatus, historyAction } = validateAdminTransition({
       currentStatus: currentRow.status,
@@ -4717,6 +4854,7 @@ router.patch('/:id/return', protect, requireAdminOrHr, async (req, res) => {
       await client.query('ROLLBACK');
       return res.status(400).json({ error: `Cannot return request with status '${currentRow.status}'` });
     }
+    await assertFinalLeaveReviewer(client, currentRow.user_id || currentRow.employee_id, reviewerId);
     const historyAction = 'returned';
 
     await client.query(
@@ -5529,6 +5667,7 @@ router.get('/:id', protect, async (req, res) => {
          LIMIT 1
        ) dhh ON true
        WHERE lr.id = $1
+         AND lr.discarded_at IS NULL
          AND (
            $2::boolean = true
            OR (lr.user_id = $3 OR lr.employee_id = $3)

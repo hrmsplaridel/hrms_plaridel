@@ -16,9 +16,8 @@ List<DocuTrackerDocument> docuTrackerDocumentsForDisplay({
   return DocuTrackerDocumentVisibility.filterForUser(documents, userId: userId);
 }
 
-/// Documents for which the signed-in user has a current, server-authorized
-/// action. Source-module actions are supplied by the backend adapter; native
-/// DocuTracker actions use current-step assignment metadata.
+/// Documents for Required actions: only items that still need the viewer to act.
+/// Completed / past-participant native docs stay in the Documents table instead.
 List<DocuTrackerDocument> docuTrackerRequiredActionDocuments({
   required List<DocuTrackerDocument> documents,
   required String userId,
@@ -27,19 +26,32 @@ List<DocuTrackerDocument> docuTrackerRequiredActionDocuments({
   return documents
       .where((document) {
         if (document.sourceOnly) {
+          // Leave/DTR: only while a source action is still available.
           return (document.sourceAction ?? '').trim().isNotEmpty;
         }
         if (uid.isEmpty) return false;
-        if (document.status == DocumentStatus.approved ||
-            document.status == DocumentStatus.rejected ||
-            document.status == DocumentStatus.cancelled) {
-          return false;
-        }
         if (DocuTrackerDocumentVisibility.isWorkInProgressDraft(document)) {
           return false;
         }
-        return document.currentHolderId?.trim() == uid ||
-            document.viewerIsRoutingAssignee;
+        final status = document.status;
+        if (status == DocumentStatus.approved ||
+            status == DocumentStatus.rejected ||
+            status == DocumentStatus.cancelled) {
+          return false;
+        }
+        final isCurrentHolder = document.currentHolderId?.trim() == uid;
+        final isActiveReview =
+            status == DocumentStatus.pending ||
+            status == DocumentStatus.inReview ||
+            status == DocumentStatus.escalated ||
+            status == DocumentStatus.overdue ||
+            status == DocumentStatus.returned;
+        final isRoutingOnActive =
+            document.viewerIsRoutingAssignee && isActiveReview;
+        final isSignatureAssignee = document.signatureSignerIds.any(
+          (id) => id.trim() == uid,
+        );
+        return isCurrentHolder || isRoutingOnActive || isSignatureAssignee;
       })
       .toList(growable: false);
 }

@@ -43,7 +43,9 @@ class EmployeeLeaveRequestsPanel extends StatefulWidget {
     required this.onLoadMore,
     required this.onEdit,
     required this.onCancel,
+    this.onDiscard,
     required this.onPrint,
+    required this.onPreview,
   });
 
   final List<LeaveRequest> requests;
@@ -57,7 +59,9 @@ class EmployeeLeaveRequestsPanel extends StatefulWidget {
   final VoidCallback onLoadMore;
   final ValueChanged<LeaveRequest> onEdit;
   final ValueChanged<LeaveRequest> onCancel;
+  final ValueChanged<LeaveRequest>? onDiscard;
   final ValueChanged<LeaveRequest> onPrint;
+  final ValueChanged<LeaveRequest> onPreview;
 
   @override
   State<EmployeeLeaveRequestsPanel> createState() => _RequestsPanelState();
@@ -294,11 +298,16 @@ class _RequestsPanelState extends State<EmployeeLeaveRequestsPanel> {
             request: request,
             canEdit: canEdit,
             canCancel: _canEmployeeCancel(request),
+            canDiscard:
+                request.status == LeaveRequestStatus.draft &&
+                widget.onDiscard != null,
             canPrint: request.status == LeaveRequestStatus.approved,
             onEdit: () => widget.onEdit(request),
             onHistory: () => _showHistory(panelContext, request),
             onCancel: () => widget.onCancel(request),
+            onDiscard: () => widget.onDiscard?.call(request),
             onPrint: () => widget.onPrint(request),
+            onPreview: () => widget.onPreview(request),
             onPreviewAttachment: () =>
                 _previewAttachment(request, panelContext),
             onDownloadAttachment: () =>
@@ -580,11 +589,14 @@ class _EmployeeLeaveDetailsPanel extends StatelessWidget {
     required this.request,
     required this.canEdit,
     required this.canCancel,
+    required this.canDiscard,
     required this.canPrint,
     required this.onEdit,
     required this.onHistory,
     required this.onCancel,
+    required this.onDiscard,
     required this.onPrint,
+    required this.onPreview,
     required this.onPreviewAttachment,
     required this.onDownloadAttachment,
   });
@@ -592,11 +604,14 @@ class _EmployeeLeaveDetailsPanel extends StatelessWidget {
   final LeaveRequest request;
   final bool canEdit;
   final bool canCancel;
+  final bool canDiscard;
   final bool canPrint;
   final VoidCallback onEdit;
   final VoidCallback onHistory;
   final VoidCallback onCancel;
+  final VoidCallback onDiscard;
   final VoidCallback onPrint;
+  final VoidCallback onPreview;
   final VoidCallback onPreviewAttachment;
   final VoidCallback onDownloadAttachment;
 
@@ -853,6 +868,24 @@ class _EmployeeLeaveDetailsPanel extends StatelessWidget {
                       },
                       icon: const Icon(Icons.cancel_outlined, size: 18),
                       label: const Text('Cancel'),
+                    ),
+                  if (canDiscard)
+                    OutlinedButton.icon(
+                      onPressed: () {
+                        Navigator.of(context).pop();
+                        onDiscard();
+                      },
+                      icon: const Icon(Icons.delete_outline_rounded, size: 18),
+                      label: const Text('Discard'),
+                    ),
+                  if (canPrint)
+                    OutlinedButton.icon(
+                      onPressed: () {
+                        Navigator.of(context).pop();
+                        onPreview();
+                      },
+                      icon: const Icon(Icons.visibility_outlined, size: 18),
+                      label: const Text('Preview Form'),
                     ),
                   if (canPrint)
                     OutlinedButton.icon(
@@ -1347,11 +1380,11 @@ String _customLeaveDetailDisplayValue(
 
 bool _canEmployeeCancel(LeaveRequest request) {
   return switch (request.status) {
-    LeaveRequestStatus.draft ||
     LeaveRequestStatus.pending ||
     LeaveRequestStatus.pendingDepartmentHead ||
     LeaveRequestStatus.pendingHr ||
     LeaveRequestStatus.returned => true,
+    LeaveRequestStatus.draft ||
     LeaveRequestStatus.approved ||
     LeaveRequestStatus.rejected ||
     LeaveRequestStatus.rejectedByDepartmentHead ||

@@ -123,6 +123,8 @@ void main() {
               'label': 'Prepared by',
               'assigned_signer_id': 'preparer-1',
               'assigned_signer_name': 'Prepared Person',
+              'assignment_source': 'creator',
+              'can_assign': false,
               'can_sign': false,
             },
             <String, dynamic>{
@@ -138,6 +140,8 @@ void main() {
 
       expect(bundle.canAssign, isTrue);
       expect(bundle.signatureFor('prepared_by')?.canSign, isFalse);
+      expect(bundle.signatureFor('prepared_by')?.canAssign, isFalse);
+      expect(bundle.signatureFor('prepared_by')?.assignmentSource, 'creator');
       expect(bundle.signatureFor('checked_by')?.canSign, isTrue);
       expect(
         bundle.signatureFor('checked_by')?.assignedSignerName,

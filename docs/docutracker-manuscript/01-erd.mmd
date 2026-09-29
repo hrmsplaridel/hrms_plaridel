@@ -1,0 +1,40 @@
+---
+title: Figure 1. DocuTracker Entity-Relationship Diagram
+config:
+  flowchart:
+    curve: stepAfter
+---
+flowchart TB
+    LEGEND["<b>Crow's Foot notation</b><br/>|| = exactly one<br/>o| = zero or one<br/>o{ = zero or many<br/>PK = primary key · FK = foreign key · UK = unique key"]:::legend
+    RC["<b>ROUTING_CONFIGS</b><br/>PK id : uuid<br/>document_type : text<br/>workflow_version : int<br/>review_deadline_hours : int"]:::entity
+    WS["<b>WORKFLOW_STEPS</b><br/>PK id : uuid<br/>document_type : text<br/>workflow_version : int<br/>step_order : int<br/>label : text"]:::entity
+    SA["<b>STEP_ASSIGNEES</b><br/>PK id : uuid<br/>FK step_id : uuid<br/>FK user_id : uuid<br/>is_primary : boolean<br/>backup_rank : int"]:::entity
+    U["<b>USERS</b><br/>PK id : uuid<br/>name : text<br/>role : text<br/>department_id : text"]:::entity
+    P["<b>PERMISSIONS</b><br/>PK id : uuid<br/>role_id : text<br/>FK user_id : uuid<br/>document_type : text<br/>action : text<br/>granted : boolean"]:::entity
+    D["<b>DOCUMENTS</b><br/>PK id : uuid<br/>UK document_number : text<br/>document_type : text<br/>title : text<br/>FK created_by : uuid<br/>FK current_holder_id : uuid<br/>current_step : int<br/>status : text<br/>deadline_time : timestamptz"]:::entity
+    RR["<b>ROUTING_RECORDS</b><br/>PK id : uuid<br/>FK document_id : uuid<br/>step_order : int<br/>FK assigned_to : uuid<br/>status : text"]:::entity
+    H["<b>DOCUMENT_HISTORY</b><br/>PK id : uuid<br/>FK document_id : uuid<br/>FK actor_id : uuid<br/>action : text<br/>from_status : text<br/>to_status : text<br/>created_at : timestamptz"]:::entity
+    N["<b>NOTIFICATIONS</b><br/>PK id : uuid<br/>FK document_id : uuid<br/>FK user_id : uuid<br/>type : text<br/>read : boolean"]:::entity
+    C["<b>DOCUMENT_CONTENTS</b><br/>PK, FK document_id : uuid<br/>pages : jsonb<br/>revision : int<br/>FK updated_by : uuid"]:::entity
+    A["<b>SIGNATURE_ASSETS</b><br/>PK id : uuid<br/>FK owner_user_id : uuid<br/>image_bytes : bytea<br/>mime_type : text<br/>is_saved : boolean"]:::entity
+    SF["<b>SIGNATURE_FIELDS</b><br/>PK id : uuid<br/>FK document_id : uuid<br/>FK assigned_signer_id : uuid<br/>FK signature_asset_id : uuid<br/>signed_at : timestamptz"]:::entity
+
+    RC ---|"|| — o{ · defines"| WS
+    WS ---|"|| — o{ · has"| SA
+    U ---|"|| — o{ · assigned"| SA
+    U ---|"|| — o{ · permissions"| P
+    U ---|"|| — o{ · creates"| D
+    U ---|"|| — o{ · holds"| D
+    U ---|"|| — o{ · routes"| RR
+    U ---|"|| — o{ · actions"| H
+    U ---|"|| — o{ · notifications"| N
+    U ---|"|| — o{ · owns"| A
+    D ---|"|| — o{ · routing"| RR
+    D ---|"|| — o{ · history"| H
+    D ---|"|| — o{ · notifications"| N
+    D ---|"|| — o| · content"| C
+    D ---|"|| — o{ · fields"| SF
+    A ---|"|| — o{ · used by"| SF
+
+    classDef entity fill:#f8f7ff,stroke:#7c3aed,color:#111,stroke-width:1.5px,text-align:left;
+    classDef legend fill:#fffbea,stroke:#ca8a04,color:#111,stroke-width:1.2px,text-align:left;

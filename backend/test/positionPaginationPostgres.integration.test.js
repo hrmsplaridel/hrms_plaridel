@@ -66,6 +66,7 @@ test.before(async () => {
        name text NOT NULL,
        description text,
        department_id uuid REFERENCES ${schema}.departments(id),
+       is_leave_final_reviewer boolean NOT NULL DEFAULT false,
        is_active boolean NOT NULL DEFAULT true
      )`
   );
