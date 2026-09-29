@@ -6207,10 +6207,12 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
           if (_orientationAt != null)
             _buildOrientationScheduleCard()
           else
-            const RspApplicantWaitingState(
+            RspApplicantWaitingState(
               title: 'Orientation',
               body:
                   'Your documents are approved. HR will schedule your orientation. No action is required right now.',
+              onRefresh: _refreshHiringStatus,
+              refreshBusy: _hiringStatusRefreshing,
             ),
         ] else if (!accountReady) ...[
           RspApplicantWaitingState(

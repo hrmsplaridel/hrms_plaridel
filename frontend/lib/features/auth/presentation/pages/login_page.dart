@@ -21,14 +21,16 @@ const _rememberKey = 'login_remember_v1';
 const _rememberEmailKey = 'login_remember_email_v1';
 
 const _kPlaridelLogoAsset = 'assets/images/Plaridel Logo.jpg';
+const _kHrmsLogoAsset = 'assets/images/hrmslogo.png';
 const _kLoginHeroImageAsset = 'assets/images/PlaridelBuildingC.png';
 const _kCardRadius = 18.0;
 const _kInputRadius = 12.0;
 const _kButtonRadius = 12.0;
 const _kFieldHeight = 50.0;
 const _kLoginFormMaxWidth = 440.0;
-const _kSplitBreakpoint = 768.0;
-const _kDesktopBreakpoint = 1024.0;
+const _kSplitBreakpoint = 1000.0;
+const _kDesktopBreakpoint = 1280.0;
+const _kWaveWidth = 80.0;
 
 enum _LoginLayout { desktop, tablet, mobile }
 
@@ -148,8 +150,6 @@ class _LoginPageState extends State<LoginPage> with TickerProviderStateMixin {
 
   @override
   Widget build(BuildContext context) {
-    final size = MediaQuery.sizeOf(context);
-    final layout = _layoutForWidth(size.width);
     final canPop = Navigator.of(context).canPop();
 
     return Scaffold(
@@ -157,21 +157,31 @@ class _LoginPageState extends State<LoginPage> with TickerProviderStateMixin {
       backgroundColor: const Color(0xFFF6F4F1),
       body: FadeTransition(
         opacity: _entranceFade,
-        child: layout == _LoginLayout.mobile
-            ? _buildStacked(context, canPop: canPop)
-            : _buildSplit(context, layout: layout, canPop: canPop),
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final layout = _layoutForWidth(constraints.maxWidth);
+            return layout == _LoginLayout.mobile
+                ? _buildStacked(context, canPop: canPop)
+                : _buildSplit(
+                    context,
+                    width: constraints.maxWidth,
+                    layout: layout,
+                    canPop: canPop,
+                  );
+          },
+        ),
       ),
     );
   }
 
   Widget _buildSplit(
     BuildContext context, {
+    required double width,
     required _LoginLayout layout,
     required bool canPop,
   }) {
-    final width = MediaQuery.sizeOf(context).width;
     final desktop = layout == _LoginLayout.desktop;
-    final formWidth = desktop ? width * 0.445 : width * 0.50;
+    final formWidth = (width * 0.445).clamp(500.0, 700.0);
     return Stack(
       fit: StackFit.expand,
       children: [
@@ -180,16 +190,18 @@ class _LoginPageState extends State<LoginPage> with TickerProviderStateMixin {
           top: 0,
           bottom: 0,
           right: formWidth * 0.42,
-          child: _LoginHeroPanel(compact: !desktop, showBack: canPop),
+          child: _LoginHeroPanel(
+            compact: !desktop,
+            showBack: canPop,
+            contentRightInset: formWidth * 0.58,
+          ),
         ),
         Positioned(
           top: 0,
           bottom: 0,
           right: 0,
           width: formWidth,
-          child: _LoginRightShelf(
-            child: _shakeForm(_form(embeddedCard: true)),
-          ),
+          child: _LoginRightShelf(child: _shakeForm(_form(embeddedCard: true))),
         ),
       ],
     );
@@ -203,53 +215,54 @@ class _LoginPageState extends State<LoginPage> with TickerProviderStateMixin {
     if (keyboardOpen) {
       heroHeight = 0;
     } else if (landscape) {
-      heroHeight = 132;
-    } else if (media.size.width < 360) {
-      heroHeight = 180;
-    } else if (media.size.height < 720) {
-      heroHeight = 196;
+      heroHeight = 220;
     } else {
-      heroHeight = 228;
+      heroHeight = math.max(
+        (media.size.height * 0.42).clamp(330.0, 390.0),
+        150 * MediaQuery.textScalerOf(context).scale(14) / 14 +
+            (canPop ? 48 : 0),
+      );
     }
 
-    return Column(
-      children: [
-        if (heroHeight > 0)
-          _LoginMobileHero(
-            height: heroHeight,
-            showBack: canPop,
-          ),
-        if (heroHeight == 0 && canPop)
-          SafeArea(
-            bottom: false,
-            child: Align(
-              alignment: Alignment.centerLeft,
-              child: _LoginIconBackButton(
-                onPressed: () => Navigator.of(context).pop(),
-                light: false,
-              ),
-            ),
-          ),
-        Expanded(
-          child: ColoredBox(
-            color: const Color(0xFFF6F4F1),
+    return SingleChildScrollView(
+      keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+      child: Column(
+        children: [
+          if (heroHeight > 0)
+            _LoginMobileHero(height: heroHeight, showBack: canPop),
+          Transform.translate(
+            offset: Offset(0, heroHeight > 0 ? -40 : 0),
             child: SafeArea(
               top: heroHeight == 0,
-              child: SingleChildScrollView(
-                keyboardDismissBehavior:
-                    ScrollViewKeyboardDismissBehavior.onDrag,
-                padding: EdgeInsets.fromLTRB(
-                  20,
-                  keyboardOpen ? 12 : 20,
-                  20,
-                  20 + media.viewInsets.bottom,
+              child: Padding(
+                padding: EdgeInsets.symmetric(
+                  horizontal: 20,
+                  vertical: keyboardOpen ? 36 : 0,
                 ),
-                child: _shakeForm(_form(embeddedCard: false)),
+                child: Center(
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 520),
+                    child: Column(
+                      children: [
+                        if (heroHeight == 0 && canPop)
+                          Align(
+                            alignment: Alignment.centerLeft,
+                            child: _LoginIconBackButton(
+                              onPressed: () => Navigator.of(context).pop(),
+                              light: false,
+                            ),
+                          ),
+                        _shakeForm(_form(embeddedCard: false)),
+                        const SizedBox(height: 12),
+                      ],
+                    ),
+                  ),
+                ),
               ),
             ),
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 
@@ -382,11 +395,7 @@ class _LoginHeroOverlay extends StatelessWidget {
             gradient: LinearGradient(
               begin: Alignment.centerLeft,
               end: Alignment.centerRight,
-              colors: [
-                Color(0x990A0A0A),
-                Color(0x330A0A0A),
-                Color(0x00000000),
-              ],
+              colors: [Color(0x990A0A0A), Color(0x330A0A0A), Color(0x00000000)],
               stops: [0.0, 0.42, 0.82],
             ),
           ),
@@ -396,11 +405,7 @@ class _LoginHeroOverlay extends StatelessWidget {
             gradient: LinearGradient(
               begin: Alignment.bottomCenter,
               end: Alignment.topCenter,
-              colors: [
-                Color(0xE6E85D04),
-                Color(0x99E85D04),
-                Color(0x00E85D04),
-              ],
+              colors: [Color(0xE6E85D04), Color(0x99E85D04), Color(0x00E85D04)],
               stops: [0.0, 0.28, 0.62],
             ),
           ),
@@ -412,10 +417,15 @@ class _LoginHeroOverlay extends StatelessWidget {
 
 /// Left panel: municipal hall photo, headline, and trust marks.
 class _LoginHeroPanel extends StatelessWidget {
-  const _LoginHeroPanel({required this.compact, required this.showBack});
+  const _LoginHeroPanel({
+    required this.compact,
+    required this.showBack,
+    required this.contentRightInset,
+  });
 
   final bool compact;
   final bool showBack;
+  final double contentRightInset;
 
   @override
   Widget build(BuildContext context) {
@@ -428,7 +438,7 @@ class _LoginHeroPanel extends StatelessWidget {
           child: LayoutBuilder(
             builder: (context, constraints) {
               final short = constraints.maxHeight < 720;
-              final brand = const _LoginHeroTopBrand();
+              final brand = _LoginHeroTopBrand(compact: compact);
               final lower = Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisSize: MainAxisSize.min,
@@ -452,36 +462,37 @@ class _LoginHeroPanel extends StatelessWidget {
                 padding: EdgeInsets.fromLTRB(
                   compact ? 22 : 36,
                   16,
-                  compact ? 36 : 72,
+                  contentRightInset + (compact ? 22 : 36),
                   20,
                 ),
-                child: short
-                    ? SingleChildScrollView(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            if (showBack) ...[
-                              const _LoginBackButton(showLabel: true),
-                              const SizedBox(height: 12),
+                child: LayoutBuilder(
+                  builder: (context, contentConstraints) =>
+                      SingleChildScrollView(
+                        child: ConstrainedBox(
+                          constraints: BoxConstraints(
+                            minHeight: contentConstraints.maxHeight,
+                          ),
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  if (showBack) ...[
+                                    const _LoginBackButton(showLabel: true),
+                                    const SizedBox(height: 12),
+                                  ],
+                                  brand,
+                                  const SizedBox(height: 24),
+                                ],
+                              ),
+                              lower,
                             ],
-                            brand,
-                            const SizedBox(height: 24),
-                            lower,
-                          ],
+                          ),
                         ),
-                      )
-                    : Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          if (showBack) ...[
-                            const _LoginBackButton(showLabel: true),
-                            const SizedBox(height: 12),
-                          ],
-                          brand,
-                          const Spacer(),
-                          lower,
-                        ],
                       ),
+                ),
               );
             },
           ),
@@ -611,8 +622,16 @@ class _LoginHeroFeatures extends StatelessWidget {
     const items = [
       (Icons.verified_user_outlined, 'Secure', 'Your data is protected'),
       (Icons.groups_outlined, 'For Our People', 'Support municipal employees'),
-      (Icons.settings_outlined, 'Modern HR Services', 'Efficient and digital processes'),
-      (Icons.bar_chart_rounded, 'Better Service', 'A stronger Plaridel tomorrow'),
+      (
+        Icons.settings_outlined,
+        'Modern HR Services',
+        'Efficient and digital processes',
+      ),
+      (
+        Icons.bar_chart_rounded,
+        'Better Service',
+        'A stronger Plaridel tomorrow',
+      ),
     ];
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -628,7 +647,9 @@ class _LoginHeroFeatures extends StatelessWidget {
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
                     color: Colors.white.withValues(alpha: 0.12),
-                    border: Border.all(color: Colors.white.withValues(alpha: 0.45)),
+                    border: Border.all(
+                      color: Colors.white.withValues(alpha: 0.45),
+                    ),
                   ),
                   child: Icon(items[i].$1, color: Colors.white, size: 20),
                 ),
@@ -670,11 +691,12 @@ class _LoginWaveClipper extends CustomClipper<Path> {
   @override
   Path getClip(Size size) {
     final w = size.width;
+    final wave = math.min(_kWaveWidth, w);
     final h = size.height;
     final path = Path()
-      ..moveTo(w * 0.20, 0)
-      ..cubicTo(w * 0.02, h * 0.14, w * 0.26, h * 0.34, w * 0.10, h * 0.52)
-      ..cubicTo(w * -0.02, h * 0.68, w * 0.22, h * 0.86, w * 0.04, h)
+      ..moveTo(wave * 0.77, 0)
+      ..cubicTo(wave * 0.08, h * 0.14, wave, h * 0.34, wave * 0.38, h * 0.52)
+      ..cubicTo(0, h * 0.68, wave * 0.85, h * 0.86, wave * 0.15, h)
       ..lineTo(w, h)
       ..lineTo(w, 0)
       ..close();
@@ -692,65 +714,52 @@ class _LoginRightShelf extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ClipPath(
-      clipper: _LoginWaveClipper(),
-      child: ColoredBox(
-        color: const Color(0xFFFFF8F3),
-        child: Stack(
-          children: [
-            Positioned(
-              right: -40,
-              bottom: -30,
-              child: IgnorePointer(
-                child: Container(
-                  width: 280,
-                  height: 280,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    gradient: RadialGradient(
-                      colors: [
-                        LoginTheme.bluePrimary.withValues(alpha: 0.22),
-                        LoginTheme.blueLight.withValues(alpha: 0.08),
-                        Colors.transparent,
-                      ],
-                    ),
-                  ),
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        IgnorePointer(
+          child: ClipPath(
+            clipper: _LoginWaveClipper(),
+            child: const DecoratedBox(
+              decoration: BoxDecoration(
+                color: Color(0xFFFFF8F3),
+                gradient: RadialGradient(
+                  center: Alignment.bottomRight,
+                  radius: 1.2,
+                  colors: [Color(0xFFFFE3CB), Color(0xFFFFF8F3)],
                 ),
               ),
             ),
-            Positioned(
-              right: 40,
-              top: 80,
-              child: IgnorePointer(
-                child: Container(
-                  width: 160,
-                  height: 160,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    gradient: RadialGradient(
-                      colors: [
-                        LoginTheme.blueLight.withValues(alpha: 0.10),
-                        Colors.transparent,
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            ),
-            SafeArea(
-              child: Center(
-                child: SingleChildScrollView(
-                  padding: const EdgeInsets.fromLTRB(56, 20, 28, 20),
-                  child: ConstrainedBox(
-                    constraints: const BoxConstraints(maxWidth: _kLoginFormMaxWidth),
-                    child: child,
-                  ),
-                ),
-              ),
-            ),
-          ],
+          ),
         ),
-      ),
+        SafeArea(
+          child: Padding(
+            // Reserve the full wave width so content never meets its edge.
+            padding: const EdgeInsets.only(left: _kWaveWidth + 16, right: 24),
+            child: LayoutBuilder(
+              builder: (context, constraints) => SingleChildScrollView(
+                primary: false,
+                keyboardDismissBehavior:
+                    ScrollViewKeyboardDismissBehavior.onDrag,
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(minHeight: constraints.maxHeight),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 20),
+                    child: Center(
+                      child: ConstrainedBox(
+                        constraints: const BoxConstraints(
+                          maxWidth: _kLoginFormMaxWidth,
+                        ),
+                        child: child,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ],
     );
   }
 }
@@ -763,19 +772,47 @@ class _LoginMobileHero extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final topInset = MediaQuery.paddingOf(context).top;
-    return SizedBox(
-      height: height + topInset,
+    return Container(
+      key: const ValueKey('mobile-login-hero'),
+      constraints: BoxConstraints(
+        minHeight: height + MediaQuery.paddingOf(context).top,
+      ),
       width: double.infinity,
       child: Stack(
-        fit: StackFit.expand,
         children: [
-          const _LoginHeroImage(alignment: Alignment(0, 0.42)),
-          const _LoginHeroOverlay(),
+          const Positioned.fill(
+            child: _LoginHeroImage(alignment: Alignment.topCenter),
+          ),
+          const Positioned.fill(
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [
+                    Color(0x66132236),
+                    Color(0x11132236),
+                    Color(0x18E85D04),
+                  ],
+                  stops: [0, 0.45, 1],
+                ),
+              ),
+            ),
+          ),
+          const Positioned(
+            bottom: 0,
+            left: 0,
+            right: 0,
+            height: 48,
+            child: IgnorePointer(
+              child: CustomPaint(painter: _MobileHeroAccentPainter()),
+            ),
+          ),
           SafeArea(
             bottom: false,
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(16, 8, 16, 14),
+            child: Container(
+              constraints: BoxConstraints(minHeight: height),
+              padding: const EdgeInsets.fromLTRB(24, 26, 24, 72),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -784,8 +821,71 @@ class _LoginMobileHero extends StatelessWidget {
                       onPressed: () => Navigator.of(context).pop(),
                       light: true,
                     ),
-                  const Spacer(),
-                  const _LoginHeroTopBrand(compact: true),
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const _MunicipalityLogoCircle(
+                        size: 58,
+                        borderColor: Colors.white,
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text.rich(
+                              TextSpan(
+                                children: [
+                                  TextSpan(text: 'Municipality of\n'),
+                                  TextSpan(
+                                    text: 'Plaridel',
+                                    style: TextStyle(
+                                      fontSize: 21,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              semanticsLabel: 'Municipality of Plaridel',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 17,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              'Human Resource\nManagement System',
+                              style: TextStyle(
+                                color: Colors.white.withValues(alpha: 0.9),
+                                fontSize: 13,
+                                height: 1.35,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 14),
+                  Container(
+                    width: 40,
+                    height: 3,
+                    decoration: BoxDecoration(
+                      color: LoginTheme.bluePrimary,
+                      borderRadius: BorderRadius.circular(3),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  const Text(
+                    'People First.\nProgress Together.',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 14,
+                      height: 1.35,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
                 ],
               ),
             ),
@@ -794,6 +894,34 @@ class _LoginMobileHero extends StatelessWidget {
       ),
     );
   }
+}
+
+class _MobileHeroAccentPainter extends CustomPainter {
+  const _MobileHeroAccentPainter();
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final wave = Path()
+      ..moveTo(0, size.height * 0.6)
+      ..cubicTo(
+        size.width * 0.35,
+        size.height,
+        size.width * 0.65,
+        0,
+        size.width,
+        size.height * 0.3,
+      )
+      ..lineTo(size.width, size.height)
+      ..lineTo(0, size.height)
+      ..close();
+    canvas.drawPath(
+      wave,
+      Paint()..color = LoginTheme.bluePrimary.withValues(alpha: 0.6),
+    );
+  }
+
+  @override
+  bool shouldRepaint(covariant _MobileHeroAccentPainter oldDelegate) => false;
 }
 
 class _LoginIconBackButton extends StatelessWidget {
@@ -805,9 +933,7 @@ class _LoginIconBackButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Material(
-      color: light
-          ? Colors.white.withValues(alpha: 0.18)
-          : Colors.white,
+      color: light ? Colors.white.withValues(alpha: 0.18) : Colors.white,
       shape: const CircleBorder(),
       child: IconButton(
         onPressed: onPressed,
@@ -842,7 +968,11 @@ class _LoginBackButton extends StatelessWidget {
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Icon(Icons.arrow_back_rounded, size: 20, color: Colors.white),
+                    Icon(
+                      Icons.arrow_back_rounded,
+                      size: 20,
+                      color: Colors.white,
+                    ),
                     SizedBox(width: 6),
                     Text(
                       'Back',
@@ -915,21 +1045,25 @@ class _LoginFormContent extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       mainAxisSize: MainAxisSize.min,
       children: [
-        const _LoginCardHeader(),
-        const SizedBox(height: 14),
-        const _LoginSecurityPill(),
+        if (embeddedCard) ...[
+          const _LoginCardHeader(),
+          const SizedBox(height: 14),
+          const _LoginSecurityPill(),
+        ] else
+          const _LoginMobileCardHeader(),
         if (formError != null) ...[
           const SizedBox(height: 14),
           _LoginInlineError(message: formError!),
         ],
-        const SizedBox(height: 16),
+        SizedBox(height: embeddedCard ? 16 : 24),
         AutofillGroup(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               _LoginTextField(
                 controller: emailController,
-                label: 'Email',
+                label: embeddedCard ? 'Email' : 'Email Address',
+                mobile: !embeddedCard,
                 hintText: 'name@plaridel.gov.ph',
                 icon: Icons.mail_outline_rounded,
                 nextFocusNode: passwordFocusNode,
@@ -937,8 +1071,9 @@ class _LoginFormContent extends StatelessWidget {
                 error: showFieldError && emailEmpty,
                 onChanged: (_) => onClearError(),
               ),
-              const SizedBox(height: 14),
+              SizedBox(height: embeddedCard ? 14 : 18),
               _PasswordTextField(
+                mobile: !embeddedCard,
                 controller: passwordController,
                 focusNode: passwordFocusNode,
                 onSubmitted: onLogin,
@@ -948,29 +1083,42 @@ class _LoginFormContent extends StatelessWidget {
             ],
           ),
         ),
-        const SizedBox(height: 8),
+        SizedBox(height: embeddedCard ? 8 : 14),
         _LoginRememberForgotRow(
+          mobile: !embeddedCard,
           rememberMe: rememberMe,
           onRememberMeChanged: onRememberMeChanged,
           onForgotPassword: onForgotPassword,
         ),
-        const SizedBox(height: 16),
+        SizedBox(height: embeddedCard ? 16 : 20),
         _LoginToHrmsButton(
+          mobile: !embeddedCard,
           onPressed: isLoading ? null : onLogin,
           isLoading: isLoading,
         ),
-        const SizedBox(height: 16),
-        const _LoginQuickAccess(),
+        if (embeddedCard) ...[
+          const SizedBox(height: 16),
+          const _LoginQuickAccess(),
+        ] else ...[
+          const SizedBox(height: 24),
+          const Divider(height: 1, color: Color(0xFFE9EDF2)),
+          const SizedBox(height: 14),
+          const _LoginFooterLinks(mobile: true),
+        ],
       ],
     );
 
     final card = DecoratedBox(
+      key: embeddedCard ? null : const ValueKey('mobile-login-card'),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(_kCardRadius),
+        borderRadius: BorderRadius.circular(embeddedCard ? _kCardRadius : 28),
+        border: embeddedCard
+            ? null
+            : Border.all(color: LoginTheme.bluePrimary.withValues(alpha: 0.10)),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.08),
+            color: Colors.black.withValues(alpha: embeddedCard ? 0.08 : 0.05),
             blurRadius: 28,
             offset: const Offset(0, 10),
           ),
@@ -978,23 +1126,113 @@ class _LoginFormContent extends StatelessWidget {
       ),
       child: Padding(
         padding: EdgeInsets.fromLTRB(
-          embeddedCard ? 24 : 20,
-          22,
-          embeddedCard ? 24 : 20,
-          18,
+          embeddedCard || MediaQuery.sizeOf(context).width >= 360 ? 24 : 18,
+          embeddedCard ? 22 : 64,
+          embeddedCard || MediaQuery.sizeOf(context).width >= 360 ? 24 : 18,
+          embeddedCard ? 18 : 26,
         ),
         child: cardBody,
       ),
     );
 
+    if (!embeddedCard) {
+      return Stack(
+        clipBehavior: Clip.none,
+        children: [
+          card,
+          Positioned(
+            top: -24,
+            left: 0,
+            right: 0,
+            child: Center(
+              child: Container(
+                key: const ValueKey('mobile-login-crest'),
+                width: 76,
+                height: 76,
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  shape: BoxShape.circle,
+                  border: Border.all(
+                    color: LoginTheme.bluePrimary.withValues(alpha: 0.15),
+                  ),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.06),
+                      blurRadius: 12,
+                      offset: const Offset(0, 3),
+                    ),
+                  ],
+                ),
+                child: Image.asset(
+                  _kHrmsLogoAsset,
+                  fit: BoxFit.contain,
+                  semanticLabel: 'HRMS system logo',
+                ),
+              ),
+            ),
+          ),
+        ],
+      );
+    }
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        const _LoginLiveHeader(),
-        const SizedBox(height: 16),
+        if (embeddedCard) ...[
+          const _LoginLiveHeader(),
+          const SizedBox(height: 16),
+        ],
         card,
         const SizedBox(height: 16),
-        const _LoginFooterLinks(),
+        _LoginFooterLinks(mobile: !embeddedCard),
+      ],
+    );
+  }
+}
+
+class _LoginMobileCardHeader extends StatelessWidget {
+  const _LoginMobileCardHeader();
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 7),
+          decoration: BoxDecoration(
+            color: LoginTheme.bluePrimary.withValues(alpha: 0.06),
+            border: Border.all(
+              color: LoginTheme.bluePrimary.withValues(alpha: 0.18),
+            ),
+            borderRadius: BorderRadius.circular(999),
+          ),
+          child: const Text(
+            'Official HRMS Portal',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: LoginTheme.bluePrimary,
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ),
+        const SizedBox(height: 14),
+        const Text(
+          'Welcome Back',
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            color: Color(0xFF172B42),
+            fontSize: 28,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        const SizedBox(height: 6),
+        const Text(
+          'Sign in to continue to your HRMS portal.',
+          textAlign: TextAlign.center,
+          style: TextStyle(color: Color(0xFF667085), fontSize: 14, height: 1.4),
+        ),
       ],
     );
   }
@@ -1065,7 +1303,11 @@ class _LoginSecurityPill extends StatelessWidget {
       ),
       child: const Row(
         children: [
-          Icon(Icons.lock_outline_rounded, size: 16, color: LoginTheme.bluePrimary),
+          Icon(
+            Icons.lock_outline_rounded,
+            size: 16,
+            color: LoginTheme.bluePrimary,
+          ),
           SizedBox(width: 8),
           Expanded(
             child: Text(
@@ -1112,7 +1354,10 @@ class _LoginQuickAccess extends StatelessWidget {
           children: [
             for (final item in items)
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 9,
+                ),
                 decoration: BoxDecoration(
                   color: const Color(0xFFF7F8FA),
                   borderRadius: BorderRadius.circular(12),
@@ -1123,12 +1368,14 @@ class _LoginQuickAccess extends StatelessWidget {
                   children: [
                     Icon(item.$1, size: 16, color: AppTheme.textSecondary),
                     const SizedBox(width: 6),
-                    Text(
-                      item.$2,
-                      style: const TextStyle(
-                        color: AppTheme.textPrimary,
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
+                    Flexible(
+                      child: Text(
+                        item.$2,
+                        style: const TextStyle(
+                          color: AppTheme.textPrimary,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                        ),
                       ),
                     ),
                   ],
@@ -1153,11 +1400,27 @@ class _LoginLiveHeaderState extends State<_LoginLiveHeader> {
   late DateTime _now;
 
   static const _weekdays = [
-    'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday',
+    'Monday',
+    'Tuesday',
+    'Wednesday',
+    'Thursday',
+    'Friday',
+    'Saturday',
+    'Sunday',
   ];
   static const _months = [
-    'January', 'February', 'March', 'April', 'May', 'June',
-    'July', 'August', 'September', 'October', 'November', 'December',
+    'January',
+    'February',
+    'March',
+    'April',
+    'May',
+    'June',
+    'July',
+    'August',
+    'September',
+    'October',
+    'November',
+    'December',
   ];
 
   @override
@@ -1177,7 +1440,9 @@ class _LoginLiveHeaderState extends State<_LoginLiveHeader> {
   }
 
   String get _timeLabel {
-    final h = _now.hour == 0 ? 12 : (_now.hour > 12 ? _now.hour - 12 : _now.hour);
+    final h = _now.hour == 0
+        ? 12
+        : (_now.hour > 12 ? _now.hour - 12 : _now.hour);
     final m = _now.minute.toString().padLeft(2, '0');
     final s = _now.second.toString().padLeft(2, '0');
     final ampm = _now.hour < 12 ? 'AM' : 'PM';
@@ -1193,7 +1458,11 @@ class _LoginLiveHeaderState extends State<_LoginLiveHeader> {
     final greeting = timeOfDayGreeting();
     final dateBlock = Row(
       children: [
-        const Icon(Icons.wb_sunny_rounded, color: LoginTheme.bluePrimary, size: 22),
+        const Icon(
+          Icons.wb_sunny_rounded,
+          color: LoginTheme.bluePrimary,
+          size: 22,
+        ),
         const SizedBox(width: 8),
         Expanded(
           child: Column(
@@ -1245,7 +1514,8 @@ class _LoginLiveHeaderState extends State<_LoginLiveHeader> {
 
     return LayoutBuilder(
       builder: (context, constraints) {
-        if (constraints.maxWidth < 360) {
+        if (constraints.maxWidth <
+            360 * MediaQuery.textScalerOf(context).scale(14) / 14) {
           return Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -1260,7 +1530,7 @@ class _LoginLiveHeaderState extends State<_LoginLiveHeader> {
           children: [
             Expanded(child: dateBlock),
             const SizedBox(width: 8),
-            greetingBlock,
+            Flexible(child: greetingBlock),
           ],
         );
       },
@@ -1288,7 +1558,11 @@ class _LoginInlineError extends StatelessWidget {
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Icon(Icons.error_outline_rounded, size: 18, color: Colors.red.shade700),
+            Icon(
+              Icons.error_outline_rounded,
+              size: 18,
+              color: Colors.red.shade700,
+            ),
             const SizedBox(width: 8),
             Expanded(
               child: Text(
@@ -1313,8 +1587,10 @@ class _LoginRememberForgotRow extends StatelessWidget {
     required this.rememberMe,
     required this.onRememberMeChanged,
     required this.onForgotPassword,
+    this.mobile = false,
   });
 
+  final bool mobile;
   final bool rememberMe;
   final ValueChanged<bool?> onRememberMeChanged;
   final VoidCallback onForgotPassword;
@@ -1322,14 +1598,21 @@ class _LoginRememberForgotRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final rememberControl = _RememberMeControl(
+      mobile: mobile,
       rememberMe: rememberMe,
       onChanged: onRememberMeChanged,
     );
-    final forgotButton = _ForgotPasswordButton(onPressed: onForgotPassword);
+    final forgotButton = _ForgotPasswordButton(
+      onPressed: onForgotPassword,
+      mobile: mobile,
+    );
 
     return LayoutBuilder(
       builder: (context, constraints) {
-        if (constraints.maxWidth < 300) {
+        if (constraints.maxWidth <
+            (mobile ? 230 : 300) *
+                MediaQuery.textScalerOf(context).scale(14) /
+                14) {
           return Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
@@ -1341,7 +1624,7 @@ class _LoginRememberForgotRow extends StatelessWidget {
         return Row(
           children: [
             Expanded(child: rememberControl),
-            forgotButton,
+            if (mobile) Expanded(child: forgotButton) else forgotButton,
           ],
         );
       },
@@ -1353,8 +1636,10 @@ class _RememberMeControl extends StatelessWidget {
   const _RememberMeControl({
     required this.rememberMe,
     required this.onChanged,
+    this.mobile = false,
   });
 
+  final bool mobile;
   final bool rememberMe;
   final ValueChanged<bool?> onChanged;
 
@@ -1383,13 +1668,13 @@ class _RememberMeControl extends StatelessWidget {
               ),
             ),
             const SizedBox(width: 10),
-            const Flexible(
+            Flexible(
               child: Text(
                 'Remember me',
-                overflow: TextOverflow.ellipsis,
+                overflow: mobile ? TextOverflow.visible : TextOverflow.ellipsis,
                 style: TextStyle(
                   color: AppTheme.textPrimary,
-                  fontSize: 14,
+                  fontSize: mobile ? 12 : 14,
                   fontWeight: FontWeight.w500,
                 ),
               ),
@@ -1402,8 +1687,9 @@ class _RememberMeControl extends StatelessWidget {
 }
 
 class _ForgotPasswordButton extends StatelessWidget {
-  const _ForgotPasswordButton({required this.onPressed});
+  const _ForgotPasswordButton({required this.onPressed, this.mobile = false});
 
+  final bool mobile;
   final VoidCallback onPressed;
 
   @override
@@ -1412,13 +1698,18 @@ class _ForgotPasswordButton extends StatelessWidget {
       onPressed: onPressed,
       style: TextButton.styleFrom(
         foregroundColor: LoginTheme.bluePrimary,
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
+        padding: EdgeInsets.symmetric(horizontal: mobile ? 0 : 8, vertical: 10),
+        alignment: mobile ? Alignment.centerRight : Alignment.center,
         minimumSize: const Size(0, 44),
         tapTargetSize: MaterialTapTargetSize.shrinkWrap,
       ),
-      child: const Text(
+      child: Text(
         'Forgot password?',
-        style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
+        textAlign: TextAlign.right,
+        style: TextStyle(
+          fontWeight: FontWeight.w600,
+          fontSize: mobile ? 12 : 14,
+        ),
       ),
     );
   }
@@ -1475,7 +1766,9 @@ class _MunicipalityLogoCircle extends StatelessWidget {
 }
 
 class _LoginFooterLinks extends StatelessWidget {
-  const _LoginFooterLinks();
+  const _LoginFooterLinks({this.mobile = false});
+
+  final bool mobile;
 
   static const _muted = Color(0xFF6C757D);
 
@@ -1531,8 +1824,22 @@ class _LoginFooterLinks extends StatelessWidget {
       crossAxisAlignment: WrapCrossAlignment.center,
       spacing: 6,
       children: [
-        Text('© ${DateTime.now().year} HRMS Plaridel', style: base),
-        Text('·', style: base.copyWith(color: _muted.withValues(alpha: 0.5))),
+        if (mobile)
+          SizedBox(
+            width: double.infinity,
+            child: Text(
+              '© ${DateTime.now().year} HRMS Plaridel',
+              textAlign: TextAlign.center,
+              style: base,
+            ),
+          )
+        else ...[
+          Text('© ${DateTime.now().year} HRMS Plaridel', style: base),
+          Text(
+            mobile ? '|' : '·',
+            style: base.copyWith(color: _muted.withValues(alpha: 0.5)),
+          ),
+        ],
         MouseRegion(
           cursor: SystemMouseCursors.click,
           child: GestureDetector(
@@ -1542,12 +1849,18 @@ class _LoginFooterLinks extends StatelessWidget {
               'HRMS Plaridel collects and processes personal information only for official human resource management of the Municipality of Plaridel. Access is limited to authorized municipal staff.',
             ),
             child: Padding(
-              padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 2),
+              padding: EdgeInsets.symmetric(
+                vertical: mobile ? 14 : 8,
+                horizontal: mobile ? 8 : 2,
+              ),
               child: Text('Privacy', style: linkStyle),
             ),
           ),
         ),
-        Text('·', style: base.copyWith(color: _muted.withValues(alpha: 0.5))),
+        Text(
+          mobile ? '|' : '·',
+          style: base.copyWith(color: _muted.withValues(alpha: 0.5)),
+        ),
         MouseRegion(
           cursor: SystemMouseCursors.click,
           child: GestureDetector(
@@ -1557,7 +1870,10 @@ class _LoginFooterLinks extends StatelessWidget {
               'This portal is for official use by municipal employees and authorized HR staff. Unauthorized access or misuse of HRMS records is prohibited.',
             ),
             child: Padding(
-              padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 2),
+              padding: EdgeInsets.symmetric(
+                vertical: mobile ? 14 : 8,
+                horizontal: mobile ? 8 : 2,
+              ),
               child: Text('Terms', style: linkStyle),
             ),
           ),
@@ -1570,6 +1886,7 @@ class _LoginFooterLinks extends StatelessWidget {
 class _LoginTextField extends StatefulWidget {
   const _LoginTextField({
     required this.controller,
+    this.mobile = false,
     required this.label,
     required this.hintText,
     required this.icon,
@@ -1580,6 +1897,7 @@ class _LoginTextField extends StatefulWidget {
   });
 
   final TextEditingController controller;
+  final bool mobile;
   final String label;
   final String hintText;
   final IconData icon;
@@ -1631,7 +1949,22 @@ class _LoginTextFieldState extends State<_LoginTextField> {
         const SizedBox(height: 8),
         AnimatedContainer(
           duration: const Duration(milliseconds: 180),
-          height: _kFieldHeight,
+          constraints: BoxConstraints(
+            minHeight: widget.mobile ? 56 : _kFieldHeight,
+          ),
+          decoration: widget.mobile
+              ? BoxDecoration(
+                  borderRadius: BorderRadius.circular(14),
+                  boxShadow: [
+                    BoxShadow(
+                      color: LoginTheme.bluePrimary.withValues(
+                        alpha: _focused ? 0.10 : 0,
+                      ),
+                      blurRadius: 8,
+                    ),
+                  ],
+                )
+              : null,
           child: TextField(
             controller: widget.controller,
             focusNode: _focusNode,
@@ -1663,6 +1996,7 @@ class _LoginTextFieldState extends State<_LoginTextField> {
 class _PasswordTextField extends StatefulWidget {
   const _PasswordTextField({
     required this.controller,
+    this.mobile = false,
     this.focusNode,
     this.onSubmitted,
     this.error = false,
@@ -1670,6 +2004,7 @@ class _PasswordTextField extends StatefulWidget {
   });
 
   final TextEditingController controller;
+  final bool mobile;
   final FocusNode? focusNode;
   final VoidCallback? onSubmitted;
   final bool error;
@@ -1721,7 +2056,22 @@ class _PasswordTextFieldState extends State<_PasswordTextField> {
         const SizedBox(height: 8),
         AnimatedContainer(
           duration: const Duration(milliseconds: 180),
-          height: _kFieldHeight,
+          constraints: BoxConstraints(
+            minHeight: widget.mobile ? 56 : _kFieldHeight,
+          ),
+          decoration: widget.mobile
+              ? BoxDecoration(
+                  borderRadius: BorderRadius.circular(14),
+                  boxShadow: [
+                    BoxShadow(
+                      color: LoginTheme.bluePrimary.withValues(
+                        alpha: _focused ? 0.10 : 0,
+                      ),
+                      blurRadius: 8,
+                    ),
+                  ],
+                )
+              : null,
           child: TextField(
             controller: widget.controller,
             focusNode: widget.focusNode,
@@ -1821,10 +2171,15 @@ InputDecoration _inputDecoration({
 }
 
 class _LoginToHrmsButton extends StatefulWidget {
-  const _LoginToHrmsButton({this.onPressed, this.isLoading = false});
+  const _LoginToHrmsButton({
+    this.onPressed,
+    this.isLoading = false,
+    this.mobile = false,
+  });
 
   final VoidCallback? onPressed;
   final bool isLoading;
+  final bool mobile;
 
   @override
   State<_LoginToHrmsButton> createState() => _LoginToHrmsButtonState();
@@ -1853,7 +2208,7 @@ class _LoginToHrmsButtonState extends State<_LoginToHrmsButton> {
         duration: const Duration(milliseconds: 150),
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 180),
-          height: 50,
+          height: widget.mobile ? 56 : 50,
           decoration: BoxDecoration(
             color: color,
             borderRadius: BorderRadius.circular(_kButtonRadius),
