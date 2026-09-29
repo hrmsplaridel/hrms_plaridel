@@ -259,6 +259,7 @@ and `reject`) cannot be granted through these system-access endpoints.
 |--------|----------|-------------|
 | GET | /api/docutracker/routing-configs | List workflow configs |
 | POST | /api/docutracker/routing-configs | Publish a workflow version with its step assignees and actions |
+| GET | /api/docutracker/hr-workflow-mirrors | List read-only Leave and Locator reviewer routes resolved from DTR configuration (admin only) |
 
 Each item in `steps` may include `user_ids` ordered as primary then backups and
 `allowed_actions`, containing one or more of `approve`, `forward`, `return`, or
@@ -266,6 +267,11 @@ Each item in `steps` may include `user_ids` ordered as primary then backups and
 creates the normalized step/assignee rows. Older configs
 without `allowed_actions` retain their stored assignee actions and otherwise
 use the legacy four-action default.
+
+The HR workflow mirror endpoint is display-only. Its Leave and Locator stages
+are resolved from effective department-head, department-backup, and final-HR
+reviewer assignments. They are not inserted into DocuTracker routing tables and
+cannot create DocuTracker approval tasks.
 
 ## Workflow Step Assignees
 

@@ -13,6 +13,7 @@ import 'package:hrms_plaridel/features/docutracker/models/document_action.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document_permission.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document_routing_config.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document_type.dart';
+import 'package:hrms_plaridel/features/docutracker/models/hr_workflow_mirror.dart';
 import 'package:hrms_plaridel/features/docutracker/security/docutracker_roles.dart';
 import 'package:hrms_plaridel/features/docutracker/services/employee_directory_lookup.dart';
 import 'package:hrms_plaridel/features/docutracker/theme/docutracker_tokens.dart';
@@ -76,6 +77,10 @@ class _DocuTrackerAdminScreenState extends State<DocuTrackerAdminScreen> {
   /// Narrow layout: 0 = workflows card, 1 = permissions card.
   int _adminTab = 0;
   bool _panelBusy = false;
+  final DocuTrackerRepository _repository = DocuTrackerRepository.instance;
+  List<HrWorkflowMirror> _hrWorkflowMirrors = const [];
+  bool _hrWorkflowMirrorsLoading = true;
+  String? _hrWorkflowMirrorsError;
 
   @override
   void initState() {
@@ -116,6 +121,7 @@ class _DocuTrackerAdminScreenState extends State<DocuTrackerAdminScreen> {
     final provider = context.read<DocuTrackerProvider>();
     await Future.wait([
       provider.loadRoutingConfigs(),
+      _loadHrWorkflowMirrors(),
       _employeeDirectory.load(),
       _loadDepartmentNames(),
     ]);
@@ -133,6 +139,31 @@ class _DocuTrackerAdminScreenState extends State<DocuTrackerAdminScreen> {
         .toSet();
     await _employeeDirectory.ensureIds(ids);
     if (mounted) setState(() {});
+  }
+
+  Future<void> _loadHrWorkflowMirrors() async {
+    if (mounted) {
+      setState(() {
+        _hrWorkflowMirrorsLoading = true;
+        _hrWorkflowMirrorsError = null;
+      });
+    }
+    try {
+      final workflows = await _repository.listHrWorkflowMirrors();
+      if (!mounted) return;
+      setState(() => _hrWorkflowMirrors = workflows);
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _hrWorkflowMirrors = const [];
+        _hrWorkflowMirrorsError = error.toString().replaceFirst(
+          'Exception: ',
+          '',
+        );
+      });
+    } finally {
+      if (mounted) setState(() => _hrWorkflowMirrorsLoading = false);
+    }
   }
 
   Future<void> _openAdminTool(Future<void> Function() action) async {
@@ -561,19 +592,54 @@ class _DocuTrackerAdminScreenState extends State<DocuTrackerAdminScreen> {
           ),
         ),
         const SizedBox(height: 20),
-        if (provider.loading)
+        if (provider.loading || _hrWorkflowMirrorsLoading)
           const Padding(
             padding: EdgeInsets.all(40),
             child: Center(child: CircularProgressIndicator()),
           )
-        else if (configs.isEmpty)
+        else if (configs.isEmpty &&
+            _hrWorkflowMirrors.isEmpty &&
+            _hrWorkflowMirrorsError == null)
           DocuTrackerPeachDashedBox(
             child: Text(
               'No workflow definitions loaded. Tap New workflow to create one.',
               style: DocuTrackerTokens.subtitleStyle(context),
             ),
           )
-        else
+        else ...[
+          if (_hrWorkflowMirrorsError != null) ...[
+            DocuTrackerPeachDashedBox(
+              padding: const EdgeInsets.all(14),
+              child: Row(
+                children: [
+                  const Icon(Icons.sync_problem_outlined, size: 20),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      'Mirrored HR workflows could not be loaded. ${_hrWorkflowMirrorsError!}',
+                      style: DocuTrackerTokens.subtitleStyle(context),
+                    ),
+                  ),
+                  TextButton(
+                    onPressed: _loadHrWorkflowMirrors,
+                    child: const Text('Retry'),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 16),
+          ],
+          ..._hrWorkflowMirrors.map(
+            (workflow) => Padding(
+              padding: const EdgeInsets.only(bottom: 16),
+              child: _HoverLift(
+                child: DocuTrackerMirroredWorkflowCard(
+                  workflow: workflow,
+                  onView: () => _showHrWorkflowMirrorDetails(workflow),
+                ),
+              ),
+            ),
+          ),
           ...configs.map(
             (config) => Padding(
               padding: const EdgeInsets.only(bottom: 16),
@@ -594,7 +660,138 @@ class _DocuTrackerAdminScreenState extends State<DocuTrackerAdminScreen> {
               ),
             ),
           ),
+        ],
       ],
+    );
+  }
+
+  void _showHrWorkflowMirrorDetails(HrWorkflowMirror workflow) {
+    final effectiveDate = workflow.effectiveDate;
+    final dateLabel = effectiveDate == null
+        ? 'Current configuration'
+        : '${effectiveDate.year.toString().padLeft(4, '0')}-'
+              '${effectiveDate.month.toString().padLeft(2, '0')}-'
+              '${effectiveDate.day.toString().padLeft(2, '0')}';
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      builder: (sheetContext) {
+        return SafeArea(
+          child: SizedBox(
+            height: MediaQuery.sizeOf(sheetContext).height * 0.78,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(24, 20, 24, 24),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              workflow.title,
+                              style: TextStyle(
+                                color: DocuTrackerTokens.textPrimaryOf(
+                                  sheetContext,
+                                ),
+                                fontSize: 20,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              '${workflow.sourceLabel} · Effective $dateLabel',
+                              style: DocuTrackerTokens.subtitleStyle(
+                                sheetContext,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      IconButton(
+                        tooltip: 'Close',
+                        onPressed: () => Navigator.of(sheetContext).pop(),
+                        icon: const Icon(Icons.close_rounded),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+                  Expanded(
+                    child: ListView.separated(
+                      itemCount: workflow.steps.length,
+                      separatorBuilder: (_, _) => const SizedBox(height: 20),
+                      itemBuilder: (context, index) {
+                        final step = workflow.steps[index];
+                        return Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              '${step.stepOrder}. ${step.label}',
+                              style: TextStyle(
+                                color: DocuTrackerTokens.textPrimaryOf(context),
+                                fontSize: 15,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              step.assigneeSummary,
+                              style: DocuTrackerTokens.subtitleStyle(context),
+                            ),
+                            const SizedBox(height: 10),
+                            ...step.groups.map(
+                              (group) =>
+                                  _buildHrWorkflowReviewerGroup(context, group),
+                            ),
+                          ],
+                        );
+                      },
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildHrWorkflowReviewerGroup(
+    BuildContext context,
+    HrWorkflowMirrorGroup group,
+  ) {
+    final primaryName = group.primary?.name ?? 'Not configured';
+    final backupNames = group.backups
+        .map((reviewer) => reviewer.name)
+        .join(', ');
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            group.scopeName,
+            style: TextStyle(
+              color: DocuTrackerTokens.textPrimaryOf(context),
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'Primary: $primaryName',
+            style: DocuTrackerTokens.metaStyle(context),
+          ),
+          Text(
+            'Backups: ${backupNames.isEmpty ? 'None' : backupNames}',
+            style: DocuTrackerTokens.metaStyle(context),
+          ),
+          const SizedBox(height: 10),
+          Divider(height: 1, color: DocuTrackerTokens.borderSubtle),
+        ],
+      ),
     );
   }
 
