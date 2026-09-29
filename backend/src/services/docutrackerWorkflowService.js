@@ -2,8 +2,21 @@ const { coalesceDocumentTitle } = require('../utils/docutrackerDisplayTitle');
 const { sameEntityId } = require('../utils/sameEntityId');
 const { todayInHrmsTimezone } = require('../utils/dateRangeParser');
 const {
+  getEmployeeDepartmentForDate,
+  getEmployeeReviewSnapshot,
   resolveDepartmentReviewers,
 } = require('./departmentReviewerService');
+
+const DYNAMIC_DEPARTMENT_ASSIGNEE_SOURCES = new Set([
+  'department_reviewers',
+  'submitter_department_reviewers',
+]);
+
+function isDynamicDepartmentAssigneeSource(source) {
+  return DYNAMIC_DEPARTMENT_ASSIGNEE_SOURCES.has(
+    String(source || '').trim().toLowerCase()
+  );
+}
 
 const VALID_STATUSES = new Set([
   'draft',
@@ -123,6 +136,7 @@ function mapDocumentRow(row) {
     file_path: row.file_path,
     file_name: row.file_name,
     created_by: row.created_by,
+    originating_department_id: row.originating_department_id ?? null,
     creator_name: row.creator_name ?? null,
     assignee_name: row.assignee_name ?? null,
     current_holder_id: row.current_holder_id,
@@ -686,7 +700,13 @@ async function validateAssignee(client, assigneeId) {
  * allowed for this step when no explicit override is used (same set as resolveStepAssignees without explicit).
  */
 async function sanitizeExplicitAssigneeId(client, user, rawExplicit, ctx) {
-  const { stepConfig, currentHolderId, documentType, workflowVersion } = ctx;
+  const {
+    stepConfig,
+    currentHolderId,
+    documentType,
+    workflowVersion,
+    submitterUserId,
+  } = ctx;
   if (rawExplicit == null || rawExplicit === '') return null;
   const id = String(rawExplicit).trim();
   if (!id) return null;
@@ -703,6 +723,7 @@ async function sanitizeExplicitAssigneeId(client, user, rawExplicit, ctx) {
     currentHolderId,
     documentType,
     workflowVersion,
+    submitterUserId,
   });
   const allowedSet = new Set(allowed.map((x) => String(x)));
   if (!allowedSet.has(String(id))) {
@@ -1225,7 +1246,7 @@ async function getWorkflowStepAssigneeRecord(client, { document, userId }) {
   const steps = parseSteps(config?.steps || []);
   const stepConfig = getStepByOrder(steps, step);
   if (!stepConfig || stepConfig.enabled === false) return null;
-  if (stepConfig.assignee_source !== 'department_reviewers') {
+  if (!isDynamicDepartmentAssigneeSource(stepConfig.assignee_source)) {
     const normalizedStep = await client.query(
       `SELECT id FROM docutracker_workflow_steps
        WHERE document_type = $1 AND workflow_version = $2 AND step_order = $3
@@ -1241,6 +1262,7 @@ async function getWorkflowStepAssigneeRecord(client, { document, userId }) {
     currentHolderId: document.current_holder_id || null,
     documentType: docType,
     workflowVersion: document.workflow_version || config?.version || null,
+    submitterUserId: document.created_by || null,
   });
   const index = assignees.map(String).indexOf(String(userId));
   if (index < 0) return null;
@@ -1286,7 +1308,14 @@ async function canUserPerformGeneralAction(client, { user, documentType, action 
   return explicit === true;
 }
 
-async function resolveStepAssignees(client, { explicitAssigneeId, stepConfig, currentHolderId, documentType, workflowVersion }) {
+async function resolveStepAssignees(client, {
+  explicitAssigneeId,
+  stepConfig,
+  currentHolderId,
+  documentType,
+  workflowVersion,
+  submitterUserId = null,
+}) {
   const type = String(stepConfig?.assignee_type || '').trim().toLowerCase();
   const source = String(
     stepConfig?.assignee_source || stepConfig?.assigneeSource || 'specific_users'
@@ -1297,6 +1326,26 @@ async function resolveStepAssignees(client, { explicitAssigneeId, stepConfig, cu
     const valid = await validateAssignee(client, explicitAssigneeId);
     if (!valid) throw validationError(`Invalid assignee '${explicitAssigneeId}'`);
     return [explicitAssigneeId];
+  }
+
+  if (source === 'submitter_department_reviewers') {
+    const submitterId = submitterUserId || null;
+    if (!submitterId) {
+      throw validationError(
+        `Submitter department reviewer step ${stepConfig?.step_order ?? 'unknown'} has no document creator`
+      );
+    }
+    const snapshot = await getEmployeeReviewSnapshot(client, {
+      employeeUserId: submitterId,
+      effectiveDate: todayInHrmsTimezone(),
+    });
+    const reviewerIds = (snapshot?.reviewerUserIds || []).map(String).filter(Boolean);
+    if (!reviewerIds.length) {
+      throw validationError(
+        `No active Department Head or backup reviewer is configured for the submitter's department (step ${stepConfig?.step_order ?? 'unknown'})`
+      );
+    }
+    return reviewerIds;
   }
 
   if (source === 'department_reviewers') {
@@ -1409,6 +1458,7 @@ async function isUserAssignedToCurrentStep(client, { document, userId }) {
       currentHolderId: document.current_holder_id || null,
       documentType: document.document_type,
       workflowVersion: document.workflow_version || (config?.version ?? null),
+      submitterUserId: document.created_by || null,
     });
     return assignees.includes(userId);
   } catch (_) {
@@ -2052,16 +2102,25 @@ async function createDocument(pool, user, input) {
       );
     }
 
+    const creatorDepartment = await getEmployeeDepartmentForDate(
+      client,
+      user.id,
+      todayInHrmsTimezone()
+    );
+    const originatingDepartmentId = creatorDepartment?.departmentId || null;
+
     const docRes = await client.query(
       `INSERT INTO docutracker_documents
        (document_number, document_type, title, description,
         source_module, source_table, source_record_id, source_title,
-        file_path, file_name, created_by, current_holder_id, current_step,
+        file_path, file_name, created_by, originating_department_id,
+        current_holder_id, current_step,
         status, sent_time, deadline_time, workflow_version)
        VALUES ($1, $2, $3, $4,
                $5, $6, $7, $8,
-               $9, $10, $11, NULL, NULL,
-               $12, NULL, NULL, $13)
+               $9, $10, $11, $12,
+               NULL, NULL,
+               $13, NULL, NULL, $14)
        RETURNING *`,
       [
         input.document_number || null,
@@ -2075,6 +2134,7 @@ async function createDocument(pool, user, input) {
         input.file_path || null,
         input.file_name || null,
         user.id,
+        originatingDepartmentId,
         initialStatus,
         workflowVersion,
       ]
@@ -2262,6 +2322,7 @@ async function transitionDocument(pool, user, documentId, action, payload = {}) 
           currentHolderId: doc.current_holder_id || user.id,
           documentType: doc.document_type,
           workflowVersion: doc.workflow_version || (config?.version ?? null),
+          submitterUserId: doc.created_by || null,
         }
       );
       const stepOneAssignees = await resolveStepAssignees(client, {
@@ -2270,6 +2331,7 @@ async function transitionDocument(pool, user, documentId, action, payload = {}) 
         currentHolderId: doc.current_holder_id || user.id,
         documentType: doc.document_type,
         workflowVersion: doc.workflow_version || (config?.version ?? null),
+        submitterUserId: doc.created_by || null,
       });
       nextHolder = stepOneAssignees[0] || null;
       nextStepAssignees = stepOneAssignees;
@@ -2294,6 +2356,7 @@ async function transitionDocument(pool, user, documentId, action, payload = {}) 
           currentHolderId: doc.current_holder_id,
           documentType: doc.document_type,
           workflowVersion: doc.workflow_version || (config?.version ?? null),
+          submitterUserId: doc.created_by || null,
         }
       );
       const nextAssignees = await resolveStepAssignees(client, {
@@ -2302,6 +2365,7 @@ async function transitionDocument(pool, user, documentId, action, payload = {}) 
         currentHolderId: doc.current_holder_id,
         documentType: doc.document_type,
         workflowVersion: doc.workflow_version || (config?.version ?? null),
+        submitterUserId: doc.created_by || null,
       });
       nextHolder = nextAssignees[0] || null;
       nextStepAssignees = nextAssignees;
@@ -2331,6 +2395,7 @@ async function transitionDocument(pool, user, documentId, action, payload = {}) 
             currentHolderId: doc.current_holder_id,
             documentType: doc.document_type,
             workflowVersion: doc.workflow_version || (config?.version ?? null),
+            submitterUserId: doc.created_by || null,
           }
         );
         const nextAssignees = await resolveStepAssignees(client, {
@@ -2339,6 +2404,7 @@ async function transitionDocument(pool, user, documentId, action, payload = {}) 
           currentHolderId: doc.current_holder_id,
           documentType: doc.document_type,
           workflowVersion: doc.workflow_version || (config?.version ?? null),
+          submitterUserId: doc.created_by || null,
         });
         nextHolder = nextAssignees[0] || null;
         nextStepAssignees = nextAssignees;
@@ -2382,6 +2448,7 @@ async function transitionDocument(pool, user, documentId, action, payload = {}) 
             currentHolderId: doc.created_by,
             documentType: doc.document_type,
             workflowVersion: doc.workflow_version || (config?.version ?? null),
+            submitterUserId: doc.created_by || null,
           }
         );
         const previousAssignees = await resolveStepAssignees(client, {
@@ -2390,6 +2457,7 @@ async function transitionDocument(pool, user, documentId, action, payload = {}) 
           currentHolderId: doc.created_by,
           documentType: doc.document_type,
           workflowVersion: doc.workflow_version || (config?.version ?? null),
+          submitterUserId: doc.created_by || null,
         });
         previousAssignee = previousAssignees[0] || null;
         nextStepAssignees = previousAssignees;
@@ -2474,6 +2542,7 @@ async function transitionDocument(pool, user, documentId, action, payload = {}) 
             currentHolderId: nextHolder,
             documentType: doc.document_type,
             workflowVersion: doc.workflow_version || (config?.version ?? null),
+            submitterUserId: doc.created_by || null,
           })
         : [nextHolder];
       nextStepAssignees = resolvedAssignees;
@@ -2775,6 +2844,7 @@ async function recoverDocumentAssignment(pool, user, documentId, payload = {}) {
       currentHolderId: assigneeId,
       documentType: doc.document_type,
       workflowVersion: doc.workflow_version || config?.version || null,
+      submitterUserId: doc.created_by || null,
     });
     const snapshotAssignees = Array.from(
       new Set([...resolvedAssignees, assigneeId].map(String).filter(Boolean))

@@ -1641,7 +1641,11 @@ router.post('/routing-configs', protect, requireAdmin, async (req, res) => {
     }
     for (const s of normalizedSteps) {
       if (!s.enabled) continue;
-      if (!['specific_users', 'department_reviewers'].includes(s.assignee_source)) {
+      if (![
+        'specific_users',
+        'department_reviewers',
+        'submitter_department_reviewers',
+      ].includes(s.assignee_source)) {
         return res.status(400).json({ error: `Invalid assignee_source for step ${s.step_order}.` });
       }
       if (!['user', 'role', 'department', 'office'].includes(s.assignee_type)) {
@@ -1657,6 +1661,10 @@ router.post('/routing-configs', protect, requireAdmin, async (req, res) => {
         return res.status(400).json({
           error: `Department reviewer step ${s.step_order} must include department_id.`,
         });
+      }
+      if (s.assignee_source === 'submitter_department_reviewers') {
+        s.department_id = null;
+        s.user_ids = [];
       }
       if (s.deadline_hours != null && (!Number.isFinite(s.deadline_hours) || s.deadline_hours <= 0)) {
         return res.status(400).json({ error: `Invalid deadline_hours for step ${s.step_order}.` });
@@ -1700,6 +1708,7 @@ router.post('/routing-configs', protect, requireAdmin, async (req, res) => {
       for (const s of normalizedSteps) {
         if (!s.enabled) continue;
         if (s.assignee_source === 'department_reviewers') continue;
+        if (s.assignee_source === 'submitter_department_reviewers') continue;
         const ids = Array.isArray(s.user_ids) ? s.user_ids.filter(Boolean) : [];
         if (!ids.length) continue;
 
@@ -1830,6 +1839,7 @@ router.post('/routing-configs', protect, requireAdmin, async (req, res) => {
 
       for (const s of normalizedSteps) {
         if (s.assignee_source === 'department_reviewers') continue;
+        if (s.assignee_source === 'submitter_department_reviewers') continue;
         if (s.assignee_type !== 'user') continue;
         const stepId = stepIdByOrder.get(s.step_order);
         if (!stepId) continue;
@@ -2052,10 +2062,16 @@ router.put('/workflow-steps/:stepId/assignees', protect, requireAdmin, async (re
         await client.query('ROLLBACK');
         return res.status(404).json({ error: 'Workflow step not found' });
       }
-      if (stepExists.rows[0]?.assignee_source === 'department_reviewers') {
+      if (
+        stepExists.rows[0]?.assignee_source === 'department_reviewers' ||
+        stepExists.rows[0]?.assignee_source === 'submitter_department_reviewers'
+      ) {
         await client.query('ROLLBACK');
         return res.status(409).json({
-          error: 'This step uses automatic department reviewers. Manage them from Department Management.',
+          error:
+            stepExists.rows[0]?.assignee_source === 'submitter_department_reviewers'
+              ? 'This step uses the submitter department head. Assignees are resolved at routing time.'
+              : 'This step uses automatic department reviewers. Manage them from Department Management.',
         });
       }
       const deptId = stepExists.rows[0]?.department_id || null;

@@ -200,7 +200,7 @@ class _DocuTrackerWorkflowEditorScreenState
                 roleId: step.roleId,
                 departmentId: step.departmentId,
                 officeId: step.officeId,
-                userIds: step.assigneeSource == 'department_reviewers'
+                userIds: step.usesDynamicDepartmentAssignees
                     ? step.userIds
                     : assigneeIdsByOrder[step.stepOrder] ?? step.userIds,
                 label: step.label,
@@ -378,15 +378,15 @@ class _DocuTrackerWorkflowEditorScreenState
       if (!s.enabled) continue;
 
       if (s.assigneeType.trim().toLowerCase() == 'user') {
-        final usesDepartmentReviewers =
-            s.assigneeSource == 'department_reviewers';
+        final usesDynamicDepartmentAssignees =
+            s.usesDynamicDepartmentAssignees;
         final userIds = (s.userIds ?? [])
             .map((e) => e.trim())
             .where((e) => e.isNotEmpty)
             .toList();
-        if (!usesDepartmentReviewers && userIds.isEmpty) {
+        if (!usesDynamicDepartmentAssignees && userIds.isEmpty) {
           errors.add('$stepLabel requires at least one assigned user.');
-        } else if (!usesDepartmentReviewers) {
+        } else if (!usesDynamicDepartmentAssignees) {
           final primaryId = userIds.first;
           final backups = userIds.skip(1).toList();
           if (backups.contains(primaryId)) {
@@ -464,19 +464,19 @@ class _DocuTrackerWorkflowEditorScreenState
     }
 
     if (step.assigneeType.trim().toLowerCase() == 'user') {
-      final usesDepartmentReviewers =
-          step.assigneeSource == 'department_reviewers';
+      final usesDynamicDepartmentAssignees = step.usesDynamicDepartmentAssignees;
       final userIds = (step.userIds ?? [])
           .map((e) => e.trim())
           .where((e) => e.isNotEmpty)
           .toList();
-      if (!usesDepartmentReviewers && userIds.isEmpty) {
+      if (!usesDynamicDepartmentAssignees && userIds.isEmpty) {
         return 'Active selected-user steps need at least one user.';
       }
-      if (usesDepartmentReviewers && (step.departmentId ?? '').trim().isEmpty) {
+      if (step.assigneeSource == 'department_reviewers' &&
+          (step.departmentId ?? '').trim().isEmpty) {
         return 'Automatic department-reviewer steps require a department.';
       }
-      if (!usesDepartmentReviewers) {
+      if (!usesDynamicDepartmentAssignees) {
         final primary = userIds.first;
         final backups = userIds.skip(1).toList();
         if (backups.contains(primary)) {
@@ -2341,6 +2341,9 @@ String _primaryUserLabel(
   WorkflowStep step,
   _WorkflowStepAssigneeSnapshot? snapshot,
 ) {
+  if (step.assigneeSource == 'submitter_department_reviewers') {
+    return 'Department Head of submitter';
+  }
   if (step.assigneeSource == 'department_reviewers') {
     return 'Official Department Head';
   }
@@ -2369,6 +2372,9 @@ List<String> _backupUserLabels(
   WorkflowStep step,
   _WorkflowStepAssigneeSnapshot? snapshot,
 ) {
+  if (step.assigneeSource == 'submitter_department_reviewers') {
+    return const ['Submitter department backups'];
+  }
   if (step.assigneeSource == 'department_reviewers') {
     return const ['Configured department backups'];
   }

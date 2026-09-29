@@ -6,6 +6,12 @@ import 'package:hrms_plaridel/features/docutracker/models/workflow_step.dart';
 import 'package:hrms_plaridel/features/docutracker/services/employee_directory_lookup.dart';
 import 'package:hrms_plaridel/features/docutracker/theme/docutracker_tokens.dart';
 
+enum _AssigneeMode {
+  specificPeople,
+  submitterDepartmentHead,
+  fixedDepartmentHead,
+}
+
 class SimplifiedWorkflowStepEditor extends StatefulWidget {
   const SimplifiedWorkflowStepEditor({
     super.key,
@@ -35,7 +41,7 @@ class _SimplifiedWorkflowStepEditorState
   final _deadlineController = TextEditingController();
 
   late bool _enabled;
-  late bool _usesAutomaticDepartmentReviewers;
+  late _AssigneeMode _assigneeMode;
   late Set<String> _allowedActions;
   String? _primaryUserId;
   String? _backupUserId;
@@ -50,8 +56,13 @@ class _SimplifiedWorkflowStepEditorState
     _nameController.text = step.label ?? '';
     _deadlineController.text = step.deadlineHours?.toString() ?? '';
     _enabled = step.enabled;
-    _usesAutomaticDepartmentReviewers =
-        step.assigneeSource == 'department_reviewers';
+    if (step.assigneeSource == 'submitter_department_reviewers') {
+      _assigneeMode = _AssigneeMode.submitterDepartmentHead;
+    } else if (step.assigneeSource == 'department_reviewers') {
+      _assigneeMode = _AssigneeMode.fixedDepartmentHead;
+    } else {
+      _assigneeMode = _AssigneeMode.specificPeople;
+    }
     final ids = (step.userIds ?? const <String>[])
         .map((id) => id.trim())
         .where((id) => id.isNotEmpty)
@@ -81,6 +92,15 @@ class _SimplifiedWorkflowStepEditorState
     _deadlineController.dispose();
     super.dispose();
   }
+
+  bool get _usesSpecificPeople =>
+      _assigneeMode == _AssigneeMode.specificPeople;
+
+  bool get _usesSubmitterDepartmentHead =>
+      _assigneeMode == _AssigneeMode.submitterDepartmentHead;
+
+  bool get _usesFixedDepartmentHead =>
+      _assigneeMode == _AssigneeMode.fixedDepartmentHead;
 
   Widget _assigneePicker({
     required String label,
@@ -172,21 +192,35 @@ class _SimplifiedWorkflowStepEditorState
     );
   }
 
+  Widget _infoCard(String text) {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: DocuTrackerTokens.brand.withValues(alpha: 0.06),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: DocuTrackerTokens.brand.withValues(alpha: 0.2),
+        ),
+      ),
+      child: Text(text),
+    );
+  }
+
   void _submit() {
     final name = _nameController.text.trim();
     if (name.isEmpty) {
       setState(() => _error = 'Step name is required.');
       return;
     }
-    if (!_usesAutomaticDepartmentReviewers && _primaryUserId == null) {
+    if (_usesSpecificPeople && _primaryUserId == null) {
       setState(() => _error = 'Choose a primary assignee.');
       return;
     }
-    if (_usesAutomaticDepartmentReviewers &&
+    if (_usesFixedDepartmentHead &&
         (widget.initial.departmentId ?? '').trim().isEmpty) {
       setState(
         () => _error =
-            'This legacy automatic-reviewer step has no department. Choose specific assignees instead.',
+            'This fixed-department head step has no department. Choose specific people or Department head of submitter instead.',
       );
       return;
     }
@@ -213,17 +247,31 @@ class _SimplifiedWorkflowStepEditorState
         ? null
         : _directory[_primaryUserId!]?.departmentId;
 
+    final String assigneeSource;
+    final String? departmentId;
+    final List<String> savedUserIds;
+    switch (_assigneeMode) {
+      case _AssigneeMode.submitterDepartmentHead:
+        assigneeSource = 'submitter_department_reviewers';
+        departmentId = null;
+        savedUserIds = const [];
+      case _AssigneeMode.fixedDepartmentHead:
+        assigneeSource = 'department_reviewers';
+        departmentId = widget.initial.departmentId;
+        savedUserIds = const [];
+      case _AssigneeMode.specificPeople:
+        assigneeSource = 'specific_users';
+        departmentId = primaryDepartmentId;
+        savedUserIds = userIds;
+    }
+
     Navigator.of(context).pop(
       WorkflowStep(
         stepOrder: widget.initial.stepOrder,
         assigneeType: 'user',
-        assigneeSource: _usesAutomaticDepartmentReviewers
-            ? 'department_reviewers'
-            : 'specific_users',
-        departmentId: _usesAutomaticDepartmentReviewers
-            ? widget.initial.departmentId
-            : primaryDepartmentId,
-        userIds: _usesAutomaticDepartmentReviewers ? const [] : userIds,
+        assigneeSource: assigneeSource,
+        departmentId: departmentId,
+        userIds: savedUserIds,
         label: name,
         enabled: _enabled,
         deadlineHours: deadline,
@@ -234,6 +282,10 @@ class _SimplifiedWorkflowStepEditorState
 
   @override
   Widget build(BuildContext context) {
+    final canUseFixedDepartment =
+        (widget.initial.departmentId ?? '').trim().isNotEmpty ||
+        _usesFixedDepartmentHead;
+
     return Material(
       color: AppTheme.white,
       child: Column(
@@ -292,25 +344,67 @@ class _SimplifiedWorkflowStepEditorState
                     onChanged: (_) => setState(() => _error = null),
                   ),
                   const SizedBox(height: 20),
-                  if (_usesAutomaticDepartmentReviewers) ...[
-                    const _FieldHeading(number: 2, label: 'Assignees'),
+                  const _FieldHeading(number: 2, label: 'Assignee Mode'),
+                  const SizedBox(height: 8),
+                  RadioListTile<_AssigneeMode>(
+                    contentPadding: EdgeInsets.zero,
+                    dense: true,
+                    title: const Text('Specific people'),
+                    subtitle: const Text('Pick a primary and optional backup.'),
+                    value: _AssigneeMode.specificPeople,
+                    groupValue: _assigneeMode,
+                    onChanged: (value) => setState(() {
+                      _assigneeMode = value!;
+                      _error = null;
+                    }),
+                  ),
+                  RadioListTile<_AssigneeMode>(
+                    contentPadding: EdgeInsets.zero,
+                    dense: true,
+                    title: const Text('Department head of submitter'),
+                    subtitle: const Text(
+                      'Routes to the official head (+ backups) of the creator\'s department.',
+                    ),
+                    value: _AssigneeMode.submitterDepartmentHead,
+                    groupValue: _assigneeMode,
+                    onChanged: (value) => setState(() {
+                      _assigneeMode = value!;
+                      _error = null;
+                    }),
+                  ),
+                  if (canUseFixedDepartment)
+                    RadioListTile<_AssigneeMode>(
+                      contentPadding: EdgeInsets.zero,
+                      dense: true,
+                      title: const Text('Official head of a fixed department'),
+                      subtitle: const Text(
+                        'Legacy: keeps the department stored on this step.',
+                      ),
+                      value: _AssigneeMode.fixedDepartmentHead,
+                      groupValue: _assigneeMode,
+                      onChanged: (value) => setState(() {
+                        _assigneeMode = value!;
+                        _error = null;
+                      }),
+                    ),
+                  const SizedBox(height: 12),
+                  if (_usesSubmitterDepartmentHead) ...[
+                    const _FieldHeading(number: 3, label: 'Resolved Assignees'),
                     const SizedBox(height: 8),
-                    Container(
-                      padding: const EdgeInsets.all(14),
-                      decoration: BoxDecoration(
-                        color: DocuTrackerTokens.brand.withValues(alpha: 0.06),
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(
-                          color: DocuTrackerTokens.brand.withValues(alpha: 0.2),
-                        ),
-                      ),
-                      child: const Text(
-                        'Primary: official Department Head\n'
-                        'Backup: configured department backup reviewers',
-                      ),
+                    _infoCard(
+                      'Primary: official Department Head of the document creator\'s department at routing time\n'
+                      'Backup: that department\'s configured backup reviewers\n'
+                      'No person is stored on this step — each office routes to its own head.',
+                    ),
+                  ] else if (_usesFixedDepartmentHead) ...[
+                    const _FieldHeading(number: 3, label: 'Resolved Assignees'),
+                    const SizedBox(height: 8),
+                    _infoCard(
+                      'Primary: official Department Head of the fixed department on this step\n'
+                      'Backup: configured department backup reviewers',
                     ),
                   ] else ...[
-                    const _FieldHeading(number: 2, label: 'Primary Assignee'),
+                    const _FieldHeading(number: 3, label: 'Primary Assignee'),
                     const SizedBox(height: 8),
                     if (_loadingPeople)
                       const LinearProgressIndicator(minHeight: 2)
@@ -331,7 +425,7 @@ class _SimplifiedWorkflowStepEditorState
                       ),
                     const SizedBox(height: 20),
                     const _FieldHeading(
-                      number: 3,
+                      number: 4,
                       label: 'Backup Assignee (Optional)',
                     ),
                     const SizedBox(height: 8),
@@ -359,7 +453,7 @@ class _SimplifiedWorkflowStepEditorState
                     ],
                   ],
                   const SizedBox(height: 20),
-                  const _FieldHeading(number: 4, label: 'Allowed Actions'),
+                  const _FieldHeading(number: 5, label: 'Allowed Actions'),
                   const SizedBox(height: 6),
                   Text(
                     'These actions apply equally to the primary and backup assignee.',
@@ -394,22 +488,6 @@ class _SimplifiedWorkflowStepEditorState
                     ),
                     subtitle: const Text('Enable state and review deadline'),
                     children: [
-                      if (widget.initial.assigneeSource ==
-                          'department_reviewers')
-                        SwitchListTile(
-                          contentPadding: EdgeInsets.zero,
-                          title: const Text(
-                            'Use automatic department reviewers',
-                          ),
-                          subtitle: const Text(
-                            'Turn this off to choose a specific primary and backup.',
-                          ),
-                          value: _usesAutomaticDepartmentReviewers,
-                          onChanged: (value) => setState(() {
-                            _usesAutomaticDepartmentReviewers = value;
-                            _error = null;
-                          }),
-                        ),
                       SwitchListTile(
                         contentPadding: EdgeInsets.zero,
                         title: const Text('Step enabled'),

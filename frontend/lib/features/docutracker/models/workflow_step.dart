@@ -26,19 +26,19 @@ class WorkflowStep {
   /// Who receives at this step: role | department | office | user
   final String assigneeType;
 
-  /// specific_users | department_reviewers
+  /// specific_users | department_reviewers | submitter_department_reviewers
   final String assigneeSource;
 
   /// Role ID when assigneeType is 'role'
   final String? roleId;
 
-  /// Department ID when assigneeType is 'department'
+  /// Department ID when assigneeType is 'department' or fixed department_reviewers
   final String? departmentId;
 
   /// Office ID when assigneeType is 'office'
   final String? officeId;
 
-  /// Specific user IDs when assigneeType is 'user'
+  /// Specific user IDs when assigneeType is 'user' and assigneeSource is specific_users
   final List<String>? userIds;
 
   /// Human-readable label (e.g. "HR Staff", "Procurement")
@@ -52,6 +52,13 @@ class WorkflowStep {
 
   /// Workflow actions available to both primary and backup assignees.
   final List<String> allowedActions;
+
+  bool get usesDynamicDepartmentAssignees =>
+      assigneeSource == 'department_reviewers' ||
+      assigneeSource == 'submitter_department_reviewers';
+
+  bool get usesSubmitterDepartmentAssignees =>
+      assigneeSource == 'submitter_department_reviewers';
 
   factory WorkflowStep.fromJson(Map<String, dynamic> json) {
     final userIdsRaw = json['user_ids'];

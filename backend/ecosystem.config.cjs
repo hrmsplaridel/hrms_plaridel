@@ -10,6 +10,8 @@ module.exports = {
       exec_mode: 'fork',
       watch: false,
       autorestart: true,
+      // Prevent a blank cmd.exe console when PM2 forks Node on Windows.
+      windowsHide: true,
 
       // A startup failure must not create another once-per-second restart storm.
       // Ten exits before ten seconds of uptime mark the process as errored, with

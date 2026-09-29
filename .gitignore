@@ -96,3 +96,6 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# Local Cursor agent rules (not shared via git)
+.cursor/rules/db-migration-init-schema-sync.mdc

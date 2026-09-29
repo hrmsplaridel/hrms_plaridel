@@ -1,1007 +1,383 @@
-DocuTracker Flutter Module Instructions
+# Universal Project Development Instructions
 
-Scope
+## Scope
 
-These instructions apply only to:
+These instructions apply to the project or module being edited.
 
-frontend/lib/docutracker/
+The goal is to make safe, maintainable, secure, and reviewable changes while preserving existing functionality and project conventions.
 
-This directory contains the Flutter frontend implementation of the DocuTracker or Document Tracker module inside a larger HRMS application.
+### Core principles
 
-Technology stack:
-
-Frontend: Flutter and Dart
-
-Backend API: Node.js and Express
-
-Database: PostgreSQL
-
-Do not place Node.js code, Express routes, PostgreSQL migrations, SQL files, or backend business logic inside this directory.
-
-Do not modify unrelated HRMS modules unless the requested DocuTracker feature genuinely requires integration with them.
-
-Before changing a file outside frontend/lib/docutracker/:
-
-Explain why the external change is necessary.
-
-Confirm that no DocuTracker-local solution exists.
-
-Make the smallest possible external change.
-
-List the external files changed.
-
-Primary Objective
-
-Maintain and improve the DocuTracker module while preserving:
-
-Existing document workflows
-
-Document routing history
-
-Document status history
-
-User permissions
-
-Document visibility rules
-
-Attachments
-
-Notifications
-
-Escalation behavior
-
-Admin and employee separation
-
-Mobile, web, and responsive behavior
-
-Existing API contracts
-
-Never invent statuses, roles, permissions, workflow actions, API endpoints, request fields, response fields, or database behavior.
-
-Inspect the existing code and documentation before making assumptions.
-
-Existing Module Structure
-
-Follow the current structure:
-
-docutracker/
-├── data/
-│   ├── dto/
-│   ├── navigation/
-│   ├── providers/
-│   ├── repositories/
-│   ├── routes/
-│   └── styles/
-├── models/
-├── presentation/
-│   ├── admin/
-│   │   ├── pages/
-│   │   └── widgets/
-│   ├── employee/
-│   │   └── pages/
-│   └── shared/
-│       ├── pages/
-│       └── widgets/
-├── security/
-├── services/
-├── theme/
-├── utils/
-├── DOCUTRACKER_API.md
-└── DOCUTRACKER_SCHEMA.md
-
-Preserve this architecture:
-
-Screen or Widget
-    ↓
-Provider
-    ↓
-Service or Repository
-    ↓
-Backend API
-
-Do not place API requests, permission evaluation, workflow validation, or complex business logic directly inside screens or widgets.
+- Study the relevant code and documentation before making changes.
+- Follow the existing architecture, naming, styling, and state-management conventions.
+- Make the smallest safe change that solves the requested problem.
+- Do not rewrite unrelated files.
+- Do not remove existing functionality unless explicitly requested.
+- Reuse existing models, components, services, utilities, styles, routes, and shared abstractions before creating new ones.
+- Search the project before creating a new class, function, component, service, or file.
+- Do not add dependencies unless explicitly approved or clearly required by the project.
+- Preserve backward compatibility where practical.
+- Do not claim a feature works unless it was actually tested or verified.
 
 ---
 
-## General Coding Rules
+# Project Architecture
 
-* Study the relevant code before making changes.
-* Follow existing naming, architecture, styling, and state-management conventions.
-* Make the smallest safe change.
-* Do not rewrite unrelated files.
-* Do not remove existing functionality unless explicitly requested.
-* Reuse existing models, widgets, services, providers, repositories, utilities, styles, routes, and theme tokens.
-* Search the module before creating a new class or file.
-* Do not add a package unless explicitly approved.
-* Do not rename public classes, fields, routes, or services without checking all references.
-* Preserve backward compatibility where possible.
-* Use null safety correctly.
-* Prefer `final` for values that do not change.
-* Prefer immutable objects where appropriate.
-* Use `const` widgets where possible.
-* Avoid unnecessary use of `dynamic`.
-* Avoid unsafe force unwraps.
-* Do not suppress analyzer warnings without a valid reason.
-* Keep changes focused and reviewable.
-* Do not claim a feature works unless it was tested or verified.
+Follow the architecture already established by the project.
+
+A typical layered flow may look like:
+
+```text
+UI / Screen / Component
+        ↓
+State / Controller / Provider
+        ↓
+Service / Repository
+        ↓
+API / Database / External Service
+```
+
+Do not move business logic into presentation code simply because it is convenient.
+
+### General architecture rules
+
+- Keep UI focused on presentation and user interaction.
+- Keep business rules in appropriate services or domain layers.
+- Keep API communication in the existing API/client/repository layer.
+- Keep data parsing in models, DTOs, serializers, or equivalent layers.
+- Keep shared functionality reusable.
+- Avoid circular dependencies.
+- Avoid duplicating the same business rule in multiple locations.
+- Follow the project's existing dependency direction.
+- Do not introduce a second architecture or framework without approval.
 
 ---
 
-## Required Investigation Before Editing
+# Required Investigation Before Editing
 
-Before implementing a DocuTracker change:
+Before implementing a change:
 
-1. Identify the affected screen or widget.
-2. Identify the provider managing its state.
-3. Identify the repository or service used by that provider.
-4. Identify the models involved.
-5. Read `DOCUTRACKER_API.md` when API behavior is involved.
-6. Read `DOCUTRACKER_SCHEMA.md` when statuses, workflows, permissions, routing, or document structures are involved.
+1. Identify the affected screen, component, feature, or module.
+2. Identify the state-management layer involved.
+3. Identify the service, repository, API client, or data source involved.
+4. Identify the models, DTOs, or data structures involved.
+5. Read relevant API documentation when API behavior is involved.
+6. Read relevant schema or domain documentation when data, permissions, workflows, or business rules are involved.
 7. Trace the current data flow.
 8. Search for an existing reusable implementation.
-9. Check all consumers of shared models and services.
-10. Identify permission and workflow implications.
+9. Check all consumers of shared models, services, and components.
+10. Identify security, permission, workflow, and integration implications.
 11. Make the smallest safe implementation.
-12. Run formatting, analysis, and relevant tests.
+12. Run formatting, static analysis, tests, and relevant checks when available.
 
-For large changes, provide a short plan before editing.
+For large changes, provide a short implementation plan before editing.
 
 ---
 
-# Architecture Responsibilities
+# General Coding Rules
 
-## `data/dto/`
+- Use the language's recommended modern practices.
+- Prefer immutable values where appropriate.
+- Use strong typing instead of unnecessary dynamic or loosely typed values.
+- Handle null or missing values safely.
+- Avoid unsafe force unwraps or equivalent unsafe operations.
+- Do not suppress compiler or analyzer warnings without a valid reason.
+- Keep functions and classes focused.
+- Avoid unnecessary abstraction.
+- Avoid premature optimization.
+- Preserve existing public interfaces unless a breaking change is required.
+- Keep changes focused and reviewable.
+- Add comments only when they explain something that is not obvious from the code.
+- Do not add comments that merely restate the code.
 
-Primary example:
+---
 
-* `docutracker_api_result.dart`
+# Data and Models
 
-Use DTOs for API-specific response structures.
+Use models or DTOs for structured data.
 
 Rules:
 
-* Keep raw JSON parsing out of screens and widgets.
-* Parse nullable fields safely.
-* Preserve backend JSON field names.
-* Do not silently rename API fields.
-* Do not hide invalid backend data using misleading fallback values.
-* Prefer typed values over `dynamic`.
-* Keep parsing logic testable.
-* Do not place UI logic inside DTOs.
+- Keep raw data parsing out of UI code.
+- Preserve external API field names unless the existing architecture explicitly maps them.
+- Parse nullable and optional fields safely.
+- Prefer typed values over generic objects.
+- Do not create misleading fallback values that hide invalid data.
+- Keep serialization and deserialization predictable.
+- Search existing models before creating a new one.
+- Extend an existing model when appropriate instead of duplicating it.
+- Keep models independent of presentation logic.
+- Do not place API requests, navigation, or UI state inside data models.
+- Check all consumers before renaming shared fields.
 
 ---
 
-## `data/navigation/`
+# API and Repository Rules
 
-This directory contains DocuTracker-specific navigation behavior.
+All external API communication should use the project's existing API client, repository, or service abstraction.
+
+- Do not make direct API requests from UI components when an existing abstraction is available.
+- Keep endpoint paths out of presentation code.
+- Reuse existing authentication and authorization behavior.
+- Preserve request and response contracts.
+- Do not invent endpoints, request fields, response fields, or backend behavior.
+- Handle timeouts, invalid responses, authentication failures, authorization failures, missing records, validation errors, and server errors.
+- Convert technical errors into understandable application errors where appropriate.
+- Do not expose stack traces, database errors, credentials, tokens, or confidential data.
+- Avoid duplicate API methods for the same operation.
+- Do not silently change return types or response structures.
+- Do not report success until the server confirms success.
+
+---
+
+# State Management
+
+Follow the project's existing state-management approach.
+
+- Do not introduce another state-management framework without approval.
+- Keep loading, refreshing, empty, success, and error states clear.
+- Prevent duplicate API requests.
+- Prevent duplicate submissions caused by repeated taps or clicks.
+- Preserve valid existing state when a request fails.
+- Notify or rebuild consumers only when state meaningfully changes.
+- Dispose resources owned by the state layer correctly.
+- Check all screens and components that depend on shared state before changing provider/controller behavior.
+- Do not put large business rules directly inside state-management classes.
+
+---
+
+# UI and Components
+
+- Reuse existing components before creating new ones.
+- Keep components focused and reusable.
+- Pass required data and callbacks through clear interfaces.
+- Keep business logic out of rendering/build methods.
+- Avoid direct API calls from UI components.
+- Preserve loading, empty, error, refreshing, and success states.
+- Avoid unnecessary rebuilds or rerenders.
+- Dispose controllers, streams, subscriptions, focus objects, timers, and animation resources when required.
+- Guard asynchronous UI updates against disposed/unmounted components where appropriate.
+- Preserve the existing design system unless a redesign is requested.
+
+---
+
+# Navigation and Routing
+
+- Reuse the project's existing routing system.
+- Search for an existing route before creating a new one.
+- Avoid duplicate routes that open the same destination.
+- Validate route arguments.
+- Handle missing, deleted, archived, or inaccessible resources safely.
+- Do not allow navigation to restricted screens or resources.
+- Do not rely on route parameters as a security mechanism.
+- Authorization must still be enforced by the backend or authoritative security layer.
+
+---
+
+# Security and Permissions
+
+Security must not depend only on the frontend.
+
+- Reuse existing role and permission definitions.
+- Do not hardcode role or permission strings throughout the UI.
+- Do not create frontend-only permissions that imply real authorization.
+- Centralize permission decisions where the project architecture supports it.
+- Distinguish between viewing a resource and performing an action.
+- Check resource-level access, not only general user roles.
+- Do not expose restricted information through lists, search results, dashboards, notifications, previews, navigation, URLs, logs, or error messages.
+- Hiding a button is not authorization.
+- Never store passwords, secrets, access tokens, or private keys in source code.
+- Do not log confidential information unnecessarily.
+- Backend authentication and authorization remain authoritative.
+
+---
+
+# Business Rules and Workflows
+
+Before changing a workflow or business rule, inspect:
+
+- Existing status definitions
+- Existing action definitions
+- Workflow/domain models
+- Workflow services
+- Validation logic
+- API documentation
+- Database/schema documentation
+- All UI consumers
 
 Rules:
 
-* Reuse the current navigation system.
-* Do not introduce another routing package.
-* Do not hardcode route strings throughout the module.
-* Keep reusable widgets independent of navigation when possible.
-* Validate route arguments.
-* Do not navigate users to restricted documents or admin screens.
-* Handle missing, archived, deleted, or inaccessible documents safely.
-* Reuse existing document and notification navigation helpers.
-
----
-
-## `data/providers/`
-
-Primary file:
-
-* `docutracker_provider.dart`
-
-The provider should coordinate frontend state and call services or repositories.
-
-Rules:
-
-* Preserve the current state-management approach.
-* Do not add Bloc, Riverpod, GetX, Redux, or another state-management framework.
-* Do not perform direct HTTP requests from the provider when repository methods already exist.
-* Do not place large workflow or permission rules directly in the provider.
-* Use services for business rules.
-* Track loading, refreshing, empty, success, and error states clearly.
-* Prevent duplicate API calls.
-* Prevent duplicate submissions from repeated taps.
-* Notify listeners only when state meaningfully changes.
-* Preserve valid existing state when a request fails.
-* Do not show success until the backend confirms success.
-* Dispose provider-owned resources correctly.
-* Avoid rebuilding the entire DocuTracker module for small state changes.
-
-When changing provider behavior, check all screens and widgets that listen to it.
-
----
-
-## `data/repositories/`
-
-Primary file:
-
-* `docutracker_repository.dart`
-
-The repository is responsible for API communication and response conversion.
-
-Rules:
-
-* All DocuTracker API communication should pass through the repository or an existing service abstraction.
-* Do not make direct HTTP calls from widgets or screens.
-* Keep endpoint paths out of presentation code.
-* Reuse the existing API client and authentication behavior.
-* Preserve request and response contracts.
-* Convert transport-level errors into understandable module errors.
-* Handle:
-
-  * Timeouts
-  * Invalid responses
-  * Unauthorized requests
-  * Forbidden requests
-  * Missing records
-  * Validation errors
-  * Server errors
-* Do not expose stack traces, SQL errors, tokens, or confidential document content.
-* Avoid duplicate repository methods for the same operation.
-* Do not silently change return types or response structures.
-
----
-
-## `data/routes/`
-
-Primary file:
-
-* `docutracker_routes.dart`
-
-Rules:
-
-* Reuse existing route constants.
-* Search for an existing route before creating another one.
-* Keep naming consistent.
-* Avoid multiple routes that open the same screen unnecessarily.
-* Validate all route arguments.
-* Restrict admin routes appropriately.
-* Handle direct navigation safely.
-* Do not expose restricted documents through route parameters.
-
----
-
-## `data/styles/`
-
-Primary file:
-
-* `docutracker_styles.dart`
-
-Rules:
-
-* Reuse existing spacing, typography, colors, borders, and dimensions.
-* Do not repeatedly hardcode style values inside widgets.
-* Preserve compatibility with the parent HRMS theme.
-* Do not redesign screens unless explicitly requested.
-* Keep responsive behavior intact.
-* Avoid duplicate style constants.
-
----
-
-# Documentation
-
-Primary documentation:
-
-* `DOCUTRACKER_API.md`
-* `DOCUTRACKER_SCHEMA.md`
-
-These files are the local source of truth for the DocuTracker frontend contract.
-
-Rules:
-
-* Read `DOCUTRACKER_API.md` before changing endpoints, request bodies, response parsing, attachments, notifications, or backend operations.
-* Read `DOCUTRACKER_SCHEMA.md` before changing document structures, statuses, workflow steps, routing, escalation, or permissions.
-* Do not invent API behavior.
-* Do not invent database columns.
-* Do not invent new statuses or workflow transitions.
-* Update documentation only when the implementation and contract genuinely changed.
-* Do not document unimplemented features.
-
----
-
-# Models
-
-Existing model files include:
-
-* `document.dart`
-* `document_action.dart`
-* `document_history.dart`
-* `document_notification.dart`
-* `document_permission.dart`
-* `document_routing_config.dart`
-* `document_routing_record.dart`
-* `document_status.dart`
-* `document_type.dart`
-* `escalation_config.dart`
-* `workflow_step.dart`
-* `models.dart`
-
-Rules:
-
-* Search existing models before creating a new model.
-* Extend an existing model when appropriate instead of duplicating it.
-* Keep models independent of presentation code.
-* Do not place API requests, navigation, provider state, or widget logic in models.
-* Preserve backend field names in JSON serialization and deserialization.
-* Parse nullable fields safely.
-* Use typed status, permission, and action values where existing model types support them.
-* Do not create fallback values that hide invalid backend data.
-* Avoid unnecessary `dynamic`.
-* Avoid unsafe null assertions.
-* Check all consumers before renaming a field.
-* Update `models.dart` when a new shared model needs to be exported.
-* Keep model serialization behavior backward-compatible.
-
----
-
-# Presentation Layer
-
-The presentation layer is divided into:
-
-* Admin
-* Employee
-* Shared
-
-Do not mix these responsibilities.
-
----
-
-## Admin Pages
-
-Location:
-
-`presentation/admin/pages/`
-
-Existing responsibilities include:
-
-* DocuTracker administration
-* Escalation configuration
-* Permission editing
-* Permission setup
-* Workflow step assignees
-* Workflow editing
-
-Rules:
-
-* Only authorized users should see admin features.
-* Hiding a control in Flutter is not sufficient authorization.
-* Backend authorization remains mandatory.
-* Reuse existing admin widgets and services.
-* Keep workflow-editing logic outside `build()` methods.
-* Validate configuration before submitting.
-* Prevent duplicate saves.
-* Disable or guard buttons while requests are running.
-* Do not permanently update local state until the backend confirms success.
-* Warn before destructive changes.
-* Do not silently remove permissions, assignees, workflow steps, or escalation rules.
-* Consider the effect of configuration changes on existing documents.
-* Preserve the current admin design unless redesign is requested.
-
----
-
-## Admin Widgets
-
-Location:
-
-`presentation/admin/widgets/`
-
-Existing widgets include responsibilities such as:
-
-* Admin UI
-* Permission management
-* Workflow actions
-* Workflow step editing
-
-Rules:
-
-* Keep widgets focused and reusable.
-* Move business rules into services.
-* Do not duplicate permission logic inside multiple widgets.
-* Pass data and callbacks through constructors.
-* Avoid direct repository calls from widgets.
-* Preserve validation and confirmation behavior.
-
----
-
-## Employee Pages
-
-Location:
-
-`presentation/employee/pages/`
-
-Primary file:
-
-* `mobile_employee_portal.dart`
-
-Rules:
-
-* Employees must only see actions allowed by their permissions.
-* Do not expose admin configuration controls.
-* Preserve mobile usability.
-* Avoid fixed widths that overflow.
-* Keep primary document actions accessible on small screens.
-* Do not display confidential information belonging to another employee, office, or department.
-* Handle restricted, missing, or unavailable documents safely.
-* Preserve the current employee navigation and UI style.
-
----
-
-## Shared Pages
-
-Location:
-
-`presentation/shared/pages/`
-
-Existing pages include responsibilities such as:
-
-* DocuTracker dashboard
-* Document listing
-* Document details
-* Main DocuTracker navigation
-* Module entry screens
-
-Rules:
-
-* Shared pages must not assume the user is always an admin or employee.
-* Use centralized permission checks.
-* Preserve loading, empty, error, and success states.
-* Keep pages focused on coordination and layout.
-* Move reusable UI into shared widgets.
-* Do not make direct HTTP requests from pages.
-* Preserve responsive layouts.
-
----
-
-## Shared Widgets
-
-Location:
-
-`presentation/shared/widgets/`
-
-Existing widgets include responsibilities such as:
-
-* Countdown timers
-* Document creation
-* Document attachments
-* Document detail sections
-* Empty states
-* Error banners
-* Module headers
-* Notification panels
-* Responsive layouts
-* Section headers
-* Slide-in panels
-* Status badges
-* Status timelines
-* Summary cards
-
-Rules:
-
-* Reuse an existing widget before creating a new one.
-* Keep shared widgets independent of admin-only and employee-only assumptions.
-* Pass required data through constructors.
-* Keep widgets small and focused.
-* Split oversized widgets into smaller reusable pieces.
-* Keep business logic out of `build()`.
-* Do not perform HTTP requests directly from widgets.
-* Use `const` constructors where possible.
-* Dispose controllers, streams, subscriptions, focus nodes, and animation controllers.
-* Guard asynchronous UI updates using `mounted` where appropriate.
-* Preserve loading, empty, refreshing, error, and success states.
-* Avoid unnecessary rebuilds.
-* Do not create multiple different widgets for the same status or summary unless necessary.
-
----
-
-# Security and Roles
-
-Primary file:
-
-* `security/docutracker_roles.dart`
-
-Rules:
-
-* Reuse existing role constants.
-* Do not hardcode role strings across screens.
-* Do not create frontend-only roles or permissions.
-* Do not weaken role checks to make a feature easier to access.
-* Frontend checks only control the interface.
-* Backend authentication and authorization remain authoritative.
-* Do not store passwords, secrets, tokens, or confidential document content in source code.
-* Do not expose restricted information in logs, notifications, previews, or error messages.
-* Prevent direct navigation to restricted admin or document screens.
-
----
-
-# Service Layer
-
-Existing service responsibilities include:
-
-* Access policy
-* Document visibility
-* Notifications
-* Permission evaluation
-* Permission management
-* Permission persistence or data access
-* Workflow configuration validation
-* Workflow operations
-* Employee directory lookup
-
-Existing files include names similar to:
-
-* `docutracker_access_policy.dart`
-* `docutracker_document_visibility_service.dart`
-* `docutracker_notification_service.dart`
-* `docutracker_permission_evaluator.dart`
-* `docutracker_permission_service.dart`
-* `docutracker_permissions_datasource.dart`
-* `docutracker_workflow_config_validator.dart`
-* `docutracker_workflow_service.dart`
-* `employee_directory_lookup.dart`
-
-Rules:
-
-* Reuse an existing service before creating a new one.
-* Keep each service focused on one responsibility.
-* Keep business rules out of widgets.
-* Use the permission evaluator for permission decisions.
-* Use the access policy and visibility service for document visibility.
-* Use the workflow service for workflow operations.
-* Use the workflow validator before saving workflow configuration.
-* Use the notification service for notification behavior.
-* Use employee directory lookup for employee data when available.
-* Avoid circular service dependencies.
-* Do not make services depend on widgets.
-* Handle failures explicitly.
-* Do not silently ignore failed workflow, permission, or notification operations.
-* Keep services testable.
-
----
-
-# Theme
-
-Primary file:
-
-* `theme/docutracker_tokens.dart`
-
-Rules:
-
-* Reuse DocuTracker design tokens.
-* Do not scatter colors, spacing, radii, icon sizes, and typography throughout widgets.
-* Preserve parent HRMS theme compatibility.
-* Preserve dark mode behavior when supported.
-* Avoid hardcoded colors that harm readability or accessibility.
-* Do not create another theme system.
-
----
-
-# Utilities
-
-Existing utility responsibilities include:
-
-* Opening attachments
-* Permission reasoning
-* Workflow phase interpretation
-
-Rules:
-
-* Reuse existing utilities.
-* Keep utilities stateless where possible.
-* Do not place large business rules in generic utility files.
-* Preserve platform-specific attachment implementations.
-* Do not import web-only packages into mobile implementations.
-* Do not import mobile-only packages into web implementations.
-* Preserve conditional imports.
-* Avoid duplicate utility logic.
-* Keep utility names specific and descriptive.
-
----
-
-# Task-to-File Guidance
-
-Use this section to determine where a change likely belongs.
-
-## Adding or changing an API request
-
-Inspect and modify, when needed:
-
-1. `DOCUTRACKER_API.md`
-2. Relevant model or DTO
-3. `docutracker_repository.dart`
-4. Relevant service
-5. `docutracker_provider.dart`
-6. Consuming screen or widget
-
-Do not implement the request directly inside a widget.
-
----
-
-## Changing document status behavior
-
-Inspect:
-
-1. `document_status.dart`
-2. `document_action.dart`
-3. `workflow_step.dart`
-4. `docutracker_workflow_service.dart`
-5. `docutracker_workflow_config_validator.dart`
-6. `DOCUTRACKER_SCHEMA.md`
-7. `DOCUTRACKER_API.md`
-8. Provider and consuming UI
-
-Do not invent a status or transition.
-
----
-
-## Changing document routing
-
-Inspect:
-
-1. `document_routing_config.dart`
-2. `document_routing_record.dart`
-3. `workflow_step.dart`
-4. Workflow service
-5. Repository
-6. Provider
-7. Routing timeline or detail widgets
-8. API and schema documentation
-
-Preserve routing history and responsible users or offices.
-
----
-
-## Changing permissions
-
-Inspect:
-
-1. `document_permission.dart`
-2. `docutracker_roles.dart`
-3. `docutracker_access_policy.dart`
-4. `docutracker_document_visibility_service.dart`
-5. `docutracker_permission_evaluator.dart`
-6. `docutracker_permission_service.dart`
-7. `docutracker_permissions_datasource.dart`
-8. Admin permission pages and widgets
-9. Employee and shared UI consumers
-
-Keep permission logic centralized.
-
----
-
-## Changing workflow configuration
-
-Inspect:
-
-1. `document_routing_config.dart`
-2. `workflow_step.dart`
-3. `docutracker_workflow_service.dart`
-4. `docutracker_workflow_config_validator.dart`
-5. Admin workflow editor pages
-6. Workflow editor widgets
-7. Repository and provider
-8. API and schema documentation
-
-Validate before saving and prevent invalid workflow definitions.
-
----
-
-## Changing document visibility
-
-Inspect:
-
-1. `document_permission.dart`
-2. `docutracker_roles.dart`
-3. `docutracker_access_policy.dart`
-4. `docutracker_document_visibility_service.dart`
-5. Permission evaluator
-6. Dashboard
-7. Document list
-8. Document detail
-9. Notifications
-10. Navigation helpers
-
-A restricted document must not appear through another screen or navigation path.
-
----
-
-## Changing attachments
-
-Inspect:
-
-1. Attachment widgets
-2. Attachment-opening utilities
-3. Repository upload or download methods
-4. Provider state
-5. API documentation
-
-Do not place direct attachment HTTP logic inside widgets.
-
----
-
-## Changing notifications
-
-Inspect:
-
-1. `document_notification.dart`
-2. Notification navigation files
-3. `docutracker_notification_service.dart`
-4. Provider notification state
-5. Notification panel or sheet widgets
-6. API documentation
-
-Prevent duplicate notifications and restricted document previews.
-
----
-
-## AI summaries
-
-DocuTracker does not include an AI summary feature.
-
-Do not add AI summary models, widgets, repository methods, API routes, or schema objects unless the feature is explicitly re-approved.
-
----
-
-## Changing escalation or countdowns
-
-Inspect:
-
-1. `escalation_config.dart`
-2. Escalation admin pages
-3. Countdown timer widget
-4. Workflow service
-5. Notification service
-6. Provider state
-7. API and schema documentation
-
-Treat backend timestamps as authoritative.
-
----
-
-## Changing UI only
-
-Inspect:
-
-1. Existing shared widgets
-2. `docutracker_styles.dart`
-3. `docutracker_tokens.dart`
-4. Responsive layout widgets
-5. Current screen implementation
-
-Reuse existing design patterns and do not duplicate widgets unnecessarily.
-
----
-
-# Workflow Rules
-
-Before modifying workflow behavior, inspect:
-
-* `document_status.dart`
-* `document_action.dart`
-* `workflow_step.dart`
-* `document_routing_config.dart`
-* `document_routing_record.dart`
-* `docutracker_workflow_service.dart`
-* `docutracker_workflow_config_validator.dart`
-* `DOCUTRACKER_API.md`
-* `DOCUTRACKER_SCHEMA.md`
-
-Rules:
-
-* Follow only existing statuses and transitions.
-* Validate every transition.
-* Do not skip required steps.
-* Prevent duplicate receiving, forwarding, approval, rejection, returning, completion, or archival actions.
-* Preserve routing and history records.
-* Preserve timestamps and responsible actors.
-* Do not report success until confirmed by the backend.
-* Refresh affected screens and state after successful actions.
-* Preserve previous valid state after failures.
-* Treat the backend as authoritative.
-* Never rely solely on Flutter for workflow enforcement.
+- Follow only existing statuses, actions, and transitions unless the feature explicitly requires a new one.
+- Do not invent business states or transitions.
+- Validate every transition.
+- Do not skip required steps.
+- Prevent duplicate actions.
+- Preserve history and audit information.
+- Preserve timestamps and responsible actors.
+- Do not report success before authoritative confirmation.
+- Refresh affected state after successful operations.
+- Preserve the previous valid state after failures.
+- Keep authoritative business rules on the backend when applicable.
 
 ---
 
 # History and Auditability
 
-Important document actions must remain traceable.
+Important actions should remain traceable when the application requires auditability.
 
-Examples:
-
-* Created
-* Edited
-* Submitted
-* Uploaded
-* Forwarded
-* Received
-* Approved
-* Rejected
-* Returned
-* Completed
-* Archived
-* Deleted, when deletion is permitted
-
-Rules:
-
-* Never overwrite old history to represent a new action.
-* Preserve actor, action, timestamp, document ID, and remarks.
-* Do not fabricate history before backend confirmation.
-* Keep history ordering consistent.
-* Handle missing actor or office data safely.
-* Do not expose history to unauthorized users.
+- Never overwrite historical records to represent a new action.
+- Preserve actor, action, timestamp, resource identifier, and relevant remarks when supported.
+- Do not fabricate history before authoritative confirmation.
+- Keep history ordering consistent.
+- Handle missing actor or related data safely.
+- Do not expose audit information to unauthorized users.
 
 ---
 
-# Permissions and Visibility Rules
+# Resource Visibility
 
-Before changing access behavior, inspect the existing permission and visibility services.
+When a resource is restricted, make sure the restriction applies consistently.
 
-Rules:
+A restricted resource must not accidentally appear through:
 
-* Centralize permission decisions.
-* Distinguish document viewing from document actions.
-* Check document-level access, not just the user's general role.
-* Consider creator, assignee, receiver, office, department, workflow step, and configured permissions where supported.
-* Do not expose restricted documents in:
+- Dashboards
+- Search results
+- Lists
+- Notifications
+- Direct navigation
+- History
+- Attachments
+- Previews
+- Related or summary screens
 
-  * Dashboard summaries
-  * Search results
-  * Document lists
-  * Notifications
-  * Direct navigation
-  * History
-  * Attachment links
-* A hidden button is not a security control.
-* Do not grant permissions locally before backend confirmation.
-* Keep denied-access behavior consistent.
+Do not assume that hiding one UI element makes the resource secure.
 
 ---
 
-# Attachment Rules
+# File and Attachment Handling
 
-Rules:
+When the project handles uploaded or downloadable files:
 
-* Handle missing, invalid, expired, deleted, or inaccessible attachments.
-* Show upload or download progress when supported.
-* Show understandable errors.
-* Do not expose physical server paths.
-* Preserve original filenames only for display.
-* Do not trust file extensions alone.
-* Respect backend file type, size, MIME type, and permission rules.
-* Preserve mobile and web compatibility.
-* Prevent duplicate uploads.
-* Do not show upload success until confirmed by the backend.
-* Clear temporary upload state after failures.
-* Do not log attachment contents or confidential filenames unnecessarily.
-
----
-
-# Notification Rules
-
-Rules:
-
-* Prevent duplicate notifications.
-* Preserve ordering.
-* Maintain accurate unread counts.
-* Mark notifications read only after the intended operation succeeds.
-* Do not open inaccessible documents.
-* Handle deleted, archived, missing, or restricted documents safely.
-* Refresh notification state after updates.
-* Do not expose confidential document details in notification previews.
-* Preserve local state if a notification update fails.
+- Handle missing, invalid, expired, deleted, or inaccessible files.
+- Show progress when supported.
+- Show understandable errors.
+- Do not expose physical server paths.
+- Do not trust file extensions alone.
+- Respect backend file type, size, MIME type, and permission rules.
+- Preserve compatibility across supported platforms.
+- Prevent duplicate uploads where appropriate.
+- Do not report upload success until the backend confirms it.
+- Clear temporary upload state after failures.
+- Do not log file contents or confidential filenames unnecessarily.
 
 ---
 
-# Escalation and Countdown Rules
+# Notifications
 
-Rules:
-
-* Follow existing escalation configuration.
-* Do not invent deadlines or escalation levels.
-* Treat backend timestamps as authoritative.
-* Handle overdue, due-soon, completed, cancelled, archived, and rejected states correctly.
-* Prevent timer resource leaks.
-* Avoid rebuilding entire screens every second.
-* Prevent duplicate escalation notifications.
-* Do not escalate ineligible documents.
-* Use timestamp comparisons instead of formatted string comparisons.
+- Prevent duplicate notifications.
+- Preserve notification ordering when meaningful.
+- Maintain accurate unread/read state.
+- Mark notifications as read only after the intended operation succeeds.
+- Do not open inaccessible resources from notifications.
+- Handle deleted, archived, missing, or restricted resources safely.
+- Refresh notification state after successful updates.
+- Do not expose confidential information in notification previews.
+- Preserve local state when notification updates fail.
 
 ---
 
-# Date and Time Rules
+# Dates, Times, Deadlines, and Timers
 
-* Follow the existing timezone strategy.
-* Treat backend timestamps as authoritative.
-* Convert timestamps only for display.
-* Do not store formatted display strings as authoritative dates.
-* Handle nullable timestamps safely.
-* Do not assume the device timezone matches the organization's timezone.
-* Use timestamp comparisons for deadlines, approvals, routing, receiving, notifications, and escalation.
+- Follow the project's existing timezone strategy.
+- Treat authoritative backend timestamps as the source of truth when applicable.
+- Convert timestamps only for display.
+- Do not store formatted display strings as authoritative dates.
+- Handle nullable timestamps safely.
+- Do not assume the device timezone matches the organization's timezone.
+- Use timestamp comparisons for deadlines and time-based logic.
+- Avoid comparing formatted date strings.
+- Dispose timers and listeners correctly.
+- Avoid rebuilding entire screens unnecessarily for every timer tick.
+- Do not invent deadlines or escalation rules.
 
 ---
 
 # Error Handling
 
-Every operation should handle:
+Every operation should consider applicable states such as:
 
-* Initial loading
-* Refreshing
-* Empty data
-* Network failure
-* Timeout
-* Offline state
-* Validation failure
-* Unauthenticated request
-* Forbidden action
-* Missing document
-* Invalid status
-* Invalid workflow action
-* Duplicate request
-* Attachment failure
-* Invalid backend response
-* Unexpected null values
-* Partial data
-* Server failure
+- Initial loading
+- Refreshing
+- Empty data
+- Network failure
+- Timeout
+- Offline state
+- Validation failure
+- Unauthenticated request
+- Forbidden action
+- Missing resource
+- Invalid status
+- Invalid action
+- Duplicate request
+- File/attachment failure
+- Invalid backend response
+- Unexpected null values
+- Partial data
+- Server failure
 
 Rules:
 
-* Show understandable user-facing messages.
-* Do not show stack traces, SQL errors, or raw exceptions.
-* Do not silently ignore failures.
-* Preserve previous valid state when an operation fails.
-* Do not report success before backend confirmation.
-* Avoid infinite retry loops.
-* Log enough information for debugging without exposing secrets or confidential content.
-* Reuse the existing DocuTracker error banner and empty-state components.
+- Show understandable user-facing messages.
+- Do not show stack traces, SQL errors, raw exceptions, credentials, or internal paths.
+- Do not silently ignore failures.
+- Preserve previous valid state when an operation fails.
+- Do not report success before confirmation.
+- Avoid infinite retry loops.
+- Log enough information for debugging without exposing secrets or confidential content.
+- Reuse existing error UI components where available.
 
 ---
 
-# Responsive Design
+# Responsive Design and Accessibility
 
-* Reuse existing responsive body and layout components.
-* Test narrow mobile widths and wider desktop or web layouts.
-* Avoid fixed widths that overflow.
-* Avoid deeply nested scrolling widgets.
-* Keep dialogs, tables, panels, forms, and lists usable on small screens.
-* Keep touch targets large enough.
-* Prevent clipping of document titles, statuses, employee names, office names, and department names.
-* Use wrapping, ellipsis, and adaptive layouts appropriately.
-* Keep important actions reachable on mobile.
-* Preserve accessibility and readability.
+- Reuse existing responsive layout components.
+- Test supported screen sizes.
+- Avoid fixed widths that can overflow.
+- Avoid deeply nested scrolling areas.
+- Keep dialogs, tables, forms, lists, and panels usable on smaller screens.
+- Keep touch targets sufficiently usable.
+- Prevent clipping of important names, titles, statuses, and actions.
+- Use wrapping, truncation, and adaptive layouts appropriately.
+- Keep important actions accessible.
+- Preserve readability and accessibility.
+- Do not sacrifice usability for visual decoration.
 
 ---
 
-# Flutter Lifecycle Rules
+# Platform Compatibility
 
-* Keep asynchronous work out of `build()`.
-* Dispose controllers, focus nodes, streams, subscriptions, and animation controllers.
-* Check `mounted` before updating UI state after asynchronous work when needed.
-* Avoid starting repeated requests during rebuilds.
-* Avoid unnecessary `setState`.
-* Preserve current state-management conventions.
-* Do not create memory leaks through timers or listeners.
+When the project supports multiple platforms:
+
+- Preserve platform-specific implementations.
+- Do not import platform-specific packages into incompatible targets.
+- Preserve conditional imports where used.
+- Test relevant platforms when making platform-sensitive changes.
+- Do not assume behavior is identical across mobile, desktop, and web.
 
 ---
 
 # Backend and Database Awareness
 
-The backend uses Node.js and Express. The database uses PostgreSQL.
+If the feature depends on backend or database behavior:
 
-This directory is frontend-only.
+- Clearly identify when backend or database changes are required.
+- Do not fake authoritative backend behavior using client-only state.
+- Do not store authoritative permissions, workflows, routing, or audit data only on the client.
+- Do not invent database tables or columns.
+- Keep frontend requests aligned with the actual backend contract.
+- Treat authoritative backend responses as the final source of truth.
 
-Rules:
-
-* Do not place backend code inside the Flutter DocuTracker directory.
-* Do not create SQL migrations here.
-* Do not fake backend functionality using frontend-only state.
-* Do not store authoritative workflow, routing, permission, or audit data only on the client.
-* Clearly state when a requested feature also requires backend or database changes.
-* Keep Flutter requests aligned with the actual backend contract.
-* Treat backend responses as the final source of truth.
+Do not place backend code, migrations, or database logic in a frontend-only directory unless the project explicitly combines them there.
 
 ---
 
@@ -1009,25 +385,25 @@ Rules:
 
 Add or update tests when the project has an existing testing setup.
 
-Prioritize testing:
+Prioritize:
 
-* Model JSON parsing
-* DTO parsing
-* Provider state transitions
-* Repository error handling
-* Permission evaluation
-* Document visibility
-* Workflow validation
-* Valid and invalid transitions
-* Duplicate actions
-* Notifications
-* Attachments
-* Escalation and countdown logic
-* Loading, empty, success, and error states
-* Responsive layouts
-* Admin and employee access differences
+- Model serialization and parsing
+- API/DTO parsing
+- State transitions
+- Repository error handling
+- Permission evaluation
+- Resource visibility
+- Business-rule validation
+- Valid and invalid transitions
+- Duplicate actions
+- Notifications
+- File handling
+- Deadline and timer logic
+- Loading, empty, success, and error states
+- Responsive layouts
+- Role-based access differences
 
-Do not delete or weaken tests to make changes pass.
+Do not delete or weaken tests just to make a change pass.
 
 When automated tests are unavailable, provide exact manual testing steps.
 
@@ -1035,89 +411,105 @@ When automated tests are unavailable, provide exact manual testing steps.
 
 # Required Checks
 
-After making changes, run when available:
+After making changes, run the project's available checks, such as:
 
-```bash
-dart format frontend/lib/docutracker
-flutter analyze
-flutter test
+```text
+Formatter
+Static analysis / lint
+Unit tests
+Integration tests
+Build
+Relevant platform checks
+```
 
-If the project already has unrelated analyzer or test failures, separate those clearly from failures introduced by the DocuTracker changes.
+Do not claim that a check passed unless it was actually run.
 
-Do not claim that formatting, analysis, or tests passed unless they were actually run.
+If unrelated existing failures are present, clearly separate them from failures introduced by the change.
 
 ---
 
 # Debugging Procedure
 
-When fixing a DocuTracker bug:
+When fixing a bug:
 
 1. Reproduce or trace the issue.
 2. Identify the affected layer.
 3. Find the root cause.
-4. Explain why it happens.
-5. Check related workflow and permission behavior.
+4. Explain why the issue occurs.
+5. Check related security, permission, workflow, and data behavior.
 6. Fix the cause instead of hiding the symptom.
 7. Avoid speculative changes.
-8. Test success and failure paths.
-9. Test mobile and web behavior when relevant.
+8. Test both success and failure paths.
+9. Test relevant platforms and screen sizes.
 10. Review the final diff for unrelated changes.
-11. Report remaining assumptions or risks.
+11. Report remaining assumptions, risks, or limitations.
+
+---
+
+# Dependency Rules
+
+- Do not add a dependency when an existing project dependency can solve the problem.
+- Do not replace frameworks or libraries without approval.
+- Check compatibility before adding or upgrading dependencies.
+- Keep dependency changes minimal.
+- Do not add packages solely for a small convenience when the functionality can reasonably be implemented with existing tools.
 
 ---
 
 # Git Safety
 
-* Do not force-push.
-* Do not reset, discard, overwrite, or delete uncommitted work without explicit approval.
-* Do not run destructive Git commands unless explicitly requested.
-* Do not modify unrelated files.
-* Do not commit secrets, generated builds, dependency folders, or editor files.
-* Review the diff before completing a task.
-* Do not automatically commit changes unless requested.
-* Do not rewrite branch history.
+- Do not force-push.
+- Do not reset, discard, overwrite, or delete uncommitted work without explicit approval.
+- Do not run destructive Git commands unless explicitly requested.
+- Do not modify unrelated files.
+- Do not commit secrets, generated builds, dependency folders, or editor-specific files unless the project explicitly requires them.
+- Review the diff before completing a task.
+- Do not automatically commit changes unless requested.
+- Do not rewrite branch history.
 
 ---
 
-# Changes Outside the Module
+# Changes Outside the Current Module
 
-Do not modify files outside:
-
-`frontend/lib/docutracker/`
-
-unless integration with the main HRMS application is required.
-
-Acceptable examples may include:
-
-* Registering a DocuTracker route
-* Adding DocuTracker to the parent navigation
-* Connecting an existing authentication provider
-* Updating a shared API client
-* Updating a shared employee model
-* Adding an approved dependency
+Do not modify unrelated modules or directories unless integration genuinely requires it.
 
 Before making an external change:
 
 1. Explain why it is necessary.
 2. Confirm that no local solution exists.
 3. Make the smallest external change.
-4. Avoid changing unrelated HRMS behavior.
+4. Avoid changing unrelated behavior.
 5. List every external file changed.
 
 ---
 
 # Final Response Format
 
-After completing a DocuTracker task, report:
+After completing a development task, report:
 
-1. Root cause or requested feature
-2. Files changed
-3. What was implemented
-4. API impact
-5. Backend or database impact
-6. Permission and security impact
-7. Formatting, analysis, and tests performed
-8. Manual testing steps
-9. Remaining assumptions, risks, or limitations
+1. **Root cause or requested feature**
+2. **Files changed**
+3. **What was implemented**
+4. **API impact**
+5. **Backend or database impact**
+6. **Permission and security impact**
+7. **Formatting, analysis, and tests performed**
+8. **Manual testing steps**
+9. **Remaining assumptions, risks, or limitations**
 
-Keep the explanation focused only on DocuTracker.
+Keep the final explanation focused on the requested task.
+
+---
+
+# Important Rules for AI Coding Agents
+
+- Do not guess when the repository already contains the answer.
+- Inspect existing code before creating new patterns.
+- Do not invent APIs, schemas, roles, permissions, workflows, statuses, or business behavior.
+- Ask for clarification when a required requirement cannot be determined safely from the project.
+- Prefer a small correct change over a large rewrite.
+- Preserve existing behavior unless the request explicitly changes it.
+- Never hide errors just to make the UI appear successful.
+- Never weaken security to make a feature easier to access.
+- Never claim tests or commands were run when they were not.
+- Always review the final changes for accidental unrelated modifications.

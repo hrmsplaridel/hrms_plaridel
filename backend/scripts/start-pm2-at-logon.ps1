@@ -1,11 +1,24 @@
 [CmdletBinding()]
 param(
   [ValidateRange(10, 180)]
-  [int]$HealthTimeoutSeconds = 45
+  [int]$HealthTimeoutSeconds = 45,
+  # Set by start-pm2-at-logon.vbs so we do not re-enter the silent launcher loop.
+  [switch]$SilentHost
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+
+# Task Scheduler still shows a blank console for powershell -WindowStyle Hidden.
+# Re-launch once through WScript (window style 0), then exit this visible host.
+if (-not $SilentHost) {
+  $vbsPath = Join-Path $PSScriptRoot 'start-pm2-at-logon.vbs'
+  if (-not (Test-Path -LiteralPath $vbsPath)) {
+    throw "Silent launcher not found: $vbsPath"
+  }
+  Start-Process -FilePath "$env:SystemRoot\System32\wscript.exe" -ArgumentList @('//B', "`"$vbsPath`"") -WindowStyle Hidden | Out-Null
+  exit 0
+}
 
 $backendRoot = Split-Path -Parent $PSScriptRoot
 $userProfile = [Environment]::GetFolderPath('UserProfile')
@@ -59,8 +72,9 @@ try {
 
   Push-Location $backendRoot
   try {
-    & $nodePath $pm2Cli resurrect *> $null
-    $pm2ExitCode = $LASTEXITCODE
+    $pm2Args = @($pm2Cli, 'resurrect')
+    $pm2Process = Start-Process -FilePath $nodePath -ArgumentList $pm2Args -WorkingDirectory $backendRoot -WindowStyle Hidden -PassThru -Wait
+    $pm2ExitCode = $pm2Process.ExitCode
     Write-StartupLog "PM2 resurrect exited with code $pm2ExitCode."
     if ($pm2ExitCode -ne 0) {
       throw "PM2 resurrect failed with exit code $pm2ExitCode."

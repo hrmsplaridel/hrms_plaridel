@@ -1,5 +1,5 @@
 -- =============================================================================
--- HRMS Plaridel - DocuTracker: INSTALL PHASE 3 (post production hardening, 10-26)
+-- HRMS Plaridel - DocuTracker: INSTALL PHASE 3 (post production hardening, 10-28)
 -- =============================================================================
 -- PREREQUISITE: phase 1 complete AND docutracker-install-production-hardening-apply-once.sql applied.
 -- Section 10 drops/replaces *_prod_v1 status constraints created in production hardening.
@@ -15,6 +15,8 @@
 -- Section 23 adds the governance audit trail.
 -- Sections 24-25 assign effective-dated officials used by generated leave forms.
 -- Section 26 records authenticated source-form creators for automatic Prepared by assignment.
+-- Section 27 records how source signature slots were assigned (creator/automatic/recovery/manual).
+-- Section 28 adds submitter-department workflow assignees and originating_department_id on documents.
 --
 -- TABLE OF CONTENTS
 --   10 - STATUS SEMANTICS V2 (drop forwarded as document status)
@@ -35,6 +37,7 @@
 --   25 - AUTOMATIC MAYOR LEAVE SIGNATORY
 --   26 - SOURCE FORM PREPARER OWNERSHIP
 --   27 - SOURCE SIGNATURE ASSIGNMENT SOURCE
+--   28 - SUBMITTER DEPARTMENT REVIEWERS + ORIGINATING DEPT
 --
 -- =============================================================================
 
@@ -1193,5 +1196,42 @@ WHERE s.source_table = 'idp_entries'
   AND f.created_by IS NOT NULL
   AND s.assigned_signer_id = f.created_by
   AND s.assignment_source = 'manual';
+
+COMMIT;
+
+
+-- #############################################################################
+-- 28 - SUBMITTER DEPARTMENT REVIEWERS + ORIGINATING DEPT
+-- Source file: migrate-docutracker-submitter-department-reviewers-v1.sql
+-- #############################################################################
+
+-- DocuTracker: submitter department reviewers + originating department snapshot
+--
+-- 1) Allows workflow steps to resolve assignees from the document creator's
+--    department head (+ backups) at routing time.
+-- 2) Snapshots originating_department_id on documents for queues/audit.
+
+BEGIN;
+
+ALTER TABLE docutracker_workflow_steps
+  DROP CONSTRAINT IF EXISTS docutracker_workflow_steps_assignee_source_check;
+
+ALTER TABLE docutracker_workflow_steps
+  ADD CONSTRAINT docutracker_workflow_steps_assignee_source_check
+  CHECK (
+    assignee_source IN (
+      'specific_users',
+      'department_reviewers',
+      'submitter_department_reviewers'
+    )
+  );
+
+ALTER TABLE docutracker_documents
+  ADD COLUMN IF NOT EXISTS originating_department_id UUID
+    REFERENCES departments(id) ON DELETE SET NULL;
+
+CREATE INDEX IF NOT EXISTS idx_docutracker_documents_originating_department
+  ON docutracker_documents(originating_department_id)
+  WHERE originating_department_id IS NOT NULL;
 
 COMMIT;

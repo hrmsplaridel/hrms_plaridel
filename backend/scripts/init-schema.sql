@@ -2148,6 +2148,7 @@ CREATE TABLE IF NOT EXISTS docutracker_documents (
   file_path TEXT,
   file_name TEXT,
   created_by UUID REFERENCES users(id) ON DELETE SET NULL,
+  originating_department_id UUID REFERENCES departments(id) ON DELETE SET NULL,
   current_holder_id UUID REFERENCES users(id) ON DELETE SET NULL,
   current_step INT DEFAULT 1,
   workflow_version INT,
@@ -2201,7 +2202,11 @@ CREATE TABLE IF NOT EXISTS docutracker_workflow_steps (
   step_order INT NOT NULL CHECK (step_order > 0),
   department_id UUID REFERENCES departments(id) ON DELETE SET NULL,
   assignee_source TEXT NOT NULL DEFAULT 'specific_users'
-    CHECK (assignee_source IN ('specific_users', 'department_reviewers')),
+    CHECK (assignee_source IN (
+      'specific_users',
+      'department_reviewers',
+      'submitter_department_reviewers'
+    )),
   label TEXT,
   enabled BOOLEAN NOT NULL DEFAULT true,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -2462,6 +2467,9 @@ CREATE TABLE IF NOT EXISTS docutracker_document_number_seq (
 
 -- DocuTracker indexes
 CREATE INDEX IF NOT EXISTS idx_docutracker_documents_created_by ON docutracker_documents(created_by);
+CREATE INDEX IF NOT EXISTS idx_docutracker_documents_originating_department
+  ON docutracker_documents(originating_department_id)
+  WHERE originating_department_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_docutracker_documents_current_holder ON docutracker_documents(current_holder_id);
 CREATE INDEX IF NOT EXISTS idx_docutracker_documents_status ON docutracker_documents(status);
 CREATE INDEX IF NOT EXISTS idx_docutracker_documents_doc_type ON docutracker_documents(document_type);

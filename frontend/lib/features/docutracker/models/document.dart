@@ -12,6 +12,7 @@ class DocuTrackerDocument {
     this.filePath,
     this.fileName,
     this.createdBy,
+    this.originatingDepartmentId,
     this.createdAt,
     this.updatedAt,
     this.currentStep,
@@ -48,6 +49,8 @@ class DocuTrackerDocument {
   final String? filePath;
   final String? fileName;
   final String? createdBy;
+  /// Department of the creator at document create time (routing / queues).
+  final String? originatingDepartmentId;
   final DateTime? createdAt;
   final DateTime? updatedAt;
 
@@ -138,6 +141,7 @@ class DocuTrackerDocument {
       filePath: json['file_path']?.toString(),
       fileName: json['file_name']?.toString(),
       createdBy: json['created_by']?.toString(),
+      originatingDepartmentId: json['originating_department_id']?.toString(),
       createdAt: json['created_at'] != null
           ? DateTime.tryParse(json['created_at'] as String)
           : null,
@@ -191,6 +195,8 @@ class DocuTrackerDocument {
     if (filePath != null) 'file_path': filePath,
     if (fileName != null) 'file_name': fileName,
     if (createdBy != null) 'created_by': createdBy,
+    if (originatingDepartmentId != null)
+      'originating_department_id': originatingDepartmentId,
     if (currentStep != null) 'current_step': currentStep,
     'status': status.value,
     if (sentTime != null) 'sent_time': sentTime!.toIso8601String(),
