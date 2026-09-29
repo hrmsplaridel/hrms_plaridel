@@ -66,6 +66,9 @@ const {
   saveSinglePermission,
   validateDocumentType,
 } = require('../services/docutrackerPermissionAdminService');
+const {
+  listHrWorkflowMirrors,
+} = require('../services/docutrackerHrWorkflowMirrorService');
 
 const router = express.Router();
 const protect = [authMiddleware];
@@ -1576,6 +1579,29 @@ router.get('/routing-configs', protect, async (req, res) => {
   } catch (err) {
     console.error('[docutracker GET /routing-configs]', err);
     res.status(500).json({ error: 'Failed to fetch routing configs' });
+  }
+});
+
+/**
+ * GET /api/docutracker/hr-workflow-mirrors
+ * Read-only DTR reviewer configuration shown alongside DocuTracker workflows.
+ * These rows never participate in the DocuTracker routing engine.
+ */
+router.get('/hr-workflow-mirrors', protect, requireAdmin, async (req, res) => {
+  try {
+    const payload = await listHrWorkflowMirrors(pool, {
+      effectiveDate: req.query?.effective_date,
+    });
+    return res.json(payload);
+  } catch (error) {
+    const status = Number(error?.statusCode) || 500;
+    console.error('[docutracker GET /hr-workflow-mirrors]', error);
+    return res.status(status).json({
+      error:
+        status === 400
+          ? error.message
+          : 'Failed to load mirrored HR workflows',
+    });
   }
 });
 
