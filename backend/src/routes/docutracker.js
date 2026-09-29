@@ -12,6 +12,7 @@ const {
   createDocument: createDocumentEngine,
   getEffectivePermissionExplanation,
   listDocuments,
+  listReviewedDepartments,
   canUserPerformDocumentAction,
   isDraftOrWipDocument,
   updateDocumentMetadata,
@@ -417,6 +418,7 @@ router.get('/documents', protect, async (req, res) => {
       q,
       sourceModule,
       sourceTable,
+      scope,
       limit = 50,
       offset = 0,
     } = req.query;
@@ -432,6 +434,7 @@ router.get('/documents', protect, async (req, res) => {
       q: q ? String(q) : undefined,
       sourceModule: sourceModule ? String(sourceModule) : undefined,
       sourceTable: sourceTable ? String(sourceTable) : undefined,
+      scope: scope === 'department' ? 'department' : undefined,
       limit: limitVal,
       offset: offsetVal,
     });
@@ -440,6 +443,16 @@ router.get('/documents', protect, async (req, res) => {
   } catch (err) {
     console.error('[docutracker GET /documents]', err);
     res.status(500).json({ error: 'Failed to fetch documents' });
+  }
+});
+
+/** GET /api/docutracker/reviewed-departments - departments whose submitted documents the caller can see. */
+router.get('/reviewed-departments', protect, async (req, res) => {
+  try {
+    res.json(await listReviewedDepartments(pool, req.user.id));
+  } catch (err) {
+    console.error('[docutracker GET /reviewed-departments]', err);
+    res.status(500).json({ error: 'Failed to load reviewed departments' });
   }
 });
 

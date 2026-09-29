@@ -11,10 +11,23 @@ The Flutter module uses the authenticated HRMS Express API under
 | GET | /api/docutracker/documents/{id} | Get an authorized document bundle |
 | POST | /api/docutracker/documents | Create a document |
 | POST | /api/docutracker/documents/{id}/transition | Perform a validated workflow action |
+| GET | /api/docutracker/reviewed-departments | List departments (`id`, `name`) the caller reviews today as Department Head or backup reviewer |
 
 Document list items may include `viewer_is_routing_assignee`, a viewer-specific
 boolean used by the client to retain documents assigned through the routing
 snapshot without exposing other assignees' user IDs.
+
+New documents record `originating_department_id`, the creator's department on
+the creation date. It drives the Department Head step and the department queue.
+
+`GET /api/docutracker/documents?scope=department` returns the department queue:
+submitted documents whose `originating_department_id` is a department the caller
+reviews today, including documents currently held by someone else. Drafts and
+unsubmitted pending documents are excluded, and source-backed module rows are not
+merged in. Callers who review no department receive an empty list. The same
+department reviewers may open these documents read-only through
+`GET /api/docutracker/documents/{id}`. They are not added to the default list,
+and they gain no workflow actions: only current-step assignees may act.
 
 Workflow transition requests use an idempotency key tied to the document state
 observed by the client. Retrying the same action against the same state reuses
@@ -98,6 +111,10 @@ Coaching (`certified_by`). On create:
 - IDP `approved_by` → active Mayor
 - Action Brainstorming `certified_by` → active Department Head for the selected
   department
+
+Department Head slots fall back to the department's rank-1 backup reviewer when
+no Department Head is active on the creation date. If neither exists, the slot
+stays empty for admin recovery.
 
 Administrators can discover forms with unassigned fields through the signature-
 request endpoints. Assigned users see only their own requests. Training Needs
@@ -267,6 +284,33 @@ creates the normalized step/assignee rows. Older configs
 without `allowed_actions` retain their stored assignee actions and otherwise
 use the legacy four-action default.
 
+Each step's `assignee_source` selects how assignees are resolved:
+
+- `specific_users` (default): the fixed `user_ids` list.
+- `department_reviewers`: the Department Head and backups of the step's
+  `department_id`, resolved when the document enters the step.
+- `submitter_department_reviewers`: the Department Head and backups of the
+  document's `originating_department_id`. The step stores no `department_id` or
+  `user_ids`. The submitter is excluded from reviewing their own document, so a
+  Head's own submission goes to the rank-1 backup.
+
+Dynamic steps are resolved at transition time. When no Department Head or backup
+can be found, the transition fails with a validation error. For example, submit
+returns 400 "No active Department Head or backup reviewer is configured for the
+submitter's department (step 1)", and the document stays unassigned.
+
+Admins can find these gaps before submitters hit them with
+`GET /api/departments/reviewer-readiness` (admin only; optional
+`effective_date=YYYY-MM-DD`). For each active department it returns
+`staff_count`, `primary`, `backup_count`, and a `status`:
+
+- `ready`: staff and the Head both have a reviewer.
+- `head_only`: a Head but no backup, so the Head's own submissions fail.
+- `no_reviewer`: staff but no Head or backup, so staff submissions fail.
+- `no_staff`: nobody is assigned.
+
+The workflow editor and the DTR Department page show these as warnings.
+
 ## Workflow Step Assignees
 
 | Method | Endpoint | Description |
@@ -285,7 +329,8 @@ At runtime, only the current step's enabled primary or backup assignees may use
 that step's allowed actions. This rule is enforced by the API for every actor,
 including admins. Creators, reached-step assignees, signature assignees, and
 admins retain relationship-based view access; future-step assignment alone does
-not grant early access.
+not grant early access. Department reviewers also get read-only access to
+submitted documents from their department (see the department queue above).
 
 ## Escalation Configs
 

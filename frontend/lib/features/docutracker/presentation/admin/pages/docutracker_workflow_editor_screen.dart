@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:hrms_plaridel/core/api/client.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
+import 'package:hrms_plaridel/features/dtr/management/departments/data/department_reviewer_readiness.dart';
 import 'package:hrms_plaridel/providers/auth_provider.dart';
 import 'package:hrms_plaridel/features/docutracker/data/providers/docutracker_provider.dart';
 import 'package:hrms_plaridel/features/docutracker/data/dto/docutracker_api_result.dart';
@@ -56,6 +57,7 @@ class _DocuTrackerWorkflowEditorScreenState
   String? _error;
   String? _selectedStepId;
   final Map<String, String> _departmentNameById = {};
+  List<DepartmentReviewerReadiness> _reviewerReadiness = const [];
   final Map<String, _WorkflowStepAssigneeSnapshot> _assigneeSnapshotsByStepId =
       {};
 
@@ -95,7 +97,60 @@ class _DocuTrackerWorkflowEditorScreenState
         .toString();
     _revalidate();
     _loadDepartmentLookup();
+    _loadReviewerReadiness();
     _loadStepAssigneeSnapshots();
+  }
+
+  Future<void> _loadReviewerReadiness() async {
+    try {
+      final rows = await DepartmentReviewerReadiness.fetch();
+      if (mounted) setState(() => _reviewerReadiness = rows);
+    } catch (_) {
+      // Non-blocking: the editor still works without the readiness warning.
+    }
+  }
+
+  /// Reviewer gaps that would block documents on the current (unsaved) steps.
+  List<String> _routingReadinessWarnings() {
+    final enabled = _steps.where((s) => s.enabled).toList();
+    final usesSubmitterHead = enabled.any(
+      (s) => s.assigneeSource == 'submitter_department_reviewers',
+    );
+    final warnings = <String>[];
+    if (usesSubmitterHead) {
+      final blocked = _reviewerReadiness
+          .where((r) => r.status == DepartmentReviewerStatus.noReviewer)
+          .map((r) => r.departmentName)
+          .toList();
+      final headOnly = _reviewerReadiness
+          .where((r) => r.status == DepartmentReviewerStatus.headOnly)
+          .map((r) => r.departmentName)
+          .toList();
+      if (blocked.isNotEmpty) {
+        warnings.add(
+          'Staff in ${blocked.join(', ')} cannot submit this document: '
+          'their department has no Department Head or backup reviewer.',
+        );
+      }
+      if (headOnly.isNotEmpty) {
+        warnings.add(
+          'The Department Head of ${headOnly.join(', ')} cannot submit this '
+          'document: no backup reviewer is set.',
+        );
+      }
+    }
+    final byId = {for (final r in _reviewerReadiness) r.departmentId: r};
+    for (final s in enabled) {
+      if (s.assigneeSource != 'department_reviewers') continue;
+      final readiness = byId[(s.departmentId ?? '').trim()];
+      if (readiness?.status == DepartmentReviewerStatus.noReviewer) {
+        warnings.add(
+          'Step ${s.stepOrder} routes to ${readiness!.departmentName}, which '
+          'has no Department Head or backup reviewer.',
+        );
+      }
+    }
+    return warnings;
   }
 
   Future<void> _loadDepartmentLookup() async {
@@ -755,6 +810,7 @@ class _DocuTrackerWorkflowEditorScreenState
     final isAdminUser = _isAdminUser();
     final blocking = _issues.where((i) => !i.isWarning).toList();
     final warnings = _issues.where((i) => i.isWarning).toList();
+    final readinessWarnings = _routingReadinessWarnings();
     if (!isAdminUser) {
       return Scaffold(
         appBar: AppBar(title: const Text('Workflow Editor')),
@@ -847,6 +903,10 @@ class _DocuTrackerWorkflowEditorScreenState
             },
           ),
           const SizedBox(height: 16),
+          if (readinessWarnings.isNotEmpty) ...[
+            _RoutingReadinessBanner(messages: readinessWarnings),
+            const SizedBox(height: 12),
+          ],
           if (_issues.isNotEmpty)
             _ValidationPanel(blocking: blocking, warnings: warnings),
           if (_error != null) ...[
@@ -1017,6 +1077,72 @@ class _DocuTrackerWorkflowEditorScreenState
 }
 
 // --- Layout pieces ---
+
+class _RoutingReadinessBanner extends StatelessWidget {
+  const _RoutingReadinessBanner({required this.messages});
+
+  final List<String> messages;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.orange.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(DocuTrackerTokens.radiusLg),
+        border: Border.all(color: Colors.orange.withValues(alpha: 0.45)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(
+            Icons.warning_amber_rounded,
+            size: 20,
+            color: Colors.orange.shade700,
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Reviewer setup needed',
+                  style: TextStyle(
+                    fontWeight: FontWeight.w700,
+                    color: AppTheme.textPrimary,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                for (final message in messages)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 2),
+                    child: Text(
+                      message,
+                      style: TextStyle(
+                        fontSize: 12,
+                        height: 1.35,
+                        color: AppTheme.textSecondary,
+                      ),
+                    ),
+                  ),
+                const SizedBox(height: 4),
+                Text(
+                  'Fix this in DTR > Department by assigning a Department '
+                  'Head position or backup reviewers.',
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontStyle: FontStyle.italic,
+                    color: AppTheme.textSecondary,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
 
 BoxDecoration _workflowPanelDecoration({Color? fill, Color? border}) {
   return BoxDecoration(

@@ -1,6 +1,6 @@
 const { createSignatureAsset } = require('./docutrackerDocumentBuilderService');
 const { writeGovernanceAudit } = require('./docutrackerGovernanceAudit');
-const { findDepartmentHeadUserId } = require('./departmentHeadService');
+const { resolveDepartmentReviewers } = require('./departmentReviewerService');
 const {
   ROLE_KEYS,
   resolveOfficialSignatory,
@@ -188,11 +188,15 @@ async function resolveDepartmentIdByName(db, departmentName) {
   return result.rows[0]?.id || null;
 }
 
-async function resolveDepartmentHeadSignerId(db, departmentName) {
+async function resolveDepartmentHeadSignerId(db, departmentName, effectiveDate) {
   const departmentId = await resolveDepartmentIdByName(db, departmentName);
   if (!departmentId) return null;
-  const headId = await findDepartmentHeadUserId(db, departmentId);
-  return resolveActiveUserId(db, headId);
+  const resolved = await resolveDepartmentReviewers(db, {
+    departmentId,
+    ...(effectiveDate ? { effectiveDate } : {}),
+  });
+  const signer = resolved.primary || resolved.backups[0] || null;
+  return resolveActiveUserId(db, signer?.reviewerId);
 }
 
 async function resolveHrmdoSignerId(db, effectiveDate) {
@@ -214,7 +218,7 @@ async function resolveAutomaticSignerId(db, rule, { creatorUserId, departmentNam
     case 'creator':
       return resolveActiveUserId(db, creatorUserId);
     case 'department_head':
-      return resolveDepartmentHeadSignerId(db, departmentName);
+      return resolveDepartmentHeadSignerId(db, departmentName, effectiveDate);
     case 'hrmdo':
       return resolveHrmdoSignerId(db, effectiveDate);
     case 'mayor':

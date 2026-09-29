@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:hrms_plaridel/core/api/client.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/features/dtr/management/departments/data/department_request_guard.dart';
+import 'package:hrms_plaridel/features/dtr/management/departments/data/department_reviewer_readiness.dart';
 import 'package:hrms_plaridel/features/dtr/management/departments/widgets/department_lifecycle_button.dart';
 
 /// Department record for display/CRUD.
@@ -93,6 +94,7 @@ class _ManageDepartmentState extends State<ManageDepartment> {
   Map<String, dynamic>? _primaryReviewer;
   List<Map<String, dynamic>> _reviewerRoster = [];
   List<String> _backupReviewerIds = [];
+  Map<String, DepartmentReviewerReadiness> _readinessById = {};
   final _departmentRequestGuard = DepartmentRequestGuard();
 
   bool _isDark(BuildContext context) => AppTheme.dashIsDark(context);
@@ -173,6 +175,7 @@ class _ManageDepartmentState extends State<ManageDepartment> {
         return;
       }
       setState(() => _departments = departments);
+      _loadReviewerReadiness();
     } on DioException catch (e) {
       if (!mounted ||
           !_departmentRequestGuard.accepts(request, _statusFilter)) {
@@ -191,6 +194,18 @@ class _ManageDepartmentState extends State<ManageDepartment> {
       if (mounted && _departmentRequestGuard.accepts(request, _statusFilter)) {
         setState(() => _loading = false);
       }
+    }
+  }
+
+  Future<void> _loadReviewerReadiness() async {
+    try {
+      final rows = await DepartmentReviewerReadiness.fetch();
+      if (!mounted) return;
+      _updateDepartmentFormState(() {
+        _readinessById = {for (final r in rows) r.departmentId: r};
+      });
+    } catch (e) {
+      debugPrint('Load reviewer readiness failed: $e');
     }
   }
 
@@ -298,6 +313,7 @@ class _ManageDepartmentState extends State<ManageDepartment> {
         );
       }
       await _loadReviewerConfig(department.id, effectiveDate: effectiveDate);
+      _loadReviewerReadiness();
     } on DioException catch (error) {
       if (mounted) {
         final message =
@@ -988,6 +1004,7 @@ class _ManageDepartmentState extends State<ManageDepartment> {
             ],
           ),
           const SizedBox(height: 20),
+          _buildReviewerReadinessBanner(),
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
             decoration: BoxDecoration(
@@ -1056,6 +1073,7 @@ class _ManageDepartmentState extends State<ManageDepartment> {
                         _tableCell(
                           d.name,
                           onTap: () => _openDepartmentDrawer(department: d),
+                          warning: _readinessById[d.id]?.problem,
                         ),
                         _tableCell(
                           d.description ?? '—',
@@ -1142,23 +1160,108 @@ class _ManageDepartmentState extends State<ManageDepartment> {
     String text, {
     VoidCallback? onTap,
     bool secondary = false,
+    String? warning,
   }) {
+    final label = Text(
+      text,
+      style: TextStyle(
+        fontSize: secondary ? 12 : 13,
+        color: secondary ? _mutedColor(context) : _headingColor(context),
+      ),
+      overflow: TextOverflow.ellipsis,
+      maxLines: 1,
+    );
     return TableCell(
       verticalAlignment: TableCellVerticalAlignment.middle,
       child: InkWell(
         onTap: onTap,
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-          child: Text(
-            text,
-            style: TextStyle(
-              fontSize: secondary ? 12 : 13,
-              color: secondary ? _mutedColor(context) : _headingColor(context),
-            ),
-            overflow: TextOverflow.ellipsis,
-            maxLines: 1,
-          ),
+          child: warning == null
+              ? label
+              : Row(
+                  children: [
+                    Flexible(child: label),
+                    const SizedBox(width: 6),
+                    Tooltip(
+                      message: warning,
+                      child: Icon(
+                        Icons.warning_amber_rounded,
+                        size: 16,
+                        color: Colors.orange.shade700,
+                      ),
+                    ),
+                  ],
+                ),
         ),
+      ),
+    );
+  }
+
+  Widget _buildReviewerReadinessBanner() {
+    final blocked = _readinessById.values
+        .where((r) => r.status == DepartmentReviewerStatus.noReviewer)
+        .map((r) => r.departmentName)
+        .toList();
+    final headOnly = _readinessById.values
+        .where((r) => r.status == DepartmentReviewerStatus.headOnly)
+        .map((r) => r.departmentName)
+        .toList();
+    if (blocked.isEmpty && headOnly.isEmpty) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 16),
+      child: _reviewerWarningBox([
+        if (blocked.isNotEmpty)
+          '${blocked.join(', ')} ${blocked.length == 1 ? 'has' : 'have'} no '
+              'Department Head or backup reviewer. Staff there cannot submit '
+              'documents that route to their Department Head.',
+        if (headOnly.isNotEmpty)
+          '${headOnly.join(', ')} ${headOnly.length == 1 ? 'has' : 'have'} a '
+              'Department Head but no backup, so documents the Head submits '
+              'cannot be routed.',
+      ]),
+    );
+  }
+
+  Widget _reviewerWarningBox(List<String> lines) {
+    final dark = _isDark(context);
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.orange.withValues(alpha: dark ? 0.16 : 0.08),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.orange.withValues(alpha: 0.45)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(
+            Icons.warning_amber_rounded,
+            size: 18,
+            color: Colors.orange.shade700,
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                for (final line in lines)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 2),
+                    child: Text(
+                      line,
+                      style: TextStyle(
+                        fontSize: 12,
+                        height: 1.35,
+                        color: _headingColor(context),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -1334,6 +1437,21 @@ class _ManageDepartmentState extends State<ManageDepartment> {
                 ),
               ],
             ),
+            if (_primaryReviewer == null && _backupReviewerIds.isEmpty) ...[
+              const SizedBox(height: 12),
+              _reviewerWarningBox(const [
+                'Nobody reviews this department. Pick at least one backup, or '
+                    'assign a Department Head position, so staff can submit '
+                    'documents.',
+              ]),
+            ] else if (_primaryReviewer != null &&
+                _backupReviewerIds.isEmpty) ...[
+              const SizedBox(height: 12),
+              _reviewerWarningBox(const [
+                'Add a backup so documents the Department Head submits '
+                    'themselves have someone to review them.',
+              ]),
+            ],
             const SizedBox(height: 18),
             Text(
               'Backup reviewers',

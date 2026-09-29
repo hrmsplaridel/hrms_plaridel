@@ -374,6 +374,49 @@ class DocuTrackerRepository implements DocuTrackerPermissionsDataSource {
     }
   }
 
+  /// Departments whose submitted documents the signed-in user may view
+  /// (as Department Head or backup reviewer). Empty when they review none.
+  Future<List<({String id, String name})>> listReviewedDepartments() async {
+    try {
+      final res = await ApiClient.instance.get<List<dynamic>>(
+        '$_base/reviewed-departments',
+      );
+      return (res.data ?? [])
+          .whereType<Map>()
+          .map((e) => (id: e['id']?.toString() ?? '', name: e['name']?.toString() ?? ''))
+          .where((d) => d.id.isNotEmpty)
+          .toList();
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  /// Submitted documents that originated from departments the user reviews.
+  Future<DocuTrackerResult<List<DocuTrackerDocument>>> listDepartmentQueue({
+    int? limit,
+  }) async {
+    try {
+      final res = await ApiClient.instance.get<List<dynamic>>(
+        '$_base/documents',
+        queryParameters: {
+          'scope': 'department',
+          if (limit != null) 'limit': limit,
+        },
+      );
+      return DocuTrackerSuccess(
+        (res.data ?? [])
+            .map(
+              (e) => DocuTrackerDocument.fromJson(
+                Map<String, dynamic>.from(e as Map),
+              ),
+            )
+            .toList(),
+      );
+    } catch (e) {
+      return DocuTrackerFailure(_apiErrorMessage(e));
+    }
+  }
+
   Future<DocuTrackerResult<DocuTrackerDocument>> getDocument(String id) async {
     try {
       final res = await ApiClient.instance.get<Map<String, dynamic>>(

@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/providers/auth_provider.dart';
+import 'package:hrms_plaridel/features/docutracker/data/dto/docutracker_api_result.dart';
 import 'package:hrms_plaridel/features/docutracker/data/providers/docutracker_provider.dart';
 import 'package:hrms_plaridel/features/docutracker/data/repositories/docutracker_repository.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document.dart';
@@ -51,6 +52,8 @@ class _DocuTrackerDashboardScreenState
   List<DocumentType> _creatableDocumentTypes = const [];
   _AdminQuickFilter _adminFilter = _AdminQuickFilter.all;
   final Map<String, bool> _expandedSections = <String, bool>{};
+  List<String> _reviewedDepartmentNames = const [];
+  List<DocuTrackerDocument> _departmentQueue = const [];
 
   @override
   void initState() {
@@ -75,6 +78,7 @@ class _DocuTrackerDashboardScreenState
       _creatableDocumentTypes = creatableTypes;
       _canCreateDocuments = creatableTypes.isNotEmpty;
     });
+    await _loadDepartmentQueue();
 
     // Keep document list in sync with server-side workflow/escalation changes.
     _pollTimer?.cancel();
@@ -87,6 +91,25 @@ class _DocuTrackerDashboardScreenState
         isAdmin: widget.isAdmin,
       );
       await provider.loadNotifications();
+      await _loadDepartmentQueue();
+    });
+  }
+
+  Future<void> _loadDepartmentQueue() async {
+    if (widget.isAdmin) return;
+    final repo = DocuTrackerRepository.instance;
+    final departments = await repo.listReviewedDepartments();
+    var queue = const <DocuTrackerDocument>[];
+    if (departments.isNotEmpty) {
+      final result = await repo.listDepartmentQueue(limit: 100);
+      if (result is DocuTrackerSuccess<List<DocuTrackerDocument>>) {
+        queue = result.value;
+      }
+    }
+    if (!mounted) return;
+    setState(() {
+      _reviewedDepartmentNames = departments.map((d) => d.name).toList();
+      _departmentQueue = queue;
     });
   }
 
@@ -222,7 +245,8 @@ class _DocuTrackerDashboardScreenState
         nearing.isNotEmpty ||
         incoming.isNotEmpty ||
         returned.isNotEmpty ||
-        completed.isNotEmpty;
+        completed.isNotEmpty ||
+        _departmentQueue.isNotEmpty;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -256,6 +280,14 @@ class _DocuTrackerDashboardScreenState
             incoming,
             userId: userId,
             sectionKey: 'employee_assigned',
+          ),
+        if (_reviewedDepartmentNames.isNotEmpty)
+          _buildDocSection(
+            'My department (${_reviewedDepartmentNames.join(', ')})',
+            _departmentQueue,
+            userId: userId,
+            showHolder: true,
+            sectionKey: 'employee_department_queue',
           ),
         if (hasAnyDocs) ...[
           if (overdue.isNotEmpty)
@@ -849,6 +881,10 @@ class _DocuTrackerDashboardScreenState
       'My drafts' => (Icons.edit_note_rounded, const Color(0xFFD97706)),
       'Returned' => (Icons.reply_rounded, const Color(0xFFFF9800)),
       'Completed' => (Icons.check_circle_rounded, DocuTrackerTokens.brand),
+      _ when sectionKey == 'employee_department_queue' => (
+        Icons.apartment_rounded,
+        DocuTrackerTokens.brand,
+      ),
       _ => (Icons.folder_open_rounded, DocuTrackerTokens.brand),
     };
 

@@ -1007,10 +1007,55 @@ async function fetchAllPermissionRowsForAction(client, { role, userId, action })
 }
 
 /**
+ * Departments the user reviews on [effectiveDate]: as the official Department
+ * Head (head period on their position) or as an active backup reviewer.
+ */
+async function listReviewedDepartments(client, userId, effectiveDate = todayInHrmsTimezone()) {
+  if (!userId) return [];
+  const result = await client.query(
+    `SELECT DISTINCT d.id, d.name
+     FROM departments d
+     WHERE d.id IN (
+       SELECT a.department_id
+       FROM assignments a
+       JOIN positions p ON p.id = a.position_id AND p.department_id = a.department_id
+       JOIN position_department_head_periods hp
+         ON hp.position_id = p.id
+        AND hp.department_id = a.department_id
+        AND hp.is_active = true
+        AND hp.effective_from <= $2::date
+        AND (hp.effective_to IS NULL OR hp.effective_to >= $2::date)
+       WHERE a.employee_id = $1::uuid
+         AND a.is_active = true
+         AND p.is_active = true
+         AND a.effective_from <= $2::date
+         AND (a.effective_to IS NULL OR a.effective_to >= $2::date)
+       UNION
+       SELECT b.department_id
+       FROM department_reviewer_backups b
+       WHERE b.employee_id = $1::uuid
+         AND b.is_active = true
+         AND b.effective_from <= $2::date
+         AND (b.effective_to IS NULL OR b.effective_to >= $2::date)
+     )
+     ORDER BY d.name`,
+    [userId, effectiveDate]
+  );
+  return result.rows.map((row) => ({ id: row.id, name: row.name }));
+}
+
+/** Submitted documents from a department the user reviews are visible read-only; drafts stay private. */
+function isDepartmentQueueDocument(document, reviewedDepartmentIds) {
+  if (!document?.originating_department_id || !reviewedDepartmentIds?.size) return false;
+  if (isDraftOrWipDocument(document)) return false;
+  return reviewedDepartmentIds.has(String(document.originating_department_id));
+}
+
+/**
  * Filters document rows the same way canUserPerformDocumentAction(..., 'view') would.
  * Relationship-scoped only — role-level `view` on '*' must NOT grant org-wide list access.
  */
-async function filterDocumentsViewableByUser(pool, user, rows) {
+async function filterDocumentsViewableByUser(pool, user, rows, { includeDepartmentQueue = false } = {}) {
   if (!rows?.length || user?.role === 'admin') return rows || [];
   const uid = user.id;
   const ids = rows.map((r) => r.id).filter(Boolean);
@@ -1067,6 +1112,9 @@ async function filterDocumentsViewableByUser(pool, user, rows) {
     historyActorDocIds = new Set(historyRes.rows.map((x) => x.id));
     signatureSignerDocIds = new Set(signatureRes.rows.map((x) => x.id));
   }
+  const reviewedDepartmentIds = includeDepartmentQueue && rows.some((r) => r.originating_department_id)
+    ? new Set((await listReviewedDepartments(pool, uid)).map((d) => String(d.id)))
+    : new Set();
 
   const out = [];
   for (const row of rows) {
@@ -1095,6 +1143,9 @@ async function filterDocumentsViewableByUser(pool, user, rows) {
           anyStepAssigneeIds.has(row.id) || historyActorDocIds.has(row.id),
       });
       continue;
+    }
+    if (isDepartmentQueueDocument(row, reviewedDepartmentIds)) {
+      out.push(row);
     }
   }
 
@@ -1604,6 +1655,12 @@ async function canUserPerformDocumentAction(client, { user, document, action }) 
     if (await isUserAssignedSignature(client, { document, userId: user.id })) return true;
     if (await isUserAssignedToCurrentStep(client, { document, userId: user.id })) return true;
     if (await isUserAssignedToAnyStep(client, { document, userId: user.id })) return true;
+    if (document.originating_department_id) {
+      const reviewed = await listReviewedDepartments(client, user.id);
+      if (isDepartmentQueueDocument(document, new Set(reviewed.map((d) => String(d.id))))) {
+        return true;
+      }
+    }
     return false;
   }
 
@@ -1870,6 +1927,13 @@ async function listDocuments(pool, user, filters = {}) {
     params.push(`%${filters.q}%`);
     i += 1;
   }
+  const departmentScope = filters.scope === 'department';
+  if (departmentScope) {
+    const reviewed = await listReviewedDepartments(pool, user.id);
+    if (!reviewed.length) return { documents: [], source_warnings: [] };
+    where.push(`d.originating_department_id = ANY($${i++}::uuid[])`);
+    params.push(reviewed.map((d) => d.id));
+  }
 
   const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
   const { limitVal, offsetVal } = parseLimitOffset(filters);
@@ -1897,7 +1961,18 @@ async function listDocuments(pool, user, filters = {}) {
   );
   let baseRows = result.rows;
   if (user.role !== 'admin') {
-    baseRows = await filterDocumentsViewableByUser(pool, user, result.rows);
+    baseRows = await filterDocumentsViewableByUser(pool, user, result.rows, {
+      includeDepartmentQueue: departmentScope,
+    });
+  }
+
+  if (departmentScope) {
+    return {
+      documents: baseRows
+        .filter((row) => !isDraftOrWipDocument(row))
+        .map(mapDocumentRow),
+      source_warnings: [],
+    };
   }
 
   const baseMapped = baseRows.map(mapDocumentRow);
@@ -2946,6 +3021,7 @@ module.exports = {
   canUserPerformDocumentAction,
   canUserPerformTypeAction,
   filterDocumentsViewableByUser,
+  listReviewedDepartments,
   getEffectivePermissionExplanation,
   parseSteps,
   resolveStepAssignees,

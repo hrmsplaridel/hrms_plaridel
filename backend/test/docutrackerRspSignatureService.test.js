@@ -859,6 +859,61 @@ test('IDP create snapshots automatic reviewed/noted/approved signers when resolv
   assert.equal(bySlot.approved_by?.source, 'automatic');
 });
 
+test('IDP department_head slot falls back to the rank-1 backup when no Head is active', async () => {
+  const backupId = 'ffffffff-ffff-4fff-8fff-ffffffffffff';
+  const departmentId = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
+  const assigned = [];
+  const db = {
+    async query(sql, params = []) {
+      if (sql.includes('SELECT * FROM "idp_entries"')) {
+        return {
+          rowCount: 1,
+          rows: [{ id: formId, created_by: signerId, department: 'Engineering' }],
+        };
+      }
+      if (sql.includes('FROM departments') && sql.includes('lower(btrim(name))')) {
+        return { rowCount: 1, rows: [{ id: departmentId }] };
+      }
+      if (sql.includes('position_department_head_periods') && sql.includes('LIMIT 1')) {
+        return { rowCount: 0, rows: [] };
+      }
+      if (sql.includes('FROM department_reviewer_backups')) {
+        return {
+          rowCount: 1,
+          rows: [{ reviewer_id: backupId, reviewer_name: 'Backup', backup_rank: 1 }],
+        };
+      }
+      if (sql.includes('FROM docutracker_official_signatories')) {
+        return { rowCount: 0, rows: [] };
+      }
+      if (sql.includes("LOWER(COALESCE(u.role, '')) = 'mayor'")) {
+        return { rowCount: 0, rows: [] };
+      }
+      if (sql.includes('FROM users') && sql.includes('is_active = true')) {
+        return { rowCount: 1, rows: [{ id: params[0] }] };
+      }
+      if (sql.includes('INSERT INTO docutracker_rsp_source_signatures')) {
+        assigned.push({ slot: params[2], signer: params[4] });
+        return { rowCount: 1, rows: [{ id: `slot-${params[2]}` }] };
+      }
+      if (sql.includes('INSERT INTO docutracker_governance_audit')) {
+        return { rowCount: 1, rows: [] };
+      }
+      throw new Error(`Unexpected query: ${sql.slice(0, 180)}`);
+    },
+  };
+
+  await initializeCreatorSourceSignatures(
+    db,
+    { id: signerId, role: 'employee' },
+    'idp_entries',
+    formId
+  );
+
+  const bySlot = Object.fromEntries(assigned.map((row) => [row.slot, row]));
+  assert.equal(bySlot.reviewed_by?.signer, backupId);
+});
+
 test('unresolved automatic roles leave the slot empty for admin recovery', async () => {
   const assigned = [];
   const db = {

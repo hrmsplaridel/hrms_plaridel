@@ -113,6 +113,62 @@ async function resolveDepartmentReviewers(
   };
 }
 
+/**
+ * Per active department: who reviews documents routed to "the submitter's
+ * Department Head" on [effectiveDate].
+ *
+ * status:
+ *  - no_staff    : nobody is assigned, nothing can be blocked
+ *  - no_reviewer : staff exist but no Head and no backup, so staff submissions fail
+ *  - head_only   : a Head exists but no backup, so the Head's own submissions fail
+ *  - ready       : a Head or backup can review staff, and someone else can review the Head
+ */
+async function listDepartmentReviewerReadiness(
+  client,
+  { effectiveDate = todayInHrmsTimezone() } = {}
+) {
+  const date = cleanDate(effectiveDate);
+  const departments = await client.query(
+    `SELECT d.id, d.name,
+            COUNT(DISTINCT u.id)::int AS staff_count
+     FROM departments d
+     LEFT JOIN assignments a
+       ON a.department_id = d.id
+      AND a.is_active = true
+      AND a.effective_from <= $1::date
+      AND (a.effective_to IS NULL OR a.effective_to >= $1::date)
+     LEFT JOIN users u
+       ON u.id = a.employee_id
+      AND (u.is_active IS NULL OR u.is_active = true)
+     WHERE d.is_active IS NULL OR d.is_active = true
+     GROUP BY d.id, d.name
+     ORDER BY d.name`,
+    [date]
+  );
+
+  const rows = [];
+  for (const department of departments.rows) {
+    const resolved = await resolveDepartmentReviewers(client, {
+      departmentId: department.id,
+      effectiveDate: date,
+    });
+    const staffCount = Number(department.staff_count) || 0;
+    let status = 'ready';
+    if (staffCount === 0) status = 'no_staff';
+    else if (resolved.reviewers.length === 0) status = 'no_reviewer';
+    else if (resolved.primary && resolved.backups.length === 0) status = 'head_only';
+    rows.push({
+      department_id: department.id,
+      department_name: department.name,
+      staff_count: staffCount,
+      primary: resolved.primary,
+      backup_count: resolved.backups.length,
+      status,
+    });
+  }
+  return { effective_date: date, departments: rows };
+}
+
 async function getEmployeeReviewSnapshot(
   client,
   { employeeUserId, effectiveDate = todayInHrmsTimezone() }
@@ -180,6 +236,7 @@ async function replaceRequestReviewerSnapshot(
 module.exports = {
   getEmployeeDepartmentForDate,
   getEmployeeReviewSnapshot,
+  listDepartmentReviewerReadiness,
   replaceRequestReviewerSnapshot,
   resolveDepartmentReviewers,
 };

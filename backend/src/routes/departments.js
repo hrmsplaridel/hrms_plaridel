@@ -17,6 +17,7 @@ const {
 const { dateInTimeZone } = require('../services/assignmentReconciliation');
 const { addDays } = require('../utils/dateRangeParser');
 const {
+  listDepartmentReviewerReadiness,
   resolveDepartmentReviewers,
 } = require('../services/departmentReviewerService');
 const {
@@ -63,6 +64,20 @@ router.get('/', protect, async (req, res) => {
   } catch (err) {
     console.error('[departments GET]', err);
     res.status(500).json({ error: 'Failed to fetch departments' });
+  }
+});
+
+// GET /api/departments/reviewer-readiness - departments whose staff or Head cannot be routed
+router.get('/reviewer-readiness', protect, requireAdmin, async (req, res) => {
+  try {
+    const effectiveDate = String(req.query.effective_date || dateInTimeZone());
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(effectiveDate)) {
+      return res.status(400).json({ error: 'effective_date must use YYYY-MM-DD' });
+    }
+    return res.json(await listDepartmentReviewerReadiness(pool, { effectiveDate }));
+  } catch (err) {
+    console.error('[departments GET reviewer-readiness]', err);
+    return res.status(500).json({ error: 'Failed to check department reviewers' });
   }
 });
 

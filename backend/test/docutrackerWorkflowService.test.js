@@ -951,3 +951,66 @@ test('filterDocumentsViewableByUser does not expose a future-step assignee', asy
 
   assert.deepEqual(filtered, []);
 });
+
+test('filterDocumentsViewableByUser shows department reviewers submitted documents from their department only', async () => {
+  const rows = [
+    {
+      id: 'doc-dept-submitted', document_type: 'memo', status: 'in_review',
+      created_by: 'staff-1', current_holder_id: 'hr-reviewer', current_step: 2,
+      originating_department_id: 'dept-accounting',
+    },
+    {
+      id: 'doc-dept-draft', document_type: 'memo', status: 'draft',
+      created_by: 'staff-1', current_holder_id: null, current_step: null,
+      originating_department_id: 'dept-accounting',
+    },
+    {
+      id: 'doc-other-dept', document_type: 'memo', status: 'in_review',
+      created_by: 'staff-2', current_holder_id: 'hr-reviewer', current_step: 1,
+      originating_department_id: 'dept-engineering',
+    },
+  ];
+  const pool = {
+    query: async (sql) => {
+      if (sql.includes('FROM department_reviewer_backups b')) {
+        return { rows: [{ id: 'dept-accounting', name: 'Accounting' }] };
+      }
+      return { rows: [] };
+    },
+  };
+
+  const user = { id: 'accounting-backup', role: 'employee' };
+  const filtered = await filterDocumentsViewableByUser(pool, user, rows, {
+    includeDepartmentQueue: true,
+  });
+
+  assert.deepEqual(filtered.map((r) => r.id), ['doc-dept-submitted']);
+  assert.notEqual(filtered[0].viewer_is_routing_assignee, true);
+  assert.deepEqual(await filterDocumentsViewableByUser(pool, user, rows), []);
+});
+
+test('department queue viewers cannot act on a step they are not assigned to', async () => {
+  const document = {
+    id: 'doc-dept', document_type: 'memo', status: 'in_review',
+    created_by: 'staff-1', current_holder_id: 'hr-reviewer', current_step: 2,
+    originating_department_id: 'dept-accounting', workflow_version: 1,
+  };
+  const client = {
+    query: async (sql) => {
+      if (sql.includes('FROM department_reviewer_backups b')) {
+        return { rowCount: 1, rows: [{ id: 'dept-accounting', name: 'Accounting' }] };
+      }
+      return { rowCount: 0, rows: [] };
+    },
+  };
+  const user = { id: 'accounting-head', role: 'employee' };
+
+  assert.equal(
+    await canUserPerformDocumentAction(client, { user, document, action: 'view' }),
+    true
+  );
+  assert.equal(
+    await canUserPerformDocumentAction(client, { user, document, action: 'approve' }),
+    false
+  );
+});

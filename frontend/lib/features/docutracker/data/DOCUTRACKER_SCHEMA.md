@@ -34,6 +34,7 @@ Complete database schema for the DocuTracker module. Run migrations in order.
 | file_path | TEXT | Storage path |
 | file_name | TEXT | Original filename |
 | created_by | UUID | Creator user ID |
+| originating_department_id | UUID | Creator's department on the creation date (FK departments, SET NULL); drives the submitter Department Head step and the department queue |
 | created_at | TIMESTAMPTZ | Creation time |
 | updated_at | TIMESTAMPTZ | Last update |
 | current_step | INT | Workflow step (1-based) |
@@ -250,6 +251,7 @@ creating another allow/deny rule.
 | workflow_version | INT | Published workflow version |
 | step_order | INT | One-based workflow position |
 | department_id | UUID | Optional department scope |
+| assignee_source | TEXT | `specific_users` (default), `department_reviewers` (Head/backups of `department_id`), or `submitter_department_reviewers` (Head/backups of the document's originating department) |
 | label | TEXT | Step display label |
 | enabled | BOOLEAN | Whether the step participates in routing |
 
