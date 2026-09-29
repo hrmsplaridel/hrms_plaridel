@@ -85,7 +85,7 @@ class _ExportDailyDeduction {
   final double equivalentDay;
 }
 
-const String _meedoManagerPositionTitle = 'MEEDO A-Manager';
+const String _meedoManagerPositionTitle = 'HRAdminAide';
 const String _hrOfficerPositionTitle =
     'Human Resource Mgt. and Dev\'t. Officer';
 
@@ -744,7 +744,7 @@ class DtrExport {
         pw.SizedBox(height: 9),
         // Line for certifying officer (above the "Verified" text, like the handwritten signature line).
         pw.Container(width: lineWidth, height: 1, color: PdfColors.black),
-        // Extra space for handwritten signature above MEEDO A-Manager.
+        // Extra space for the handwritten first signatory signature.
         pw.SizedBox(height: 8),
         pw.Text(
           'Verified as to the prescribed office hours.',
