@@ -1,5 +1,6 @@
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
+import 'package:hrms_plaridel/shared/widgets/workforce_loading_skeleton.dart';
 import 'package:hrms_plaridel/core/api/client.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
 
@@ -1046,9 +1047,9 @@ class _ManageShiftState extends State<ManageShift> {
           ),
           const SizedBox(height: 8),
           if (_loading)
-            const Padding(
-              padding: EdgeInsets.all(32),
-              child: Center(child: CircularProgressIndicator()),
+            const WorkforceRowsSkeleton(
+              columns: [1, 2, 2, 2, 3],
+              label: 'Loading shifts',
             )
           else if (_loadError != null)
             Padding(

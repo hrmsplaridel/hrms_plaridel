@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:hrms_plaridel/shared/widgets/workforce_loading_skeleton.dart';
 import 'package:hrms_plaridel/core/api/client.dart';
 import 'package:hrms_plaridel/core/api/user_facing_api_error.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
@@ -257,10 +258,7 @@ class _ManageWeeklyScheduleState extends State<ManageWeeklySchedule> {
         _buildLegend(),
         const SizedBox(height: 14),
         if (_loading)
-          const SizedBox(
-            height: 280,
-            child: Center(child: CircularProgressIndicator()),
-          )
+          const WeeklyScheduleSkeleton()
         else if (_error != null)
           _buildError()
         else if (_employees.isEmpty)

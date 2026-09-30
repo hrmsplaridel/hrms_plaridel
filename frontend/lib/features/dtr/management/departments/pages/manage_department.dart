@@ -1,5 +1,6 @@
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
+import 'package:hrms_plaridel/shared/widgets/workforce_loading_skeleton.dart';
 import 'package:hrms_plaridel/core/api/client.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/features/dtr/management/departments/data/department_request_guard.dart';
@@ -899,13 +900,7 @@ class _ManageDepartmentState extends State<ManageDepartment> {
             ),
           ),
           if (_loading)
-            Container(
-              width: double.infinity,
-              constraints: const BoxConstraints(minHeight: 160),
-              alignment: Alignment.center,
-              padding: const EdgeInsets.symmetric(vertical: 48),
-              child: const CircularProgressIndicator(),
-            )
+            const WorkforceRowsSkeleton(label: 'Loading departments')
           else if (filtered.isEmpty)
             Container(
               width: double.infinity,

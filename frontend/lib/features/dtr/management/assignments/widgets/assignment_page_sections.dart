@@ -79,9 +79,9 @@ extension _ManageAssignmentPageSections on _ManageAssignmentState {
           ),
           const SizedBox(height: 8),
           if (_loadingEmployees)
-            const Padding(
-              padding: EdgeInsets.all(32),
-              child: Center(child: CircularProgressIndicator()),
+            const WorkforceRowsSkeleton(
+              columns: [1, 3],
+              label: 'Loading employees',
             )
           else if (_employees.isEmpty)
             Container(
@@ -377,7 +377,9 @@ extension _ManageAssignmentPageSections on _ManageAssignmentState {
                 const SizedBox(width: 12),
                 Expanded(
                   child: Text(
-                    'Assignments for ${hasSelection ? employeeLabel : 'Select an employee'}',
+                    hasSelection
+                        ? 'Assignments for $employeeLabel'
+                        : 'Select an employee to view assignments',
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
@@ -543,9 +545,10 @@ extension _ManageAssignmentPageSections on _ManageAssignmentState {
             ),
           ),
           if (_loadingAssignments)
-            const Padding(
-              padding: EdgeInsets.all(32),
-              child: Center(child: CircularProgressIndicator()),
+            const WorkforceRowsSkeleton(
+              columns: [1, 1, 1, 1, 1, 1, 1],
+              rows: 2,
+              label: 'Loading primary assignments',
             )
           else if (_assignments.isEmpty)
             Padding(
@@ -686,9 +689,10 @@ extension _ManageAssignmentPageSections on _ManageAssignmentState {
             ),
           ),
           if (_loadingDesignations)
-            const Padding(
-              padding: EdgeInsets.all(32),
-              child: Center(child: CircularProgressIndicator()),
+            const WorkforceRowsSkeleton(
+              columns: [1, 1, 1, 1],
+              rows: 2,
+              label: 'Loading other positions',
             )
           else if (_designations.isEmpty)
             Padding(

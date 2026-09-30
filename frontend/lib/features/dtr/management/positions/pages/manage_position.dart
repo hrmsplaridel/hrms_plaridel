@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
+import 'package:hrms_plaridel/shared/widgets/workforce_loading_skeleton.dart';
 import 'package:hrms_plaridel/core/api/client.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/features/dtr/management/positions/data/position_request_guard.dart';
@@ -919,9 +920,9 @@ class _ManagePositionState extends State<ManagePosition> {
           ),
           const SizedBox(height: 8),
           if (_loading)
-            const Padding(
-              padding: EdgeInsets.all(32),
-              child: Center(child: CircularProgressIndicator()),
+            const WorkforceRowsSkeleton(
+              columns: [1, 2, 2, 3],
+              label: 'Loading positions',
             )
           else if (_positions.isEmpty)
             Container(

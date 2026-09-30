@@ -1,5 +1,6 @@
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
+import 'package:hrms_plaridel/shared/widgets/workforce_loading_skeleton.dart';
 import 'package:hrms_plaridel/core/api/client.dart';
 import 'package:hrms_plaridel/core/api/user_facing_api_error.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
@@ -991,12 +992,11 @@ class _ManageAttendancePolicyState extends State<ManageAttendancePolicy> {
             ),
             const SizedBox(height: 12),
           ],
-          if (_loading && !hasCurrentFilterData)
-            const Center(
-              child: Padding(
-                padding: EdgeInsets.all(32),
-                child: CircularProgressIndicator(),
-              ),
+          if (_loading)
+            const WorkforceRowsSkeleton(
+              columns: [3, 1],
+              cellHeight: 32,
+              label: 'Loading attendance policies',
             )
           else if (!hasCurrentFilterData && _loadError != null)
             const SizedBox(height: 120)
@@ -1013,7 +1013,6 @@ class _ManageAttendancePolicyState extends State<ManageAttendancePolicy> {
           else
             Column(
               children: [
-                if (_loading) const LinearProgressIndicator(minHeight: 2),
                 ListView.separated(
                   shrinkWrap: true,
                   itemCount: paged.length,

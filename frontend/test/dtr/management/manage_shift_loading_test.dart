@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hrms_plaridel/core/api/client.dart';
 import 'package:hrms_plaridel/features/dtr/management/shifts/pages/manage_shift.dart';
+import 'package:hrms_plaridel/shared/widgets/workforce_loading_skeleton.dart';
 
 void main() {
   final requests = <RequestOptions>[];
@@ -116,11 +117,12 @@ void main() {
     await select(tester, 'All');
     fail(0);
     await tester.pump();
-    expect(find.byType(CircularProgressIndicator), findsOneWidget);
+    expect(find.byType(WorkforceRowsSkeleton), findsOneWidget);
     expect(find.text('Access denied.'), findsNothing);
     succeed(1, name: 'Current shift');
     await tester.pumpAndSettle();
     expect(find.text('Current shift'), findsOneWidget);
+    expect(find.byType(WorkforceRowsSkeleton), findsNothing);
   });
 
   testWidgets('failure hides old rows and Retry reloads the selected status', (
