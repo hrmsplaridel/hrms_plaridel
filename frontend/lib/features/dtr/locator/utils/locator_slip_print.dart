@@ -6,6 +6,8 @@ import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 
+import 'locator_form_signatories.dart';
+
 class LocatorSlipPrint {
   const LocatorSlipPrint._();
 
@@ -21,7 +23,24 @@ class LocatorSlipPrint {
     required bool amOut,
     required bool pmIn,
     required bool pmOut,
+    LocatorFormSignatories signatories = const LocatorFormSignatories(),
   }) async {
+    // Use the same server response for the content and its request-bound ink.
+    final form = signatories.form;
+    employeeName = form['employee_name'] as String? ?? employeeName;
+    final date = DateTime.tryParse(form['slip_date']?.toString() ?? '');
+    if (date != null) {
+      dateText = const DefaultMaterialLocalizations().formatShortDate(date);
+    }
+    office = form['office'] as String? ?? office;
+    remarks = form['reason'] as String? ?? remarks;
+    requestTypeLabel =
+        form['request_type_label'] as String? ?? requestTypeLabel;
+    locationLabel = form['location_label'] as String? ?? locationLabel;
+    amIn = form['am_in'] as bool? ?? amIn;
+    amOut = form['am_out'] as bool? ?? amOut;
+    pmIn = form['pm_in'] as bool? ?? pmIn;
+    pmOut = form['pm_out'] as bool? ?? pmOut;
     final doc = pw.Document();
     pw.MemoryImage? logoImage;
     try {
@@ -95,6 +114,49 @@ class LocatorSlipPrint {
       );
     }
 
+    pw.Widget signatureBlock(LocatorPrintedSignatory person, String label) =>
+        pw.Column(
+          children: [
+            pw.SizedBox(
+              height: 28,
+              child: person.signatureBytes == null
+                  ? null
+                  : pw.Image(
+                      pw.MemoryImage(person.signatureBytes!),
+                      width: 140,
+                      height: 28,
+                      fit: pw.BoxFit.contain,
+                    ),
+            ),
+            pw.Container(
+              height: 18,
+              width: double.infinity,
+              alignment: pw.Alignment.center,
+              decoration: const pw.BoxDecoration(
+                border: pw.Border(bottom: pw.BorderSide(width: 1)),
+              ),
+              child: person.name.trim().isEmpty
+                  ? null
+                  : pw.FittedBox(
+                      fit: pw.BoxFit.scaleDown,
+                      child: pw.Text(
+                        person.name,
+                        style: pw.TextStyle(
+                          fontSize: 12,
+                          fontWeight: pw.FontWeight.bold,
+                        ),
+                      ),
+                    ),
+            ),
+            pw.SizedBox(height: 3),
+            pw.Text(
+              label,
+              textAlign: pw.TextAlign.center,
+              style: pw.TextStyle(fontSize: 11, fontWeight: pw.FontWeight.bold),
+            ),
+          ],
+        );
+
     doc.addPage(
       pw.Page(
         pageFormat: PdfPageFormat.a4.landscape,
@@ -102,7 +164,7 @@ class LocatorSlipPrint {
         build: (ctx) => pw.Center(
           child: pw.Container(
             width: 760,
-            height: 370,
+            height: 440,
             decoration: pw.BoxDecoration(border: pw.Border.all(width: 1)),
             padding: const pw.EdgeInsets.fromLTRB(18, 14, 18, 12),
             child: pw.Column(
@@ -226,62 +288,29 @@ class LocatorSlipPrint {
                 lineField(label: 'Remarks/Reasons', value: remarks),
                 pw.SizedBox(height: 20),
                 pw.Row(
+                  crossAxisAlignment: pw.CrossAxisAlignment.start,
                   children: [
                     pw.Expanded(
-                      child: pw.Column(
-                        children: [
-                          pw.Container(
-                            width: double.infinity,
-                            decoration: const pw.BoxDecoration(
-                              border: pw.Border(
-                                bottom: pw.BorderSide(width: 1),
-                              ),
-                            ),
-                          ),
-                          pw.SizedBox(height: 3),
-                          pw.Text(
-                            'Authorized Representative',
-                            style: pw.TextStyle(
-                              fontWeight: pw.FontWeight.bold,
-                              fontSize: 12,
-                            ),
-                          ),
-                          pw.Text(
-                            '(Head of Office)',
-                            style: pw.TextStyle(
-                              fontWeight: pw.FontWeight.bold,
-                              fontSize: 12,
-                            ),
-                          ),
-                        ],
+                      child: signatureBlock(
+                        signatories.departmentHead,
+                        'Authorized Representative\n(Head of Office)',
                       ),
                     ),
                     pw.SizedBox(width: 56),
                     pw.Expanded(
-                      child: pw.Column(
-                        children: [
-                          pw.Container(
-                            width: double.infinity,
-                            decoration: const pw.BoxDecoration(
-                              border: pw.Border(
-                                bottom: pw.BorderSide(width: 1),
-                              ),
-                            ),
-                          ),
-                          pw.SizedBox(height: 3),
-                          pw.Text(
-                            '(Signature Over Printed Name)',
-                            style: pw.TextStyle(
-                              fontWeight: pw.FontWeight.bold,
-                              fontSize: 12,
-                            ),
-                          ),
-                        ],
+                      child: signatureBlock(
+                        LocatorPrintedSignatory(
+                          name: signatories.applicant.name.isEmpty
+                              ? employeeName
+                              : signatories.applicant.name,
+                          signatureBytes: signatories.applicant.signatureBytes,
+                        ),
+                        '(Signature Over Printed Name)',
                       ),
                     ),
                   ],
                 ),
-                pw.SizedBox(height: 26),
+                pw.SizedBox(height: 12),
                 pw.Padding(
                   padding: const pw.EdgeInsets.only(left: 100),
                   child: pw.Text(
@@ -292,31 +321,12 @@ class LocatorSlipPrint {
                     ),
                   ),
                 ),
-                pw.SizedBox(height: 16),
                 pw.Center(
-                  child: pw.Container(
+                  child: pw.SizedBox(
                     width: 420,
-                    decoration: const pw.BoxDecoration(
-                      border: pw.Border(bottom: pw.BorderSide(width: 1)),
-                    ),
-                  ),
-                ),
-                pw.SizedBox(height: 3),
-                pw.Center(
-                  child: pw.Text(
-                    'MARCELO B. CANARES',
-                    style: pw.TextStyle(
-                      fontWeight: pw.FontWeight.bold,
-                      fontSize: 14,
-                    ),
-                  ),
-                ),
-                pw.Center(
-                  child: pw.Text(
-                    'Human Resource Management and Development Officer',
-                    style: pw.TextStyle(
-                      fontWeight: pw.FontWeight.bold,
-                      fontSize: 13,
+                    child: signatureBlock(
+                      signatories.finalApprover,
+                      'Final Approver',
                     ),
                   ),
                 ),
@@ -346,6 +356,7 @@ class LocatorSlipPrint {
   }) async {
     try {
       final bytes = await buildPdf(
+        signatories: await loadLocatorFormSignatories(id),
         id: id,
         employeeName: employeeName,
         dateText: dateText,

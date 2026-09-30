@@ -21,6 +21,8 @@ import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/providers/auth_provider.dart';
 import 'package:hrms_plaridel/core/services/app_realtime_provider.dart';
 import 'package:hrms_plaridel/features/dtr/locator/utils/locator_slip_print.dart';
+import 'package:hrms_plaridel/features/dtr/locator/utils/locator_form_signatories.dart';
+import 'package:hrms_plaridel/features/dtr/locator/presentation/shared/widgets/locator_signature_section.dart';
 import 'package:hrms_plaridel/features/dtr/locator/utils/open_locator_attachment_io.dart'
     if (dart.library.html) 'package:hrms_plaridel/features/dtr/locator/utils/open_locator_attachment_web.dart'
     as locator_attachment;
@@ -689,6 +691,7 @@ class EmployeeLocatorSlipContentState extends State<EmployeeLocatorSlipContent>
     Future<void> previewForm(BuildContext dialogContext) async {
       try {
         final bytes = await LocatorSlipPrint.buildPdf(
+          signatories: await loadLocatorFormSignatories(item.id),
           id: item.id,
           employeeName: item.employeeName,
           dateText: _formatDate(item.date),
@@ -901,6 +904,8 @@ class EmployeeLocatorSlipContentState extends State<EmployeeLocatorSlipContent>
                   ],
                 ),
               ],
+              if (item.id?.isNotEmpty == true)
+                LocatorSignatureSection(requestId: item.id!),
             ],
           ),
           actions: EmployeeLocatorMobileDetailActions(

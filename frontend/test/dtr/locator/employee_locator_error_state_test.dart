@@ -12,6 +12,7 @@ import 'package:hrms_plaridel/core/api/client_device_header.dart';
 import 'package:hrms_plaridel/core/api/token_storage.dart';
 import 'package:hrms_plaridel/core/services/app_realtime_provider.dart';
 import 'package:hrms_plaridel/features/dtr/locator/data/repositories/locator_slip_data_cache.dart';
+import 'package:hrms_plaridel/features/docutracker/data/providers/docutracker_provider.dart';
 import 'package:hrms_plaridel/features/dtr/locator/presentation/employee/shared/pages/employee_locator_slip_content.dart';
 import 'package:hrms_plaridel/providers/auth_provider.dart';
 import 'package:provider/provider.dart';
@@ -234,6 +235,9 @@ void main() {
         providers: [
           ChangeNotifierProvider<AuthProvider>.value(value: auth),
           ChangeNotifierProvider<AppRealtimeProvider>.value(value: realtime),
+          ChangeNotifierProvider<DocuTrackerProvider>(
+            create: (_) => DocuTrackerProvider(),
+          ),
         ],
         child: const MaterialApp(
           home: Scaffold(
@@ -467,6 +471,14 @@ class _LocatorHistoryAdapter implements HttpClientAdapter {
             'total': 1,
             'page_count': 1,
           },
+        });
+      case '/api/docutracker/sources/dtr/locator_slips/request-1/signatures':
+        return _jsonResponse({
+          'source_module': 'dtr',
+          'source_table': 'locator_slips',
+          'source_record_id': 'request-1',
+          'source_status': 'approved',
+          'signatures': [],
         });
       case '/api/locator-slips/request-1/history':
         historyRequestCount += 1;

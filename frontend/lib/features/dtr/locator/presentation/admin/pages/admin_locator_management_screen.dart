@@ -16,6 +16,8 @@ import 'package:hrms_plaridel/core/services/app_realtime_provider.dart';
 import 'package:hrms_plaridel/features/dtr/locator/presentation/admin/pages/locator_type_management_screen.dart';
 import 'package:hrms_plaridel/features/dtr/locator/presentation/admin/widgets/admin_locator_correction_dialog.dart';
 import 'package:hrms_plaridel/features/dtr/locator/utils/locator_slip_print.dart';
+import 'package:hrms_plaridel/features/dtr/locator/utils/locator_form_signatories.dart';
+import 'package:hrms_plaridel/features/dtr/locator/presentation/shared/widgets/locator_signature_section.dart';
 import 'package:hrms_plaridel/features/dtr/locator/utils/open_locator_attachment_io.dart'
     if (dart.library.html) 'package:hrms_plaridel/features/dtr/locator/utils/open_locator_attachment_web.dart'
     as locator_attachment;
@@ -1127,6 +1129,7 @@ class _AdminLocatorManagementScreenState
                           ],
                         ),
                       ),
+                      LocatorSignatureSection(requestId: item.id),
                     ],
                   ),
                 ),
@@ -1210,6 +1213,9 @@ class _AdminLocatorManagementScreenState
                             onPressed: () async {
                               try {
                                 final bytes = await LocatorSlipPrint.buildPdf(
+                                  signatories: await loadLocatorFormSignatories(
+                                    item.id,
+                                  ),
                                   id: item.id,
                                   employeeName: item.employeeName,
                                   dateText: item.slipDateLabel,
