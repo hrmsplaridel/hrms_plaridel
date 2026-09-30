@@ -24,6 +24,20 @@ void main() {
                       rows: 2,
                     ),
                     WeeklyScheduleSkeleton(),
+                    WorkforceRowsSkeleton(
+                      columns: [2, 1, 1, 1, 1, 1, 1, 2],
+                      rows: 8,
+                      label: 'Loading attendance report',
+                    ),
+                    SizedBox(
+                      width: 168,
+                      child: WorkforceRowsSkeleton(
+                        columns: [1, 1],
+                        rows: 4,
+                        cellHeight: 40,
+                        label: 'Loading report summary',
+                      ),
+                    ),
                   ],
                 ),
               ),

@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
+import 'package:hrms_plaridel/shared/widgets/workforce_loading_skeleton.dart';
 import 'package:flutter/services.dart';
 import 'package:pdf/pdf.dart';
 import 'package:printing/printing.dart';
@@ -2809,6 +2810,17 @@ class _DtrReportsState extends State<DtrReports> {
     BuildContext context,
     List<EmployeeOption> employees,
   ) {
+    if (_employeesState == DtrReportDataState.loading) {
+      return const SizedBox(
+        width: 260,
+        child: SingleChildScrollView(
+          child: WorkforceRowsSkeleton(
+            columns: [1, 3],
+            label: 'Loading employees',
+          ),
+        ),
+      );
+    }
     final dark = AppTheme.dashIsDark(context);
     return Container(
       width: 260,
@@ -3035,7 +3047,13 @@ class _DtrReportsState extends State<DtrReports> {
               ),
               Expanded(
                 child: _reportLoading
-                    ? const Center(child: CircularProgressIndicator())
+                    ? const SingleChildScrollView(
+                        child: WorkforceRowsSkeleton(
+                          columns: [2, 1, 1, 1, 1, 1, 1, 2],
+                          rows: 8,
+                          label: 'Loading attendance report',
+                        ),
+                      )
                     : sortedDates.isEmpty
                     ? Center(
                         child: Padding(
@@ -3241,6 +3259,21 @@ class _DtrReportsState extends State<DtrReports> {
     required DateTime start,
     required DateTime end,
   }) {
+    if (_reportLoading || _employeesState == DtrReportDataState.loading) {
+      return Container(
+        width: fullWidth ? double.infinity : 200,
+        padding: const EdgeInsets.all(16),
+        decoration: AppTheme.dashSurfaceCard(context, radius: 12),
+        child: const SingleChildScrollView(
+          child: WorkforceRowsSkeleton(
+            columns: [1, 1],
+            rows: 4,
+            cellHeight: 40,
+            label: 'Loading report summary',
+          ),
+        ),
+      );
+    }
     final dark = AppTheme.dashIsDark(context);
     final compactPanel = dense || !fullWidth;
     final equivalentDay = summaryEquivalentDay(
@@ -3698,6 +3731,13 @@ class _DtrReportsState extends State<DtrReports> {
     BuildContext context,
     List<EmployeeOption> employees,
   ) {
+    if (_employeesState == DtrReportDataState.loading) {
+      return const WorkforceRowsSkeleton(
+        columns: [1, 3],
+        rows: 3,
+        label: 'Loading employees',
+      );
+    }
     final dark = AppTheme.dashIsDark(context);
     return Container(
       decoration: AppTheme.dashSurfaceCard(context, radius: 12),

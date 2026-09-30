@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:hrms_plaridel/shared/widgets/workforce_loading_skeleton.dart';
 import 'package:provider/provider.dart';
 import 'package:hrms_plaridel/core/api/user_facing_api_error.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
@@ -1117,11 +1118,10 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
           ],
           const SizedBox(height: 20),
           if (dtr.loading)
-            const Center(
-              child: Padding(
-                padding: EdgeInsets.all(24),
-                child: CircularProgressIndicator(),
-              ),
+            const WorkforceRowsSkeleton(
+              columns: [2, 2, 1, 1, 1, 1],
+              rows: 6,
+              label: 'Loading time logs',
             ),
           if (!dtr.loading && displayRecords.isEmpty)
             Container(
@@ -2056,7 +2056,10 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
                             if (employeesLoading)
                               const Padding(
                                 padding: EdgeInsets.only(bottom: 8),
-                                child: LinearProgressIndicator(minHeight: 3),
+                                child: WorkforceRowsSkeleton(
+                                  rows: 1,
+                                  label: 'Loading employees',
+                                ),
                               ),
                             if (!employeesLoading && empList.isEmpty)
                               Padding(
@@ -2198,7 +2201,10 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
                             ),
                             const SizedBox(height: 18),
                             if (shiftLoading) ...[
-                              const LinearProgressIndicator(minHeight: 3),
+                              const WorkforceRowsSkeleton(
+                                rows: 1,
+                                label: 'Loading shift',
+                              ),
                               const SizedBox(height: 12),
                             ],
                             if (shiftLookupError != null) ...[
@@ -3535,10 +3541,18 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
                     ],
                   ),
                 ),
-                if (loading) const LinearProgressIndicator(minHeight: 2),
+                if (loading && items.isNotEmpty)
+                  const WorkforceRowsSkeleton(
+                    rows: 1,
+                    label: 'Refreshing records',
+                  ),
                 Expanded(
                   child: loading && items.isEmpty
-                      ? const Center(child: CircularProgressIndicator())
+                      ? const SingleChildScrollView(
+                          child: WorkforceRowsSkeleton(
+                            label: 'Loading records',
+                          ),
+                        )
                       : error != null
                       ? _deletedEntriesError(
                           panelContext,
