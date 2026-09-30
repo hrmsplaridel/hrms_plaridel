@@ -15,6 +15,13 @@ class ManageWeeklySchedule extends StatefulWidget {
 
 class _ManageWeeklyScheduleState extends State<ManageWeeklySchedule> {
   static const _dayLabels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+  static const _pageSize = 25;
+  int _page = 0;
+  int _loadSerial = 0;
+
+  int get _pageCount => (_employees.length / _pageSize).ceil();
+  Iterable<_WeeklyEmployee> get _pageEmployees =>
+      _employees.skip(_page * _pageSize).take(_pageSize);
 
   final _searchController = TextEditingController();
   DateTime _weekStart = _mondayOf(DateTime.now());
@@ -86,7 +93,9 @@ class _ManageWeeklyScheduleState extends State<ManageWeeklySchedule> {
     }
   }
 
-  Future<void> _loadSchedule() async {
+  Future<void> _loadSchedule({bool preservePage = false}) async {
+    if (!mounted) return;
+    final serial = ++_loadSerial;
     final requestedWeek = _apiDate(_weekStart);
     setState(() {
       _loading = true;
@@ -112,13 +121,16 @@ class _ManageWeeklyScheduleState extends State<ManageWeeklySchedule> {
                 )
                 .toList()
           : <_WeeklyEmployee>[];
-      if (!mounted || requestedWeek != _apiDate(_weekStart)) return;
+      if (!mounted || serial != _loadSerial) return;
       setState(() {
         _employees = employees;
+        _page = preservePage && _pageCount > 0
+            ? _page.clamp(0, _pageCount - 1)
+            : 0;
         _loading = false;
       });
     } catch (error) {
-      if (!mounted) return;
+      if (!mounted || serial != _loadSerial) return;
       setState(() {
         _loading = false;
         _error = userFacingApiError(error);
@@ -153,7 +165,7 @@ class _ManageWeeklyScheduleState extends State<ManageWeeklySchedule> {
       _employees.where((employee) => employee.isDirty).length;
 
   void _discardChanges() {
-    if (!_saving) _loadSchedule();
+    if (!_saving) _loadSchedule(preservePage: true);
   }
 
   Future<void> _saveChanges() async {
@@ -180,7 +192,7 @@ class _ManageWeeklyScheduleState extends State<ManageWeeklySchedule> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('${dirty.length} employee schedule(s) saved.')),
       );
-      await _loadSchedule();
+      await _loadSchedule(preservePage: true);
     } catch (error) {
       if (!mounted) return;
       ScaffoldMessenger.of(
@@ -265,6 +277,7 @@ class _ManageWeeklyScheduleState extends State<ManageWeeklySchedule> {
           _buildEmpty()
         else ...[
           _buildRoster(),
+          _buildPagination(),
           const SizedBox(height: 14),
           _buildSummary(),
         ],
@@ -426,7 +439,7 @@ class _ManageWeeklyScheduleState extends State<ManageWeeklySchedule> {
                   ],
                 ),
               ),
-              for (final employee in _employees)
+              for (final employee in _pageEmployees)
                 Container(
                   decoration: BoxDecoration(
                     border: Border(top: BorderSide(color: border)),
@@ -579,6 +592,45 @@ class _ManageWeeklyScheduleState extends State<ManageWeeklySchedule> {
     fontSize: 12,
     fontWeight: FontWeight.w700,
   );
+
+  Widget _buildPagination() {
+    final locked = _loading || _saving || _dirtyEmployeeCount > 0;
+    final end = ((_page + 1) * _pageSize).clamp(0, _employees.length);
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Wrap(
+        spacing: 16,
+        runSpacing: 8,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: [
+          Text(
+            'Showing ${_page * _pageSize + 1}-$end of ${_employees.length} employees',
+          ),
+          const Text('25 per page'),
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              IconButton(
+                tooltip: 'Previous employee page',
+                onPressed: locked || _page == 0
+                    ? null
+                    : () => setState(() => _page--),
+                icon: const Icon(Icons.chevron_left),
+              ),
+              Text('Page ${_page + 1} of $_pageCount'),
+              IconButton(
+                tooltip: 'Next employee page',
+                onPressed: locked || _page + 1 >= _pageCount
+                    ? null
+                    : () => setState(() => _page++),
+                icon: const Icon(Icons.chevron_right),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
 
   Widget _buildSummary() {
     final restDays = _employees.fold<int>(
