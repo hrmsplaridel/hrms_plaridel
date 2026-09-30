@@ -6,6 +6,7 @@ const {
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const HRMS_TIMEZONE = process.env.HRMS_TIMEZONE || 'Asia/Manila';
 
 function serviceError(code, message) {
   const error = new Error(message);
@@ -16,6 +17,20 @@ function serviceError(code, message) {
 function field(label, value) {
   if (value == null || String(value).trim() === '') return null;
   return { label, value: String(value) };
+}
+
+function displayDateTime(value) {
+  if (value == null || value === '') return null;
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value);
+  return date.toLocaleString('en-US', {
+    timeZone: HRMS_TIMEZONE,
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  });
 }
 
 function compact(values) {
@@ -51,9 +66,13 @@ async function loadTrainingDailyReport(pool, user, sourceRecordId, canViewType) 
   const result = await pool.query(
     `SELECT r.id, r.employee_id, u.full_name AS employee_name,
             r.title, r.description, r.submitted_at, r.updated_at, r.status,
+            r.seen_at, seen_by.full_name AS seen_by_name,
+            reviewed_by.full_name AS reviewed_by_name,
             a.id AS attachment_id, a.file_name AS attachment_name
      FROM training_daily_reports r
      JOIN users u ON u.id = r.employee_id
+     LEFT JOIN users seen_by ON seen_by.id = r.seen_by_admin
+     LEFT JOIN users reviewed_by ON reviewed_by.id = r.reviewed_by
      LEFT JOIN LATERAL (
        SELECT id, file_name
        FROM training_report_attachments
@@ -85,8 +104,10 @@ async function loadTrainingDailyReport(pool, user, sourceRecordId, canViewType) 
       field('Employee', row.employee_name),
       field('Report title', row.title),
       field('Description', row.description || 'No description provided'),
-      field('Submitted', row.submitted_at),
-      field('Status', row.status),
+      field('Submitted', displayDateTime(row.submitted_at)),
+      field('Seen by', row.seen_by_name),
+      field('Seen on', displayDateTime(row.seen_at)),
+      field('Reviewed by', row.reviewed_by_name),
     ]),
     attachments: compact([
       attachment('Training report attachment', row.attachment_name, attachmentUrl),
@@ -190,8 +211,7 @@ async function loadRecruitmentApplication(pool, user, sourceRecordId) {
       field('Civil status', row.civil_status),
       field('Address', row.address),
       field('Application notes', row.resume_notes),
-      field('Status', row.status),
-      field('Final interview', row.final_interview_at),
+      field('Final interview', displayDateTime(row.final_interview_at)),
       field(
         'Final interview result',
         row.final_interview_passed == null
@@ -204,7 +224,7 @@ async function loadRecruitmentApplication(pool, user, sourceRecordId) {
         'Final requirements',
         row.final_requirements_approved ? 'Approved' : 'Not yet approved'
       ),
-      field('Orientation schedule', row.orientation_at),
+      field('Orientation schedule', displayDateTime(row.orientation_at)),
       field(
         'Orientation attendance',
         row.orientation_attended == null

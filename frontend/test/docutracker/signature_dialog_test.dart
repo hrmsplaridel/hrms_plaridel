@@ -54,7 +54,7 @@ void main() {
     await _openDialog(tester, surface: const Size(1280, 900));
 
     expect(find.text('Draw'), findsOneWidget);
-    expect(find.text('Preview (cropped & centered)'), findsOneWidget);
+    expect(find.text('Your signature will appear here'), findsOneWidget);
     expect(
       find.byKey(const Key('docutracker_signature_preview')),
       findsOneWidget,
@@ -74,9 +74,109 @@ void main() {
 
     expect(find.text('Draw'), findsOneWidget);
     final padBox = tester.getSize(_pad);
-    expect(padBox.height, greaterThanOrEqualTo(200));
-    expect(padBox.height, lessThanOrEqualTo(280));
+    expect(padBox.height, greaterThanOrEqualTo(260));
+    expect(padBox.height, lessThanOrEqualTo(380));
     expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('vertical strokes draw instead of scrolling the dialog', (
+    tester,
+  ) async {
+    await _openDialog(tester, surface: const Size(360, 640));
+
+    final scrollable = tester.state<ScrollableState>(
+      find
+          .descendant(
+            of: find.byType(AlertDialog),
+            matching: find.byType(Scrollable),
+          )
+          .first,
+    );
+    expect(scrollable.position.maxScrollExtent, greaterThan(0));
+    final offsetBefore = scrollable.position.pixels;
+
+    final gesture = await tester.startGesture(
+      tester.getTopLeft(_pad) + const Offset(60, 10),
+    );
+    for (var i = 0; i < 12; i++) {
+      await gesture.moveBy(const Offset(0, 10));
+      await tester.pump();
+    }
+    await gesture.up();
+    await tester.pump();
+
+    expect(scrollable.position.pixels, offsetBefore);
+    final undo = find.byKey(const Key('docutracker_signature_undo'));
+    expect(tester.widget<TextButton>(undo).onPressed, isNotNull);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('strokes can start anywhere in the dialog body', (tester) async {
+    await _openDialog(tester);
+    final undo = find.byKey(const Key('docutracker_signature_undo'));
+    expect(tester.widget<TextButton>(undo).onPressed, isNull);
+
+    final gesture = await tester.startGesture(
+      tester.getTopLeft(_pad) + const Offset(10, -20),
+    );
+    for (var i = 0; i < 8; i++) {
+      await gesture.moveBy(const Offset(15, 12));
+      await tester.pump();
+    }
+    await gesture.up();
+    await tester.pump();
+
+    expect(tester.widget<TextButton>(undo).onPressed, isNotNull);
+    expect(tester.takeException(), isNull);
+  });
+
+  for (final entry in <String, Offset Function(WidgetTester)>{
+    'below the pad': (tester) =>
+        tester.getBottomRight(_pad) + const Offset(-60, 20),
+    'outside the dialog': (tester) =>
+        tester.getTopLeft(
+          find
+              .descendant(
+                of: find.byType(AlertDialog),
+                matching: find.byType(Material),
+              )
+              .first,
+        ) +
+        const Offset(-20, 200),
+  }.entries) {
+    testWidgets('strokes starting ${entry.key} still draw', (tester) async {
+      await _openDialog(tester, surface: const Size(1400, 1400));
+      final undo = find.byKey(const Key('docutracker_signature_undo'));
+      expect(tester.widget<TextButton>(undo).onPressed, isNull);
+
+      final gesture = await tester.startGesture(entry.value(tester));
+      for (var i = 0; i < 8; i++) {
+        await gesture.moveBy(const Offset(12, -15));
+        await tester.pump();
+      }
+      await gesture.up();
+      await tester.pump();
+
+      expect(tester.widget<TextButton>(undo).onPressed, isNotNull);
+      expect(tester.takeException(), isNull);
+    });
+  }
+
+  testWidgets('Cancel still closes the dialog in draw mode', (tester) async {
+    await _openDialog(tester);
+    await tester.tap(find.text('Cancel'));
+    await tester.pumpAndSettle();
+    expect(find.byType(AlertDialog), findsNothing);
+  });
+
+  testWidgets('mode switch above the pad still responds to taps', (
+    tester,
+  ) async {
+    await _openDialog(tester);
+    await tester.tap(find.text('Upload'));
+    await tester.pumpAndSettle();
+    expect(_pad, findsNothing);
+    expect(find.text('Choose PNG or JPEG (max 2 MB)'), findsOneWidget);
   });
 
   testWidgets('Undo Last Stroke and Clear update the drawing', (tester) async {

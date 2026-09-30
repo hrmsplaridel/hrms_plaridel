@@ -10,6 +10,7 @@ import 'package:hrms_plaridel/features/docutracker/models/linked_source_document
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_error_banner.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_responsive_body.dart';
 import 'package:hrms_plaridel/features/docutracker/theme/docutracker_tokens.dart';
+import 'package:hrms_plaridel/features/docutracker/utils/docutracker_source_status_text.dart';
 import 'package:hrms_plaridel/features/learning_development/models/training_daily_report.dart';
 import 'package:hrms_plaridel/features/recruitment/models/recruitment_application.dart';
 import 'package:hrms_plaridel/features/recruitment/utils/rsp_applications_report_export.dart';
@@ -186,11 +187,12 @@ class _DocuTrackerLinkedSourceDocumentScreenState
                 fontWeight: FontWeight.w800,
               ),
             ),
-            const SizedBox(height: 6),
-            Text(
-              'Status: ${_displayValue(source.status)}',
-              textAlign: TextAlign.center,
-              style: DocuTrackerTokens.subtitleStyle(context),
+            const SizedBox(height: 14),
+            DocuTrackerSourceStatusPanel(
+              status: docuTrackerLinkedSourceStatusText(
+                sourceModule: source.sourceModule,
+                status: source.status,
+              ),
             ),
             const SizedBox(height: 14),
             Center(
@@ -274,11 +276,61 @@ class _DocuTrackerLinkedSourceDocumentScreenState
       ),
     );
   }
+}
 
-  String _displayValue(String value) {
-    final normalized = value.replaceAll('_', ' ').trim();
-    if (normalized.isEmpty) return 'Not provided';
-    return '${normalized[0].toUpperCase()}${normalized.substring(1)}';
+/// Status label and plain-language meaning for a linked source record.
+class DocuTrackerSourceStatusPanel extends StatelessWidget {
+  const DocuTrackerSourceStatusPanel({super.key, required this.status});
+
+  final DocuTrackerSourceStatusText status;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      key: const ValueKey('docutracker-source-status-panel'),
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: DocuTrackerTokens.brand.withValues(alpha: 0.06),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(
+          color: DocuTrackerTokens.brand.withValues(alpha: 0.25),
+        ),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Icon(
+            Icons.info_outline_rounded,
+            size: 20,
+            color: DocuTrackerTokens.brand,
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Status: ${status.label}',
+                  style: TextStyle(
+                    color: DocuTrackerTokens.textPrimaryOf(context),
+                    fontSize: 14,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  status.description,
+                  style: DocuTrackerTokens.subtitleStyle(
+                    context,
+                  ).copyWith(fontSize: 13, height: 1.4),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }
 

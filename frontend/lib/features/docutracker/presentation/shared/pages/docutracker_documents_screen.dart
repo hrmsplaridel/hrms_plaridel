@@ -586,7 +586,8 @@ class _RequiredActionsPanelState extends State<_RequiredActionsPanel> {
     final document = entry.document;
     if (request != null) {
       if (request.requiresSetup) return _ActionPriority.needsSetup;
-      if (request.hasUnsignedAssignedSlot) return _ActionPriority.needsSignature;
+      if (request.hasUnsignedAssignedSlot)
+        return _ActionPriority.needsSignature;
       if (request.viewerHasCompletedAssignedSlots) {
         return _ActionPriority.completed;
       }
@@ -659,9 +660,7 @@ class _RequiredActionsPanelState extends State<_RequiredActionsPanel> {
     final q = _searchQuery.trim().toLowerCase();
     if (q.isEmpty) return true;
     final haystack = [
-      _cleanTitle(
-        entry.sourceRequest?.title ?? entry.document?.title ?? '',
-      ),
+      _cleanTitle(entry.sourceRequest?.title ?? entry.document?.title ?? ''),
       entry.sourceRequest?.formName ?? '',
       _moduleKey(entry),
       _formKey(entry),
@@ -676,7 +675,9 @@ class _RequiredActionsPanelState extends State<_RequiredActionsPanel> {
     copy.sort((a, b) {
       final module = _moduleKey(a).compareTo(_moduleKey(b));
       if (module != 0) return module;
-      final form = _formKey(a).toLowerCase().compareTo(_formKey(b).toLowerCase());
+      final form = _formKey(
+        a,
+      ).toLowerCase().compareTo(_formKey(b).toLowerCase());
       if (form != 0) return form;
       return _sortTitle(a).compareTo(_sortTitle(b));
     });
@@ -687,9 +688,8 @@ class _RequiredActionsPanelState extends State<_RequiredActionsPanel> {
     BuildContext context, {
     required List<_RequiredActionEntry> allEntries,
   }) {
-    final modules =
-        allEntries.map(_moduleKey).toSet().toList(growable: false)
-          ..sort();
+    final modules = allEntries.map(_moduleKey).toSet().toList(growable: false)
+      ..sort();
     final forms = allEntries.map(_formKey).toSet().toList(growable: false)
       ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
     final hasFilters =
@@ -728,9 +728,7 @@ class _RequiredActionsPanelState extends State<_RequiredActionsPanel> {
                     icon: const Icon(Icons.close_rounded, size: 18),
                   )
                 : null,
-            border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(10),
-            ),
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
             contentPadding: const EdgeInsets.symmetric(
               horizontal: 12,
               vertical: 10,
@@ -825,14 +823,8 @@ class _RequiredActionsPanelState extends State<_RequiredActionsPanel> {
           completed.add(entry);
       }
     }
-    final primary = [
-      ..._sorted(needsSignature),
-      ..._sorted(needsSetup),
-    ];
-    final secondary = [
-      ..._sorted(waiting),
-      ..._sorted(completed),
-    ];
+    final primary = [..._sorted(needsSignature), ..._sorted(needsSetup)];
+    final secondary = [..._sorted(waiting), ..._sorted(completed)];
     final actionableCount = allEntries
         .where(
           (e) =>
@@ -900,111 +892,114 @@ class _RequiredActionsPanelState extends State<_RequiredActionsPanel> {
             ),
           ),
           if (!_collapsed) ...[
-          if (allEntries.isNotEmpty) _buildFindBar(context, allEntries: allEntries),
-          if (filtering)
-            Padding(
-              padding: const EdgeInsets.only(top: 6),
-              child: Text(
-                entries.isEmpty
-                    ? 'No forms match your search or filters.'
-                    : 'Showing ${entries.length} matching',
-                style: const TextStyle(
-                  color: DocuTrackerTokens.textMuted,
-                  fontSize: 12,
-                ),
-              ),
-            ),
-          if (widget.loading) ...[
-            const SizedBox(height: 10),
-            const LinearProgressIndicator(minHeight: 2),
-          ],
-          if (widget.hasPartialError) ...[
-            const SizedBox(height: 10),
-            Row(
-              children: [
-                const Expanded(
-                  child: Text(
-                    'Some signature requests could not be loaded.',
-                    style: TextStyle(
-                      color: DocuTrackerTokens.textMuted,
-                      fontSize: 12,
-                    ),
+            if (allEntries.isNotEmpty)
+              _buildFindBar(context, allEntries: allEntries),
+            if (filtering)
+              Padding(
+                padding: const EdgeInsets.only(top: 6),
+                child: Text(
+                  entries.isEmpty
+                      ? 'No forms match your search or filters.'
+                      : 'Showing ${entries.length} matching',
+                  style: const TextStyle(
+                    color: DocuTrackerTokens.textMuted,
+                    fontSize: 12,
                   ),
                 ),
-                TextButton(
-                  onPressed: widget.loading ? null : widget.onRefreshSignatures,
-                  child: const Text('Retry'),
-                ),
-              ],
-            ),
-          ],
-          if (primary.isEmpty &&
-              secondary.isEmpty &&
-              !widget.loading &&
-              allEntries.isEmpty)
-            const Padding(
-              padding: EdgeInsets.only(top: 12),
-              child: Text(
-                'Nothing needs your attention right now.',
-                style: TextStyle(color: DocuTrackerTokens.textMuted),
               ),
-            ),
-          if (needsSignature.isNotEmpty)
-            _buildSection(
-              context,
-              title: 'Needs your signature',
-              entries: _sorted(needsSignature),
-            ),
-          if (needsSetup.isNotEmpty)
-            _buildSection(
-              context,
-              title: 'Needs setup',
-              entries: _sorted(needsSetup),
-            ),
-          if (secondary.isNotEmpty) ...[
-            const SizedBox(height: 8),
-            Align(
-              alignment: Alignment.centerLeft,
-              child: TextButton.icon(
-                onPressed: () =>
-                    setState(() => _showSecondary = !_showSecondary),
-                icon: Icon(
-                  _showSecondary
-                      ? Icons.expand_less_rounded
-                      : Icons.expand_more_rounded,
-                ),
-                label: Text(
-                  _showSecondary
-                      ? 'Hide waiting & signed'
-                      : 'Show waiting & signed (${secondary.length})',
-                ),
-              ),
-            ),
-            if (_showSecondary) ...[
-              if (waiting.isNotEmpty)
-                _buildSection(
-                  context,
-                  title: 'Waiting on others',
-                  entries: _sorted(waiting),
-                ),
-              if (completed.isNotEmpty)
-                _buildSection(
-                  context,
-                  title: 'Signed / completed',
-                  entries: _sorted(completed),
-                ),
+            if (widget.loading) ...[
+              const SizedBox(height: 10),
+              const LinearProgressIndicator(minHeight: 2),
             ],
-          ],
-          if (allEntries.isNotEmpty) ...[
-            const SizedBox(height: 4),
-            const Text(
-              'DTR, RSP, and L&D records remain managed by their source modules.',
-              style: TextStyle(
-                color: DocuTrackerTokens.textMuted,
-                fontSize: 11,
+            if (widget.hasPartialError) ...[
+              const SizedBox(height: 10),
+              Row(
+                children: [
+                  const Expanded(
+                    child: Text(
+                      'Some signature requests could not be loaded.',
+                      style: TextStyle(
+                        color: DocuTrackerTokens.textMuted,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ),
+                  TextButton(
+                    onPressed: widget.loading
+                        ? null
+                        : widget.onRefreshSignatures,
+                    child: const Text('Retry'),
+                  ),
+                ],
               ),
-            ),
-          ],
+            ],
+            if (primary.isEmpty &&
+                secondary.isEmpty &&
+                !widget.loading &&
+                allEntries.isEmpty)
+              const Padding(
+                padding: EdgeInsets.only(top: 12),
+                child: Text(
+                  'Nothing needs your attention right now.',
+                  style: TextStyle(color: DocuTrackerTokens.textMuted),
+                ),
+              ),
+            if (needsSignature.isNotEmpty)
+              _buildSection(
+                context,
+                title: 'Needs your signature',
+                entries: _sorted(needsSignature),
+              ),
+            if (needsSetup.isNotEmpty)
+              _buildSection(
+                context,
+                title: 'Needs setup',
+                entries: _sorted(needsSetup),
+              ),
+            if (secondary.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: TextButton.icon(
+                  onPressed: () =>
+                      setState(() => _showSecondary = !_showSecondary),
+                  icon: Icon(
+                    _showSecondary
+                        ? Icons.expand_less_rounded
+                        : Icons.expand_more_rounded,
+                  ),
+                  label: Text(
+                    _showSecondary
+                        ? 'Hide waiting & signed'
+                        : 'Show waiting & signed (${secondary.length})',
+                  ),
+                ),
+              ),
+              if (_showSecondary) ...[
+                if (waiting.isNotEmpty)
+                  _buildSection(
+                    context,
+                    title: 'Waiting on others',
+                    entries: _sorted(waiting),
+                  ),
+                if (completed.isNotEmpty)
+                  _buildSection(
+                    context,
+                    title: 'Signed / completed',
+                    entries: _sorted(completed),
+                  ),
+              ],
+            ],
+            if (allEntries.isNotEmpty) ...[
+              const SizedBox(height: 4),
+              const Text(
+                'DTR, RSP, and L&D records remain managed by their source modules.',
+                style: TextStyle(
+                  color: DocuTrackerTokens.textMuted,
+                  fontSize: 11,
+                ),
+              ),
+            ],
           ],
         ],
       ),
@@ -1046,10 +1041,7 @@ class _RequiredActionsPanelState extends State<_RequiredActionsPanel> {
           const SizedBox(height: 8),
           Text(
             module,
-            style: const TextStyle(
-              fontWeight: FontWeight.w700,
-              fontSize: 12,
-            ),
+            style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 12),
           ),
           const SizedBox(height: 6),
           LayoutBuilder(
@@ -1221,9 +1213,9 @@ class _RequiredActionsPanelState extends State<_RequiredActionsPanel> {
                           ),
                           decoration: BoxDecoration(
                             color: needsSetup
-                                ? const Color(0xFFF59E0B).withValues(
-                                    alpha: 0.16,
-                                  )
+                                ? const Color(
+                                    0xFFF59E0B,
+                                  ).withValues(alpha: 0.16)
                                 : DocuTrackerTokens.brand.withValues(
                                     alpha: 0.12,
                                   ),
@@ -1419,7 +1411,7 @@ class _EmptyState extends StatelessWidget {
   }
 }
 
-class _DocumentList extends StatelessWidget {
+class _DocumentList extends StatefulWidget {
   const _DocumentList({
     required this.documents,
     required this.isAdmin,
@@ -1437,7 +1429,29 @@ class _DocumentList extends StatelessWidget {
   final bool sortByDeadline;
 
   @override
+  State<_DocumentList> createState() => _DocumentListState();
+}
+
+class _DocumentListState extends State<_DocumentList> {
+  static const _pageSize = 10;
+  int _page = 0;
+
+  @override
+  void didUpdateWidget(covariant _DocumentList oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.searchQuery != widget.searchQuery ||
+        oldWidget.sortByDeadline != widget.sortByDeadline) {
+      _page = 0;
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final documents = widget.documents;
+    final searchQuery = widget.searchQuery;
+    final isAdmin = widget.isAdmin;
+    final userId = widget.userId;
+    final onRefresh = widget.onRefresh;
     var filtered = documents.where((doc) {
       if (searchQuery.isEmpty) return true;
       final q = searchQuery.toLowerCase();
@@ -1447,7 +1461,7 @@ class _DocumentList extends StatelessWidget {
           (doc.createdBy?.toLowerCase().contains(q) ?? false);
     }).toList();
 
-    if (sortByDeadline) {
+    if (widget.sortByDeadline) {
       filtered.sort((a, b) {
         if (a.deadlineTime == null && b.deadlineTime == null) return 0;
         if (a.deadlineTime == null) return 1;
@@ -1493,37 +1507,143 @@ class _DocumentList extends StatelessWidget {
       );
     }
 
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        if (constraints.maxWidth >= 860) {
-          return _DocumentDataTable(
-            documents: filtered,
-            isAdmin: isAdmin,
-            userId: userId,
-            onRefresh: onRefresh,
-          );
-        }
-        return Column(
-          children: filtered.map((doc) {
-            final statusForUi = docuTrackerStatusForDisplay(doc);
-            final isOverdue = statusForUi == DocumentStatus.overdue;
-            return _DocumentRowCard(
-              doc: doc,
-              statusForUi: statusForUi,
-              isOverdue: isOverdue,
-              isAdmin: isAdmin,
-              userId: userId,
-              onRefresh: onRefresh,
+    final pageCount = (filtered.length / _pageSize).ceil();
+    final page = _page.clamp(0, pageCount - 1);
+    final pageDocuments = filtered
+        .skip(page * _pageSize)
+        .take(_pageSize)
+        .toList(growable: false);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        LayoutBuilder(
+          builder: (context, constraints) {
+            if (constraints.maxWidth >= 860) {
+              return _DocumentTable(
+                documents: pageDocuments,
+                isAdmin: isAdmin,
+                userId: userId,
+                onRefresh: onRefresh,
+              );
+            }
+            return Column(
+              children: pageDocuments.map((doc) {
+                final statusForUi = docuTrackerStatusForDisplay(doc);
+                final isOverdue = statusForUi == DocumentStatus.overdue;
+                return _DocumentRowCard(
+                  doc: doc,
+                  statusForUi: statusForUi,
+                  isOverdue: isOverdue,
+                  isAdmin: isAdmin,
+                  userId: userId,
+                  onRefresh: onRefresh,
+                );
+              }).toList(),
             );
-          }).toList(),
-        );
-      },
+          },
+        ),
+        const SizedBox(height: 8),
+        _DocumentPager(
+          page: page,
+          pageCount: pageCount,
+          onPageChanged: (value) => setState(() => _page = value),
+        ),
+      ],
     );
   }
 }
 
-class _DocumentDataTable extends StatelessWidget {
-  const _DocumentDataTable({
+class _DocumentPager extends StatelessWidget {
+  const _DocumentPager({
+    required this.page,
+    required this.pageCount,
+    required this.onPageChanged,
+  });
+
+  final int page;
+  final int pageCount;
+  final ValueChanged<int> onPageChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final canGoBack = page > 0;
+    final canGoForward = page < pageCount - 1;
+    final muted = DocuTrackerTokens.textMutedOf(context);
+    Widget arrow({
+      required IconData icon,
+      required String tooltip,
+      required int? target,
+    }) {
+      return IconButton(
+        tooltip: tooltip,
+        visualDensity: VisualDensity.compact,
+        color: muted,
+        onPressed: target == null ? null : () => onPageChanged(target),
+        icon: Icon(icon, size: 20),
+      );
+    }
+
+    return Row(
+      key: const ValueKey('docutracker-document-pager'),
+      mainAxisAlignment: MainAxisAlignment.end,
+      children: [
+        arrow(
+          icon: Icons.keyboard_double_arrow_left_rounded,
+          tooltip: 'First page',
+          target: canGoBack ? 0 : null,
+        ),
+        arrow(
+          icon: Icons.chevron_left_rounded,
+          tooltip: 'Previous page',
+          target: canGoBack ? page - 1 : null,
+        ),
+        Container(
+          constraints: const BoxConstraints(minWidth: 30),
+          height: 30,
+          alignment: Alignment.center,
+          padding: const EdgeInsets.symmetric(horizontal: 8),
+          decoration: BoxDecoration(
+            color: DocuTrackerTokens.surfaceOf(context),
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: const Color(0xFF3B82F6)),
+          ),
+          child: Text(
+            '${page + 1}',
+            style: const TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w700,
+              color: Color(0xFF1D4ED8),
+            ),
+          ),
+        ),
+        if (pageCount > 1)
+          Padding(
+            padding: const EdgeInsets.only(left: 6),
+            child: Text(
+              'of $pageCount',
+              style: TextStyle(fontSize: 12, color: muted),
+            ),
+          ),
+        arrow(
+          icon: Icons.chevron_right_rounded,
+          tooltip: 'Next page',
+          target: canGoForward ? page + 1 : null,
+        ),
+        arrow(
+          icon: Icons.keyboard_double_arrow_right_rounded,
+          tooltip: 'Last page',
+          target: canGoForward ? pageCount - 1 : null,
+        ),
+      ],
+    );
+  }
+}
+
+const _documentTableFlex = (title: 4, type: 2, status: 2, deadline: 2);
+
+class _DocumentTable extends StatelessWidget {
+  const _DocumentTable({
     required this.documents,
     required this.isAdmin,
     required this.userId,
@@ -1535,95 +1655,303 @@ class _DocumentDataTable extends StatelessWidget {
   final String userId;
   final VoidCallback onRefresh;
 
-  String _deadlineLabel(DateTime? date) {
-    if (date == null) return 'No deadline';
-    final local = date.toLocal();
-    return '${local.year}-${local.month.toString().padLeft(2, '0')}-${local.day.toString().padLeft(2, '0')}';
+  @override
+  Widget build(BuildContext context) {
+    final headerStyle = TextStyle(
+      fontSize: 12,
+      fontWeight: FontWeight.w600,
+      color: DocuTrackerTokens.textMutedOf(context),
+    );
+    return Column(
+      key: const ValueKey('docutracker-document-table'),
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(20, 0, 20, 10),
+          child: Row(
+            children: [
+              Expanded(
+                flex: _documentTableFlex.title,
+                child: Text('Document Title', style: headerStyle),
+              ),
+              Expanded(
+                flex: _documentTableFlex.type,
+                child: Text('Type', style: headerStyle),
+              ),
+              Expanded(
+                flex: _documentTableFlex.status,
+                child: Text('Status', style: headerStyle),
+              ),
+              Expanded(
+                flex: _documentTableFlex.deadline,
+                child: Text('Deadline', style: headerStyle),
+              ),
+              SizedBox(width: 150, child: Text('Assignee', style: headerStyle)),
+            ],
+          ),
+        ),
+        for (final doc in documents)
+          _DocumentTableRow(
+            doc: doc,
+            onTap: () => openDocuTrackerDocumentDetail(
+              context,
+              document: doc,
+              isAdmin: isAdmin,
+              userId: userId,
+              onReturned: onRefresh,
+            ),
+          ),
+      ],
+    );
   }
+}
+
+class _DocumentTableRow extends StatefulWidget {
+  const _DocumentTableRow({required this.doc, required this.onTap});
+
+  final DocuTrackerDocument doc;
+  final Future<void> Function() onTap;
+
+  @override
+  State<_DocumentTableRow> createState() => _DocumentTableRowState();
+}
+
+class _DocumentTableRowState extends State<_DocumentTableRow> {
+  bool _hovered = false;
+  bool _opening = false;
+
+  static const _typeChipColors = <String, (Color, Color)>{
+    'ld': (Color(0xFFEEF0FB), Color(0xFF4F5BA8)),
+    'rsp': (Color(0xFFEAF5F0), Color(0xFF2F7A5B)),
+  };
+
+  Future<void> _open() async {
+    if (_opening) return;
+    setState(() => _opening = true);
+    try {
+      await widget.onTap();
+    } finally {
+      if (mounted) setState(() => _opening = false);
+    }
+  }
+
+  String _dateRange(BuildContext context) {
+    final created = widget.doc.createdAt?.toLocal();
+    final updated = widget.doc.updatedAt?.toLocal();
+    final l10n = MaterialLocalizations.of(context);
+    if (created == null && updated == null) return '';
+    if (created == null || updated == null) {
+      return l10n.formatShortDate((created ?? updated)!);
+    }
+    final sameDay =
+        created.year == updated.year &&
+        created.month == updated.month &&
+        created.day == updated.day;
+    if (sameDay) return l10n.formatShortDate(created);
+    if (created.year == updated.year) {
+      return '${l10n.formatShortMonthDay(created)} - '
+          '${l10n.formatShortDate(updated)}';
+    }
+    return '${l10n.formatShortDate(created)} - '
+        '${l10n.formatShortDate(updated)}';
+  }
+
+  double _progressFor(DocuTrackerDocument doc, DocumentStatus status) {
+    if (status == DocumentStatus.pending &&
+        DocuTrackerDocumentVisibility.isWorkInProgressDraft(doc)) {
+      return 0.2;
+    }
+    return switch (status) {
+      DocumentStatus.pending => 0.3,
+      DocumentStatus.returned => 0.4,
+      DocumentStatus.inReview ||
+      DocumentStatus.overdue ||
+      DocumentStatus.escalated => 0.6,
+      DocumentStatus.approved ||
+      DocumentStatus.rejected ||
+      DocumentStatus.cancelled => 1.0,
+    };
+  }
+
+  Color _progressColor(DocumentStatus status) => switch (status) {
+    DocumentStatus.rejected ||
+    DocumentStatus.cancelled => const Color(0xFFDC2626),
+    _ => DocuTrackerStatusTheme.foreground(status),
+  };
 
   @override
   Widget build(BuildContext context) {
-    final screenWidth = MediaQuery.sizeOf(context).width;
-    final compactRows = screenWidth < 1200;
-    final dataRowMinHeight = compactRows ? 52.0 : 56.0;
-    final dataRowMaxHeight = compactRows ? 72.0 : 80.0;
+    final doc = widget.doc;
+    final statusForUi = docuTrackerStatusForDisplay(doc);
+    final isOverdue = statusForUi == DocumentStatus.overdue;
+    final isEscalated = doc.status == DocumentStatus.escalated;
+    final typeName = documentTypeFromString(doc.documentType).displayName;
+    final (chipBg, chipFg) =
+        _typeChipColors[doc.documentType.trim().toLowerCase()] ??
+        (const Color(0xFFF6EBDD), const Color(0xFF8A5A2B));
+    final dateRange = _dateRange(context);
+    final deadline = doc.deadlineTime;
+    final textPrimary = DocuTrackerTokens.textPrimaryOf(context);
+    final textMuted = DocuTrackerTokens.textMutedOf(context);
 
-    return LayoutBuilder(
-      builder: (context, constraints) => SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
-        child: ConstrainedBox(
-          constraints: BoxConstraints(minWidth: constraints.maxWidth),
-          child: DataTable(
-            columnSpacing: 18,
-            headingRowHeight: 44,
-            dataRowMinHeight: dataRowMinHeight,
-            // Keep row constraints normalized across screen sizes to prevent
-            // BoxConstraints assertion failures.
-            dataRowMaxHeight: dataRowMaxHeight,
-            columns: const [
-              DataColumn(label: Text('Document')),
-              DataColumn(label: Text('Type')),
-              DataColumn(label: Text('Status')),
-              DataColumn(label: Text('Deadline')),
-              DataColumn(label: Text('Current assignee')),
-            ],
-            rows: documents.map((doc) {
-              final statusForUi = docuTrackerStatusForDisplay(doc);
-              final isOverdue = statusForUi == DocumentStatus.overdue;
-              final title = doc.title;
-              return DataRow(
-                onSelectChanged: (_) async {
-                  await openDocuTrackerDocumentDetail(
-                    context,
-                    document: doc,
-                    isAdmin: isAdmin,
-                    userId: userId,
-                    onReturned: onRefresh,
-                  );
-                },
-                color: WidgetStateProperty.resolveWith<Color?>((states) {
-                  if (isOverdue) return const Color(0xFFFEF2F2);
-                  if (doc.status == DocumentStatus.escalated) {
-                    return const Color(0xFFF5F3FF);
-                  }
-                  return null;
-                }),
-                cells: [
-                  DataCell(
-                    ConstrainedBox(
-                      constraints: const BoxConstraints(maxWidth: 260),
-                      child: Text(
-                        title,
+    Color background = DocuTrackerTokens.surfaceOf(context);
+    if (isOverdue) {
+      background = const Color(0xFFFEF2F2);
+    } else if (isEscalated) {
+      background = const Color(0xFFF5F3FF);
+    } else if (_hovered) {
+      background = const Color(0xFFF0F5FF);
+    }
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Material(
+        color: background,
+        borderRadius: BorderRadius.circular(12),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(12),
+          onHover: (value) => setState(() => _hovered = value),
+          onTap: _opening ? null : _open,
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 140),
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                color: _hovered
+                    ? const Color(0xFFBFD3F5)
+                    : DocuTrackerTokens.borderSubtleOf(context),
+              ),
+            ),
+            child: Row(
+              children: [
+                Expanded(
+                  flex: _documentTableFlex.title,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        doc.title,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(fontWeight: FontWeight.w600),
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w700,
+                          color: isOverdue
+                              ? const Color(0xFF991B1B)
+                              : textPrimary,
+                        ),
+                      ),
+                      if (dateRange.isNotEmpty) ...[
+                        const SizedBox(height: 3),
+                        Text(
+                          dateRange,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(fontSize: 12, color: textMuted),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+                Expanded(
+                  flex: _documentTableFlex.type,
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 9,
+                        vertical: 4,
+                      ),
+                      decoration: BoxDecoration(
+                        color: chipBg,
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Text(
+                        typeName.toUpperCase(),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: 0.4,
+                          color: chipFg,
+                        ),
                       ),
                     ),
                   ),
-                  DataCell(
-                    Text(documentTypeFromString(doc.documentType).displayName),
-                  ),
-                  DataCell(
-                    DocuTrackerStatusBadge(
-                      status: statusForUi,
-                      compact: true,
-                      label: _statusLabel(doc, statusForUi),
-                    ),
-                  ),
-                  DataCell(Text(_deadlineLabel(doc.deadlineTime))),
-                  DataCell(
-                    ConstrainedBox(
-                      constraints: const BoxConstraints(maxWidth: 220),
-                      child: Text(
-                        _assigneeLabel(doc),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
+                ),
+                Expanded(
+                  flex: _documentTableFlex.status,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      DocuTrackerStatusBadge(
+                        status: statusForUi,
+                        compact: true,
+                        label: _statusLabel(doc, statusForUi),
                       ),
+                      const SizedBox(height: 6),
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(2),
+                        child: SizedBox(
+                          width: 46,
+                          height: 3,
+                          child: LinearProgressIndicator(
+                            value: _progressFor(doc, statusForUi),
+                            backgroundColor: const Color(0xFFE5E7EB),
+                            color: _progressColor(statusForUi),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Expanded(
+                  flex: _documentTableFlex.deadline,
+                  child: Text(
+                    deadline == null
+                        ? 'No deadline'
+                        : MaterialLocalizations.of(
+                            context,
+                          ).formatShortDate(deadline.toLocal()),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: deadline == null
+                          ? FontWeight.w400
+                          : FontWeight.w700,
+                      color: isOverdue
+                          ? const Color(0xFFB91C1C)
+                          : (deadline == null ? textMuted : textPrimary),
                     ),
                   ),
-                ],
-              );
-            }).toList(),
+                ),
+                SizedBox(
+                  width: 150,
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.person_outline_rounded,
+                        size: 15,
+                        color: textMuted,
+                      ),
+                      const SizedBox(width: 5),
+                      Expanded(
+                        child: Text(
+                          _assigneeLabel(doc),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(fontSize: 13, color: textPrimary),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
       ),

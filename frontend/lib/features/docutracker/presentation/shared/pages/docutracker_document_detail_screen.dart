@@ -28,8 +28,11 @@ import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/d
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_status_badge.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_source_signature_card.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/pages/docutracker_document_builder_screen.dart';
+import 'package:hrms_plaridel/core/utils/responsive_right_side_panel.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/pages/docutracker_linked_source_document_screen.dart';
 import 'package:hrms_plaridel/features/dtr/leave/data/providers/leave_provider.dart';
+import 'package:hrms_plaridel/features/dtr/leave/models/leave_request.dart';
+import 'package:hrms_plaridel/features/dtr/leave/presentation/admin/widgets/admin_leave_details_side_sheet.dart';
 import 'package:hrms_plaridel/features/dtr/leave/presentation/employee/shared/utils/employee_leave_actions.dart';
 
 /// Step 9: Document detail with audit trail timeline.
@@ -52,6 +55,8 @@ class DocuTrackerDocumentDetailScreen extends StatefulWidget {
 class _DocuTrackerDocumentDetailScreenState
     extends State<DocuTrackerDocumentDetailScreen> {
   final _remarkController = TextEditingController();
+  final _noteController = TextEditingController();
+  bool _postingNote = false;
 
   Timer? _pollTimer;
   List<DocumentRoutingRecord> _routingRecords = const [];
@@ -138,10 +143,40 @@ class _DocuTrackerDocumentDetailScreenState
       ).showSnackBar(SnackBar(content: Text(error)));
       return;
     }
-    await EmployeeLeaveActions(
+    final currentUserId = context.read<AuthProvider>().user?.id;
+    final isApplicant =
+        currentUserId != null &&
+        currentUserId.isNotEmpty &&
+        request.userId == currentUserId;
+    if (isApplicant && request.status.canEmployeeEdit) {
+      await EmployeeLeaveActions(
+        context: context,
+        isMounted: () => mounted,
+      ).editRequest(request);
+      return;
+    }
+    final leaveActions = EmployeeLeaveActions(
       context: context,
       isMounted: () => mounted,
-    ).editRequest(request);
+    );
+    Future<void> readOnly(LeaveRequest _) async {}
+    await openResponsiveRightSidePanel<void>(
+      context: context,
+      barrierLabel: 'Close request details',
+      minWidth: 400,
+      initialWidthFraction: 0.46,
+      builder: (_) => AdminLeaveDetailsSideSheet(
+        initial: request,
+        isDepartmentHead: false,
+        canReviewPending: false,
+        currentReviewerId: currentUserId,
+        onApprove: readOnly,
+        onReturn: readOnly,
+        onReject: readOnly,
+        onPreview: leaveActions.previewLeaveForm,
+        onPrint: leaveActions.printLeaveForm,
+      ),
+    );
   }
 
   Widget _buildLinkedLeaveSection(
@@ -379,6 +414,7 @@ class _DocuTrackerDocumentDetailScreenState
   @override
   void dispose() {
     _remarkController.dispose();
+    _noteController.dispose();
     _pollTimer?.cancel();
     super.dispose();
   }
@@ -609,37 +645,40 @@ class _DocuTrackerDocumentDetailScreenState
                   onDismiss: () => provider.clearError(),
                 ),
               ],
-              if (showActions) ...[
-                const SizedBox(height: 24),
-                _buildActionsCard(
-                  doc,
-                  provider,
-                  userId,
-                  canAct,
-                  canSubmit,
-                  canApprove: canApprove,
-                  canForward: canForward,
-                  canReject: canReject,
-                  canReturn: canReturn,
-                ),
-              ],
               const SizedBox(height: 24),
               LayoutBuilder(
                 builder: (context, constraints) {
                   final isDesktop = constraints.maxWidth > 720;
+                  final actionsCard = showActions
+                      ? _buildActionsCard(
+                          doc,
+                          provider,
+                          userId,
+                          canAct,
+                          canSubmit,
+                          canApprove: canApprove,
+                          canForward: canForward,
+                          canReject: canReject,
+                          canReturn: canReturn,
+                        )
+                      : null;
 
                   final leftColumn = Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       _buildWorkflowSection(doc, provider, userId),
                       const SizedBox(height: 24),
-                      _buildHistorySection(provider),
+                      _buildHistorySection(provider, doc, userId),
                     ],
                   );
 
                   final rightColumn = Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
+                      if (actionsCard != null) ...[
+                        actionsCard,
+                        const SizedBox(height: 24),
+                      ],
                       if (_isLinkedLeave(doc)) ...[
                         _buildLinkedLeaveSection(doc, userId),
                         const SizedBox(height: 24),
@@ -662,8 +701,12 @@ class _DocuTrackerDocumentDetailScreenState
                   }
 
                   return Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
+                      if (actionsCard != null) ...[
+                        actionsCard,
+                        const SizedBox(height: 24),
+                      ],
                       _buildWorkflowSection(doc, provider, userId),
                       const SizedBox(height: 24),
                       if (_isLinkedLeave(doc)) ...[
@@ -674,7 +717,7 @@ class _DocuTrackerDocumentDetailScreenState
                       const SizedBox(height: 24),
                       _buildDocumentInfoSection(doc),
                       const SizedBox(height: 24),
-                      _buildHistorySection(provider),
+                      _buildHistorySection(provider, doc, userId),
                     ],
                   );
                 },
@@ -757,71 +800,83 @@ class _DocuTrackerDocumentDetailScreenState
       }
     }
 
-    final savedLabel = docuTrackerFormatRelativeSaved(
-      doc.updatedAt ?? doc.createdAt,
+    final provider = context.read<DocuTrackerProvider>();
+    final currentStep = doc.currentStep ?? 1;
+    final currentStepLabel =
+        (_routingConfigFor(provider, doc)?.steps ?? const <WorkflowStep>[])
+            .where((s) => s.enabled && s.stepOrder == currentStep)
+            .map((s) => s.label?.trim() ?? '')
+            .firstWhere((label) => label.isNotEmpty, orElse: () => '');
+    final stepValue = !isDraft && !isTerminal && currentStepLabel.isNotEmpty
+        ? '$currentStep. $currentStepLabel'
+        : currentStepValue;
+    final stepSub = isDraft
+        ? 'Draft stage'
+        : isTerminal
+        ? doc.status.displayName
+        : phase.label;
+    final creatorName = doc.creatorName?.trim().isNotEmpty == true
+        ? doc.creatorName!.trim()
+        : null;
+    final assigneeValue = isDraft
+        ? (creatorName ?? currentAssigneeValue)
+        : currentAssigneeValue;
+    final assigneeSub = isDraft
+        ? 'Document owner'
+        : backupNames.isNotEmpty
+        ? 'Backup: ${backupNames.join(', ')}'
+        : (isTerminal ? 'Workflow finished' : 'Current reviewer');
+    final lastSaved = doc.updatedAt ?? doc.createdAt;
+    final versionSub = doc.workflowVersion == null
+        ? ''
+        : 'Workflow version ${doc.workflowVersion}${isDraft ? ' (Draft)' : ''}';
+    final busy = provider.loading;
+
+    final actionButtons = Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      children: [
+        if (!doc.sourceOnly)
+          OutlinedButton.icon(
+            key: const ValueKey('docutracker-detail-preview'),
+            onPressed: busy ? null : () => _openPrimaryDocument(doc),
+            icon: const Icon(Icons.visibility_outlined, size: 18),
+            label: const Text('Preview'),
+            style: DocuTrackerStyles.outlinedButtonStyle(),
+          ),
+        FilledButton.icon(
+          onPressed: busy ? null : () => _openPrimaryDocument(doc),
+          icon: const Icon(Icons.article_outlined, size: 18),
+          label: Text(
+            doc.sourceOnly ? 'Open Source Document' : 'Open Document',
+          ),
+          style: DocuTrackerStyles.primaryBrandButtonStyle(),
+        ),
+      ],
     );
 
-    return Column(
+    final titleBlock = Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        InkWell(
-          borderRadius: BorderRadius.circular(4),
-          onTap: () => Navigator.of(context).pop(),
-          child: const Padding(
-            padding: EdgeInsets.symmetric(vertical: 4, horizontal: 2),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(
-                  Icons.arrow_back_rounded,
-                  size: 16,
-                  color: DocuTrackerTokens.textMuted,
-                ),
-                SizedBox(width: 6),
-                Text(
-                  'Back to documents',
-                  style: TextStyle(
-                    color: DocuTrackerTokens.textMuted,
-                    fontSize: 13,
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-        const SizedBox(height: 20),
         Wrap(
           spacing: 8,
           runSpacing: 8,
+          crossAxisAlignment: WrapCrossAlignment.center,
           children: [
-            DocuTrackerDetailTag(label: typeName),
+            DocuTrackerDetailTag(label: typeName.toUpperCase()),
             if (doc.documentNumber != null)
               DocuTrackerDetailTag(label: doc.documentNumber!),
-          ],
-        ),
-        const SizedBox(height: 12),
-        Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
             DocuTrackerStatusBadge(
               status: doc.status,
+              compact: true,
               dotStyle: true,
               label: doc.status == DocumentStatus.pending && isDraft
                   ? 'Draft'
                   : null,
             ),
-            if (savedLabel.isNotEmpty) ...[
-              const SizedBox(height: 6),
-              Text(savedLabel, style: DocuTrackerTokens.metaStyle(context)),
-            ],
-            if (deadlineLabel.isNotEmpty) ...[
-              const SizedBox(height: 8),
+            if (deadlineLabel.isNotEmpty)
               Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 10,
-                  vertical: 6,
-                ),
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                 decoration: BoxDecoration(
                   color: deadlineColor.withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(20),
@@ -832,12 +887,12 @@ class _DocuTrackerDocumentDetailScreenState
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Icon(deadlineIcon, size: 14, color: deadlineColor),
-                    const SizedBox(width: 6),
+                    Icon(deadlineIcon, size: 12, color: deadlineColor),
+                    const SizedBox(width: 4),
                     Text(
                       deadlineLabel,
                       style: TextStyle(
-                        fontSize: 12,
+                        fontSize: 11,
                         fontWeight: FontWeight.w700,
                         color: deadlineColor,
                       ),
@@ -845,57 +900,180 @@ class _DocuTrackerDocumentDetailScreenState
                   ],
                 ),
               ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        Text(
+          doc.title,
+          style: TextStyle(
+            fontSize: 26,
+            fontWeight: FontWeight.w800,
+            color: DocuTrackerTokens.textPrimaryOf(context),
+            height: 1.15,
+            letterSpacing: -0.5,
+          ),
+        ),
+        if (creatorName != null) ...[
+          const SizedBox(height: 6),
+          Text(
+            'Initiated by $creatorName',
+            style: DocuTrackerTokens.subtitleStyle(context),
+          ),
+        ],
+      ],
+    );
+
+    final summaryCells = <Widget>[
+      _HeroSummaryCell(
+        label: 'CURRENT STEP',
+        value: stepValue,
+        sub: stepSub,
+        leading: Container(
+          width: 8,
+          height: 8,
+          decoration: const BoxDecoration(
+            color: DocuTrackerTokens.brand,
+            shape: BoxShape.circle,
+          ),
+        ),
+      ),
+      _HeroSummaryCell(
+        label: 'PRIMARY ASSIGNEE',
+        value: assigneeValue,
+        sub: assigneeSub,
+        leading: CircleAvatar(
+          radius: 11,
+          backgroundColor: DocuTrackerTokens.brandSoft,
+          child: Text(
+            _getInitials(assigneeValue),
+            style: const TextStyle(
+              fontSize: 9,
+              fontWeight: FontWeight.w800,
+              color: DocuTrackerTokens.brand,
+            ),
+          ),
+        ),
+      ),
+      _HeroSummaryCell(
+        label: 'TARGET DEADLINE',
+        value: doc.deadlineTime == null
+            ? 'No deadline'
+            : _formatDateTime(doc.deadlineTime!),
+        sub: deadlineLabel,
+        subColor: deadlineLabel.isEmpty ? null : deadlineColor,
+      ),
+      _HeroSummaryCell(
+        label: 'LAST SAVED',
+        value: lastSaved == null ? 'Not available' : _formatDateTime(lastSaved),
+        sub: versionSub,
+      ),
+    ];
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Wrap(
+          key: const ValueKey('docutracker-detail-breadcrumbs'),
+          crossAxisAlignment: WrapCrossAlignment.center,
+          spacing: 8,
+          runSpacing: 4,
+          children: [
+            InkWell(
+              borderRadius: BorderRadius.circular(4),
+              onTap: () => Navigator.of(context).pop(),
+              child: const Padding(
+                padding: EdgeInsets.symmetric(vertical: 4, horizontal: 2),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      Icons.arrow_back_rounded,
+                      size: 16,
+                      color: DocuTrackerTokens.textMuted,
+                    ),
+                    SizedBox(width: 6),
+                    Text(
+                      'Back to documents',
+                      style: TextStyle(
+                        color: DocuTrackerTokens.textMuted,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const Text('/', style: TextStyle(color: Color(0xFFD1D5DB))),
+            Text(
+              typeName,
+              style: const TextStyle(
+                color: DocuTrackerTokens.textMuted,
+                fontSize: 13,
+              ),
+            ),
+            if (doc.documentNumber != null) ...[
+              const Text('/', style: TextStyle(color: Color(0xFFD1D5DB))),
+              DocuTrackerDetailTag(label: doc.documentNumber!),
             ],
           ],
         ),
-        const SizedBox(height: 14),
-        Text(
-          doc.title,
-          style: const TextStyle(
-            fontSize: 30,
-            fontWeight: FontWeight.w800,
-            color: DocuTrackerTokens.textPrimary,
-            height: 1.15,
-            letterSpacing: -0.6,
-          ),
-        ),
-        const SizedBox(height: 18),
-        Wrap(
-          spacing: 12,
-          runSpacing: 12,
-          children: [
-            _DetailSummaryItem(label: 'Current step', value: currentStepValue),
-            _DetailSummaryItem(
-              label: 'Primary assignee',
-              value: currentAssigneeValue,
-            ),
-            if (backupNames.isNotEmpty)
-              _DetailSummaryItem(
-                label: 'Backup assignee',
-                value: backupNames.join(', '),
-              ),
-            _DetailSummaryItem(
-              label: 'Deadline',
-              value: doc.deadlineTime == null
-                  ? 'No deadline'
-                  : _formatDateTime(doc.deadlineTime!),
-            ),
-            _DetailSummaryItem(
-              label: 'Last update',
-              value: savedLabel.isEmpty ? 'Not available' : savedLabel,
-            ),
-          ],
-        ),
         const SizedBox(height: 16),
-        FilledButton.icon(
-          onPressed: context.read<DocuTrackerProvider>().loading
-              ? null
-              : () => _openPrimaryDocument(doc),
-          icon: const Icon(Icons.article_outlined),
-          label: Text(
-            doc.sourceOnly ? 'Open Source Document' : 'Open Document',
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(24),
+          decoration: DocuTrackerTokens.cardDecoration(context: context),
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final wide = constraints.maxWidth >= 720;
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  if (wide)
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Expanded(child: titleBlock),
+                        const SizedBox(width: 16),
+                        actionButtons,
+                      ],
+                    )
+                  else ...[
+                    titleBlock,
+                    const SizedBox(height: 14),
+                    actionButtons,
+                  ],
+                  const SizedBox(height: 20),
+                  if (constraints.maxWidth >= 900)
+                    IntrinsicHeight(
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          for (var i = 0; i < summaryCells.length; i++) ...[
+                            if (i > 0) const SizedBox(width: 12),
+                            Expanded(child: summaryCells[i]),
+                          ],
+                        ],
+                      ),
+                    )
+                  else
+                    Wrap(
+                      spacing: 12,
+                      runSpacing: 12,
+                      children: [
+                        for (final cell in summaryCells)
+                          SizedBox(
+                            width: wide
+                                ? (constraints.maxWidth - 12) / 2
+                                : constraints.maxWidth,
+                            child: cell,
+                          ),
+                      ],
+                    ),
+                ],
+              );
+            },
           ),
-          style: DocuTrackerStyles.primaryBrandButtonStyle(),
         ),
         if (doc.status == DocumentStatus.approved ||
             doc.status == DocumentStatus.rejected) ...[
@@ -947,11 +1125,15 @@ class _DocuTrackerDocumentDetailScreenState
     required bool canReturn,
   }) {
     if (_permissionsLoading) return false;
+    final quickAccess =
+        (_canEdit &&
+            DocuTrackerDocumentVisibility.isWorkInProgressDraft(doc)) ||
+        _canDownloadAttachment;
     final terminal =
         doc.status == DocumentStatus.approved ||
         doc.status == DocumentStatus.rejected;
-    if (terminal) return _canEdit;
-    return canApprove || canReject || canReturn || canForward || _canEdit;
+    if (terminal) return _canDownloadAttachment;
+    return canApprove || canReject || canReturn || canForward || quickAccess;
   }
 
   Widget _buildAttachmentSection(DocuTrackerDocument doc) {
@@ -1411,78 +1593,6 @@ class _DocuTrackerDocumentDetailScreenState
         ),
     ];
 
-    final adminRemark = _canEdit
-        ? OutlinedButton.icon(
-            onPressed: provider.loading
-                ? null
-                : () async {
-                    final remarkCtrl = TextEditingController();
-                    try {
-                      await showDialog<void>(
-                        context: context,
-                        builder: (ctx) => AlertDialog(
-                          title: const Text('Remark'),
-                          content: TextField(
-                            controller: remarkCtrl,
-                            autofocus: true,
-                            decoration: DocuTrackerStyles.inputDecoration(
-                              context,
-                              'Enter remark (logged to history)',
-                              Icons.comment_rounded,
-                            ),
-                            maxLines: 4,
-                          ),
-                          actions: [
-                            OutlinedButton(
-                              onPressed: () => Navigator.of(ctx).pop(),
-                              style: DocuTrackerStyles.outlinedButtonStyle(),
-                              child: const Text('Cancel'),
-                            ),
-                            FilledButton(
-                              onPressed: () async {
-                                final remarks = remarkCtrl.text.trim();
-                                if (remarks.isEmpty) return;
-                                Navigator.of(ctx).pop();
-                                final ok = await provider.addRemark(
-                                  doc,
-                                  actorId: userId,
-                                  remarks: remarks,
-                                );
-                                if (!mounted) return;
-                                if (ok) {
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    const SnackBar(
-                                      content: Text('Remark added.'),
-                                    ),
-                                  );
-                                  provider.loadDocumentHistory(doc.id!);
-                                } else {
-                                  _showActionError(
-                                    provider,
-                                    fallback: 'Failed to add remark.',
-                                  );
-                                }
-                              },
-                              style: DocuTrackerStyles.primaryButtonStyle(),
-                              child: const Text('Save'),
-                            ),
-                          ],
-                        ),
-                      );
-                    } finally {
-                      remarkCtrl.dispose();
-                    }
-                  },
-            icon: const Icon(Icons.comment_rounded, size: 18),
-            label: const Text('Add remark'),
-            style: DocuTrackerStyles.outlinedButtonStyle().copyWith(
-              padding: WidgetStateProperty.all(
-                const EdgeInsets.symmetric(vertical: 16),
-              ),
-            ),
-          )
-        : null;
-
     final isDraft = DocuTrackerDocumentVisibility.isWorkInProgressDraft(doc);
     final showQuickAccess = (_canEdit && isDraft) || _canDownloadAttachment;
     final forwardActions = canForward
@@ -1491,18 +1601,25 @@ class _DocuTrackerDocumentDetailScreenState
     final moreWorkflowActions = secondaryActions
         .skip(forwardActions.length)
         .toList(growable: false);
-    final hasMoreActions =
-        adminRemark != null ||
-        showQuickAccess ||
-        moreWorkflowActions.isNotEmpty;
+    final hasMoreActions = showQuickAccess || moreWorkflowActions.isNotEmpty;
 
     Widget fullWidth(Widget child) =>
         SizedBox(width: double.infinity, child: child);
 
     return DocuTrackerDetailSectionCard(
       icon: Icons.touch_app_outlined,
-      title: 'Actions',
+      title: 'Workflow Actions',
       subtitle: 'Available actions for this workflow step',
+      trailing: enabledSteps.isEmpty || isDraft
+          ? null
+          : Text(
+              'Step ${doc.currentStep ?? 1}/${enabledSteps.length}',
+              style: const TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+                color: Color(0xFF1D4ED8),
+              ),
+            ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -1542,11 +1659,6 @@ class _DocuTrackerDocumentDetailScreenState
               childrenPadding: const EdgeInsets.only(bottom: 4),
               title: const Text('More'),
               children: [
-                if (adminRemark != null)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 8),
-                    child: fullWidth(adminRemark),
-                  ),
                 if (showQuickAccess)
                   Row(
                     children: [
@@ -1699,16 +1811,107 @@ class _DocuTrackerDocumentDetailScreenState
     return copy;
   }
 
-  Widget _buildHistorySection(DocuTrackerProvider provider) {
+  Future<void> _postNote(
+    DocuTrackerProvider provider,
+    DocuTrackerDocument doc,
+    String userId,
+  ) async {
+    final remarks = _noteController.text.trim();
+    if (remarks.isEmpty || _postingNote) return;
+    setState(() => _postingNote = true);
+    final ok = await provider.addRemark(doc, actorId: userId, remarks: remarks);
+    if (!mounted) return;
+    setState(() => _postingNote = false);
+    if (ok) {
+      _noteController.clear();
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Note posted.')));
+      provider.loadDocumentHistory(doc.id!);
+    } else {
+      _showActionError(provider, fallback: 'Failed to post note.');
+    }
+  }
+
+  Widget _buildNoteComposer(
+    DocuTrackerProvider provider,
+    DocuTrackerDocument doc,
+    String userId,
+  ) {
+    final busy = _postingNote || provider.loading;
+    return Container(
+      key: const Key('docutracker-detail-note-composer'),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: DocuTrackerTokens.canvasOf(context),
+        borderRadius: BorderRadius.circular(DocuTrackerTokens.radiusSm),
+        border: Border.all(color: DocuTrackerTokens.borderSubtleOf(context)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(
+            'ADD INTERNAL NOTE FOR REVIEWERS',
+            style: TextStyle(
+              fontSize: 10.5,
+              fontWeight: FontWeight.w700,
+              letterSpacing: 0.6,
+              color: DocuTrackerTokens.textMutedOf(context),
+            ),
+          ),
+          const SizedBox(height: 8),
+          TextField(
+            controller: _noteController,
+            enabled: !busy,
+            minLines: 2,
+            maxLines: 4,
+            decoration: DocuTrackerStyles.inputDecoration(
+              context,
+              'Write a note (logged to the audit trail)',
+              Icons.edit_note_rounded,
+            ),
+          ),
+          const SizedBox(height: 10),
+          Align(
+            alignment: Alignment.centerRight,
+            child: FilledButton.icon(
+              key: const Key('docutracker-detail-post-note'),
+              onPressed: busy ? null : () => _postNote(provider, doc, userId),
+              style: DocuTrackerStyles.primaryButtonStyle(),
+              icon: const Icon(Icons.send_rounded, size: 16),
+              label: const Text('Post Note'),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildHistorySection(
+    DocuTrackerProvider provider,
+    DocuTrackerDocument doc,
+    String userId,
+  ) {
     final sorted = _sortedHistory(provider.documentHistory);
+    final showCount = !_permissionsLoading && _canViewAuditTrail;
 
     return DocuTrackerDetailSectionCard(
       icon: Icons.history_rounded,
-      title: 'Activity',
-      subtitle: 'Document updates and decisions in order.',
+      title: 'Activity & Audit Trail',
+      subtitle: 'Document updates, status changes, and decisions in order',
+      trailing: showCount
+          ? Text(
+              '${sorted.length} ${sorted.length == 1 ? 'event' : 'events'} logged',
+              style: DocuTrackerTokens.metaStyle(context),
+            )
+          : null,
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
+          if (!_permissionsLoading && _canEdit && userId.isNotEmpty) ...[
+            _buildNoteComposer(provider, doc, userId),
+            const SizedBox(height: 16),
+          ],
           if (_permissionsLoading)
             const Center(
               child: Padding(
@@ -2424,37 +2627,75 @@ class _TimelineItem extends StatelessWidget {
   }
 }
 
-class _DetailSummaryItem extends StatelessWidget {
-  const _DetailSummaryItem({required this.label, required this.value});
+class _HeroSummaryCell extends StatelessWidget {
+  const _HeroSummaryCell({
+    required this.label,
+    required this.value,
+    this.sub = '',
+    this.subColor,
+    this.leading,
+  });
 
   final String label;
   final String value;
+  final String sub;
+  final Color? subColor;
+  final Widget? leading;
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      width: 210,
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
       decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surface,
+        color: DocuTrackerTokens.surfaceOf(context),
         borderRadius: BorderRadius.circular(DocuTrackerTokens.radiusSm),
-        border: Border.all(color: DocuTrackerTokens.borderSubtle),
+        border: Border.all(color: DocuTrackerTokens.borderSubtleOf(context)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(label, style: DocuTrackerTokens.metaStyle(context)),
-          const SizedBox(height: 4),
           Text(
-            value,
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(
-              color: DocuTrackerTokens.textPrimary,
-              fontSize: 14,
+            label,
+            style: TextStyle(
+              fontSize: 10.5,
               fontWeight: FontWeight.w700,
+              letterSpacing: 0.6,
+              color: DocuTrackerTokens.textMutedOf(context),
             ),
           ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              if (leading != null) ...[leading!, const SizedBox(width: 8)],
+              Expanded(
+                child: Text(
+                  value,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: DocuTrackerTokens.textPrimaryOf(context),
+                    fontSize: 14,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          if (sub.isNotEmpty) ...[
+            const SizedBox(height: 4),
+            Text(
+              sub,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 11.5,
+                fontWeight: subColor == null
+                    ? FontWeight.w500
+                    : FontWeight.w700,
+                color: subColor ?? DocuTrackerTokens.textMutedOf(context),
+              ),
+            ),
+          ],
         ],
       ),
     );

@@ -199,13 +199,20 @@ void main() {
       reason: 'Requests: $requestedPaths',
     );
     expect(find.text('Department Head'), findsOneWidget);
-    expect(find.text('Current assignee'), findsOneWidget);
+    expect(find.text('Assignee'), findsOneWidget);
+    expect(find.text('Document Title'), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('docutracker-document-pager')),
+      findsOneWidget,
+    );
     expect(find.text('Draft'), findsWidgets);
     expect(find.text('Not submitted'), findsOneWidget);
     expect(find.text('Workflow complete'), findsOneWidget);
     expect(find.text('Managed in DTR'), findsOneWidget);
     expect(find.text('Unassigned'), findsOneWidget);
-    final tableSize = tester.getSize(find.byType(DataTable));
+    final tableSize = tester.getSize(
+      find.byKey(const ValueKey('docutracker-document-table')),
+    );
     expect(tableSize.width, greaterThan(1300));
     expect(tester.takeException(), isNull);
   });

@@ -44,6 +44,43 @@ test('employee can load only an owned L&D report with view permission', async ()
   assert.equal(result.fields[0].value, 'Maria Santos');
 });
 
+test('L&D source detail describes review progress with readable dates', async () => {
+  const pool = {
+    async query() {
+      return {
+        rows: [{
+          id: recordId,
+          employee_id: '22222222-2222-4222-8222-222222222222',
+          employee_name: 'Maria Santos',
+          title: 'Day 1 report',
+          submitted_at: new Date('2026-09-14T01:00:00Z'),
+          seen_at: new Date('2026-09-15T02:30:00Z'),
+          seen_by_name: 'L&D Admin',
+          reviewed_by_name: 'L&D Reviewer',
+          status: 'reviewed',
+        }],
+      };
+    },
+  };
+  const result = await getLinkedSourceDocument(
+    pool,
+    { id: '33333333-3333-4333-8333-333333333333', role: 'admin' },
+    'ld',
+    'training_daily_reports',
+    recordId
+  );
+  const byLabel = Object.fromEntries(
+    result.fields.map((item) => [item.label, item.value])
+  );
+
+  assert.equal(result.status, 'reviewed');
+  assert.equal(byLabel['Seen by'], 'L&D Admin');
+  assert.equal(byLabel['Reviewed by'], 'L&D Reviewer');
+  assert.match(byLabel.Submitted, /^Sep 14, 2026/);
+  assert.match(byLabel['Seen on'], /^Sep 15, 2026/);
+  assert.equal(Object.hasOwn(byLabel, 'Status'), false);
+});
+
 test('L&D source detail rejects a user without module view access', async () => {
   const pool = {
     async query() {

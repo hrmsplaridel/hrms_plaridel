@@ -1,4 +1,4 @@
-BEGIN;
+  BEGIN;
 
 -- Snapshot how an RSP/L&D source signature slot was assigned so admin recovery
 -- can require remarks when overriding creator or automatic assignments.

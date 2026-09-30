@@ -71,6 +71,14 @@ class _SignatureDialog extends StatefulWidget {
 class _SignatureDialogState extends State<_SignatureDialog> {
   final DocuTrackerSignatureStrokeController _strokes =
       DocuTrackerSignatureStrokeController();
+  final GlobalKey _inkLayerKey = GlobalKey();
+  final GlobalKey _saveOptionKey = GlobalKey();
+  final GlobalKey _padToolsKey = GlobalKey();
+  final GlobalKey _modeSwitchKey = GlobalKey();
+  final GlobalKey _viewportKey = GlobalKey();
+  final GlobalKey _cancelKey = GlobalKey();
+  final GlobalKey _submitKey = GlobalKey();
+  final ScrollController _scrollController = ScrollController();
   _SignatureMode _mode = _SignatureMode.draw;
   Uint8List? _uploadedBytes;
   String _uploadedMimeType = 'image/png';
@@ -94,6 +102,7 @@ class _SignatureDialogState extends State<_SignatureDialog> {
   void dispose() {
     _strokes.removeListener(_onStrokesChanged);
     _strokes.dispose();
+    _scrollController.dispose();
     super.dispose();
   }
 
@@ -221,16 +230,16 @@ class _SignatureDialogState extends State<_SignatureDialog> {
   double _drawingPadHeight(Size mediaSize) {
     final isCompact = mediaSize.width < 600;
     if (isCompact) {
-      return (mediaSize.height * 0.28).clamp(200.0, 280.0);
+      return (mediaSize.height * 0.4).clamp(260.0, 380.0);
     }
-    return (mediaSize.height * 0.36).clamp(300.0, 420.0);
+    return (mediaSize.height * 0.4).clamp(300.0, 520.0);
   }
 
   double _dialogWidth(Size mediaSize) {
     if (mediaSize.width < 480) {
       return mediaSize.width - 32;
     }
-    return mediaSize.width < 900 ? 640.0 : 720.0;
+    return mediaSize.width < 900 ? 720.0 : 860.0;
   }
 
   @override
@@ -238,86 +247,170 @@ class _SignatureDialogState extends State<_SignatureDialog> {
     final mediaSize = MediaQuery.sizeOf(context);
     final dialogWidth = _dialogWidth(mediaSize);
 
-    return AlertDialog(
+    final dialog = AlertDialog(
       title: Text(widget.title),
       content: SizedBox(
         width: dialogWidth,
-        child: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              SegmentedButton<_SignatureMode>(
-                segments: <ButtonSegment<_SignatureMode>>[
-                  const ButtonSegment(
-                    value: _SignatureMode.draw,
-                    icon: Icon(Icons.draw_outlined),
-                    label: Text('Draw'),
-                  ),
-                  const ButtonSegment(
-                    value: _SignatureMode.upload,
-                    icon: Icon(Icons.upload_file_outlined),
-                    label: Text('Upload'),
-                  ),
-                  if (widget.allowSavedSelection)
+        child: Scrollbar(
+          controller: _scrollController,
+          thumbVisibility: true,
+          child: SingleChildScrollView(
+            key: _viewportKey,
+            controller: _scrollController,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                SegmentedButton<_SignatureMode>(
+                  key: _modeSwitchKey,
+                  segments: <ButtonSegment<_SignatureMode>>[
                     const ButtonSegment(
-                      value: _SignatureMode.saved,
-                      icon: Icon(Icons.bookmark_outline),
-                      label: Text('Saved'),
+                      value: _SignatureMode.draw,
+                      icon: Icon(Icons.draw_outlined),
+                      label: Text('Draw'),
                     ),
-                ],
-                selected: <_SignatureMode>{_mode},
-                onSelectionChanged: (selection) {
-                  setState(() {
-                    _mode = selection.first;
-                    _error = null;
-                  });
-                },
-              ),
-              const SizedBox(height: 18),
-              if (_mode == _SignatureMode.draw) _buildDrawing(mediaSize),
-              if (_mode == _SignatureMode.upload) _buildUpload(),
-              if (_mode == _SignatureMode.saved) _buildSaved(),
-              if (_mode != _SignatureMode.saved &&
-                  !widget.forceSaveForReuse) ...[
-                const SizedBox(height: 12),
-                CheckboxListTile(
-                  contentPadding: EdgeInsets.zero,
-                  value: _saveForReuse,
-                  onChanged: (value) =>
-                      setState(() => _saveForReuse = value == true),
-                  title: const Text('Save this signature for future use'),
-                  subtitle: const Text(
-                    'Only your authenticated account can reuse it.',
+                    const ButtonSegment(
+                      value: _SignatureMode.upload,
+                      icon: Icon(Icons.upload_file_outlined),
+                      label: Text('Upload'),
+                    ),
+                    if (widget.allowSavedSelection)
+                      const ButtonSegment(
+                        value: _SignatureMode.saved,
+                        icon: Icon(Icons.bookmark_outline),
+                        label: Text('Saved'),
+                      ),
+                  ],
+                  selected: <_SignatureMode>{_mode},
+                  onSelectionChanged: (selection) {
+                    setState(() {
+                      _mode = selection.first;
+                      _error = null;
+                    });
+                  },
+                ),
+                const SizedBox(height: 18),
+                if (_mode == _SignatureMode.draw) _buildDrawing(mediaSize),
+                if (_mode == _SignatureMode.upload) _buildUpload(),
+                if (_mode == _SignatureMode.saved) _buildSaved(),
+                if (_mode != _SignatureMode.saved &&
+                    !widget.forceSaveForReuse) ...[
+                  const SizedBox(height: 12),
+                  CheckboxListTile(
+                    key: _saveOptionKey,
+                    contentPadding: EdgeInsets.zero,
+                    value: _saveForReuse,
+                    onChanged: (value) =>
+                        setState(() => _saveForReuse = value == true),
+                    title: const Text('Save this signature for future use'),
+                    subtitle: const Text(
+                      'Only your authenticated account can reuse it.',
+                    ),
+                    controlAffinity: ListTileControlAffinity.leading,
                   ),
-                  controlAffinity: ListTileControlAffinity.leading,
-                ),
-              ] else if (widget.forceSaveForReuse) ...[
-                const SizedBox(height: 12),
-                const Text(
-                  'This signature will be saved in My Signatures for future use.',
-                ),
+                ] else if (widget.forceSaveForReuse) ...[
+                  const SizedBox(height: 12),
+                  const Text(
+                    'This signature will be saved in My Signatures for future use.',
+                  ),
+                ],
+                if (_error != null) ...[
+                  const SizedBox(height: 10),
+                  Text(_error!, style: const TextStyle(color: Colors.red)),
+                ],
               ],
-              if (_error != null) ...[
-                const SizedBox(height: 10),
-                Text(_error!, style: const TextStyle(color: Colors.red)),
-              ],
-            ],
+            ),
           ),
         ),
       ),
       actions: [
         TextButton(
+          key: _cancelKey,
           onPressed: _submitting ? null : () => Navigator.of(context).pop(),
           child: const Text('Cancel'),
         ),
         FilledButton.icon(
+          key: _submitKey,
           onPressed: _submitting ? null : _submit,
           icon: const Icon(Icons.verified_user_outlined),
           label: Text(_submitting ? 'Preparing…' : 'Use signature'),
         ),
       ],
     );
+
+    return RawGestureDetector(
+      behavior: HitTestBehavior.translucent,
+      gestures: <Type, GestureRecognizerFactory>{
+        _SignaturePanRecognizer:
+            GestureRecognizerFactoryWithHandlers<_SignaturePanRecognizer>(
+              () => _SignaturePanRecognizer(debugOwner: this),
+              (recognizer) {
+                recognizer
+                  ..canCapture = _canCaptureAt
+                  ..dragStartBehavior = DragStartBehavior.down
+                  ..onStart = (details) {
+                    final point = _inkPoint(details.globalPosition);
+                    if (point == null) return;
+                    if (_error != null) setState(() => _error = null);
+                    _strokes.beginStroke(point);
+                  }
+                  ..onUpdate = (details) {
+                    final point = _inkPoint(details.globalPosition);
+                    if (point == null) return;
+                    _strokes.appendStroke(point);
+                  }
+                  ..onEnd = (_) {
+                    _strokes.endStroke();
+                  }
+                  ..onCancel = _strokes.endStroke;
+              },
+            ),
+      },
+      child: KeyedSubtree(key: _inkLayerKey, child: dialog),
+    );
+  }
+
+  static const double _scrollbarGrabWidth = 16;
+
+  Rect? _globalRectOf(GlobalKey key) {
+    final box = key.currentContext?.findRenderObject();
+    if (box is! RenderBox || !box.hasSize || !box.attached) return null;
+    return box.localToGlobal(Offset.zero) & box.size;
+  }
+
+  bool _canCaptureAt(Offset globalPosition) {
+    if (_mode != _SignatureMode.draw || _submitting) return false;
+    final viewport = _globalRectOf(_viewportKey);
+    if (viewport != null) {
+      for (final key in [_modeSwitchKey, _padToolsKey, _saveOptionKey]) {
+        final rect = _globalRectOf(key)?.intersect(viewport);
+        if (rect != null && !rect.isEmpty && rect.contains(globalPosition)) {
+          return false;
+        }
+      }
+      final scrollable =
+          _scrollController.hasClients &&
+          _scrollController.position.maxScrollExtent > 0;
+      if (scrollable &&
+          Rect.fromLTRB(
+            viewport.right - _scrollbarGrabWidth,
+            viewport.top,
+            viewport.right,
+            viewport.bottom,
+          ).contains(globalPosition)) {
+        return false;
+      }
+    }
+    for (final key in [_cancelKey, _submitKey]) {
+      if (_globalRectOf(key)?.contains(globalPosition) ?? false) return false;
+    }
+    return true;
+  }
+
+  Offset? _inkPoint(Offset globalPosition) {
+    final box = _inkLayerKey.currentContext?.findRenderObject();
+    if (box is! RenderBox || !box.hasSize) return null;
+    return box.globalToLocal(globalPosition);
   }
 
   Widget _buildDrawing(Size mediaSize) {
@@ -327,84 +420,67 @@ class _SignatureDialogState extends State<_SignatureDialog> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Text(
-          'Draw with your pen or mouse anywhere in the pad.',
+          'Sign anywhere on the screen with your pen tablet, finger, or '
+          'mouse — you can start from any spot. Your signature appears in '
+          'the preview below, cropped and centered.',
           style: TextStyle(color: DocuTrackerTokens.textMuted, fontSize: 13),
         ),
-        const SizedBox(height: 8),
-        Container(
+        const SizedBox(height: 10),
+        SizedBox(
           key: const Key('docutracker_signature_pad'),
           height: padHeight,
-          decoration: BoxDecoration(
-            color: Colors.white,
-            border: Border.all(color: DocuTrackerTokens.borderSubtle),
-            borderRadius: BorderRadius.circular(10),
-          ),
-          clipBehavior: Clip.antiAlias,
-          child: GestureDetector(
-            behavior: HitTestBehavior.opaque,
-            dragStartBehavior: DragStartBehavior.down,
-            onPanStart: (details) {
-              if (_error != null) setState(() => _error = null);
-              _strokes.beginStroke(details.localPosition);
-            },
-            onPanUpdate: (details) {
-              _strokes.appendStroke(details.localPosition);
-            },
-            onPanEnd: (_) => _strokes.endStroke(),
-            onPanCancel: _strokes.endStroke,
-            child: RepaintBoundary(
-              child: CustomPaint(
-                painter: _SignaturePadPainter(_strokes),
-                isComplex: true,
-                willChange: true,
-                child: const SizedBox.expand(),
-              ),
+          child: Container(
+            key: const Key('docutracker_signature_preview'),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              border: Border.all(color: DocuTrackerTokens.borderSubtle),
+              borderRadius: BorderRadius.circular(10),
             ),
+            clipBehavior: Clip.antiAlias,
+            child: _hasInk
+                ? RepaintBoundary(
+                    child: CustomPaint(
+                      painter: _SignaturePreviewPainter(_strokes),
+                      isComplex: true,
+                      willChange: true,
+                      child: const SizedBox.expand(),
+                    ),
+                  )
+                : Center(
+                    child: Text(
+                      'Your signature will appear here',
+                      style: TextStyle(
+                        color: DocuTrackerTokens.textMuted.withValues(
+                          alpha: 0.6,
+                        ),
+                        fontSize: 18,
+                        fontStyle: FontStyle.italic,
+                      ),
+                    ),
+                  ),
           ),
         ),
         const SizedBox(height: 10),
-        Wrap(
-          spacing: 4,
-          runSpacing: 0,
-          children: [
-            TextButton.icon(
-              key: const Key('docutracker_signature_undo'),
-              onPressed: _hasInk ? _undoLastStroke : null,
-              icon: const Icon(Icons.undo_rounded),
-              label: const Text('Undo Last Stroke'),
-            ),
-            TextButton.icon(
-              key: const Key('docutracker_signature_clear'),
-              onPressed: _hasInk ? _clearDrawing : null,
-              icon: const Icon(Icons.refresh_rounded),
-              label: const Text('Clear'),
-            ),
-          ],
-        ),
-        const SizedBox(height: 8),
-        Text(
-          'Preview (cropped & centered)',
-          style: TextStyle(
-            color: DocuTrackerTokens.textMuted,
-            fontSize: 12,
-            fontWeight: FontWeight.w600,
-          ),
-        ),
-        const SizedBox(height: 6),
-        Container(
-          key: const Key('docutracker_signature_preview'),
-          height: 96,
-          decoration: BoxDecoration(
-            color: const Color(0xFFF3F4F6),
-            border: Border.all(color: DocuTrackerTokens.borderSubtle),
-            borderRadius: BorderRadius.circular(10),
-          ),
-          clipBehavior: Clip.antiAlias,
-          child: RepaintBoundary(
-            child: CustomPaint(
-              painter: _SignaturePreviewPainter(_strokes),
-              child: const SizedBox.expand(),
-            ),
+        Align(
+          alignment: Alignment.center,
+          child: Wrap(
+            key: _padToolsKey,
+            spacing: 4,
+            runSpacing: 0,
+            children: [
+              TextButton.icon(
+                key: const Key('docutracker_signature_undo'),
+                onPressed: _hasInk ? _undoLastStroke : null,
+                icon: const Icon(Icons.undo_rounded),
+                label: const Text('Undo Last Stroke'),
+              ),
+              TextButton.icon(
+                key: const Key('docutracker_signature_clear'),
+                onPressed: _hasInk ? _clearDrawing : null,
+                icon: const Icon(Icons.refresh_rounded),
+                label: const Text('Clear'),
+              ),
+            ],
           ),
         ),
       ],
@@ -489,24 +565,28 @@ class _SignatureDialogState extends State<_SignatureDialog> {
   }
 }
 
-class _SignaturePadPainter extends CustomPainter {
-  _SignaturePadPainter(this.controller) : super(repaint: controller);
+/// Claims pointers that land in the signing zone on touch-down so the enclosing
+/// dialog scroll view can never win the gesture arena while the user is
+/// signing. Pointers outside the zone are ignored and reach buttons normally.
+class _SignaturePanRecognizer extends PanGestureRecognizer {
+  _SignaturePanRecognizer({super.debugOwner});
 
-  final DocuTrackerSignatureStrokeController controller;
+  bool Function(Offset globalPosition)? canCapture;
 
   @override
-  void paint(Canvas canvas, Size size) {
-    paintDocuTrackerSignatureInk(canvas, controller.points);
+  bool isPointerAllowed(PointerEvent event) =>
+      super.isPointerAllowed(event) &&
+      (canCapture?.call(event.position) ?? false);
+
+  @override
+  void addAllowedPointer(PointerDownEvent event) {
+    super.addAllowedPointer(event);
+    resolve(GestureDisposition.accepted);
   }
-
-  @override
-  bool shouldRepaint(covariant _SignaturePadPainter oldDelegate) =>
-      oldDelegate.controller != controller;
 }
 
 class _SignaturePreviewPainter extends CustomPainter {
-  _SignaturePreviewPainter(this.controller)
-    : super(repaint: controller.previewListenable);
+  _SignaturePreviewPainter(this.controller) : super(repaint: controller);
 
   final DocuTrackerSignatureStrokeController controller;
 

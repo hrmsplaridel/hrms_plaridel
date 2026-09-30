@@ -1,0 +1,1412 @@
+---
+description: Project-specific development rules for the DocuTracker module in HRMS Plaridel
+globs:
+  - "frontend/lib/features/docutracker/**"
+  - "frontend/test/docutracker/**"
+  - "backend/src/routes/docutracker.js"
+  - "backend/src/services/docutracker*.js"
+  - "backend/test/docutracker*.test.js"
+  - "backend/scripts/migrations/docutracker/**"
+alwaysApply: false
+---
+
+# DocuTracker Project Rules
+
+These rules are specific to the **DocuTracker module of HRMS Plaridel**.
+
+They supplement the repository's universal development rules.
+
+If a general rule and a verified DocuTracker-specific convention differ, preserve the existing DocuTracker architecture and behavior unless the task explicitly requires changing it.
+
+Do not guess DocuTracker behavior when the repository can answer the question.
+
+---
+
+# 1. PROJECT IDENTITY
+
+DocuTracker is a document creation, routing, tracking, approval, and e-signature module inside the HRMS Plaridel application.
+
+It is NOT a standalone application.
+
+Major responsibilities include:
+
+- creating native documents
+- routing documents through versioned multi-step workflows
+- approving, forwarding, rejecting, and returning documents
+- tracking document status and routing history
+- document deadlines and escalation
+- document attachments
+- document builder using Quill Delta
+- electronic signatures
+- signature libraries
+- source-module document viewing
+- source-form signatures
+- DocuTracker notifications
+- department review queues
+- workflow administration
+- permission administration
+- escalation configuration
+- governance auditing
+- official signatories
+
+Do not introduce behavior that conflicts with the existing HRMS application.
+
+---
+
+# 2. VERIFIED TECHNOLOGY STACK
+
+Frontend:
+
+- Flutter
+- Dart
+- Provider
+- ChangeNotifier
+- Dio
+- flutter_secure_storage
+- flutter_quill
+- pdf / printing
+- file_picker
+- path_provider
+- url_launcher
+
+Backend:
+
+- Node.js
+- Express
+- PostgreSQL
+- pg
+- multer
+- jsonwebtoken
+- uuid
+
+DocuTracker does NOT currently use:
+
+- BLoC
+- Riverpod
+- GetX
+- GoRouter
+- AutoRoute
+- generated JSON serialization
+- Clean Architecture use-case classes
+
+Do not introduce a second state-management, routing, HTTP, serialization, or architectural framework unless explicitly requested.
+
+---
+
+# 3. AUTHORITATIVE ARCHITECTURE
+
+The normal DocuTracker flow is:
+
+Flutter UI
+→ DocuTrackerProvider / local screen state
+→ DocuTrackerWorkflowService when applicable
+→ DocuTrackerRepository
+→ /api/docutracker
+→ Express routes
+→ DocuTracker backend services
+→ PostgreSQL
+
+The BACKEND is authoritative for:
+
+- permissions
+- workflow transitions
+- workflow assignments
+- document visibility
+- status changes
+- current workflow step
+- current holder
+- deadlines
+- escalation
+- history
+- signatures
+- authoritative document state
+
+Flutter permission and visibility logic exists primarily for UX.
+
+Client-side checks MUST NOT be treated as security enforcement.
+
+Never implement authoritative workflow behavior only in Flutter.
+
+---
+
+# 4. IMPORTANT PROJECT FILES
+
+Before changing DocuTracker behavior, inspect the files relevant to the task.
+
+## Core frontend
+
+- `frontend/lib/features/docutracker/data/repositories/docutracker_repository.dart`
+- `frontend/lib/features/docutracker/data/providers/docutracker_provider.dart`
+- `frontend/lib/features/docutracker/data/dto/docutracker_api_result.dart`
+- `frontend/lib/features/docutracker/models/`
+- `frontend/lib/features/docutracker/services/`
+- `frontend/lib/features/docutracker/theme/docutracker_tokens.dart`
+- `frontend/lib/features/docutracker/data/styles/docutracker_styles.dart`
+
+## API documentation
+
+- `frontend/lib/features/docutracker/data/DOCUTRACKER_API.md`
+- `frontend/lib/features/docutracker/data/DOCUTRACKER_SCHEMA.md`
+
+Treat documentation as supporting information.
+
+When documentation conflicts with executable backend code or current schema, investigate the discrepancy instead of blindly following the documentation.
+
+## Backend
+
+- `backend/src/routes/docutracker.js`
+- `backend/src/services/docutrackerWorkflowService.js`
+- `backend/src/services/docutrackerDocumentBuilderService.js`
+- `backend/src/services/docutrackerLeaveSignatureService.js`
+- `backend/src/services/docutrackerRspSignatureService.js`
+- `backend/src/services/docutrackerSourceDocumentService.js`
+- `backend/src/services/docutrackerPermissionAdminService.js`
+- `backend/src/services/docutrackerGovernanceAudit.js`
+- `backend/src/services/docutrackerEscalationWorker.js`
+- `backend/src/services/docutrackerStatusSemantics.js`
+
+## Database
+
+- `backend/scripts/init-schema.sql`
+- `backend/scripts/migrations/docutracker/`
+- `backend/scripts/build-docutracker-all.js`
+
+---
+
+# 5. DOCUMENT MODEL
+
+The primary frontend model is:
+
+`DocuTrackerDocument`
+
+in:
+
+`frontend/lib/features/docutracker/models/document.dart`
+
+Follow its existing conventions:
+
+- immutable values where appropriate
+- `const` constructors
+- `factory fromJson`
+- safe nullable parsing
+- snake_case backend keys
+- `toJson`
+- `copyWith`
+
+Do not create duplicate document models unless technically necessary and explicitly justified.
+
+Do not invent document fields.
+
+Verify fields against:
+
+1. backend response
+2. database schema
+3. existing Dart model
+4. API documentation
+
+in that order when resolving actual runtime behavior.
+
+---
+
+# 6. DOCUMENT STATUSES
+
+The authoritative stored document statuses are:
+
+- `pending`
+- `in_review`
+- `approved`
+- `rejected`
+- `returned`
+- `overdue`
+- `escalated`
+- `cancelled`
+
+Do NOT invent new stored statuses without explicit requirements and matching backend/database changes.
+
+In particular:
+
+- `draft` is NOT a stored database status.
+- `forwarded` is NOT a stored database status.
+- `archived` is NOT currently an implemented native document status.
+
+A draft/WIP document is represented by approximately:
+
+- `status = pending`
+- no current holder
+- no active/current workflow step
+- no sent time
+
+Use the existing draft/WIP helpers instead of recreating this logic.
+
+Use:
+
+- `DocumentStatus`
+- `documentStatusFromString`
+- `docuTrackerStatusForDisplay`
+- `DocuTrackerWorkflowPhase`
+
+where appropriate.
+
+Do not create independent status interpretation logic without checking these first.
+
+---
+
+# 7. WORKFLOW ACTIONS
+
+The existing native workflow actions are:
+
+- `submit`
+- `forward`
+- `approve`
+- `reject`
+- `return`
+
+Do not invent workflow actions without explicit requirements.
+
+The general lifecycle is:
+
+Create
+→ Draft/WIP
+→ Submit
+→ In Review
+
+From an active review state:
+
+- forward → next enabled workflow step
+- approve → next enabled step OR terminal approved state
+- reject → terminal rejected state
+- return → previous enabled workflow step
+
+Escalation may produce:
+
+- `escalated`
+- `overdue`
+- `needs_admin_intervention`
+
+Do not assume cancellation or archiving workflows exist for native documents.
+
+---
+
+# 8. WORKFLOW TRANSITIONS ARE SERVER CONTROLLED
+
+All normal document status, workflow step, and holder transitions MUST use the existing transition mechanism:
+
+`POST /api/docutracker/documents/:id/transition`
+
+and the backend:
+
+`transitionDocument()`
+
+Administrative assignment recovery uses the existing admin PATCH behavior.
+
+Never implement workflow transitions using:
+
+- metadata PUT
+- direct frontend state mutation
+- direct SQL from unrelated code
+- manual history insertion from Flutter
+- independent status-update endpoints
+
+Do not bypass `transitionDocument()` merely because changing the document row directly appears simpler.
+
+---
+
+# 9. TRANSITION TRANSACTION SAFETY
+
+Backend workflow transitions currently rely on database transactions.
+
+Preserve:
+
+- `BEGIN`
+- `SELECT ... FOR UPDATE`
+- validation
+- permission checks
+- document update
+- routing updates
+- routing-assignee snapshots
+- history creation
+- notification creation
+- transition request/idempotency handling
+- `COMMIT`
+- `ROLLBACK`
+- client release
+
+Do not move critical transition operations outside the transaction without a verified architectural reason.
+
+A workflow operation must not report success until the authoritative server transaction succeeds.
+
+---
+
+# 10. TRANSITION IDEMPOTENCY
+
+DocuTracker already protects against duplicate workflow actions.
+
+Frontend protections include:
+
+- `_transitionInFlight`
+- state-based idempotency keys
+
+Backend transition requests also participate in idempotency handling.
+
+Preserve these mechanisms.
+
+Any new workflow action must consider:
+
+- rapid double clicks
+- network retries
+- duplicate HTTP requests
+- stale document state
+- repeated transitions
+
+Never remove duplicate-transition protection just to simplify code.
+
+---
+
+# 11. WORKFLOW ASSIGNEES
+
+Workflow actions are NOT granted merely by role.
+
+For:
+
+- approve
+- forward
+- reject
+- return
+
+the actor must be an enabled assignee for the CURRENT workflow step and the action must exist in that assignment's `allowed_actions`.
+
+This rule applies to admins as well.
+
+Do NOT add an automatic "admin can approve everything" bypass unless explicitly required by a new product requirement.
+
+Existing assignee sources include:
+
+- `specific_users`
+- `department_reviewers`
+- `submitter_department_reviewers`
+
+Before modifying assignment behavior, inspect:
+
+- `resolveStepAssignees`
+- workflow-step configuration
+- workflow-step assignees
+- routing-record assignee snapshots
+- database constraints/triggers
+
+---
+
+# 12. PERMISSIONS AND WORKFLOW ACTIONS ARE DIFFERENT
+
+DocuTracker contains TWO related but separate authorization concepts.
+
+## System permissions
+
+Stored through `docutracker_permissions`.
+
+Used for general capabilities such as:
+
+- view
+- create_draft / create
+- submit
+- download
+
+## Workflow assignment permissions
+
+Used for:
+
+- approve
+- forward
+- reject
+- return
+
+These depend on the current workflow-step assignment and `allowed_actions`.
+
+NEVER grant workflow actions merely by adding:
+
+- approve
+- forward
+- reject
+- return
+
+to general system permissions.
+
+Do not merge these two authorization systems without explicit architectural approval.
+
+---
+
+# 13. ROLES
+
+Verified roles include:
+
+- `admin`
+- `hr`
+- `supervisor`
+- `employee`
+
+A `mayor` user role exists in the broader system and is used by DocuTracker primarily for signatory resolution.
+
+Known aliases include:
+
+- `hr_staff` → `hr`
+- `dept_head` → `supervisor`
+
+Do not invent role names.
+
+Do not use placeholder UI labels as authoritative role names.
+
+In particular, labels such as:
+
+- Super Admin
+- Department Manager
+- Standard User
+
+must not automatically be treated as actual backend roles.
+
+Verify role behavior against the backend permission services and database configuration.
+
+---
+
+# 14. DOCUMENT VISIBILITY
+
+Document visibility is relationship-based.
+
+Relevant relationships may include:
+
+- creator
+- current holder
+- current workflow-step assignee
+- past workflow-step assignee
+- signature-field assignee
+- history actor
+- eligible department reviewer
+
+A user-specific `view` denial may override access.
+
+Do NOT assume a role-level wildcard `view` permission means organisation-wide document visibility.
+
+Backend visibility remains authoritative.
+
+---
+
+# 15. KNOWN VISIBILITY RISK
+
+There is currently a known potential mismatch between backend visibility and Flutter visibility.
+
+Relevant frontend code includes:
+
+- `DocuTrackerDocumentVisibility`
+- `DocuTrackerAccessPolicy`
+- `openDocuTrackerDocumentDetail`
+- `docuTrackerRequiredActionDocuments`
+
+Relevant backend logic includes:
+
+- `filterDocumentsViewableByUser`
+- `canUserPerformDocumentAction`
+
+Before changing visibility or fixing an "access denied" issue:
+
+1. inspect backend visibility
+2. inspect Flutter visibility
+3. inspect the actual API response
+4. check whether required viewer fields reached Flutter
+5. distinguish UI filtering from backend authorization
+
+Do not loosen backend authorization merely to fix a frontend visibility bug.
+
+---
+
+# 16. KNOWN DOCUMENT MAPPING RISK
+
+There are currently multiple `mapDocumentRow` implementations.
+
+At least:
+
+- route-level mapping in `backend/src/routes/docutracker.js`
+- service-level mapping in `docutrackerWorkflowService.js`
+
+They are not guaranteed to return identical fields.
+
+Known fields that require particular attention include:
+
+- `viewer_is_routing_assignee`
+- `viewer_participated_in_source`
+- `source_only`
+- `source_status`
+- `source_action`
+- `source_action_label`
+- `originating_department_id`
+
+When adding or changing document response fields:
+
+1. search for ALL `mapDocumentRow` implementations
+2. inspect both route and service mappings
+3. update all required mappings or consolidate safely
+4. update `DocuTrackerDocument.fromJson`
+5. update tests
+
+Do not assume changing one mapper changes all document responses.
+
+---
+
+# 17. PROVIDER RULES
+
+`DocuTrackerProvider` is the primary feature-level `ChangeNotifier`.
+
+Do not introduce another state-management framework.
+
+Preserve authentication-generation protection:
+
+`_authGeneration`
+
+and:
+
+`_isCurrentAuthGeneration()`
+
+Async provider operations that can outlive the current authenticated session must verify that their response still belongs to the current auth generation.
+
+This prevents responses from a previous account from contaminating another user's state.
+
+Preserve valid state on recoverable failures where the existing provider already does so.
+
+---
+
+# 18. FLUTTER ASYNC SAFETY
+
+After asynchronous work in widgets:
+
+- verify `mounted` before using `BuildContext`
+- do not call UI methods after disposal
+- dispose controllers
+- dispose focus nodes
+- dispose streams/subscriptions
+- dispose timers where applicable
+
+Follow existing:
+
+- `context.watch` inside builds
+- `context.read` inside callbacks
+
+Do not move business authorization into widgets.
+
+---
+
+# 19. REPOSITORY CONVENTIONS
+
+Use the existing:
+
+`DocuTrackerRepository`
+
+for DocuTracker API communication.
+
+New repository operations SHOULD use:
+
+`DocuTrackerResult<T>`
+
+with:
+
+- `DocuTrackerSuccess`
+- `DocuTrackerFailure`
+
+Prefer consistent error propagation rather than introducing additional throw/silent-failure patterns.
+
+Do not call `/api/docutracker` directly from UI widgets when an appropriate repository abstraction exists.
+
+Before creating a repository method, search for an existing equivalent.
+
+---
+
+# 20. BACKEND ERROR CONTRACT
+
+Backend errors normally use:
+
+`{ "error": "message" }`
+
+Existing service errors map approximately to:
+
+- validation → 400
+- forbidden → 403
+- not found → 404
+- conflict → 409
+- unavailable → 503
+- unexpected → 500
+
+Preserve safe user-facing errors.
+
+Never expose:
+
+- SQL internals
+- database connection information
+- physical file paths
+- stack traces
+- tokens
+- secrets
+- password hashes
+
+to normal clients.
+
+---
+
+# 21. DOCUMENT HISTORY
+
+`docutracker_document_history` is the authoritative document event history.
+
+Known history actions include:
+
+- `created`
+- `submitted`
+- `forwarded`
+- `approved`
+- `rejected`
+- `returned`
+- `metadata_updated`
+- `remark`
+- `escalated`
+- `overdue`
+- `assigned`
+- `signed`
+
+Do not invent history action values without matching database/backend changes.
+
+Client-created history is prohibited.
+
+`POST /documents/:id/history` must remain non-writable unless the architecture is explicitly redesigned.
+
+Do not update or delete history records as part of normal feature implementation.
+
+Workflow transitions should create history through the authoritative backend operation.
+
+---
+
+# 22. GOVERNANCE AUDIT
+
+Governance changes use:
+
+`docutracker_governance_audit`
+
+and the existing governance audit service.
+
+Permission, assignment, and signature-related administrative changes may require before/after audit information.
+
+Before modifying administrative operations, inspect whether governance auditing is expected.
+
+Never silently remove governance audit writes.
+
+---
+
+# 23. NOTIFICATIONS
+
+DocuTracker workflow notifications belong to:
+
+`docutracker_notifications`
+
+Do NOT insert normal DocuTracker workflow events into:
+
+`user_notifications`
+
+unless the existing architecture explicitly requires a global notification category.
+
+Known DocuTracker notification types include:
+
+- `assigned`
+- `deadline_near`
+- `overdue`
+- `escalated`
+- `returned`
+- `rejected`
+
+Do not invent notification types without checking database constraints and consumers.
+
+Preserve notification deduplication and event keys.
+
+Form e-signature notifications may use the broader application's:
+
+`form_signature`
+
+category.
+
+---
+
+# 24. DEADLINES AND ESCALATION
+
+Deadlines are authoritative on the backend.
+
+Step deadlines use existing workflow configuration and deadline-hour behavior.
+
+Flutter may derive a display state such as overdue, but it must not become the authority for changing persisted workflow status.
+
+Before changing escalation behavior inspect:
+
+- `docutrackerEscalationWorker.js`
+- escalation configs
+- workflow assignees
+- current holder behavior
+- `needs_admin_intervention`
+- history writes
+- notification writes
+
+KNOWN RISK:
+
+An escalation may assign `current_holder_id` to a role-resolved user without making that user a current-step workflow assignee.
+
+Because workflow actions require current-step assignment, an escalated holder may be able to view a document but not act on it.
+
+Do not "fix" this by bypassing assignment authorization.
+
+Investigate the intended escalation semantics first.
+
+---
+
+# 25. DOCUMENT NUMBERS
+
+The database is authoritative for native document-number generation.
+
+Current database-generated format:
+
+`DOC-YYYY-NNNNNN`
+
+Do not generate document numbers independently in Flutter.
+
+A legacy `/next-document-number` endpoint may use a conflicting four-digit format.
+
+Do not use that endpoint for new functionality without reconciling it with the database trigger.
+
+---
+
+# 26. ATTACHMENTS
+
+Native DocuTracker currently uses a single active attachment reference per document through:
+
+- `file_path`
+- `file_name`
+
+Do not assume arbitrary multi-file support.
+
+Current attachment constraints include:
+
+- PDF
+- JPG
+- JPEG
+- PNG
+- maximum 10 MB
+
+Do not widen supported types or size limits only on the frontend.
+
+Any constraint change must be consistent with backend upload validation.
+
+Never expose physical server file paths.
+
+Attachment access must respect backend permission checks.
+
+---
+
+# 27. SIGNATURES
+
+DocuTracker includes multiple signature systems:
+
+- native document builder signatures
+- DTR leave signatures
+- RSP signatures
+- L&D signatures
+- signature assets/library
+
+Do not assume these systems are interchangeable.
+
+Before changing signature behavior inspect the relevant service.
+
+Signer authorization must be decided server-side.
+
+Never trust a frontend `can_sign` value as authoritative authorization.
+
+Saved signature assets are private to their owners unless existing backend behavior explicitly says otherwise.
+
+---
+
+# 28. SOURCE DOCUMENTS
+
+Some DocuTracker entries represent records from other HRMS modules rather than native DocuTracker documents.
+
+Known source integrations include:
+
+- DTR leave requests
+- L&D training reports
+- RSP recruitment applications
+
+Source items may be read-only or may expose specific signing actions.
+
+Do not apply native document workflow assumptions to source records.
+
+Check:
+
+- source module
+- source table
+- source record ID
+- source status
+- source action
+- source action label
+- source-only behavior
+
+before changing source functionality.
+
+---
+
+# 29. DATABASE MIGRATION SAFETY
+
+DocuTracker schema changes require special care.
+
+When changing a DocuTracker migration:
+
+1. inspect existing migrations
+2. inspect `backend/scripts/init-schema.sql`
+3. ensure fresh installs receive the final schema
+4. update migration rollups when required
+5. preserve backward compatibility where required
+6. test both upgrade and fresh-install assumptions when possible
+
+If a migration is included in the DocuTracker rollup list, regenerate the rollup using:
+
+`backend/scripts/build-docutracker-all.js`
+
+Do not assume migration-only schema changes are enough.
+
+---
+
+# 30. KNOWN SCHEMA DRIFT
+
+Known schema inconsistencies currently exist.
+
+Pay particular attention to:
+
+`docutracker_notifications`
+
+The fresh-install schema may not contain fields expected by later code/migrations, including:
+
+- `read_at`
+- `channel`
+- `delivery_status`
+- `sent_at`
+- `failed_at`
+- `failure_reason`
+
+Also:
+
+`docutracker_document_files`
+
+may exist through migrations but not the fresh-install schema.
+
+Before editing related functionality:
+
+- compare migrations
+- compare init-schema
+- compare runtime queries
+- identify the intended final schema
+
+Do not silently work around schema drift only in Flutter.
+
+---
+
+# 31. SEARCH AND PAGINATION
+
+Backend document search supports more functionality than the Flutter client currently uses.
+
+Do not assume the current client search represents all backend capabilities.
+
+KNOWN RISK:
+
+Backend pagination may apply SQL LIMIT/OFFSET before relationship-based visibility filtering for non-admin users.
+
+This can cause visible documents to be omitted.
+
+Before modifying pagination:
+
+- inspect SQL query order
+- inspect relationship filtering
+- inspect source-row merging
+- inspect final slicing
+- test non-admin users
+
+Do not solve missing results merely by increasing the frontend limit.
+
+---
+
+# 32. UI AND DESIGN SYSTEM
+
+Prefer existing DocuTracker components before creating new ones.
+
+Primary styling:
+
+`DocuTrackerTokens`
+
+Older screens may use:
+
+`DocuTrackerStyles`
+
+When modifying an existing screen, follow its established style unless intentionally migrating it.
+
+Reuse components such as:
+
+- `DocuTrackerStatusBadge`
+- `DocuTrackerErrorBanner`
+- `DocuTrackerEmptyState`
+- `DocuTrackerModuleHeader`
+- `DocuTrackerSectionHeader`
+- `DocuTrackerSummaryCard`
+- `DocuTrackerDocumentSummaryHeader`
+- `DocuTrackerDetailSectionCard`
+- `DocuTrackerDetailActionBanner`
+- `DocuTrackerDetailTag`
+- `DocuTrackerWarmFilterChip`
+- `DocuTrackerWarmSurfaceCard`
+- `DocuTrackerCreateFab`
+- `DocuTrackerUtilityIconButton`
+- `DocuTrackerResponsiveBody`
+- `DocuTrackerSlideInPanel`
+- `DocuTrackerPressScale`
+- `DocumentCountdownTimer`
+
+Search for an existing reusable widget before creating another one.
+
+---
+
+# 33. RESPONSIVE DESIGN
+
+The important DocuTracker mobile breakpoint is approximately:
+
+`600px`
+
+Maximum content width is approximately:
+
+`1680px`
+
+Admin functionality is primarily desktop-oriented.
+
+Do not make an admin surface available on mobile merely by removing a frontend check.
+
+Check:
+
+- `DocuTrackerAccessPolicy`
+- dashboard hosting behavior
+- responsive widgets
+- backend authorization
+
+before changing device-specific access.
+
+Preserve platform-specific attachment opening through existing conditional imports.
+
+---
+
+# 34. DATE AND TIME
+
+Backend timestamps use PostgreSQL timezone-aware timestamps.
+
+Business-date behavior uses the HRMS timezone strategy, including:
+
+`todayInHrmsTimezone()`
+
+with a default of:
+
+`Asia/Manila`
+
+where currently implemented.
+
+Do not use frontend device time as the authority for workflow transitions, deadlines, or escalation.
+
+Frontend `toLocal()` is primarily for display.
+
+Do not introduce formatted strings as authoritative timestamp values.
+
+---
+
+# 35. LEGACY AND UNUSED CODE
+
+The project contains known legacy, placeholder, duplicate, and possibly unused code.
+
+Examples include:
+
+- `MobileEmployeePortal`
+- old step-assignee editor
+- setup-permissions screen
+- unused `ResponsiveLayout`
+- `/next-document-number`
+- `/documents-overdue`
+- `getDocumentBundle`
+- placeholder admin role hierarchy
+- placeholder pagination
+- legacy model `tableName` constants
+- deprecated `terracotta*` styling aliases
+- older API documentation sections
+
+Do NOT automatically delete these merely because they appear unused.
+
+Before modifying or deleting suspected legacy code:
+
+1. search all references
+2. check tests
+3. check dynamic/navigation usage
+4. check backend consumers
+5. verify the requested task actually requires removal
+
+---
+
+# 36. KNOWN DUPLICATION
+
+Known duplication includes:
+
+- multiple `mapDocumentRow` implementations
+- `normalizeStatus` / `normalizeDocStatus`
+- differing `GENERAL_PERMISSION_ACTIONS`
+- duplicate `insertNotificationIfNotRecent`
+- `DocuTrackerStyles` and `DocuTrackerTokens`
+- repeated private date formatters
+- overlapping frontend visibility helpers
+
+Do not create a third implementation.
+
+If the requested task touches duplicated behavior:
+
+1. identify all implementations
+2. determine which consumers use each
+3. keep behavior synchronized
+4. consolidate only if safe and within scope
+
+Do not perform broad cleanup during an unrelated feature request.
+
+---
+
+# 37. TESTING
+
+Existing frontend tests are under:
+
+`frontend/test/docutracker/`
+
+Existing backend tests are under:
+
+`backend/test/`
+
+Use existing testing conventions.
+
+Frontend tests use hand-written fakes rather than introducing a new mocking library.
+
+When changing behavior, prioritize tests for:
+
+- workflow transitions
+- idempotency
+- permissions
+- visibility
+- status parsing
+- document parsing
+- repository errors
+- workflow configuration
+- signatures
+- navigation
+- document builder
+- permission editor
+- workflow editor
+
+When touching known-risk areas, add regression tests where practical.
+
+Important currently under-tested areas include:
+
+- escalation worker
+- governance audit
+- attachments
+- provider behavior
+- document visibility
+- access policy
+- required-action filtering
+- detail permission gating
+- dashboard behavior
+- document mapper field preservation
+
+---
+
+# 38. DEVELOPMENT CHECKS
+
+For Flutter changes, use the relevant checks when available:
+
+`dart format`
+
+`flutter analyze`
+
+`flutter test`
+
+For DocuTracker-specific frontend tests:
+
+`flutter test test/docutracker/`
+
+For backend DocuTracker tests:
+
+`node --test test/docutracker*.test.js`
+
+Run commands from the appropriate frontend/backend directory.
+
+Never claim a command passed unless it was actually executed successfully.
+
+If commands cannot be run, state that clearly.
+
+Distinguish:
+
+- failures caused by the change
+- pre-existing failures
+- checks that were not run
+
+---
+
+# 39. SECURITY RULES
+
+Never weaken backend authorization to solve a frontend UX issue.
+
+Never:
+
+- trust role strings from UI input
+- trust client-side permission results as authority
+- trust client-side signature permission
+- expose server file paths
+- expose SQL errors
+- expose JWTs
+- expose refresh tokens
+- expose passwords
+- expose password hashes
+- copy seeded credentials into documentation or responses
+- allow arbitrary history insertion
+- bypass workflow assignments
+- bypass current-step validation
+
+Authorization must remain resource-specific and server-enforced.
+
+---
+
+# 40. VERIFY BEFORE CHANGING WORKFLOW
+
+Before modifying workflow behavior inspect:
+
+- `TRANSITION_ALLOWED_FROM`
+- `isDraftOrWipDocument`
+- `transitionDocument`
+- `resolveStepAssignees`
+- workflow-step configuration
+- workflow-step assignments
+- routing records
+- routing-record assignee snapshots
+- database workflow constraints
+- history writes
+- notification writes
+- transition idempotency
+
+Do not modify workflow from one file in isolation.
+
+---
+
+# 41. VERIFY BEFORE CHANGING PERMISSIONS
+
+Before changing permissions inspect:
+
+- `canUserPerformDocumentAction`
+- `canUserPerformWorkflowAction`
+- `filterDocumentsViewableByUser`
+- `hasPermission`
+- `docutrackerPermissionAdminService.js`
+- canonical roles
+- role aliases
+- baseline permission seeds
+- frontend permission evaluator
+- frontend visibility helpers
+
+Never infer backend authorization solely from whether a button is visible.
+
+---
+
+# 42. VERIFY BEFORE CHANGING DATABASE CODE
+
+Before schema work inspect:
+
+- current table definition in `init-schema.sql`
+- all relevant DocuTracker migrations
+- backend queries
+- Dart models
+- API response mapping
+- tests
+- migration rollup configuration
+
+Pay special attention to existing migration/init-schema drift.
+
+Never invent a table or column because a feature "probably needs it."
+
+---
+
+# 43. VERIFY BEFORE CHANGING UI
+
+Before building a new screen/widget:
+
+1. search existing DocuTracker presentation code
+2. search shared DocuTracker widgets
+3. inspect `DocuTrackerTokens`
+4. inspect `DocuTrackerStyles`
+5. inspect responsive behavior
+6. check whether an older implementation already exists
+7. verify backend capability already exists if the UI depends on it
+
+Do not create fake frontend functionality for backend behavior that does not exist.
+
+---
+
+# 44. VERIFY BEFORE CHANGING SOURCE OR SIGNATURE FEATURES
+
+Before changing source documents or signatures inspect the relevant implementation:
+
+- document builder service
+- leave signature service
+- RSP signature service
+- L&D usage
+- source document service
+- signature assets
+- assignment-source semantics
+- authenticated signer validation
+
+Do not assume all e-signature flows share identical rules.
+
+---
+
+# 45. AI AGENT BEHAVIOR FOR DOCUTRACKER
+
+When given a DocuTracker task:
+
+1. Identify the affected feature.
+2. Search the repository before proposing changes.
+3. Trace UI → provider/state → repository → route → backend service → database.
+4. Identify authoritative backend behavior.
+5. Check roles and permissions.
+6. Check workflow implications.
+7. Check history/audit implications.
+8. Check notifications.
+9. Check API response mapping.
+10. Check migrations/init-schema if data changes.
+11. Check existing tests.
+12. Make the smallest safe change.
+13. Format modified Dart code.
+14. Run relevant analysis/tests when available.
+15. Review the final diff for unrelated changes.
+
+Do not begin by rewriting architecture.
+
+Do not create abstractions merely because they would be cleaner in a new project.
+
+Preserve existing behavior unless the request explicitly changes it.
+
+---
+
+# 46. BUG-FIXING PRIORITY
+
+When debugging DocuTracker, identify the layer containing the root cause.
+
+For example:
+
+UI appears wrong
+→ verify API response
+→ verify response mapper
+→ verify repository parsing
+→ verify provider state
+→ verify backend permission/workflow behavior
+→ verify database state
+
+Do not compensate for a backend response bug with fabricated frontend state.
+
+Do not compensate for a frontend filtering bug by weakening backend permissions.
+
+Fix the root cause at the correct layer.
+
+---
+
+# 47. CURRENT KNOWN RISKS
+
+Treat these as investigation flags, NOT automatic change requests:
+
+1. Route-level document mapping may drop fields required by Flutter visibility and required-action logic.
+2. Flutter visibility may be narrower than backend visibility.
+3. Department-review queue items may fail client-side access checks for legitimate reviewers.
+4. Escalation recipients may become holders without becoming actionable current-step assignees.
+5. Fresh database notification schema may be missing columns expected by mark-read operations.
+6. `docutracker_document_files` may not be represented in fresh-install schema.
+7. Backend pagination may occur before non-admin relationship filtering.
+8. Legacy document-number endpoint conflicts with database-generated numbering.
+9. API documentation contains some outdated PostgREST/Supabase-era information.
+10. Multiple duplicated helpers can drift independently.
+
+Do not silently fix these during unrelated tasks.
+
+If one directly affects the requested task:
+
+- verify it
+- explain the root cause
+- make the smallest safe correction
+- add/update tests where practical
+
+---
+
+# 48. DO NOT INVENT
+
+Never invent DocuTracker:
+
+- roles
+- permissions
+- statuses
+- workflow actions
+- workflow transitions
+- document types
+- API endpoints
+- database tables
+- database columns
+- notification types
+- history actions
+- assignment sources
+- signature rules
+- source modules
+- attachment rules
+- deadline behavior
+- escalation behavior
+
+If required behavior cannot be determined from the repository or supplied requirements, ask for clarification.
+
+---
+
+# 49. FINAL CHANGE REPORT
+
+After completing a DocuTracker development task, report:
+
+### Request / Root Cause
+What was requested or what caused the issue.
+
+### Files Changed
+Exact files modified.
+
+### Implementation
+What changed and why.
+
+### Workflow Impact
+Whether workflow behavior changed.
+
+### API Impact
+Endpoints/contracts affected.
+
+### Database Impact
+Schema/migration impact.
+
+### Permission & Security Impact
+Authorization or visibility implications.
+
+### History / Notification Impact
+Any audit, history, or notification changes.
+
+### Validation
+What was actually run:
+
+- formatting
+- analysis
+- frontend tests
+- backend tests
+- manual checks
+
+### Remaining Risks
+Anything not verified or intentionally left unchanged.
+
+Never claim successful testing when tests were not run.

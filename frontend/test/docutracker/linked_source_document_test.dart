@@ -6,6 +6,7 @@ import 'package:hrms_plaridel/features/docutracker/data/providers/docutracker_pr
 import 'package:hrms_plaridel/features/docutracker/models/document.dart';
 import 'package:hrms_plaridel/features/docutracker/models/linked_source_document.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/pages/docutracker_linked_source_document_screen.dart';
+import 'package:hrms_plaridel/features/docutracker/utils/docutracker_source_status_text.dart';
 
 class _LinkedSourceProvider extends DocuTrackerProvider {
   @override
@@ -65,6 +66,21 @@ void main() {
     expect(source.printData, isEmpty);
   });
 
+  test('L&D and RSP statuses use module wording', () {
+    final ld = docuTrackerLinkedSourceStatusText(
+      sourceModule: 'ld',
+      status: 'needs_revision',
+    );
+    expect(ld.label, 'Needs revision');
+    expect(ld.description, 'L&D asked the employee to revise this report.');
+
+    final rsp = docuTrackerLinkedSourceStatusText(
+      sourceModule: 'rsp',
+      status: 'registered',
+    );
+    expect(rsp.label, 'Hired');
+  });
+
   for (final width in [360.0, 768.0, 1440.0]) {
     testWidgets('RSP linked document fits at $width', (tester) async {
       tester.view.physicalSize = Size(width, 900);
@@ -94,6 +110,14 @@ void main() {
 
       expect(find.text('RECRUITMENT, SELECTION AND PLACEMENT'), findsOneWidget);
       expect(find.text('Juan Dela Cruz'), findsOneWidget);
+      expect(find.text('Status: Application Submitted'), findsOneWidget);
+      expect(
+        find.text(
+          'The application is waiting for HR to review the submitted '
+          'documents.',
+        ),
+        findsOneWidget,
+      );
       expect(
         find.byKey(const ValueKey('docutracker-print-source-document')),
         findsOneWidget,
