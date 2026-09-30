@@ -16,8 +16,8 @@ const {
   isDepartmentHead,
 } = require('../services/departmentHeadService');
 const {
-  replaceRequestReviewerSnapshot,
-} = require('../services/departmentReviewerService');
+  snapshotLocatorReviewers,
+} = require('../services/locatorSignatureService');
 const locatorNotifications = require('../services/locatorNotifications');
 const {
   recordLocatorAttachmentAccess,
@@ -795,7 +795,7 @@ const locatorSubmissionService = createLocatorSubmissionService({
   notifyAfterSubmit: locatorNotifications.notifyAfterSubmit,
   broadcastSubmitted: (row) => broadcastLocatorUpdated('submitted', row),
   recordHistory: recordLocatorWorkflowEvent,
-  snapshotReviewers: replaceRequestReviewerSnapshot,
+  snapshotReviewers: snapshotLocatorReviewers,
   assertSubmissionReviewer: (db, applicantId) => assertLeaveSubmissionReviewer(db, applicantId, 'locator'),
 });
 
@@ -1696,7 +1696,7 @@ router.patch('/:id/resubmit', protect, async (req, res) => {
         departmentHeadUserId,
       ]
     );
-    await replaceRequestReviewerSnapshot(client, {
+    await snapshotLocatorReviewers(client, {
       requestType: 'locator',
       requestId: id,
       departmentId: reviewSnapshot?.departmentId || null,

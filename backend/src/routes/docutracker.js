@@ -46,6 +46,7 @@ const {
   signLeaveSourceDepartmentHead,
   signLeaveSourceHrApprover,
 } = require('../services/docutrackerLeaveSignatureService');
+const { getLocatorSourceSignatures, signLocatorSourceSlot } = require('../services/locatorSignatureService');
 const {
   getSourceSignatures,
   listRspSignatureRequests,
@@ -642,7 +643,8 @@ router.get(
     try {
       const load = ['rsp', 'ld'].includes(req.params.sourceModule)
         ? getSourceSignatures
-        : getLeaveSourceSignatures;
+        : req.params.sourceModule === 'dtr' && req.params.sourceTable === 'locator_slips'
+          ? getLocatorSourceSignatures : getLeaveSourceSignatures;
       res.json(
         await load(
           pool,
@@ -748,6 +750,20 @@ router.post(
       ));
     } catch (err) {
       console.error('[docutracker POST L&D source signature]', err);
+      const mapped = mapWorkflowServiceError(err);
+      res.status(mapped.status).json({ error: mapped.error });
+    }
+  }
+);
+
+router.post(
+  '/sources/dtr/locator_slips/:sourceRecordId/signatures/:slotKey/sign',
+  protect,
+  async (req, res) => {
+    try {
+      res.json(await signLocatorSourceSlot(pool, req.user, 'dtr', 'locator_slips',
+        req.params.sourceRecordId, req.params.slotKey, req.body || {}));
+    } catch (err) {
       const mapped = mapWorkflowServiceError(err);
       res.status(mapped.status).json({ error: mapped.error });
     }
