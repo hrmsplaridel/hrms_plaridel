@@ -634,7 +634,7 @@ class _DesignationDialogState extends State<_DesignationDialog> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            if (_loading) const LinearProgressIndicator(),
+            if (_loading) const SettingsDetailsSkeleton(),
             if (_error != null)
               Text(
                 _error!,

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:hrms_plaridel/shared/widgets/workforce_loading_skeleton.dart';
 
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/shared/widgets/request_filters_bar.dart';
@@ -564,7 +565,10 @@ class _AdminLeaveRequestQueuePanelState
               (widget.loading ||
                   (!widget.initialLoadComplete &&
                       !widget.initialLoadAttempted)))
-            const AdminLeaveCenteredState(message: 'Loading leave requests...')
+            const WorkforceRowsSkeleton(
+              columns: [2, 2, 1, 1],
+              label: 'Loading leave requests',
+            )
           else if (widget.requests.isEmpty && !widget.initialLoadComplete)
             Center(
               child: Column(

@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
+import 'package:hrms_plaridel/shared/widgets/workforce_loading_skeleton.dart';
 import 'package:provider/provider.dart';
 
 import 'package:hrms_plaridel/core/api/client.dart';
@@ -260,7 +261,12 @@ class _AdminLocatorManagementScreenState
                     child: Center(
                       child: Semantics(
                         label: 'Loading locator requests',
-                        child: const CircularProgressIndicator(),
+                        child: const SingleChildScrollView(
+                          child: WorkforceRowsSkeleton(
+                            columns: [2, 2, 1],
+                            rows: 3,
+                          ),
+                        ),
                       ),
                     ),
                   ),
@@ -296,7 +302,12 @@ class _AdminLocatorManagementScreenState
                                 child: Center(
                                   child: Semantics(
                                     label: 'Refreshing locator requests',
-                                    child: const CircularProgressIndicator(),
+                                    child: const SingleChildScrollView(
+                                      child: WorkforceRowsSkeleton(
+                                        columns: [2, 2, 1],
+                                        rows: 3,
+                                      ),
+                                    ),
                                   ),
                                 ),
                               ),

@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hrms_plaridel/core/api/client.dart';
 import 'package:hrms_plaridel/features/dtr/management/holidays/pages/manage_holiday.dart';
+import 'package:hrms_plaridel/shared/widgets/workforce_loading_skeleton.dart';
 
 void main() {
   final requests = <RequestOptions>[];
@@ -55,6 +56,7 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 20));
     expect(requests, hasLength(1));
+    expect(find.byType(WorkforceRowsSkeleton), findsOneWidget);
   }
 
   void respond(int index, String name) {
@@ -88,6 +90,7 @@ void main() {
     respond(1, 'Newest holiday');
     await tester.pumpAndSettle();
     expect(find.text('Newest holiday'), findsOneWidget);
+    expect(find.byType(WorkforceRowsSkeleton), findsNothing);
 
     respond(0, 'Stale holiday');
     await tester.pumpAndSettle();
@@ -106,6 +109,7 @@ void main() {
 
       expect(find.byKey(const Key('holiday-load-error')), findsOneWidget);
       expect(find.text('Holiday list unavailable'), findsOneWidget);
+      expect(find.byType(WorkforceRowsSkeleton), findsNothing);
       expect(find.text('No holidays yet'), findsNothing);
       expect(find.byKey(const Key('holiday-load-retry')), findsOneWidget);
     },
