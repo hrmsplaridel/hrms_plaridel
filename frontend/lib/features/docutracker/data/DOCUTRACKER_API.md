@@ -51,6 +51,7 @@ same geometry can be rendered on different screen sizes and in PDF output.
 | DELETE | `/api/docutracker/signature-assets/{assetId}` | Remove a signature from the authenticated user's library without changing signed documents |
 | GET | `/api/docutracker/sources/{module}/{table}/{recordId}` | Load a server-authorized, read-only L&D training report or RSP recruitment application with short-lived attachment links |
 | POST | `/api/docutracker/documents/{id}/signature-fields/{fieldId}/sign` | Sign or replace the signature image in one field assigned to the authenticated user |
+| POST | `/api/docutracker/documents/{id}/signature-fields/own` | Current-step reviewer adds and signs their own field on a submitted, non-terminal document (used for steps with `requires_signature`) |
 | PATCH | `/api/docutracker/documents/{id}/signature-fields/{fieldId}/position` | Move an already-signed field assigned to the authenticated user without changing its size, signer, or image |
 | GET | `/api/docutracker/sources/dtr/leave_requests/{leaveRequestId}/signatures` | Load fixed e-signature slots for an authorized linked DTR leave request |
 | POST | `/api/docutracker/sources/dtr/leave_requests/{leaveRequestId}/signatures/applicant/sign` | Add or replace the authenticated applicant's signature while the leave request remains active |

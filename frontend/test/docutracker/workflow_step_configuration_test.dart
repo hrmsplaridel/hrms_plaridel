@@ -18,6 +18,23 @@ void main() {
     expect(step.toJson()['allowed_actions'], ['approve', 'return', 'reject']);
   });
 
+  test('workflow step round-trips the signature-required flag', () {
+    final required = WorkflowStep.fromJson({
+      'step_order': 1,
+      'assignee_type': 'user',
+      'requires_signature': true,
+    });
+    final legacy = WorkflowStep.fromJson({
+      'step_order': 1,
+      'assignee_type': 'user',
+    });
+
+    expect(required.requiresSignature, isTrue);
+    expect(required.toJson()['requires_signature'], isTrue);
+    expect(legacy.requiresSignature, isFalse);
+    expect(legacy.toJson()['requires_signature'], isFalse);
+  });
+
   test('validator requires a primary assignee and at least one action', () {
     const steps = [
       WorkflowStep(

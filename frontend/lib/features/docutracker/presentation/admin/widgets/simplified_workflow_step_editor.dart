@@ -41,6 +41,7 @@ class _SimplifiedWorkflowStepEditorState
   final _deadlineController = TextEditingController();
 
   late bool _enabled;
+  late bool _requiresSignature;
   late _AssigneeMode _assigneeMode;
   late Set<String> _allowedActions;
   String? _primaryUserId;
@@ -56,6 +57,7 @@ class _SimplifiedWorkflowStepEditorState
     _nameController.text = step.label ?? '';
     _deadlineController.text = step.deadlineHours?.toString() ?? '';
     _enabled = step.enabled;
+    _requiresSignature = step.requiresSignature;
     if (step.assigneeSource == 'submitter_department_reviewers') {
       _assigneeMode = _AssigneeMode.submitterDepartmentHead;
     } else if (step.assigneeSource == 'department_reviewers') {
@@ -93,8 +95,7 @@ class _SimplifiedWorkflowStepEditorState
     super.dispose();
   }
 
-  bool get _usesSpecificPeople =>
-      _assigneeMode == _AssigneeMode.specificPeople;
+  bool get _usesSpecificPeople => _assigneeMode == _AssigneeMode.specificPeople;
 
   bool get _usesSubmitterDepartmentHead =>
       _assigneeMode == _AssigneeMode.submitterDepartmentHead;
@@ -275,6 +276,7 @@ class _SimplifiedWorkflowStepEditorState
         label: name,
         enabled: _enabled,
         deadlineHours: deadline,
+        requiresSignature: _requiresSignature,
         allowedActions: _allowedActions.toList(growable: false),
       ),
     );
@@ -479,6 +481,20 @@ class _SimplifiedWorkflowStepEditorState
                         _error = null;
                       }),
                     ),
+                  const SizedBox(height: 8),
+                  SwitchListTile(
+                    key: const Key('workflow-step-requires-signature'),
+                    contentPadding: EdgeInsets.zero,
+                    secondary: const Icon(Icons.draw_outlined),
+                    title: const Text('Signature required'),
+                    subtitle: const Text(
+                      'The reviewer must sign the document before they can '
+                      'approve or forward it at this step.',
+                    ),
+                    value: _requiresSignature,
+                    onChanged: (value) =>
+                        setState(() => _requiresSignature = value),
+                  ),
                   const SizedBox(height: 8),
                   ExpansionTile(
                     tilePadding: EdgeInsets.zero,

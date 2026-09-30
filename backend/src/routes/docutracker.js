@@ -39,6 +39,7 @@ const {
   renameSavedSignatureAsset,
   removeSavedSignatureAsset,
   signDocumentField,
+  addOwnSignatureField,
   moveSignedDocumentField,
 } = require('../services/docutrackerDocumentBuilderService');
 const {
@@ -877,6 +878,19 @@ router.post('/documents/:id/signature-fields/:fieldId/sign', protect, async (req
   }
 });
 
+/** POST /api/docutracker/documents/:id/signature-fields/own. Active-step reviewer only. */
+router.post('/documents/:id/signature-fields/own', protect, async (req, res) => {
+  try {
+    res.json(
+      await addOwnSignatureField(pool, req.user, req.params.id, req.body || {})
+    );
+  } catch (err) {
+    console.error('[docutracker POST /documents/:id/signature-fields/own]', err);
+    const mapped = mapWorkflowServiceError(err);
+    res.status(mapped.status).json({ error: mapped.error });
+  }
+});
+
 /** PATCH /api/docutracker/documents/:id/signature-fields/:fieldId/position. */
 router.patch('/documents/:id/signature-fields/:fieldId/position', protect, async (req, res) => {
   try {
@@ -1628,6 +1642,8 @@ router.post('/routing-configs', protect, requireAdmin, async (req, res) => {
             : s.deadlineHours != null
               ? Number(s.deadlineHours)
               : null,
+        requires_signature:
+          s.requires_signature === true || s.requiresSignature === true,
         allowed_actions: Array.isArray(s.allowed_actions)
           ? s.allowed_actions.map((action) => String(action).trim().toLowerCase())
           : Array.isArray(s.allowedActions)

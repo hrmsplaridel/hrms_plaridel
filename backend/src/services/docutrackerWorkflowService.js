@@ -550,6 +550,8 @@ function parseSteps(steps) {
           : step.deadlineHours != null
             ? Number(step.deadlineHours)
             : null,
+      requires_signature:
+        step.requires_signature === true || step.requiresSignature === true,
       user_ids: Array.isArray(step.user_ids)
         ? step.user_ids
         : Array.isArray(step.userIds)
@@ -2246,6 +2248,32 @@ async function createDocument(pool, user, input) {
   }
 }
 
+const STEP_SIGNATURE_GATED_ACTIONS = new Set(['approve', 'forward']);
+
+async function canAddOwnSignatureToDocument(client, { document, user }) {
+  if (!document || !user?.id) return false;
+  const status = normalizeStatus(document.status);
+  if (TERMINAL_STATUSES.has(status)) return false;
+  if (isDraftOrWipDocument(document, status)) return false;
+  const row = await getWorkflowStepAssigneeRecord(client, {
+    document,
+    userId: user.id,
+  });
+  return Boolean(row && row.is_enabled !== false);
+}
+
+async function hasUserSignedDocument(client, { documentId, userId }) {
+  const result = await client.query(
+    `SELECT 1 FROM docutracker_signature_fields
+     WHERE document_id = $1
+       AND signed_by = $2::uuid
+       AND signed_at IS NOT NULL
+     LIMIT 1`,
+    [documentId, userId]
+  );
+  return result.rowCount > 0;
+}
+
 function nextStepFromConfig(config, currentStep) {
   const steps = parseSteps(config?.steps || []);
   for (let order = currentStep + 1; order <= steps.length; order += 1) {
@@ -2357,6 +2385,15 @@ async function transitionDocument(pool, user, documentId, action, payload = {}) 
       if (!allowedWorkflow) {
         throw forbiddenError(
           'Only an assigned reviewer for the current workflow step can perform this action'
+        );
+      }
+      if (
+        STEP_SIGNATURE_GATED_ACTIONS.has(action) &&
+        currentConfigStep.requires_signature === true &&
+        !(await hasUserSignedDocument(client, { documentId, userId: user.id }))
+      ) {
+        throw validationError(
+          `This step requires your signature. Open the document and sign it before you ${action}.`
         );
       }
     }
@@ -3019,6 +3056,7 @@ module.exports = {
   ensureValidWorkflowConfig,
   hasPermission,
   canUserPerformDocumentAction,
+  canAddOwnSignatureToDocument,
   canUserPerformTypeAction,
   filterDocumentsViewableByUser,
   listReviewedDepartments,

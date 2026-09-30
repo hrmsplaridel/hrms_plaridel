@@ -85,7 +85,7 @@ class DocuTrackerSignatureFieldsPanel extends StatelessWidget {
             ),
           ),
           if (isBusy) const LinearProgressIndicator(minHeight: 2),
-          if (canEditLayout && (onAddField != null || onInsertOwn != null))
+          if (onAddField != null || onInsertOwn != null)
             Padding(
               padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
               child: Wrap(

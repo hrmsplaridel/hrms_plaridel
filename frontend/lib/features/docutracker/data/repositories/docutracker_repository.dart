@@ -137,7 +137,9 @@ class DocuTrackerRepository implements DocuTrackerPermissionsDataSource {
       final path = module.isEmpty
           ? '$_base/sources/signature-assignments/re-resolve'
           : '$_base/sources/${Uri.encodeComponent(module)}/signature-assignments/re-resolve';
-      final response = await ApiClient.instance.post<Map<String, dynamic>>(path);
+      final response = await ApiClient.instance.post<Map<String, dynamic>>(
+        path,
+      );
       return response.data ?? const <String, dynamic>{};
     } catch (error) {
       throw Exception(_apiErrorMessage(error));
@@ -383,7 +385,12 @@ class DocuTrackerRepository implements DocuTrackerPermissionsDataSource {
       );
       return (res.data ?? [])
           .whereType<Map>()
-          .map((e) => (id: e['id']?.toString() ?? '', name: e['name']?.toString() ?? ''))
+          .map(
+            (e) => (
+              id: e['id']?.toString() ?? '',
+              name: e['name']?.toString() ?? '',
+            ),
+          )
           .where((d) => d.id.isNotEmpty)
           .toList();
     } catch (_) {
@@ -790,6 +797,49 @@ class DocuTrackerRepository implements DocuTrackerPermissionsDataSource {
       final data = response.data;
       if (data == null) {
         return const DocuTrackerFailure('The document was not signed');
+      }
+      return DocuTrackerSuccess(DocuTrackerDocumentBuilderData.fromJson(data));
+    } catch (error) {
+      return DocuTrackerFailure(_apiErrorMessage(error));
+    }
+  }
+
+  Future<DocuTrackerResult<DocuTrackerDocumentBuilderData>>
+  addOwnSignatureField({
+    required String documentId,
+    required int pageNumber,
+    required double x,
+    required double y,
+    required double width,
+    required double height,
+    String? signatureAssetId,
+    Uint8List? imageBytes,
+    String mimeType = 'image/png',
+    String sourceType = 'drawn',
+    bool saveForReuse = false,
+  }) async {
+    try {
+      final response = await ApiClient.instance.post<Map<String, dynamic>>(
+        '$_base/documents/$documentId/signature-fields/own',
+        data: <String, dynamic>{
+          'page_number': pageNumber,
+          'position_x': x,
+          'position_y': y,
+          'width': width,
+          'height': height,
+          if (signatureAssetId != null)
+            'signature_asset_id': signatureAssetId
+          else ...<String, dynamic>{
+            'image_base64': base64Encode(imageBytes ?? Uint8List(0)),
+            'mime_type': mimeType,
+            'source_type': sourceType,
+            'is_saved': saveForReuse,
+          },
+        },
+      );
+      final data = response.data;
+      if (data == null) {
+        return const DocuTrackerFailure('Your signature was not added');
       }
       return DocuTrackerSuccess(DocuTrackerDocumentBuilderData.fromJson(data));
     } catch (error) {

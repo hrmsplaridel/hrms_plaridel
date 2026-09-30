@@ -1,6 +1,7 @@
 const { v4: uuidv4 } = require('uuid');
 const {
   canUserPerformDocumentAction,
+  canAddOwnSignatureToDocument,
 } = require('./docutrackerWorkflowService');
 
 const MAX_PAGES = 50;
@@ -163,6 +164,9 @@ async function serializeBuilder(client, document, user) {
     [document.id]
   );
   const canEditLayout = await canEditBuilder(client, document, user);
+  const canAddOwnSignature =
+    !canEditLayout &&
+    (await canAddOwnSignatureToDocument(client, { document, user }));
   const signatureFields = fieldsResult.rows.map((field) => ({
     ...field,
     can_sign: String(field.assigned_signer_id) === String(user.id),
@@ -177,6 +181,7 @@ async function serializeBuilder(client, document, user) {
     revision: Number(contentResult.rows[0]?.revision || 0),
     signature_fields: signatureFields,
     can_edit_layout: canEditLayout,
+    can_add_own_signature: canAddOwnSignature,
     can_sign: signatureFields.some((field) => field.can_sign),
   };
 }
@@ -411,54 +416,120 @@ async function signDocumentField(pool, user, documentId, fieldId, input) {
     if (String(field.assigned_signer_id) !== String(user.id)) {
       throw forbiddenError('Only the assigned signer can sign this field');
     }
-    const isReplacement = Boolean(
-      field.signature_asset_id || field.signed_at || field.locked_at
-    );
+    await signLockedField(client, user, documentId, field, input);
+    await client.query('COMMIT');
+    return getDocumentBuilder(pool, user, documentId);
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
+}
 
-    let assetId = String(input.signature_asset_id || '').trim();
-    if (assetId) {
-      if (!isUuid(assetId)) throw validationError('Saved signature is invalid');
-      const ownedAsset = await client.query(
-        `SELECT id FROM docutracker_signature_assets
-         WHERE id = $1 AND owner_user_id = $2`,
-        [assetId, user.id]
+async function signLockedField(client, user, documentId, field, input) {
+  const isReplacement = Boolean(
+    field.signature_asset_id || field.signed_at || field.locked_at
+  );
+
+  let assetId = String(input.signature_asset_id || '').trim();
+  if (assetId) {
+    if (!isUuid(assetId)) throw validationError('Saved signature is invalid');
+    const ownedAsset = await client.query(
+      `SELECT id FROM docutracker_signature_assets
+       WHERE id = $1 AND owner_user_id = $2`,
+      [assetId, user.id]
+    );
+    if (!ownedAsset.rowCount) throw forbiddenError('Saved signature not found');
+  } else {
+    const asset = await createSignatureAsset(client, user, input);
+    assetId = asset.id;
+  }
+
+  const userResult = await client.query(
+    `SELECT full_name FROM users WHERE id = $1 AND is_active = true`,
+    [user.id]
+  );
+  if (!userResult.rowCount) throw forbiddenError('Only an active user can sign');
+  const signerName = userResult.rows[0].full_name;
+  const signed = await client.query(
+    `UPDATE docutracker_signature_fields SET
+       signature_asset_id = $1,
+       signed_by = $2,
+       signer_name_snapshot = $3,
+       signed_at = now(),
+       locked_at = now(),
+       updated_at = now()
+     WHERE id = $4 AND document_id = $5 AND assigned_signer_id = $2
+     RETURNING *`,
+    [assetId, user.id, signerName, field.id, documentId]
+  );
+  if (!signed.rowCount) throw conflictError('This signature field changed while it was being signed');
+
+  await client.query(
+    `INSERT INTO docutracker_document_history
+       (document_id, action, actor_id, actor_name, remarks)
+     VALUES ($1, 'signed', $2, $3, $4)`,
+    [
+      documentId,
+      user.id,
+      signerName,
+      `${isReplacement ? 'Replaced signature' : 'Signed'} field: ${field.label}`,
+    ]
+  );
+}
+
+/**
+ * Lets the reviewer assigned to the document's active workflow step place and
+ * sign a field for themselves after submission, when content editing is locked.
+ */
+async function addOwnSignatureField(pool, user, documentId, input) {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const document = await getDocumentForUpdate(client, documentId, true);
+    if (!(await canAddOwnSignatureToDocument(client, { document, user }))) {
+      throw forbiddenError(
+        'Only a reviewer assigned to the current workflow step can add their signature'
       );
-      if (!ownedAsset.rowCount) throw forbiddenError('Saved signature not found');
-    } else {
-      const asset = await createSignatureAsset(client, user, input);
-      assetId = asset.id;
     }
-
-    const userResult = await client.query(
-      `SELECT full_name FROM users WHERE id = $1 AND is_active = true`,
-      [user.id]
+    const contentResult = await client.query(
+      `SELECT pages FROM docutracker_document_contents WHERE document_id = $1`,
+      [documentId]
     );
-    if (!userResult.rowCount) throw forbiddenError('Only an active user can sign');
-    const signerName = userResult.rows[0].full_name;
-    const signed = await client.query(
-      `UPDATE docutracker_signature_fields SET
-         signature_asset_id = $1,
-         signed_by = $2,
-         signer_name_snapshot = $3,
-         signed_at = now(),
-         locked_at = now(),
-         updated_at = now()
-       WHERE id = $4 AND document_id = $5 AND assigned_signer_id = $2
+    const pages = contentResult.rows[0]?.pages;
+    const pageCount = Array.isArray(pages) && pages.length ? pages.length : 1;
+    const field = normalizeField(
+      {
+        ...input,
+        id: null,
+        assigned_signer_id: user.id,
+        label: input.label || 'Signature',
+      },
+      pageCount
+    );
+    const inserted = await client.query(
+      `INSERT INTO docutracker_signature_fields
+         (id, document_id, page_number, position_x, position_y, width, height,
+          assigned_signer_id, label, created_by)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $8)
        RETURNING *`,
-      [assetId, user.id, signerName, fieldId, documentId]
-    );
-    if (!signed.rowCount) throw conflictError('This signature field changed while it was being signed');
-
-    await client.query(
-      `INSERT INTO docutracker_document_history
-         (document_id, action, actor_id, actor_name, remarks)
-       VALUES ($1, 'signed', $2, $3, $4)`,
       [
+        field.id,
         documentId,
+        field.pageNumber,
+        field.x,
+        field.y,
+        field.width,
+        field.height,
         user.id,
-        signerName,
-        `${isReplacement ? 'Replaced signature' : 'Signed'} field: ${field.label}`,
+        field.label,
       ]
+    );
+    await signLockedField(client, user, documentId, inserted.rows[0], input);
+    await client.query(
+      `UPDATE docutracker_documents SET updated_at = now() WHERE id = $1`,
+      [documentId]
     );
     await client.query('COMMIT');
     return getDocumentBuilder(pool, user, documentId);
@@ -541,5 +612,6 @@ module.exports = {
   renameSavedSignatureAsset,
   removeSavedSignatureAsset,
   signDocumentField,
+  addOwnSignatureField,
   moveSignedDocumentField,
 };

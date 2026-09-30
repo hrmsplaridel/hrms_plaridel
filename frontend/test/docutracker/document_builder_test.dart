@@ -242,6 +242,23 @@ void main() {
     expect(data.formatVersion, 1);
     expect(data.signatureFields.single.canSign, isTrue);
     expect(data.signatureFields.single.assignedSignerName, 'Assigned Signer');
+    expect(data.canAddOwnSignature, isFalse);
+  });
+
+  test('builder reads the reviewer add-own-signature capability', () {
+    final data = DocuTrackerDocumentBuilderData.fromJson(<String, dynamic>{
+      'document_id': 'document-1',
+      'current_user_id': 'reviewer-1',
+      'pages': <dynamic>[],
+      'revision': 1,
+      'can_edit_layout': false,
+      'can_sign': false,
+      'can_add_own_signature': true,
+      'signature_fields': <dynamic>[],
+    });
+
+    expect(data.canEditLayout, isFalse);
+    expect(data.canAddOwnSignature, isTrue);
   });
 
   test(

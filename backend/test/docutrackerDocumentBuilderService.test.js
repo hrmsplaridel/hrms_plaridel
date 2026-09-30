@@ -9,6 +9,7 @@ const {
   renameSavedSignatureAsset,
   removeSavedSignatureAsset,
   signDocumentField,
+  addOwnSignatureField,
   moveSignedDocumentField,
 } = require('../src/services/docutrackerDocumentBuilderService');
 
@@ -564,4 +565,144 @@ test('user who is not the assigned signer cannot move a signed field', async () 
     (error) => error.code === 'FORBIDDEN'
   );
   assert.equal(rolledBack, true);
+});
+
+function ownSignatureHarness({ assigned, status = 'in_review' }) {
+  const documentId = '11111111-1111-4111-8111-111111111111';
+  const reviewerId = '77777777-7777-4777-8777-777777777777';
+  const assetId = '55555555-5555-4555-8555-555555555555';
+  const document = {
+    id: documentId,
+    document_type: 'memo',
+    workflow_version: 1,
+    current_step: 2,
+    status,
+    created_by: '33333333-3333-4333-8333-333333333333',
+    current_holder_id: reviewerId,
+  };
+  const assigneeRows = assigned
+    ? [{ is_enabled: true, allowed_actions: ['approve'], is_primary: true }]
+    : [];
+  const state = { inserted: null, signedParams: null, history: null, rolledBack: false };
+  const client = {
+    async query(sql, params = []) {
+      if (sql === 'BEGIN' || sql === 'COMMIT') return { rowCount: 0, rows: [] };
+      if (sql === 'ROLLBACK') {
+        state.rolledBack = true;
+        return { rowCount: 0, rows: [] };
+      }
+      if (sql.includes('SELECT * FROM docutracker_documents')) {
+        return { rowCount: 1, rows: [document] };
+      }
+      if (sql.includes('a.allowed_actions')) {
+        return { rowCount: assigneeRows.length, rows: assigneeRows };
+      }
+      if (sql.includes('SELECT pages FROM docutracker_document_contents')) {
+        return { rowCount: 1, rows: [{ pages: [[{ insert: '\n' }], [{ insert: '\n' }]] }] };
+      }
+      if (sql.includes('INSERT INTO docutracker_signature_fields')) {
+        state.inserted = params;
+        return {
+          rowCount: 1,
+          rows: [{
+            id: params[0],
+            document_id: documentId,
+            assigned_signer_id: reviewerId,
+            label: params[8],
+            signature_asset_id: null,
+            signed_at: null,
+            locked_at: null,
+          }],
+        };
+      }
+      if (sql.includes('SELECT id FROM docutracker_signature_assets')) {
+        return { rowCount: 1, rows: [{ id: assetId }] };
+      }
+      if (sql.includes('SELECT full_name FROM users')) {
+        return { rowCount: 1, rows: [{ full_name: 'Department Head' }] };
+      }
+      if (sql.includes('UPDATE docutracker_signature_fields SET')) {
+        state.signedParams = params;
+        return { rowCount: 1, rows: [{}] };
+      }
+      if (sql.includes('INSERT INTO docutracker_document_history')) {
+        state.history = params;
+        return { rowCount: 1, rows: [] };
+      }
+      if (sql.includes('UPDATE docutracker_documents SET updated_at')) {
+        return { rowCount: 1, rows: [] };
+      }
+      if (sql.includes('routing_config')) return { rowCount: 0, rows: [] };
+      throw new Error(`Unexpected transaction query: ${sql}`);
+    },
+    release() {},
+  };
+  const pool = {
+    async connect() {
+      return client;
+    },
+    async query(sql) {
+      if (sql.includes('SELECT * FROM docutracker_documents')) {
+        return { rowCount: 1, rows: [document] };
+      }
+      if (sql.includes('a.allowed_actions')) {
+        return { rowCount: assigneeRows.length, rows: assigneeRows };
+      }
+      if (sql.includes('SELECT format_version, pages, revision')) {
+        return { rowCount: 1, rows: [{ format_version: 2, pages: [[{ insert: '\n' }]], revision: 3 }] };
+      }
+      if (sql.includes('SELECT f.*')) return { rowCount: 0, rows: [] };
+      return { rowCount: 0, rows: [] };
+    },
+  };
+  return { pool, state, documentId, reviewerId, assetId };
+}
+
+test('current step reviewer can add and sign their own field after submission', async () => {
+  const { pool, state, documentId, reviewerId, assetId } = ownSignatureHarness({ assigned: true });
+  const result = await addOwnSignatureField(
+    pool,
+    { id: reviewerId, role: 'employee' },
+    documentId,
+    {
+      page_number: 2,
+      position_x: 0.1,
+      position_y: 0.7,
+      width: 0.3,
+      height: 0.12,
+      assigned_signer_id: '99999999-9999-4999-8999-999999999999',
+      signature_asset_id: assetId,
+    }
+  );
+
+  assert.equal(state.inserted[2], 2);
+  assert.equal(state.inserted[7], reviewerId);
+  assert.equal(state.inserted[8], 'Signature');
+  assert.equal(state.signedParams[1], reviewerId);
+  assert.equal(state.history[3], 'Signed field: Signature');
+  assert.equal(state.rolledBack, false);
+  assert.equal(result.can_add_own_signature, true);
+  assert.equal(result.can_edit_layout, false);
+});
+
+test('users outside the current step cannot add their own signature field', async () => {
+  for (const scenario of [
+    { assigned: false },
+    { assigned: true, status: 'approved' },
+  ]) {
+    const { pool, state, documentId, reviewerId, assetId } = ownSignatureHarness(scenario);
+    await assert.rejects(
+      addOwnSignatureField(pool, { id: reviewerId, role: 'employee' }, documentId, {
+        page_number: 1,
+        position_x: 0.1,
+        position_y: 0.7,
+        width: 0.3,
+        height: 0.12,
+        signature_asset_id: assetId,
+      }),
+      (error) => error.code === 'FORBIDDEN'
+    );
+    assert.equal(state.inserted, null);
+    assert.equal(state.rolledBack, true);
+  }
 });

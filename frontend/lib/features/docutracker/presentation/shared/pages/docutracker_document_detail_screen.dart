@@ -1340,6 +1340,9 @@ class _DocuTrackerDocumentDetailScreenState
         enabledSteps.isNotEmpty &&
         doc.currentStep ==
             enabledSteps.map((step) => step.stepOrder).reduce(max);
+    final currentStepRequiresSignature = enabledSteps.any(
+      (step) => step.stepOrder == doc.currentStep && step.requiresSignature,
+    );
     final primaryActions = <Widget>[
       if (canAct && canSubmit)
         Tooltip(
@@ -1628,6 +1631,22 @@ class _DocuTrackerDocumentDetailScreenState
               icon: Icons.hourglass_top_rounded,
               color: DocuTrackerTokens.brand,
               message: 'Processing action… please wait.',
+            ),
+            const SizedBox(height: 12),
+          ],
+          if (canAct &&
+              (canApprove || canForward) &&
+              currentStepRequiresSignature) ...[
+            KeyedSubtree(
+              key: const Key('docutracker-detail-signature-required'),
+              child: DocuTrackerStyles.stateMessage(
+                icon: Icons.draw_outlined,
+                color: const Color(0xFF7C3AED),
+                message:
+                    'This step requires your signature. Open the document, '
+                    'use Signatures → Insert My Signature, then approve or '
+                    'forward.',
+              ),
             ),
             const SizedBox(height: 12),
           ],

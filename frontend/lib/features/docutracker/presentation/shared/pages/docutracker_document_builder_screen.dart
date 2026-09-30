@@ -69,6 +69,9 @@ class _DocuTrackerDocumentBuilderScreenState
   bool _loadingDirectory = false;
   bool _exporting = false;
   bool _canEditLayout = false;
+  bool _canAddOwnSignature = false;
+
+  bool get _canInsertOwnSignature => _canEditLayout || _canAddOwnSignature;
   bool _dirty = false;
   String? _draggingSignedFieldId;
   double? _signedDragOriginX;
@@ -176,6 +179,7 @@ class _DocuTrackerDocumentBuilderScreenState
       _formatVersion = data.formatVersion;
       _currentUserId = data.currentUserId;
       _canEditLayout = data.canEditLayout;
+      _canAddOwnSignature = data.canAddOwnSignature;
       _activePage = _activePage.clamp(0, _pages.length - 1);
       _loading = false;
       _saving = false;
@@ -392,7 +396,7 @@ class _DocuTrackerDocumentBuilderScreenState
   }
 
   Future<void> _insertOwnSignature() async {
-    if (!_canEditLayout || _currentUserId.isEmpty || _busy) return;
+    if (!_canInsertOwnSignature || _currentUserId.isEmpty || _busy) return;
     final choice = await showDocuTrackerSignatureDialog(
       context,
       provider: _provider,
@@ -400,6 +404,10 @@ class _DocuTrackerDocumentBuilderScreenState
     if (choice == null || !mounted) return;
     final pageNumber = _activePage + 1;
     final placement = _nextSignaturePlacement();
+    if (!_canEditLayout) {
+      await _addOwnSignatureAsReviewer(pageNumber, placement, choice);
+      return;
+    }
     final localId =
         'local-${DateTime.now().microsecondsSinceEpoch}-${_localFieldCounter++}';
     final signer = _directory[_currentUserId];
@@ -435,6 +443,54 @@ class _DocuTrackerDocumentBuilderScreenState
       return;
     }
     await _applySignatureChoice(savedFields.last, choice);
+  }
+
+  Future<void> _addOwnSignatureAsReviewer(
+    int pageNumber,
+    ({double x, double y}) placement,
+    DocuTrackerSignatureChoice choice,
+  ) async {
+    final existingIds = _signatureFields.map((field) => field.id).toSet();
+    setState(() => _saving = true);
+    final result = await _provider.addOwnSignatureField(
+      documentId: widget.document.id!,
+      pageNumber: pageNumber,
+      x: placement.x,
+      y: placement.y,
+      width: 0.3,
+      height: 0.12,
+      signatureAssetId: choice.signatureAssetId,
+      imageBytes: choice.imageBytes,
+      mimeType: choice.mimeType,
+      sourceType: choice.sourceType,
+      saveForReuse: choice.saveForReuse,
+    );
+    if (!mounted) return;
+    if (result == null) {
+      setState(() {
+        _saving = false;
+        _error = _provider.builderError ?? 'Could not add your signature.';
+      });
+      return;
+    }
+    final added = result.signatureFields
+        .where((field) => !existingIds.contains(field.id))
+        .firstOrNull;
+    final imageBytes = added?.signatureImageBytes;
+    if (imageBytes != null) {
+      try {
+        await _precacheDocumentImage(imageBytes);
+      } catch (_) {
+        // The server already recorded the signature; only the preview failed.
+      }
+    }
+    if (!mounted) return;
+    _replaceFromServer(result);
+    if (added != null) await _focusSignatureField(added);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Your signature was added and locked.')),
+    );
   }
 
   Future<void> _applySignatureChoice(
@@ -705,7 +761,7 @@ class _DocuTrackerDocumentBuilderScreenState
               onAddField: _canEditLayout
                   ? () => closeThen(() => unawaited(_addSignatureField()))
                   : null,
-              onInsertOwn: _canEditLayout
+              onInsertOwn: _canInsertOwnSignature
                   ? () => closeThen(() => unawaited(_insertOwnSignature()))
                   : null,
               onClose: () => Navigator.of(sheetContext).pop(),
@@ -1224,7 +1280,7 @@ class _DocuTrackerDocumentBuilderScreenState
                     onAddField: _canEditLayout
                         ? () => unawaited(_addSignatureField())
                         : null,
-                    onInsertOwn: _canEditLayout
+                    onInsertOwn: _canInsertOwnSignature
                         ? () => unawaited(_insertOwnSignature())
                         : null,
                     onSelect: (field) => unawaited(_focusSignatureField(field)),

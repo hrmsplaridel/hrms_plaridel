@@ -367,6 +367,7 @@ class DocuTrackerDocumentBuilderData {
     required this.revision,
     required this.canEditLayout,
     required this.canSign,
+    this.canAddOwnSignature = false,
     this.formatVersion = 1,
   });
 
@@ -377,6 +378,10 @@ class DocuTrackerDocumentBuilderData {
   final int revision;
   final bool canEditLayout;
   final bool canSign;
+
+  /// Backend-granted: the active-step reviewer may place and sign a field for
+  /// themselves even though the document layout is locked.
+  final bool canAddOwnSignature;
   final int formatVersion;
 
   factory DocuTrackerDocumentBuilderData.fromJson(Map<String, dynamic> json) {
@@ -404,6 +409,7 @@ class DocuTrackerDocumentBuilderData {
       revision: (json['revision'] as num?)?.toInt() ?? 0,
       canEditLayout: json['can_edit_layout'] == true,
       canSign: json['can_sign'] == true,
+      canAddOwnSignature: json['can_add_own_signature'] == true,
       formatVersion: (json['format_version'] as num?)?.toInt() ?? 1,
     );
   }

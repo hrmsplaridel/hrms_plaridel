@@ -12,6 +12,7 @@ class WorkflowStep {
     this.label,
     this.enabled = true,
     this.deadlineHours,
+    this.requiresSignature = false,
     this.allowedActions = const <String>[
       'approve',
       'forward',
@@ -50,6 +51,10 @@ class WorkflowStep {
   /// Optional per-step deadline in hours. If null, workflow default applies.
   final int? deadlineHours;
 
+  /// When true, the backend blocks approve/forward at this step until the
+  /// acting reviewer has signed the document.
+  final bool requiresSignature;
+
   /// Workflow actions available to both primary and backup assignees.
   final List<String> allowedActions;
 
@@ -75,6 +80,7 @@ class WorkflowStep {
       label: json['label']?.toString(),
       enabled: json['enabled'] != false,
       deadlineHours: (json['deadline_hours'] as num?)?.toInt(),
+      requiresSignature: json['requires_signature'] == true,
       allowedActions:
           (json['allowed_actions'] as List<dynamic>?)
               ?.map((value) => value.toString())
@@ -94,6 +100,7 @@ class WorkflowStep {
     if (label != null) 'label': label,
     'enabled': enabled,
     if (deadlineHours != null) 'deadline_hours': deadlineHours,
+    'requires_signature': requiresSignature,
     'allowed_actions': allowedActions,
   };
 }

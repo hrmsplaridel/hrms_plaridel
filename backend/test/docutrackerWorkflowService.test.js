@@ -1014,3 +1014,92 @@ test('department queue viewers cannot act on a step they are not assigned to', a
     false
   );
 });
+
+function signatureStepPool({ requiresSignature, signed }) {
+  return createMockPool((sql) => {
+    if (sql.includes('SELECT * FROM docutracker_documents WHERE id = $1 FOR UPDATE')) {
+      return {
+        rowCount: 1,
+        rows: [{
+          id: 'doc-sign',
+          document_type: 'memo',
+          workflow_version: 1,
+          status: 'in_review',
+          current_step: 1,
+          created_by: 'creator-1',
+          current_holder_id: 'head-1',
+        }],
+      };
+    }
+    if (sql.includes('a.allowed_actions')) {
+      return {
+        rowCount: 1,
+        rows: [{ is_enabled: true, allowed_actions: ['approve', 'forward'], is_primary: true }],
+      };
+    }
+    if (sql.includes('routing_config')) {
+      return {
+        rowCount: 1,
+        rows: [{
+          document_type: 'memo',
+          version: 1,
+          review_deadline_hours: 24,
+          steps: [
+            { step_order: 1, assignee_type: 'user', requires_signature: requiresSignature },
+            { step_order: 2, assignee_type: 'user' },
+          ],
+        }],
+      };
+    }
+    if (sql.includes('FROM docutracker_signature_fields') && sql.includes('signed_by')) {
+      return { rowCount: signed ? 1 : 0, rows: signed ? [{ '?column?': 1 }] : [] };
+    }
+    return { rowCount: 0, rows: [] };
+  });
+}
+
+test('signature-required step blocks approve and forward until the reviewer signs', async () => {
+  for (const action of ['approve', 'forward']) {
+    const { pool, calls } = signatureStepPool({ requiresSignature: true, signed: false });
+    await assert.rejects(
+      () => transitionDocument(pool, { id: 'head-1', role: 'employee' }, 'doc-sign', action, {}),
+      (err) => {
+        assert.equal(err.code, 'VALIDATION');
+        assert.match(err.message, /This step requires your signature/);
+        return true;
+      }
+    );
+    assert.equal(calls.some((c) => c.sql.includes('UPDATE docutracker_documents')), false);
+  }
+});
+
+test('signature gate passes once signed and is skipped for steps that do not require it', async () => {
+  for (const scenario of [
+    { requiresSignature: true, signed: true },
+    { requiresSignature: false, signed: false },
+  ]) {
+    const { pool, calls } = signatureStepPool(scenario);
+    try {
+      await transitionDocument(pool, { id: 'head-1', role: 'employee' }, 'doc-sign', 'approve', {});
+    } catch (err) {
+      assert.doesNotMatch(String(err.message), /requires your signature/);
+    }
+    const checkedSignature = calls.some(
+      (c) => c.sql.includes('FROM docutracker_signature_fields') && c.sql.includes('signed_by')
+    );
+    assert.equal(checkedSignature, scenario.requiresSignature);
+  }
+});
+
+test('return and reject never require a signature', async () => {
+  const { pool, calls } = signatureStepPool({ requiresSignature: true, signed: false });
+  try {
+    await transitionDocument(pool, { id: 'head-1', role: 'employee' }, 'doc-sign', 'reject', {});
+  } catch (err) {
+    assert.doesNotMatch(String(err.message), /requires your signature/);
+  }
+  assert.equal(
+    calls.some((c) => c.sql.includes('FROM docutracker_signature_fields') && c.sql.includes('signed_by')),
+    false
+  );
+});

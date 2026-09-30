@@ -80,6 +80,7 @@ class _DocuTrackerWorkflowEditorScreenState
                 label: s.label,
                 enabled: s.enabled,
                 deadlineHours: s.deadlineHours,
+                requiresSignature: s.requiresSignature,
                 allowedActions: List<String>.from(s.allowedActions),
               ),
             )
@@ -261,6 +262,7 @@ class _DocuTrackerWorkflowEditorScreenState
                 label: step.label,
                 enabled: step.enabled,
                 deadlineHours: step.deadlineHours,
+                requiresSignature: step.requiresSignature,
                 allowedActions: step.allowedActions.isNotEmpty
                     ? step.allowedActions
                     : legacyActionsByOrder[step.stepOrder] ?? const [],
@@ -433,8 +435,7 @@ class _DocuTrackerWorkflowEditorScreenState
       if (!s.enabled) continue;
 
       if (s.assigneeType.trim().toLowerCase() == 'user') {
-        final usesDynamicDepartmentAssignees =
-            s.usesDynamicDepartmentAssignees;
+        final usesDynamicDepartmentAssignees = s.usesDynamicDepartmentAssignees;
         final userIds = (s.userIds ?? [])
             .map((e) => e.trim())
             .where((e) => e.isNotEmpty)
@@ -519,7 +520,8 @@ class _DocuTrackerWorkflowEditorScreenState
     }
 
     if (step.assigneeType.trim().toLowerCase() == 'user') {
-      final usesDynamicDepartmentAssignees = step.usesDynamicDepartmentAssignees;
+      final usesDynamicDepartmentAssignees =
+          step.usesDynamicDepartmentAssignees;
       final userIds = (step.userIds ?? [])
           .map((e) => e.trim())
           .where((e) => e.isNotEmpty)
@@ -560,6 +562,7 @@ class _DocuTrackerWorkflowEditorScreenState
           label: _steps[i].label,
           enabled: _steps[i].enabled,
           deadlineHours: _steps[i].deadlineHours,
+          requiresSignature: _steps[i].requiresSignature,
           allowedActions: List<String>.from(_steps[i].allowedActions),
         ),
     ];
@@ -933,7 +936,8 @@ class _DocuTrackerWorkflowEditorScreenState
       child: Scaffold(
         backgroundColor: DocuTrackerTokens.canvasOf(context),
         appBar: AppBar(
-          backgroundColor: DocuTrackerTokens.surface,
+          backgroundColor: DocuTrackerTokens.surfaceOf(context),
+          foregroundColor: DocuTrackerTokens.textPrimaryOf(context),
           surfaceTintColor: Colors.transparent,
           elevation: 0,
           shadowColor: Colors.black.withValues(alpha: 0.06),
@@ -2729,6 +2733,12 @@ class _WorkflowStepFlowCard extends StatelessWidget {
                             _StepBadge(
                               label: 'Highlighted',
                               color: DocuTrackerTokens.brand,
+                              isSoft: true,
+                            ),
+                          if (step.requiresSignature)
+                            const _StepBadge(
+                              label: 'Signature required',
+                              color: Color(0xFF7C3AED),
                               isSoft: true,
                             ),
                           if (!step.enabled)

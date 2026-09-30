@@ -304,10 +304,9 @@ class DocuTrackerProvider extends ChangeNotifier {
   /// Pending RSP/L&D e-sign tasks for the current user (and admin setup /
   /// still-unsigned assigned forms). Completed signatures stay in the list
   /// but do not inflate this badge count.
-  int get pendingSourceSignatureActionCount =>
-      _sourceSignatureRequests
-          .where((request) => request.hasActionableRequiredAction)
-          .length;
+  int get pendingSourceSignatureActionCount => _sourceSignatureRequests
+      .where((request) => request.hasActionableRequiredAction)
+      .length;
 
   /// DocuTracker sidebar attention: unread workflow notices + pending e-signs.
   int get docuTrackerAttentionCount =>
@@ -1072,6 +1071,51 @@ class DocuTrackerProvider extends ChangeNotifier {
     final result = await _repo.signDocumentField(
       documentId: documentId,
       fieldId: fieldId,
+      signatureAssetId: signatureAssetId,
+      imageBytes: imageBytes,
+      mimeType: mimeType,
+      sourceType: sourceType,
+      saveForReuse: saveForReuse,
+    );
+    if (!_isCurrentAuthGeneration(authGeneration)) return null;
+    _builderLoading = false;
+    switch (result) {
+      case DocuTrackerSuccess<DocuTrackerDocumentBuilderData>(:final value):
+        _builderData = value;
+        notifyListeners();
+        return value;
+      case DocuTrackerFailure<DocuTrackerDocumentBuilderData>(:final message):
+        _builderError = message;
+        notifyListeners();
+        return null;
+    }
+  }
+
+  Future<DocuTrackerDocumentBuilderData?> addOwnSignatureField({
+    required String documentId,
+    required int pageNumber,
+    required double x,
+    required double y,
+    required double width,
+    required double height,
+    String? signatureAssetId,
+    Uint8List? imageBytes,
+    String mimeType = 'image/png',
+    String sourceType = 'drawn',
+    bool saveForReuse = false,
+  }) async {
+    if (_builderLoading) return null;
+    final authGeneration = _authGeneration;
+    _builderLoading = true;
+    _builderError = null;
+    notifyListeners();
+    final result = await _repo.addOwnSignatureField(
+      documentId: documentId,
+      pageNumber: pageNumber,
+      x: x,
+      y: y,
+      width: width,
+      height: height,
       signatureAssetId: signatureAssetId,
       imageBytes: imageBytes,
       mimeType: mimeType,

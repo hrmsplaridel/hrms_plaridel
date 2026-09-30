@@ -632,6 +632,7 @@ class _DocuTrackerPermissionEditorScreenState
         backgroundColor: DocuTrackerTokens.canvasOf(context),
         appBar: AppBar(
           backgroundColor: DocuTrackerTokens.surfaceOf(context),
+          foregroundColor: DocuTrackerTokens.textPrimaryOf(context),
           surfaceTintColor: Colors.transparent,
           leading: IconButton(
             tooltip: 'Back',
