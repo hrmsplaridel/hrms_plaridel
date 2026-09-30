@@ -35,7 +35,6 @@ class _ApprovalsSignatoriesPageState extends State<ApprovalsSignatoriesPage> {
           ),
           const SizedBox(height: 12),
           Container(
-            width: double.infinity,
             decoration: BoxDecoration(
               color: AppTheme.dashPanelOf(context),
               border: Border.all(color: AppTheme.dashHairlineOf(context)),
