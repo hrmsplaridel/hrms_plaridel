@@ -161,6 +161,7 @@ class DtrAssignmentSegment {
     this.scheduledWorkHoursPerDay,
     this.punchMode,
     this.workingDays,
+    this.scheduleOverrides = const {},
   });
 
   final DateTime? effectiveFrom;
@@ -171,6 +172,7 @@ class DtrAssignmentSegment {
   final double? scheduledWorkHoursPerDay;
   final String? punchMode;
   final List<int>? workingDays;
+  final Map<String, bool> scheduleOverrides;
 }
 
 /// DTR export to PDF, Excel, and Word (HTML) — single page, matches official form.
@@ -422,6 +424,12 @@ class DtrExport {
     }
     final segment = _assignmentSegmentForDate(date, assignmentSegments);
     if (segment == null) return false;
+    final dateKey =
+        '${date.year.toString().padLeft(4, '0')}-'
+        '${date.month.toString().padLeft(2, '0')}-'
+        '${date.day.toString().padLeft(2, '0')}';
+    final override = segment.scheduleOverrides[dateKey];
+    if (override != null) return override;
     final workingDays = segment.workingDays?.toSet();
     return (workingDays == null || workingDays.isEmpty
             ? const {1, 2, 3, 4, 5}

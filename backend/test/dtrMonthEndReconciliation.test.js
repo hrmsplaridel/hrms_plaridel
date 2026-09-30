@@ -45,6 +45,7 @@ test('holiday changes enqueue only completed months with existing DTR postings',
   assert.ok(insert);
   assert.match(insert.sql, /FROM leave_attendance_deductions lad/);
   assert.match(insert.sql, /lad\.service_month </);
+  assert.match(insert.sql, /NULL::timestamptz/);
   assert.deepEqual(insert.params.slice(0, 2), ['2026-07-12', '2026-07-12']);
 });
 
@@ -83,6 +84,7 @@ test('historical employee changes queue every completed month in the affected ra
   );
   assert.ok(insert);
   assert.match(insert.sql, /date_trunc\(\s*'month',\s*CURRENT_TIMESTAMP AT TIME ZONE/);
+  assert.match(insert.sql, /NULL::timestamptz/);
   assert.deepEqual(insert.params.slice(0, 4), [
     '11111111-1111-4111-8111-111111111111',
     '2026-06-16',

@@ -59,14 +59,17 @@ function evaluateLocatorWorkingDay({ dateInfo, assignment }) {
   }
 
   const workingDays = normalizeLocatorWorkingDays(assignment.working_days);
-  if (!workingDays.includes(dateInfo.isoWeekday)) {
+  const isWorkingDay = typeof assignment.override_is_working_day === 'boolean'
+    ? assignment.override_is_working_day
+    : workingDays.includes(dateInfo.isoWeekday);
+  if (!isWorkingDay) {
     const weekdayName =
       LOCATOR_WEEKDAY_NAMES[dateInfo.isoWeekday - 1] || 'that day';
     return {
       ok: false,
       error:
         `You cannot file a locator request for ${weekdayName} because it is ` +
-        'not included in your assigned shift working days.',
+        'scheduled as your rest or non-working day.',
     };
   }
   return { ok: true };
@@ -82,9 +85,13 @@ async function validateLocatorWorkingDayForEmployee(
     `SELECT a.id,
             a.shift_id,
             s.name AS shift_name,
-            s.working_days
+            s.working_days,
+            eso.is_working_day AS override_is_working_day
      FROM assignments a
      LEFT JOIN shifts s ON s.id = a.shift_id
+     LEFT JOIN employee_schedule_overrides eso
+       ON eso.employee_id = a.employee_id
+      AND eso.schedule_date = $2::date
      WHERE a.employee_id = $1::uuid
        AND a.effective_from <= $2::date
        AND (a.effective_to IS NULL OR a.effective_to >= $2::date)

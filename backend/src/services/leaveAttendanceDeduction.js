@@ -32,6 +32,10 @@ const {
   resolveReconciliationMonth,
 } = require('./dtrMonthEndReconciliation');
 const { normalizeAttendancePolicy } = require('./attendancePolicyResolver');
+const {
+  loadScheduleOverrides,
+  resolvedWorkingDay,
+} = require('./employeeScheduleOverrides');
 
 const VACATION_LEAVE = 'vacationLeave';
 const DEFAULT_TIME_ZONE = 'Asia/Manila';
@@ -547,6 +551,12 @@ async function calculateMonthlyAttendanceDeductions(
     assignmentsByEmployee,
     holidayCoverage
   );
+  const scheduleOverrides = await loadScheduleOverrides(
+    client,
+    employeeIds,
+    startStr,
+    endStr
+  );
 
   const monthDates = datesInRange(startStr, endStr);
   const summaries = [];
@@ -565,7 +575,12 @@ async function calculateMonthlyAttendanceDeductions(
         employee.userId,
         dateStr
       );
-      if (!assignment || !assignment.workingDays.includes(isoWeekday(dateStr))) {
+      if (!assignment || !resolvedWorkingDay({
+        employeeId: employee.userId,
+        dateStr,
+        workingDays: assignment.workingDays,
+        overrides: scheduleOverrides,
+      })) {
         continue;
       }
 

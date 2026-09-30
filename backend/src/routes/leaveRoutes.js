@@ -601,6 +601,7 @@ async function computeEmployeeLeaveWorkingDays(client, userId, startStr, endStr)
     `SELECT
         to_char(gs::date, 'YYYY-MM-DD') AS attendance_date,
         COALESCE(s.working_days, ARRAY[1,2,3,4,5]::int[]) AS working_days,
+        eso.is_working_day AS override_is_working_day,
         eff.assignment_id IS NOT NULL AS has_assignment,
         s.id IS NOT NULL AS has_shift
      FROM generate_series($2::date, $3::date, '1 day'::interval) AS gs
@@ -614,6 +615,9 @@ async function computeEmployeeLeaveWorkingDays(client, userId, startStr, endStr)
        LIMIT 1
      ) eff ON TRUE
      LEFT JOIN shifts s ON s.id = eff.shift_id
+     LEFT JOIN employee_schedule_overrides eso
+       ON eso.employee_id = $1::uuid
+      AND eso.schedule_date = gs::date
      ORDER BY gs::date`,
     [userId, startStr, endStr]
   );
@@ -631,7 +635,10 @@ async function computeEmployeeLeaveWorkingDays(client, userId, startStr, endStr)
     else sawNoAssignment = true;
     if (holidayDates.has(ds)) continue;
     const workingDays = normalizeWorkingDays(row.working_days);
-    if (workingDays.includes(isoWeekday)) countedDates.push(ds);
+    const isWorkingDay = typeof row.override_is_working_day === 'boolean'
+      ? row.override_is_working_day
+      : workingDays.includes(isoWeekday);
+    if (isWorkingDay) countedDates.push(ds);
   }
 
   const scheduleSource = sawShift

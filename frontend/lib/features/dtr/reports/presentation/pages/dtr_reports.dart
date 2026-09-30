@@ -208,6 +208,7 @@ class _DtrReportsState extends State<DtrReports> {
               scheduledWorkHoursPerDay: assignment.workHoursPerDay,
               punchMode: assignment.punchMode,
               workingDays: assignment.workingDays,
+              scheduleOverrides: assignment.scheduleOverrides,
             ),
           )
           .toList(growable: false);
@@ -699,7 +700,16 @@ class _DtrReportsState extends State<DtrReports> {
     final effectiveMonth = month ?? _selectedMonth;
     final res = await ApiClient.instance.get<List<dynamic>>(
       '/api/assignments',
-      queryParameters: {'employee_id': employeeId, 'status': 'All'},
+      queryParameters: {
+        'employee_id': employeeId,
+        'status': 'All',
+        'start_date': _reportDateKey(
+          DateTime(effectiveYear, effectiveMonth, 1),
+        ),
+        'end_date': _reportDateKey(
+          DateTime(effectiveYear, effectiveMonth + 1, 0),
+        ),
+      },
     );
     return _parseAssignmentTimeline(
       res.data ?? const [],
@@ -738,6 +748,17 @@ class _DtrReportsState extends State<DtrReports> {
             .where((x) => x >= 1 && x <= 7)
             .toList();
       }
+      final scheduleOverrides = <String, bool>{};
+      final rawOverrides = m['schedule_overrides'];
+      if (rawOverrides is List) {
+        for (final rawOverride in rawOverrides.whereType<Map>()) {
+          final date = rawOverride['date']?.toString().trim() ?? '';
+          final value = rawOverride['is_working_day'];
+          if (RegExp(r'^\d{4}-\d{2}-\d{2}$').hasMatch(date) && value is bool) {
+            scheduleOverrides[date] = value;
+          }
+        }
+      }
       String? officialHours;
       final st = m['start_time'];
       final et = m['end_time'];
@@ -757,6 +778,7 @@ class _DtrReportsState extends State<DtrReports> {
       assignments.add(
         _DtrAssignmentInfo(
           workingDays: (days != null && days.isNotEmpty) ? days : null,
+          scheduleOverrides: scheduleOverrides,
           officialHours: officialHours,
           workHoursPerDay: _reportShiftWorkHours(
             startMinutes: startMinutes,
@@ -798,6 +820,8 @@ class _DtrReportsState extends State<DtrReports> {
   bool _isScheduledWorkDayFor(DateTime dt, List<_DtrAssignmentInfo> timeline) {
     final assignment = _assignmentForDate(dt, timeline);
     if (assignment == null) return false;
+    final override = assignment.scheduleOverrides[_reportDateKey(dt)];
+    if (override != null) return override;
     final shiftWd =
         assignment.workingDays != null && assignment.workingDays!.isNotEmpty
         ? assignment.workingDays!.toSet()
@@ -1653,6 +1677,7 @@ class _DtrReportsState extends State<DtrReports> {
               scheduledWorkHoursPerDay: assignment.workHoursPerDay,
               punchMode: assignment.punchMode,
               workingDays: assignment.workingDays,
+              scheduleOverrides: assignment.scheduleOverrides,
             ),
           )
           .toList(growable: false),
@@ -3878,6 +3903,7 @@ class _DtrBulkReportBatch {
 class _DtrAssignmentInfo {
   const _DtrAssignmentInfo({
     this.workingDays,
+    this.scheduleOverrides = const {},
     this.officialHours,
     this.workHoursPerDay,
     this.punchMode,
@@ -3888,6 +3914,7 @@ class _DtrAssignmentInfo {
   });
 
   final List<int>? workingDays;
+  final Map<String, bool> scheduleOverrides;
   final String? officialHours;
   final double? workHoursPerDay;
   final String? punchMode;
@@ -3896,6 +3923,11 @@ class _DtrAssignmentInfo {
   final String? department;
   final String? position;
 }
+
+String _reportDateKey(DateTime date) =>
+    '${date.year.toString().padLeft(4, '0')}-'
+    '${date.month.toString().padLeft(2, '0')}-'
+    '${date.day.toString().padLeft(2, '0')}';
 
 class _ToggleDtrMultiSelectIntent extends Intent {
   const _ToggleDtrMultiSelectIntent();

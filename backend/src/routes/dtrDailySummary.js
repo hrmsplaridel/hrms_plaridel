@@ -38,6 +38,10 @@ const {
   addDaysToIsoDate,
   isAttendanceDateFinalized,
 } = require('../services/dtrReportCutoff');
+const {
+  loadScheduleOverrides,
+  resolvedWorkingDay,
+} = require('../services/employeeScheduleOverrides');
 
 const router = express.Router();
 const protect = [authMiddleware];
@@ -971,6 +975,20 @@ function assignmentForBulkReport(assignment) {
   };
 }
 
+function scheduleOverridesForEmployee(overrides, employeeId, assignment) {
+  if (!(overrides instanceof Map)) return [];
+  const prefix = `${employeeId}|`;
+  const rows = [];
+  for (const [key, isWorkingDay] of overrides.entries()) {
+    if (!String(key).startsWith(prefix)) continue;
+    const date = String(key).slice(prefix.length);
+    if (date < assignment.effective_from) continue;
+    if (assignment.effective_to && date > assignment.effective_to) continue;
+    rows.push({ date, is_working_day: isWorkingDay === true });
+  }
+  return rows.sort((a, b) => a.date.localeCompare(b.date));
+}
+
 /** True if holidays table has coverage column (work suspension migration applied). */
 let _holidaysHasCoverageColumnCached = null;
 async function _holidaysHasCoverageColumn() {
@@ -1145,6 +1163,7 @@ async function listDtrDailySummaries(req, res) {
 
     let reportEmployeeIds = rawEmployeeIds;
     let reportAssignmentsByEmployee = rawAssignmentsByEmployee;
+    let reportScheduleOverrides = new Map();
     const rows = await Promise.all(rawRows.map(async (r) => {
       // Use the date-only text from SQL to avoid timezone shifting issues when JS receives Date objects.
       const dateStr = (r.attendance_date_iso && String(r.attendance_date_iso).slice(0, 10)) || toIsoDateStr(r.attendance_date);
@@ -1347,6 +1366,13 @@ async function listDtrDailySummaries(req, res) {
       }
 
       const assignmentsByEmployee = await getAssignmentsForEmployeesInRange(employeeIds, startStr, endStr);
+      const scheduleOverrides = await loadScheduleOverrides(
+        pool,
+        employeeIds,
+        startStr,
+        endStr
+      );
+      reportScheduleOverrides = scheduleOverrides;
       reportEmployeeIds = employeeIds;
       reportAssignmentsByEmployee = assignmentsByEmployee;
       const attendancePolicyContext = await loadAttendancePolicyContext(
@@ -1390,10 +1416,12 @@ async function listDtrDailySummaries(req, res) {
             ) {
               continue;
             }
-            const workingDays = shiftInfo.workingDays;
-            if (!Array.isArray(workingDays) || workingDays.length === 0) continue;
-            const isoDow = isoWeekdayFromDateStr(h.dateStr);
-            if (!workingDays.includes(isoDow)) continue;
+            if (!resolvedWorkingDay({
+              employeeId: empId,
+              dateStr: h.dateStr,
+              workingDays: shiftInfo.workingDays,
+              overrides: scheduleOverrides,
+            })) continue;
             existingKeys.add(key);
             rows.push({
               id: null,
@@ -1520,10 +1548,12 @@ async function listDtrDailySummaries(req, res) {
           });
           if (locatorCoverage.isFullCoverage) continue;
 
-          const workingDays = shiftInfo.workingDays;
-          if (!Array.isArray(workingDays) || workingDays.length === 0) continue;
-          const isoDow = isoWeekdayFromDateStr(dateStr);
-          if (!workingDays.includes(isoDow)) continue;
+          if (!resolvedWorkingDay({
+            employeeId: empId,
+            dateStr,
+            workingDays: shiftInfo.workingDays,
+            overrides: scheduleOverrides,
+          })) continue;
 
           // Only show "Absent" for today after shift end, or any past working day.
           if (dateStr === todayStr) {
@@ -1764,6 +1794,7 @@ async function listDtrDailySummaries(req, res) {
       res.locals.dtrReportContext = {
         employeeIds: reportEmployeeIds,
         assignmentsByEmployee: reportAssignmentsByEmployee,
+        scheduleOverrides: reportScheduleOverrides,
         holidayByDate: activeHolidayByDate,
         rangeStart: startStr,
         rangeEnd: endStr,
@@ -1991,7 +2022,14 @@ router.post('/bulk-report', protect, requireAdminOrSupervisor, async (req, res) 
       employees.push({
         employee_id: employeeId,
         records: recordsByEmployee.get(employeeId) || [],
-        assignments: assignmentTimeline.map(assignmentForBulkReport),
+        assignments: assignmentTimeline.map((assignment) => ({
+          ...assignmentForBulkReport(assignment),
+          schedule_overrides: scheduleOverridesForEmployee(
+            context.scheduleOverrides,
+            employeeId,
+            assignment
+          ),
+        })),
         reportable_through: resolveReportableThroughFromAssignments({
           employeeId,
           rangeEnd: context.rangeEnd || String(end_date).slice(0, 10),

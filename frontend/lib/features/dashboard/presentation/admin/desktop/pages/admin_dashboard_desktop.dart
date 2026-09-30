@@ -34,6 +34,7 @@ import 'package:hrms_plaridel/features/dtr/management/assignments/pages/manage_a
 import 'package:hrms_plaridel/features/dtr/management/departments/pages/manage_department.dart';
 import 'package:hrms_plaridel/features/dtr/management/positions/pages/manage_position.dart';
 import 'package:hrms_plaridel/features/dtr/management/shifts/pages/manage_shift.dart';
+import 'package:hrms_plaridel/features/dtr/management/weekly_schedules/pages/manage_weekly_schedule.dart';
 import 'package:hrms_plaridel/features/dtr/management/holidays/pages/manage_holiday.dart';
 import 'package:hrms_plaridel/features/dtr/management/attendance_policies/pages/manage_attendance_policy.dart';
 import 'package:hrms_plaridel/features/dtr/management/biometric_devices/pages/manage_biometric_devices.dart';
@@ -1585,12 +1586,12 @@ class _DtrContent extends StatefulWidget {
 
 class _DtrContentState extends State<_DtrContent> {
   static const int _maxCachedFeatures = 5;
-  static const List<int> _workforceSetupSections = [4, 5, 6, 7, 10];
+  static const List<int> _workforceSetupSections = [4, 5, 6, 7, 13, 10];
 
   /// 0 = menu, 1 = Time Logs, 2 = Reports, 3 = Employees, 4 = Assignment,
   /// 5 = Department, 6 = Position, 7 = Shift, 8 = Leave Management,
   /// 9–10 = Holiday / Policy via [_ManageContent], 11 = Biometric Devices,
-  /// 12 = Locator Slip Management
+  /// 12 = Locator Slip Management, 13 = Weekly Schedule
   int _dtrSectionIndex = 0;
   final Map<int, _DtrFeatureCacheEntry> _featureCache = {};
   int _featureCacheClock = 0;
@@ -1638,6 +1639,7 @@ class _DtrContentState extends State<_DtrContent> {
     5 => 'Departments',
     6 => 'Positions',
     7 => 'Shifts',
+    13 => 'Weekly Schedule',
     10 => 'Attendance Policies',
     _ => 'Workforce Setup',
   };
@@ -1647,6 +1649,7 @@ class _DtrContentState extends State<_DtrContent> {
     5 => Icons.business_rounded,
     6 => Icons.work_rounded,
     7 => Icons.access_time_rounded,
+    13 => Icons.calendar_view_week_rounded,
     10 => Icons.policy_rounded,
     _ => Icons.settings_rounded,
   };
@@ -1738,6 +1741,7 @@ class _DtrContentState extends State<_DtrContent> {
     if (index == 8) return const LeaveMain(isAdmin: true);
     if (index == 11) return const ManageBiometricDevices();
     if (index == 12) return const AdminLocatorManagementScreen();
+    if (index == 13) return const ManageWeeklySchedule();
     return _ManageContent(
       subIndex: index - 3,
       onOpenAssignmentForEmployee: _goToAssignmentWithEmployee,

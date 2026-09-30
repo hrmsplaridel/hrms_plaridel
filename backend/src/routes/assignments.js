@@ -138,6 +138,20 @@ router.get('/', protect, async (req, res) => {
       return res.status(access.statusCode).json({ error: access.error });
     }
     const employeeId = access.employeeId;
+    const rangeStart = req.query.start_date == null
+      ? null
+      : parseDate(req.query.start_date);
+    const rangeEnd = req.query.end_date == null
+      ? null
+      : parseDate(req.query.end_date);
+    if ((req.query.start_date != null && !rangeStart) ||
+        (req.query.end_date != null && !rangeEnd) ||
+        ((rangeStart == null) !== (rangeEnd == null)) ||
+        (rangeStart && rangeEnd && rangeEnd < rangeStart)) {
+      return res.status(400).json({
+        error: 'start_date and end_date must be a valid ascending YYYY-MM-DD range',
+      });
+    }
     const statusContext = assignmentStatusContext(req.query.status);
     const statusWhere = assignmentStatusWhereSql(
       'a',
@@ -228,6 +242,22 @@ router.get('/', protect, async (req, res) => {
       });
     }
 
+    let scheduleOverrides = [];
+    if (rangeStart && rangeEnd) {
+      const overridesResult = await pool.query(
+        `SELECT schedule_date::text AS date, is_working_day
+         FROM employee_schedule_overrides
+         WHERE employee_id = $1::uuid
+           AND schedule_date BETWEEN $2::date AND $3::date
+         ORDER BY schedule_date`,
+        [employeeId, rangeStart, rangeEnd]
+      );
+      scheduleOverrides = overridesResult.rows.map((row) => ({
+        date: String(row.date).slice(0, 10),
+        is_working_day: row.is_working_day === true,
+      }));
+    }
+
     res.json(visibleRows.map((r) => {
       const wd = r.shift_working_days;
       const workingDays = Array.isArray(wd)
@@ -257,6 +287,10 @@ router.get('/', protect, async (req, res) => {
         punch_mode: r.punch_mode || 'auto',
         date_assigned: r.effective_from,
         working_days: workingDays?.length ? workingDays : [1, 2, 3, 4, 5],
+        schedule_overrides: scheduleOverrides.filter((override) =>
+          override.date >= String(r.effective_from).slice(0, 10) &&
+          (!r.effective_to || override.date <= String(r.effective_to).slice(0, 10))
+        ),
       };
     }));
   } catch (err) {

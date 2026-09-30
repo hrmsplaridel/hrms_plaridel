@@ -110,7 +110,8 @@ async function enqueueHolidayReconciliation(
        required_at, reconciled_at, updated_at
      )
      SELECT DISTINCT lad.user_id, lad.service_month, 'pending',
-            $${reasonIndex}::text, $${metadataIndex}::jsonb, now(), NULL, now()
+            $${reasonIndex}::text, $${metadataIndex}::jsonb,
+            now(), NULL::timestamptz, now()
        FROM leave_attendance_deductions lad
       WHERE lad.service_month <
             date_trunc('month', CURRENT_TIMESTAMP AT TIME ZONE $${timeZoneIndex})::date
@@ -169,7 +170,7 @@ async function enqueueEmployeeRangeReconciliation(
        required_at, reconciled_at, updated_at
      )
      SELECT $1::uuid, service_month, 'pending', $4::text, $5::jsonb,
-            now(), NULL, now()
+            now(), NULL::timestamptz, now()
        FROM completed_months
       WHERE service_month <= $3::date
      ON CONFLICT (employee_id, service_month) DO UPDATE

@@ -35,6 +35,49 @@ void main() {
     );
   });
 
+  test('weekly rest-day overrides are applied to official DTR rows', () {
+    final start = DateTime(2026, 10, 7); // Wednesday
+    final end = DateTime(2026, 10, 11); // Sunday
+    final segment = DtrAssignmentSegment(
+      effectiveFrom: DateTime(2026, 10, 1),
+      scheduledWorkHoursPerDay: 8,
+      punchMode: 'full_day',
+      workingDays: const [
+        DateTime.monday,
+        DateTime.tuesday,
+        DateTime.wednesday,
+        DateTime.thursday,
+        DateTime.friday,
+        DateTime.saturday,
+      ],
+      scheduleOverrides: const {
+        '2026-10-07': false,
+        '2026-10-11': true,
+      },
+    );
+
+    final html = DtrExport.generateWordHtmlSync(
+      employeeName: 'Rotating Schedule Employee',
+      year: 2026,
+      month: 10,
+      start: start,
+      end: end,
+      recordsByDate: const {},
+      assignmentSegments: [segment],
+      reportableThrough: end,
+    );
+
+    final wednesdayRow = RegExp(
+      r'<tr><td>7 Wed</td>.*?</tr>',
+    ).firstMatch(html)?.group(0);
+    final sundayRow = RegExp(
+      r'<tr><td>11 Sun</td>.*?</tr>',
+    ).firstMatch(html)?.group(0);
+    expect(wednesdayRow, isNotNull);
+    expect(wednesdayRow, isNot(contains('ABSENT')));
+    expect(sundayRow, contains('ABSENT'));
+  });
+
   test('combined policy adds late to the official undertime column only', () {
     final date = DateTime(2026, 8, 14);
     final record = TimeRecord(
