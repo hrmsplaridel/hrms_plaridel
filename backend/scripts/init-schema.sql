@@ -2907,7 +2907,19 @@ WITH baseline(role_id, document_type, action, granted) AS (
     ('admin',     '*', 'forward',  true),
     ('admin',     '*', 'approve',  true),
     ('admin',     '*', 'reject',   true),
-    ('admin',     '*', 'return',   true)
+    ('admin',     '*', 'return',   true),
+    ('employee',  'memo',            'create_draft', false),
+    ('employee',  'memo',            'submit',       false),
+    ('hr',        'memo',            'create_draft', false),
+    ('hr',        'memo',            'submit',       false),
+    ('supervisor','memo',            'create_draft', false),
+    ('supervisor','memo',            'submit',       false),
+    ('employee',  'purchaseRequest', 'create_draft', false),
+    ('employee',  'purchaseRequest', 'submit',       false),
+    ('hr',        'purchaseRequest', 'create_draft', false),
+    ('hr',        'purchaseRequest', 'submit',       false),
+    ('supervisor','purchaseRequest', 'create_draft', false),
+    ('supervisor','purchaseRequest', 'submit',       false)
 )
 INSERT INTO docutracker_permissions(role_id, user_id, document_type, action, granted)
 SELECT b.role_id, NULL::uuid, b.document_type, b.action, b.granted

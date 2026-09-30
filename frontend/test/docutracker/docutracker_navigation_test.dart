@@ -46,6 +46,19 @@ void main() {
             '/api/docutracker/permission-explain' => <String, dynamic>{
               'final_decision': true,
             },
+            '/api/docutracker/routing-configs' => <dynamic>[
+              <String, dynamic>{
+                'document_type': 'travel_order',
+                'version': 1,
+                'steps': <dynamic>[
+                  <String, dynamic>{
+                    'step_order': 1,
+                    'assignee_type': 'user',
+                    'assignee_source': 'submitter_department_reviewers',
+                  },
+                ],
+              },
+            ],
             '/api/docutracker/documents' => <dynamic>[
               <String, dynamic>{
                 'id': '00000000-0000-4000-8000-000000000001',

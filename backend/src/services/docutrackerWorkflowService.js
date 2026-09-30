@@ -1,6 +1,7 @@
 const { coalesceDocumentTitle } = require('../utils/docutrackerDisplayTitle');
 const { sameEntityId } = require('../utils/sameEntityId');
 const { todayInHrmsTimezone } = require('../utils/dateRangeParser');
+const { resolveActiveMayor } = require('./officialSignatoryService');
 const {
   getEmployeeDepartmentForDate,
   getEmployeeReviewSnapshot,
@@ -1636,7 +1637,18 @@ async function canUserPerformDocumentAction(client, { user, document, action }) 
         return false;
       }
     }
-    return canUserPerformWorkflowAction(client, { user, document, action });
+    const allowedByWorkflow = await canUserPerformWorkflowAction(client, {
+      user,
+      document,
+      action,
+    });
+    if (!allowedByWorkflow || action !== 'approve') return allowedByWorkflow;
+    try {
+      if (!(await isMayorFinalApproval(client, { document }))) return true;
+    } catch (_) {
+      return false;
+    }
+    return isActiveMayor(client, user.id);
   }
 
   // View is relationship-scoped (not role-wide browse). User-specific deny still wins.
@@ -2274,6 +2286,28 @@ async function hasUserSignedDocument(client, { documentId, userId }) {
   return result.rowCount > 0;
 }
 
+// Document types whose final approval (issuing the document) belongs to the
+// active Mayor only, regardless of who is assigned to the last step.
+const MAYOR_FINAL_AUTHORITY_TYPES = new Set(['memo']);
+
+async function isMayorFinalApproval(client, { document, config }) {
+  if (!MAYOR_FINAL_AUTHORITY_TYPES.has(String(document?.document_type || ''))) {
+    return false;
+  }
+  const routing = config || await getRoutingConfig(
+    client,
+    document.document_type,
+    document.workflow_version || null
+  );
+  if (!routing) return false;
+  return !nextStepFromConfig(routing, Number(document.current_step || 1));
+}
+
+async function isActiveMayor(client, userId) {
+  const mayor = await resolveActiveMayor(client, todayInHrmsTimezone());
+  return Boolean(mayor && sameEntityId(mayor.employee_id, userId));
+}
+
 function nextStepFromConfig(config, currentStep) {
   const steps = parseSteps(config?.steps || []);
   for (let order = currentStep + 1; order <= steps.length; order += 1) {
@@ -2344,6 +2378,23 @@ async function transitionDocument(pool, user, documentId, action, payload = {}) 
       throw validationError(`Cannot ${action} document in ${status} status`);
     }
     ensureActionAllowedFromStatus(action, status);
+
+    if (action === 'approve' && MAYOR_FINAL_AUTHORITY_TYPES.has(String(doc.document_type || ''))) {
+      const finalApproval = await isMayorFinalApproval(client, { document: doc });
+      if (
+        finalApproval &&
+        (await canUserPerformWorkflowAction(client, { user, document: doc, action })) &&
+        !(await isActiveMayor(client, user.id))
+      ) {
+        throw forbiddenError('Only the Mayor can give final approval and issue this Memo.');
+      }
+      if (
+        finalApproval &&
+        !(await hasUserSignedDocument(client, { documentId, userId: user.id }))
+      ) {
+        throw validationError('Sign the Memo before giving final approval.');
+      }
+    }
 
     const allowed = await canUserPerformDocumentAction(client, {
       user,

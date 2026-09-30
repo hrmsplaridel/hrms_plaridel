@@ -164,6 +164,45 @@ test('resolvePermissionDecisionFromRows applies conflict precedence', () => {
   assert.equal(decision, false);
 });
 
+test('purchase request is denied to unauthorized employees despite wildcard grants', () => {
+  const rows = [
+    { user_id: null, role_id: 'employee', document_type: '*', granted: true },
+    { user_id: null, role_id: 'employee', document_type: 'purchaseRequest', granted: false },
+  ];
+  const ctx = { userId: 'emp-1', roleIds: ['employee'], documentType: 'purchaseRequest' };
+  assert.equal(resolvePermissionDecisionFromRows(rows, ctx), false);
+  assert.equal(
+    resolvePermissionDecisionFromRows(rows, { ...ctx, documentType: 'travel_order' }),
+    true
+  );
+});
+
+test('admin-authorized user may create and submit purchase requests', () => {
+  for (const roleIds of [['employee'], ['supervisor', 'dept_head'], ['hr', 'hr_staff']]) {
+    const rows = [
+      { user_id: null, role_id: roleIds[0], document_type: '*', granted: true },
+      { user_id: null, role_id: roleIds[0], document_type: 'purchaseRequest', granted: false },
+      { user_id: 'buyer-1', role_id: null, document_type: 'purchaseRequest', granted: true },
+    ];
+    assert.equal(
+      resolvePermissionDecisionFromRows(rows, {
+        userId: 'buyer-1',
+        roleIds,
+        documentType: 'purchaseRequest',
+      }),
+      true
+    );
+    assert.equal(
+      resolvePermissionDecisionFromRows(rows, {
+        userId: 'someone-else',
+        roleIds,
+        documentType: 'purchaseRequest',
+      }),
+      false
+    );
+  }
+});
+
 test('permissionPriority honors role aliases via roleIds', () => {
   const ctx = { userId: 'u9', roleIds: ['hr', 'hr_staff'], documentType: 'memo' };
   const aliasSpecific = permissionPriority(
@@ -1089,6 +1128,145 @@ test('signature gate passes once signed and is skipped for steps that do not req
     );
     assert.equal(checkedSignature, scenario.requiresSignature);
   }
+});
+
+function mayorMemoPool({
+  documentType = 'memo',
+  currentStep = 2,
+  signed = true,
+  holder = 'assignee-1',
+} = {}) {
+  return createMockPool((sql) => {
+    if (sql.includes('SELECT * FROM docutracker_documents WHERE id = $1 FOR UPDATE')) {
+      return {
+        rowCount: 1,
+        rows: [{
+          id: 'doc-memo',
+          document_type: documentType,
+          workflow_version: 1,
+          status: 'in_review',
+          current_step: currentStep,
+          created_by: 'staff-1',
+          current_holder_id: holder,
+        }],
+      };
+    }
+    if (sql.includes('a.allowed_actions')) {
+      return {
+        rowCount: 1,
+        rows: [{
+          is_enabled: true,
+          allowed_actions: ['approve', 'forward', 'return', 'reject'],
+          is_primary: true,
+        }],
+      };
+    }
+    if (sql.includes('routing_config')) {
+      return {
+        rowCount: 1,
+        rows: [{
+          document_type: documentType,
+          version: 1,
+          review_deadline_hours: 24,
+          steps: [
+            { step_order: 1, assignee_type: 'user' },
+            { step_order: 2, assignee_type: 'user' },
+          ],
+        }],
+      };
+    }
+    if (sql.includes("LOWER(COALESCE(u.role, '')) = 'mayor'")) {
+      return { rowCount: 1, rows: [{ employee_id: 'mayor-1', name: 'Mayor' }] };
+    }
+    if (sql.includes('FROM docutracker_signature_fields') && sql.includes('signed_by')) {
+      return { rowCount: signed ? 1 : 0, rows: signed ? [{ '?column?': 1 }] : [] };
+    }
+    return { rowCount: 0, rows: [] };
+  });
+}
+
+function memoDocument(overrides = {}) {
+  return {
+    id: 'doc-memo',
+    document_type: 'memo',
+    workflow_version: 1,
+    status: 'in_review',
+    current_step: 2,
+    created_by: 'staff-1',
+    current_holder_id: 'assignee-1',
+    ...overrides,
+  };
+}
+
+test('only the active Mayor may give final approval on a Memo', async () => {
+  const { pool } = mayorMemoPool();
+  const client = await pool.connect();
+  const staff = { id: 'staff-2', role: 'employee' };
+  const mayor = { id: 'mayor-1', role: 'mayor' };
+  const admin = { id: 'admin-1', role: 'admin' };
+
+  for (const user of [staff, admin]) {
+    assert.equal(
+      await canUserPerformDocumentAction(client, { user, document: memoDocument(), action: 'approve' }),
+      false
+    );
+  }
+  assert.equal(
+    await canUserPerformDocumentAction(client, { user: mayor, document: memoDocument(), action: 'approve' }),
+    true
+  );
+  for (const action of ['return', 'reject']) {
+    assert.equal(
+      await canUserPerformDocumentAction(client, { user: staff, document: memoDocument(), action }),
+      true
+    );
+  }
+});
+
+test('Mayor rule leaves earlier Memo steps and other document types alone', async () => {
+  const { pool } = mayorMemoPool();
+  const client = await pool.connect();
+  const staff = { id: 'staff-2', role: 'employee' };
+  assert.equal(
+    await canUserPerformDocumentAction(client, {
+      user: staff,
+      document: memoDocument({ current_step: 1 }),
+      action: 'approve',
+    }),
+    true
+  );
+  assert.equal(
+    await canUserPerformDocumentAction(client, {
+      user: staff,
+      document: memoDocument({ document_type: 'purchaseRequest' }),
+      action: 'approve',
+    }),
+    true
+  );
+});
+
+test('issuing a Memo is refused for staff and requires the Mayor signature', async () => {
+  const staffRun = mayorMemoPool();
+  await assert.rejects(
+    () => transitionDocument(staffRun.pool, { id: 'assignee-1', role: 'employee' }, 'doc-memo', 'approve', {}),
+    (err) => {
+      assert.equal(err.code, 'FORBIDDEN');
+      assert.match(err.message, /Only the Mayor can give final approval/);
+      return true;
+    }
+  );
+  assert.equal(staffRun.calls.some((c) => c.sql.includes('UPDATE docutracker_documents')), false);
+
+  const unsignedRun = mayorMemoPool({ signed: false, holder: 'mayor-1' });
+  await assert.rejects(
+    () => transitionDocument(unsignedRun.pool, { id: 'mayor-1', role: 'mayor' }, 'doc-memo', 'approve', {}),
+    (err) => {
+      assert.equal(err.code, 'VALIDATION');
+      assert.match(err.message, /Sign the Memo before giving final approval/);
+      return true;
+    }
+  );
+  assert.equal(unsignedRun.calls.some((c) => c.sql.includes('UPDATE docutracker_documents')), false);
 });
 
 test('return and reject never require a signature', async () => {

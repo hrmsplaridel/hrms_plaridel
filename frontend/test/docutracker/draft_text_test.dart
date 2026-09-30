@@ -101,6 +101,10 @@ Future<void> _pump(
                       context,
                       auth: auth,
                       provider: provider,
+                      allowedDocumentTypes: const [
+                        DocumentType.memo,
+                        DocumentType.purchaseRequest,
+                      ],
                     ),
                     child: const Text('New document'),
                   ),
@@ -377,12 +381,17 @@ void main() {
       await _pump(tester, provider, create: true);
       await tester.tap(find.text('New document'));
       await tester.pumpAndSettle();
-      await tester.enterText(find.byType(TextField).first, 'Staff orientation');
+      await tester.tap(find.byKey(const Key('docutracker-create-type-memo')));
+      await tester.pumpAndSettle();
       await tester.enterText(
-        find.byType(TextField).last,
+        find.byKey(const Key('docutracker-create-title')),
+        'Staff orientation',
+      );
+      await tester.enterText(
+        find.byKey(const Key('docutracker-create-purpose')),
         'Discuss the new attendance guidelines.',
       );
-      await tester.tap(find.widgetWithText(FilledButton, 'Create Draft'));
+      await tester.tap(find.byKey(const Key('docutracker-create-submit')));
       await tester.pumpAndSettle();
       final text = _controller(tester).document.toPlainText();
       expect(text, contains('SUBJECT: Staff orientation'));
@@ -401,10 +410,12 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.byType(BottomSheet), findsOneWidget);
-    expect(find.byType(DropdownButtonFormField<DocumentType>), findsOneWidget);
+    expect(find.text('What are you creating?'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('docutracker-create-type-memo')));
+    await tester.pumpAndSettle();
     expect(find.byType(TextField), findsNWidgets(2));
-    expect(find.text('Add attachment'), findsOneWidget);
-    expect(find.widgetWithText(FilledButton, 'Create Draft'), findsOneWidget);
+    expect(find.byKey(const Key('docutracker-create-attach')), findsOneWidget);
+    expect(find.byKey(const Key('docutracker-create-submit')), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 }

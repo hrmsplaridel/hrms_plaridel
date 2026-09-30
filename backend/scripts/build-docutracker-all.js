@@ -37,6 +37,9 @@ const postSections = [
   ["26 - SOURCE FORM PREPARER OWNERSHIP", "migrate-docutracker-source-preparer-ownership-v1.sql"],
   ["27 - SOURCE SIGNATURE ASSIGNMENT SOURCE", "migrate-docutracker-source-signature-assignment-source-v1.sql"],
   ["28 - SUBMITTER DEPARTMENT REVIEWERS + ORIGINATING DEPT", "migrate-docutracker-submitter-department-reviewers-v1.sql"],
+  ["29 - HIDE TEST DOCUMENT TYPES FROM EMPLOYEES", "migrate-docutracker-hide-test-types-from-employees-v1.sql"],
+  ["30 - PURCHASE REQUEST AUTHORIZED CREATORS ONLY", "migrate-docutracker-purchase-request-authorized-creators-v1.sql"],
+  ["31 - MEMO AUTHORIZED PREPARERS ONLY", "migrate-docutracker-memo-authorized-preparers-v1.sql"],
 ];
 
 function readBody(file) {
@@ -103,10 +106,10 @@ const applyOnceOut = `-- =======================================================
 ${applyOnceBody}
 `;
 
-// --- Phase 3: post production hardening (10-28)
+// --- Phase 3: post production hardening (10-31)
 const postToc = postSections.map(([t]) => t);
 const postOut = buildRollup({
-  title: "HRMS Plaridel - DocuTracker: INSTALL PHASE 3 (post production hardening, 10-28)",
+  title: "HRMS Plaridel - DocuTracker: INSTALL PHASE 3 (post production hardening, 10-31)",
   descriptionLines: [
     "PREREQUISITE: phase 1 complete AND docutracker-install-production-hardening-apply-once.sql applied.",
     "Section 10 drops/replaces *_prod_v1 status constraints created in production hardening.",
@@ -124,6 +127,9 @@ const postOut = buildRollup({
     "Section 26 records authenticated source-form creators for automatic Prepared by assignment.",
     "Section 27 records how source signature slots were assigned (creator/automatic/recovery/manual).",
     "Section 28 adds submitter-department workflow assignees and originating_department_id on documents.",
+    "Section 29 denies employee create on the memo/purchaseRequest test types.",
+    "Section 30 limits purchaseRequest create/submit to admin-authorized users.",
+    "Section 31 limits memo create/submit to admin-authorized preparers (Mayor issues).",
   ],
   tocLines: postToc,
   sections: postSections,
@@ -139,7 +145,7 @@ const orchestratorOut = `-- ====================================================
 -- This file uses psql \\ir (include relative to this file) to run, in order:
 --   1) docutracker-install-core.sql                    (sections 01-08)
 --   2) docutracker-install-production-hardening-apply-once.sql
---   3) docutracker-install-post-production-hardening.sql (sections 10-28)
+--   3) docutracker-install-post-production-hardening.sql (sections 10-31)
 --
 -- USAGE (from repo root; path must point at this file - \\ir resolves next to it):
 --   psql -d hrms_plaridel -v ON_ERROR_STOP=1 -f backend/scripts/migrations/docutracker/docutracker-install-all-in-order.sql

@@ -38,6 +38,31 @@ String _apiErrorMessage(Object e) {
   return e.toString();
 }
 
+/// Document types owned by other HRMS modules (Leave, L&D, RSP). Their
+/// DocuTracker documents are created from those modules, never manually.
+const docuTrackerSourceModuleDocumentTypes = <String>{'dtr', 'ld', 'rsp'};
+
+/// Distinct, name-sorted published types that may be created by hand.
+List<DocumentType> docuTrackerManuallyCreatableTypes(
+  Iterable<DocumentType> publishedTypes,
+) {
+  final types =
+      publishedTypes
+          .where(
+            (type) => !docuTrackerSourceModuleDocumentTypes.contains(
+              type.value.trim().toLowerCase(),
+            ),
+          )
+          .toSet()
+          .toList()
+        ..sort(
+          (a, b) => a.displayName.toLowerCase().compareTo(
+            b.displayName.toLowerCase(),
+          ),
+        );
+  return types;
+}
+
 class _DocuTrackerRequestException implements Exception {
   const _DocuTrackerRequestException(this.message);
 
@@ -203,13 +228,16 @@ class DocuTrackerRepository implements DocuTrackerPermissionsDataSource {
   }
 
   Future<List<DocumentRoutingConfig>> getRoutingConfigs() async {
+    final published = await _getPublishedRoutingConfigs();
+    return published.isEmpty ? DocumentRoutingConfig.defaults : published;
+  }
+
+  Future<List<DocumentRoutingConfig>> _getPublishedRoutingConfigs() async {
     try {
       final res = await ApiClient.instance.get<List<dynamic>>(
         '$_base/routing-configs',
       );
-      final list = res.data ?? [];
-      if (list.isEmpty) return DocumentRoutingConfig.defaults;
-      return list
+      return (res.data ?? const [])
           .map(
             (e) => DocumentRoutingConfig.fromJson(
               Map<String, dynamic>.from(e as Map),
@@ -1198,38 +1226,31 @@ class DocuTrackerRepository implements DocuTrackerPermissionsDataSource {
     }
   }
 
+  /// Published workflow types the server lets the current user create.
+  /// Source-module types are excluded because those documents are created by
+  /// their own modules, not manually.
   Future<List<DocumentType>> creatableDocumentTypes() async {
-    List<DocumentType> allTypes;
+    final List<DocumentRoutingConfig> configs;
     try {
-      final configs = await getRoutingConfigs();
-      allTypes = configs.map((config) => config.documentType).toSet().toList()
-        ..sort(
-          (a, b) => a.displayName.toLowerCase().compareTo(
-            b.displayName.toLowerCase(),
-          ),
-        );
+      configs = await _getPublishedRoutingConfigs();
     } catch (_) {
-      allTypes = List<DocumentType>.from(DocumentType.values);
+      return const [];
     }
-    if (allTypes.isEmpty) {
-      allTypes = List<DocumentType>.from(DocumentType.values);
-    }
-    final action = DocumentAction.createDraft.value;
-    final wildcardAllowed = await hasCurrentUserPermission(
-      documentType: '*',
-      action: action,
+    final candidates = docuTrackerManuallyCreatableTypes(
+      configs.map((config) => config.documentType),
     );
-    if (wildcardAllowed) return allTypes;
-
-    final allowed = <DocumentType>[];
-    for (final type in allTypes) {
-      final canCreate = await hasCurrentUserPermission(
-        documentType: type.value,
-        action: action,
-      );
-      if (canCreate) allowed.add(type);
-    }
-    return allowed;
+    final action = DocumentAction.createDraft.value;
+    // Checked per type: a type-specific deny outranks a wildcard grant.
+    final decisions = await Future.wait(
+      candidates.map(
+        (type) =>
+            hasCurrentUserPermission(documentType: type.value, action: action),
+      ),
+    );
+    return [
+      for (var i = 0; i < candidates.length; i++)
+        if (decisions[i]) candidates[i],
+    ];
   }
 
   Future<DocuTrackerPermissionExplanation> explainPermission({

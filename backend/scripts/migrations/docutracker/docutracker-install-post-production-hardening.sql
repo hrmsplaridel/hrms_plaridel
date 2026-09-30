@@ -1,5 +1,5 @@
 -- =============================================================================
--- HRMS Plaridel - DocuTracker: INSTALL PHASE 3 (post production hardening, 10-28)
+-- HRMS Plaridel - DocuTracker: INSTALL PHASE 3 (post production hardening, 10-31)
 -- =============================================================================
 -- PREREQUISITE: phase 1 complete AND docutracker-install-production-hardening-apply-once.sql applied.
 -- Section 10 drops/replaces *_prod_v1 status constraints created in production hardening.
@@ -17,6 +17,9 @@
 -- Section 26 records authenticated source-form creators for automatic Prepared by assignment.
 -- Section 27 records how source signature slots were assigned (creator/automatic/recovery/manual).
 -- Section 28 adds submitter-department workflow assignees and originating_department_id on documents.
+-- Section 29 denies employee create on the memo/purchaseRequest test types.
+-- Section 30 limits purchaseRequest create/submit to admin-authorized users.
+-- Section 31 limits memo create/submit to admin-authorized preparers (Mayor issues).
 --
 -- TABLE OF CONTENTS
 --   10 - STATUS SEMANTICS V2 (drop forwarded as document status)
@@ -38,6 +41,9 @@
 --   26 - SOURCE FORM PREPARER OWNERSHIP
 --   27 - SOURCE SIGNATURE ASSIGNMENT SOURCE
 --   28 - SUBMITTER DEPARTMENT REVIEWERS + ORIGINATING DEPT
+--   29 - HIDE TEST DOCUMENT TYPES FROM EMPLOYEES
+--   30 - PURCHASE REQUEST AUTHORIZED CREATORS ONLY
+--   31 - MEMO AUTHORIZED PREPARERS ONLY
 --
 -- =============================================================================
 
@@ -1118,7 +1124,7 @@ COMMIT;
 -- Source file: migrate-docutracker-source-signature-assignment-source-v1.sql
 -- #############################################################################
 
-BEGIN;
+  BEGIN;
 
 -- Snapshot how an RSP/L&D source signature slot was assigned so admin recovery
 -- can require remarks when overriding creator or automatic assignments.
@@ -1235,3 +1241,97 @@ CREATE INDEX IF NOT EXISTS idx_docutracker_documents_originating_department
   WHERE originating_department_id IS NOT NULL;
 
 COMMIT;
+
+
+-- #############################################################################
+-- 29 - HIDE TEST DOCUMENT TYPES FROM EMPLOYEES
+-- Source file: migrate-docutracker-hide-test-types-from-employees-v1.sql
+-- #############################################################################
+
+-- DocuTracker: stop normal employees from creating the built-in test types.
+--
+-- The employee role is granted create on '*'. A role row for a specific
+-- document_type outranks the wildcard (permissionPriority 200 vs 100), so these
+-- deny rows hide Memo and Purchase Request from employees while keeping the
+-- workflows and existing documents intact. Admins are unaffected.
+--
+-- Idempotent.
+
+INSERT INTO docutracker_permissions(role_id, user_id, document_type, action, granted)
+VALUES
+  ('employee', NULL::uuid, 'memo',            'create_draft', false),
+  ('employee', NULL::uuid, 'purchaseRequest', 'create_draft', false)
+ON CONFLICT (role_id, document_type, action)
+WHERE role_id IS NOT NULL
+DO UPDATE SET
+  granted = EXCLUDED.granted,
+  updated_at = now();
+
+
+-- #############################################################################
+-- 30 - PURCHASE REQUEST AUTHORIZED CREATORS ONLY
+-- Source file: migrate-docutracker-purchase-request-authorized-creators-v1.sql
+-- #############################################################################
+
+-- DocuTracker: Purchase Requests may only be created and submitted by
+-- employees an admin has explicitly authorized.
+--
+-- Role baselines grant create/submit on '*'. These role rows for the specific
+-- purchaseRequest type outrank that wildcard (permissionPriority 200 vs 100),
+-- so no non-admin role can create or submit a Purchase Request by default.
+--
+-- To authorize a person, an admin grants them create_draft and submit for
+-- purchaseRequest in System Access. That user-specific row outranks these
+-- role rows (400 vs 200). Workflow review actions (approve/forward/return/
+-- reject) are decided by step assignment, not these rows, so Department
+-- Heads and other configured reviewers keep their responsibilities.
+--
+-- Idempotent.
+
+INSERT INTO docutracker_permissions(role_id, user_id, document_type, action, granted)
+VALUES
+  ('employee',   NULL::uuid, 'purchaseRequest', 'create_draft', false),
+  ('employee',   NULL::uuid, 'purchaseRequest', 'submit',       false),
+  ('hr',         NULL::uuid, 'purchaseRequest', 'create_draft', false),
+  ('hr',         NULL::uuid, 'purchaseRequest', 'submit',       false),
+  ('supervisor', NULL::uuid, 'purchaseRequest', 'create_draft', false),
+  ('supervisor', NULL::uuid, 'purchaseRequest', 'submit',       false)
+ON CONFLICT (role_id, document_type, action)
+WHERE role_id IS NOT NULL
+DO UPDATE SET
+  granted = EXCLUDED.granted,
+  updated_at = now();
+
+
+-- #############################################################################
+-- 31 - MEMO AUTHORIZED PREPARERS ONLY
+-- Source file: migrate-docutracker-memo-authorized-preparers-v1.sql
+-- #############################################################################
+
+-- DocuTracker: Mayor's Memorandums may only be prepared (created/submitted)
+-- by users an admin has explicitly authorized, e.g. Mayor's Office staff.
+--
+-- Role baselines grant create/submit on '*'. These role rows for the specific
+-- memo type outrank that wildcard (permissionPriority 200 vs 100). An admin
+-- authorizes a preparer with user-specific memo create_draft/submit grants in
+-- System Access (400 beats 200).
+--
+-- Final approval (issuing the Memo) is not a permission row: the workflow
+-- service only lets the active Mayor approve the last Memo step, and only
+-- after signing. Preparers therefore cannot issue a Memo themselves.
+--
+-- Idempotent.
+
+INSERT INTO docutracker_permissions(role_id, user_id, document_type, action, granted)
+VALUES
+  ('employee',   NULL::uuid, 'memo', 'create_draft', false),
+  ('employee',   NULL::uuid, 'memo', 'submit',       false),
+  ('hr',         NULL::uuid, 'memo', 'create_draft', false),
+  ('hr',         NULL::uuid, 'memo', 'submit',       false),
+  ('supervisor', NULL::uuid, 'memo', 'create_draft', false),
+  ('supervisor', NULL::uuid, 'memo', 'submit',       false)
+ON CONFLICT (role_id, document_type, action)
+WHERE role_id IS NOT NULL
+DO UPDATE SET
+  granted = EXCLUDED.granted,
+  updated_at = now();
