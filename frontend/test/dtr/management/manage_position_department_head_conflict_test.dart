@@ -5,7 +5,7 @@ import 'package:hrms_plaridel/core/api/client.dart';
 import 'package:hrms_plaridel/features/dtr/management/positions/pages/manage_position.dart';
 
 void main() {
-  testWidgets('disables head designation when another position owns it', (
+  testWidgets('position edits leave approval designations unchanged', (
     tester,
   ) async {
     tester.view.devicePixelRatio = 1;
@@ -15,12 +15,16 @@ void main() {
       tester.view.resetPhysicalSize();
     });
     ApiClient.instance.init();
+    final requests = <RequestOptions>[];
     ApiClient.instance.dio.interceptors.clear();
     ApiClient.instance.dio.interceptors.add(
       InterceptorsWrapper(
         onRequest: (options, handler) {
+          requests.add(options);
           dynamic data;
-          if (options.path == '/api/departments') {
+          if (options.method == 'PUT') {
+            data = {'id': '22222222-2222-4222-8222-222222222222'};
+          } else if (options.path == '/api/departments') {
             data = <Map<String, dynamic>>[
               {
                 'id': '11111111-1111-4111-8111-111111111111',
@@ -37,6 +41,10 @@ void main() {
                   'department_id': '11111111-1111-4111-8111-111111111111',
                   'department_name': 'Human Resources',
                   'is_active': true,
+                  'is_department_head': true,
+                  'is_leave_final_reviewer': true,
+                  'department_head_period_id': 'existing-period',
+                  'department_head_effective_from': '2026-01-01',
                 },
               ],
               'pagination': {'page': 1, 'page_count': 1, 'total': 1},
@@ -70,13 +78,25 @@ void main() {
     await tester.tap(find.text('HR Staff').first);
     await tester.pumpAndSettle();
 
-    final toggle = tester.widget<SwitchListTile>(
-      find.widgetWithText(SwitchListTile, 'Official Department Head'),
-    );
-    expect(toggle.onChanged, isNull);
+    expect(find.text('Official Department Head'), findsNothing);
+    expect(find.text('Official Leave Final Reviewer'), findsNothing);
+    expect(find.text('Save Reviewers'), findsNothing);
     expect(
-      find.textContaining('Department Head already holds'),
-      findsOneWidget,
+      requests.where(
+        (r) =>
+            r.path.contains('reviewer') ||
+            r.path.contains('department-head-conflict'),
+      ),
+      isEmpty,
     );
+
+    await tester.tap(find.text('Update'));
+    await tester.pumpAndSettle();
+    final payload = requests.singleWhere((r) => r.method == 'PUT').data as Map;
+    expect(payload, {
+      'name': 'HR Staff',
+      'description': null,
+      'department_id': '11111111-1111-4111-8111-111111111111',
+    });
   });
 }

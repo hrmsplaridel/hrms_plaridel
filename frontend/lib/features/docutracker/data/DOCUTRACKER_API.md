@@ -238,9 +238,20 @@ committed or rolled back together.
 | GET | /api/docutracker/permission-records | Compatibility endpoint for raw permission rows |
 | POST | /api/docutracker/permissions | Compatibility endpoint for one validated permission change |
 | DELETE | /api/docutracker/permissions | Reset validated explicit rules and create audit entries |
-| GET | /api/docutracker/official-signatories | List effective-dated Leave Credit Certifiers (admin only) |
+| GET | /api/docutracker/official-signatories | List effective-dated official signatories (admin only) |
 | GET | /api/docutracker/official-signatories/automatic-mayor | Resolve the active Mayor used in leave forms (admin only) |
-| PUT | /api/docutracker/official-signatories/:roleKey | Configure a Leave Credit Certifier period (admin only) |
+| PUT | /api/docutracker/official-signatories/:roleKey | Configure an official signatory period (admin only) |
+
+Supported role keys are `leave_credit_certifier`, `dtr_office_hours_verifier`,
+and `dtr_hr_officer`. DTR's Approvals & Signatories screen uses the same registry
+and audited, effective-dated editor. DocuTracker continues to show its existing
+Leave Credit Certifier and automatic Mayor sections.
+
+`GET /api/dtr-report-signatories` requires authentication and returns the two DTR
+roles only, each with `configured` and `current` (name and position title, or null).
+It does not expose designation history or administrative write access. Printed DTR
+officials are resolved for today's official HRMS date. A role with no history may
+use the legacy position lookup; expired/future explicit designations do not.
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|

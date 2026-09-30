@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:hrms_plaridel/shared/widgets/settings_master_detail.dart';
+import 'package:hrms_plaridel/shared/widgets/settings_loading_skeleton.dart';
 
 import 'package:hrms_plaridel/features/docutracker/data/repositories/docutracker_repository.dart';
 import 'package:hrms_plaridel/features/docutracker/models/official_signatory.dart';
@@ -6,9 +8,16 @@ import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/d
 import 'package:hrms_plaridel/features/docutracker/services/employee_directory_lookup.dart';
 
 const _creditCertifier = 'leave_credit_certifier';
+const _dtrRoles = {
+  'dtr_office_hours_verifier': 'Office-hours Verifier',
+  'dtr_hr_officer': 'HR Report Officer',
+  _creditCertifier: 'Leave Credit Certifier',
+};
 
 class DocuTrackerOfficialSignatoriesScreen extends StatefulWidget {
-  const DocuTrackerOfficialSignatoriesScreen({super.key});
+  const DocuTrackerOfficialSignatoriesScreen({super.key, this.dtrOnly = false});
+
+  final bool dtrOnly;
 
   @override
   State<DocuTrackerOfficialSignatoriesScreen> createState() =>
@@ -24,6 +33,7 @@ class _DocuTrackerOfficialSignatoriesScreenState
   bool _loading = true;
   bool _reResolving = false;
   String? _error;
+  String _selectedRole = 'dtr_office_hours_verifier';
 
   @override
   void initState() {
@@ -76,9 +86,7 @@ class _DocuTrackerOfficialSignatoriesScreenState
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           behavior: SnackBarBehavior.floating,
-          content: Text(
-            error.toString().replaceFirst('Exception: ', ''),
-          ),
+          content: Text(error.toString().replaceFirst('Exception: ', '')),
         ),
       );
     } finally {
@@ -93,14 +101,17 @@ class _DocuTrackerOfficialSignatoriesScreenState
     });
     try {
       await _directory.load();
+      if (!_directory.isLoaded) {
+        throw Exception('Employee directory could not be loaded.');
+      }
       final results = await Future.wait([
         _repository.listOfficialSignatories(),
-        _repository.getAutomaticMayorSignatory(),
+        if (!widget.dtrOnly) _repository.getAutomaticMayorSignatory(),
       ]);
       if (!mounted) return;
       setState(() {
         _periods = results[0] as List<OfficialSignatoryPeriod>;
-        _mayor = results[1] as AutomaticMayorSignatory?;
+        _mayor = widget.dtrOnly ? null : results[1] as AutomaticMayorSignatory?;
       });
     } catch (error) {
       if (!mounted) return;
@@ -118,7 +129,7 @@ class _DocuTrackerOfficialSignatoriesScreenState
     );
     final saved = await showDocuTrackerSlideInPanel<bool>(
       context: context,
-      title: 'Configure Leave Credit Certifier',
+      title: 'Configure ${_dtrRoles[roleKey] ?? roleKey}',
       width: 560,
       child: _OfficialSignatoryPanel(
         roleKey: roleKey,
@@ -134,11 +145,14 @@ class _DocuTrackerOfficialSignatoriesScreenState
       messenger.showSnackBar(
         SnackBar(
           behavior: SnackBarBehavior.floating,
-          content: const Row(
+          content: Row(
             children: [
-              Icon(Icons.check_circle_outline_rounded, color: Colors.white),
-              SizedBox(width: 12),
-              Expanded(child: Text('Leave Credit Certifier saved.')),
+              const Icon(
+                Icons.check_circle_outline_rounded,
+                color: Colors.white,
+              ),
+              const SizedBox(width: 12),
+              Expanded(child: Text('${_dtrRoles[roleKey]} saved.')),
             ],
           ),
         ),
@@ -152,21 +166,26 @@ class _DocuTrackerOfficialSignatoriesScreenState
 
   @override
   Widget build(BuildContext context) {
+    if (widget.dtrOnly) return _buildDtrLayout();
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Official Signatories'),
+        automaticallyImplyLeading: !widget.dtrOnly,
+        title: Text(
+          widget.dtrOnly ? 'Report Signatories' : 'Official Signatories',
+        ),
         actions: [
-          TextButton.icon(
-            onPressed: (_loading || _reResolving) ? null : _reResolveSigners,
-            icon: _reResolving
-                ? const SizedBox(
-                    width: 16,
-                    height: 16,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : const Icon(Icons.manage_history_rounded),
-            label: Text(_reResolving ? 'Backfilling…' : 'Re-resolve signers'),
-          ),
+          if (!widget.dtrOnly)
+            TextButton.icon(
+              onPressed: (_loading || _reResolving) ? null : _reResolveSigners,
+              icon: _reResolving
+                  ? const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.manage_history_rounded),
+              label: Text(_reResolving ? 'Backfilling…' : 'Re-resolve signers'),
+            ),
           IconButton(
             tooltip: 'Refresh',
             onPressed: _loading ? null : _load,
@@ -179,6 +198,10 @@ class _DocuTrackerOfficialSignatoriesScreenState
           : RefreshIndicator(
               onRefresh: _load,
               child: ListView(
+                key: PageStorageKey(
+                  'official-signatories-list-${widget.dtrOnly}',
+                ),
+                primary: false,
                 padding: const EdgeInsets.all(24),
                 children: [
                   if (_error != null) ...[
@@ -193,19 +216,109 @@ class _DocuTrackerOfficialSignatoriesScreenState
                     ),
                     const SizedBox(height: 16),
                   ],
+                  if (widget.dtrOnly)
+                    for (final role in _dtrRoles.entries.where(
+                      (e) => e.key != _creditCertifier,
+                    )) ...[
+                      _SignatorySection(
+                        roleKey: role.key,
+                        title: role.value,
+                        subtitle: 'DTR and tardiness reports',
+                        periods: _forRole(role.key),
+                        onConfigure: () => _configure(role.key),
+                      ),
+                      const SizedBox(height: 16),
+                    ],
                   _SignatorySection(
+                    roleKey: _creditCertifier,
                     title: 'Leave Credit Certifier',
                     subtitle: 'Printed in section 7.A of the leave form.',
                     periods: _forRole(_creditCertifier),
                     onConfigure: () => _configure(_creditCertifier),
                   ),
                   const SizedBox(height: 16),
-                  _AutomaticMayorSection(mayor: _mayor),
+                  if (!widget.dtrOnly) _AutomaticMayorSection(mayor: _mayor),
                   const SizedBox(height: 16),
-                  _BackfillHintCard(onRun: _reResolveSigners, busy: _reResolving),
+                  if (!widget.dtrOnly)
+                    _BackfillHintCard(
+                      onRun: _reResolveSigners,
+                      busy: _reResolving,
+                    ),
                 ],
               ),
             ),
+    );
+  }
+
+  Widget _buildDtrLayout() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: Text(
+                'Report Signatories',
+                style: Theme.of(context).textTheme.titleMedium,
+              ),
+            ),
+            IconButton(
+              tooltip: 'Refresh',
+              onPressed: _loading ? null : _load,
+              icon: const Icon(Icons.refresh),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        if (_loading) const Expanded(child: SettingsMasterDetailSkeleton()),
+        if (_error != null)
+          Padding(
+            padding: const EdgeInsets.all(16),
+            child: Text(
+              _error!,
+              style: TextStyle(color: Theme.of(context).colorScheme.error),
+            ),
+          ),
+        if (!_loading && _error == null)
+          Expanded(
+            child: SettingsMasterDetail(
+              key: const PageStorageKey('signatory-master-detail'),
+              searchLabel: 'Search roles',
+              selectedId: _selectedRole,
+              entries: [
+                for (final role in _dtrRoles.entries)
+                  SettingsListEntry(
+                    id: role.key,
+                    title: role.value,
+                    icon: Icons.draw_outlined,
+                    subtitle:
+                        _forRole(
+                          role.key,
+                        ).where((p) => p.isEffective).firstOrNull?.name ??
+                        'Not configured for today',
+                  ),
+              ],
+              onSelected: (role) => setState(() => _selectedRole = role),
+              detail: ListView(
+                key: PageStorageKey('official-signatory-detail-$_selectedRole'),
+                primary: false,
+                padding: const EdgeInsets.all(8),
+                children: [
+                  _SignatorySection(
+                    roleKey: _selectedRole,
+                    title: _dtrRoles[_selectedRole]!,
+                    subtitle: _selectedRole == _creditCertifier
+                        ? 'Printed in section 7.A of the leave form.'
+                        : 'DTR and tardiness reports',
+                    periods: _forRole(_selectedRole),
+                    onConfigure: () => _configure(_selectedRole),
+                    framed: false,
+                  ),
+                ],
+              ),
+            ),
+          ),
+      ],
     );
   }
 }
@@ -317,16 +430,20 @@ class _AutomaticMayorSection extends StatelessWidget {
 
 class _SignatorySection extends StatelessWidget {
   const _SignatorySection({
+    required this.roleKey,
     required this.title,
     required this.subtitle,
     required this.periods,
     required this.onConfigure,
+    this.framed = true,
   });
 
+  final String roleKey;
   final String title;
   final String subtitle;
   final List<OfficialSignatoryPeriod> periods;
   final VoidCallback onConfigure;
+  final bool framed;
 
   @override
   Widget build(BuildContext context) {
@@ -336,10 +453,12 @@ class _SignatorySection extends StatelessWidget {
       orElse: () => null,
     );
     return Container(
-      decoration: BoxDecoration(
-        border: Border.all(color: theme.dividerColor),
-        borderRadius: BorderRadius.circular(8),
-      ),
+      decoration: !framed
+          ? null
+          : BoxDecoration(
+              border: Border.all(color: theme.dividerColor),
+              borderRadius: BorderRadius.circular(8),
+            ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -378,6 +497,7 @@ class _SignatorySection extends StatelessWidget {
           if (periods.isNotEmpty) ...[
             const Divider(height: 1),
             ExpansionTile(
+              key: PageStorageKey('official-signatory-history-$roleKey'),
               title: Text('Designation history (${periods.length})'),
               children: periods
                   .map(

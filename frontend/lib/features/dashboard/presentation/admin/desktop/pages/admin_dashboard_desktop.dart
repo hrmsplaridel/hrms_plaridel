@@ -35,6 +35,7 @@ import 'package:hrms_plaridel/features/dtr/management/departments/pages/manage_d
 import 'package:hrms_plaridel/features/dtr/management/positions/pages/manage_position.dart';
 import 'package:hrms_plaridel/features/dtr/management/shifts/pages/manage_shift.dart';
 import 'package:hrms_plaridel/features/dtr/management/weekly_schedules/pages/manage_weekly_schedule.dart';
+import 'package:hrms_plaridel/features/dtr/management/approvals/pages/approvals_signatories_page.dart';
 import 'package:hrms_plaridel/features/dtr/management/holidays/pages/manage_holiday.dart';
 import 'package:hrms_plaridel/features/dtr/management/attendance_policies/pages/manage_attendance_policy.dart';
 import 'package:hrms_plaridel/features/dtr/management/biometric_devices/pages/manage_biometric_devices.dart';
@@ -1742,6 +1743,7 @@ class _DtrContentState extends State<_DtrContent> {
     if (index == 11) return const ManageBiometricDevices();
     if (index == 12) return const AdminLocatorManagementScreen();
     if (index == 13) return const ManageWeeklySchedule();
+    if (index == 14) return const ApprovalsSignatoriesPage();
     return _ManageContent(
       subIndex: index - 3,
       onOpenAssignmentForEmployee: _goToAssignmentWithEmployee,
@@ -1895,6 +1897,13 @@ class _DtrContentState extends State<_DtrContent> {
                           'Review employee leave requests, approvals, and leave-related records.',
                       icon: Icons.event_note_rounded,
                       onTap: () => _openDtrSection(8),
+                    ),
+                    FeatureCard(
+                      title: 'Approvals & Signatories',
+                      subtitle:
+                          'Department reviewers, final reviewers, backups, and report signatories.',
+                      icon: Icons.account_tree_outlined,
+                      onTap: () => _openDtrSection(14),
                     ),
                     FeatureCard(
                       title: 'Locator Slip Management',

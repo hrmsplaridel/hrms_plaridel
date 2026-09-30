@@ -266,32 +266,63 @@ class DtrExport {
     bool requireVerifiedSource = false,
   }) async {
     try {
+      final configuredResponse = await ApiClient.instance
+          .get<Map<String, dynamic>>('/api/dtr-report-signatories');
+      final roles = configuredResponse.data?['roles'] as Map;
+      DtrExportSignatory? configured(String role, String defaultTitle) {
+        final designation = roles[role] as Map;
+        if (designation['configured'] != true) return null;
+        final current = designation['current'] as Map?;
+        // An expired or future designation must not revive a legacy signatory.
+        return DtrExportSignatory(
+          positionTitle: current?['position_title']?.toString() ?? defaultTitle,
+          employeeName: current?['name']?.toString(),
+        );
+      }
+
+      final verifier = configured(
+        'dtr_office_hours_verifier',
+        _meedoManagerPositionTitle,
+      );
+      final officer = configured('dtr_hr_officer', _hrOfficerPositionTitle);
+      if (verifier != null && officer != null) {
+        return DtrExportSignatories(meedoManager: verifier, hrOfficer: officer);
+      }
       final res = await ApiClient.instance.get<List<dynamic>>(
         '/api/employees',
         queryParameters: {'status': 'Active', 'role': 'All'},
       );
       final rows = res.data ?? const <dynamic>[];
-      final meedoManagerName =
-          _findEmployeeNameByExactPosition(rows, _meedoManagerPositionTitle) ??
-          await _findOtherPositionEmployeeName(
-            _meedoManagerPositionTitle,
-            requireVerifiedSource: requireVerifiedSource,
-          );
-      final hrOfficerName =
-          _findEmployeeNameByExactPosition(rows, _hrOfficerPositionTitle) ??
-          await _findOtherPositionEmployeeName(
-            _hrOfficerPositionTitle,
-            requireVerifiedSource: requireVerifiedSource,
-          );
+      final meedoManagerName = verifier != null
+          ? verifier.employeeName
+          : _findEmployeeNameByExactPosition(
+                  rows,
+                  _meedoManagerPositionTitle,
+                ) ??
+                await _findOtherPositionEmployeeName(
+                  _meedoManagerPositionTitle,
+                  requireVerifiedSource: requireVerifiedSource,
+                );
+      final hrOfficerName = officer != null
+          ? officer.employeeName
+          : _findEmployeeNameByExactPosition(rows, _hrOfficerPositionTitle) ??
+                await _findOtherPositionEmployeeName(
+                  _hrOfficerPositionTitle,
+                  requireVerifiedSource: requireVerifiedSource,
+                );
       return DtrExportSignatories(
-        meedoManager: DtrExportSignatory(
-          positionTitle: _meedoManagerPositionTitle,
-          employeeName: meedoManagerName,
-        ),
-        hrOfficer: DtrExportSignatory(
-          positionTitle: _hrOfficerPositionTitle,
-          employeeName: hrOfficerName,
-        ),
+        meedoManager:
+            verifier ??
+            DtrExportSignatory(
+              positionTitle: _meedoManagerPositionTitle,
+              employeeName: meedoManagerName,
+            ),
+        hrOfficer:
+            officer ??
+            DtrExportSignatory(
+              positionTitle: _hrOfficerPositionTitle,
+              employeeName: hrOfficerName,
+            ),
       );
     } catch (_) {
       if (requireVerifiedSource) rethrow;
