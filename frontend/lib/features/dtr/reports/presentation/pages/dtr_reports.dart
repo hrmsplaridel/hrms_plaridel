@@ -208,6 +208,8 @@ class _DtrReportsState extends State<DtrReports> {
               officialHours: assignment.officialHours,
               scheduledWorkHoursPerDay: assignment.workHoursPerDay,
               punchMode: assignment.punchMode,
+              overnight: assignment.overnight,
+              shiftEndMinutes: assignment.shiftEndMinutes,
               workingDays: assignment.workingDays,
               scheduleOverrides: assignment.scheduleOverrides,
             ),
@@ -689,7 +691,10 @@ class _DtrReportsState extends State<DtrReports> {
       return '${h12.toString().padLeft(2, '0')}:${m.toString().padLeft(2, '0')}${isPm ? 'PM' : 'AM'}';
     }
 
-    return '${toAmPm(start)}-${toAmPm(end)}';
+    final crossesMidnight =
+        (_parseShiftClockMinutes(end) ?? 1440) <
+        (_parseShiftClockMinutes(start) ?? 0);
+    return '${toAmPm(start)}-${toAmPm(end)}${crossesMidnight ? ' (+1 day)' : ''}';
   }
 
   Future<List<_DtrAssignmentInfo>> _fetchAssignmentTimelineForEmployee(
@@ -781,11 +786,17 @@ class _DtrReportsState extends State<DtrReports> {
           workingDays: (days != null && days.isNotEmpty) ? days : null,
           scheduleOverrides: scheduleOverrides,
           officialHours: officialHours,
+          overnight:
+              startMinutes != null &&
+              endMinutes != null &&
+              endMinutes < startMinutes,
+          shiftEndMinutes: endMinutes,
           workHoursPerDay: _reportShiftWorkHours(
             startMinutes: startMinutes,
             endMinutes: endMinutes,
             breakEndMinutes: breakEndMinutes,
             punchMode: punchMode,
+            breakStartMinutes: _parseShiftClockMinutes(m['break_start']),
           ),
           punchMode: punchMode,
           effectiveFrom: DateTime(from.year, from.month, from.day),
@@ -1677,6 +1688,8 @@ class _DtrReportsState extends State<DtrReports> {
               officialHours: assignment.officialHours,
               scheduledWorkHoursPerDay: assignment.workHoursPerDay,
               punchMode: assignment.punchMode,
+              overnight: assignment.overnight,
+              shiftEndMinutes: assignment.shiftEndMinutes,
               workingDays: assignment.workingDays,
               scheduleOverrides: assignment.scheduleOverrides,
             ),
@@ -3898,6 +3911,7 @@ String _resolveReportPunchMode(
     return mode;
   }
   if (startMinutes == null) return 'auto';
+  if (endMinutes != null && endMinutes < startMinutes) return 'single_session';
   if (startMinutes >= 12 * 60) return 'pm_only';
   if (breakEndMinutes == null && endMinutes != null && endMinutes <= 13 * 60) {
     return 'am_only';
@@ -3910,10 +3924,18 @@ double? _reportShiftWorkHours({
   required int? endMinutes,
   required int? breakEndMinutes,
   required String punchMode,
+  int? breakStartMinutes,
 }) {
   if (startMinutes == null || endMinutes == null) return null;
   var spanMinutes = endMinutes - startMinutes;
   if (spanMinutes <= 0) spanMinutes += 24 * 60;
+  if (punchMode == 'full_day' && endMinutes < startMinutes) {
+    int normalize(int value) => value < startMinutes ? value + 1440 : value;
+    final duration =
+        normalize(breakEndMinutes ?? 13 * 60) -
+        normalize(breakStartMinutes ?? 12 * 60);
+    return (spanMinutes - duration).clamp(0, 1440) / 60;
+  }
   if (punchMode == 'full_day') {
     final lunchMinutes = breakEndMinutes == null
         ? 60
@@ -3947,6 +3969,8 @@ class _DtrAssignmentInfo {
     this.officialHours,
     this.workHoursPerDay,
     this.punchMode,
+    this.overnight = false,
+    this.shiftEndMinutes,
     this.effectiveFrom,
     this.effectiveTo,
     this.department,
@@ -3958,6 +3982,8 @@ class _DtrAssignmentInfo {
   final String? officialHours;
   final double? workHoursPerDay;
   final String? punchMode;
+  final bool overnight;
+  final int? shiftEndMinutes;
   final DateTime? effectiveFrom;
   final DateTime? effectiveTo;
   final String? department;

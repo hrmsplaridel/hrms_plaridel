@@ -162,6 +162,8 @@ class DtrAssignmentSegment {
     this.punchMode,
     this.workingDays,
     this.scheduleOverrides = const {},
+    this.overnight = false,
+    this.shiftEndMinutes,
   });
 
   final DateTime? effectiveFrom;
@@ -173,6 +175,8 @@ class DtrAssignmentSegment {
   final String? punchMode;
   final List<int>? workingDays;
   final Map<String, bool> scheduleOverrides;
+  final bool overnight;
+  final int? shiftEndMinutes;
 }
 
 /// DTR export to PDF, Excel, and Word (HTML) — single page, matches official form.
@@ -384,15 +388,20 @@ class DtrExport {
         .replaceAll("'", '&#39;');
   }
 
-  static String _formatTime(DateTime? dt) {
-    return formatOfficialPhilippineTime(dt, emptyValue: '-');
-  }
-
-  /// Time for print form (lowercase am/pm like reference).
-  static String _formatTimePrint(DateTime? dt) {
+  static String _formatTime(DateTime? dt, [DateTime? attendanceDate]) {
     return formatOfficialPhilippineTime(
       dt,
       emptyValue: '-',
+      attendanceDate: attendanceDate,
+    );
+  }
+
+  /// Time for print form (lowercase am/pm like reference).
+  static String _formatTimePrint(DateTime? dt, [DateTime? attendanceDate]) {
+    return formatOfficialPhilippineTime(
+      dt,
+      emptyValue: '-',
+      attendanceDate: attendanceDate,
       lowercasePeriod: true,
       padHour: true,
     );
@@ -455,6 +464,12 @@ class DtrExport {
     }
     final segment = _assignmentSegmentForDate(date, assignmentSegments);
     if (segment == null) return false;
+    if (segment.overnight && segment.shiftEndMinutes != null) {
+      final end = DateTime.utc(date.year, date.month, date.day + 1)
+          .add(Duration(minutes: segment.shiftEndMinutes!))
+          .subtract(const Duration(hours: 8));
+      if (DateTime.now().toUtc().isBefore(end)) return false;
+    }
     final dateKey =
         '${date.year.toString().padLeft(4, '0')}-'
         '${date.month.toString().padLeft(2, '0')}-'
@@ -1305,16 +1320,16 @@ class DtrExport {
         // For each slot, prefer the real punch time; if null, check whether a
         // locator slip covers that slot and show "ON FIELD" instead of blank.
         amInStr = rec.timeIn != null
-            ? _formatTimePrint(rec.timeIn)
+            ? _formatTimePrint(rec.timeIn, rec.recordDate)
             : _locatorSlotOrBlank(rec, 'AM IN');
         amOutStr = rec.breakOut != null
-            ? _formatTimePrint(rec.breakOut)
+            ? _formatTimePrint(rec.breakOut, rec.recordDate)
             : _locatorSlotOrBlank(rec, 'AM OUT');
         pmInStr = rec.breakIn != null
-            ? _formatTimePrint(rec.breakIn)
+            ? _formatTimePrint(rec.breakIn, rec.recordDate)
             : _locatorSlotOrBlank(rec, 'PM IN');
         pmOutStr = rec.timeOut != null
-            ? _formatTimePrint(rec.timeOut)
+            ? _formatTimePrint(rec.timeOut, rec.recordDate)
             : _locatorSlotOrBlank(rec, 'PM OUT');
       } else if (_isOnFieldByLocator(rec)) {
         amInStr = _locatorSlotOrBlank(rec, 'AM IN');
@@ -1748,16 +1763,16 @@ class DtrExport {
       String statusText = '';
       if (showTimes) {
         amInStr = rec.timeIn != null
-            ? _formatTime(rec.timeIn)
+            ? _formatTime(rec.timeIn, rec.recordDate)
             : _locatorSlotOrBlank(rec, 'AM IN');
         amOutStr = rec.breakOut != null
-            ? _formatTime(rec.breakOut)
+            ? _formatTime(rec.breakOut, rec.recordDate)
             : _locatorSlotOrBlank(rec, 'AM OUT');
         pmInStr = rec.breakIn != null
-            ? _formatTime(rec.breakIn)
+            ? _formatTime(rec.breakIn, rec.recordDate)
             : _locatorSlotOrBlank(rec, 'PM IN');
         pmOutStr = rec.timeOut != null
-            ? _formatTime(rec.timeOut)
+            ? _formatTime(rec.timeOut, rec.recordDate)
             : _locatorSlotOrBlank(rec, 'PM OUT');
       } else if (_isOnFieldByLocator(rec)) {
         amInStr = _locatorSlotOrBlank(rec, 'AM IN');
@@ -2091,16 +2106,16 @@ class DtrExport {
       String statusText = '';
       if (showTimes) {
         amIn = rec.timeIn != null
-            ? _formatTime(rec.timeIn)
+            ? _formatTime(rec.timeIn, rec.recordDate)
             : _locatorSlotOrBlank(rec, 'AM IN');
         amOut = rec.breakOut != null
-            ? _formatTime(rec.breakOut)
+            ? _formatTime(rec.breakOut, rec.recordDate)
             : _locatorSlotOrBlank(rec, 'AM OUT');
         pmIn = rec.breakIn != null
-            ? _formatTime(rec.breakIn)
+            ? _formatTime(rec.breakIn, rec.recordDate)
             : _locatorSlotOrBlank(rec, 'PM IN');
         pmOut = rec.timeOut != null
-            ? _formatTime(rec.timeOut)
+            ? _formatTime(rec.timeOut, rec.recordDate)
             : _locatorSlotOrBlank(rec, 'PM OUT');
       } else if (_isOnFieldByLocator(rec)) {
         amIn = _locatorSlotOrBlank(rec, 'AM IN');
@@ -2344,16 +2359,16 @@ class DtrExport {
       String statusText = '';
       if (showTimes) {
         amIn = rec.timeIn != null
-            ? _formatTime(rec.timeIn)
+            ? _formatTime(rec.timeIn, rec.recordDate)
             : _locatorSlotOrBlank(rec, 'AM IN');
         amOut = rec.breakOut != null
-            ? _formatTime(rec.breakOut)
+            ? _formatTime(rec.breakOut, rec.recordDate)
             : _locatorSlotOrBlank(rec, 'AM OUT');
         pmIn = rec.breakIn != null
-            ? _formatTime(rec.breakIn)
+            ? _formatTime(rec.breakIn, rec.recordDate)
             : _locatorSlotOrBlank(rec, 'PM IN');
         pmOut = rec.timeOut != null
-            ? _formatTime(rec.timeOut)
+            ? _formatTime(rec.timeOut, rec.recordDate)
             : _locatorSlotOrBlank(rec, 'PM OUT');
       } else if (_isOnFieldByLocator(rec)) {
         amIn = _locatorSlotOrBlank(rec, 'AM IN');

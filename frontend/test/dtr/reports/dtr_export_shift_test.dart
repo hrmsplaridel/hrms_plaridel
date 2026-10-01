@@ -4,6 +4,44 @@ import 'package:hrms_plaridel/features/dtr/attendance/models/time_record.dart';
 import 'package:hrms_plaridel/features/dtr/reports/data/dtr_export.dart';
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+
+  test(
+    'overnight export keeps the start-date row and marks the next-day departure',
+    () {
+      final date = DateTime(2026, 9, 30);
+      final record = TimeRecord(
+        userId: 'night-employee',
+        recordDate: date,
+        timeIn: DateTime.parse('2026-09-30T20:00:00+08:00'),
+        timeOut: DateTime.parse('2026-10-01T07:00:00+08:00'),
+        totalHours: 11,
+        undertimeMinutes: 0,
+        lateMinutes: 0,
+        status: 'present',
+        shiftPunchMode: 'single_session',
+        shiftIsOvernight: true,
+      );
+      final html = DtrExport.generateWordHtmlSync(
+        employeeName: 'Night Employee',
+        year: 2026,
+        month: 9,
+        start: date,
+        end: date,
+        recordsByDate: {date: record},
+        punchMode: 'single_session',
+        scheduledWorkHoursPerDay: 11,
+        assignmentEffectiveFrom: date,
+        workingDays: const [DateTime.wednesday],
+        reportableThrough: date,
+      );
+      expect(html, contains('30 Wed'));
+      expect(html, contains('8:00 PM'));
+      expect(html, contains('7:00 AM (+1 day)'));
+      expect(html, isNot(contains('ABSENT')));
+    },
+  );
+
   test('PM-only absence uses the shift column and scheduled duration', () {
     final date = DateTime(2024, 7, 1);
 
@@ -50,10 +88,7 @@ void main() {
         DateTime.friday,
         DateTime.saturday,
       ],
-      scheduleOverrides: const {
-        '2026-10-07': false,
-        '2026-10-11': true,
-      },
+      scheduleOverrides: const {'2026-10-07': false, '2026-10-11': true},
     );
 
     final html = DtrExport.generateWordHtmlSync(

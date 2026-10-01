@@ -100,6 +100,7 @@ class TimeRecord {
     this.locatorSlipCoverageMode,
     this.locatorSlipSegments,
     this.shiftPunchMode = 'auto',
+    this.shiftIsOvernight = false,
     this.combineLateAndUndertime = false,
     this.attendancePolicy,
     this.reportDeduction,
@@ -171,6 +172,7 @@ class TimeRecord {
   /// Employee's shift punch mode for this record's date.
   /// Values: 'auto', 'full_day', 'am_only', 'pm_only', 'single_session'.
   final String shiftPunchMode;
+  final bool shiftIsOvernight;
 
   /// When true, official DTR exports display late minutes in the undertime column.
   /// Stored and on-screen late/undertime values remain separate.
@@ -271,6 +273,7 @@ class TimeRecord {
                 .toList()
           : null,
       shiftPunchMode: json['shift_punch_mode']?.toString() ?? 'auto',
+      shiftIsOvernight: json['shift_overnight'] == true,
       combineLateAndUndertime: json['combine_late_and_undertime'] == true,
       attendancePolicy: json['attendance_policy'] is Map
           ? AttendancePolicySnapshot.fromJson(
@@ -365,6 +368,7 @@ class TimeRecord {
     String? locatorSlipCoverageMode,
     List<String>? locatorSlipSegments,
     String? shiftPunchMode,
+    bool? shiftIsOvernight,
     bool? combineLateAndUndertime,
     AttendancePolicySnapshot? attendancePolicy,
     AttendanceReportDeduction? reportDeduction,
@@ -407,6 +411,7 @@ class TimeRecord {
           locatorSlipCoverageMode ?? this.locatorSlipCoverageMode,
       locatorSlipSegments: locatorSlipSegments ?? this.locatorSlipSegments,
       shiftPunchMode: shiftPunchMode ?? this.shiftPunchMode,
+      shiftIsOvernight: shiftIsOvernight ?? this.shiftIsOvernight,
       combineLateAndUndertime:
           combineLateAndUndertime ?? this.combineLateAndUndertime,
       attendancePolicy: attendancePolicy ?? this.attendancePolicy,

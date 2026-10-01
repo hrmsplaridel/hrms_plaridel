@@ -32,7 +32,14 @@ String getAttendanceRemark(TimeRecord r) {
       r.breakOut != null &&
       r.breakIn != null &&
       r.timeOut != null;
-  if (!hasAllFour) return 'Incomplete';
+  final complete = switch (r.shiftPunchMode) {
+    'single_session' =>
+      (r.timeIn ?? r.breakIn) != null && (r.timeOut ?? r.breakOut) != null,
+    'am_only' => r.timeIn != null && r.breakOut != null,
+    'pm_only' => r.breakIn != null && r.timeOut != null,
+    _ => hasAllFour,
+  };
+  if (!complete) return 'Incomplete';
   final late = (r.lateMinutes ?? 0) > 0;
   final under = (r.undertimeMinutes ?? 0) > 0;
   if (late && under) return 'Late + Undertime';
@@ -54,6 +61,14 @@ bool isCompletedAttendanceRecord(TimeRecord record) {
     'On Time' || 'Late' || 'Undertime' || 'Late + Undertime' => true,
     _ => false,
   };
+}
+
+String formatWorkedHours(TimeRecord record) {
+  if (record.totalHours == null || record.totalHours! < 0) return '-';
+  final minutes = (record.totalHours! * 60).round();
+  final hours = minutes ~/ 60;
+  final remainder = minutes % 60;
+  return remainder == 0 ? '$hours h' : '$hours h $remainder min';
 }
 
 /// Display late minutes: "X min", "0 min", or "—" for holiday/leave.

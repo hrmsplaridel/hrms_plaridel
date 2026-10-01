@@ -64,9 +64,9 @@ void main() {
     }
   }
 
-  Future<void> mount(WidgetTester tester) async {
+  Future<void> mount(WidgetTester tester, {double width = 1440}) async {
     tester.view.devicePixelRatio = 1;
-    tester.view.physicalSize = const Size(1440, 1000);
+    tester.view.physicalSize = Size(width, 1000);
     addTearDown(() {
       tester.view.resetDevicePixelRatio();
       tester.view.resetPhysicalSize();
@@ -88,6 +88,101 @@ void main() {
     dropdown.onChanged!(status);
     await flushRequests(tester);
   }
+
+  void expectAttendanceOnlyForm(WidgetTester tester) {
+    expect(find.text('Attendance Mode'), findsOneWidget);
+    for (final label in [
+      'Break handling',
+      'Existing rules',
+      'Paid break',
+      'Fixed unpaid deduction',
+      'Recorded unpaid break',
+      'Unpaid break (minutes)',
+      'Punch window before/after shift (minutes)',
+    ]) {
+      expect(find.text(label), findsNothing);
+    }
+    final dropdownValues = tester
+        .widgetList<DropdownButton<String>>(find.byType(DropdownButton<String>))
+        .expand((widget) => widget.items ?? <DropdownMenuItem<String>>[])
+        .map((item) => item.value);
+    expect(dropdownValues, contains('single_session'));
+    expect(dropdownValues, contains('full_day'));
+    for (final value in ['legacy', 'paid', 'fixed', 'recorded']) {
+      expect(dropdownValues, isNot(contains(value)));
+    }
+  }
+
+  for (final width in [390.0, 1440.0]) {
+    testWidgets('new shift form at $width only exposes attendance settings', (
+      tester,
+    ) async {
+      await mount(tester, width: width);
+      succeed(0);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Add Shift'));
+      await tester.pumpAndSettle();
+      expectAttendanceOnlyForm(tester);
+      await tester.tap(find.byTooltip('Close'));
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+    });
+  }
+
+  testWidgets('shift edits do not submit hidden break or matching settings', (
+    tester,
+  ) async {
+    await mount(tester);
+    handlers[0].resolve(
+      Response<List<dynamic>>(
+        requestOptions: requests[0],
+        data: [
+          {
+            'id': 'saved-shift',
+            'name': 'Saved shift',
+            'start_time': '08:00',
+            'end_time': '17:00',
+            'break_start': '12:00',
+            'break_end': '13:00',
+            'punch_mode': 'full_day',
+            'capture_window_minutes': 90,
+          },
+        ],
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Saved shift'));
+    await tester.pumpAndSettle();
+    expectAttendanceOnlyForm(tester);
+    await tester.enterText(
+      find.byWidgetPredicate(
+        (widget) =>
+            widget is TextField && widget.controller?.text == 'Saved shift',
+      ),
+      'Renamed shift',
+    );
+    await tester.tap(find.text('Update'));
+    await flushRequests(tester);
+    expect(requests[1].method, 'PUT');
+    final body = requests[1].data as Map<String, dynamic>;
+    expect(body['name'], 'Renamed shift');
+    expect(body['break_start'], '12:00:00');
+    expect(body['break_end'], '13:00:00');
+    for (final field in [
+      'break_mode',
+      'unpaid_break_minutes',
+      'capture_window_minutes',
+    ]) {
+      expect(body, isNot(contains(field)));
+    }
+    handlers[1].resolve(
+      Response<dynamic>(requestOptions: requests[1], data: {}),
+    );
+    await flushRequests(tester);
+    succeed(2, name: 'Renamed shift');
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+  });
 
   testWidgets('older successes cannot replace the latest filter results', (
     tester,

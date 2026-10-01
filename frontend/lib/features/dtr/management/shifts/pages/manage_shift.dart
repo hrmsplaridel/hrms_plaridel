@@ -42,6 +42,7 @@ class _ShiftRecord {
     this.workingDays = const [1, 2, 3, 4, 5],
     this.shiftNumber,
     this.breakEndTime,
+    this.breakStartTime,
     this.punchMode = 'auto',
     this.assignmentHistoryCount = 0,
     this.scheduleEditLocked = false,
@@ -55,6 +56,7 @@ class _ShiftRecord {
   final TimeOfDay startTime;
   final TimeOfDay endTime;
   final TimeOfDay? breakEndTime;
+  final TimeOfDay? breakStartTime;
   final bool isActive;
   final int gracePeriodMinutes;
   final List<int> workingDays;
@@ -109,6 +111,12 @@ class _ManageShiftState extends State<ManageShift> {
   _breakEndTime; // PM resume time (e.g. 13:00 for 1PM) – used for PM late check
   Set<int> _workingDays = {1, 2, 3, 4, 5}; // Mon–Fri default
   String _punchMode = 'auto';
+  TimeOfDay? _breakStartTime;
+  bool get _overnight =>
+      _startTime != null &&
+      _endTime != null &&
+      _endTime!.hour * 60 + _endTime!.minute <
+          _startTime!.hour * 60 + _startTime!.minute;
 
   bool _isDark(BuildContext context) => AppTheme.dashIsDark(context);
 
@@ -250,6 +258,7 @@ class _ManageShiftState extends State<ManageShift> {
           startTime: _parseTime(st) ?? const TimeOfDay(hour: 0, minute: 0),
           endTime: _parseTime(et) ?? const TimeOfDay(hour: 0, minute: 0),
           breakEndTime: _parseTime(be),
+          breakStartTime: _parseTime(m['break_start']?.toString()),
           punchMode: _parsePunchMode(m['punch_mode']),
           isActive: m['is_active'] as bool? ?? true,
           gracePeriodMinutes: grace is int
@@ -297,6 +306,7 @@ class _ManageShiftState extends State<ManageShift> {
       _startTime = s.startTime;
       _endTime = s.endTime;
       _punchMode = s.punchMode;
+      _breakStartTime = s.breakStartTime;
       _breakEndTime = _punchMode == 'full_day' || _punchMode == 'auto'
           ? s.breakEndTime
           : null;
@@ -314,6 +324,7 @@ class _ManageShiftState extends State<ManageShift> {
       _breakEndTime = null;
       _workingDays = {1, 2, 3, 4, 5};
       _punchMode = 'auto';
+      _breakStartTime = null;
     });
   }
 
@@ -323,11 +334,11 @@ class _ManageShiftState extends State<ManageShift> {
     if (start == null || end == null) return false;
     final startMinutes = (start.hour * 60) + start.minute;
     final endMinutes = (end.hour * 60) + end.minute;
-    if (endMinutes > startMinutes) return true;
+    if (endMinutes != startMinutes) return true;
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
         content: Text(
-          'Overnight shifts are not currently supported. End Time must be later than Start Time.',
+          'Start and End Time must differ; shifts must be shorter than 24 hours.',
         ),
       ),
     );
@@ -338,6 +349,7 @@ class _ManageShiftState extends State<ManageShift> {
     if (_punchMode != 'auto') return _punchMode;
     final start = _startTime;
     final end = _endTime;
+    if (_overnight) return 'single_session';
     if (start != null && start.hour >= 12) return 'pm_only';
     final endMinutes = end == null ? null : (end.hour * 60) + end.minute;
     if (_breakEndTime == null && endMinutes != null && endMinutes <= 13 * 60) {
@@ -353,6 +365,27 @@ class _ManageShiftState extends State<ManageShift> {
     final start = _startTime!;
     final end = _endTime!;
     final pmStart = _breakEndTime;
+    if (_overnight) {
+      if (!['full_day', 'single_session'].contains(mode)) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Choose Single session or Full day with break for an overnight shift.',
+            ),
+          ),
+        );
+        return false;
+      }
+      if (mode == 'full_day' && (_breakStartTime == null || pmStart == null)) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Set Break Start and Break End for four punches.'),
+          ),
+        );
+        return false;
+      }
+      return true;
+    }
     if (mode == 'full_day') {
       if (start.hour >= 12) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -442,6 +475,9 @@ class _ManageShiftState extends State<ManageShift> {
         'start_time': _timeStr(_startTime!),
         'end_time': _timeStr(_endTime!),
         'punch_mode': _punchMode,
+        'break_start': _formUsesPmStart && _breakStartTime != null
+            ? _timeStr(_breakStartTime!)
+            : null,
         if (_breakEndTime != null && _formUsesPmStart)
           'break_end': _timeStr(_breakEndTime!),
         'is_active': true,
@@ -504,6 +540,9 @@ class _ManageShiftState extends State<ManageShift> {
         'start_time': _timeStr(_startTime!),
         'end_time': _timeStr(_endTime!),
         'punch_mode': _punchMode,
+        'break_start': _formUsesPmStart && _breakStartTime != null
+            ? _timeStr(_breakStartTime!)
+            : null,
         'break_end': _breakEndTime != null && _formUsesPmStart
             ? _timeStr(_breakEndTime!)
             : null,
@@ -1431,7 +1470,7 @@ class _ManageShiftState extends State<ManageShift> {
         ),
         const SizedBox(height: 20),
         Text(
-          'End Time',
+          _overnight ? 'End Time (+1 day)' : 'End Time',
           style: TextStyle(
             fontSize: 12,
             fontWeight: FontWeight.w600,
@@ -1466,9 +1505,23 @@ class _ManageShiftState extends State<ManageShift> {
         ),
         const SizedBox(height: 6),
         _buildPunchModeDropdown(enabled: !scheduleLocked),
+        if (_formUsesPmStart) ...[
+          const SizedBox(height: 16),
+          Text(
+            'Break Start',
+            style: TextStyle(color: _mutedColor(context), fontSize: 12),
+          ),
+          const SizedBox(height: 6),
+          _buildTimePicker(
+            _breakStartTime,
+            (value) => _updateShiftFormState(() => _breakStartTime = value),
+            enabled: !scheduleLocked,
+            allowClear: !_overnight,
+          ),
+        ],
         const SizedBox(height: 20),
         Text(
-          'PM Start (Break End)',
+          _overnight ? 'Break End' : 'PM Start (Break End)',
           style: TextStyle(
             fontSize: 12,
             fontWeight: FontWeight.w600,

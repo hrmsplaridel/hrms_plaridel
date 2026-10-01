@@ -12,11 +12,13 @@ class EmployeeAttendanceMobileList extends StatelessWidget {
   const EmployeeAttendanceMobileList({
     super.key,
     required this.records,
+    this.viewMode = 'auto',
     required this.formatDate,
     required this.formatTime,
   });
 
   final List<TimeRecord> records;
+  final String viewMode;
   final String Function(DateTime date) formatDate;
   final EmployeeAttendanceTimeFormatter formatTime;
 
@@ -27,11 +29,31 @@ class EmployeeAttendanceMobileList extends StatelessWidget {
       children: [
         for (var i = 0; i < records.length; i++) ...[
           EmployeeAttendanceMobileCard(
+            singleSession:
+                viewMode == 'single' ||
+                (viewMode == 'auto' &&
+                    records[i].shiftPunchMode == 'single_session'),
+            overnight: records[i].shiftIsOvernight,
+            hoursWorked: formatWorkedHours(records[i]),
             dateLabel: formatDate(records[i].recordDate),
-            amIn: formatTime(records[i], records[i].timeIn, 'AM IN'),
+            amIn: formatTime(
+              records[i],
+              records[i].timeIn ??
+                  (records[i].shiftPunchMode == 'single_session'
+                      ? records[i].breakIn
+                      : null),
+              'AM IN',
+            ),
             amOut: formatTime(records[i], records[i].breakOut, 'AM OUT'),
             pmIn: formatTime(records[i], records[i].breakIn, 'PM IN'),
-            pmOut: formatTime(records[i], records[i].timeOut, 'PM OUT'),
+            pmOut: formatTime(
+              records[i],
+              records[i].timeOut ??
+                  (records[i].shiftPunchMode == 'single_session'
+                      ? records[i].breakOut
+                      : null),
+              'PM OUT',
+            ),
             late: formatLateMinutes(records[i]),
             undertime: formatUndertimeMinutes(records[i]),
             remark: getAttendanceRemark(records[i]),
@@ -51,6 +73,9 @@ class EmployeeAttendanceMobileCard extends StatelessWidget {
     super.key,
     required this.dateLabel,
     required this.amIn,
+    this.singleSession = false,
+    this.overnight = false,
+    this.hoursWorked,
     required this.amOut,
     required this.pmIn,
     required this.pmOut,
@@ -63,6 +88,9 @@ class EmployeeAttendanceMobileCard extends StatelessWidget {
 
   final String dateLabel;
   final String amIn;
+  final bool singleSession;
+  final bool overnight;
+  final String? hoursWorked;
   final String amOut;
   final String pmIn;
   final String pmOut;
@@ -162,31 +190,33 @@ class EmployeeAttendanceMobileCard extends StatelessWidget {
                     width: tileWidth,
                     child: _EmployeeAttendanceTimeTile(
                       icon: Icons.login_rounded,
-                      label: 'AM In',
+                      label: singleSession || overnight ? 'Time In' : 'AM In',
                       value: amIn,
                     ),
                   ),
+                  if (!singleSession)
+                    SizedBox(
+                      width: tileWidth,
+                      child: _EmployeeAttendanceTimeTile(
+                        icon: Icons.logout_rounded,
+                        label: overnight ? 'Break Out' : 'AM Out',
+                        value: amOut,
+                      ),
+                    ),
+                  if (!singleSession)
+                    SizedBox(
+                      width: tileWidth,
+                      child: _EmployeeAttendanceTimeTile(
+                        icon: Icons.login_rounded,
+                        label: overnight ? 'Break In' : 'PM In',
+                        value: pmIn,
+                      ),
+                    ),
                   SizedBox(
                     width: tileWidth,
                     child: _EmployeeAttendanceTimeTile(
                       icon: Icons.logout_rounded,
-                      label: 'AM Out',
-                      value: amOut,
-                    ),
-                  ),
-                  SizedBox(
-                    width: tileWidth,
-                    child: _EmployeeAttendanceTimeTile(
-                      icon: Icons.login_rounded,
-                      label: 'PM In',
-                      value: pmIn,
-                    ),
-                  ),
-                  SizedBox(
-                    width: tileWidth,
-                    child: _EmployeeAttendanceTimeTile(
-                      icon: Icons.logout_rounded,
-                      label: 'PM Out',
+                      label: singleSession || overnight ? 'Time Out' : 'PM Out',
                       value: pmOut,
                     ),
                   ),
@@ -200,6 +230,12 @@ class EmployeeAttendanceMobileCard extends StatelessWidget {
             runSpacing: 8,
             crossAxisAlignment: WrapCrossAlignment.center,
             children: [
+              if (singleSession && hoursWorked != null)
+                _EmployeeAttendanceMetaChip(
+                  icon: Icons.schedule,
+                  label: 'Hours Worked',
+                  value: hoursWorked!,
+                ),
               _EmployeeAttendanceMetaChip(
                 icon: Icons.timer_outlined,
                 label: 'Late',
