@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:dio/dio.dart';
 import 'package:file_picker/file_picker.dart';
@@ -22,6 +23,7 @@ import 'package:hrms_plaridel/providers/auth_provider.dart';
 import 'package:hrms_plaridel/core/services/app_realtime_provider.dart';
 import 'package:hrms_plaridel/features/dtr/locator/utils/locator_slip_print.dart';
 import 'package:hrms_plaridel/features/dtr/locator/utils/locator_form_signatories.dart';
+import 'package:hrms_plaridel/features/dtr/locator/utils/locator_signature_prompt.dart';
 import 'package:hrms_plaridel/features/dtr/locator/presentation/shared/widgets/locator_signature_section.dart';
 import 'package:hrms_plaridel/features/dtr/locator/utils/open_locator_attachment_io.dart'
     if (dart.library.html) 'package:hrms_plaridel/features/dtr/locator/utils/open_locator_attachment_web.dart'
@@ -713,9 +715,7 @@ class EmployeeLocatorSlipContentState extends State<EmployeeLocatorSlipContent>
         );
       } catch (e) {
         if (!dialogContext.mounted) return;
-        ScaffoldMessenger.of(
-          dialogContext,
-        ).showSnackBar(SnackBar(content: Text('Preview failed: $e')));
+        await LocatorSlipPrint.showFailure(dialogContext, 'Preview');
       }
     }
 
@@ -1928,7 +1928,13 @@ class EmployeeLocatorSlipContentState extends State<EmployeeLocatorSlipContent>
       _loadingMy = true;
     });
     try {
+      if (!context.mounted) return;
+      final signature = await promptLocatorSignature(context);
+      if (signature == null || !_isCurrentAuthSession(userId, authGeneration)) {
+        return;
+      }
       final payload = {
+        'signature': jsonEncode(signature),
         'slip_date': _toIsoDate(created.date),
         'am_in': created.amIn,
         'am_out': created.amOut,
@@ -2438,9 +2444,17 @@ class EmployeeLocatorSlipContentState extends State<EmployeeLocatorSlipContent>
     if (userId == null) return;
     final authGeneration = _authGeneration;
     try {
+      final signature = await promptLocatorSignature(
+        context,
+        requestId: item.id,
+        slot: 'department_head',
+      );
+      if (signature == null || !_isCurrentAuthSession(userId, authGeneration)) {
+        return;
+      }
       await ApiClient.instance.patch<Map<String, dynamic>>(
         '/api/locator-slips/${item.id}/department-head-approve',
-        data: const {},
+        data: signature.isEmpty ? const {} : {'signature': signature},
       );
       if (!_isCurrentAuthSession(userId, authGeneration)) return;
       LocatorSlipDataCache.instance.invalidateRequests();
@@ -2462,7 +2476,7 @@ class EmployeeLocatorSlipContentState extends State<EmployeeLocatorSlipContent>
     final userId = _authenticatedUserId;
     if (userId == null) return;
     final authGeneration = _authGeneration;
-    final reason = await _promptRejectionReason('Department Head');
+    final reason = await _promptRejectionReason();
     if (reason == null || !_isCurrentAuthSession(userId, authGeneration)) {
       return;
     }
@@ -2485,7 +2499,7 @@ class EmployeeLocatorSlipContentState extends State<EmployeeLocatorSlipContent>
     }
   }
 
-  Future<String?> _promptRejectionReason(String reviewerLabel) async {
+  Future<String?> _promptRejectionReason() async {
     final controller = TextEditingController();
     String? validationMessage;
     final reason = await showDialog<String>(
@@ -2524,7 +2538,7 @@ class EmployeeLocatorSlipContentState extends State<EmployeeLocatorSlipContent>
                 Navigator.of(dialogContext).pop(value);
               },
               icon: const Icon(Icons.block_rounded, size: 18),
-              label: Text('Reject as $reviewerLabel'),
+              label: const Text('Reject Request'),
             ),
           ],
         ),
@@ -2664,6 +2678,11 @@ class EmployeeLocatorSlipContentState extends State<EmployeeLocatorSlipContent>
       _loadingMy = true;
     });
     try {
+      if (!mounted) return;
+      final signature = await promptLocatorSignature(context);
+      if (signature == null || !_isCurrentAuthSession(userId, authGeneration)) {
+        return;
+      }
       final attachmentBytes = corrected.pendingAttachmentBytes;
       final attachmentName = corrected.pendingAttachmentName?.trim();
       if (attachmentBytes != null &&
@@ -2684,6 +2703,7 @@ class EmployeeLocatorSlipContentState extends State<EmployeeLocatorSlipContent>
       await ApiClient.instance.patch<Map<String, dynamic>>(
         '/api/locator-slips/$id/resubmit',
         data: {
+          'signature': signature,
           'slip_date': _toIsoDate(corrected.date),
           'request_type': corrected.requestType.code,
           'office': corrected.office,

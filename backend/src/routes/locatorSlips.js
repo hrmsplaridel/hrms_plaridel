@@ -17,6 +17,7 @@ const {
 } = require('../services/departmentHeadService');
 const {
   snapshotLocatorReviewers,
+  persistLocatorSignature,
 } = require('../services/locatorSignatureService');
 const locatorNotifications = require('../services/locatorNotifications');
 const {
@@ -327,7 +328,7 @@ const locatorAttachmentStorage = multer.diskStorage({
 
 const uploadLocatorAttachment = multer({
   storage: locatorAttachmentStorage,
-  limits: { fileSize: MAX_LOCATOR_ATTACHMENT_SIZE },
+  limits: { fileSize: MAX_LOCATOR_ATTACHMENT_SIZE, fieldSize: 3 * 1024 * 1024 },
   fileFilter: (_req, file, cb) => {
     const name = file.originalname || '';
     if (!ALLOWED_LOCATOR_ATTACHMENT_EXT.test(name)) {
@@ -1130,6 +1131,7 @@ router.post('/submit', protect, async (req, res) => {
 
   try {
     const mapped = await locatorSubmissionService.submit({
+      signature: req.body?.signature,
       employeeUserId: userId,
       slipDate,
       office,
@@ -1176,6 +1178,7 @@ router.post('/submit-with-attachment', protect, uploadLocatorAttachmentMw, async
 
   try {
     const mapped = await locatorSubmissionService.submit({
+      signature: req.body?.signature,
       employeeUserId: userId,
       slipDate,
       office,
@@ -1711,6 +1714,7 @@ router.patch('/:id/resubmit', protect, async (req, res) => {
       actorRole: 'employee',
       metadata: { changes },
     });
+    await persistLocatorSignature(client, req.user, id, 'applicant', req.body?.signature, { requireInput: true });
     await client.query('COMMIT');
 
     notifySafe(() =>
@@ -2141,6 +2145,7 @@ router.patch('/:id/department-head-approve', protect, async (req, res) => {
       await client.query('ROLLBACK');
       return res.status(409).json(locatorConflictPayload(conflictCheck));
     }
+    await persistLocatorSignature(client, req.user, id, 'department_head', req.body?.signature);
     await client.query(
       `UPDATE locator_slips
        SET status = 'pending_hr',
@@ -2187,6 +2192,7 @@ router.patch('/:id/department-head-approve', protect, async (req, res) => {
       await client.query('ROLLBACK');
     } catch (_) {}
     console.error('[locator PATCH /:id/department-head-approve]', err);
+    if (err.statusCode) return res.status(err.statusCode).json({ error: err.message });
     res.status(500).json({ error: 'Failed to approve locator slip (department head)' });
   } finally {
     client.release();
@@ -2702,6 +2708,7 @@ router.patch('/:id/approve', protect, requireAdminOrHr, async (req, res) => {
       await client.query('ROLLBACK');
       return res.status(409).json(locatorConflictPayload(conflictCheck));
     }
+    await persistLocatorSignature(client, req.user, id, 'hr_approver', req.body?.signature);
     await client.query(
       `UPDATE locator_slips
        SET status = 'approved',

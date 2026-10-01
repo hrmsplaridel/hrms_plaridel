@@ -14,7 +14,7 @@ async function resolveFinalLeaveReviewerConfiguration(
   date = todayInHrmsTimezone()
 ) {
   const primary = await db.query(
-    `SELECT u.id, u.full_name AS name
+    `SELECT u.id, u.full_name AS name, p.name AS position_title
      FROM positions p
      JOIN assignments a ON a.position_id = p.id
      JOIN users u ON u.id = a.employee_id

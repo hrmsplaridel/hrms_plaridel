@@ -4,16 +4,26 @@ import 'dart:typed_data';
 import 'package:hrms_plaridel/core/api/client.dart';
 
 class LocatorPrintedSignatory {
-  const LocatorPrintedSignatory({this.name = '', this.signatureBytes});
+  const LocatorPrintedSignatory({
+    this.name = '',
+    this.positionTitle = '',
+    this.signatureBytes,
+  });
 
   final String name;
+  final String positionTitle;
   final Uint8List? signatureBytes;
 
   factory LocatorPrintedSignatory.fromJson(dynamic value) {
     if (value is! Map) return const LocatorPrintedSignatory();
-    final image = value['signature_image_base64']?.toString();
+    // PostgreSQL base64 encoding inserts line breaks every 76 characters.
+    final image = value['signature_image_base64']?.toString().replaceAll(
+      RegExp(r'\s+'),
+      '',
+    );
     return LocatorPrintedSignatory(
       name: value['name']?.toString() ?? '',
+      positionTitle: value['position_title']?.toString() ?? '',
       signatureBytes: image == null || image.isEmpty
           ? null
           : base64Decode(image),

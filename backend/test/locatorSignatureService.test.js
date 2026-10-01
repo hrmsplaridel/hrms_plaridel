@@ -4,7 +4,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const {
   canSign, printableSignature, getLocatorSourceSignatures, signLocatorSourceSlot,
-  snapshotLocatorReviewers,
+  snapshotLocatorReviewers, persistLocatorSignature,
 } = require('../src/services/locatorSignatureService');
 
 const requestId = '11111111-1111-4111-8111-111111111111';
@@ -16,7 +16,7 @@ const asset = '66666666-6666-4666-8666-666666666666';
 const officials = {
   applicant: { id: employee, name: 'Applicant' },
   department_head: { id: head, name: 'Official Head' },
-  hr_approver: { id: final, name: 'Official Final Approver' },
+  hr_approver: { id: final, name: 'Official Final Approver', position_title: 'Municipal HR Officer' },
 };
 const context = {
   id: requestId, employee_id: employee, employee_name: 'Applicant',
@@ -55,12 +55,13 @@ test('unsigned decisions and inactive request states never acquire ink', () => {
   assert.equal(printableSignature(context, 'applicant', ink(backup, 'applicant')), null);
 });
 
-test('only named officials may sign, and backups cannot sign under their names', () => {
+test('eligible primary and backup reviewers sign only during their review stage', () => {
   const pending = { ...context, status: 'pending_department_head', reviewer: true };
   assert.equal(canSign(pending, { id: head }, 'department_head'), true);
-  assert.equal(canSign(pending, { id: backup }, 'department_head'), false);
+  assert.equal(canSign(pending, { id: backup }, 'department_head'), true);
   assert.equal(canSign({ ...pending, owner: true }, { id: head }, 'department_head'), false);
-  assert.equal(canSign({ ...context, hr: true }, { id: final }, 'hr_approver'), true);
+  assert.equal(canSign({ ...context, hr: true }, { id: final }, 'hr_approver'), false);
+  assert.equal(canSign({ ...context, status: 'pending_hr', canFinalReview: true }, { id: backup }, 'hr_approver'), true);
   assert.equal(canSign({ ...context, hr: true, hr_reviewer_id: backup }, { id: final }, 'hr_approver'), false);
   assert.equal(canSign({ ...context, dept_head_reviewer_id: backup }, { id: head }, 'department_head'), false);
   assert.equal(canSign({ ...context, owner: true, status: 'pending_hr' }, { id: employee }, 'applicant'), true);
@@ -75,7 +76,14 @@ function mockDb(row, signatures = []) {
     async query(sql, params = []) {
       calls.push({ sql, params });
       if (sql.includes('FROM locator_slips ls')) return { rowCount: 1, rows: [row] };
+      if (sql.includes('FROM assignments a JOIN positions p')) {
+        return { rows: [{ position_title: 'Historical Position' }] };
+      }
       if (sql.includes('FROM docutracker_locator_signatures s')) return { rows: stored };
+      if (sql.includes('FROM docutracker_locator_signatures')) {
+        const matches = stored.filter((s) => s.revision === params[1] && s.slot_key === params[2] && s.signed_by === params[3]);
+        return { rows: matches, rowCount: matches.length };
+      }
       if (sql.includes('SELECT full_name FROM users')) return { rowCount: 1, rows: [{ full_name: 'Official Head' }] };
       if (sql.includes('FROM docutracker_signature_assets')) return { rowCount: db.assetOwned ? 1 : 0, rows: [] };
       if (sql.includes('INSERT INTO docutracker_locator_signatures')) {
@@ -97,9 +105,21 @@ test('backup approvals keep official names but suppress both official signatures
   const result = await getLocatorSourceSignatures(db, { id: employee, role: 'employee' }, 'dtr', 'locator_slips', requestId);
   assert.equal(result.print_signatories.department_head.name, 'Official Head');
   assert.equal(result.print_signatories.hr_approver.name, 'Official Final Approver');
+  assert.equal(result.print_signatories.hr_approver.position_title, 'Municipal HR Officer');
   assert.equal(result.print_signatories.department_head.signature_image_base64, null);
   assert.equal(result.print_signatories.hr_approver.signature_image_base64, null);
   assert.equal(result.print_form.employee_name, 'Applicant');
+});
+
+test('legacy titles resolve for the snapshotted official without replacing their name', async () => {
+  const db = mockDb({ ...context, print_signatories: {
+    ...officials, hr_approver: { id: final, name: 'Historical Official' },
+  } });
+  const result = await getLocatorSourceSignatures(db, { id: employee, role: 'employee' }, 'dtr', 'locator_slips', requestId);
+  assert.equal(result.print_signatories.hr_approver.name, 'Historical Official');
+  assert.equal(result.print_signatories.hr_approver.position_title, 'Historical Position');
+  const lookup = db.calls.find((call) => call.sql.includes('FROM assignments a JOIN positions p'));
+  assert.deepEqual(lookup.params, [final, context.slip_date_text]);
 });
 
 test('unrelated employees cannot read signatures and unsupported sources are rejected', async () => {
@@ -122,8 +142,8 @@ test('signing locks the request, checks asset ownership, and audits before commi
   assert.equal(result.print_signatories.department_head.signature_image_base64, null);
 });
 
-test('foreign assets and backup attempts roll back without saving a signature', async () => {
-  for (const [actor, assetOwned] of [[head, false], [backup, true]]) {
+test('foreign assets roll back for both primary and backup reviewers', async () => {
+  for (const [actor, assetOwned] of [[head, false], [backup, false]]) {
     const db = mockDb({ ...context, status: 'pending_department_head', is_reviewer: true });
     db.assetOwned = assetOwned;
     await assert.rejects(signLocatorSourceSlot(db, { id: actor, role: 'employee' }, 'dtr', 'locator_slips', requestId, 'department_head', { signature_asset_id: asset }), { code: 'FORBIDDEN' });
@@ -131,6 +151,30 @@ test('foreign assets and backup attempts roll back without saving a signature', 
     assert.ok(db.calls.some((call) => call.sql === 'ROLLBACK'));
     assert.equal(db.calls.at(-1).sql, 'RELEASE');
   }
+});
+
+test('approval requires a signature by this actor on the current revision', async () => {
+  const row = { ...context, status: 'pending_department_head', is_reviewer: true };
+  for (const signatures of [[], [ink(backup)], [{ ...ink(head), revision: 1 }]]) {
+    const db = mockDb(row, signatures);
+    await assert.rejects(persistLocatorSignature(db, { id: head, role: 'employee' }, requestId, 'department_head', null), { code: 'CONFLICT' });
+  }
+  const db = mockDb(row, [ink(head)]);
+  await persistLocatorSignature(db, { id: head, role: 'employee' }, requestId, 'department_head', null);
+  assert.equal(db.calls.some((call) => call.sql.includes('INSERT INTO')), false);
+});
+
+test('backup signature records the backup identity and remains absent from the official PDF block', async () => {
+  const db = mockDb({ ...context, status: 'pending_department_head', is_reviewer: true });
+  const result = await signLocatorSourceSlot(db, { id: backup, role: 'employee' }, 'dtr', 'locator_slips', requestId, 'department_head', { signature_asset_id: asset });
+  assert.equal(result.signatures[1].signed_by, backup);
+  assert.equal(result.print_signatories.department_head.name, 'Official Head');
+  assert.equal(result.print_signatories.department_head.signature_image_base64, null);
+});
+
+test('resubmission requires fresh signature confirmation even if an old signature exists', async () => {
+  const db = mockDb({ ...context, status: 'pending_department_head' }, [ink(employee, 'applicant')]);
+  await assert.rejects(persistLocatorSignature(db, { id: employee, role: 'employee' }, requestId, 'applicant', null, { requireInput: true }), { code: 'CONFLICT' });
 });
 
 test('a missing primary never snapshots the routing backup as the printed head', async () => {

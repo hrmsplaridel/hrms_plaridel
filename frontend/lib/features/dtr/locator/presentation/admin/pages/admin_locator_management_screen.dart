@@ -17,6 +17,7 @@ import 'package:hrms_plaridel/features/dtr/locator/presentation/admin/pages/loca
 import 'package:hrms_plaridel/features/dtr/locator/presentation/admin/widgets/admin_locator_correction_dialog.dart';
 import 'package:hrms_plaridel/features/dtr/locator/utils/locator_slip_print.dart';
 import 'package:hrms_plaridel/features/dtr/locator/utils/locator_form_signatories.dart';
+import 'package:hrms_plaridel/features/dtr/locator/utils/locator_signature_prompt.dart';
 import 'package:hrms_plaridel/features/dtr/locator/presentation/shared/widgets/locator_signature_section.dart';
 import 'package:hrms_plaridel/features/dtr/locator/utils/open_locator_attachment_io.dart'
     if (dart.library.html) 'package:hrms_plaridel/features/dtr/locator/utils/open_locator_attachment_web.dart'
@@ -1237,10 +1238,9 @@ class _AdminLocatorManagementScreenState
                                 );
                               } catch (e) {
                                 if (!dialogContext.mounted) return;
-                                ScaffoldMessenger.of(
+                                await LocatorSlipPrint.showFailure(
                                   dialogContext,
-                                ).showSnackBar(
-                                  SnackBar(content: Text('Preview failed: $e')),
+                                  'Preview',
                                 );
                               }
                             },
@@ -1906,9 +1906,15 @@ class _AdminLocatorManagementScreenState
 
   Future<void> _approve(_LocatorAdminRecord item) async {
     try {
+      final signature = await promptLocatorSignature(
+        context,
+        requestId: item.id,
+        slot: 'hr_approver',
+      );
+      if (signature == null || !mounted) return;
       await ApiClient.instance.patch<Map<String, dynamic>>(
         '/api/locator-slips/${item.id}/approve',
-        data: const {},
+        data: signature.isEmpty ? const {} : {'signature': signature},
       );
       LocatorSlipDataCache.instance.invalidateRequests();
       await _load(forceRefresh: true);

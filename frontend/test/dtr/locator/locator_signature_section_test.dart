@@ -43,35 +43,32 @@ class _Signatures extends DocuTrackerProvider {
 
 void main() {
   for (final primary in [true, false]) {
-    testWidgets('locator signatures use official names, primary=$primary', (
-      tester,
-    ) async {
-      await tester.binding.setSurfaceSize(const Size(390, 844));
-      addTearDown(() => tester.binding.setSurfaceSize(null));
-      await tester.pumpWidget(
-        ChangeNotifierProvider<DocuTrackerProvider>(
-          create: (_) => _Signatures(primary),
-          child: const MaterialApp(
-            home: Scaffold(
-              body: SingleChildScrollView(
-                child: LocatorSignatureSection(requestId: 'locator-1'),
+    testWidgets(
+      'locator details show compact read-only statuses, primary=$primary',
+      (tester) async {
+        await tester.binding.setSurfaceSize(const Size(390, 844));
+        addTearDown(() => tester.binding.setSurfaceSize(null));
+        await tester.pumpWidget(
+          ChangeNotifierProvider<DocuTrackerProvider>(
+            create: (_) => _Signatures(primary),
+            child: const MaterialApp(
+              home: Scaffold(
+                body: SingleChildScrollView(
+                  child: LocatorSignatureSection(requestId: 'locator-1'),
+                ),
               ),
             ),
           ),
-        ),
-      );
-      await tester.pumpAndSettle();
-      expect(
-        find.text('Automatically assigned to Official Head'),
-        findsOneWidget,
-      );
-      expect(
-        find.text('Add Signature'),
-        primary ? findsOneWidget : findsNothing,
-      );
-      expect(find.text('Change signer'), findsNothing);
-      expect(find.text('Noted / Final Approver'), findsOneWidget);
-      expect(tester.takeException(), isNull);
-    });
+        );
+        await tester.pumpAndSettle();
+        expect(find.text('Applicant: Not signed'), findsOneWidget);
+        expect(find.text('Department review: Not signed'), findsOneWidget);
+        expect(find.text('Add Signature'), findsNothing);
+        expect(find.text('Change signer'), findsNothing);
+        expect(find.text('Final review: Not signed'), findsOneWidget);
+        expect(find.byType(Image), findsNothing);
+        expect(tester.takeException(), isNull);
+      },
+    );
   }
 }

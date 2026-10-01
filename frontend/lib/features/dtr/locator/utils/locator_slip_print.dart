@@ -326,7 +326,7 @@ class LocatorSlipPrint {
                     width: 420,
                     child: signatureBlock(
                       signatories.finalApprover,
-                      'Final Approver',
+                      signatories.finalApprover.positionTitle,
                     ),
                   ),
                 ),
@@ -375,9 +375,25 @@ class LocatorSlipPrint {
       );
     } catch (e) {
       if (!context.mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Print failed: $e')));
+      await showFailure(context, 'Print');
     }
   }
+
+  static Future<void> showFailure(BuildContext context, String action) =>
+      showDialog<void>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: Text('$action failed'),
+          content: const Text(
+            'The locator form could not be generated. Please try again. '
+            'If the problem continues, contact your administrator.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: const Text('OK'),
+            ),
+          ],
+        ),
+      );
 }

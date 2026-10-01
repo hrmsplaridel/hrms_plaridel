@@ -8,7 +8,10 @@ const { recordLocatorWorkflowEvent } = require('./locatorWorkflowHistory');
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const LABELS = { applicant: 'Applicant', department_head: 'Head of Office', hr_approver: 'Noted' };
 const PENDING = new Set(['pending', 'pending_department_head', 'pending_hr']);
-function fail(code, message) { throw Object.assign(new Error(message), { code }); }
+function fail(code, message) {
+  const statusCode = { FORBIDDEN: 403, NOT_FOUND: 404, VALIDATION: 400, CONFLICT: 409 }[code] || 500;
+  throw Object.assign(new Error(message), { code, statusCode, payload: { error: message } });
+}
 
 async function resolveOfficials(db, row) {
   const date = row.slip_date_text;
@@ -21,7 +24,8 @@ async function resolveOfficials(db, row) {
   return {
     applicant: { id: row.employee_id, name: row.employee_name },
     department_head: { id: department.primary?.reviewerId || null, name: department.primary?.reviewerName || '' },
-    hr_approver: { id: final.primary?.id || null, name: final.primary?.name || '' },
+    hr_approver: { id: final.primary?.id || null, name: final.primary?.name || '',
+      position_title: final.primary?.position_title || '' },
   };
 }
 
@@ -60,7 +64,7 @@ async function loadContext(db, user, id, lock = false) {
   }
   // Legacy forms have no historical official snapshot. Resolve primary roles only,
   // never the routing fallback or the person who happened to approve.
-  const officials = row.print_signatories || await resolveOfficials(db, row);
+  const officials = { ...(row.print_signatories || await resolveOfficials(db, row)) };
   if (!row.print_signatories) {
     const primary = await db.query(
       `SELECT reviewer_id, reviewer_name_snapshot FROM locator_slip_department_reviewers
@@ -70,6 +74,20 @@ async function loadContext(db, user, id, lock = false) {
       officials.department_head = { id: primary.rows[0].reviewer_id, name: primary.rows[0].reviewer_name_snapshot };
     }
   }
+  const finalOfficial = officials.hr_approver;
+  if (finalOfficial?.id && finalOfficial.position_title === undefined) {
+    const position = await db.query(
+      `SELECT p.name AS position_title
+       FROM assignments a JOIN positions p ON p.id = a.position_id
+       WHERE a.employee_id = $1::uuid
+         AND a.effective_from <= $2::date
+         AND (a.effective_to IS NULL OR a.effective_to >= $2::date)
+       ORDER BY a.effective_from DESC, a.created_at DESC, a.id DESC LIMIT 1`,
+      [finalOfficial.id, row.slip_date_text]
+    );
+    officials.hr_approver = { ...finalOfficial,
+      position_title: position.rows[0]?.position_title || '' };
+  }
   const finalReviewers = hr && !owner && PENDING.has(row.status)
     ? await resolveFinalLeaveReviewers(db) : [];
   return { ...row, officials, owner, hr, reviewer,
@@ -77,17 +95,13 @@ async function loadContext(db, user, id, lock = false) {
 }
 
 function canSign(context, user, slot) {
-  const official = context.officials[slot];
-  if (!official?.id || official.id !== user.id) return false;
   if (slot === 'applicant') return context.owner && PENDING.has(context.status);
   if (context.owner) return false;
   if (slot === 'department_head') {
-    return (context.reviewer && context.status === 'pending_department_head') ||
-      (['pending_hr', 'approved'].includes(context.status) && context.dept_head_reviewer_id === user.id);
+    return Boolean(context.reviewer) && context.status === 'pending_department_head';
   }
   if (slot === 'hr_approver') {
-    return (context.canFinalReview && ['pending', 'pending_hr'].includes(context.status)) ||
-      (context.hr && context.status === 'approved' && context.hr_reviewer_id === user.id);
+    return Boolean(context.canFinalReview) && ['pending', 'pending_hr'].includes(context.status);
   }
   return false;
 }
@@ -145,6 +159,7 @@ async function getLocatorSourceSignatures(db, user, module, table, id) {
         const signature = printableSignature(context, slot, result.rows.find((s) => s.slot_key === slot));
         return [slot, {
           name: context.officials[slot]?.name || '',
+          position_title: context.officials[slot]?.position_title || '',
           signature_image_base64: signature?.signature_image_base64 || null,
         }];
       })),
@@ -160,8 +175,35 @@ async function signLocatorSourceSlot(pool, user, module, table, id, slot, input)
   const db = await pool.connect();
   try {
     await db.query('BEGIN');
+    await persistLocatorSignature(db, user, id, slot, input);
+    await db.query('COMMIT');
+  } catch (error) {
+    try { await db.query('ROLLBACK'); } catch (_) { /* Preserve the original failure. */ }
+    throw storageError(error);
+  } finally { db.release(); }
+  return getLocatorSourceSignatures(pool, user, module, table, id);
+}
+
+// Called inside the submission/decision transaction, before the workflow moves.
+async function persistLocatorSignature(db, user, id, slot, input, { requireInput = false } = {}) {
+    if (!Object.hasOwn(LABELS, slot)) fail('NOT_FOUND', 'Signature field not found');
     const context = await loadContext(db, user, id, true);
-    if (!canSign(context, user, slot)) fail('FORBIDDEN', 'Only the named official can sign at this review stage');
+    if (!canSign(context, user, slot)) fail('FORBIDDEN', 'Only an eligible reviewer or applicant can sign at this stage');
+    if (typeof input === 'string') {
+      try { input = JSON.parse(input); } catch (_) { fail('VALIDATION', 'Invalid signature input'); }
+    }
+    if (!input) {
+      if (!requireInput) {
+        const existing = await db.query(
+          `SELECT id FROM docutracker_locator_signatures
+           WHERE locator_slip_id = $1::uuid AND revision = $2 AND slot_key = $3 AND signed_by = $4::uuid`,
+          [id, context.signature_revision, slot, user.id]
+        );
+        if (existing.rowCount) return;
+      }
+      fail('CONFLICT', 'Add your signature before submitting or approving this locator request.');
+    }
+    if (typeof input !== 'object' || Array.isArray(input)) fail('VALIDATION', 'Invalid signature input');
     const active = await db.query('SELECT full_name FROM users WHERE id = $1::uuid AND is_active = true', [user.id]);
     if (!active.rowCount) fail('FORBIDDEN', 'Only an active signer can sign');
     let assetId = String(input.signature_asset_id || '').trim();
@@ -188,12 +230,6 @@ async function signLocatorSourceSlot(pool, user, module, table, id, slot, input)
     await recordLocatorWorkflowEvent(db, { locatorSlipId: id, action: 'signed',
       fromStatus: context.status, toStatus: context.status, actorId: user.id, actorRole: user.role,
       metadata: { slot_key: slot, signature_asset_id: assetId, revision: context.signature_revision } });
-    await db.query('COMMIT');
-  } catch (error) {
-    try { await db.query('ROLLBACK'); } catch (_) { /* Preserve the original failure. */ }
-    throw storageError(error);
-  } finally { db.release(); }
-  return getLocatorSourceSignatures(pool, user, module, table, id);
 }
 
-module.exports = { snapshotLocatorReviewers, getLocatorSourceSignatures, signLocatorSourceSlot, canSign, printableSignature };
+module.exports = { snapshotLocatorReviewers, getLocatorSourceSignatures, signLocatorSourceSlot, persistLocatorSignature, canSign, printableSignature };

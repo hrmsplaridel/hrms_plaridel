@@ -9,7 +9,7 @@ const EMPLOYEE_ID = '00000000-0000-0000-0000-000000000101';
 const DEPARTMENT_ID = '00000000-0000-0000-0000-000000000201';
 const HEAD_ID = '00000000-0000-0000-0000-000000000301';
 
-function createHarness({ reviewerAvailable = true } = {}) {
+function createHarness({ reviewerAvailable = true, signatureFailure = false } = {}) {
   const state = {
     queries: [],
     inserts: [],
@@ -129,6 +129,13 @@ function createHarness({ reviewerAvailable = true } = {}) {
     snapshotReviewers: async (_client, snapshot) => {
       state.reviewerSnapshots.push(snapshot);
     },
+    saveApplicantSignature: async (_client, actor, id, slot, signature, options) => {
+      assert.equal(actor.id, EMPLOYEE_ID);
+      assert.equal(slot, 'applicant');
+      assert.equal(options.requireInput, true);
+      assert.ok(state.queries.lastIndexOf('BEGIN') > state.queries.lastIndexOf('COMMIT'));
+      if (signatureFailure) throw new Error('Signature required');
+    },
     assertSubmissionReviewer: async () => {
       if (!reviewerAvailable) {
         const error = new Error('No eligible final reviewer is configured');
@@ -147,6 +154,16 @@ test('locator filing is blocked before insertion when no final reviewer is avail
   await assert.rejects(service.submit(validInput()), /No eligible final reviewer/);
   assert.equal(state.inserts.length, 0);
   assert.equal(state.notifications.length, 0);
+});
+
+test('signature failure rolls submission back before notifications or commit', async () => {
+  const { service, state } = createHarness({ signatureFailure: true });
+  await assert.rejects(service.submit(validInput()), /Signature required/);
+  assert.equal(state.queries.includes('COMMIT'), false);
+  assert.equal(state.queries.includes('ROLLBACK'), true);
+  assert.equal(state.notifications.length, 0);
+  assert.equal(state.broadcasts.length, 0);
+  assert.equal(state.released, 1);
 });
 
 function validInput(overrides = {}) {

@@ -18,6 +18,7 @@ void main() {
           name:
               'A Very Long Official Department Head Name With Several Middle Names',
           signatureBytes: signed ? ink : null,
+          positionTitle: 'Municipal Human Resource Management Officer',
         );
         final bytes = await LocatorSlipPrint.buildPdf(
           id: 'locator-1',

@@ -4,16 +4,41 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:hrms_plaridel/features/dtr/locator/utils/locator_form_signatories.dart';
 
 void main() {
+  test('decodes PostgreSQL line-wrapped signature base64', () {
+    final bytes = List<int>.generate(120, (index) => index);
+    final encoded = base64Encode(bytes);
+    for (final separator in ['\n', '\r\n']) {
+      final person = LocatorPrintedSignatory.fromJson({
+        'signature_image_base64':
+            '${encoded.substring(0, 76)}$separator${encoded.substring(76)}',
+      });
+      expect(person.signatureBytes, bytes);
+    }
+  });
+
+  test('invalid signature data fails rather than printing unsigned', () {
+    expect(
+      () => LocatorPrintedSignatory.fromJson({
+        'signature_image_base64': 'invalid!',
+      }),
+      throwsFormatException,
+    );
+  });
+
   test('fixed names survive blank signatures after backup approval', () {
     final form = LocatorFormSignatories.fromJson({
       'print_signatories': {
         'department_head': {'name': 'Official Head'},
-        'hr_approver': {'name': 'Official Final Approver'},
+        'hr_approver': {
+          'name': 'Official Final Approver',
+          'position_title': 'Municipal HR Officer',
+        },
         'applicant': {'name': 'Applicant'},
       },
     });
     expect(form.departmentHead.name, 'Official Head');
     expect(form.finalApprover.name, 'Official Final Approver');
+    expect(form.finalApprover.positionTitle, 'Municipal HR Officer');
     expect(form.departmentHead.signatureBytes, isNull);
     expect(form.finalApprover.signatureBytes, isNull);
   });
