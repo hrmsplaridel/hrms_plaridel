@@ -74,12 +74,15 @@ class DocuTrackerStyles {
   /// @deprecated Use [primaryBrandButtonStyle].
   static ButtonStyle primaryButtonStyleNavy() => primaryBrandButtonStyle();
 
-  static ButtonStyle outlinedButtonStyle() => OutlinedButton.styleFrom(
-    foregroundColor: AppTheme.textPrimary,
-    side: BorderSide(color: DocuTrackerTokens.brand.withValues(alpha: 0.6)),
-    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-  );
+  static ButtonStyle outlinedButtonStyle([BuildContext? context]) =>
+      OutlinedButton.styleFrom(
+        foregroundColor: context == null
+            ? AppTheme.textPrimary
+            : DocuTrackerTokens.textPrimaryOf(context),
+        side: BorderSide(color: DocuTrackerTokens.brand.withValues(alpha: 0.6)),
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      );
 
   static ButtonStyle outlinedGreenStyle() => OutlinedButton.styleFrom(
     foregroundColor: primaryGreen,

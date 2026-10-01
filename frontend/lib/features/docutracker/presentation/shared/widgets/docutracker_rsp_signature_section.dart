@@ -42,10 +42,7 @@ class DocuTrackerRspSignatureSection extends StatelessWidget {
             ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800),
           ),
           const SizedBox(height: 4),
-          Text(
-            helperText,
-            style: DocuTrackerTokens.subtitleStyle(context),
-          ),
+          Text(helperText, style: DocuTrackerTokens.subtitleStyle(context)),
           const SizedBox(height: 12),
           LayoutBuilder(
             builder: (context, constraints) {

@@ -20,6 +20,7 @@ import 'package:hrms_plaridel/features/docutracker/services/docutracker_permissi
 import 'package:hrms_plaridel/features/docutracker/theme/docutracker_tokens.dart';
 import 'package:hrms_plaridel/features/docutracker/utils/docutracker_open_attachment.dart';
 import 'package:hrms_plaridel/features/docutracker/utils/docutracker_permission_reason_label.dart';
+import 'package:hrms_plaridel/features/docutracker/utils/docutracker_source_status_text.dart';
 import 'package:hrms_plaridel/features/docutracker/utils/docutracker_workflow_phase.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_document_attachment_panel.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_document_detail_ui.dart';
@@ -227,11 +228,11 @@ class _DocuTrackerDocumentDetailScreenState
               label: const Text('Open, Edit, or Submit Leave Form'),
             )
           else
-            const Text(
+            Text(
               'The leave details and approval decision remain controlled by '
               'the DTR Leave workflow.',
               style: TextStyle(
-                color: DocuTrackerTokens.textMuted,
+                color: DocuTrackerTokens.textMutedOf(context),
                 fontSize: 12,
               ),
             ),
@@ -462,7 +463,7 @@ class _DocuTrackerDocumentDetailScreenState
       width: double.infinity,
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: DocuTrackerTokens.overduePink,
+        color: DocuTrackerTokens.overduePinkOf(context),
         borderRadius: BorderRadius.circular(DocuTrackerTokens.radiusMd),
         border: Border.all(
           color: DocuTrackerTokens.overdueAccent.withValues(alpha: 0.35),
@@ -481,7 +482,7 @@ class _DocuTrackerDocumentDetailScreenState
             child: Text(
               message,
               style: DocuTrackerTokens.subtitleStyle(context).copyWith(
-                color: DocuTrackerTokens.textPrimary,
+                color: DocuTrackerTokens.textPrimaryOf(context),
                 fontWeight: FontWeight.w600,
               ),
             ),
@@ -498,6 +499,33 @@ class _DocuTrackerDocumentDetailScreenState
     required bool isAssignedReviewer,
     List<String> assigneeNames = const [],
   }) {
+    final sourceModule = docuTrackerSourceModuleLabel(doc.sourceModule);
+    if (doc.sourceOnly && sourceModule != null) {
+      final rawStatus = doc.sourceStatus?.trim() ?? '';
+      final statusText = rawStatus.isEmpty
+          ? null
+          : docuTrackerLinkedSourceStatusText(
+              sourceModule: doc.sourceModule!.trim().toLowerCase(),
+              status: rawStatus,
+            );
+      final nextStep = doc.sourceActionLabel?.trim() ?? '';
+      return Padding(
+        padding: const EdgeInsets.only(top: 16),
+        child: DocuTrackerDetailActionBanner(
+          key: const ValueKey('docutracker-source-workflow-banner'),
+          title: 'Managed in $sourceModule',
+          subtitle: [
+            if (statusText != null)
+              '$sourceModule status: ${statusText.label}. ${statusText.description}',
+            nextStep.isNotEmpty
+                ? 'Next step: $nextStep.'
+                : 'No action is needed from you in DocuTracker.',
+            'Approvals and status changes happen in the $sourceModule module.',
+          ].join('\n'),
+          icon: Icons.open_in_new_rounded,
+        ),
+      );
+    }
     final terminal =
         doc.status == DocumentStatus.approved ||
         doc.status == DocumentStatus.rejected ||
@@ -771,10 +799,25 @@ class _DocuTrackerDocumentDetailScreenState
       assigneeNames: assigneeNames,
     );
 
+    final sourceModuleLabel = doc.sourceOnly
+        ? docuTrackerSourceModuleLabel(doc.sourceModule)
+        : null;
+    final sourceRawStatus = doc.sourceStatus?.trim() ?? '';
+    final sourceStatusText =
+        sourceModuleLabel == null || sourceRawStatus.isEmpty
+        ? null
+        : docuTrackerLinkedSourceStatusText(
+            sourceModule: doc.sourceModule!.trim().toLowerCase(),
+            status: sourceRawStatus,
+          );
+
     String deadlineLabel = '';
     Color deadlineColor = const Color(0xFF6B7280);
     IconData deadlineIcon = Icons.schedule_rounded;
-    if (doc.deadlineTime == null && doc.status == DocumentStatus.pending) {
+    if (sourceModuleLabel != null) {
+      // RSP/L&D records have no DocuTracker deadline; their module owns timing.
+    } else if (doc.deadlineTime == null &&
+        doc.status == DocumentStatus.pending) {
       deadlineLabel = 'Awaiting submission';
       deadlineColor = const Color(0xFF9CA3AF);
       deadlineIcon = Icons.edit_note_rounded;
@@ -799,6 +842,7 @@ class _DocuTrackerDocumentDetailScreenState
         }
       }
     }
+    deadlineColor = DocuTrackerTokens.toneOf(context, deadlineColor);
 
     final provider = context.read<DocuTrackerProvider>();
     final currentStep = doc.currentStep ?? 1;
@@ -842,7 +886,7 @@ class _DocuTrackerDocumentDetailScreenState
             onPressed: busy ? null : () => _openPrimaryDocument(doc),
             icon: const Icon(Icons.visibility_outlined, size: 18),
             label: const Text('Preview'),
-            style: DocuTrackerStyles.outlinedButtonStyle(),
+            style: DocuTrackerStyles.outlinedButtonStyle(context),
           ),
         FilledButton.icon(
           onPressed: busy ? null : () => _openPrimaryDocument(doc),
@@ -923,11 +967,18 @@ class _DocuTrackerDocumentDetailScreenState
       ],
     );
 
+    final sourceNextStep = doc.sourceActionLabel?.trim() ?? '';
     final summaryCells = <Widget>[
       _HeroSummaryCell(
-        label: 'CURRENT STEP',
-        value: stepValue,
-        sub: stepSub,
+        label: sourceModuleLabel == null
+            ? 'CURRENT STEP'
+            : '$sourceModuleLabel STATUS',
+        value: sourceModuleLabel == null
+            ? stepValue
+            : sourceStatusText?.label ?? 'Not available',
+        sub: sourceModuleLabel == null
+            ? stepSub
+            : 'Managed in $sourceModuleLabel',
         leading: Container(
           width: 8,
           height: 8,
@@ -937,31 +988,41 @@ class _DocuTrackerDocumentDetailScreenState
           ),
         ),
       ),
-      _HeroSummaryCell(
-        label: 'PRIMARY ASSIGNEE',
-        value: assigneeValue,
-        sub: assigneeSub,
-        leading: CircleAvatar(
-          radius: 11,
-          backgroundColor: DocuTrackerTokens.brandSoft,
-          child: Text(
-            _getInitials(assigneeValue),
-            style: const TextStyle(
-              fontSize: 9,
-              fontWeight: FontWeight.w800,
-              color: DocuTrackerTokens.brand,
+      if (sourceModuleLabel != null)
+        _HeroSummaryCell(
+          label: 'NEXT STEP',
+          value: sourceNextStep.isEmpty
+              ? 'No action needed in DocuTracker'
+              : sourceNextStep,
+          sub: 'Done in the $sourceModuleLabel module',
+        )
+      else ...[
+        _HeroSummaryCell(
+          label: 'PRIMARY ASSIGNEE',
+          value: assigneeValue,
+          sub: assigneeSub,
+          leading: CircleAvatar(
+            radius: 11,
+            backgroundColor: DocuTrackerTokens.brandSoftOf(context),
+            child: Text(
+              _getInitials(assigneeValue),
+              style: const TextStyle(
+                fontSize: 9,
+                fontWeight: FontWeight.w800,
+                color: DocuTrackerTokens.brand,
+              ),
             ),
           ),
         ),
-      ),
-      _HeroSummaryCell(
-        label: 'TARGET DEADLINE',
-        value: doc.deadlineTime == null
-            ? 'No deadline'
-            : _formatDateTime(doc.deadlineTime!),
-        sub: deadlineLabel,
-        subColor: deadlineLabel.isEmpty ? null : deadlineColor,
-      ),
+        _HeroSummaryCell(
+          label: 'TARGET DEADLINE',
+          value: doc.deadlineTime == null
+              ? 'No deadline'
+              : _formatDateTime(doc.deadlineTime!),
+          sub: deadlineLabel,
+          subColor: deadlineLabel.isEmpty ? null : deadlineColor,
+        ),
+      ],
       _HeroSummaryCell(
         label: 'LAST SAVED',
         value: lastSaved == null ? 'Not available' : _formatDateTime(lastSaved),
@@ -981,21 +1042,21 @@ class _DocuTrackerDocumentDetailScreenState
             InkWell(
               borderRadius: BorderRadius.circular(4),
               onTap: () => Navigator.of(context).pop(),
-              child: const Padding(
-                padding: EdgeInsets.symmetric(vertical: 4, horizontal: 2),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 2),
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Icon(
                       Icons.arrow_back_rounded,
                       size: 16,
-                      color: DocuTrackerTokens.textMuted,
+                      color: DocuTrackerTokens.textMutedOf(context),
                     ),
-                    SizedBox(width: 6),
+                    const SizedBox(width: 6),
                     Text(
                       'Back to documents',
                       style: TextStyle(
-                        color: DocuTrackerTokens.textMuted,
+                        color: DocuTrackerTokens.textMutedOf(context),
                         fontSize: 13,
                         fontWeight: FontWeight.w500,
                       ),
@@ -1004,16 +1065,26 @@ class _DocuTrackerDocumentDetailScreenState
                 ),
               ),
             ),
-            const Text('/', style: TextStyle(color: Color(0xFFD1D5DB))),
+            Text(
+              '/',
+              style: TextStyle(
+                color: DocuTrackerTokens.borderStrongOf(context),
+              ),
+            ),
             Text(
               typeName,
-              style: const TextStyle(
-                color: DocuTrackerTokens.textMuted,
+              style: TextStyle(
+                color: DocuTrackerTokens.textMutedOf(context),
                 fontSize: 13,
               ),
             ),
             if (doc.documentNumber != null) ...[
-              const Text('/', style: TextStyle(color: Color(0xFFD1D5DB))),
+              Text(
+                '/',
+                style: TextStyle(
+                  color: DocuTrackerTokens.borderStrongOf(context),
+                ),
+              ),
               DocuTrackerDetailTag(label: doc.documentNumber!),
             ],
           ],
@@ -1082,9 +1153,12 @@ class _DocuTrackerDocumentDetailScreenState
             icon: doc.status == DocumentStatus.approved
                 ? Icons.verified_rounded
                 : Icons.gpp_bad_rounded,
-            color: doc.status == DocumentStatus.approved
-                ? const Color(0xFF047857)
-                : const Color(0xFFB91C1C),
+            color: DocuTrackerTokens.toneOf(
+              context,
+              doc.status == DocumentStatus.approved
+                  ? const Color(0xFF047857)
+                  : const Color(0xFFB91C1C),
+            ),
             message: doc.status == DocumentStatus.approved
                 ? 'This workflow is complete.'
                 : 'This document was rejected and cannot move forward.',
@@ -1172,13 +1246,13 @@ class _DocuTrackerDocumentDetailScreenState
             _InfoRow(label: 'Version', value: '${doc.workflowVersion}'),
           if (doc.description != null && doc.description!.isNotEmpty) ...[
             const SizedBox(height: 16),
-            const Text(
+            Text(
               'DESCRIPTION',
               style: TextStyle(
                 fontSize: 11,
                 fontWeight: FontWeight.w800,
                 letterSpacing: 0.6,
-                color: DocuTrackerTokens.textMuted,
+                color: DocuTrackerTokens.textMutedOf(context),
               ),
             ),
             const SizedBox(height: 8),
@@ -1186,10 +1260,10 @@ class _DocuTrackerDocumentDetailScreenState
               padding: const EdgeInsets.all(14),
               child: SelectableText(
                 doc.description!,
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 14,
                   height: 1.4,
-                  color: DocuTrackerTokens.textPrimary,
+                  color: DocuTrackerTokens.textPrimaryOf(context),
                 ),
               ),
             ),
@@ -1218,8 +1292,8 @@ class _DocuTrackerDocumentDetailScreenState
                       backgroundColor: s.stepOrder == current
                           ? DocuTrackerTokens.brand
                           : s.stepOrder < current
-                          ? DocuTrackerTokens.brandSoft
-                          : DocuTrackerTokens.borderSubtle,
+                          ? DocuTrackerTokens.brandSoftOf(ctx)
+                          : DocuTrackerTokens.borderSubtleOf(ctx),
                       child: Text(
                         '${s.stepOrder}',
                         style: TextStyle(
@@ -1227,7 +1301,7 @@ class _DocuTrackerDocumentDetailScreenState
                           fontWeight: FontWeight.w800,
                           color: s.stepOrder == current
                               ? Colors.white
-                              : DocuTrackerTokens.textSecondary,
+                              : DocuTrackerTokens.textSecondaryOf(ctx),
                         ),
                       ),
                     ),
@@ -1489,7 +1563,9 @@ class _DocuTrackerDocumentDetailScreenState
                           actions: [
                             OutlinedButton(
                               onPressed: () => Navigator.of(ctx).pop(),
-                              style: DocuTrackerStyles.outlinedButtonStyle(),
+                              style: DocuTrackerStyles.outlinedButtonStyle(
+                                context,
+                              ),
                               child: const Text('Cancel'),
                             ),
                             FilledButton(
@@ -1554,7 +1630,9 @@ class _DocuTrackerDocumentDetailScreenState
                           actions: [
                             OutlinedButton(
                               onPressed: () => Navigator.of(ctx).pop(),
-                              style: DocuTrackerStyles.outlinedButtonStyle(),
+                              style: DocuTrackerStyles.outlinedButtonStyle(
+                                context,
+                              ),
                               child: const Text('Cancel'),
                             ),
                             FilledButton(
@@ -1617,10 +1695,10 @@ class _DocuTrackerDocumentDetailScreenState
           ? null
           : Text(
               'Step ${doc.currentStep ?? 1}/${enabledSteps.length}',
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 12,
                 fontWeight: FontWeight.w700,
-                color: Color(0xFF1D4ED8),
+                color: DocuTrackerTokens.textMutedOf(context),
               ),
             ),
       child: Column(
@@ -1641,7 +1719,10 @@ class _DocuTrackerDocumentDetailScreenState
               key: const Key('docutracker-detail-signature-required'),
               child: DocuTrackerStyles.stateMessage(
                 icon: Icons.draw_outlined,
-                color: const Color(0xFF7C3AED),
+                color: DocuTrackerTokens.toneOf(
+                  context,
+                  const Color(0xFF7C3AED),
+                ),
                 message:
                     'This step requires your signature. Open the document, '
                     'use Signatures → Insert My Signature, then approve or '
@@ -2021,7 +2102,7 @@ class _WorkflowStepStrip extends StatelessWidget {
                         history: history,
                       ).isCompleted
                       ? DocuTrackerTokens.brand
-                      : DocuTrackerTokens.borderSubtle,
+                      : DocuTrackerTokens.borderStrongOf(context),
                 ),
             ],
           ],
@@ -2061,10 +2142,13 @@ class _WorkflowStepNode extends StatelessWidget {
       DocuTrackerStepIndicatorKind.rejected => const Color(0xFFB91C1C),
       DocuTrackerStepIndicatorKind.overdue => const Color(0xFFDC2626),
       DocuTrackerStepIndicatorKind.escalated => const Color(0xFF7C3AED),
-      DocuTrackerStepIndicatorKind.cancelled => DocuTrackerTokens.textMuted,
+      DocuTrackerStepIndicatorKind.cancelled => DocuTrackerTokens.textMutedOf(
+        context,
+      ),
       DocuTrackerStepIndicatorKind.current => DocuTrackerTokens.brand,
-      _ => DocuTrackerTokens.textMuted,
+      _ => DocuTrackerTokens.textMutedOf(context),
     };
+    final labelColor = DocuTrackerTokens.toneOf(context, statusColor);
     final emphasized =
         isCurrent ||
         isDone ||
@@ -2073,10 +2157,12 @@ class _WorkflowStepNode extends StatelessWidget {
         isOverdue ||
         isEscalated ||
         isCancelled;
-    final nodeColor = emphasized ? statusColor : DocuTrackerTokens.surfaceCream;
+    final nodeColor = emphasized
+        ? statusColor
+        : DocuTrackerTokens.insetOf(context);
     final borderColor = emphasized
         ? statusColor
-        : DocuTrackerTokens.borderStrong;
+        : DocuTrackerTokens.borderStrongOf(context);
 
     return Column(
       mainAxisSize: MainAxisSize.min,
@@ -2108,7 +2194,7 @@ class _WorkflowStepNode extends StatelessWidget {
                       fontWeight: FontWeight.w800,
                       color: emphasized
                           ? Colors.white
-                          : DocuTrackerTokens.textMuted,
+                          : DocuTrackerTokens.textMutedOf(context),
                     ),
                   ),
           ),
@@ -2124,7 +2210,7 @@ class _WorkflowStepNode extends StatelessWidget {
             style: TextStyle(
               fontSize: 12,
               fontWeight: emphasized ? FontWeight.w800 : FontWeight.w600,
-              color: DocuTrackerTokens.textPrimary,
+              color: DocuTrackerTokens.textPrimaryOf(context),
               height: 1.2,
             ),
           ),
@@ -2136,7 +2222,7 @@ class _WorkflowStepNode extends StatelessWidget {
             fontSize: 10,
             fontWeight: FontWeight.w800,
             letterSpacing: 0.4,
-            color: statusColor,
+            color: labelColor,
           ),
         ),
       ],
@@ -2206,18 +2292,18 @@ class _CurrentAssignmentCard extends StatelessWidget {
               ),
             ),
           if (primaryName != null) ...[
-            const Text(
+            Text(
               'Primary assignee',
               style: TextStyle(
                 fontSize: 11,
                 fontWeight: FontWeight.w700,
-                color: DocuTrackerTokens.textMuted,
+                color: DocuTrackerTokens.textMutedOf(context),
               ),
             ),
             const SizedBox(height: 8),
             Chip(
               avatar: CircleAvatar(
-                backgroundColor: DocuTrackerTokens.brandSoft,
+                backgroundColor: DocuTrackerTokens.brandSoftOf(context),
                 child: Text(
                   primaryName[0].toUpperCase(),
                   style: const TextStyle(
@@ -2229,23 +2315,26 @@ class _CurrentAssignmentCard extends StatelessWidget {
               ),
               label: Text(
                 primaryName,
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 12,
                   fontWeight: FontWeight.w600,
+                  color: DocuTrackerTokens.textPrimaryOf(context),
                 ),
               ),
-              backgroundColor: Colors.white,
-              side: const BorderSide(color: DocuTrackerTokens.borderSubtle),
+              backgroundColor: DocuTrackerTokens.surfaceOf(context),
+              side: BorderSide(
+                color: DocuTrackerTokens.borderSubtleOf(context),
+              ),
               visualDensity: VisualDensity.compact,
             ),
             if (backupNames.isNotEmpty) ...[
               const SizedBox(height: 12),
-              const Text(
+              Text(
                 'Backup assignee',
                 style: TextStyle(
                   fontSize: 11,
                   fontWeight: FontWeight.w700,
-                  color: DocuTrackerTokens.textMuted,
+                  color: DocuTrackerTokens.textMutedOf(context),
                 ),
               ),
               const SizedBox(height: 8),
@@ -2253,7 +2342,20 @@ class _CurrentAssignmentCard extends StatelessWidget {
                 spacing: 8,
                 runSpacing: 8,
                 children: backupNames
-                    .map((name) => Chip(label: Text(name)))
+                    .map(
+                      (name) => Chip(
+                        label: Text(
+                          name,
+                          style: TextStyle(
+                            color: DocuTrackerTokens.textPrimaryOf(context),
+                          ),
+                        ),
+                        backgroundColor: DocuTrackerTokens.surfaceOf(context),
+                        side: BorderSide(
+                          color: DocuTrackerTokens.borderSubtleOf(context),
+                        ),
+                      ),
+                    )
                     .toList(),
               ),
             ],
@@ -2263,7 +2365,7 @@ class _CurrentAssignmentCard extends StatelessWidget {
               children: [
                 CircleAvatar(
                   radius: 16,
-                  backgroundColor: DocuTrackerTokens.brandSoft,
+                  backgroundColor: DocuTrackerTokens.brandSoftOf(context),
                   child: Icon(
                     Icons.person,
                     size: 16,
@@ -2277,10 +2379,10 @@ class _CurrentAssignmentCard extends StatelessWidget {
                     children: [
                       Text(
                         primaryHolderName ?? 'Unknown user',
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontSize: 13,
                           fontWeight: FontWeight.w700,
-                          color: DocuTrackerTokens.textPrimary,
+                          color: DocuTrackerTokens.textPrimaryOf(context),
                         ),
                       ),
                     ],
@@ -2320,8 +2422,9 @@ class _InfoRow extends StatelessWidget {
           Expanded(
             child: Text(
               value,
-              style: const TextStyle(
-                color: DocuTrackerTokens.textPrimary,
+              textAlign: TextAlign.right,
+              style: TextStyle(
+                color: DocuTrackerTokens.textPrimaryOf(context),
                 fontSize: 14,
                 fontWeight: FontWeight.w600,
               ),
@@ -2377,19 +2480,29 @@ class _TimelineItem extends StatelessWidget {
         entry.action == 'forwarded';
     final isNegative = entry.action == 'rejected' || entry.action == 'returned';
 
-    Color dotColor = const Color(0xFF6B7280);
-    Color bgColor = Colors.white;
-    Color borderColor = const Color(0xFFE4E7ED);
+    final dark = DocuTrackerTokens.isDark(context);
+    Color dotColor = DocuTrackerTokens.textMutedOf(context);
+    Color bgColor = DocuTrackerTokens.insetOf(context);
+    Color borderColor = DocuTrackerTokens.borderSubtleOf(context);
+    Color titleColor = DocuTrackerTokens.textPrimaryOf(context);
+    Color timeColor = DocuTrackerTokens.textMutedOf(context);
 
     if (isSystemEvent) {
       dotColor = const Color(0xFFF59E0B);
-      bgColor = const Color(0xFFFFFBEB);
-      borderColor = const Color(0xFFFDE68A);
+      bgColor = dark
+          ? dotColor.withValues(alpha: 0.12)
+          : const Color(0xFFFFFBEB);
+      borderColor = dark
+          ? dotColor.withValues(alpha: 0.35)
+          : const Color(0xFFFDE68A);
+      titleColor = dark ? const Color(0xFFFCD34D) : const Color(0xFF92400E);
+      timeColor = dark ? const Color(0xFFFBBF24) : const Color(0xFFB45309);
     } else if (isPositive) {
       dotColor = const Color(0xFF10B981);
     } else if (isNegative) {
       dotColor = const Color(0xFFEF4444);
     }
+    final noteColor = DocuTrackerTokens.textSecondaryOf(context);
 
     return IntrinsicHeight(
       child: Row(
@@ -2404,7 +2517,7 @@ class _TimelineItem extends StatelessWidget {
                   width: 32,
                   height: 32,
                   decoration: BoxDecoration(
-                    color: Colors.white,
+                    color: DocuTrackerTokens.surfaceOf(context),
                     shape: BoxShape.circle,
                     border: Border.all(
                       color: dotColor.withValues(alpha: 0.3),
@@ -2436,7 +2549,10 @@ class _TimelineItem extends StatelessWidget {
                 ),
                 if (!isLast)
                   Expanded(
-                    child: Container(width: 2, color: const Color(0xFFE5E7EB)),
+                    child: Container(
+                      width: 2,
+                      color: DocuTrackerTokens.borderSubtleOf(context),
+                    ),
                   ),
               ],
             ),
@@ -2474,9 +2590,7 @@ class _TimelineItem extends StatelessWidget {
                                 ? _actionLabel(entry.action)
                                 : '${_actionLabel(entry.action)} by ${_actorDisplayName(entry)}',
                             style: TextStyle(
-                              color: isSystemEvent
-                                  ? const Color(0xFF92400E)
-                                  : const Color(0xFF111827),
+                              color: titleColor,
                               fontSize: 14,
                               fontWeight: FontWeight.w700,
                             ),
@@ -2486,9 +2600,7 @@ class _TimelineItem extends StatelessWidget {
                           Text(
                             _formatEntryTime(entry.createdAt!),
                             style: TextStyle(
-                              color: isSystemEvent
-                                  ? const Color(0xFFB45309)
-                                  : const Color(0xFF6B7280),
+                              color: timeColor,
                               fontSize: 12,
                               fontWeight: FontWeight.w500,
                             ),
@@ -2506,10 +2618,12 @@ class _TimelineItem extends StatelessWidget {
                           vertical: 8,
                         ),
                         decoration: BoxDecoration(
-                          color: DocuTrackerTokens.highlightPeach,
+                          color: DocuTrackerTokens.highlightPeachOf(context),
                           borderRadius: BorderRadius.circular(8),
                           border: Border.all(
-                            color: DocuTrackerTokens.highlightPeachBorder,
+                            color: DocuTrackerTokens.highlightPeachBorderOf(
+                              context,
+                            ),
                           ),
                         ),
                         child: Column(
@@ -2518,11 +2632,11 @@ class _TimelineItem extends StatelessWidget {
                             if (entry.fromStep != null || entry.toStep != null)
                               Text(
                                 'Step: ${_stepLine(entry)}',
-                                style: const TextStyle(
+                                style: TextStyle(
                                   fontSize: 11,
                                   fontWeight: FontWeight.w700,
                                   letterSpacing: 0.3,
-                                  color: DocuTrackerTokens.textSecondary,
+                                  color: noteColor,
                                 ),
                               ),
                             if ((entry.fromStep != null ||
@@ -2534,11 +2648,11 @@ class _TimelineItem extends StatelessWidget {
                                 entry.toStatus != null)
                               Text(
                                 'Status: ${_statusLine(entry)}',
-                                style: const TextStyle(
+                                style: TextStyle(
                                   fontSize: 11,
                                   fontWeight: FontWeight.w700,
                                   letterSpacing: 0.3,
-                                  color: DocuTrackerTokens.textSecondary,
+                                  color: noteColor,
                                 ),
                               ),
                           ],
@@ -2550,10 +2664,12 @@ class _TimelineItem extends StatelessWidget {
                       Container(
                         width: double.infinity,
                         decoration: BoxDecoration(
-                          color: DocuTrackerTokens.highlightPeach,
+                          color: DocuTrackerTokens.highlightPeachOf(context),
                           borderRadius: BorderRadius.circular(8),
                           border: Border.all(
-                            color: DocuTrackerTokens.highlightPeachBorder,
+                            color: DocuTrackerTokens.highlightPeachBorderOf(
+                              context,
+                            ),
                           ),
                         ),
                         clipBehavior: Clip.antiAlias,
@@ -2572,8 +2688,8 @@ class _TimelineItem extends StatelessWidget {
                                   padding: const EdgeInsets.all(12),
                                   child: Text(
                                     entry.remarks!,
-                                    style: const TextStyle(
-                                      color: DocuTrackerTokens.textSecondary,
+                                    style: TextStyle(
+                                      color: noteColor,
                                       fontSize: 12,
                                       height: 1.4,
                                       fontWeight: FontWeight.w600,
@@ -2666,7 +2782,9 @@ class _HeroSummaryCell extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
       decoration: BoxDecoration(
-        color: DocuTrackerTokens.surfaceOf(context),
+        color: DocuTrackerTokens.isDark(context)
+            ? DocuTrackerTokens.insetOf(context)
+            : DocuTrackerTokens.surfaceOf(context),
         borderRadius: BorderRadius.circular(DocuTrackerTokens.radiusSm),
         border: Border.all(color: DocuTrackerTokens.borderSubtleOf(context)),
       ),
@@ -2730,8 +2848,11 @@ class _QuickAccessChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final dark = DocuTrackerTokens.isDark(context);
     return Material(
-      color: DocuTrackerTokens.highlightPeach,
+      color: dark
+          ? DocuTrackerTokens.insetOf(context)
+          : DocuTrackerTokens.highlightPeach,
       borderRadius: BorderRadius.circular(DocuTrackerTokens.radiusSm),
       child: InkWell(
         onTap: onTap,
@@ -2740,7 +2861,11 @@ class _QuickAccessChip extends StatelessWidget {
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(DocuTrackerTokens.radiusSm),
-            border: Border.all(color: DocuTrackerTokens.highlightPeachBorder),
+            border: Border.all(
+              color: dark
+                  ? DocuTrackerTokens.borderStrongOf(context)
+                  : DocuTrackerTokens.highlightPeachBorder,
+            ),
           ),
           child: Row(
             mainAxisAlignment: MainAxisAlignment.center,
@@ -2751,10 +2876,10 @@ class _QuickAccessChip extends StatelessWidget {
                 child: Text(
                   label,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 12,
                     fontWeight: FontWeight.w700,
-                    color: DocuTrackerTokens.textPrimary,
+                    color: DocuTrackerTokens.textPrimaryOf(context),
                   ),
                 ),
               ),

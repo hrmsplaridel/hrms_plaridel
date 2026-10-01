@@ -1,4 +1,5 @@
 const { writeGovernanceAudit } = require('./docutrackerGovernanceAudit');
+const { SYSTEM_ACCESS_ACTIONS } = require('./docutrackerSystemAccessActions');
 const {
   getEffectivePermissionExplanation,
 } = require('./docutrackerWorkflowService');
@@ -7,12 +8,7 @@ const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const BUILT_IN_DOCUMENT_TYPES = new Set(['memo', 'purchaseRequest']);
 const CANONICAL_ROLES = new Set(['admin', 'hr', 'supervisor', 'employee']);
-const SYSTEM_PERMISSION_ACTIONS = Object.freeze([
-  'view',
-  'create_draft',
-  'download',
-  'submit',
-]);
+const SYSTEM_PERMISSION_ACTIONS = SYSTEM_ACCESS_ACTIONS;
 
 class PermissionAdminError extends Error {
   constructor(message, status = 400) {
@@ -475,10 +471,13 @@ async function getPermissionPolicy(pool, { documentType, userId = null }) {
         action,
         documentType: normalizedDocumentType,
       });
+      const winner = explanation.explicit_matches?.[0] || null;
       effective[action] = {
         granted: explanation.final_decision === true,
         source: explanation.reason || 'fallback_rule',
-        matched_document_type: explanation.explicit_matches?.[0]?.document_type || null,
+        matched_document_type: winner?.document_type || null,
+        matched_scope: winner ? (winner.user_id ? 'user' : 'role') : null,
+        matched_role_id: winner && !winner.user_id ? winner.role_id || null : null,
       };
     }
   }

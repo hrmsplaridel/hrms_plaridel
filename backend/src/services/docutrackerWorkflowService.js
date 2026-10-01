@@ -1,7 +1,9 @@
-const { coalesceDocumentTitle } = require('../utils/docutrackerDisplayTitle');
+const { normalizeStatus, mapDocumentRow } = require('./docutrackerDocumentMapper');
 const { sameEntityId } = require('../utils/sameEntityId');
 const { todayInHrmsTimezone } = require('../utils/dateRangeParser');
 const { resolveActiveMayor } = require('./officialSignatoryService');
+const { GENERAL_PERMISSION_ACTIONS } = require('./docutrackerSystemAccessActions');
+const { excludeMayorIntakeStubSql } = require('../utils/mayorIntakeStub');
 const {
   getEmployeeDepartmentForDate,
   getEmployeeReviewSnapshot,
@@ -110,57 +112,38 @@ async function recordInitialDocumentFile(client, { documentId, fileName, filePat
   );
 }
 
-function normalizeStatus(value) {
-  if (!value) return 'pending';
-  const s = String(value).toLowerCase().trim().replaceAll(' ', '_');
-  if (s === 'inreview') return 'in_review';
-  // Backward-compatibility: treat legacy 'forwarded' as active in_review.
-  if (s === 'forwarded') return 'in_review';
-  return s;
-}
+/**
+ * Next step owned by the RSP / L&D source module. Only admins act on these
+ * records (RSP applications and L&D report review are admin-only routes);
+ * DocuTracker links to the module and never transitions the record itself.
+ */
+const RSP_APPLICATION_ADMIN_ACTIONS = Object.freeze({
+  submitted: { action: 'review_documents_in_rsp', label: 'Review applicant documents in RSP' },
+  exam_taken: { action: 'grade_exam_in_rsp', label: 'Complete exam grading in RSP' },
+  passed: { action: 'continue_hiring_in_rsp', label: 'Continue hiring steps in RSP' },
+});
 
-function mapDocumentRow(row) {
-  if (!row) return null;
-  return {
-    id: row.id,
-    document_number: row.document_number,
-    document_type: row.document_type,
-    title: coalesceDocumentTitle(row),
-    description: row.description,
-    source_module: row.source_module,
-    source_table: row.source_table,
-    source_record_id: row.source_record_id,
-    source_title: row.source_title,
-    source_status: row.source_status ?? null,
-    source_action: row.source_action ?? null,
-    source_action_label: row.source_action_label ?? null,
-    file_path: row.file_path,
-    file_name: row.file_name,
-    created_by: row.created_by,
-    originating_department_id: row.originating_department_id ?? null,
-    creator_name: row.creator_name ?? null,
-    assignee_name: row.assignee_name ?? null,
-    current_holder_id: row.current_holder_id,
-    current_step: row.current_step,
-    status: normalizeStatus(row.status),
-    sent_time: row.sent_time,
-    deadline_time: row.deadline_time,
-    reviewed_time: row.reviewed_time,
-    workflow_version: row.workflow_version,
-    escalation_level: row.escalation_level,
-    needs_admin_intervention: row.needs_admin_intervention,
-    signature_signer_ids: Array.isArray(row.signature_signer_ids)
-      ? row.signature_signer_ids.map(String)
-      : [],
-    viewer_is_routing_assignee: row.viewer_is_routing_assignee === true,
-    viewer_participated_in_source: row.viewer_participated_in_source === true,
-    source_only: row.source_only === true,
-    created_at: row.created_at,
-    updated_at: row.updated_at,
-  };
+function sourceModuleActionForRow(row, user) {
+  const role = String(user?.role || '').trim().toLowerCase();
+  if (role !== 'admin') return null;
+  const status = String(row.source_status || '').trim().toLowerCase();
+  if (row.source_module === 'rsp' && row.source_table === 'recruitment_applications') {
+    return RSP_APPLICATION_ADMIN_ACTIONS[status] || null;
+  }
+  if (
+    row.source_module === 'ld' &&
+    row.source_table === 'training_daily_reports' &&
+    status === 'submitted'
+  ) {
+    return { action: 'review_report_in_ld', label: 'Review training report in L&D' };
+  }
+  return null;
 }
 
 function sourceActionForRow(row, user) {
+  if (row.source_module === 'rsp' || row.source_module === 'ld') {
+    return sourceModuleActionForRow(row, user);
+  }
   if (row.source_module !== 'dtr' || row.source_table !== 'leave_requests') {
     return null;
   }
@@ -213,9 +196,13 @@ function mapSourceStatusToDocuTracker(sourceModule, sourceStatus) {
   }
 
   if (sourceModule === 'rsp') {
-    if (status === 'document_declined' || status === 'failed') return 'rejected';
-    if (status === 'registered' || status === 'passed') return 'approved';
-    if (status === 'document_approved' || status === 'exam_taken') return 'in_review';
+    // Applicants may resubmit declined documents; hiring completes at registered.
+    if (status === 'document_declined') return 'returned';
+    if (status === 'failed') return 'rejected';
+    if (status === 'registered') return 'approved';
+    if (status === 'document_approved' || status === 'exam_taken' || status === 'passed') {
+      return 'in_review';
+    }
     return 'pending';
   }
 
@@ -456,7 +443,9 @@ async function listSourceBackedDocuments(pool, user, filters = {}) {
          a.created_at AS created_at,
          a.updated_at AS updated_at,
          a.status AS source_status
-       FROM recruitment_applications a`
+       FROM recruitment_applications a
+       WHERE ${excludeMayorIntakeStubSql('a')}
+         AND a.status NOT IN ('endorsed', 'rejected')`
     );
     pieces.push(...rspRows);
   }
@@ -1225,7 +1214,6 @@ function getRelationshipFlags(document, user) {
 }
 
 const WORKFLOW_STEP_ACTIONS = new Set(['forward', 'approve', 'reject', 'return']);
-const GENERAL_PERMISSION_ACTIONS = new Set(['view', 'create', 'create_draft', 'download']);
 
 function canonicalPermissionAction(action) {
   const a = String(action || '').trim().toLowerCase();
@@ -3102,6 +3090,7 @@ module.exports = {
   VALID_STATUSES,
   mapDocumentRow,
   sourceActionForRow,
+  mapSourceStatusToDocuTracker,
   permissionPriority,
   resolvePermissionDecisionFromRows,
   ensureValidWorkflowConfig,

@@ -76,9 +76,7 @@ class _DocuTrackerOfficialSignatoriesScreenState
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           behavior: SnackBarBehavior.floating,
-          content: Text(
-            error.toString().replaceFirst('Exception: ', ''),
-          ),
+          content: Text(error.toString().replaceFirst('Exception: ', '')),
         ),
       );
     } finally {
@@ -202,7 +200,10 @@ class _DocuTrackerOfficialSignatoriesScreenState
                   const SizedBox(height: 16),
                   _AutomaticMayorSection(mayor: _mayor),
                   const SizedBox(height: 16),
-                  _BackfillHintCard(onRun: _reResolveSigners, busy: _reResolving),
+                  _BackfillHintCard(
+                    onRun: _reResolveSigners,
+                    busy: _reResolving,
+                  ),
                 ],
               ),
             ),

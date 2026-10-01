@@ -710,6 +710,17 @@ router.get('/', protect, async (_req, res) => {
   }
 });
 
+// Statuses owned by the RSP pipeline; `endorsed` / `rejected` belong to the Mayor module.
+const RSP_ADMIN_STATUSES = new Set([
+  'submitted',
+  'document_approved',
+  'document_declined',
+  'exam_taken',
+  'passed',
+  'failed',
+  'registered',
+]);
+
 // PUT /api/rsp/applications/:applicationId/status
 // Admin status updates (approve/decline/failed/passed).
 router.put('/:applicationId/status', protect, async (req, res) => {
@@ -719,6 +730,9 @@ router.put('/:applicationId/status', protect, async (req, res) => {
     const { status } = req.body || {};
     if (!status || typeof status !== 'string') {
       return res.status(400).json({ error: 'status is required' });
+    }
+    if (!RSP_ADMIN_STATUSES.has(status)) {
+      return res.status(400).json({ error: 'Unsupported application status' });
     }
     const result = await pool.query(
       `

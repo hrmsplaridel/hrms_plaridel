@@ -12,9 +12,15 @@ class DocuTrackerDetailTag extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
       decoration: BoxDecoration(
-        color: DocuTrackerTokens.highlightPeach,
+        color: DocuTrackerTokens.isDark(context)
+            ? DocuTrackerTokens.insetOf(context)
+            : DocuTrackerTokens.highlightPeach,
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: DocuTrackerTokens.highlightPeachBorder),
+        border: Border.all(
+          color: DocuTrackerTokens.isDark(context)
+              ? DocuTrackerTokens.borderStrongOf(context)
+              : DocuTrackerTokens.highlightPeachBorder,
+        ),
       ),
       child: Text(
         label.toUpperCase(),
@@ -22,7 +28,7 @@ class DocuTrackerDetailTag extends StatelessWidget {
           fontSize: 11,
           fontWeight: FontWeight.w700,
           letterSpacing: 0.4,
-          color: DocuTrackerTokens.textSecondary,
+          color: DocuTrackerTokens.textSecondaryOf(context),
         ),
       ),
     );
@@ -48,7 +54,7 @@ class DocuTrackerDetailActionBanner extends StatelessWidget {
       width: double.infinity,
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
       decoration: BoxDecoration(
-        color: DocuTrackerTokens.highlightPeach,
+        color: DocuTrackerTokens.highlightPeachOf(context),
         borderRadius: BorderRadius.circular(DocuTrackerTokens.radiusMd),
         border: Border.all(
           color: DocuTrackerTokens.brand.withValues(alpha: 0.45),
@@ -109,7 +115,7 @@ class DocuTrackerDetailSectionCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      decoration: DocuTrackerTokens.cardDecoration(),
+      decoration: DocuTrackerTokens.cardDecoration(context: context),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -121,7 +127,7 @@ class DocuTrackerDetailSectionCard extends StatelessWidget {
                 Container(
                   padding: const EdgeInsets.all(10),
                   decoration: BoxDecoration(
-                    color: DocuTrackerTokens.brandSoft,
+                    color: DocuTrackerTokens.brandSoftOf(context),
                     borderRadius: BorderRadius.circular(
                       DocuTrackerTokens.radiusSm,
                     ),
@@ -158,7 +164,9 @@ class DocuTrackerDetailSectionCard extends StatelessWidget {
           ),
           Divider(
             height: 1,
-            color: DocuTrackerTokens.borderSubtle.withValues(alpha: 0.85),
+            color: DocuTrackerTokens.borderSubtleOf(
+              context,
+            ).withValues(alpha: 0.85),
           ),
           Padding(
             padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
@@ -187,10 +195,14 @@ class DocuTrackerPeachDashedBox extends StatelessWidget {
       width: double.infinity,
       padding: padding,
       decoration: BoxDecoration(
-        color: DocuTrackerTokens.highlightPeach,
+        color: DocuTrackerTokens.isDark(context)
+            ? DocuTrackerTokens.insetOf(context)
+            : DocuTrackerTokens.highlightPeach,
         borderRadius: BorderRadius.circular(DocuTrackerTokens.radiusMd),
         border: Border.all(
-          color: DocuTrackerTokens.highlightPeachBorder,
+          color: DocuTrackerTokens.isDark(context)
+              ? DocuTrackerTokens.borderSubtleOf(context)
+              : DocuTrackerTokens.highlightPeachBorder,
           style: BorderStyle.solid,
         ),
       ),

@@ -305,6 +305,88 @@ async function notifyAssignedSigner(db, {
   }
 }
 
+async function loadFormTitle(db, sourceModule, sourceTable, sourceRecordId) {
+  try {
+    const formResult = await db.query(
+      `SELECT to_jsonb(source_row) AS source_record
+       FROM "${sourceTable}" source_row
+       WHERE id = $1::uuid`,
+      [sourceRecordId]
+    );
+    if (!formResult.rowCount) return null;
+    return requestTitle(sourceModule, sourceTable, formResult.rows[0].source_record);
+  } catch (_) {
+    // Title is optional for the notification body.
+    return null;
+  }
+}
+
+/**
+ * After a new signature: tell the next signer it is their turn, or tell the
+ * form owner that every slot is signed. Failures never block signing.
+ */
+async function notifySignatureProgress(db, {
+  sourceModule,
+  sourceTable,
+  sourceRecordId,
+  slots,
+  rows,
+  signerId,
+  ownerId,
+}) {
+  const order = Object.keys(slots);
+  const nextKey = order.find(
+    (key) => !isSignedRow(rows.find((row) => row.slot_key === key))
+  );
+  const formName =
+    SOURCE_SIGNATURE_CONFIGS[sourceModule]?.formNames?.[sourceTable] ||
+    (sourceModule === 'ld' ? 'L&D form' : 'RSP form');
+  const formTitle = await loadFormTitle(db, sourceModule, sourceTable, sourceRecordId);
+  const subject = formTitle ? `${formName}: ${formTitle}` : formName;
+  let recipientId;
+  let notice;
+  if (nextKey) {
+    const next = rows.find((row) => row.slot_key === nextKey);
+    recipientId = next?.assigned_signer_id;
+    notice = {
+      type: 'source_signature_turn',
+      title: `${slots[nextKey]} is ready to sign`,
+      body: `Earlier signatures on ${subject} are done. Open DocuTracker → Required actions to sign.`,
+      slotKey: nextKey,
+    };
+  } else {
+    recipientId = ownerId;
+    notice = {
+      type: 'source_signature_completed',
+      title: `${formName} fully signed`,
+      body: `All signatures on ${subject} are complete.`,
+      slotKey: null,
+    };
+  }
+  if (!UUID_RE.test(String(recipientId || ''))) return;
+  if (String(recipientId) === String(signerId || '')) return;
+  try {
+    await insertNotification(db, {
+      userId: recipientId,
+      category: 'form_signature',
+      type: notice.type,
+      title: notice.title,
+      body: notice.body,
+      referenceType: 'source_form',
+      referenceId: sourceRecordId,
+      metadata: {
+        source_module: sourceModule,
+        source_table: sourceTable,
+        slot_key: notice.slotKey,
+        form_name: formName,
+        form_title: formTitle,
+      },
+    });
+  } catch (err) {
+    console.error('[docutrackerRspSignatureService] notifySignatureProgress', err);
+  }
+}
+
 async function insertSourceSignatureAssignment(
   db,
   {
@@ -361,24 +443,7 @@ async function insertSourceSignatureAssignment(
       recovery_remarks: recoveryRemarks,
     },
   });
-  let formTitle = null;
-  try {
-    const formResult = await db.query(
-      `SELECT to_jsonb(source_row) AS source_record
-       FROM "${sourceTable}" source_row
-       WHERE id = $1::uuid`,
-      [sourceRecordId]
-    );
-    if (formResult.rowCount) {
-      formTitle = requestTitle(
-        sourceModule,
-        sourceTable,
-        formResult.rows[0].source_record
-      );
-    }
-  } catch (_) {
-    // Title is optional for the notification body.
-  }
+  const formTitle = await loadFormTitle(db, sourceModule, sourceTable, sourceRecordId);
   await notifyAssignedSigner(db, {
     assignedSignerId,
     actorId,
@@ -516,7 +581,7 @@ async function loadContext(db, user, sourceModule, sourceTable, sourceRecordId, 
   const rows = await db.query(
     `SELECT s.id, s.slot_key, s.label, s.assigned_signer_id,
             assigned.full_name AS assigned_signer_name,
-            s.assignment_source, s.recovery_remarks,
+            s.assignment_source, s.recovery_remarks, s.created_by,
             s.signature_asset_id, s.signed_by, s.signer_name_snapshot,
             s.signed_at, a.mime_type,
             encode(a.image_bytes, 'base64') AS signature_image_base64
@@ -556,38 +621,77 @@ function serializeAssignmentSource(row, sourceTable, sourceCreatorId) {
   return 'manual';
 }
 
+function isSignedRow(row) {
+  return Boolean(row?.signature_asset_id && row?.signed_at);
+}
+
+/** First earlier slot (in form order) that is still unsigned, or null. */
+function earlierUnsignedSlot(slots, rows, slotKey) {
+  const order = Object.keys(slots);
+  for (const key of order.slice(0, Math.max(order.indexOf(slotKey), 0))) {
+    if (!isSignedRow(rows.find((row) => row.slot_key === key))) {
+      return { slot_key: key, label: slots[key] };
+    }
+  }
+  return null;
+}
+
+/**
+ * Signature progress of a source form: every slot needs an assigned signer
+ * and a signature. Slots are signed in form order.
+ */
+function signatureStatus(signatures) {
+  if (signatures.some((signature) => !signature.assigned_signer_id)) {
+    return 'needs_setup';
+  }
+  const complete = signatures.every(
+    (signature) => signature.signature_asset_id && signature.signed_at
+  );
+  return complete ? 'completed' : 'awaiting_signatures';
+}
+
 function serialize(context, user, sourceTable, sourceRecordId) {
+  const signatures = serializeSignatures(context, user, sourceTable);
   return {
     source_module: context.sourceModule,
     source_table: sourceTable,
     source_record_id: sourceRecordId,
-    source_status: 'saved',
+    source_status: signatureStatus(signatures),
     can_assign: context.isAdmin,
-    signatures: Object.entries(context.slots).map(([slotKey, label]) => {
-      const row = context.rows.find((candidate) => candidate.slot_key === slotKey);
-      const assignmentSource = row
-        ? serializeAssignmentSource(row, sourceTable, context.sourceCreatorId)
-        : 'manual';
-      const creatorAssigned = assignmentSource === 'creator';
-      return {
-        id: row?.id || null,
-        slot_key: slotKey,
-        label,
-        assigned_signer_id: row?.assigned_signer_id || '',
-        assigned_signer_name: row?.assigned_signer_name || null,
-        assignment_source: assignmentSource,
-        recovery_remarks: row?.recovery_remarks || null,
-        can_assign: context.isAdmin && !creatorAssigned,
-        can_sign: String(row?.assigned_signer_id || '') === String(user.id),
-        signature_asset_id: row?.signature_asset_id || null,
-        signature_image_base64: row?.signature_image_base64 || null,
-        mime_type: row?.mime_type || null,
-        signed_by: row?.signed_by || null,
-        signer_name_snapshot: row?.signer_name_snapshot || null,
-        signed_at: row?.signed_at || null,
-      };
-    }),
+    signatures,
   };
+}
+
+function serializeSignatures(context, user, sourceTable) {
+  return Object.entries(context.slots).map(([slotKey, label]) => {
+    const row = context.rows.find((candidate) => candidate.slot_key === slotKey);
+    const assignmentSource = row
+      ? serializeAssignmentSource(row, sourceTable, context.sourceCreatorId)
+      : 'manual';
+    const creatorAssigned = assignmentSource === 'creator';
+    const waitingOn = isSignedRow(row)
+      ? null
+      : earlierUnsignedSlot(context.slots, context.rows, slotKey);
+    return {
+      id: row?.id || null,
+      slot_key: slotKey,
+      label,
+      assigned_signer_id: row?.assigned_signer_id || '',
+      assigned_signer_name: row?.assigned_signer_name || null,
+      assignment_source: assignmentSource,
+      recovery_remarks: row?.recovery_remarks || null,
+      can_assign: context.isAdmin && !creatorAssigned,
+      can_sign: String(row?.assigned_signer_id || '') === String(user.id),
+      waiting_on_slot_key: waitingOn?.slot_key || null,
+      waiting_on_label: waitingOn?.label || null,
+      signature_asset_id: row?.signature_asset_id || null,
+      signature_image_base64: row?.signature_image_base64 || null,
+      mime_type: row?.mime_type || null,
+      signed_by: row?.signed_by || null,
+      signer_name_snapshot: row?.signer_name_snapshot || null,
+      signed_at: row?.signed_at || null,
+    };
+  });
 }
 
 async function getSourceSignatures(pool, user, sourceModule, sourceTable, sourceRecordId) {
@@ -829,24 +933,7 @@ async function assignSourceSigner(pool, user, sourceModule, sourceTable, sourceR
       signerId
     );
     await client.query('COMMIT');
-    let formTitle = null;
-    try {
-      const formResult = await pool.query(
-        `SELECT to_jsonb(source_row) AS source_record
-         FROM "${sourceTable}" source_row
-         WHERE id = $1::uuid`,
-        [sourceRecordId]
-      );
-      if (formResult.rowCount) {
-        formTitle = requestTitle(
-          sourceModule,
-          sourceTable,
-          formResult.rows[0].source_record
-        );
-      }
-    } catch (_) {
-      // Title is optional for the notification body.
-    }
+    const formTitle = await loadFormTitle(pool, sourceModule, sourceTable, sourceRecordId);
     if (!previous || String(previous.assigned_signer_id) !== signerId) {
       await notifyAssignedSigner(pool, {
         assignedSignerId: signerId,
@@ -877,6 +964,15 @@ async function signSourceSlot(pool, user, sourceModule, sourceTable, sourceRecor
     const current = context.rows.find((row) => row.slot_key === slotKey);
     if (!current || String(current.assigned_signer_id) !== String(user.id)) {
       throw serviceError('FORBIDDEN', 'Only the assigned person can sign this field');
+    }
+    const waitingOn = isSignedRow(current)
+      ? null
+      : earlierUnsignedSlot(context.slots, context.rows, slotKey);
+    if (waitingOn) {
+      throw serviceError(
+        'VALIDATION',
+        `${waitingOn.label} must sign before ${context.slots[slotKey]}`
+      );
     }
     let assetId = String(input.signature_asset_id || '').trim();
     if (assetId) {
@@ -913,6 +1009,26 @@ async function signSourceSlot(pool, user, sourceModule, sourceTable, sourceRecor
       afterState: { source_table: sourceTable, slot_key: slotKey, signer_name: signerName },
     });
     await client.query('COMMIT');
+    if (!current.signature_asset_id) {
+      const signedAt = new Date().toISOString();
+      const rows = context.rows.map((row) =>
+        row.slot_key === slotKey
+          ? { ...row, signature_asset_id: assetId, signed_at: row.signed_at || signedAt }
+          : row
+      );
+      const firstSlot = rows.find(
+        (row) => row.slot_key === Object.keys(context.slots)[0]
+      );
+      await notifySignatureProgress(pool, {
+        sourceModule: config.sourceModule,
+        sourceTable,
+        sourceRecordId,
+        slots: context.slots,
+        rows,
+        signerId: user.id,
+        ownerId: context.sourceCreatorId || firstSlot?.created_by || null,
+      });
+    }
   } catch (error) {
     try { await client.query('ROLLBACK'); } catch (_) {}
     throw error;

@@ -2,16 +2,27 @@ class DocuTrackerPermissionPolicyDecision {
   const DocuTrackerPermissionPolicyDecision({
     required this.granted,
     required this.source,
+    this.matchedScope,
+    this.matchedDocumentType,
+    this.matchedRoleId,
   });
 
   final bool granted;
   final String source;
+
+  /// `user` or `role` for the rule that decided an employee's access.
+  final String? matchedScope;
+  final String? matchedDocumentType;
+  final String? matchedRoleId;
 
   factory DocuTrackerPermissionPolicyDecision.fromJson(
     Map<String, dynamic> json,
   ) => DocuTrackerPermissionPolicyDecision(
     granted: json['granted'] == true,
     source: json['source']?.toString() ?? 'not_configured',
+    matchedScope: json['matched_scope']?.toString(),
+    matchedDocumentType: json['matched_document_type']?.toString(),
+    matchedRoleId: json['matched_role_id']?.toString(),
   );
 }
 

@@ -14,6 +14,7 @@ import 'package:hrms_plaridel/features/docutracker/services/docutracker_access_p
 import 'package:hrms_plaridel/features/docutracker/services/docutracker_document_visibility.dart';
 import 'package:hrms_plaridel/features/docutracker/services/docutracker_workflow_service.dart';
 import 'package:hrms_plaridel/features/docutracker/services/docutracker_notification_service.dart';
+import 'package:hrms_plaridel/features/docutracker/services/employee_directory_lookup.dart';
 
 /// DocuTracker state management for UI.
 /// Owns in-memory state and orchestrates backend calls.
@@ -22,7 +23,8 @@ class DocuTrackerProvider extends ChangeNotifier {
     DocuTrackerRepository? repo,
     DocuTrackerWorkflowService? workflowService,
     DocuTrackerNotificationService? notificationService,
-  }) {
+    DateTime Function()? clock,
+  }) : _clock = clock ?? DateTime.now {
     _repo = repo ?? DocuTrackerRepository.instance;
     _workflowService = workflowService ?? DocuTrackerWorkflowService(_repo);
     _notificationService =
@@ -32,6 +34,51 @@ class DocuTrackerProvider extends ChangeNotifier {
   late final DocuTrackerRepository _repo;
   late final DocuTrackerWorkflowService _workflowService;
   late final DocuTrackerNotificationService _notificationService;
+  final DateTime Function() _clock;
+
+  /// How long loaded data is reused before a revisit refreshes it quietly.
+  static const documentsTtl = Duration(seconds: 30);
+  static const routingConfigsTtl = Duration(minutes: 5);
+  static const sourceSignatureRequestsTtl = Duration(seconds: 15);
+  static const departmentQueueTtl = Duration(seconds: 30);
+  static const permissionsTtl = Duration(minutes: 1);
+  static const employeeDirectoryTtl = Duration(minutes: 5);
+
+  DateTime? _permissionsLoadedAt;
+  Future<void>? _permissionsInFlight;
+  String? _permissionsInFlightKey;
+  EmployeeDirectoryLookup _employeeDirectory = EmployeeDirectoryLookup();
+  DateTime? _employeeDirectoryLoadedAt;
+  Future<void>? _employeeDirectoryInFlight;
+
+  DateTime? _documentsLoadedAt;
+  String? _documentsDataScopeKey;
+  int _documentsRequestSeq = 0;
+  Future<void>? _documentsInFlight;
+  String? _documentsInFlightScopeKey;
+  DateTime? _routingConfigsLoadedAt;
+  Future<void>? _routingConfigsInFlight;
+  DateTime? _sourceSignatureRequestsLoadedAt;
+  Future<void>? _sourceSignatureRequestsInFlight;
+  List<({String id, String name})> _reviewedDepartments = const [];
+  List<DocuTrackerDocument> _departmentQueue = const [];
+  DateTime? _departmentQueueLoadedAt;
+  Future<void>? _departmentQueueInFlight;
+  final Map<String, Map<String, Object?>> _viewStates = {};
+
+  bool _isFresh(DateTime? loadedAt, Duration ttl) =>
+      loadedAt != null && _clock().difference(loadedAt) < ttl;
+
+  /// Screen UI state (filters, search, tabs) kept across navigation for the
+  /// signed-in user. Mutating the returned map does not notify listeners.
+  Map<String, Object?> viewState(String screenKey) =>
+      _viewStates.putIfAbsent(screenKey, () => <String, Object?>{});
+
+  /// Marks the document list stale so the next visit refreshes it quietly.
+  void invalidateDocuments() {
+    _documentsLoadedAt = null;
+    _departmentQueueLoadedAt = null;
+  }
 
   List<DocuTrackerDocument> _documents = [];
   List<DocumentRoutingConfig> _routingConfigs = [];
@@ -99,8 +146,28 @@ class DocuTrackerProvider extends ChangeNotifier {
     _documentsLoadStatus = null;
     _documentsLoadIsAdmin = false;
     _documentsLoadMobileRestricted = false;
+    _documentsLoadedAt = null;
+    _documentsDataScopeKey = null;
+    _documentsInFlight = null;
+    _documentsInFlightScopeKey = null;
+    _routingConfigsLoadedAt = null;
+    _routingConfigsInFlight = null;
+    _sourceSignatureRequestsLoadedAt = null;
+    _sourceSignatureRequestsInFlight = null;
+    _reviewedDepartments = const [];
+    _departmentQueue = const [];
+    _departmentQueueLoadedAt = null;
+    _departmentQueueInFlight = null;
+    _permissionsLoadedAt = null;
+    _permissionsInFlight = null;
+    _permissionsInFlightKey = null;
+    _employeeDirectory = EmployeeDirectoryLookup();
+    _employeeDirectoryLoadedAt = null;
+    _employeeDirectoryInFlight = null;
+    _viewStates.clear();
     _transitionInFlight.clear();
     _notificationService.clearCache();
+    _repo.clearSessionCaches();
   }
 
   bool _isCurrentAuthGeneration(int generation) =>
@@ -203,6 +270,7 @@ class DocuTrackerProvider extends ChangeNotifier {
         }
         if (result is DocuTrackerSuccess<DocuTrackerDocument>) {
           _upsertLocalDocument(result.value);
+          _departmentQueueLoadedAt = null;
           await refreshDocument(documentId, reloadHistory: true);
           if (!_isCurrentAuthGeneration(authGeneration)) return false;
           await loadNotifications(forceRefresh: true);
@@ -397,12 +465,28 @@ class DocuTrackerProvider extends ChangeNotifier {
   bool get builderLoading => _builderLoading;
   String? get builderError => _builderError;
 
-  /// Load routing configs (Step 1 & 3).
-  Future<void> loadRoutingConfigs() async {
+  /// Load routing configs (Step 1 & 3). Cached for [routingConfigsTtl];
+  /// concurrent callers share one request.
+  Future<void> loadRoutingConfigs({bool forceRefresh = false}) {
+    final inFlight = _routingConfigsInFlight;
+    if (inFlight != null && !forceRefresh) return inFlight;
+    if (!forceRefresh && _isFresh(_routingConfigsLoadedAt, routingConfigsTtl)) {
+      return Future.value();
+    }
+    late final Future<void> request;
+    request = _fetchRoutingConfigs().whenComplete(() {
+      if (identical(_routingConfigsInFlight, request)) {
+        _routingConfigsInFlight = null;
+      }
+    });
+    _routingConfigsInFlight = request;
+    return request;
+  }
+
+  /// Does not toggle [loading]: routing configs load alongside documents and
+  /// must not end the documents spinner early or blank cached rows.
+  Future<void> _fetchRoutingConfigs() async {
     final authGeneration = _authGeneration;
-    _loading = true;
-    _error = null;
-    notifyListeners();
     try {
       final routingConfigs = await _repo.getRoutingConfigs();
       if (!_isCurrentAuthGeneration(authGeneration)) return;
@@ -410,12 +494,12 @@ class DocuTrackerProvider extends ChangeNotifier {
       if (_routingConfigs.isEmpty) {
         _routingConfigs = DocumentRoutingConfig.defaults;
       }
+      _routingConfigsLoadedAt = _clock();
     } catch (e) {
       if (!_isCurrentAuthGeneration(authGeneration)) return;
       _error = e.toString();
     }
     if (!_isCurrentAuthGeneration(authGeneration)) return;
-    _loading = false;
     notifyListeners();
   }
 
@@ -432,6 +516,7 @@ class DocuTrackerProvider extends ChangeNotifier {
       isAdmin: _documentsLoadIsAdmin,
       mobileRestricted: _documentsLoadMobileRestricted,
       showLoading: false,
+      forceRefresh: true,
     );
   }
 
@@ -446,8 +531,8 @@ class DocuTrackerProvider extends ChangeNotifier {
     bool isAdmin = false,
     bool mobileRestricted = false,
     bool showLoading = true,
-  }) async {
-    final authGeneration = _authGeneration;
+    bool forceRefresh = false,
+  }) {
     final scopeKey = _documentsScopeKey(
       userId: userId,
       roleId: roleId,
@@ -458,6 +543,58 @@ class DocuTrackerProvider extends ChangeNotifier {
       isAdmin: isAdmin,
       mobileRestricted: mobileRestricted,
     );
+    final hasDataForScope = _documentsDataScopeKey == scopeKey;
+    if (!forceRefresh &&
+        hasDataForScope &&
+        _documentsLoadScopeKey == scopeKey &&
+        _isFresh(_documentsLoadedAt, documentsTtl)) {
+      return Future.value();
+    }
+    final inFlight = _documentsInFlight;
+    if (!forceRefresh &&
+        inFlight != null &&
+        _documentsInFlightScopeKey == scopeKey) {
+      return inFlight;
+    }
+    late final Future<void> request;
+    request =
+        _fetchDocuments(
+          scopeKey: scopeKey,
+          userId: userId,
+          roleId: roleId,
+          departmentId: departmentId,
+          officeId: officeId,
+          documentType: documentType,
+          status: status,
+          isAdmin: isAdmin,
+          mobileRestricted: mobileRestricted,
+          // Cached rows stay on screen while a revisit refreshes quietly.
+          showLoading: showLoading && !hasDataForScope,
+        ).whenComplete(() {
+          if (identical(_documentsInFlight, request)) {
+            _documentsInFlight = null;
+            _documentsInFlightScopeKey = null;
+          }
+        });
+    _documentsInFlight = request;
+    _documentsInFlightScopeKey = scopeKey;
+    return request;
+  }
+
+  Future<void> _fetchDocuments({
+    required String scopeKey,
+    required String userId,
+    String? roleId,
+    String? departmentId,
+    String? officeId,
+    String? documentType,
+    DocumentStatus? status,
+    required bool isAdmin,
+    required bool mobileRestricted,
+    required bool showLoading,
+  }) async {
+    final authGeneration = _authGeneration;
+    final requestSeq = ++_documentsRequestSeq;
     final preservePreviousDocuments = _documentsLoadScopeKey == scopeKey;
     _documentsLoadScopeKey = scopeKey;
     _documentsLoadUserId = userId;
@@ -473,6 +610,7 @@ class DocuTrackerProvider extends ChangeNotifier {
       _error = null;
       notifyListeners();
     }
+    var loaded = false;
     try {
       final effectiveIsAdmin = isAdmin && !mobileRestricted;
       if (effectiveIsAdmin) {
@@ -481,12 +619,15 @@ class DocuTrackerProvider extends ChangeNotifier {
           status: status,
           limit: 100,
         );
-        if (!_isCurrentDocumentRequest(authGeneration, scopeKey)) return;
+        if (!_isCurrentDocumentRequest(authGeneration, scopeKey, requestSeq)) {
+          return;
+        }
         if (r is DocuTrackerFailure<List<DocuTrackerDocument>>) {
           if (!preservePreviousDocuments) _documents = [];
           _error = r.message;
         } else if (r is DocuTrackerSuccess<List<DocuTrackerDocument>>) {
           _documents = r.value;
+          loaded = true;
         } else {
           if (!preservePreviousDocuments) _documents = [];
           _error = 'Could not load documents.';
@@ -503,7 +644,9 @@ class DocuTrackerProvider extends ChangeNotifier {
           status: status,
           limit: 100,
         );
-        if (!_isCurrentDocumentRequest(authGeneration, scopeKey)) return;
+        if (!_isCurrentDocumentRequest(authGeneration, scopeKey, requestSeq)) {
+          return;
+        }
         if (r is DocuTrackerFailure<List<DocuTrackerDocument>>) {
           if (!preservePreviousDocuments) _documents = [];
           _error = r.message;
@@ -512,6 +655,7 @@ class DocuTrackerProvider extends ChangeNotifier {
             r.value,
             userId: userId,
           );
+          loaded = true;
         } else {
           if (!preservePreviousDocuments) _documents = [];
           _error = 'Could not load documents.';
@@ -524,18 +668,33 @@ class DocuTrackerProvider extends ChangeNotifier {
         );
       }
     } catch (e) {
-      if (!_isCurrentDocumentRequest(authGeneration, scopeKey)) return;
+      if (!_isCurrentDocumentRequest(authGeneration, scopeKey, requestSeq)) {
+        return;
+      }
       if (!preservePreviousDocuments) _documents = [];
       _error = e.toString();
     }
-    if (!_isCurrentDocumentRequest(authGeneration, scopeKey)) return;
+    if (!_isCurrentDocumentRequest(authGeneration, scopeKey, requestSeq)) {
+      return;
+    }
+    if (loaded) {
+      _documentsDataScopeKey = scopeKey;
+      _documentsLoadedAt = _clock();
+    } else if (!preservePreviousDocuments) {
+      _documentsDataScopeKey = null;
+    }
     _loading = false;
     notifyListeners();
   }
 
-  bool _isCurrentDocumentRequest(int authGeneration, String scopeKey) =>
+  bool _isCurrentDocumentRequest(
+    int authGeneration,
+    String scopeKey,
+    int requestSeq,
+  ) =>
       _isCurrentAuthGeneration(authGeneration) &&
-      _documentsLoadScopeKey == scopeKey;
+      _documentsLoadScopeKey == scopeKey &&
+      _documentsRequestSeq == requestSeq;
 
   /// Load permissions (Step 4: Admin Privilege Management).
   Future<void> loadPermissions({
@@ -543,12 +702,51 @@ class DocuTrackerProvider extends ChangeNotifier {
     String? userId,
     String? documentType,
     bool userOnly = false,
-  }) async {
+    bool forceRefresh = false,
+  }) {
     final loadKey = [roleId, userId, documentType, userOnly].join('|');
+    final inFlight = _permissionsInFlight;
+    if (inFlight != null && _permissionsInFlightKey == loadKey) {
+      return inFlight;
+    }
+    if (!forceRefresh &&
+        _permissionsLoadKey == loadKey &&
+        _isFresh(_permissionsLoadedAt, permissionsTtl)) {
+      return Future.value();
+    }
+    late final Future<void> request;
+    request =
+        _fetchPermissions(
+          loadKey: loadKey,
+          roleId: roleId,
+          userId: userId,
+          documentType: documentType,
+          userOnly: userOnly,
+        ).whenComplete(() {
+          if (identical(_permissionsInFlight, request)) {
+            _permissionsInFlight = null;
+            _permissionsInFlightKey = null;
+          }
+        });
+    _permissionsInFlight = request;
+    _permissionsInFlightKey = loadKey;
+    return request;
+  }
+
+  Future<void> _fetchPermissions({
+    required String loadKey,
+    String? roleId,
+    String? userId,
+    String? documentType,
+    required bool userOnly,
+  }) async {
     final authGeneration = _authGeneration;
-    _loading = true;
-    _error = null;
-    notifyListeners();
+    final showLoading = _permissionsLoadKey != loadKey;
+    if (showLoading) {
+      _loading = true;
+      _error = null;
+      notifyListeners();
+    }
     try {
       final permissions = await _repo.listPermissions(
         roleId: roleId,
@@ -559,13 +757,59 @@ class DocuTrackerProvider extends ChangeNotifier {
       if (!_isCurrentAuthGeneration(authGeneration)) return;
       _permissions = permissions;
       _permissionsLoadKey = loadKey;
+      _permissionsLoadedAt = _clock();
+      _error = null;
     } catch (e) {
       if (!_isCurrentAuthGeneration(authGeneration)) return;
       if (_permissionsLoadKey != loadKey) _permissions = [];
       _error = e.toString();
     }
     if (!_isCurrentAuthGeneration(authGeneration)) return;
-    _loading = false;
+    if (showLoading) _loading = false;
+    notifyListeners();
+  }
+
+  /// Active employee names used by admin screens to label permission rows.
+  EmployeeDirectoryLookup get employeeDirectory => _employeeDirectory;
+
+  /// Loads the employee directory once per session (refreshed after
+  /// [employeeDirectoryTtl]), then resolves any [ids] still missing from it.
+  Future<void> loadEmployeeDirectory({
+    Iterable<String> ids = const [],
+    bool forceRefresh = false,
+  }) async {
+    final authGeneration = _authGeneration;
+    final inFlight = _employeeDirectoryInFlight;
+    if (inFlight != null) {
+      await inFlight;
+    } else if (forceRefresh ||
+        !_isFresh(_employeeDirectoryLoadedAt, employeeDirectoryTtl)) {
+      late final Future<void> request;
+      request = _fetchEmployeeDirectory().whenComplete(() {
+        if (identical(_employeeDirectoryInFlight, request)) {
+          _employeeDirectoryInFlight = null;
+        }
+      });
+      _employeeDirectoryInFlight = request;
+      await request;
+    }
+    if (ids.isEmpty || !_isCurrentAuthGeneration(authGeneration)) return;
+    final directory = _employeeDirectory;
+    final missing = ids.where((id) => directory[id] == null).toList();
+    if (missing.isEmpty) return;
+    await directory.ensureIds(missing);
+    if (_isCurrentAuthGeneration(authGeneration)) notifyListeners();
+  }
+
+  Future<void> _fetchEmployeeDirectory() async {
+    final authGeneration = _authGeneration;
+    final directory = EmployeeDirectoryLookup();
+    await directory.load();
+    if (!_isCurrentAuthGeneration(authGeneration) || !directory.isLoaded) {
+      return;
+    }
+    _employeeDirectory = directory;
+    _employeeDirectoryLoadedAt = _clock();
     notifyListeners();
   }
 
@@ -631,6 +875,8 @@ class DocuTrackerProvider extends ChangeNotifier {
         forceRefresh: forceRefresh,
       );
       if (!_isCurrentAuthGeneration(authGeneration)) return;
+      // A cache hit returns the same list; skip the rebuild.
+      if (identical(notifications, _notifications)) return;
       _notifications = notifications;
       _error = null;
       notifyListeners();
@@ -745,6 +991,7 @@ class DocuTrackerProvider extends ChangeNotifier {
       }
 
       _documents = [created.value, ..._documents];
+      _departmentQueueLoadedAt = null;
       _loading = false;
       notifyListeners();
       return created.value;
@@ -801,6 +1048,7 @@ class DocuTrackerProvider extends ChangeNotifier {
     switch (result) {
       case DocuTrackerSuccess<DocuTrackerDocumentBuilderData>(:final value):
         _builderData = value;
+        invalidateDocuments();
         notifyListeners();
         return value;
       case DocuTrackerFailure<DocuTrackerDocumentBuilderData>(:final message):
@@ -897,12 +1145,38 @@ class DocuTrackerProvider extends ChangeNotifier {
   bool get rspSignatureRequestsLoading => sourceSignatureRequestsLoading;
   String? get rspSignatureRequestsError => sourceSignatureRequestsError;
 
-  Future<void> loadSourceSignatureRequests() async {
-    if (_sourceSignatureRequestsLoading) return;
+  /// Pending RSP/L&D signature requests. Cached for
+  /// [sourceSignatureRequestsTtl]; concurrent callers (dashboard polling and
+  /// the documents screen) share one request.
+  Future<void> loadSourceSignatureRequests({bool forceRefresh = false}) {
+    final inFlight = _sourceSignatureRequestsInFlight;
+    if (inFlight != null) return inFlight;
+    if (!forceRefresh &&
+        _isFresh(
+          _sourceSignatureRequestsLoadedAt,
+          sourceSignatureRequestsTtl,
+        )) {
+      return Future.value();
+    }
+    late final Future<void> request;
+    request = _fetchSourceSignatureRequests().whenComplete(() {
+      if (identical(_sourceSignatureRequestsInFlight, request)) {
+        _sourceSignatureRequestsInFlight = null;
+      }
+    });
+    _sourceSignatureRequestsInFlight = request;
+    return request;
+  }
+
+  Future<void> _fetchSourceSignatureRequests() async {
     final authGeneration = _authGeneration;
-    _sourceSignatureRequestsLoading = true;
-    _sourceSignatureRequestsError = null;
-    notifyListeners();
+    // Show the spinner only before the first result; refreshes happen in place.
+    final blocking = _sourceSignatureRequestsLoadedAt == null;
+    if (blocking) {
+      _sourceSignatureRequestsLoading = true;
+      _sourceSignatureRequestsError = null;
+      notifyListeners();
+    }
     final results = await Future.wait([
       _repo.getSourceSignatureRequests(sourceModule: 'rsp'),
       _repo.getSourceSignatureRequests(sourceModule: 'ld'),
@@ -925,10 +1199,54 @@ class DocuTrackerProvider extends ChangeNotifier {
     }
     _sourceSignatureRequests = requests;
     _sourceSignatureRequestsError = errors.isEmpty ? null : errors.join(' ');
+    if (errors.isEmpty) _sourceSignatureRequestsLoadedAt = _clock();
     notifyListeners();
   }
 
   Future<void> loadRspSignatureRequests() => loadSourceSignatureRequests();
+
+  List<String> get reviewedDepartmentNames => [
+    for (final department in _reviewedDepartments) department.name,
+  ];
+  List<DocuTrackerDocument> get departmentQueue =>
+      List.unmodifiable(_departmentQueue);
+
+  /// Submitted documents from departments the user reviews. Cached for
+  /// [departmentQueueTtl] and refreshed in place.
+  Future<void> loadDepartmentQueue({bool forceRefresh = false}) {
+    final inFlight = _departmentQueueInFlight;
+    if (inFlight != null) return inFlight;
+    if (!forceRefresh &&
+        _isFresh(_departmentQueueLoadedAt, departmentQueueTtl)) {
+      return Future.value();
+    }
+    late final Future<void> request;
+    request = _fetchDepartmentQueue().whenComplete(() {
+      if (identical(_departmentQueueInFlight, request)) {
+        _departmentQueueInFlight = null;
+      }
+    });
+    _departmentQueueInFlight = request;
+    return request;
+  }
+
+  Future<void> _fetchDepartmentQueue() async {
+    final authGeneration = _authGeneration;
+    final departments = await _repo.listReviewedDepartments();
+    if (!_isCurrentAuthGeneration(authGeneration)) return;
+    var queue = const <DocuTrackerDocument>[];
+    if (departments.isNotEmpty) {
+      final result = await _repo.listDepartmentQueue(limit: 100);
+      if (!_isCurrentAuthGeneration(authGeneration)) return;
+      if (result is DocuTrackerSuccess<List<DocuTrackerDocument>>) {
+        queue = result.value;
+      }
+    }
+    _reviewedDepartments = departments;
+    _departmentQueue = queue;
+    _departmentQueueLoadedAt = _clock();
+    notifyListeners();
+  }
 
   Future<DocuTrackerSourceSignatureBundle?> loadSourceSignatures({
     required String sourceModule,
@@ -1011,6 +1329,7 @@ class DocuTrackerProvider extends ChangeNotifier {
     _sourceSignatureLoading = false;
     switch (result) {
       case DocuTrackerSuccess<DocuTrackerSourceSignatureBundle>(:final value):
+        _sourceSignatureRequestsLoadedAt = null;
         notifyListeners();
         return value;
       case DocuTrackerFailure<DocuTrackerSourceSignatureBundle>(:final message):
@@ -1045,6 +1364,7 @@ class DocuTrackerProvider extends ChangeNotifier {
     _sourceSignatureLoading = false;
     switch (result) {
       case DocuTrackerSuccess<DocuTrackerSourceSignatureBundle>(:final value):
+        _sourceSignatureRequestsLoadedAt = null;
         notifyListeners();
         return value;
       case DocuTrackerFailure<DocuTrackerSourceSignatureBundle>(:final message):
@@ -1082,6 +1402,7 @@ class DocuTrackerProvider extends ChangeNotifier {
     switch (result) {
       case DocuTrackerSuccess<DocuTrackerDocumentBuilderData>(:final value):
         _builderData = value;
+        invalidateDocuments();
         notifyListeners();
         return value;
       case DocuTrackerFailure<DocuTrackerDocumentBuilderData>(:final message):
@@ -1127,6 +1448,7 @@ class DocuTrackerProvider extends ChangeNotifier {
     switch (result) {
       case DocuTrackerSuccess<DocuTrackerDocumentBuilderData>(:final value):
         _builderData = value;
+        invalidateDocuments();
         notifyListeners();
         return value;
       case DocuTrackerFailure<DocuTrackerDocumentBuilderData>(:final message):
@@ -1158,6 +1480,7 @@ class DocuTrackerProvider extends ChangeNotifier {
     switch (result) {
       case DocuTrackerSuccess<DocuTrackerDocumentBuilderData>(:final value):
         _builderData = value;
+        invalidateDocuments();
         notifyListeners();
         return value;
       case DocuTrackerFailure<DocuTrackerDocumentBuilderData>(:final message):
@@ -1268,7 +1591,8 @@ class DocuTrackerProvider extends ChangeNotifier {
     try {
       await _repo.savePermission(perm);
       if (!_isCurrentAuthGeneration(authGeneration)) return;
-      await loadPermissions();
+      _permissionsLoadedAt = null;
+      await loadPermissions(forceRefresh: true);
     } catch (e) {
       if (!_isCurrentAuthGeneration(authGeneration)) return;
       _error = e.toString();

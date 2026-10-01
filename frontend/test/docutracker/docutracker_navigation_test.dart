@@ -246,12 +246,12 @@ void main() {
     await tester.tap(find.text('Audit log'));
     for (
       var i = 0;
-      i < 30 && find.text('Governance audit log').evaluate().isEmpty;
+      i < 30 && find.text('Configuration audit log').evaluate().isEmpty;
       i++
     ) {
       await tester.pump(const Duration(milliseconds: 20));
     }
-    expect(find.text('Governance audit log'), findsOneWidget);
+    expect(find.text('Configuration audit log'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 }

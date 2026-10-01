@@ -11,6 +11,14 @@ class DocuTrackerSourceStatusText {
   final String description;
 }
 
+/// Display name of an RSP / L&D source module, or null for other modules.
+String? docuTrackerSourceModuleLabel(String? sourceModule) =>
+    switch (sourceModule?.trim().toLowerCase()) {
+      'rsp' => 'RSP',
+      'ld' => 'L&D',
+      _ => null,
+    };
+
 DocuTrackerSourceStatusText docuTrackerLinkedSourceStatusText({
   required String sourceModule,
   required String status,

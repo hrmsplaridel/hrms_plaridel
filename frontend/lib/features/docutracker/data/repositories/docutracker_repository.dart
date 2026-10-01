@@ -92,6 +92,18 @@ class DocuTrackerRepository implements DocuTrackerPermissionsDataSource {
 
   late final DocuTrackerPermissionService _permissionService;
 
+  static const _creatableTypesTtl = Duration(minutes: 5);
+  Future<List<DocumentType>>? _creatableTypesFuture;
+  DateTime? _creatableTypesAt;
+
+  void _invalidatePermissionCaches() {
+    _permissionService.clearCache();
+    _creatableTypesFuture = null;
+  }
+
+  /// Drops caches bound to the signed-in user; call on login/logout.
+  void clearSessionCaches() => _invalidatePermissionCaches();
+
   Future<List<OfficialSignatoryPeriod>> listOfficialSignatories() async {
     try {
       final response = await ApiClient.instance.get<Map<String, dynamic>>(
@@ -197,6 +209,8 @@ class DocuTrackerRepository implements DocuTrackerPermissionsDataSource {
     String? documentType,
     String? eventType,
     String? actorId,
+    String? targetUserId,
+    String? targetRoleId,
     int limit = 50,
     int offset = 0,
   }) async {
@@ -204,6 +218,10 @@ class DocuTrackerRepository implements DocuTrackerPermissionsDataSource {
       final res = await ApiClient.instance.get<List<dynamic>>(
         '$_base/governance-audit',
         queryParameters: {
+          if (targetUserId != null && targetUserId.trim().isNotEmpty)
+            'target_user_id': targetUserId.trim(),
+          if (targetRoleId != null && targetRoleId.trim().isNotEmpty)
+            'target_role_id': targetRoleId.trim(),
           if (documentType != null && documentType.trim().isNotEmpty)
             'document_type': documentType.trim(),
           if (eventType != null && eventType.trim().isNotEmpty)
@@ -257,6 +275,7 @@ class DocuTrackerRepository implements DocuTrackerPermissionsDataSource {
         '$_base/routing-configs',
         data: config.toJson(),
       );
+      _creatableTypesFuture = null;
       final row = res.data;
       final version = (row?['version'] as num?)?.toInt() ?? config.version + 1;
       return DocuTrackerSuccess(version);
@@ -1092,7 +1111,7 @@ class DocuTrackerRepository implements DocuTrackerPermissionsDataSource {
           'granted': perm.granted,
         },
       );
-      _permissionService.clearCache();
+      _invalidatePermissionCaches();
     } catch (e) {
       throw Exception(_apiErrorMessage(e));
     }
@@ -1132,7 +1151,7 @@ class DocuTrackerRepository implements DocuTrackerPermissionsDataSource {
           'changes': changes.map((change) => change.toJson()).toList(),
         },
       );
-      _permissionService.clearCache();
+      _invalidatePermissionCaches();
       return DateTime.tryParse(response.data?['updated_at']?.toString() ?? '');
     } catch (error) {
       throw Exception(_apiErrorMessage(error));
@@ -1155,7 +1174,7 @@ class DocuTrackerRepository implements DocuTrackerPermissionsDataSource {
           if (action != null) 'action': action,
         },
       );
-      _permissionService.clearCache();
+      _invalidatePermissionCaches();
       final deleted = res.data?['deleted'];
       if (deleted is num) return deleted.toInt();
       return 0;
@@ -1229,11 +1248,41 @@ class DocuTrackerRepository implements DocuTrackerPermissionsDataSource {
   /// Published workflow types the server lets the current user create.
   /// Source-module types are excluded because those documents are created by
   /// their own modules, not manually.
-  Future<List<DocumentType>> creatableDocumentTypes() async {
+  /// Document types the current user may create. Shared by the dashboard and
+  /// documents screens for [_creatableTypesTtl]; the backend still enforces
+  /// create permission on every request.
+  Future<List<DocumentType>> creatableDocumentTypes({
+    bool forceRefresh = false,
+  }) {
+    final cached = _creatableTypesFuture;
+    final cachedAt = _creatableTypesAt;
+    if (!forceRefresh &&
+        cached != null &&
+        cachedAt != null &&
+        DateTime.now().difference(cachedAt) < _creatableTypesTtl) {
+      return cached;
+    }
+    late final Future<List<DocumentType>> request;
+    request = _fetchCreatableDocumentTypes(
+      onFailure: () {
+        if (identical(_creatableTypesFuture, request)) {
+          _creatableTypesFuture = null;
+        }
+      },
+    );
+    _creatableTypesFuture = request;
+    _creatableTypesAt = DateTime.now();
+    return request;
+  }
+
+  Future<List<DocumentType>> _fetchCreatableDocumentTypes({
+    required void Function() onFailure,
+  }) async {
     final List<DocumentRoutingConfig> configs;
     try {
       configs = await _getPublishedRoutingConfigs();
     } catch (_) {
+      onFailure();
       return const [];
     }
     final candidates = docuTrackerManuallyCreatableTypes(

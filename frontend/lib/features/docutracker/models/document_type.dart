@@ -41,11 +41,7 @@ class DocumentType {
         .replaceAll(RegExp(r'[^a-z0-9]+'), '_')
         .replaceAll(RegExp(r'^_+|_+$'), '');
     if (value.isEmpty) {
-      throw ArgumentError.value(
-        name,
-        'name',
-        'Document type name is invalid.',
-      );
+      throw ArgumentError.value(name, 'name', 'Document type name is invalid.');
     }
     return DocumentType.fromValue(value);
   }

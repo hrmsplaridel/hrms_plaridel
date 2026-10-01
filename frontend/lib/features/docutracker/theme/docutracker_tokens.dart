@@ -76,6 +76,29 @@ abstract final class DocuTrackerTokens {
   static Color textMutedOf(BuildContext context) =>
       isDark(context) ? textMutedDark : textMuted;
 
+  static Color borderStrongOf(BuildContext context) =>
+      isDark(context) ? const Color(0xFF4B5563) : borderStrong;
+
+  /// Inset panels inside cards (timeline entries, detail rows, inputs).
+  static Color insetOf(BuildContext context) =>
+      isDark(context) ? const Color(0xFF172131) : surfaceCream;
+
+  static Color brandSoftOf(BuildContext context) =>
+      isDark(context) ? brand.withValues(alpha: 0.18) : brandSoft;
+
+  static Color highlightPeachOf(BuildContext context) =>
+      isDark(context) ? const Color(0xFF2A1E17) : highlightPeach;
+
+  static Color highlightPeachBorderOf(BuildContext context) =>
+      isDark(context) ? brand.withValues(alpha: 0.35) : highlightPeachBorder;
+
+  static Color overduePinkOf(BuildContext context) =>
+      isDark(context) ? overdueAccent.withValues(alpha: 0.16) : overduePink;
+
+  /// Keeps semantic status colors readable on the dark surfaces.
+  static Color toneOf(BuildContext context, Color color) =>
+      isDark(context) ? Color.lerp(color, Colors.white, 0.3)! : color;
+
   static TextStyle titleStyle(BuildContext context) => TextStyle(
     fontSize: 15,
     height: 1.25,

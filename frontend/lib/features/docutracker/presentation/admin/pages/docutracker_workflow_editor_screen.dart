@@ -789,7 +789,9 @@ class _DocuTrackerWorkflowEditorScreenState
       }
 
       if (!mounted) return;
-      await context.read<DocuTrackerProvider>().loadRoutingConfigs();
+      await context.read<DocuTrackerProvider>().loadRoutingConfigs(
+        forceRefresh: true,
+      );
       if (!mounted) return;
       _hasUnsavedChanges = false;
       if (publish) {

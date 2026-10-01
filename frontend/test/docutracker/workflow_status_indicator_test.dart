@@ -20,17 +20,20 @@ DocuTrackerDocument _document({
 }
 
 void main() {
-  test('returned document phase says changes are required at its current step', () {
-    final phase = DocuTrackerWorkflowPhase.forDocument(
-      doc: _document(status: DocumentStatus.returned, currentStep: 1),
-      totalEnabledSteps: 3,
-      currentStepLabel: 'Department Review',
-    );
+  test(
+    'returned document phase says changes are required at its current step',
+    () {
+      final phase = DocuTrackerWorkflowPhase.forDocument(
+        doc: _document(status: DocumentStatus.returned, currentStep: 1),
+        totalEnabledSteps: 3,
+        currentStepLabel: 'Department Review',
+      );
 
-    expect(phase.label, 'Returned for changes');
-    expect(phase.detail, contains('Step 1 of 3'));
-    expect(phase.detail, contains('Changes are required'));
-  });
+      expect(phase.label, 'Returned for changes');
+      expect(phase.detail, contains('Step 1 of 3'));
+      expect(phase.detail, contains('Changes are required'));
+    },
+  );
 
   test('final approved step is approved instead of current', () {
     final indicator = DocuTrackerWorkflowPhase.indicatorForStep(
@@ -80,17 +83,11 @@ void main() {
     final doc = _document(status: DocumentStatus.returned, currentStep: 1);
 
     expect(
-      DocuTrackerWorkflowPhase.indicatorForStep(
-        doc: doc,
-        stepOrder: 1,
-      ).label,
+      DocuTrackerWorkflowPhase.indicatorForStep(doc: doc, stepOrder: 1).label,
       'RETURNED',
     );
     expect(
-      DocuTrackerWorkflowPhase.indicatorForStep(
-        doc: doc,
-        stepOrder: 2,
-      ).label,
+      DocuTrackerWorkflowPhase.indicatorForStep(doc: doc, stepOrder: 2).label,
       'WAITING',
     );
   });

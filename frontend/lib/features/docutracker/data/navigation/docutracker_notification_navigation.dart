@@ -76,6 +76,7 @@ Future<void> refreshDocuTrackerAfterNotificationNav(
   await provider.loadDocumentsForUser(
     userId: auth.user?.id ?? '',
     isAdmin: isAdmin,
+    forceRefresh: true,
   );
   await provider.loadNotifications(forceRefresh: true);
 }

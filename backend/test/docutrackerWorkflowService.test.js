@@ -4,6 +4,7 @@ const {
   VALID_STATUSES,
   mapDocumentRow,
   sourceActionForRow,
+  mapSourceStatusToDocuTracker,
   ensureValidWorkflowConfig,
   permissionPriority,
   resolvePermissionDecisionFromRows,
@@ -15,7 +16,71 @@ const {
   getEffectivePermissionExplanation,
   recoverDocumentAssignment,
   listDocuments,
+  canUserPerformTypeAction,
 } = require('../src/services/docutrackerWorkflowService');
+const {
+  GENERAL_PERMISSION_ACTIONS,
+  SYSTEM_ACCESS_ACTIONS,
+} = require('../src/services/docutrackerSystemAccessActions');
+
+function permissionRowsClient(rowsByAction) {
+  return {
+    query: async (sql, params = []) => {
+      if (!sql.includes('FROM docutracker_permissions')) return { rowCount: 0, rows: [] };
+      const rows = params[0].flatMap((action) => rowsByAction[action] || []);
+      return { rowCount: rows.length, rows };
+    },
+  };
+}
+
+test('System Access actions are shared and exclude workflow-step actions', () => {
+  assert.deepEqual([...SYSTEM_ACCESS_ACTIONS].sort(), ['create_draft', 'download', 'submit', 'view']);
+  assert.equal(GENERAL_PERMISSION_ACTIONS.has('create'), true);
+  for (const action of ['approve', 'forward', 'reject', 'return']) {
+    assert.equal(GENERAL_PERMISSION_ACTIONS.has(action), false);
+  }
+});
+
+test('canUserPerformTypeAction honours submit grants like other System Access actions', async () => {
+  const user = { id: 'u-pr-clerk', role: 'employee' };
+  const roleDenied = permissionRowsClient({
+    submit: [{ user_id: null, role_id: 'employee', document_type: 'purchaseRequest', granted: false }],
+  });
+  assert.equal(
+    await canUserPerformTypeAction(roleDenied, { user, documentType: 'purchaseRequest', action: 'submit' }),
+    false
+  );
+
+  const userOverride = permissionRowsClient({
+    submit: [
+      { user_id: null, role_id: 'employee', document_type: 'purchaseRequest', granted: false },
+      { user_id: 'u-pr-clerk', role_id: null, document_type: 'purchaseRequest', granted: true },
+    ],
+  });
+  assert.equal(
+    await canUserPerformTypeAction(userOverride, { user, documentType: 'purchaseRequest', action: 'submit' }),
+    true
+  );
+
+  assert.equal(
+    await canUserPerformTypeAction(permissionRowsClient({}), { user, documentType: 'purchaseRequest', action: 'submit' }),
+    false
+  );
+});
+
+test('canUserPerformTypeAction never grants workflow-step actions from permission rows', async () => {
+  const client = permissionRowsClient({
+    approve: [{ user_id: 'u-1', role_id: null, document_type: '*', granted: true }],
+  });
+  assert.equal(
+    await canUserPerformTypeAction(client, {
+      user: { id: 'u-1', role: 'employee' },
+      documentType: 'memo',
+      action: 'approve',
+    }),
+    false
+  );
+});
 
 test('VALID_STATUSES includes workflow statuses', () => {
   const expected = [
@@ -93,6 +158,90 @@ test('sourceActionForRow exposes only the viewer current DTR leave action', () =
     ),
     null
   );
+});
+
+test('sourceActionForRow points RSP/L&D admins to the owning module step', () => {
+  const admin = { id: 'admin-1', role: 'admin' };
+  const rsp = { source_module: 'rsp', source_table: 'recruitment_applications' };
+  assert.deepEqual(sourceActionForRow({ ...rsp, source_status: 'submitted' }, admin), {
+    action: 'review_documents_in_rsp',
+    label: 'Review applicant documents in RSP',
+  });
+  assert.equal(
+    sourceActionForRow({ ...rsp, source_status: 'exam_taken' }, admin).action,
+    'grade_exam_in_rsp'
+  );
+  assert.equal(
+    sourceActionForRow({ ...rsp, source_status: 'passed' }, admin).action,
+    'continue_hiring_in_rsp'
+  );
+  for (const status of ['document_declined', 'document_approved', 'failed', 'registered']) {
+    assert.equal(sourceActionForRow({ ...rsp, source_status: status }, admin), null);
+  }
+  assert.equal(
+    sourceActionForRow({ ...rsp, source_status: 'submitted' }, { id: 'hr-1', role: 'hr' }),
+    null
+  );
+
+  const ld = { source_module: 'ld', source_table: 'training_daily_reports' };
+  assert.deepEqual(sourceActionForRow({ ...ld, source_status: 'submitted' }, admin), {
+    action: 'review_report_in_ld',
+    label: 'Review training report in L&D',
+  });
+  assert.equal(sourceActionForRow({ ...ld, source_status: 'seen' }, admin), null);
+  assert.equal(
+    sourceActionForRow({ ...ld, source_status: 'submitted' }, { id: 'emp-1', role: 'employee' }),
+    null
+  );
+});
+
+test('RSP application statuses map to the hiring pipeline', () => {
+  const expected = {
+    submitted: 'pending',
+    document_approved: 'in_review',
+    document_declined: 'returned',
+    exam_taken: 'in_review',
+    passed: 'in_review',
+    failed: 'rejected',
+    registered: 'approved',
+  };
+  for (const [status, mapped] of Object.entries(expected)) {
+    assert.equal(mapSourceStatusToDocuTracker('rsp', status), mapped, status);
+  }
+});
+
+test('RSP source feed excludes Mayor endorsement records', async () => {
+  let rspSql = '';
+  const pool = {
+    query: async (sql) => {
+      if (sql.includes('FROM recruitment_applications a')) {
+        rspSql = sql;
+        return {
+          rows: [{
+            source_record_id: 'app-1',
+            source_module: 'rsp',
+            source_table: 'recruitment_applications',
+            source_title: 'Administrative Aide',
+            created_by: null,
+            creator_name: 'Applicant One',
+            created_at: '2026-09-01T00:00:00.000Z',
+            source_status: 'exam_taken',
+          }],
+        };
+      }
+      return { rowCount: 0, rows: [] };
+    },
+  };
+
+  const result = await listDocuments(pool, { id: 'admin-1', role: 'admin' }, { type: 'rsp' });
+
+  assert.match(rspSql, /LIKE '%@local\.intake'/);
+  assert.match(rspSql, /a\.status NOT IN \('endorsed', 'rejected'\)/);
+  const [row] = result.documents;
+  assert.equal(row.status, 'in_review');
+  assert.equal(row.source_status, 'exam_taken');
+  assert.equal(row.source_action, 'grade_exam_in_rsp');
+  assert.equal(row.source_only, true);
 });
 
 test('mapDocumentRow preserves server-owned source action metadata', () => {

@@ -157,7 +157,7 @@ test('GET /governance-audit preserves entries for deleted actors', async () => {
   const req = {
     query: {
       document_type: 'memo',
-      event_type: 'workflow_published',
+      event_type: 'workflow_published, step_assignees_updated',
       actor_id: 'deleted-user-1',
       limit: '25',
       offset: '50',
@@ -172,13 +172,60 @@ test('GET /governance-audit preserves entries for deleted actors', async () => {
   assert.deepEqual(res.payload, [auditRow]);
   assert.equal(queries.length, 1);
   assert.match(queries[0].sql, /LEFT JOIN users u ON u\.id = a\.actor_id/);
+  assert.match(queries[0].sql, /LEFT JOIN users t ON t\.id = a\.target_user_id/);
+  assert.match(queries[0].sql, /a\.event_type = ANY\(\$2::text\[\]\)/);
   assert.deepEqual(queries[0].params, [
     'memo',
-    'workflow_published',
+    ['workflow_published', 'step_assignees_updated'],
     'deleted-user-1',
     25,
     50,
   ]);
+
+  restoreWorkflow();
+  restoreDb();
+  restoreAuth();
+  restoreRbac();
+  delete require.cache[routePath];
+});
+
+test('GET /governance-audit filters permission history by target employee or role', async () => {
+  const queries = [];
+  const restoreWorkflow = withMockedModule(
+    '../src/services/docutrackerWorkflowService',
+    workflowServiceMock()
+  );
+  const restoreDb = withMockedModule('../src/config/db', {
+    pool: {
+      query: async (sql, params) => {
+        queries.push({ sql, params });
+        return { rowCount: 0, rows: [] };
+      },
+    },
+  });
+  const restoreAuth = withMockedModule('../src/middleware/auth', {
+    authMiddleware: (_req, _res, next) => next?.(),
+  });
+  const restoreRbac = withMockedModule('../src/middleware/rbac', {
+    requireAdmin: (_req, _res, next) => next?.(),
+  });
+
+  const routePath = require.resolve('../src/routes/docutracker');
+  delete require.cache[routePath];
+  const router = require('../src/routes/docutracker');
+  const handler = getRouteHandler(router, 'get', '/governance-audit');
+  const userId = '22222222-2222-4222-8222-222222222222';
+
+  const res = createMockResponse();
+  await handler({ query: { target_user_id: userId, target_role_id: ' Employee ' } }, res);
+  assert.equal(res.statusCode, 200);
+  assert.match(queries[0].sql, /a\.target_user_id = \$1::uuid AND a\.target_role_id = \$2/);
+  assert.deepEqual(queries[0].params.slice(0, 2), [userId, 'employee']);
+
+  const invalid = createMockResponse();
+  await handler({ query: { target_user_id: 'not-a-uuid' } }, invalid);
+  assert.equal(invalid.statusCode, 400);
+  assert.equal(queries.length, 1);
 
   restoreWorkflow();
   restoreDb();
@@ -251,6 +298,56 @@ test('GET /documents/:id returns the current holder name for detail summaries', 
     queries.some((sql) => sql.includes('LEFT JOIN users holder ON holder.id = d.current_holder_id')),
     true
   );
+
+  restoreWorkflow();
+  restoreDb();
+  restoreAuth();
+  restoreRbac();
+  delete require.cache[routePath];
+});
+
+test('GET /documents keeps RSP/L&D source metadata for Flutter', async () => {
+  const sourceRow = {
+    id: 'source:ld:11111111-1111-4111-8111-111111111111',
+    document_type: 'ld',
+    title: 'Day 1 report',
+    status: 'pending',
+    source_module: 'ld',
+    source_table: 'training_daily_reports',
+    source_record_id: '11111111-1111-4111-8111-111111111111',
+    source_status: 'submitted',
+    source_action: 'review_report_in_ld',
+    source_action_label: 'Review training report in L&D',
+    source_only: true,
+    viewer_participated_in_source: false,
+  };
+  const restoreWorkflow = withMockedModule(
+    '../src/services/docutrackerWorkflowService',
+    workflowServiceMock({ listDocuments: async () => ({ documents: [sourceRow] }) })
+  );
+  const restoreDb = withMockedModule('../src/config/db', {
+    pool: { query: async () => ({ rowCount: 0, rows: [] }) },
+  });
+  const restoreAuth = withMockedModule('../src/middleware/auth', {
+    authMiddleware: (_req, _res, next) => next?.(),
+  });
+  const restoreRbac = withMockedModule('../src/middleware/rbac', {
+    requireAdmin: (_req, _res, next) => next?.(),
+  });
+
+  const routePath = require.resolve('../src/routes/docutracker');
+  delete require.cache[routePath];
+  const router = require('../src/routes/docutracker');
+  const handler = getRouteHandler(router, 'get', '/documents');
+  const res = createMockResponse();
+  await handler({ query: {}, user: { id: 'admin-1', role: 'admin' } }, res);
+
+  assert.equal(res.statusCode, 200);
+  const [doc] = res.payload;
+  assert.equal(doc.source_status, 'submitted');
+  assert.equal(doc.source_action, 'review_report_in_ld');
+  assert.equal(doc.source_action_label, 'Review training report in L&D');
+  assert.equal(doc.source_only, true);
 
   restoreWorkflow();
   restoreDb();

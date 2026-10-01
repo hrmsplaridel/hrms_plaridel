@@ -18,10 +18,11 @@ const {
   updateDocumentMetadata,
   recoverDocumentAssignment,
 } = require('../services/docutrackerWorkflowService');
+const { mapDocumentRow } = require('../services/docutrackerDocumentMapper');
 const {
   ACTIVE_WORKFLOW_STATUSES_FOR_OVERDUE,
 } = require('../services/docutrackerStatusSemantics');
-const { coalesceDocumentTitle } = require('../utils/docutrackerDisplayTitle');
+const { GENERAL_PERMISSION_ACTIONS } = require('../services/docutrackerSystemAccessActions');
 const { sameEntityId } = require('../utils/sameEntityId');
 const { writeGovernanceAudit } = require('../services/docutrackerGovernanceAudit');
 const {
@@ -225,17 +226,6 @@ async function clearCurrentDocumentFiles(client, documentId) {
   );
 }
 
-// Role/user permission rows cover baseline access and draft-start capability.
-// Runtime workflow actions (approve/forward/reject/return) are enforced by
-// current holder / step-assignee logic.
-const GENERAL_PERMISSION_ACTIONS = new Set([
-  'view',
-  'create',
-  'create_draft',
-  'download',
-  'submit',
-]);
-
 function normalizeGeneralPermissionAction(action) {
   const a = String(action || '').trim().toLowerCase();
   if (!a) return a;
@@ -333,43 +323,6 @@ async function upsertLatestRoutingConfigCache(
      VALUES ($1, $2::jsonb, COALESCE($3, 1))`,
     [documentType, stepsJson, reviewDeadlineHours ?? null]
   );
-}
-
-/**
- * Utility: map DB row to document response DTO.
- */
-function mapDocumentRow(row) {
-  if (!row) return null;
-  return {
-    id: row.id,
-    document_number: row.document_number,
-    document_type: row.document_type,
-    title: coalesceDocumentTitle(row),
-    description: row.description,
-    source_module: row.source_module,
-    source_table: row.source_table,
-    source_record_id: row.source_record_id,
-    source_title: row.source_title,
-    file_path: row.file_path,
-    file_name: row.file_name,
-    created_by: row.created_by,
-    creator_name: row.creator_name,
-    current_holder_id: row.current_holder_id,
-    assignee_name: row.assignee_name ?? null,
-    current_step: row.current_step,
-    status: row.status,
-    sent_time: row.sent_time,
-    deadline_time: row.deadline_time,
-    reviewed_time: row.reviewed_time,
-    workflow_version: row.workflow_version,
-    escalation_level: row.escalation_level,
-    needs_admin_intervention: row.needs_admin_intervention,
-    signature_signer_ids: Array.isArray(row.signature_signer_ids)
-      ? row.signature_signer_ids.map(String)
-      : [],
-    created_at: row.created_at,
-    updated_at: row.updated_at,
-  };
 }
 
 /** Map Flutter/camelCase status names to DB-friendly values (legacy + snake). */
@@ -1094,14 +1047,30 @@ router.get('/governance-audit', protect, requireAdmin, async (req, res) => {
       where.push(sql.replace('?', `$${params.length}`));
     };
     if (req.query.document_type) add('a.document_type = ?', String(req.query.document_type));
-    if (req.query.event_type) add('a.event_type = ?', String(req.query.event_type));
+    if (req.query.event_type) {
+      const eventTypes = String(req.query.event_type)
+        .split(',')
+        .map((value) => value.trim())
+        .filter(Boolean);
+      if (eventTypes.length) add('a.event_type = ANY(?::text[])', eventTypes);
+    }
     if (req.query.actor_id) add('a.actor_id = ?::uuid', String(req.query.actor_id));
+    if (req.query.target_user_id) {
+      if (!isUuid(String(req.query.target_user_id))) {
+        return res.status(400).json({ error: 'target_user_id must be a valid UUID' });
+      }
+      add('a.target_user_id = ?::uuid', String(req.query.target_user_id));
+    }
+    if (req.query.target_role_id) {
+      add('a.target_role_id = ?', String(req.query.target_role_id).trim().toLowerCase());
+    }
     const filter = where.length ? `WHERE ${where.join(' AND ')}` : '';
     params.push(limit, offset);
     const result = await pool.query(
-      `SELECT a.*, u.full_name AS actor_name
+      `SELECT a.*, u.full_name AS actor_name, t.full_name AS target_user_name
        FROM docutracker_governance_audit a
        LEFT JOIN users u ON u.id = a.actor_id
+       LEFT JOIN users t ON t.id = a.target_user_id
        ${filter}
        ORDER BY a.created_at DESC
        LIMIT $${params.length - 1} OFFSET $${params.length}`,

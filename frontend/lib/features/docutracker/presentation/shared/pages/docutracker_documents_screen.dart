@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart' show listEquals;
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
@@ -18,6 +19,7 @@ import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/d
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_module_header.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_status_badge.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_status_theme.dart';
+import 'package:hrms_plaridel/features/docutracker/utils/docutracker_source_status_text.dart';
 import 'package:hrms_plaridel/features/docutracker/utils/docutracker_workflow_phase.dart';
 
 String _statusLabel(
@@ -36,6 +38,10 @@ String _assigneeLabel(DocuTrackerDocument document) {
   if (name != null && name.isNotEmpty) return name;
   if (document.sourceOnly && document.sourceModule == 'dtr') {
     return 'Managed in DTR';
+  }
+  final sourceModule = docuTrackerSourceModuleLabel(document.sourceModule);
+  if (document.sourceOnly && sourceModule != null) {
+    return 'Managed in $sourceModule';
   }
   if (document.status == DocumentStatus.approved ||
       document.status == DocumentStatus.rejected ||
@@ -84,12 +90,36 @@ class _DocuTrackerDocumentsScreenState
   List<DocumentType> _creatableDocumentTypes = const [];
   bool _deepLinkHandled = false;
   bool _deepLinkOpening = false;
+  final _documentSearchController = TextEditingController();
+  late final Map<String, Object?> _viewState;
 
   @override
   void initState() {
     super.initState();
+    final provider = context.read<DocuTrackerProvider>();
+    _viewState = provider.viewState('documents:${widget.isAdmin}');
+    _filterType = _viewState['filterType'] as String?;
+    _filterStatus = _viewState['filterStatus'] as DocumentStatus?;
+    _sortByDeadline = _viewState['sortByDeadline'] as bool? ?? false;
+    _showMobileFilters = _viewState['showMobileFilters'] as bool? ?? false;
+    _documentSearchController.text = _viewState['search'] as String? ?? '';
+    _searchQuery = _documentSearchController.text.toLowerCase();
     WidgetsBinding.instance.addPostFrameCallback((_) => _load());
   }
+
+  @override
+  void dispose() {
+    _viewState
+      ..['filterType'] = _filterType
+      ..['filterStatus'] = _filterStatus
+      ..['sortByDeadline'] = _sortByDeadline
+      ..['showMobileFilters'] = _showMobileFilters
+      ..['search'] = _documentSearchController.text;
+    _documentSearchController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _refresh() => _load(forceRefresh: true);
 
   @override
   void didUpdateWidget(covariant DocuTrackerDocumentsScreen oldWidget) {
@@ -107,26 +137,36 @@ class _DocuTrackerDocumentsScreenState
     }
   }
 
-  Future<void> _load() async {
+  /// Shows cached data immediately; [forceRefresh] re-fetches quietly while
+  /// the current rows stay visible (manual refresh, return from detail).
+  Future<void> _load({bool forceRefresh = false}) async {
     final auth = context.read<AuthProvider>();
     final provider = context.read<DocuTrackerProvider>();
-    await provider.loadRoutingConfigs();
-    await provider.loadDocumentsForUser(
-      userId: auth.user?.id ?? '',
-      isAdmin: widget.isAdmin,
-      documentType: _filterType,
-      status: _filterStatus,
-    );
-    await provider.loadSourceSignatureRequests();
-
     final repo = DocuTrackerRepository.instance;
-    final creatableTypes = await repo.creatableDocumentTypes();
+    final creatableTypesRequest = repo.creatableDocumentTypes(
+      forceRefresh: forceRefresh,
+    );
+    await Future.wait([
+      provider.loadRoutingConfigs(),
+      provider.loadDocumentsForUser(
+        userId: auth.user?.id ?? '',
+        isAdmin: widget.isAdmin,
+        documentType: _filterType,
+        status: _filterStatus,
+        forceRefresh: forceRefresh,
+      ),
+      provider.loadSourceSignatureRequests(forceRefresh: forceRefresh),
+    ]);
+    final creatableTypes = await creatableTypesRequest;
 
     if (!mounted) return;
-    setState(() {
-      _creatableDocumentTypes = creatableTypes;
-      _canCreateDocuments = creatableTypes.isNotEmpty;
-    });
+    if (_canCreateDocuments == null ||
+        !listEquals(creatableTypes, _creatableDocumentTypes)) {
+      setState(() {
+        _creatableDocumentTypes = creatableTypes;
+        _canCreateDocuments = creatableTypes.isNotEmpty;
+      });
+    }
     await _tryOpenSourceDeepLink();
   }
 
@@ -217,13 +257,14 @@ class _DocuTrackerDocumentsScreenState
             sourceRequests: pendingSourceRequests,
             loading: provider.sourceSignatureRequestsLoading,
             hasPartialError: provider.sourceSignatureRequestsError != null,
-            onRefreshSignatures: provider.loadSourceSignatureRequests,
+            onRefreshSignatures: () =>
+                provider.loadSourceSignatureRequests(forceRefresh: true),
             onDocumentTap: (document) => openDocuTrackerDocumentDetail(
               context,
               document: document,
               isAdmin: widget.isAdmin,
               userId: userId,
-              onReturned: _load,
+              onReturned: _refresh,
             ),
           ),
           const SizedBox(height: 16),
@@ -255,7 +296,7 @@ class _DocuTrackerDocumentsScreenState
             documents: visibleDocuments,
             isAdmin: widget.isAdmin,
             userId: userId,
-            onRefresh: _load,
+            onRefresh: _refresh,
             searchQuery: _searchQuery,
             sortByDeadline: _sortByDeadline,
           ),
@@ -271,7 +312,7 @@ class _DocuTrackerDocumentsScreenState
     auth: auth,
     provider: provider,
     allowedDocumentTypes: _creatableDocumentTypes,
-    onCreated: _load,
+    onCreated: _refresh,
   );
 
   List<DocumentType> _availableFilterTypes(DocuTrackerProvider provider) {
@@ -394,7 +435,7 @@ class _DocuTrackerDocumentsScreenState
 
     final refreshButton = IconButton.outlined(
       tooltip: 'Refresh documents',
-      onPressed: provider.loading ? null : _load,
+      onPressed: provider.loading ? null : _refresh,
       icon: const Icon(Icons.refresh_rounded),
     );
     final signaturesButton = OutlinedButton.icon(
@@ -417,6 +458,7 @@ class _DocuTrackerDocumentsScreenState
         builder: (context, constraints) {
           final search = TextField(
             key: const ValueKey('docutracker-document-search'),
+            controller: _documentSearchController,
             onChanged: (value) =>
                 setState(() => _searchQuery = value.toLowerCase()),
             decoration: AppTheme.dashInputDecoration(
@@ -568,8 +610,30 @@ class _RequiredActionsPanelState extends State<_RequiredActionsPanel> {
     caseSensitive: false,
   );
 
+  late final Map<String, Object?> _viewState;
+
+  @override
+  void initState() {
+    super.initState();
+    _viewState = context.read<DocuTrackerProvider>().viewState(
+      'requiredActions',
+    );
+    _collapsed = _viewState['collapsed'] as bool? ?? false;
+    _showSecondary = _viewState['showSecondary'] as bool? ?? false;
+    _moduleFilter = _viewState['moduleFilter'] as String?;
+    _formFilter = _viewState['formFilter'] as String?;
+    _searchQuery = _viewState['search'] as String? ?? '';
+    _searchController.text = _searchQuery;
+  }
+
   @override
   void dispose() {
+    _viewState
+      ..['collapsed'] = _collapsed
+      ..['showSecondary'] = _showSecondary
+      ..['moduleFilter'] = _moduleFilter
+      ..['formFilter'] = _formFilter
+      ..['search'] = _searchQuery;
     _searchController.dispose();
     super.dispose();
   }
@@ -586,8 +650,9 @@ class _RequiredActionsPanelState extends State<_RequiredActionsPanel> {
     final document = entry.document;
     if (request != null) {
       if (request.requiresSetup) return _ActionPriority.needsSetup;
-      if (request.hasUnsignedAssignedSlot)
+      if (request.hasUnsignedAssignedSlot) {
         return _ActionPriority.needsSignature;
+      }
       if (request.viewerHasCompletedAssignedSlots) {
         return _ActionPriority.completed;
       }
@@ -623,6 +688,14 @@ class _RequiredActionsPanelState extends State<_RequiredActionsPanel> {
     final document = entry.document;
     if (document?.sourceOnly == true && document?.sourceModule == 'dtr') {
       return 'Leave';
+    }
+    if (document?.sourceOnly == true) {
+      switch (document?.sourceTable) {
+        case 'recruitment_applications':
+          return 'Recruitment Application';
+        case 'training_daily_reports':
+          return 'Training Daily Report';
+      }
     }
     final type = (document?.documentType ?? '').trim();
     if (type.isEmpty) return 'Document';
@@ -1114,21 +1187,41 @@ class _RequiredActionsPanelState extends State<_RequiredActionsPanel> {
               ? 'View signature status'
               : 'Review and sign'
         : document?.sourceActionLabel ?? 'Review document';
+    final sourceModuleLabel = request == null
+        ? docuTrackerSourceModuleLabel(document?.sourceModule)
+        : null;
+    final pendingSigners = request?.pendingSignerNames ?? const <String>[];
     final statusHint = request == null
-        ? null
+        ? sourceModuleLabel == null ||
+                  (document?.sourceStatus ?? '').trim().isEmpty
+              ? null
+              : docuTrackerLinkedSourceStatusText(
+                  sourceModule: document!.sourceModule!.toLowerCase(),
+                  status: document.sourceStatus!,
+                ).description
         : needsSetup
         ? unassignedCount > 0
               ? '$unassignedCount signer${unassignedCount == 1 ? '' : 's'} still unassigned'
               : 'Assign required signers before this form can be completed'
         : canSignNow
         ? 'Awaiting your e-signature'
+        : request.viewerWaitingOnLabel != null
+        ? 'You sign after ${request.viewerWaitingOnLabel}'
         : alreadySigned
-        ? 'You already signed — reopen to review'
+        ? request.isFullySigned
+              ? 'All signatures complete'
+              : pendingSigners.isEmpty
+              ? 'You already signed — reopen to review'
+              : 'You signed — waiting on ${pendingSigners.join(', ')}'
         : awaitingOthers
-        ? 'Assigned signer has not signed yet'
+        ? pendingSigners.isEmpty
+              ? 'Assigned signer has not signed yet'
+              : 'Waiting on ${pendingSigners.join(', ')}'
         : 'Awaiting your e-signature';
     final chipLabel = needsSetup
         ? 'Needs setup'
+        : documentActionPending && sourceModuleLabel != null
+        ? 'Action'
         : canSignNow || documentActionPending
         ? 'Sign'
         : alreadySigned

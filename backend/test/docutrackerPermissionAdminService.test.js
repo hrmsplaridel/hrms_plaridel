@@ -311,6 +311,10 @@ test('policy returns role defaults, employee exceptions, and effective access to
   assert.equal(hr.permissions.view.source, 'all_document_types');
   assert.equal(policy.user_overrides.view, false);
   assert.equal(policy.effective.view.granted, false);
+  assert.equal(policy.effective.view.matched_scope, 'user');
+  assert.equal(policy.effective.view.matched_document_type, 'memo');
+  assert.equal(policy.effective.view.matched_role_id, null);
+  assert.equal(policy.effective.download.matched_scope, null);
   const policyQuery = queries.find((query) =>
     query.sql.includes('SELECT * FROM docutracker_permissions')
   );

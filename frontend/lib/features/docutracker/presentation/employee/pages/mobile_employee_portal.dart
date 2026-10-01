@@ -26,14 +26,25 @@ class MobileEmployeePortal extends StatefulWidget {
 
 class _MobileEmployeePortalState extends State<MobileEmployeePortal> {
   int _currentIndex = 0;
+  late final Map<String, Object?> _viewState;
 
   @override
   void initState() {
     super.initState();
+    _viewState = context.read<DocuTrackerProvider>().viewState('mobilePortal');
+    _currentIndex = _viewState['tab'] as int? ?? 0;
     WidgetsBinding.instance.addPostFrameCallback((_) => _loadMyDocuments());
   }
 
-  Future<void> _loadMyDocuments() async {
+  @override
+  void dispose() {
+    _viewState['tab'] = _currentIndex;
+    super.dispose();
+  }
+
+  Future<void> _refreshMyDocuments() => _loadMyDocuments(forceRefresh: true);
+
+  Future<void> _loadMyDocuments({bool forceRefresh = false}) async {
     final auth = context.read<AuthProvider>();
     final provider = context.read<DocuTrackerProvider>();
     final userId = auth.user?.id ?? '';
@@ -44,6 +55,7 @@ class _MobileEmployeePortalState extends State<MobileEmployeePortal> {
       roleId: auth.user?.role,
       isAdmin: false,
       mobileRestricted: true,
+      forceRefresh: forceRefresh,
     );
   }
 
@@ -68,9 +80,12 @@ class _MobileEmployeePortalState extends State<MobileEmployeePortal> {
         loading: provider.loading,
         docs: myDocuments,
         userId: userId,
-        onRefresh: _loadMyDocuments,
+        onRefresh: _refreshMyDocuments,
       ),
-      1 => _MobileTrackingTab(docs: myDocuments, onRefresh: _loadMyDocuments),
+      1 => _MobileTrackingTab(
+        docs: myDocuments,
+        onRefresh: _refreshMyDocuments,
+      ),
       _ => _MobileProfileTab(
         displayName: auth.displayName,
         email: auth.email,

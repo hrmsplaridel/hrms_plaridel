@@ -30,6 +30,7 @@ class DocuTrackerSourceSignatureCard extends StatefulWidget {
   final String unsignedMessage;
   final String waitingMessage;
   final String savedMessage;
+
   /// When provided (e.g. from Required actions), skip the extra network fetch.
   final DocuTrackerSourceSignatureBundle? initialBundle;
   final ValueChanged<DocuTrackerSourceSignatureBundle>? onChanged;
@@ -315,12 +316,19 @@ class _DocuTrackerSourceSignatureCardState
     final hasAssignedSigner = (signature?.assignedSignerId ?? '')
         .trim()
         .isNotEmpty;
-    final unsignedMessage = canAssign && !canSign
+    final waitingOnLabel = signature?.isWaitingOnEarlierSlot == true
+        ? signature!.waitingOnLabel!.trim()
+        : null;
+    final unsignedMessage = waitingOnLabel != null
+        ? 'Waiting for $waitingOnLabel'
+        : canAssign && !canSign
         ? hasAssignedSigner
               ? 'Waiting for the assigned signer'
               : 'No signer assigned yet'
         : widget.unsignedMessage;
-    final waitingMessage = canAssign && !hasAssignedSigner
+    final waitingMessage = waitingOnLabel != null
+        ? '$waitingOnLabel must sign before this field.'
+        : canAssign && !hasAssignedSigner
         ? 'Assign an account before this field can be signed.'
         : widget.waitingMessage;
     return Container(
@@ -429,7 +437,7 @@ class _DocuTrackerSourceSignatureCardState
               ),
             ],
             const SizedBox(height: 12),
-            if (signature?.canSign == true)
+            if (signature?.canSign == true && waitingOnLabel == null)
               FilledButton.icon(
                 onPressed: _signing ? null : _sign,
                 icon: _signing

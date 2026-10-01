@@ -74,6 +74,7 @@ test('only an assigned RSP signer or admin can load signature fields', async () 
   );
   assert.equal(assigned.can_assign, false);
   assert.equal(assigned.signatures[0].can_sign, true);
+  assert.equal(assigned.source_status, 'awaiting_signatures');
 
   const admin = await getRspSourceSignatures(
     pool,
@@ -347,6 +348,7 @@ test('completed source signature requests stay visible for the assigned signer',
   assert.equal(result[0].source_record_id, formId);
   assert.equal(result[0].signature_bundle.signatures[0].can_sign, true);
   assert.ok(result[0].signature_bundle.signatures[0].signed_at);
+  assert.equal(result[0].signature_bundle.source_status, 'completed');
 });
 
 test('completed source signature requests are omitted for unrelated viewers', async () => {
@@ -709,6 +711,119 @@ test('assigned signer can sign with an owned saved signature and the action is a
       sql.includes('INSERT INTO docutracker_governance_audit') &&
       params.includes('source_signed')
     )
+  );
+});
+
+function turnAroundSignatureRows({ preparedSigned = false } = {}) {
+  return [
+    signatureRow({
+      slot_key: 'prepared_by',
+      assigned_signer_id: otherId,
+      created_by: adminId,
+      ...(preparedSigned
+        ? { signature_asset_id: assetId, signed_at: new Date('2026-09-15T04:00:00.000Z') }
+        : {}),
+    }),
+    signatureRow({
+      id: '77777777-7777-4777-8777-777777777777',
+      slot_key: 'noted_by',
+      label: 'Noted by',
+      assigned_signer_id: signerId,
+      created_by: adminId,
+    }),
+  ];
+}
+
+function signingPool({ rows, creatorId = adminId, notifications }) {
+  const answer = (sql, params) => {
+    if (['BEGIN', 'COMMIT', 'ROLLBACK'].includes(sql)) return { rowCount: 0, rows: [] };
+    if (sql.includes('SELECT id, created_by FROM "turn_around_time_entries"')) {
+      return sourceRow({ created_by: creatorId });
+    }
+    if (sql.includes('FROM docutracker_rsp_source_signatures s')) {
+      return { rowCount: rows.length, rows };
+    }
+    if (sql.includes('FROM docutracker_signature_assets')) return { rowCount: 1, rows: [{ id: assetId }] };
+    if (sql.includes('SELECT full_name FROM users')) return { rowCount: 1, rows: [{ full_name: 'Signer' }] };
+    if (sql.includes('UPDATE docutracker_rsp_source_signatures')) return { rowCount: 1, rows: [] };
+    if (sql.includes('INSERT INTO docutracker_governance_audit')) return { rowCount: 1, rows: [] };
+    if (sql.includes('to_jsonb(source_row)')) {
+      return { rowCount: 1, rows: [{ source_record: { id: formId, position: 'Aide' } }] };
+    }
+    if (sql.includes('INSERT INTO user_notifications')) {
+      notifications.push({ userId: params[0], type: params[2], title: params[3] });
+      return { rowCount: 1, rows: [{ user_id: params[0], type: params[2], category: params[1] }] };
+    }
+    throw new Error(`Unexpected query: ${sql}`);
+  };
+  const client = { async query(sql, params) { return answer(sql, params); }, release() {} };
+  return { async connect() { return client; }, async query(sql, params) { return answer(sql, params); } };
+}
+
+test('source signatures must be signed in form order', async () => {
+  const notifications = [];
+  const pool = signingPool({ rows: turnAroundSignatureRows(), notifications });
+
+  const bundle = await getSourceSignatures(
+    pool,
+    { id: signerId, role: 'employee' },
+    'rsp',
+    'turn_around_time_entries',
+    formId
+  );
+  const noted = bundle.signatures.find((s) => s.slot_key === 'noted_by');
+  const prepared = bundle.signatures.find((s) => s.slot_key === 'prepared_by');
+  assert.equal(noted.can_sign, true);
+  assert.equal(noted.waiting_on_label, 'Prepared by');
+  assert.equal(prepared.waiting_on_label, null);
+
+  await assert.rejects(
+    signRspSourceSlot(
+      pool,
+      { id: signerId, role: 'employee' },
+      'rsp',
+      'turn_around_time_entries',
+      formId,
+      'noted_by',
+      { signature_asset_id: assetId }
+    ),
+    (error) => error.code === 'VALIDATION' && /Prepared by must sign/.test(error.message)
+  );
+  assert.deepEqual(notifications, []);
+});
+
+test('signing notifies the next signer, then the form owner on completion', async () => {
+  const turnNotifications = [];
+  await signRspSourceSlot(
+    signingPool({ rows: turnAroundSignatureRows(), notifications: turnNotifications }),
+    { id: otherId, role: 'employee' },
+    'rsp',
+    'turn_around_time_entries',
+    formId,
+    'prepared_by',
+    { signature_asset_id: assetId }
+  );
+  assert.deepEqual(
+    turnNotifications.map(({ userId, type }) => ({ userId, type })),
+    [{ userId: signerId, type: 'source_signature_turn' }]
+  );
+
+  const doneNotifications = [];
+  await signRspSourceSlot(
+    signingPool({
+      rows: turnAroundSignatureRows({ preparedSigned: true }),
+      notifications: doneNotifications,
+    }),
+    { id: signerId, role: 'employee' },
+    'rsp',
+    'turn_around_time_entries',
+    formId,
+    'noted_by',
+    { signature_asset_id: assetId }
+  );
+  assert.deepEqual(
+    doneNotifications.map(({ userId, type }) => ({ userId, type })),
+    [{ userId: adminId, type: 'source_signature_completed' }]
   );
 });
 

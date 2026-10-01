@@ -4,7 +4,6 @@
 
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:hrms_plaridel/core/api/client.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/features/docutracker/data/providers/docutracker_provider.dart';
 import 'package:hrms_plaridel/features/docutracker/data/repositories/docutracker_repository.dart';
@@ -70,69 +69,55 @@ class _DocuTrackerAdminScreenState extends State<DocuTrackerAdminScreen> {
   /// Permissions table: filter rows by employee role (null = all).
   String? _permissionsRoleFilter;
   final _searchController = TextEditingController();
-  final EmployeeDirectoryLookup _employeeDirectory = EmployeeDirectoryLookup();
-  final Map<String, String> _departmentNameById = {};
 
   /// Narrow layout: 0 = workflows card, 1 = permissions card.
   int _adminTab = 0;
   bool _panelBusy = false;
+  late final Map<String, Object?> _viewState;
+
+  EmployeeDirectoryLookup get _employeeDirectory =>
+      Provider.of<DocuTrackerProvider>(
+        context,
+        listen: false,
+      ).employeeDirectory;
 
   @override
   void initState() {
     super.initState();
+    _viewState = context.read<DocuTrackerProvider>().viewState('admin');
+    _adminTab = _viewState['adminTab'] as int? ?? 0;
+    _permissionsRoleFilter = _viewState['roleFilter'] as String?;
+    _searchController.text = _viewState['search'] as String? ?? '';
     WidgetsBinding.instance.addPostFrameCallback((_) => _load());
   }
 
   @override
   void dispose() {
+    _viewState
+      ..['adminTab'] = _adminTab
+      ..['roleFilter'] = _permissionsRoleFilter
+      ..['search'] = _searchController.text;
     _searchController.dispose();
     super.dispose();
   }
 
-  Future<void> _loadDepartmentNames() async {
-    try {
-      final res = await ApiClient.instance.get<List<dynamic>>(
-        '/api/departments',
-      );
-      final data = res.data ?? [];
-      final map = <String, String>{};
-      for (final e in data) {
-        final m = e as Map<String, dynamic>;
-        final id = m['id']?.toString();
-        if (id == null || id.isEmpty) continue;
-        map[id] = m['name']?.toString() ?? '—';
-      }
-      if (mounted) {
-        setState(
-          () => _departmentNameById
-            ..clear()
-            ..addAll(map),
-        );
-      }
-    } catch (_) {}
-  }
-
-  Future<void> _load() async {
+  Future<void> _load({bool forceRefresh = false}) async {
     final provider = context.read<DocuTrackerProvider>();
     await Future.wait([
-      provider.loadRoutingConfigs(),
-      _employeeDirectory.load(),
-      _loadDepartmentNames(),
+      provider.loadRoutingConfigs(forceRefresh: forceRefresh),
+      provider.loadEmployeeDirectory(forceRefresh: forceRefresh),
+      provider.loadPermissions(
+        roleId: null,
+        userId: null,
+        userOnly: true,
+        documentType: null,
+        forceRefresh: forceRefresh,
+      ),
     ]);
     if (!mounted) return;
-    await provider.loadPermissions(
-      roleId: null,
-      userId: null,
-      userOnly: true,
-      documentType: null,
+    await provider.loadEmployeeDirectory(
+      ids: provider.permissions.map((p) => p.userId).whereType<String>(),
     );
-    if (!mounted) return;
-    final ids = provider.permissions
-        .map((p) => p.userId)
-        .whereType<String>()
-        .toSet();
-    await _employeeDirectory.ensureIds(ids);
-    if (mounted) setState(() {});
   }
 
   Future<void> _openAdminTool(Future<void> Function() action) async {
@@ -383,7 +368,7 @@ class _DocuTrackerAdminScreenState extends State<DocuTrackerAdminScreen> {
         ),
       ),
     );
-    if (saved == true && mounted) await _load();
+    if (saved == true && mounted) await _load(forceRefresh: true);
   }
 
   @override
@@ -588,7 +573,9 @@ class _DocuTrackerAdminScreenState extends State<DocuTrackerAdminScreen> {
                         ),
                       ),
                     );
-                    if (saved == true && mounted) await _load();
+                    if (saved == true && mounted) {
+                      await _load(forceRefresh: true);
+                    }
                   },
                 ),
               ),
@@ -610,7 +597,7 @@ class _DocuTrackerAdminScreenState extends State<DocuTrackerAdminScreen> {
                 builder: (_) => const DocuTrackerPermissionEditorScreen(),
               ),
             );
-            if (mounted) await _load();
+            if (mounted) await _load(forceRefresh: true);
           case 'audit':
             await Navigator.of(context).push(
               MaterialPageRoute<void>(
@@ -630,7 +617,7 @@ class _DocuTrackerAdminScreenState extends State<DocuTrackerAdminScreen> {
               ),
             );
           case 'refresh':
-            await _load();
+            await _load(forceRefresh: true);
         }
       }),
       itemBuilder: (_) => const [
@@ -758,7 +745,7 @@ class _DocuTrackerAdminScreenState extends State<DocuTrackerAdminScreen> {
                     builder: (_) => const DocuTrackerPermissionEditorScreen(),
                   ),
                 );
-                if (mounted) await _load();
+                if (mounted) await _load(forceRefresh: true);
               }),
             );
             final manageBtn = DocuTrackerAdminPrimaryButton(
@@ -771,7 +758,7 @@ class _DocuTrackerAdminScreenState extends State<DocuTrackerAdminScreen> {
                     builder: (_) => const DocuTrackerPermissionEditorScreen(),
                   ),
                 );
-                if (mounted) await _load();
+                if (mounted) await _load(forceRefresh: true);
               }),
             );
 
@@ -1103,7 +1090,9 @@ class _DocuTrackerAdminScreenState extends State<DocuTrackerAdminScreen> {
               DocuTrackerAdminToolRow(
                 icon: Icons.refresh_rounded,
                 label: 'Refresh data',
-                onTap: provider.loading || _panelBusy ? () {} : _load,
+                onTap: provider.loading || _panelBusy
+                    ? () {}
+                    : () => _load(forceRefresh: true),
               ),
             ],
           ),
@@ -1192,7 +1181,7 @@ class _DocuTrackerAdminScreenState extends State<DocuTrackerAdminScreen> {
         ),
       ),
     );
-    if (mounted) _load();
+    if (mounted) _load(forceRefresh: true);
   }
 
   static const _userGroups = <String, String>{

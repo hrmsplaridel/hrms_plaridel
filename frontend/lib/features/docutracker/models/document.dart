@@ -49,6 +49,7 @@ class DocuTrackerDocument {
   final String? filePath;
   final String? fileName;
   final String? createdBy;
+
   /// Department of the creator at document create time (routing / queues).
   final String? originatingDepartmentId;
   final DateTime? createdAt;
@@ -181,8 +182,7 @@ class DocuTrackerDocument {
               .toList(growable: false) ??
           const <String>[],
       viewerIsRoutingAssignee: json['viewer_is_routing_assignee'] == true,
-      viewerParticipatedInSource:
-          json['viewer_participated_in_source'] == true,
+      viewerParticipatedInSource: json['viewer_participated_in_source'] == true,
     );
   }
 

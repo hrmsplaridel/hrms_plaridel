@@ -1,10 +1,10 @@
 import 'dart:async';
+import 'package:flutter/foundation.dart' show listEquals;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/providers/auth_provider.dart';
-import 'package:hrms_plaridel/features/docutracker/data/dto/docutracker_api_result.dart';
 import 'package:hrms_plaridel/features/docutracker/data/providers/docutracker_provider.dart';
 import 'package:hrms_plaridel/features/docutracker/data/repositories/docutracker_repository.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document.dart';
@@ -51,70 +51,71 @@ class _DocuTrackerDashboardScreenState
   bool? _canCreateDocuments;
   List<DocumentType> _creatableDocumentTypes = const [];
   _AdminQuickFilter _adminFilter = _AdminQuickFilter.all;
-  final Map<String, bool> _expandedSections = <String, bool>{};
-  List<String> _reviewedDepartmentNames = const [];
-  List<DocuTrackerDocument> _departmentQueue = const [];
+  late final Map<String, bool> _expandedSections;
+  late final Map<String, Object?> _viewState;
 
   @override
   void initState() {
     super.initState();
+    final provider = context.read<DocuTrackerProvider>();
+    _viewState = provider.viewState('dashboard:${widget.isAdmin}');
+    _expandedSections =
+        _viewState.putIfAbsent('expandedSections', () => <String, bool>{})
+            as Map<String, bool>;
+    _adminFilter =
+        _viewState['adminFilter'] as _AdminQuickFilter? ?? _adminFilter;
     WidgetsBinding.instance.addPostFrameCallback((_) => _load());
   }
 
-  Future<void> _load() async {
+  /// Shows cached data immediately; [forceRefresh] re-fetches quietly while
+  /// current content stays visible.
+  Future<void> _load({bool forceRefresh = false}) async {
     final auth = context.read<AuthProvider>();
     final provider = context.read<DocuTrackerProvider>();
-    await provider.loadRoutingConfigs();
-    await provider.loadDocumentsForUser(
-      userId: auth.user?.id ?? '',
-      isAdmin: widget.isAdmin,
-    );
-    await provider.loadNotifications();
-
-    final repo = DocuTrackerRepository.instance;
-    final creatableTypes = await repo.creatableDocumentTypes();
+    final creatableTypesRequest = DocuTrackerRepository.instance
+        .creatableDocumentTypes(forceRefresh: forceRefresh);
+    await Future.wait([
+      provider.loadRoutingConfigs(),
+      provider.loadDocumentsForUser(
+        userId: auth.user?.id ?? '',
+        isAdmin: widget.isAdmin,
+        forceRefresh: forceRefresh,
+      ),
+      provider.loadNotifications(),
+      if (!widget.isAdmin)
+        provider.loadDepartmentQueue(forceRefresh: forceRefresh),
+    ]);
+    final creatableTypes = await creatableTypesRequest;
     if (!mounted) return;
-    setState(() {
-      _creatableDocumentTypes = creatableTypes;
-      _canCreateDocuments = creatableTypes.isNotEmpty;
-    });
-    await _loadDepartmentQueue();
+    if (_canCreateDocuments == null ||
+        !listEquals(creatableTypes, _creatableDocumentTypes)) {
+      setState(() {
+        _creatableDocumentTypes = creatableTypes;
+        _canCreateDocuments = creatableTypes.isNotEmpty;
+      });
+    }
 
     // Keep document list in sync with server-side workflow/escalation changes.
-    _pollTimer?.cancel();
-    _pollTimer = Timer.periodic(const Duration(seconds: 60), (_) async {
+    _pollTimer ??= Timer.periodic(const Duration(seconds: 60), (_) async {
       if (!mounted) return;
-      final auth = context.read<AuthProvider>();
-      final userId = auth.user?.id ?? '';
-      await provider.loadDocumentsForUser(
-        userId: userId,
-        isAdmin: widget.isAdmin,
-      );
-      await provider.loadNotifications();
-      await _loadDepartmentQueue();
+      final userId = context.read<AuthProvider>().user?.id ?? '';
+      await Future.wait([
+        provider.loadDocumentsForUser(
+          userId: userId,
+          isAdmin: widget.isAdmin,
+          forceRefresh: true,
+        ),
+        provider.loadNotifications(),
+        if (!widget.isAdmin) provider.loadDepartmentQueue(forceRefresh: true),
+      ]);
     });
   }
 
-  Future<void> _loadDepartmentQueue() async {
-    if (widget.isAdmin) return;
-    final repo = DocuTrackerRepository.instance;
-    final departments = await repo.listReviewedDepartments();
-    var queue = const <DocuTrackerDocument>[];
-    if (departments.isNotEmpty) {
-      final result = await repo.listDepartmentQueue(limit: 100);
-      if (result is DocuTrackerSuccess<List<DocuTrackerDocument>>) {
-        queue = result.value;
-      }
-    }
-    if (!mounted) return;
-    setState(() {
-      _reviewedDepartmentNames = departments.map((d) => d.name).toList();
-      _departmentQueue = queue;
-    });
-  }
+  Future<void> _refresh() => _load(forceRefresh: true);
 
   @override
   void dispose() {
+    _viewState['adminFilter'] = _adminFilter;
     _pollTimer?.cancel();
     super.dispose();
   }
@@ -193,7 +194,7 @@ class _DocuTrackerDashboardScreenState
                         auth: auth,
                         provider: provider,
                         allowedDocumentTypes: _creatableDocumentTypes,
-                        onCreated: _load,
+                        onCreated: _refresh,
                       ),
                 backgroundColor: DocuTrackerTokens.terracotta,
                 foregroundColor: Colors.white,
@@ -246,7 +247,8 @@ class _DocuTrackerDashboardScreenState
         incoming.isNotEmpty ||
         returned.isNotEmpty ||
         completed.isNotEmpty ||
-        _departmentQueue.isNotEmpty;
+        provider.departmentQueue.isNotEmpty;
+    final reviewedDepartmentNames = provider.reviewedDepartmentNames;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -281,10 +283,10 @@ class _DocuTrackerDashboardScreenState
             userId: userId,
             sectionKey: 'employee_assigned',
           ),
-        if (_reviewedDepartmentNames.isNotEmpty)
+        if (reviewedDepartmentNames.isNotEmpty)
           _buildDocSection(
-            'My department (${_reviewedDepartmentNames.join(', ')})',
-            _departmentQueue,
+            'My department (${reviewedDepartmentNames.join(', ')})',
+            provider.departmentQueue,
             userId: userId,
             showHolder: true,
             sectionKey: 'employee_department_queue',
@@ -949,7 +951,7 @@ class _DocuTrackerDashboardScreenState
                         document: doc,
                         isAdmin: widget.isAdmin,
                         userId: userId,
-                        onReturned: _load,
+                        onReturned: _refresh,
                       );
                     },
                   ),

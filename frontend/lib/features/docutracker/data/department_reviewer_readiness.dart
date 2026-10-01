@@ -61,9 +61,11 @@ class DepartmentReviewerReadiness {
     if (raw is! List) return const [];
     return raw
         .whereType<Map>()
-        .map((e) => DepartmentReviewerReadiness.fromJson(
-              Map<String, dynamic>.from(e),
-            ))
+        .map(
+          (e) => DepartmentReviewerReadiness.fromJson(
+            Map<String, dynamic>.from(e),
+          ),
+        )
         .toList();
   }
 }

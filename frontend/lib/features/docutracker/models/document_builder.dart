@@ -89,6 +89,7 @@ class DocuTrackerSourceSignature {
     this.signedBy,
     this.signerName,
     this.signedAt,
+    this.waitingOnLabel,
   });
 
   final String? id;
@@ -99,6 +100,12 @@ class DocuTrackerSourceSignature {
   final bool? canAssign;
   final String assignmentSource;
   final bool canSign;
+
+  /// Earlier slot that must be signed first (server-enforced signing order).
+  final String? waitingOnLabel;
+
+  bool get isWaitingOnEarlierSlot =>
+      !isSigned && (waitingOnLabel?.trim().isNotEmpty ?? false);
   final String? signatureAssetId;
   final Uint8List? signatureImageBytes;
   final String? mimeType;
@@ -133,6 +140,7 @@ class DocuTrackerSourceSignature {
       signedBy: json['signed_by']?.toString(),
       signerName: json['signer_name_snapshot']?.toString(),
       signedAt: DateTime.tryParse(json['signed_at']?.toString() ?? ''),
+      waitingOnLabel: json['waiting_on_label']?.toString(),
     );
   }
 }
@@ -224,14 +232,50 @@ class DocuTrackerRspSignatureRequest {
   }
 
   bool get hasUnsignedAssignedSlot => signatureBundle.signatures.any(
-    (signature) => signature.canSign && !signature.isSigned,
+    (signature) =>
+        signature.canSign &&
+        !signature.isSigned &&
+        !signature.isWaitingOnEarlierSlot,
   );
+
+  /// Earlier slot the viewer is waiting on before they can sign, if any.
+  String? get viewerWaitingOnLabel {
+    if (hasUnsignedAssignedSlot) return null;
+    for (final signature in signatureBundle.signatures) {
+      if (signature.canSign && signature.isWaitingOnEarlierSlot) {
+        return signature.waitingOnLabel!.trim();
+      }
+    }
+    return null;
+  }
 
   /// True when any assigned slot is still unsigned (for admin monitoring).
   bool get hasPendingAssignedSignature => signatureBundle.signatures.any(
     (signature) =>
         signature.assignedSignerId.trim().isNotEmpty && !signature.isSigned,
   );
+
+  /// Every signature slot has an assigned signer who has signed.
+  bool get isFullySigned =>
+      signatureBundle.signatures.isNotEmpty &&
+      signatureBundle.signatures.every(
+        (signature) =>
+            signature.assignedSignerId.trim().isNotEmpty && signature.isSigned,
+      );
+
+  /// Names of assigned signers who still have to sign.
+  List<String> get pendingSignerNames => signatureBundle.signatures
+      .where(
+        (signature) =>
+            signature.assignedSignerId.trim().isNotEmpty && !signature.isSigned,
+      )
+      .map(
+        (signature) => signature.assignedSignerName?.trim().isNotEmpty == true
+            ? signature.assignedSignerName!.trim()
+            : signature.label,
+      )
+      .toSet()
+      .toList(growable: false);
 
   /// Current user is assigned to at least one slot (pending or already signed).
   bool get isAssignedToViewer =>

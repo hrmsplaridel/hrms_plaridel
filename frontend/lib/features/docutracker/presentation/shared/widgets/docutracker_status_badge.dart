@@ -23,7 +23,15 @@ class DocuTrackerStatusBadge extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final fg = DocuTrackerStatusTheme.foreground(status);
+    final dark = Theme.of(context).brightness == Brightness.dark;
+    final base = DocuTrackerStatusTheme.foreground(status);
+    final fg = dark ? Color.lerp(base, Colors.white, 0.45)! : base;
+    final background = dark
+        ? base.withValues(alpha: 0.22)
+        : DocuTrackerStatusTheme.chipBackground(status);
+    final border = dark
+        ? base.withValues(alpha: 0.5)
+        : DocuTrackerStatusTheme.chipBorder(status);
     final fontSize = compact ? 11.0 : 12.0;
     final padH = compact ? 8.0 : 10.0;
     final padV = compact ? 3.0 : 5.0;
@@ -37,9 +45,9 @@ class DocuTrackerStatusBadge extends StatelessWidget {
         curve: Curves.easeOutCubic,
         padding: EdgeInsets.symmetric(horizontal: padH, vertical: padV),
         decoration: BoxDecoration(
-          color: DocuTrackerStatusTheme.chipBackground(status),
+          color: background,
           borderRadius: BorderRadius.circular(radius),
-          border: Border.all(color: DocuTrackerStatusTheme.chipBorder(status)),
+          border: Border.all(color: border),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
