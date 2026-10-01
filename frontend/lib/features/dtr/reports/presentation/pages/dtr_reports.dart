@@ -935,16 +935,17 @@ class _DtrReportsState extends State<DtrReports> {
     _load();
   }
 
-  static String _formatTime(DateTime? dt) {
-    return formatOfficialPhilippineTime(dt);
-  }
-
   static String _cellDisplayForSegment({
     required TimeRecord record,
     required DateTime? timeValue,
     required String segment,
   }) {
-    if (timeValue != null) return _formatTime(timeValue);
+    if (timeValue != null) {
+      return formatOfficialPhilippineTime(
+        timeValue,
+        attendanceDate: record.recordDate,
+      );
+    }
     final segs = record.locatorSlipSegments ?? const <String>[];
     if (segs.any((s) => s.toUpperCase() == segment)) {
       return record.locatorSlipSlotLabel;
@@ -2971,13 +2972,37 @@ class _DtrReportsState extends State<DtrReports> {
     bool compactColumns = false,
     double? availableWidth,
   }) {
+    final visibleRecords = sortedDates
+        .map((date) => recordsByDate[date])
+        .whereType<TimeRecord>()
+        .toList();
+    final singleSession = visibleRecords.isEmpty
+        ? _shiftPunchMode == 'single_session'
+        : visibleRecords.every(
+            (record) => record.shiftPunchMode == 'single_session',
+          );
+    final genericHeaders =
+        singleSession ||
+        visibleRecords.any(
+          (record) =>
+              record.shiftIsOvernight ||
+              record.shiftPunchMode == 'single_session',
+        );
     final colDate = compactColumns ? 80.0 : 90.0;
-    final colTime = compactColumns ? 58.0 : 70.0;
+    final colTime = compactColumns ? 84.0 : 96.0;
     final colLate = compactColumns ? 48.0 : 58.0;
     final colUndertime = compactColumns ? 72.0 : 78.0;
     final minTableWidth = compactColumns
-        ? (colDate + colTime * 4 + colLate + colUndertime + 70)
-        : 550.0 + colLate + colUndertime;
+        ? (colDate +
+              colTime * (singleSession ? 2 : 4) +
+              colLate +
+              colUndertime +
+              100)
+        : colDate +
+              colTime * (singleSession ? 2 : 4) +
+              colLate +
+              colUndertime +
+              140;
     final tableWidth = availableWidth != null
         ? availableWidth.clamp(minTableWidth, double.infinity)
         : minTableWidth;
@@ -3024,19 +3049,33 @@ class _DtrReportsState extends State<DtrReports> {
                     ),
                     SizedBox(
                       width: colTime,
-                      child: Text('AM IN', style: headerStyle),
+                      child: Text(
+                        genericHeaders ? 'TIME IN' : 'AM IN',
+                        style: headerStyle,
+                      ),
                     ),
+                    if (!singleSession)
+                      SizedBox(
+                        width: colTime,
+                        child: Text(
+                          genericHeaders ? 'BREAK OUT' : 'AM OUT',
+                          style: headerStyle,
+                        ),
+                      ),
+                    if (!singleSession)
+                      SizedBox(
+                        width: colTime,
+                        child: Text(
+                          genericHeaders ? 'BREAK IN' : 'PM IN',
+                          style: headerStyle,
+                        ),
+                      ),
                     SizedBox(
                       width: colTime,
-                      child: Text('AM OUT', style: headerStyle),
-                    ),
-                    SizedBox(
-                      width: colTime,
-                      child: Text('PM IN', style: headerStyle),
-                    ),
-                    SizedBox(
-                      width: colTime,
-                      child: Text('PM OUT', style: headerStyle),
+                      child: Text(
+                        genericHeaders ? 'TIME OUT' : 'PM OUT',
+                        style: headerStyle,
+                      ),
                     ),
                     SizedBox(
                       width: colLate,
@@ -3128,38 +3167,44 @@ class _DtrReportsState extends State<DtrReports> {
                                         ? '—'
                                         : _cellDisplayForSegment(
                                             record: rec,
-                                            timeValue: rec.timeIn,
+                                            timeValue:
+                                                rec.timeIn ??
+                                                (singleSession
+                                                    ? rec.breakIn
+                                                    : null),
                                             segment: 'AM IN',
                                           ),
                                     style: cellStyle,
                                   ),
                                 ),
-                                SizedBox(
-                                  width: colTime,
-                                  child: Text(
-                                    rec == null
-                                        ? '—'
-                                        : _cellDisplayForSegment(
-                                            record: rec,
-                                            timeValue: rec.breakOut,
-                                            segment: 'AM OUT',
-                                          ),
-                                    style: cellStyle,
+                                if (!singleSession)
+                                  SizedBox(
+                                    width: colTime,
+                                    child: Text(
+                                      rec == null
+                                          ? '—'
+                                          : _cellDisplayForSegment(
+                                              record: rec,
+                                              timeValue: rec.breakOut,
+                                              segment: 'AM OUT',
+                                            ),
+                                      style: cellStyle,
+                                    ),
                                   ),
-                                ),
-                                SizedBox(
-                                  width: colTime,
-                                  child: Text(
-                                    rec == null
-                                        ? '—'
-                                        : _cellDisplayForSegment(
-                                            record: rec,
-                                            timeValue: rec.breakIn,
-                                            segment: 'PM IN',
-                                          ),
-                                    style: cellStyle,
+                                if (!singleSession)
+                                  SizedBox(
+                                    width: colTime,
+                                    child: Text(
+                                      rec == null
+                                          ? '—'
+                                          : _cellDisplayForSegment(
+                                              record: rec,
+                                              timeValue: rec.breakIn,
+                                              segment: 'PM IN',
+                                            ),
+                                      style: cellStyle,
+                                    ),
                                   ),
-                                ),
                                 SizedBox(
                                   width: colTime,
                                   child: Text(
@@ -3167,7 +3212,11 @@ class _DtrReportsState extends State<DtrReports> {
                                         ? '—'
                                         : _cellDisplayForSegment(
                                             record: rec,
-                                            timeValue: rec.timeOut,
+                                            timeValue:
+                                                rec.timeOut ??
+                                                (singleSession
+                                                    ? rec.breakOut
+                                                    : null),
                                             segment: 'PM OUT',
                                           ),
                                     style: cellStyle,

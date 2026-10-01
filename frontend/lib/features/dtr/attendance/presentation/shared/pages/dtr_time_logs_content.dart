@@ -1280,9 +1280,9 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
                                   Expanded(
                                     flex: 1,
                                     child: Center(
-                                      child: _headerLabel(
-                                        context,
-                                        singleView ? 'Time In' : 'AM In',
+                                      child: Tooltip(
+                                        message: 'Shift start',
+                                        child: _headerLabel(context, 'In'),
                                       ),
                                     ),
                                   ),
@@ -1290,22 +1290,28 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
                                     Expanded(
                                       flex: 1,
                                       child: Center(
-                                        child: _headerLabel(context, 'AM Out'),
+                                        child: Tooltip(
+                                          message: 'Break start',
+                                          child: _headerLabel(context, 'Out'),
+                                        ),
                                       ),
                                     ),
                                   if (!singleView)
                                     Expanded(
                                       flex: 1,
                                       child: Center(
-                                        child: _headerLabel(context, 'PM In'),
+                                        child: Tooltip(
+                                          message: 'Break end',
+                                          child: _headerLabel(context, 'In'),
+                                        ),
                                       ),
                                     ),
                                   Expanded(
                                     flex: 1,
                                     child: Center(
-                                      child: _headerLabel(
-                                        context,
-                                        singleView ? 'Time Out' : 'PM Out',
+                                      child: Tooltip(
+                                        message: 'Shift end',
+                                        child: _headerLabel(context, 'Out'),
                                       ),
                                     ),
                                   ),
@@ -1555,7 +1561,8 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
                   segment: 'AM IN',
                 ),
                 style: cellStyle,
-                overflow: TextOverflow.ellipsis,
+                textAlign: TextAlign.center,
+                softWrap: true,
               ),
             ),
           ),
@@ -1570,7 +1577,8 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
                     segment: 'AM OUT',
                   ),
                   style: cellStyle,
-                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.center,
+                  softWrap: true,
                 ),
               ),
             ),
@@ -1585,7 +1593,8 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
                     segment: 'PM IN',
                   ),
                   style: cellStyle,
-                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.center,
+                  softWrap: true,
                 ),
               ),
             ),
@@ -1599,7 +1608,8 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
                   segment: 'PM OUT',
                 ),
                 style: cellStyle,
-                overflow: TextOverflow.ellipsis,
+                textAlign: TextAlign.center,
+                softWrap: true,
               ),
             ),
           ),
