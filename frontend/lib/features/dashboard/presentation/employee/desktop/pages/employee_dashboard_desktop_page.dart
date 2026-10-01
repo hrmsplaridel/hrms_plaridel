@@ -2488,6 +2488,7 @@ class _EmployeeAttendanceContentState extends State<EmployeeAttendanceContent>
   int _selectedMonth = 1;
   int _selectedYear = 2000;
   int? _selectedDay;
+  bool _dateAscending = true;
   bool _didApplyMobileDefault = false;
   String _mobileAttendanceMode = 'today';
   DateTime? _officialHrmsDate;
@@ -3074,8 +3075,10 @@ class _EmployeeAttendanceContentState extends State<EmployeeAttendanceContent>
         return rd.isAfter(today);
       })
       ..sort(
-        (a, b) => a.recordDate.compareTo(b.recordDate),
-      ); // Day 1..N ascending
+        (a, b) => _dateAscending
+            ? a.recordDate.compareTo(b.recordDate)
+            : b.recordDate.compareTo(a.recordDate),
+      );
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -3311,6 +3314,33 @@ class _EmployeeAttendanceContentState extends State<EmployeeAttendanceContent>
               ),
             );
 
+            final sortButton = SizedBox(
+              width: 44,
+              height: 44,
+              child: PopupMenuButton<bool>(
+                tooltip: _dateAscending
+                    ? 'Date order: Ascending'
+                    : 'Date order: Descending',
+                initialValue: _dateAscending,
+                icon: const Icon(Icons.swap_vert_rounded),
+                onSelected: (ascending) {
+                  setState(() => _dateAscending = ascending);
+                },
+                itemBuilder: (context) => [
+                  CheckedPopupMenuItem(
+                    value: true,
+                    checked: _dateAscending,
+                    child: const Text('Day: Ascending'),
+                  ),
+                  CheckedPopupMenuItem(
+                    value: false,
+                    checked: !_dateAscending,
+                    child: const Text('Day: Descending'),
+                  ),
+                ],
+              ),
+            );
+
             final refreshButton = IconButton(
               onPressed: _officialDateLoading
                   ? null
@@ -3339,7 +3369,12 @@ class _EmployeeAttendanceContentState extends State<EmployeeAttendanceContent>
                     runSpacing: 8,
                     alignment: WrapAlignment.start,
                     crossAxisAlignment: WrapCrossAlignment.center,
-                    children: [monthField(), yearField(), refreshButton],
+                    children: [
+                      monthField(),
+                      yearField(),
+                      sortButton,
+                      refreshButton,
+                    ],
                   ),
                   const SizedBox(height: 12),
                   _buildMobileModeSelector(),
@@ -3351,15 +3386,15 @@ class _EmployeeAttendanceContentState extends State<EmployeeAttendanceContent>
               );
             }
 
-            return Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
+            return Wrap(
+              spacing: 12,
+              runSpacing: 8,
+              crossAxisAlignment: WrapCrossAlignment.center,
               children: [
                 monthField(),
-                const SizedBox(width: 12),
                 yearField(),
-                const SizedBox(width: 12),
                 dayField(),
-                const SizedBox(width: 4),
+                sortButton,
                 refreshButton,
               ],
             );
