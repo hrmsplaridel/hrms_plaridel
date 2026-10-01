@@ -111,6 +111,7 @@ function minutesToTimeStr(mins) {
 const NOON_MINUTES = 12 * 60;
 
 /** Default timezone for interpreting shift rules vs log timestamps. */
+const { isOvernight, overnightPenalties, hasShiftEnded } = require('../services/shiftTimeline');
 const HRMS_TIMEZONE = process.env.HRMS_TIMEZONE || 'Asia/Manila';
 const MAX_DTR_RANGE_DAYS = 62;
 const DEFAULT_DTR_PAGE_SIZE = 500;
@@ -350,27 +351,36 @@ function getExpectedLogsForDay(shiftInfo, holidayInfo) {
  */
 async function getAssignmentShiftForDate(employeeId, dateStr) {
   const result = await pool.query(
-    `SELECT a.override_start_time::text AS override_start_time,
+    `SELECT saved.shift_snapshot, a.department_id, a.shift_id,
+            (SELECT o.is_working_day FROM employee_schedule_overrides o
+             WHERE o.employee_id = $1::uuid AND o.schedule_date = $2::date) AS scheduled_working_day,
+            a.override_start_time::text AS override_start_time,
             a.override_end_time::text AS override_end_time,
             a.override_break_end::text AS override_break_end,
             a.effective_from, a.effective_to,
             s.start_time::text AS shift_start,
             s.end_time::text AS shift_end,
              s.break_end::text AS shift_break_end,
-             s.punch_mode,
+             s.punch_mode, s.break_start::text AS shift_break_start, s.capture_window_minutes,
              s.working_days,
              s.grace_period_minutes
-     FROM assignments a
-     LEFT JOIN shifts s ON a.shift_id = s.id
-     WHERE a.employee_id = $1
-       AND a.effective_from <= $2::date
-       AND (a.effective_to IS NULL OR a.effective_to >= $2::date)
-     ORDER BY a.effective_from DESC, a.created_at DESC, a.id DESC
-     LIMIT 1`,
+     FROM (SELECT (SELECT d.shift_snapshot FROM dtr_daily_summary d
+                   WHERE d.employee_id = $1::uuid AND d.attendance_date = $2::date)
+                  AS shift_snapshot) saved
+     LEFT JOIN LATERAL (
+       SELECT a.* FROM assignments a
+       WHERE a.employee_id = $1::uuid
+         AND a.effective_from <= $2::date
+         AND (a.effective_to IS NULL OR a.effective_to >= $2::date)
+       ORDER BY a.effective_from DESC, a.created_at DESC, a.id DESC
+       LIMIT 1
+     ) a ON true
+     LEFT JOIN shifts s ON a.shift_id = s.id`,
     [employeeId, dateStr]
   );
   const row = result.rows[0];
   if (!row) return null;
+  if (row.shift_snapshot) return row.shift_snapshot;
   const startTimeStr = row.override_start_time || row.shift_start;
   if (!startTimeStr) return null;
   const startMinutes = timeToMinutes(startTimeStr);
@@ -381,11 +391,17 @@ async function getAssignmentShiftForDate(employeeId, dateStr) {
   const breakEndStr = row.override_break_end || row.shift_break_end;
   const breakEndMinutes = breakEndStr ? timeToMinutes(breakEndStr) : null;
   return {
+    departmentId: row.department_id || null,
+    shiftId: row.shift_id || null,
     startMinutes,
     endMinutes,
     graceMinutes,
     breakEndMinutes,
     punchMode: row.punch_mode || 'auto',
+    isWorkingDay: typeof row.scheduled_working_day === 'boolean' ? row.scheduled_working_day :
+      resolvedWorkingDay({ employeeId, dateStr, workingDays: row.working_days }),
+    breakStartMinutes: timeToMinutes(row.shift_break_start),
+    captureWindowMinutes: Number(row.capture_window_minutes ?? 120),
     workingDays: Array.isArray(row.working_days)
       ? row.working_days.map((value) => parseInt(value, 10)).filter(Number.isFinite)
       : [],
@@ -401,6 +417,7 @@ async function computeStatusFromShift(employeeId, dateStr, timeInIso) {
   const shiftInfo = await getAssignmentShiftForDate(employeeId, dateStr);
   if (!shiftInfo) return 'present';
   const { startMinutes, graceMinutes } = shiftInfo;
+  if (isOvernight(shiftInfo)) return overnightPenalties(shiftInfo, dateStr, { timeIn: timeInIso }).lateMinutes > 0 ? 'late' : 'present';
   const cutoffMinutes = startMinutes + graceMinutes;
 
   const localMins = minutesFromMidnightInTimeZone(timeInIso);
@@ -418,6 +435,10 @@ async function computePmLateStatus(employeeId, dateStr, breakInIso) {
   if (!shiftInfo) return 'present';
   const pmStartMinutes = getExpectedPmStartMinutes(shiftInfo);
   if (pmStartMinutes == null) return 'present';
+  if (isOvernight(shiftInfo)) {
+    const { punchMinute, scheduledMinute } = require('../services/shiftTimeline');
+    return punchMinute(breakInIso, dateStr) > scheduledMinute(shiftInfo, pmStartMinutes) + shiftInfo.graceMinutes ? 'late' : 'present';
+  }
   const cutoffMinutes = pmStartMinutes + shiftInfo.graceMinutes;
 
   const localMins = minutesFromMidnightInTimeZone(breakInIso);
@@ -446,6 +467,7 @@ async function computeLateMinutes(
   if (isHolidayOrSuspension && (!coverage || coverage === 'whole_day')) return 0;
   const shiftInfo = prefetchedShiftInfo || await getAssignmentShiftForDate(employeeId, dateStr);
   if (!shiftInfo) return 0;
+  if (isOvernight(shiftInfo)) return overnightPenalties(shiftInfo, dateStr, { timeIn: timeInIso, breakIn: breakInIso }, new Date(), coverage).lateMinutes;
   const { startMinutes, graceMinutes } = shiftInfo;
   const type = getShiftType(shiftInfo);
   let total = 0;
@@ -514,6 +536,9 @@ async function computeUndertimeMinutes(
   if (isHolidayOrSuspension && (!coverage || coverage === 'whole_day')) return 0;
   const shiftInfo = prefetchedShiftInfo || await getAssignmentShiftForDate(employeeId, dateStr);
   if (!shiftInfo || shiftInfo.endMinutes == null) return 0;
+  if (isOvernight(shiftInfo)) return overnightPenalties(shiftInfo, dateStr, {
+    timeIn: timeInIso, breakIn: breakInIso, timeOut: timeOutIso, breakOut: breakOutIso,
+  }, new Date(), coverage, locatorSegments).undertimeMinutes;
   const type = getShiftType(shiftInfo);
   const evalAm = !isHolidayOrSuspension || coverage !== 'am_only';
   const evalPm = !isHolidayOrSuspension || coverage !== 'pm_only';
@@ -841,7 +866,7 @@ async function getAssignmentsForEmployeesInRange(employeeIds, startStr, endStr) 
             COALESCE(a.override_start_time, s.start_time)::text AS start_time,
             COALESCE(a.override_end_time, s.end_time)::text AS end_time,
             COALESCE(a.override_break_end, s.break_end)::text AS break_end,
-            s.punch_mode,
+            s.punch_mode, s.break_start::text AS shift_break_start, s.capture_window_minutes,
             s.grace_period_minutes,
             s.working_days
      FROM assignments a
@@ -873,6 +898,8 @@ async function getAssignmentsForEmployeesInRange(employeeIds, startStr, endStr) 
       endMinutes: r.end_time ? timeToMinutes(r.end_time) : null,
       breakEndMinutes: r.break_end ? timeToMinutes(r.break_end) : null,
       punchMode: r.punch_mode || 'auto',
+      breakStartMinutes: timeToMinutes(r.shift_break_start),
+      captureWindowMinutes: Number(r.capture_window_minutes ?? 120),
       graceMinutes: r.grace_period_minutes != null ? parseInt(r.grace_period_minutes, 10) : 0,
       workingDays: Array.isArray(r.working_days)
         ? r.working_days.map((x) => parseInt(x, 10)).filter((x) => Number.isFinite(x))
@@ -1103,7 +1130,7 @@ async function listDtrDailySummaries(req, res) {
       : 'h.name AS holiday_name, h.holiday_type AS holiday_type, NULL::text AS holiday_coverage';
     const result = await pool.query(
       `SELECT d.id, d.employee_id, d.attendance_date, d.attendance_date::text AS attendance_date_iso, d.time_in, d.break_out, d.break_in, d.time_out, d.total_hours,
-              d.late_minutes, d.undertime_minutes, d.status, d.pm_status, d.remarks, d.source, d.holiday_id,
+              d.late_minutes, d.undertime_minutes, d.status, d.pm_status, d.remarks, d.source, d.holiday_id, d.shift_snapshot,
               d.leave_request_id AS base_leave_request_id,
               dlc.id AS leave_coverage_id,
               COALESCE(dlc.leave_request_id, d.leave_request_id) AS leave_request_id,
@@ -1164,12 +1191,16 @@ async function listDtrDailySummaries(req, res) {
     let reportEmployeeIds = rawEmployeeIds;
     let reportAssignmentsByEmployee = rawAssignmentsByEmployee;
     let reportScheduleOverrides = new Map();
+    const savedShiftsByDate = new Map();
     const rows = await Promise.all(rawRows.map(async (r) => {
       // Use the date-only text from SQL to avoid timezone shifting issues when JS receives Date objects.
       const dateStr = (r.attendance_date_iso && String(r.attendance_date_iso).slice(0, 10)) || toIsoDateStr(r.attendance_date);
-      const shiftInfo = dateStr
+      const shiftInfo = r.shift_snapshot || (dateStr
         ? getShiftInfoForDateFromAssignments(rawAssignmentsByEmployee, r.employee_id, dateStr)
-        : null;
+        : null);
+      if (r.shift_snapshot && dateStr) {
+        savedShiftsByDate.set(`${r.employee_id}|${dateStr}`, r.shift_snapshot);
+      }
       const activeHoliday = activeHolidayByDate.get(dateStr) || null;
       const holidayState = resolveAttendanceHolidayOverlay(r, activeHoliday);
       const activeHolidayId = holidayState.holidayId;
@@ -1260,6 +1291,8 @@ async function listDtrDailySummaries(req, res) {
         activeLeaveRequestId,
         activeHoliday
       );
+      if (isOvernight(shiftInfo) && !hasShiftEnded(shiftInfo, dateStr) &&
+          !r.time_out && !hasLeaveCoverage && !activeHoliday) attendanceRemark = 'In progress';
       const recordDateStr = (r.attendance_date_iso && String(r.attendance_date_iso).slice(0, 10)) || toIsoDateStr(r.attendance_date);
       return {
         id: r.id,
@@ -1288,7 +1321,8 @@ async function listDtrDailySummaries(req, res) {
         created_at: r.created_at,
         updated_at: r.updated_at,
         employee_name: r.employee_name,
-        shift_punch_mode: shiftInfo?.punchMode || 'auto',
+        shift_punch_mode: resolveShiftType(shiftInfo) || 'auto',
+        shift_overnight: isOvernight(shiftInfo),
         combine_late_and_undertime:
           effectiveAttendancePolicy?.combineLateAndUndertime ?? false,
       };
@@ -1450,7 +1484,8 @@ async function listDtrDailySummaries(req, res) {
               created_at: null,
               updated_at: null,
               employee_name: userIdToName[empId] || null,
-              shift_punch_mode: shiftInfo?.punchMode || 'auto',
+              shift_punch_mode: resolveShiftType(shiftInfo) || 'auto',
+        shift_overnight: isOvernight(shiftInfo),
             });
           }
         }
@@ -1499,7 +1534,8 @@ async function listDtrDailySummaries(req, res) {
           created_at: null,
           updated_at: null,
           employee_name: userIdToName[empId] || null,
-          shift_punch_mode: shiftInfo?.punchMode || 'auto',
+          shift_punch_mode: resolveShiftType(shiftInfo) || 'auto',
+        shift_overnight: isOvernight(shiftInfo),
         });
       }
 
@@ -1556,7 +1592,8 @@ async function listDtrDailySummaries(req, res) {
           })) continue;
 
           // Only show "Absent" for today after shift end, or any past working day.
-          if (dateStr === todayStr) {
+          if (isOvernight(shiftInfo) && !hasShiftEnded(shiftInfo, dateStr)) continue;
+          if (!isOvernight(shiftInfo) && dateStr === todayStr) {
             const endMinutes = shiftInfo.endMinutes != null ? shiftInfo.endMinutes : (24 * 60 - 1);
             if (nowMinutes <= endMinutes) continue;
           }
@@ -1598,7 +1635,8 @@ async function listDtrDailySummaries(req, res) {
           created_at: null,
           updated_at: null,
           employee_name: userIdToName[empId] || null,
-          shift_punch_mode: shiftInfo?.punchMode || 'auto',
+        shift_punch_mode: resolveShiftType(shiftInfo) || 'auto',
+        shift_overnight: isOvernight(shiftInfo),
           combine_late_and_undertime: policyForDay.combineLateAndUndertime,
           });
         }
@@ -1661,7 +1699,8 @@ async function listDtrDailySummaries(req, res) {
           created_at: null,
           updated_at: null,
           employee_name: userIdToName[empId] || null,
-          shift_punch_mode: shiftInfo?.punchMode || 'auto',
+          shift_punch_mode: resolveShiftType(shiftInfo) || 'auto',
+        shift_overnight: isOvernight(shiftInfo),
         });
       }
 
@@ -1682,7 +1721,7 @@ async function listDtrDailySummaries(req, res) {
 
         const rowDateStr = String(row.record_date).slice(0, 10);
         const holidayInfo = holidayByDate.get(rowDateStr) || null;
-        const shiftInfo = getShiftInfoForDateFromAssignments(
+        const shiftInfo = savedShiftsByDate.get(rowKey) || getShiftInfoForDateFromAssignments(
           assignmentsByEmployee,
           row.user_id,
           rowDateStr
@@ -1753,7 +1792,7 @@ async function listDtrDailySummaries(req, res) {
       for (const row of rows) {
         const rowDateStr = String(row.record_date || '').slice(0, 10);
         if (!rowDateStr) continue;
-        const shiftInfo = getShiftInfoForDateFromAssignments(
+        const shiftInfo = savedShiftsByDate.get(`${row.user_id}|${rowDateStr}`) || getShiftInfoForDateFromAssignments(
           assignmentsByEmployee,
           row.user_id,
           rowDateStr
@@ -2162,6 +2201,9 @@ router.get('/shift-for-date', protect, requireAdminOrHr, async (req, res) => {
       start_minutes: shiftInfo.startMinutes,
       end_minutes: shiftInfo.endMinutes,
       break_end_minutes: shiftInfo.breakEndMinutes,
+      break_start_minutes: shiftInfo.breakStartMinutes,
+      is_overnight: isOvernight(shiftInfo),
+      capture_window_minutes: shiftInfo.captureWindowMinutes,
       expected_punches: expectedPunches,
     });
   } catch (err) {
@@ -2458,10 +2500,10 @@ router.post('/', protect, requireAdminOrHr, async (req, res) => {
     const sourceValue = (status === 'holiday' || holidayId) ? 'adjusted' : 'manual';
 
     const result = await pool.query(
-      `INSERT INTO dtr_daily_summary (employee_id, attendance_date, time_in, break_out, break_in, time_out, total_hours, late_minutes, undertime_minutes, status, pm_status, source, holiday_id)
-       VALUES ($1, $2::date, $3::timestamptz, $4::timestamptz, $5::timestamptz, $6::timestamptz, $7::numeric, $8, $9, $10, $11, $12, $13)
+      `INSERT INTO dtr_daily_summary (employee_id, attendance_date, time_in, break_out, break_in, time_out, total_hours, late_minutes, undertime_minutes, status, pm_status, source, holiday_id, shift_snapshot)
+       VALUES ($1, $2::date, $3::timestamptz, $4::timestamptz, $5::timestamptz, $6::timestamptz, $7::numeric, $8, $9, $10, $11, $12, $13, $14::jsonb)
        RETURNING id, employee_id, attendance_date::text AS attendance_date_iso, time_in, break_out, break_in, time_out, total_hours, late_minutes, undertime_minutes, status, pm_status, source, created_at`,
-       [targetId, date, timeIn, breakOut, breakIn, timeOut, total, lateMinutes, undertimeMinutes, status, pmStatus, sourceValue, holidayId]
+       [targetId, date, timeIn, breakOut, breakIn, timeOut, total, lateMinutes, undertimeMinutes, status, pmStatus, sourceValue, holidayId, JSON.stringify(shiftInfo)]
     );
     const r = result.rows[0];
     const recordDateStr = (r.attendance_date_iso && String(r.attendance_date_iso).slice(0, 10)) || date;
@@ -2555,7 +2597,7 @@ router.put('/:id', protect, requireAdminOrHr, async (req, res) => {
       });
     }
 
-    const shiftInfo = await getAssignmentShiftForDate(employeeId, dateStr);
+    const shiftInfo = existing.shift_snapshot || await getAssignmentShiftForDate(employeeId, dateStr);
     const ti = time_in !== undefined ? time_in : existing.time_in;
     const bo = break_out !== undefined ? break_out : existing.break_out;
     const bi = break_in !== undefined ? break_in : existing.break_in;
@@ -2655,6 +2697,10 @@ router.put('/:id', protect, requireAdminOrHr, async (req, res) => {
 
     if (updates.length === 0) {
       return rejectEdit(400, { error: 'No fields to update' });
+    }
+    if (!existing.shift_snapshot && shiftInfo) {
+      updates.push('shift_snapshot = $' + i++ + '::jsonb');
+      values.push(JSON.stringify(shiftInfo));
     }
     updates.push("source = 'adjusted'");
     updates.push('updated_at = now()');
@@ -2769,7 +2815,7 @@ router.post('/:id/recalculate', protect, requireAdminOrHr, async (req, res) => {
     const holidayInfo = holidayByDate.get(dateStr) || null;
     const holidayId = holidayInfo?.id || null;
     const coverage = holidayInfo?.coverage || null;
-    const shiftInfo = await getAssignmentShiftForDate(employeeId, dateStr);
+    const shiftInfo = existing.shift_snapshot || await getAssignmentShiftForDate(employeeId, dateStr);
 
     const shiftType = resolveShiftType(shiftInfo);
     const statusTimeIn = shiftType === 'single_session'

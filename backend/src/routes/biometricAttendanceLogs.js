@@ -5,8 +5,8 @@ const { requireAdmin } = require('../middleware/rbac');
 const {
   processBiometricLogsToSummary,
   evaluateBiometricDayGate,
+  resolveBiometricPunchDate,
   isPunchAfterShiftEnd,
-  getManilaDateStr,
 } = require('../services/biometricProcessing');
 
 const router = express.Router();
@@ -420,6 +420,7 @@ router.post('/push', pushAuth, async (req, res) => {
     let skippedInvalidTimestamp = 0;
     const processingScopes = new Map();
     const biometricGateCache = new Map();
+    const shiftDateCache = new Map();
     const existingDayPunchCache = new Map();
 
     for (const p of sortByLoggedAtAsc(punches, (item) => item?.logged_at)) {
@@ -439,7 +440,7 @@ router.post('/push', pushAuth, async (req, res) => {
         continue;
       }
 
-      const manilaDate = getManilaDateStr(loggedAt);
+      const manilaDate = await resolveBiometricPunchDate(userId, loggedAt, shiftDateCache);
       if (!manilaDate) {
         skippedInvalidTimestamp++;
         continue;
@@ -585,6 +586,7 @@ router.post('/import', protect, requireAdmin, async (req, res) => {
     let skippedInvalidTimestamp = 0;
     const processingScopes = new Map();
     const biometricGateCache = new Map();
+    const shiftDateCache = new Map();
     const existingDayPunchCache = new Map();
 
     for (const row of sortByLoggedAtAsc(rows, (item) => item?.logged_at)) {
@@ -608,7 +610,7 @@ router.post('/import', protect, requireAdmin, async (req, res) => {
         continue;
       }
 
-      const manilaDate = getManilaDateStr(loggedAt);
+      const manilaDate = await resolveBiometricPunchDate(userId, loggedAt, shiftDateCache);
       if (!manilaDate) {
         skippedInvalidTimestamp++;
         continue;

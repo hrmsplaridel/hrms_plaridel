@@ -27,6 +27,17 @@ const {
 } = require('../services/shiftLifecycle');
 const { todayInHrmsTimezone } = require('../utils/dateRangeParser');
 
+function breakConfiguration(body, existing = {}) {
+  const config = {
+    break_start: body.break_start === undefined ? (existing.break_start ?? null)
+      : parseShiftTimeInput(body.break_start, { field: 'break_start', label: 'Break Start', required: false }),
+    capture_window_minutes: body.capture_window_minutes ?? existing.capture_window_minutes ?? 120,
+  };
+  if (!Number.isInteger(config.capture_window_minutes) || config.capture_window_minutes < 0 || config.capture_window_minutes > 240) {
+    throw new ShiftLifecycleError('capture_window_minutes must be a whole number between 0 and 240.', 400);
+  }
+  return config;
+}
 const router = express.Router();
 const protect = [authMiddleware];
 
@@ -40,7 +51,7 @@ router.get('/', protect, requireAdmin, async (req, res) => {
     else if (status === 'Inactive') where = 'WHERE is_active = false';
 
     const result = await pool.query(
-      `SELECT id, shift_number, name, start_time, end_time, break_end, punch_mode,
+      `SELECT id, shift_number, name, start_time, end_time, break_end, break_start, capture_window_minutes, punch_mode,
               grace_period_minutes, working_days, is_active,
               ${shiftDependencyCountsSql('shifts.id')},
               ${shiftDeactivationCountsSql('shifts.id', '$1')}
@@ -60,6 +71,8 @@ router.get('/', protect, requireAdmin, async (req, res) => {
         start_time: r.start_time,
         end_time: r.end_time,
         break_end: r.break_end,
+        break_start: r.break_start,
+        capture_window_minutes: r.capture_window_minutes,
         punch_mode: normalizePunchMode(r.punch_mode),
         grace_period_minutes: r.grace_period_minutes ?? 0,
         working_days: r.working_days && Array.isArray(r.working_days)
@@ -104,11 +117,13 @@ router.post('/', protect, requireAdmin, async (req, res) => {
       required: false,
     });
     const mode = normalizePunchMode(punch_mode);
+    const breaks = breakConfiguration(req.body);
     ensureCompatiblePunchModeSchedule({
       startTime: st,
       endTime: et,
       breakEnd: be,
       punchMode: mode,
+      breakStart: breaks.break_start,
     });
     const grace = grace_period_minutes === undefined
       ? 0
@@ -121,10 +136,10 @@ router.post('/', protect, requireAdmin, async (req, res) => {
     client = await pool.connect();
     await client.query('BEGIN');
     const result = await client.query(
-      `INSERT INTO shifts (name, start_time, end_time, break_end, punch_mode, grace_period_minutes, working_days, is_active)
-       VALUES ($1, $2::time, $3::time, $4::time, $5, $6, $7::int[], $8)
-       RETURNING id, shift_number, name, start_time, end_time, break_end, punch_mode, grace_period_minutes, working_days, is_active`,
-      [name.trim(), st, et, be, mode, grace, wd, active]
+      `INSERT INTO shifts (name, start_time, end_time, break_end, break_start, capture_window_minutes, punch_mode, grace_period_minutes, working_days, is_active)
+       VALUES ($1, $2::time, $3::time, $4::time, $9::time, $10, $5, $6, $7::int[], $8)
+       RETURNING id, shift_number, name, start_time, end_time, break_end, break_start, capture_window_minutes, punch_mode, grace_period_minutes, working_days, is_active`,
+      [name.trim(), st, et, be, mode, grace, wd, active, breaks.break_start, breaks.capture_window_minutes]
     );
     const r = result.rows[0];
     await writeShiftAudit(client, {
@@ -141,6 +156,8 @@ router.post('/', protect, requireAdmin, async (req, res) => {
       start_time: r.start_time,
       end_time: r.end_time,
       break_end: r.break_end,
+      break_start: r.break_start,
+      capture_window_minutes: r.capture_window_minutes,
       punch_mode: normalizePunchMode(r.punch_mode),
       grace_period_minutes: r.grace_period_minutes ?? 0,
       working_days: r.working_days && Array.isArray(r.working_days)
@@ -223,7 +240,7 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
     }
     if (parsedIsActive !== undefined) { updates.push(`is_active = $${i++}`); values.push(parsedIsActive); }
 
-    if (updates.length === 0) {
+    if (updates.length === 0 && !['break_start', 'capture_window_minutes'].some((key) => req.body[key] !== undefined)) {
       return res.status(400).json({ error: 'No fields to update' });
     }
     updates.push('updated_at = now()');
@@ -235,6 +252,14 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
     if (!lockedShift) {
       await client.query('ROLLBACK');
       return res.status(404).json({ error: 'Shift not found' });
+    }
+    const breaks = breakConfiguration(req.body, lockedShift);
+    for (const [key, value] of Object.entries(breaks)) {
+      if (req.body[key] !== undefined) {
+        updates.splice(updates.length - 1, 0, key + ' = $' + i + (key === 'break_start' ? '::time' : ''));
+        values.splice(values.length - 1, 0, value);
+        i++;
+      }
     }
     const before = shiftAuditSnapshot(lockedShift);
     if (start_time !== undefined || end_time !== undefined) {
@@ -251,16 +276,17 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
       start_time !== undefined ||
       end_time !== undefined ||
       break_end !== undefined ||
-      punch_mode !== undefined
+      punch_mode !== undefined || req.body.break_start !== undefined
     ) {
       ensureCompatiblePunchModeSchedule({
         startTime: parsedStartTime ?? lockedShift.start_time,
         endTime: parsedEndTime ?? lockedShift.end_time,
         breakEnd: break_end !== undefined ? parsedBreakEnd : lockedShift.break_end,
         punchMode: parsedPunchMode ?? lockedShift.punch_mode,
+        breakStart: breaks.break_start,
       });
     }
-    const scheduleChanges = {};
+    const scheduleChanges = Object.fromEntries(Object.entries(breaks).filter(([key]) => req.body[key] !== undefined));
     if (parsedStartTime !== undefined) scheduleChanges.start_time = parsedStartTime;
     if (parsedEndTime !== undefined) scheduleChanges.end_time = parsedEndTime;
     if (break_end !== undefined) {
@@ -291,7 +317,7 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
 
     const result = await client.query(
       `UPDATE shifts SET ${updates.join(', ')} WHERE id = $${i}
-       RETURNING id, shift_number, name, start_time, end_time, break_end, punch_mode, grace_period_minutes, working_days, is_active`,
+       RETURNING id, shift_number, name, start_time, end_time, break_end, break_start, capture_window_minutes, punch_mode, grace_period_minutes, working_days, is_active`,
       values
     );
     const r = result.rows[0];
@@ -311,6 +337,8 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
       start_time: r.start_time,
       end_time: r.end_time,
       break_end: r.break_end,
+      break_start: r.break_start,
+      capture_window_minutes: r.capture_window_minutes,
       punch_mode: normalizePunchMode(r.punch_mode),
       grace_period_minutes: r.grace_period_minutes ?? 0,
       working_days: r.working_days && Array.isArray(r.working_days)

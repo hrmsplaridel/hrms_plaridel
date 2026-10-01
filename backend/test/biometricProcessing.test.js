@@ -290,6 +290,7 @@ test('deleted processed DTR date is not recreated from preserved biometric punch
         ],
       };
     }
+    if (/FROM assignments a/i.test(String(sql))) return { rows: [] };
     throw new Error(`Unexpected query after deleted-date suppression: ${sql}`);
   });
 
@@ -301,8 +302,45 @@ test('deleted processed DTR date is not recreated from preserved biometric punch
     );
 
     assert.deepEqual(result, { inserted: 0, updated: 0 });
-    assert.equal(queries.length, 2);
+    assert.equal(queries.filter((sql) => sql.includes('INSERT INTO dtr_daily_summary')).length, 0);
   } finally {
     restore();
   }
 });
+
+for (const source of ['system', 'manual', 'adjusted']) {
+  test(`cross-month night processing preserves the saved schedule and protects ${source} ownership`, async () => {
+    const employee = '85082d28-c26c-441d-a215-67851a5b8721';
+    const snapshot = { startMinutes: 1200, endMinutes: 420, graceMinutes: 0,
+      punchMode: 'single_session',
+      captureWindowMinutes: 120, workingDays: [1, 2, 3, 4, 5], isWorkingDay: true };
+    const start = '2026-09-30T20:00:00+08:00';
+    const end = '2026-10-01T07:00:00+08:00';
+    let update = null;
+    const { service, restore } = loadBiometricProcessing(async (sql, params) => {
+      if (/FROM biometric_attendance_logs/.test(sql)) return { rows: [
+        { user_id: employee, attendance_date: '2026-09-30', punches: [start] },
+        { user_id: employee, attendance_date: '2026-10-01', punches: [end] },
+      ] };
+      if (/FROM assignments a/.test(sql)) return { rows: [{
+        shift_start: '08:00:00', shift_end: '17:00:00', punch_mode: 'full_day',
+        shift_snapshot: params[1] === '2026-09-30' ? snapshot : null,
+      }] };
+      if (/FROM dtr_daily_summary_deletions|FROM holidays|FROM leave_requests/.test(sql)) return { rows: [] };
+      if (/FROM policy_assignments|FROM attendance_policies/.test(sql)) return { rows: [{ work_hours_per_day: 8, deduct_undertime: true, deduct_late: true, deduction_multiplier: 1 }] };
+      if (/SELECT id, source, time_in/.test(sql)) return { rows: [{ source, time_in: start, time_out: null, status: 'incomplete', total_hours: 0 }] };
+      if (/UPDATE dtr_daily_summary/.test(sql)) { update = params; return { rows: [{ id: 'summary' }], rowCount: 1 }; }
+      throw new Error(`Unexpected overnight query: ${sql}`);
+    });
+    try {
+      const result = await service.processBiometricLogsToSummary([employee], '2026-10-01', '2026-10-01');
+      assert.equal(result.updated, source === 'system' ? 1 : 0);
+      if (source === 'system') {
+        assert.equal(update[1], '2026-09-30');
+        assert.equal(update[7], 11);
+        assert.equal(new Date(update[5]).toISOString(), new Date(end).toISOString());
+        assert.deepEqual(JSON.parse(update[10]), snapshot);
+      } else assert.equal(update, null);
+    } finally { restore(); }
+  });
+}

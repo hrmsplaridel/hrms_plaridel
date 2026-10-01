@@ -8,6 +8,64 @@ const ASSIGNMENT_ID = '00000000-0000-4000-8000-000000000402';
 const DEPARTMENT_ID = '00000000-0000-4000-8000-000000000403';
 const SHIFT_ID = '00000000-0000-4000-8000-000000000404';
 
+test('bulk report calculates historical absence from the saved night schedule', async () => {
+  const snapshot = {
+    startMinutes: 1200, endMinutes: 420, punchMode: 'single_session',
+    workingDays: [1, 2, 3, 4, 5],
+    departmentId: DEPARTMENT_ID, shiftId: SHIFT_ID,
+  };
+  const restoreDb = withMockedModule('../src/config/db', {
+    pool: {
+      async query(sql) {
+        const text = String(sql);
+        if (/SELECT id, full_name\s+FROM users\s+WHERE id = ANY/i.test(text)) {
+          return { rows: [{ id: EMPLOYEE_ID, full_name: 'Night Employee' }] };
+        }
+        if (/d\.attendance_date::text AS attendance_date_iso/i.test(text)) {
+          return { rows: [{
+            id: ASSIGNMENT_ID, employee_id: EMPLOYEE_ID,
+            attendance_date_iso: '2026-09-30', status: 'absent',
+            undertime_minutes: 0, late_minutes: 0, shift_snapshot: snapshot,
+          }] };
+        }
+        if (/FROM assignments a/i.test(text) &&
+            /LEFT JOIN departments d ON d\.id = a\.department_id/i.test(text)) {
+          return { rows: [{
+            id: ASSIGNMENT_ID, employee_id: EMPLOYEE_ID,
+            department_id: DEPARTMENT_ID, shift_id: SHIFT_ID,
+            effective_from: '2026-01-01', start_time: '08:00:00',
+            end_time: '17:00:00', break_end: '13:00:00',
+            punch_mode: 'full_day', working_days: [1, 2, 3, 4, 5],
+          }] };
+        }
+        return { rows: [], rowCount: 0 };
+      },
+    },
+  });
+  const restoreWs = withMockedModule('../src/websockets/biometricStream', {
+    broadcastBiometricUpdate: () => 0,
+  });
+  clearModule('../src/routes/dtrDailySummary');
+  try {
+    const router = require('../src/routes/dtrDailySummary');
+    const handlers = route(router, 'post', '/bulk-report');
+    const res = response();
+    await handlers[handlers.length - 1]({
+      user: { id: EMPLOYEE_ID, role: 'admin' },
+      body: { employee_ids: [EMPLOYEE_ID], start_date: '2026-09-30', end_date: '2026-09-30' },
+    }, res);
+    assert.equal(res.statusCode, 200);
+    const record = res.payload.employees[0].records[0];
+    assert.equal(record.shift_overnight, true);
+    assert.equal(record.shift_punch_mode, 'single_session');
+    assert.equal(record.report_deduction.absence_minutes, 660);
+  } finally {
+    restoreWs();
+    restoreDb();
+    clearModule('../src/routes/dtrDailySummary');
+  }
+});
+
 function response() {
   return {
     statusCode: 200,

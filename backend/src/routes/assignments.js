@@ -200,6 +200,7 @@ router.get('/', protect, async (req, res) => {
               employee_policy.attendance_policy_name,
               s.start_time AS shift_start_time, s.end_time AS shift_end_time,
               s.break_end AS shift_break_end, s.punch_mode,
+              s.break_start, s.capture_window_minutes,
               s.working_days AS shift_working_days
        FROM assignments a
        LEFT JOIN departments d ON a.department_id = d.id
@@ -285,6 +286,8 @@ router.get('/', protect, async (req, res) => {
         end_time: r.override_end_time || r.shift_end_time,
         break_end: r.override_break_end || r.shift_break_end,
         punch_mode: r.punch_mode || 'auto',
+        break_start: r.break_start || null,
+        capture_window_minutes: Number(r.capture_window_minutes ?? 120),
         date_assigned: r.effective_from,
         working_days: workingDays?.length ? workingDays : [1, 2, 3, 4, 5],
         schedule_overrides: scheduleOverrides.filter((override) =>

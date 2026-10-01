@@ -243,6 +243,8 @@ CREATE TABLE IF NOT EXISTS shifts (
   start_time TIME NOT NULL,
   end_time TIME NOT NULL,
   break_end TIME,
+  break_start TIME,
+  capture_window_minutes INT NOT NULL DEFAULT 120 CHECK (capture_window_minutes BETWEEN 0 AND 240),
   punch_mode TEXT NOT NULL DEFAULT 'auto'
     CONSTRAINT shifts_punch_mode_check
     CHECK (punch_mode IN ('auto', 'full_day', 'am_only', 'pm_only', 'single_session')),
@@ -1451,6 +1453,7 @@ CREATE TABLE IF NOT EXISTS dtr_daily_summary (
   undertime_minutes INT NOT NULL DEFAULT 0 CHECK (undertime_minutes >= 0),
   overtime_minutes INT NOT NULL DEFAULT 0 CHECK (overtime_minutes >= 0),
   total_hours NUMERIC(6,2) NOT NULL DEFAULT 0 CHECK (total_hours >= 0),
+  shift_snapshot JSONB,
 
   status TEXT NOT NULL DEFAULT 'incomplete'
     CHECK (status IN (

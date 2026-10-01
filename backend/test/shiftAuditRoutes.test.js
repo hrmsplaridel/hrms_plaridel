@@ -112,7 +112,10 @@ for (const method of ['post', 'put', 'delete']) {
 
 for (const [label, changes] of [
   ['malformed time', { start_time: '8am' }],
-  ['overnight range', { start_time: '22:00', end_time: '06:00' }],
+  ['overnight four-punch schedule without a valid break', { start_time: '22:00', end_time: '06:00' }],
+  ['break start with two punches', { punch_mode: 'single_session', break_end: null, break_start: '12:00' }],
+  ['break start after break end', { break_start: '14:00' }],
+  ['excessive punch capture window', { capture_window_minutes: 241 }],
   ['missing full-day PM Start', { break_end: null }],
   ['incompatible PM-only mode', { punch_mode: 'pm_only', break_end: null }],
   ['duplicate weekdays', { working_days: [1, 1] }],
@@ -130,6 +133,52 @@ for (const [label, changes] of [
     });
   }
 }
+
+for (const method of ['post', 'put']) {
+  test(`${method} saves a two-punch night shift and its matching window atomically`, async () => {
+    const body = { name: 'Night', start_time: '20:00', end_time: '07:00', break_end: null,
+      punch_mode: 'single_session', capture_window_minutes: 90 };
+    const { response, queries } = await exerciseMutation(method, body);
+    assert.equal(response.statusCode, method === 'post' ? 201 : 200);
+    assertAuditBeforeCommit(queries);
+    assert.equal(response.payload.capture_window_minutes, 90);
+    const mutation = queries.find(({ sql }) => /INSERT INTO shifts|UPDATE shifts SET/.test(sql));
+    assert.ok(mutation.params.includes(90));
+    assert.equal(Object.hasOwn(response.payload, 'break_mode'), false);
+    assert.equal(Object.hasOwn(response.payload, 'unpaid_break_minutes'), false);
+  });
+}
+
+for (const [punchMode, breakStart, breakEnd] of [
+  ['single_session', null, null],
+  ['full_day', '00:00', '01:00'],
+]) {
+  test(`POST ${punchMode} night shift uses attendance defaults without policy controls`, async () => {
+    const { response, queries } = await exerciseMutation('post', {
+      name: 'Night', start_time: '20:00', end_time: '07:00',
+      punch_mode: punchMode, break_start: breakStart, break_end: breakEnd,
+    });
+    assert.equal(response.statusCode, 201);
+    const mutation = queries.find(({ sql }) => /INSERT INTO shifts/.test(sql));
+    assert.deepEqual(mutation.params.slice(8), [breakStart ? `${breakStart}:00` : null, 120]);
+    assertAuditBeforeCommit(queries);
+  });
+}
+
+test('PUT omitting the internal matching window preserves its saved value', async () => {
+  const before = shiftRow({
+    capture_window_minutes: 90,
+  });
+  const { response, queries } = await exerciseMutation('put', { name: 'Renamed shift' }, { before });
+  assert.equal(response.statusCode, 200);
+  const mutation = queries.find(({ sql }) => /UPDATE shifts SET/.test(sql));
+  assert.doesNotMatch(mutation.sql.split('RETURNING')[0], /break_mode\s*=|unpaid_break_minutes\s*=|capture_window_minutes\s*=/);
+  assert.equal(Object.hasOwn(response.payload, 'break_mode'), false);
+  assert.equal(Object.hasOwn(response.payload, 'unpaid_break_minutes'), false);
+  assert.equal(response.payload.capture_window_minutes, 90);
+  const audit = JSON.parse(auditQuery(queries).params[3]);
+  assert.equal(audit.after.capture_window_minutes, audit.before.capture_window_minutes);
+});
 
 for (const [label, body, dependencies] of [
   ['historical schedule edit', { start_time: '09:00' }, { dependency_assignments: 1 }],
