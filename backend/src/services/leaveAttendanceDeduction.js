@@ -11,6 +11,7 @@
 const { loadHolidayOverlayMap } = require('./holidayOverlay');
 const {
   getExpectedWorkMinutes,
+  getExpectedAmEndMinutes,
   getExpectedPmStartMinutes,
   getShiftType,
 } = require('./shiftAttendance');
@@ -179,7 +180,7 @@ function expectedMinutesForCoverage(assignment, coverage) {
   if (coverage === 'pm_only') {
     if (shiftType === 'pm_only') return 0;
     if (shiftType === 'am_only' || shiftType === 'single_session') return full;
-    return Math.max(0, NOON_MINUTES - (assignment.startMinutes ?? NOON_MINUTES));
+    return Math.max(0, getExpectedAmEndMinutes(assignment) - (assignment.startMinutes ?? NOON_MINUTES));
   }
   return full;
 }

@@ -606,11 +606,7 @@ async function computeUndertimeMinutes(
       const startMinutes = shiftInfo.startMinutes != null ? shiftInfo.startMinutes : 0;
       const spanMinutes = Math.max(0, shiftInfo.endMinutes - startMinutes);
       if (type === 'full_day') {
-        const lunchMinutes =
-          shiftInfo.breakEndMinutes != null
-            ? Math.max(0, shiftInfo.breakEndMinutes - NOON_MINUTES)
-            : 60;
-        return Math.max(0, spanMinutes - lunchMinutes) + amUndertimePenalty;
+        return resolveExpectedWorkMinutes(shiftInfo) + amUndertimePenalty;
       }
       return spanMinutes + amUndertimePenalty;
     }

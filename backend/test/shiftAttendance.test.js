@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 
 const {
   getShiftType,
+  getExpectedWorkMinutes,
   getExpectedPmStartMinutes,
   getExpectedWorkMinutesForCoverage,
   getShiftExpectedLogs,
@@ -10,6 +11,17 @@ const {
   computeTotalHoursFromRecord,
   computeClockOutUndertimeMinutes,
 } = require('../src/services/shiftAttendance');
+
+test('configured daytime break start controls expected work and partial coverage', () => {
+  const shift = { startMinutes: 480, endMinutes: 1020, punchMode: 'full_day',
+    breakStartMinutes: 660, breakEndMinutes: 720 };
+  assert.equal(getExpectedWorkMinutes(shift), 480);
+  assert.equal(getExpectedWorkMinutesForCoverage(shift, 'pm_only'), 180);
+  assert.equal(getExpectedWorkMinutesForCoverage(shift, 'am_only'), 300);
+  assert.equal(getExpectedWorkMinutes({ ...shift, breakStartMinutes: 690, breakEndMinutes: 780 }), 450);
+  assert.equal(getExpectedWorkMinutes({ ...shift, breakStartMinutes: null, breakEndMinutes: 780 }), 480);
+  assert.equal(getExpectedWorkMinutes({ startMinutes: 480, endMinutes: 1020, punchMode: 'full_day' }), 480);
+});
 
 test('PM cutoff uses one consistent rule for current and legacy shifts', () => {
   assert.equal(getExpectedPmStartMinutes({

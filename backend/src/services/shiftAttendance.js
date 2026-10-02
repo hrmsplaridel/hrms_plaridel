@@ -50,10 +50,8 @@ function getExpectedWorkMinutes(shiftInfo) {
       ? schedule.breakEndMinutes - schedule.breakStartMinutes : 0));
   }
   if (type !== 'full_day') return spanMinutes;
-  const lunchMinutes =
-    shiftInfo.breakEndMinutes != null
-      ? Math.max(0, shiftInfo.breakEndMinutes - NOON_MINUTES)
-      : 60;
+  const lunchMinutes = Math.max(0,
+    (shiftInfo.breakEndMinutes ?? ONE_PM_MINUTES) - getExpectedAmEndMinutes(shiftInfo));
   return Math.max(0, spanMinutes - lunchMinutes);
 }
 
