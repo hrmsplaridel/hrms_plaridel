@@ -1592,7 +1592,7 @@ class _DtrContent extends StatefulWidget {
 
 class _DtrContentState extends State<_DtrContent> {
   static const int _maxCachedFeatures = 5;
-  static const List<int> _workforceSetupSections = [4, 5, 6, 7, 13, 10];
+  static const List<int> _workforceSetupSections = [4, 5, 6, 7, 13, 9, 10];
 
   /// 0 = menu, 1 = Time Logs, 2 = Reports, 3 = Employees, 4 = Assignment,
   /// 5 = Department, 6 = Position, 7 = Shift, 8 = Leave Management,
@@ -1647,6 +1647,7 @@ class _DtrContentState extends State<_DtrContent> {
     6 => 'Positions',
     7 => 'Shifts',
     13 => 'Weekly Schedule',
+    9 => 'Holidays',
     10 => 'Attendance Policies',
     _ => 'Workforce Setup',
   };
@@ -1657,6 +1658,7 @@ class _DtrContentState extends State<_DtrContent> {
     6 => Icons.work_rounded,
     7 => Icons.access_time_rounded,
     13 => Icons.calendar_view_week_rounded,
+    9 => Icons.calendar_today_rounded,
     10 => Icons.policy_rounded,
     _ => Icons.settings_rounded,
   };
@@ -1897,7 +1899,7 @@ class _DtrContentState extends State<_DtrContent> {
                     FeatureCard(
                       title: 'Workforce Setup',
                       subtitle:
-                          'Manage assignments, departments, positions, shifts, and attendance policies.',
+                          'Manage assignments, schedules, holidays, and attendance policies.',
                       icon: Icons.settings_rounded,
                       onTap: () => _openDtrSection(4),
                     ),
@@ -1921,13 +1923,6 @@ class _DtrContentState extends State<_DtrContent> {
                           'Review locator slip approvals, department-head endorsements, and HR final decisions.',
                       icon: Icons.pin_drop_rounded,
                       onTap: () => _openDtrSection(12),
-                    ),
-                    FeatureCard(
-                      title: 'Holiday Management',
-                      subtitle:
-                          'Define regular, special, and local holidays for DTR and payroll.',
-                      icon: Icons.calendar_today_rounded,
-                      onTap: () => _openDtrSection(9),
                     ),
                     FeatureCard(
                       title: 'Biometric Devices',
