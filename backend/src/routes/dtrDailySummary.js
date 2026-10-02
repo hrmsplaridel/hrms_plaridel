@@ -3320,6 +3320,16 @@ async function applyApprovedCorrectionToSummary(client, correctionRow) {
   const bi = reqBi != null ? reqBi : existing?.break_in;
   const to = reqOut != null ? reqOut : existing?.time_out;
 
+  const shiftInfo = await getAssignmentShiftForDate(employeeId, dateStr);
+  if (!shiftInfo) return { error: 'No shift is assigned for this date.' };
+  const validation = validateDtrPunchDates({
+    attendanceDate: dateStr,
+    punches: { time_in: ti, break_out: bo, break_in: bi, time_out: to },
+    shiftInfo,
+    todayDate: todayInHrmsTimezone(),
+  });
+  if (!validation.valid) return { error: validation.error };
+
   const hasAnyTime = ti || bo || bi || to;
   if (!hasAnyTime) {
     return {
@@ -3347,7 +3357,7 @@ async function applyApprovedCorrectionToSummary(client, correctionRow) {
 
   const holidayId = holiday ? holiday.id : null;
 
-  const total = computeTotalHours(timeIn, bo, bi, to);
+  const total = computeTotalHoursFromRecord({ timeIn, breakOut: bo, breakIn: bi, timeOut: to }, shiftInfo);
   let lateMinutes = 0;
   let undertimeMinutes = 0;
   if (
@@ -3452,8 +3462,14 @@ async function applyApprovedCorrectionToSummary(client, correctionRow) {
     );
   }
 
+  await client.query(
+    `UPDATE dtr_daily_summary SET shift_snapshot = COALESCE(shift_snapshot, $3::jsonb)
+     WHERE employee_id = $1::uuid AND attendance_date = $2::date`,
+    [employeeId, dateStr, JSON.stringify(shiftInfo)]
+  );
   return {};
 }
 
 module.exports = router;
 module.exports.applyApprovedCorrectionToSummary = applyApprovedCorrectionToSummary;
+module.exports.getCorrectionShift = getAssignmentShiftForDate;

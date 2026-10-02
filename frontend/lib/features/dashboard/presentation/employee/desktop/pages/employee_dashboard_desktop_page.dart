@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:hrms_plaridel/features/dtr/attendance/presentation/widgets/dtr_corrections_dialog.dart';
 import 'dart:ui' show lerpDouble;
 
 import 'package:flutter/material.dart';
@@ -3119,6 +3120,14 @@ class _EmployeeAttendanceContentState extends State<EmployeeAttendanceContent>
           ),
           const SizedBox(height: 24),
         ],
+        Align(
+          alignment: Alignment.centerRight,
+          child: TextButton.icon(
+            icon: const Icon(Icons.edit_calendar_outlined),
+            label: const Text('DTR Corrections'),
+            onPressed: () => showDtrCorrections(context),
+          ),
+        ),
         LayoutBuilder(
           key: widget.filtersKey,
           builder: (context, constraints) {

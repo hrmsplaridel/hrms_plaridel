@@ -189,6 +189,7 @@ app.use('/api/biometric-attendance-logs', biometricAttendanceLogsRoutes);
 app.use('/api/overtime', overtimeRoutes);
 app.use('/api/calendar', calendarRoutes);
 app.use('/api/dtr-daily-summary', dtrDailySummaryRoutes);
+app.use('/api/dtr-corrections', require('./routes/dtrCorrections'));
 app.use('/api/dtr-assistant', dtrAssistantRoutes);
 app.use('/api/docutracker', docutrackerRoutes);
 app.use('/api/training-daily-reports', trainingDailyReportsRoutes);

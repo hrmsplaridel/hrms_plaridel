@@ -1617,6 +1617,8 @@ CREATE TABLE IF NOT EXISTS dtr_corrections (
   requested_break_out TIMESTAMPTZ,
 
   reason TEXT NOT NULL,
+  original_record JSONB,
+  applied_record JSONB,
 
   status TEXT NOT NULL DEFAULT 'pending'
     CHECK (status IN ('pending', 'approved', 'rejected')),
