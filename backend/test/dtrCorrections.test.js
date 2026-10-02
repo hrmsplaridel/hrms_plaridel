@@ -1,6 +1,9 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { createRouter } = require('../src/routes/dtrCorrections');
+const { createRouter: createBackendRouter } = require('../src/routes/dtrCorrections');
+const createRouter = options => createBackendRouter({
+  notifications: { submitted: async () => {}, reviewed: async () => {} }, ...options,
+});
 const employee = '11111111-1111-4111-8111-111111111111';
 const reviewer = '22222222-2222-4222-8222-222222222222';
 const id = '33333333-3333-4333-8333-333333333333';
@@ -19,6 +22,7 @@ function fixture({ own = false, status = 'pending', stale = false, applyError = 
   const queries = [];
   let applied = 0;
   let queued = 0;
+  const notices = [];
   const row = { id, employee_id: own ? reviewer : employee, attendance_date: '2026-09-30', status, original_record: null };
   const client = { release() {}, async query(sql, args) {
     queries.push({ sql, args });
@@ -28,8 +32,12 @@ function fixture({ own = false, status = 'pending', stale = false, applyError = 
   } };
   const router = createRouter({ db: { connect: async () => client },
     apply: async () => { applied++; return applyError ? { error: 'Invalid punches' } : {}; },
-    enqueue: async () => { queued++; }, broadcast() {} });
-  return { router, queries, counts: () => ({ applied, queued }) };
+    enqueue: async () => { queued++; }, broadcast() {},
+    notifications: { reviewed: async (_, request, decision) => {
+      assert.equal(queries.at(-1).sql, 'COMMIT');
+      notices.push({ request, decision });
+    } } });
+  return { router, queries, notices, counts: () => ({ applied, queued }) };
 }
 const reviewRequest = (role = 'hr') => ({ user: { id: reviewer, role }, params: { id }, body: { decision: 'approved', notes: 'Verified against supervisor report.' } });
 
@@ -55,6 +63,7 @@ for (const [name, options, code] of [
     assert.ok(f.queries.some(q => q.sql === 'ROLLBACK'));
     assert.ok(!f.queries.some(q => q.sql === 'COMMIT'));
     assert.equal(f.counts().queued, 0);
+    assert.equal(f.notices.length, 0);
   });
 }
 test('employee role cannot approve requests', async () => {
@@ -67,6 +76,7 @@ test('approval commits audit and reconciliation together', async () => {
   const res = await invoke(f.router, 'post', '/:id/review', reviewRequest());
   assert.equal(res.code, 200);
   assert.deepEqual(f.counts(), { applied: 1, queued: 1 });
+  assert.equal(f.notices[0].decision, 'approved');
   assert.ok(f.queries.some(q => q.sql.includes('applied_record=$5')));
   assert.equal(f.queries.at(-1).sql, 'COMMIT');
 });
@@ -75,20 +85,38 @@ test('rejection retains original attendance', async () => {
   const req = reviewRequest(); req.body.decision = 'rejected';
   assert.equal((await invoke(f.router, 'post', '/:id/review', req)).code, 200);
   assert.deepEqual(f.counts(), { applied: 0, queued: 0 });
+  assert.equal(f.notices[0].decision, 'rejected');
 });
 test('submission ignores a supplied employee ID and preserves original data', async () => {
   let insert;
-  const client = { release() {}, query: async (sql, args) => {
+  let released = false;
+  let notified = false;
+  const client = { release() { released = true; }, query: async (sql, args) => {
     if (sql.includes('INSERT INTO dtr_corrections')) { insert = args; return { rows: [{ id }] }; }
     return { rows: [] };
   } };
   const router = createRouter({ db: { connect: async () => client },
+    notifications: { submitted: async (_, row) => {
+      assert.equal(released, true);
+      assert.equal(row.employee_id, employee);
+      assert.equal(row.attendance_date, '2020-09-30');
+      notified = true;
+    } },
     shiftFor: async () => ({ startMinutes: 1320, endMinutes: 420, punchMode: 'single_session', captureWindowMinutes: 120 }) });
   const req = { user: { id: employee }, body: { employee_id: reviewer, attendance_date: '2020-09-30',
     reason: 'Biometric device was unavailable.', requested_time_in: '2020-09-30T22:00:00+08:00', requested_time_out: '2020-10-01T07:00:00+08:00' } };
   assert.equal((await invoke(router, 'post', '/', req)).code, 201);
   assert.equal(insert[0], employee);
   assert.equal(insert[7], 'null');
+  assert.equal(notified, true);
+});
+
+test('notification detail endpoint scopes employee access and denies missing requests', async () => {
+  let args;
+  const router = createRouter({ db: { query: async (_, values) => { args = values; return { rows: [] }; } } });
+  const result = await invoke(router, 'get', '/:id', { user: { id: employee, role: 'employee' }, params: { id } });
+  assert.equal(result.code, 404);
+  assert.deepEqual(args, [id, employee, false]);
 });
 test('duplicate pending requests are blocked under a transaction lock', async () => {
   const sqls = [];

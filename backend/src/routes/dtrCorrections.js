@@ -17,9 +17,13 @@ function fingerprint(row) {
 
 function createRouter({ db = pool, auth = authMiddleware, apply = applyApprovedCorrectionToSummary,
   shiftFor = getCorrectionShift, enqueue = enqueueEmployeeRangeReconciliation,
-  broadcast = broadcastBiometricUpdate } = {}) {
+  broadcast = broadcastBiometricUpdate,
+  notifications = require('../services/dtrCorrectionNotifications') } = {}) {
   const router = express.Router();
   router.use(auth);
+  async function notify(action) {
+    try { await action(); } catch (error) { console.error('[dtrCorrections] notification delivery failed', error); }
+  }
   const handle = fn => async (req, res) => {
     try { await fn(req, res); } catch (error) {
       if (!error.status) console.error('[dtrCorrections]', error);
@@ -56,6 +60,7 @@ function createRouter({ db = pool, auth = authMiddleware, apply = applyApprovedC
     const shift = await shiftFor(req.user.id, date);
     if (!shift) fail('No shift is assigned for this date.');
     const client = await db.connect();
+    let submitted;
     try {
       await client.query('BEGIN');
       await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`dtr-correction:${req.user.id}:${date}`]);
@@ -76,9 +81,23 @@ function createRouter({ db = pool, auth = authMiddleware, apply = applyApprovedC
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb) RETURNING *`,
         [req.user.id, date, reason, ...fields.map(k => punches[k]), JSON.stringify(original)]);
       await client.query('COMMIT');
-      res.status(201).json(result.rows[0]);
+      submitted = result.rows[0];
     } catch (error) { await client.query('ROLLBACK'); throw error; }
     finally { client.release(); }
+    await notify(() => notifications.submitted(db, { ...submitted, employee_id: req.user.id, attendance_date: date }));
+    res.status(201).json(submitted);
+  }));
+
+  router.get('/:id', handle(async (req, res) => {
+    if (!uuid.test(req.params.id)) fail('Invalid correction ID.');
+    const result = await db.query(`SELECT c.*, c.attendance_date::text AS attendance_date,
+      u.full_name AS employee_name, r.full_name AS reviewer_name
+      FROM dtr_corrections c JOIN users u ON u.id=c.employee_id
+      LEFT JOIN users r ON r.id=c.reviewed_by
+      WHERE c.id=$1 AND (c.employee_id=$2 OR $3::boolean)`,
+      [req.params.id, req.user.id, ['admin', 'hr'].includes(req.user.role)]);
+    if (!result.rows.length) fail('Correction not found or access denied.', 404);
+    res.json(result.rows[0]);
   }));
 
   router.post('/:id/review', requireAdminOrHr, handle(async (req, res) => {
@@ -113,6 +132,7 @@ function createRouter({ db = pool, auth = authMiddleware, apply = applyApprovedC
       await client.query('COMMIT');
     } catch (error) { await client.query('ROLLBACK'); throw error; }
     finally { client.release(); }
+    await notify(() => notifications.reviewed(db, row, decision));
     if (decision === 'approved') broadcast('dtr_refresh', { action: 'correction_approved', userId: row.employee_id, date: row.attendance_date });
     res.json({ status: decision });
   }));
