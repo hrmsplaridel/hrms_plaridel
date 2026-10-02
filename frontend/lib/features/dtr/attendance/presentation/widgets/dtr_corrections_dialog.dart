@@ -4,11 +4,14 @@ import 'package:hrms_plaridel/core/api/user_facing_api_error.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/core/utils/responsive_right_side_panel.dart';
 
-Future<void> showDtrCorrections(BuildContext context, {bool review = false}) =>
-    openResponsiveRightSidePanel<void>(
-      context: context,
-      builder: (_) => DtrCorrectionsDialog(review: review),
-    );
+Future<void> showDtrCorrections(
+  BuildContext context, {
+  bool review = false,
+  String? requestId,
+}) => openResponsiveRightSidePanel<void>(
+  context: context,
+  builder: (_) => DtrCorrectionsDialog(review: review, requestId: requestId),
+);
 
 const _punches = {
   'time_in': 'Shift In',
@@ -27,7 +30,8 @@ String _stamp(dynamic value) {
 }
 
 class DtrCorrectionsDialog extends StatefulWidget {
-  const DtrCorrectionsDialog({super.key, this.review = false});
+  const DtrCorrectionsDialog({super.key, this.review = false, this.requestId});
+  final String? requestId;
   final bool review;
   @override
   State<DtrCorrectionsDialog> createState() => _DtrCorrectionsDialogState();
@@ -40,6 +44,7 @@ class _DtrCorrectionsDialogState extends State<DtrCorrectionsDialog> {
   int _offset = 0;
   bool _creating = false;
   Map<String, dynamic>? _selected;
+  bool _openedRequest = false;
   @override
   void initState() {
     super.initState();
@@ -62,6 +67,17 @@ class _DtrCorrectionsDialogState extends State<DtrCorrectionsDialog> {
               .map((r) => Map<String, dynamic>.from(r as Map))
               .toList(),
         );
+      }
+      if (!_openedRequest && widget.requestId != null) {
+        final detail = await ApiClient.instance.dio.get(
+          '/api/dtr-corrections/${widget.requestId}',
+        );
+        if (mounted) {
+          setState(() {
+            _selected = Map<String, dynamic>.from(detail.data as Map);
+            _openedRequest = true;
+          });
+        }
       }
     } catch (e) {
       if (mounted) setState(() => _error = userFacingApiError(e));

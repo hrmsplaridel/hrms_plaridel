@@ -361,6 +361,14 @@ class _EmployeeDashboardState extends State<EmployeeDashboardDesktopPage>
   void _applyNotificationTapResult(NotificationTapResult? result) {
     if (result == null || result.kind == NotificationTapKind.none) return;
     switch (result.kind) {
+      case NotificationTapKind.dtrCorrectionReview:
+      case NotificationTapKind.dtrCorrectionRequests:
+        showDtrCorrections(
+          context,
+          review: result.kind == NotificationTapKind.dtrCorrectionReview,
+          requestId: result.referenceId,
+        );
+        break;
       case NotificationTapKind.employeeLeaveApprovals:
       case NotificationTapKind.employeeLeaveRequests:
         final section = result.employeeLeaveSection;

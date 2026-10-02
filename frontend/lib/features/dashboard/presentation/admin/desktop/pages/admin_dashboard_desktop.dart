@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:hrms_plaridel/features/dtr/attendance/presentation/widgets/dtr_corrections_dialog.dart';
 import 'dart:ui' show lerpDouble;
 import 'package:flutter/material.dart';
 import 'package:shimmer/shimmer.dart';
@@ -115,11 +116,7 @@ class _AdminDashUi {
 }
 
 class _AdminSectionHeader extends StatelessWidget {
-  const _AdminSectionHeader({
-    required this.title,
-    this.icon,
-    this.subtitle,
-  });
+  const _AdminSectionHeader({required this.title, this.icon, this.subtitle});
 
   final String title;
   final IconData? icon;
@@ -424,6 +421,14 @@ class _AdminDashboardState extends State<AdminDashboard>
   void _applyNotificationTapResult(NotificationTapResult? result) {
     if (result == null || result.kind == NotificationTapKind.none) return;
     switch (result.kind) {
+      case NotificationTapKind.dtrCorrectionReview:
+      case NotificationTapKind.dtrCorrectionRequests:
+        showDtrCorrections(
+          context,
+          review: result.kind == NotificationTapKind.dtrCorrectionReview,
+          requestId: result.referenceId,
+        );
+        break;
       case NotificationTapKind.adminDtrLeaveManagement:
         setState(() => _selectedMenu = AdminMenu.dtr);
         DashboardContentNavigator.showHome(_contentNavKey);
@@ -1328,10 +1333,7 @@ class _AdminDashboardShimmer extends StatelessWidget {
 }
 
 class _AdminDashboardBone extends StatelessWidget {
-  const _AdminDashboardBone({
-    required this.height,
-    this.radius = 7,
-  });
+  const _AdminDashboardBone({required this.height, this.radius = 7});
 
   final double height;
   final double radius;
@@ -1440,8 +1442,9 @@ class _RecruitmentOverviewCardState extends State<RecruitmentOverviewCard> {
     unawaited(_loadVacancyAnnouncement());
 
     try {
-      final apps = await (widget.loadApplications?.call() ??
-          RecruitmentRepo.instance.listApplications());
+      final apps =
+          await (widget.loadApplications?.call() ??
+              RecruitmentRepo.instance.listApplications());
       if (!mounted) return;
       setState(() {
         _all = apps.where((a) => !a.isFromMayorModule).toList();
@@ -1462,8 +1465,9 @@ class _RecruitmentOverviewCardState extends State<RecruitmentOverviewCard> {
 
   Future<void> _loadVacancyAnnouncement() async {
     try {
-      final announcement = await (widget.loadAnnouncement?.call() ??
-          JobVacancyAnnouncementRepo.instance.fetch());
+      final announcement =
+          await (widget.loadAnnouncement?.call() ??
+              JobVacancyAnnouncementRepo.instance.fetch());
       if (!mounted) return;
       setState(() {
         _announcement = announcement;
@@ -1713,11 +1717,7 @@ class _DtrContentState extends State<_DtrContent> {
                 mainAxisAlignment: MainAxisAlignment.center,
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Icon(
-                    _workforceSetupIcon(index),
-                    size: 18,
-                    color: foreground,
-                  ),
+                  Icon(_workforceSetupIcon(index), size: 18, color: foreground),
                   const SizedBox(width: 8),
                   Text(
                     _workforceSetupLabel(index),
