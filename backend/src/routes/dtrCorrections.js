@@ -38,14 +38,28 @@ function createRouter({ db = pool, auth = authMiddleware, apply = applyApprovedC
     const review = req.query.review === 'true';
     if (review && !['admin', 'hr'].includes(req.user.role)) fail('HR or admin access required.', 403);
     const offset = Math.max(0, parseInt(req.query.offset, 10) || 0);
+    const status = String(req.query.status || '').trim().toLowerCase();
+    if (status && !['pending', 'approved', 'rejected'].includes(status)) fail('Invalid correction status.');
+    const search = String(req.query.search || '').trim();
+    if (search.length > 100) fail('Search is too long.');
+    const values = [review, req.user.id, offset];
+    let filters = '';
+    if (status) {
+      values.push(status);
+      filters += ` AND c.status = $${values.length}`;
+    }
+    if (search) {
+      values.push(`%${search.replace(/[\\%_]/g, '\\$&')}%`);
+      filters += ` AND (u.full_name ILIKE $${values.length} ESCAPE '\\' OR u.employee_number::text ILIKE $${values.length} ESCAPE '\\')`;
+    }
     const result = await db.query(
       `SELECT c.*, u.full_name AS employee_name, reviewer.full_name AS reviewer_name,
               c.attendance_date::text AS attendance_date
          FROM dtr_corrections c JOIN users u ON u.id = c.employee_id
          LEFT JOIN users reviewer ON reviewer.id = c.reviewed_by
-        WHERE ($1::boolean OR c.employee_id = $2::uuid)
+        WHERE ($1::boolean OR c.employee_id = $2::uuid)${filters}
         ORDER BY (c.status = 'pending') DESC, c.created_at DESC, c.id DESC
-        LIMIT 50 OFFSET $3`, [review, req.user.id, offset]);
+        LIMIT 50 OFFSET $3`, values);
     res.json(result.rows);
   }));
 

@@ -54,6 +54,27 @@ test('employee history is scoped to authenticated employee', async () => {
   assert.deepEqual(args, [false, employee, 0]);
 });
 
+test('review queue filters status and employee search at the database', async () => {
+  let sql;
+  let args;
+  const router = createRouter({ db: { query: async (query, values) => {
+    sql = query; args = values; return { rows: [] };
+  } } });
+  const result = await invoke(router, 'get', '/', { user: { id: reviewer, role: 'hr' },
+    query: { review: 'true', status: 'approved', search: 'Earl_%', offset: '50' } });
+  assert.equal(result.code, 200);
+  assert.match(sql, /c.status = \$4/);
+  assert.match(sql, /u.full_name ILIKE \$5/);
+  assert.deepEqual(args, [true, reviewer, 50, 'approved', '%Earl\\_\\%%']);
+});
+
+test('review queue rejects invalid status filters', async () => {
+  const router = createRouter({ db: { query: async () => { throw new Error('must not query'); } } });
+  const result = await invoke(router, 'get', '/', { user: { id: reviewer, role: 'hr' },
+    query: { review: 'true', status: 'other' } });
+  assert.equal(result.code, 400);
+});
+
 test('original attendance preview only reads the authenticated employee', async () => {
   let args;
   let shiftArgs;

@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:hrms_plaridel/features/dtr/attendance/presentation/widgets/dtr_corrections_dialog.dart';
+import 'package:hrms_plaridel/features/dtr/attendance/presentation/pages/admin_dtr_corrections_page.dart';
 import 'dart:ui' show lerpDouble;
 import 'package:flutter/material.dart';
 import 'package:shimmer/shimmer.dart';
@@ -1596,7 +1597,8 @@ class _DtrContentState extends State<_DtrContent> {
   /// 0 = menu, 1 = Time Logs, 2 = Reports, 3 = Employees, 4 = Assignment,
   /// 5 = Department, 6 = Position, 7 = Shift, 8 = Leave Management,
   /// 9–10 = Holiday / Policy via [_ManageContent], 11 = Biometric Devices,
-  /// 12 = Locator Slip Management, 13 = Weekly Schedule
+  /// 12 = Locator Slip Management, 13 = Weekly Schedule,
+  /// 14 = Approvals & Signatories, 15 = DTR Corrections
   int _dtrSectionIndex = 0;
   final Map<int, _DtrFeatureCacheEntry> _featureCache = {};
   int _featureCacheClock = 0;
@@ -1744,6 +1746,7 @@ class _DtrContentState extends State<_DtrContent> {
     if (index == 12) return const AdminLocatorManagementScreen();
     if (index == 13) return const ManageWeeklySchedule();
     if (index == 14) return const ApprovalsSignatoriesPage();
+    if (index == 15) return const AdminDtrCorrectionsPage();
     return _ManageContent(
       subIndex: index - 3,
       onOpenAssignmentForEmployee: _goToAssignmentWithEmployee,
@@ -1871,6 +1874,13 @@ class _DtrContentState extends State<_DtrContent> {
                           'Manage and correct daily time-in/out records. Add, edit, or delete entries.',
                       icon: Icons.schedule_rounded,
                       onTap: () => _openDtrSection(1),
+                    ),
+                    FeatureCard(
+                      title: 'DTR Corrections',
+                      subtitle:
+                          'Review employee attendance correction requests and decisions.',
+                      icon: Icons.fact_check_outlined,
+                      onTap: () => _openDtrSection(15),
                     ),
                     FeatureCard(
                       title: 'Reports',

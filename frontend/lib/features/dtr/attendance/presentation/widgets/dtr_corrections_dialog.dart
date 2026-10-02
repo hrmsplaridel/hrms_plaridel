@@ -70,6 +70,119 @@ Future<void> showDtrCorrections(
   builder: (_) => DtrCorrectionsDialog(review: review, requestId: requestId),
 );
 
+ThemeData _correctionPanelTheme(BuildContext context) {
+  final theme = Theme.of(context);
+  final background = AppTheme.dashPanelOf(context);
+  final foreground = AppTheme.dashTextPrimaryOf(context);
+  return theme.copyWith(
+    scaffoldBackgroundColor: background,
+    colorScheme: theme.colorScheme.copyWith(
+      surface: background,
+      onSurface: foreground,
+    ),
+    textTheme: theme.textTheme.apply(
+      bodyColor: foreground,
+      displayColor: foreground,
+    ),
+    inputDecorationTheme: InputDecorationTheme(
+      filled: true,
+      fillColor: AppTheme.dashMutedSurfaceOf(context),
+      border: OutlineInputBorder(borderRadius: BorderRadius.circular(6)),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 16),
+    ),
+  );
+}
+
+Future<bool?> showDtrCorrectionReview(BuildContext context, String requestId) =>
+    openResponsiveRightSidePanel<bool>(
+      context: context,
+      builder: (panelContext) => Theme(
+        data: _correctionPanelTheme(panelContext),
+        child: _CorrectionReviewPanel(requestId: requestId),
+      ),
+    );
+
+class _CorrectionReviewPanel extends StatefulWidget {
+  const _CorrectionReviewPanel({required this.requestId});
+  final String requestId;
+
+  @override
+  State<_CorrectionReviewPanel> createState() => _CorrectionReviewPanelState();
+}
+
+class _CorrectionReviewPanelState extends State<_CorrectionReviewPanel> {
+  Map<String, dynamic>? _row;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    setState(() {
+      _row = null;
+      _error = null;
+    });
+    try {
+      final response = await ApiClient.instance.dio.get(
+        '/api/dtr-corrections/${widget.requestId}',
+      );
+      if (mounted) {
+        setState(() => _row = Map<String, dynamic>.from(response.data as Map));
+      }
+    } catch (e) {
+      if (mounted) setState(() => _error = userFacingApiError(e));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_row != null) {
+      return _CorrectionDetails(
+        row: _row!,
+        review: true,
+        onClose: () => Navigator.of(context).pop(false),
+        onReviewed: () => Navigator.of(context).pop(true),
+      );
+    }
+    return Scaffold(
+      body: SafeArea(
+        child: Column(
+          children: [
+            Align(
+              alignment: Alignment.centerLeft,
+              child: IconButton(
+                tooltip: 'Close request',
+                onPressed: () => Navigator.of(context).pop(false),
+                icon: const Icon(Icons.close),
+              ),
+            ),
+            Expanded(
+              child: Center(
+                child: _error == null
+                    ? const CircularProgressIndicator()
+                    : Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(_error!),
+                          TextButton.icon(
+                            onPressed: _load,
+                            icon: const Icon(Icons.refresh),
+                            label: const Text('Retry'),
+                          ),
+                        ],
+                      ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 const _punches = {
   'time_in': 'Shift In',
   'break_out': 'Break Out',
@@ -145,30 +258,8 @@ class _DtrCorrectionsDialogState extends State<DtrCorrectionsDialog> {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final background = AppTheme.dashPanelOf(context);
-    final foreground = AppTheme.dashTextPrimaryOf(context);
     return Theme(
-      data: theme.copyWith(
-        scaffoldBackgroundColor: background,
-        colorScheme: theme.colorScheme.copyWith(
-          surface: background,
-          onSurface: foreground,
-        ),
-        textTheme: theme.textTheme.apply(
-          bodyColor: foreground,
-          displayColor: foreground,
-        ),
-        inputDecorationTheme: InputDecorationTheme(
-          filled: true,
-          fillColor: AppTheme.dashMutedSurfaceOf(context),
-          border: OutlineInputBorder(borderRadius: BorderRadius.circular(6)),
-          contentPadding: const EdgeInsets.symmetric(
-            horizontal: 12,
-            vertical: 16,
-          ),
-        ),
-      ),
+      data: _correctionPanelTheme(context),
       child: Builder(
         builder: (context) {
           if (_creating) {
@@ -731,8 +822,10 @@ class _CorrectionDetails extends StatefulWidget {
     required this.row,
     required this.review,
     required this.onClose,
+    this.onReviewed,
   });
   final VoidCallback onClose;
+  final VoidCallback? onReviewed;
   final Map<String, dynamic> row;
   final bool review;
   @override
@@ -785,7 +878,7 @@ class _CorrectionDetailsState extends State<_CorrectionDetails> {
         '/api/dtr-corrections/${widget.row['id']}/review',
         data: {'decision': decision, 'notes': _notes.text.trim()},
       );
-      if (mounted) widget.onClose();
+      if (mounted) (widget.onReviewed ?? widget.onClose)();
     } catch (e) {
       if (mounted) setState(() => _error = userFacingApiError(e));
     } finally {

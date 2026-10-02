@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'package:hrms_plaridel/features/dtr/attendance/presentation/widgets/dtr_corrections_dialog.dart';
 import 'package:hrms_plaridel/features/dtr/attendance/presentation/widgets/attendance_display.dart'
     show formatWorkedHours;
 import 'package:hrms_plaridel/features/dtr/reports/data/official_time.dart';
@@ -1067,9 +1066,6 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
                         color: AppTheme.dashPanelOf(context),
                         onSelected: (value) {
                           switch (value) {
-                            case 'corrections':
-                              showDtrCorrections(context, review: true);
-                              break;
                             case 'add':
                               _showAddDialog(context, dtr);
                               break;
@@ -1082,11 +1078,6 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
                           }
                         },
                         itemBuilder: (context) => [
-                          if (['admin', 'hr'].contains(auth.user?.role))
-                            const PopupMenuItem<String>(
-                              value: 'corrections',
-                              child: Text('Review DTR corrections'),
-                            ),
                           PopupMenuItem<String>(
                             value: 'add',
                             child: Row(
