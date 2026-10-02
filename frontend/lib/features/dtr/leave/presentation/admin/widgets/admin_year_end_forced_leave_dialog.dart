@@ -313,7 +313,7 @@ class _AdminYearEndForcedLeaveDialogState
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         const Text(
-                          'Year-End Forced Leave Deduction',
+                          'Mandatory Leave Compliance',
                           style: TextStyle(
                             fontSize: 18,
                             fontWeight: FontWeight.w700,
