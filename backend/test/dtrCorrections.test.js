@@ -9,6 +9,7 @@ const reviewer = '22222222-2222-4222-8222-222222222222';
 const id = '33333333-3333-4333-8333-333333333333';
 
 async function invoke(router, method, path, req) {
+  req.headers ??= {};
   const res = { code: 200, status(n) { this.code = n; return this; }, json(body) { this.body = body; } };
   const stack = router.stack.find(l => l.route?.path === path && l.route.methods[method]).route.stack;
   for (const layer of stack) {
@@ -51,6 +52,31 @@ test('employee history is scoped to authenticated employee', async () => {
   const router = createRouter({ db: { query: async (_, values) => { args = values; return { rows: [] }; } } });
   await invoke(router, 'get', '/', { user: { id: employee, role: 'employee' }, query: { employee_id: reviewer } });
   assert.deepEqual(args, [false, employee, 0]);
+});
+
+test('original attendance preview only reads the authenticated employee', async () => {
+  let args;
+  let shiftArgs;
+  const router = createRouter({
+    db: { query: async (_, values) => { args = values; return { rows: [] }; } },
+    shiftFor: async (...values) => { shiftArgs = values; return { punchMode: 'single_session', startMinutes: 1320, endMinutes: 420 }; },
+  });
+  const result = await invoke(router, 'get', '/original/:date', {
+    user: { id: employee, role: 'admin' }, params: { date: '2026-10-02' }, query: { employee_id: reviewer },
+  });
+  assert.equal(result.code, 200);
+  assert.deepEqual(result.body, { shift_punch_mode: 'single_session' });
+  assert.deepEqual(args, [employee, '2026-10-02']);
+  assert.deepEqual(shiftArgs, [employee, '2026-10-02']);
+});
+
+test('original attendance preview resolves split shifts and missing assignments', async () => {
+  const db = { query: async () => ({ rows: [{ time_in: '2026-10-02T00:00:00Z' }] }) };
+  const request = { user: { id: employee }, params: { date: '2026-10-02' } };
+  const split = createRouter({ db, shiftFor: async () => ({ punchMode: 'full_day', startMinutes: 480, endMinutes: 1020 }) });
+  const absent = createRouter({ db, shiftFor: async () => null });
+  assert.equal((await invoke(split, 'get', '/original/:date', request)).body.shift_punch_mode, 'full_day');
+  assert.equal((await invoke(absent, 'get', '/original/:date', request)).body.shift_punch_mode, null);
 });
 for (const [name, options, code] of [
   ['self approval', { own: true }, 403], ['already reviewed', { status: 'approved' }, 409],
@@ -127,4 +153,32 @@ test('duplicate pending requests are blocked under a transaction lock', async ()
     requested_time_in: '2020-09-30T08:00:00+08:00', reason: 'Missing biometric time in.' } });
   assert.equal(res.code, 409);
   assert.ok(sqls.some(sql => sql.includes('pg_advisory_xact_lock')));
+});
+
+test('attachment download is scoped to owner or HR and refuses unauthorized access', async () => {
+  let args;
+  const router = createRouter({ db: { query: async (sql, values) => {
+    assert.match(sql, /c.employee_id=\$2 OR \$3::boolean/);
+    args = values; return { rows: [] };
+  } } });
+  const result = await invoke(router, 'get', '/:id/attachment', { user: { id: employee, role: 'employee' }, params: { id } });
+  assert.equal(result.code, 404);
+  assert.deepEqual(args, [id, employee, false]);
+});
+
+test('evidence is saved in the request transaction before commit', async () => {
+  const queries = [];
+  const client = { release() {}, query: async (sql, args) => {
+    queries.push({ sql, args });
+    return { rows: sql.includes('INSERT INTO dtr_corrections') ? [{ id }] : [] };
+  } };
+  const router = createRouter({ db: { connect: async () => client }, shiftFor: async () => ({ startMinutes: 480, endMinutes: 1020 }) });
+  const res = await invoke(router, 'post', '/', { user: { id: employee },
+    file: { originalname: 'proof.pdf', buffer: Buffer.from('%PDF-1.4\n') },
+    body: { attendance_date: '2020-09-30', reason: 'Device was unavailable today.', requested_time_in: '2020-09-30T08:00:00+08:00' } });
+  assert.equal(res.code, 201);
+  const evidence = queries.findIndex(q => q.sql.includes('INSERT INTO dtr_correction_attachments'));
+  assert.ok(evidence > 0);
+  assert.equal(queries[evidence].args[0], id);
+  assert.equal(queries[evidence + 1].sql, 'COMMIT');
 });
