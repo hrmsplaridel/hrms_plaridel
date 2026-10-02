@@ -1,6 +1,6 @@
 const NOON_MINUTES = 12 * 60;
 const ONE_PM_MINUTES = 13 * 60;
-const { isOvernight, timeline, expectedNightMinutes } = require('./shiftTimeline');
+const { isOvernight, scheduledMinute, timeline, expectedNightMinutes } = require('./shiftTimeline');
 const VALID_PUNCH_MODES = new Set([
   'auto',
   'full_day',
@@ -246,6 +246,9 @@ function computeTotalHoursFromRecord(record, shiftInfo = null) {
   const breakIn = record.break_in ?? record.breakIn ?? null;
   const timeOut = record.time_out ?? record.timeOut ?? null;
   const shiftType = getShiftType(shiftInfo);
+  if (shiftType === 'full_day' && isOvernight(shiftInfo) && !timeIn && breakIn && timeOut) {
+    return computeTotalHours(null, timeOut, null, breakIn, 'pm_only');
+  }
   if (shiftType === 'single_session') {
     const session = resolveSingleSessionPunches(record);
     return computeTotalHours(session.timeIn, session.timeOut, null, null, shiftType);
@@ -297,13 +300,16 @@ function interpretPunchesForShift(punches, shiftInfo = null, timeZone) {
     const firstPunchMins = minutesFromMidnightInTimeZone(punches[0], timeZone);
     const pmStartThreshold =
       getExpectedPmStartMinutes(shiftInfo) ?? ONE_PM_MINUTES;
-    const isAfternoonFirstPunch = !isOvernight(shiftInfo) &&
-      firstPunchMins != null && firstPunchMins >= pmStartThreshold;
+    const overnight = isOvernight(shiftInfo);
+    const isAfternoonFirstPunch = firstPunchMins != null && (overnight
+      ? scheduledMinute(shiftInfo, firstPunchMins) >= timeline(shiftInfo).breakEndMinutes
+      : firstPunchMins >= pmStartThreshold);
 
     if (isAfternoonFirstPunch) {
       breakIn = punches[0];
       if (n >= 2) timeOut = punches[n - 1];
-      status = n >= 2 ? 'present' : 'incomplete';
+      // A completed second session does not supply the missing first session.
+      status = !overnight && n >= 2 ? 'present' : 'incomplete';
       return {
         timeIn,
         breakOut,
@@ -312,7 +318,7 @@ function interpretPunchesForShift(punches, shiftInfo = null, timeZone) {
         status,
         totalHours: computeTotalHours(timeIn, timeOut, breakOut, breakIn, 'pm_only'),
         punchCount: n,
-        shiftType: 'pm_only',
+        shiftType: overnight ? 'full_day' : 'pm_only',
       };
     }
 

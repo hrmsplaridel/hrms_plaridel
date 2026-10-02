@@ -7,6 +7,33 @@ const night = { startMinutes: 1200, endMinutes: 420, punchMode: 'single_session'
   captureWindowMinutes: 120 };
 const stamp = (date, time) => `${date}T${time}:00+08:00`;
 
+test('second-session-only night punches retain hours without double penalties', () => {
+  const shift = { ...night, startMinutes: 1320, punchMode: 'full_day',
+    breakStartMinutes: 120, breakEndMinutes: 180, graceMinutes: 0 };
+  for (const [arrival, departure, hours, late, under] of [
+    ['03:00', '07:00', 4, 0, 240],
+    ['03:15', '06:45', 3.5, 15, 255],
+  ]) {
+    const punches = [stamp('2026-10-01', arrival), stamp('2026-10-01', departure)];
+    const record = interpretPunchesForShift(punches, shift, 'Asia/Manila');
+    assert.equal(record.timeIn, null);
+    assert.equal(record.breakOut, null);
+    assert.equal(record.breakIn, punches[0]);
+    assert.equal(record.timeOut, punches[1]);
+    assert.equal(record.status, 'incomplete');
+    assert.equal(record.shiftType, 'full_day');
+    assert.equal(record.totalHours, hours);
+    assert.equal(computeTotalHoursFromRecord(record, shift), hours);
+    assert.deepEqual(overnightPenalties(shift, '2026-09-30', record,
+      stamp('2026-10-01', '08:00')), { lateMinutes: late, undertimeMinutes: under });
+  }
+  const partial = interpretPunchesForShift([stamp('2026-10-01', '03:00')], shift, 'Asia/Manila');
+  assert.equal(partial.breakIn, stamp('2026-10-01', '03:00'));
+  assert.equal(partial.timeOut, null);
+  assert.equal(partial.totalHours, 0);
+  assert.equal(partial.status, 'incomplete');
+});
+
 test('night shift validation permits two and four punches but rejects 24-hour shifts', () => {
   ensureSupportedShiftRange('20:00', '07:00');
   assert.throws(() => ensureSupportedShiftRange('20:00', '20:00'));
