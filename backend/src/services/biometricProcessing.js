@@ -580,7 +580,9 @@ async function processBiometricLogsToSummary(userIds, dateFrom, dateTo) {
   let removed = 0;
   let skipped = 0;
   const affected = [];
+  const reconciliationRetries = [];
 
+  try {
   for (const row of grouped.rows) {
     const { user_id, attendance_date, punches } = row;
     const attendanceDateStr = typeof attendance_date === 'string' ? attendance_date.slice(0, 10) : toDateStr(attendance_date);
@@ -840,6 +842,8 @@ async function processBiometricLogsToSummary(userIds, dateFrom, dateTo) {
         undertimeMinutes,
       };
       if (!hasBiometricSummaryChanged(existingRow, candidateSummary)) {
+        // Retry queueing if an earlier import saved the DTR but queueing failed.
+        reconciliationRetries.push({ userId: String(user_id), date: attendanceDateStr });
         skipped++;
         console.log('[biometricProcessing] SKIP (system summary unchanged)', {
           employee_id: user_id,
@@ -911,6 +915,11 @@ async function processBiometricLogsToSummary(userIds, dateFrom, dateTo) {
         source: existing.rows[0].source,
       });
     }
+  }
+
+  } finally {
+    const { enqueueBiometricReconciliation } = require('./dtrMonthEndReconciliation');
+    await enqueueBiometricReconciliation(pool, [...affected, ...reconciliationRetries], HRMS_TIMEZONE);
   }
 
   console.log('[biometricProcessing] Done:', { inserted, updated, removed, skipped });

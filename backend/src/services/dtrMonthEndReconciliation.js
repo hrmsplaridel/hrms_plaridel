@@ -290,7 +290,31 @@ async function recordReconciliationFailure(
   return result.rowCount || 0;
 }
 
+async function enqueueBiometricReconciliation(db, changes, timeZone = DEFAULT_TIME_ZONE) {
+  if (!changes.length) return 0;
+  await ensureDtrMonthEndReconciliationTable(db);
+  const result = await db.query(
+    `INSERT INTO dtr_month_end_reconciliation_queue (
+       employee_id, service_month, status, reason, required_at, updated_at
+     )
+     SELECT DISTINCT lad.user_id, lad.service_month, 'pending',
+            'biometric_attendance_changed', now(), now()
+       FROM jsonb_to_recordset($1::jsonb) AS changed("userId" uuid, date date)
+       JOIN leave_attendance_deductions lad
+         ON lad.user_id = changed."userId"
+        AND lad.service_month = date_trunc('month', changed.date)::date
+      WHERE lad.service_month < date_trunc('month', CURRENT_TIMESTAMP AT TIME ZONE $2)::date
+     ON CONFLICT (employee_id, service_month) DO UPDATE
+       SET status = 'pending', reason = EXCLUDED.reason,
+           required_at = now(), reconciled_at = NULL, last_error = NULL,
+           updated_at = now()`,
+    [JSON.stringify(changes), timeZone]
+  );
+  return result.rowCount || 0;
+}
+
 module.exports = {
+  enqueueBiometricReconciliation,
   DEFAULT_QUEUE_LIMIT,
   DEFAULT_TIME_ZONE,
   dateOnly,

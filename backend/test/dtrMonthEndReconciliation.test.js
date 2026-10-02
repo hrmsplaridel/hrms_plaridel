@@ -2,6 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const {
+  enqueueBiometricReconciliation,
   enqueueEmployeeRangeReconciliation,
   enqueueHolidayReconciliation,
   listPendingReconciliationEmployees,
@@ -10,6 +11,26 @@ const {
   resolveReconciliationMonth,
   serviceMonthForDate,
 } = require('../src/services/dtrMonthEndReconciliation');
+
+test('biometric reconciliation uses attendance month and only completed posted months', async () => {
+  const calls = [];
+  const db = { query: async (sql, params) => {
+    calls.push({ sql, params });
+    return { rowCount: 1, rows: [] };
+  } };
+  assert.equal(await enqueueBiometricReconciliation(db, []), 0);
+  assert.equal(calls.length, 0);
+  const changes = [{ userId: 'employee', date: '2026-09-30' }];
+  assert.equal(await enqueueBiometricReconciliation(db, changes), 1);
+  const queued = calls.at(-1);
+  assert.deepEqual(JSON.parse(queued.params[0]), changes);
+  assert.equal(queued.params[1], 'Asia/Manila');
+  assert.match(queued.sql, /JOIN leave_attendance_deductions/);
+  assert.match(queued.sql, /date_trunc\('month', changed.date\)/);
+  assert.match(queued.sql, /WHERE lad.service_month </);
+  assert.match(queued.sql, /ON CONFLICT \(employee_id, service_month\) DO UPDATE/);
+  assert.match(queued.sql, /reconciled_at = NULL/);
+});
 
 test('attendance dates resolve to their first-of-month reconciliation key', () => {
   assert.equal(serviceMonthForDate('2026-07-31'), '2026-07-01');

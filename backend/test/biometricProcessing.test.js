@@ -20,6 +20,10 @@ function withMockedModule(modulePath, exportsValue) {
 }
 
 function loadBiometricProcessing(query) {
+  const reconciliations = [];
+  const restoreReconciliation = withMockedModule('../src/services/dtrMonthEndReconciliation', {
+    enqueueBiometricReconciliation: async (_, changes) => { reconciliations.push(...changes); },
+  });
   const restoreDb = withMockedModule('../src/config/db', {
     pool: {
       query: query || (async () => {
@@ -37,7 +41,9 @@ function loadBiometricProcessing(query) {
 
   return {
     service,
+    reconciliations,
     restore() {
+      restoreReconciliation();
       delete require.cache[modulePath];
       restoreWs();
       restoreDb();
@@ -317,7 +323,7 @@ for (const source of ['system', 'manual', 'adjusted']) {
     const start = '2026-09-30T20:00:00+08:00';
     const end = '2026-10-01T07:00:00+08:00';
     let update = null;
-    const { service, restore } = loadBiometricProcessing(async (sql, params) => {
+    const { service, restore, reconciliations } = loadBiometricProcessing(async (sql, params) => {
       if (/FROM biometric_attendance_logs/.test(sql)) return { rows: [
         { user_id: employee, attendance_date: '2026-09-30', punches: [start] },
         { user_id: employee, attendance_date: '2026-10-01', punches: [end] },
@@ -335,6 +341,8 @@ for (const source of ['system', 'manual', 'adjusted']) {
     try {
       const result = await service.processBiometricLogsToSummary([employee], '2026-10-01', '2026-10-01');
       assert.equal(result.updated, source === 'system' ? 1 : 0);
+      assert.deepEqual(reconciliations.map(({ userId, date }) => ({ userId, date })),
+        source === 'system' ? [{ userId: employee, date: '2026-09-30' }] : []);
       if (source === 'system') {
         assert.equal(update[1], '2026-09-30');
         assert.equal(update[7], 11);
