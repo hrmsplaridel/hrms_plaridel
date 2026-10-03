@@ -6,6 +6,9 @@ require('dotenv').config({
 const express = require('express');
 const cors = require('cors');
 const { pool } = require('./config/db');
+const { Pool } = require('pg');
+const { HealthMonitor, createProbe } = require('./services/systemHealth');
+const { createSystemHealthRouter } = require('./routes/systemHealth');
 const { initWebSocket } = require('./websockets/biometricStream');
 const { initAppEventsWebSocket } = require('./websockets/appEvents');
 const { scheduleLeaveMonthlyAccrualCron } = require('./jobs/leaveMonthlyAccrualScheduler');
@@ -70,6 +73,22 @@ const { validateHolidayTemplateSchema } = require('./services/holidayTemplateSch
 
 const app = express();
 app.disable('x-powered-by');
+
+// Dedicated, bounded probe connection so an outage cannot exhaust the application pool.
+const healthDatabase = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  max: 1,
+  connectionTimeoutMillis: 5000,
+  query_timeout: 5000,
+  statement_timeout: 5000,
+  idleTimeoutMillis: 10000,
+  allowExitOnIdle: true,
+});
+healthDatabase.on('error', () => {}); // Failed probes are reported on the health page.
+const healthMonitor = new HealthMonitor({
+  directory: process.env.SYSTEM_HEALTH_DATA_DIR || path.resolve(__dirname, '../.system-health'),
+  probe: createProbe(healthDatabase, process.env.SYSTEM_HEALTH_DISK_PATH || path.resolve(__dirname, '../uploads')),
+});
 
 // Behind nginx/Caddy on Kamatera (HTTPS) so req.ip / rate limits see real client IP
 if (process.env.TRUST_PROXY === '1' || process.env.TRUST_PROXY === 'true') {
@@ -191,6 +210,7 @@ app.use('/api/calendar', calendarRoutes);
 app.use('/api/dtr-daily-summary', dtrDailySummaryRoutes);
 app.use('/api/dtr-corrections', require('./routes/dtrCorrections'));
 app.use('/api/system-audit', require('./routes/systemAudit'));
+app.use('/api/system-health', createSystemHealthRouter(healthMonitor));
 app.use('/api/account-creation-access', require('./routes/accountCreationAccess'));
 app.use('/api/dtr-access', require('./routes/dtrAccess'));
 app.use('/api/dtr-assistant', dtrAssistantRoutes);
@@ -275,6 +295,7 @@ async function startServer() {
   console.log('  GET  /api/rsp/storage/signed-url - admin signed attachment URL (service role)');
   console.log('  API  /api/rsp-ld-saved-entries/:table - RSP/L&D saved forms (admin JWT, PostgreSQL)');
   scheduleLeaveMonthlyAccrualCron(pool);
+  void healthMonitor.start();
   scheduleYearEndForcedLeaveCron(pool);
   scheduleAuthRefreshTokenCleanupCron(pool);
   // DocuTracker: server-side escalation worker (workflow control).
@@ -293,6 +314,10 @@ server.on('error', (err) => {
     process.exit(1);
   }
   throw err;
+});
+server.on('close', () => {
+  healthMonitor.stop();
+  void healthDatabase.end();
 });
 
 // Initialize WebSocket servers and route upgrade requests by path.
