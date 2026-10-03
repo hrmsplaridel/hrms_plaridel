@@ -6,7 +6,9 @@ import 'package:hrms_plaridel/features/dashboard/presentation/super_admin/dtr_ac
 
 void main() {
   final writes = <Map<String, dynamic>>[];
+  final accountWrites = <bool>[];
   var rejectSave = false;
+  var rejectAccountSave = false;
 
   setUpAll(() {
     TestWidgetsFlutterBinding.ensureInitialized();
@@ -15,7 +17,9 @@ void main() {
 
   setUp(() {
     writes.clear();
+    accountWrites.clear();
     rejectSave = false;
+    rejectAccountSave = false;
     ApiClient.instance.dio.interceptors.clear();
     ApiClient.instance.dio.interceptors.add(
       InterceptorsWrapper(
@@ -43,6 +47,44 @@ void main() {
                 },
               ),
             );
+            return;
+          }
+          if (options.method == 'GET' &&
+              options.path == '/api/account-creation-access') {
+            handler.resolve(
+              Response<Map<String, dynamic>>(
+                requestOptions: options,
+                data: {
+                  'admins': [
+                    {'id': 'admin-1', 'allowed': false},
+                  ],
+                },
+              ),
+            );
+            return;
+          }
+          if (options.method == 'PUT' &&
+              options.path == '/api/account-creation-access/admin-1') {
+            accountWrites.add((options.data as Map)['allowed'] == true);
+            if (rejectAccountSave) {
+              handler.reject(
+                DioException(
+                  requestOptions: options,
+                  response: Response(
+                    requestOptions: options,
+                    statusCode: 500,
+                    data: {'error': 'Save failed'},
+                  ),
+                ),
+              );
+            } else {
+              handler.resolve(
+                Response<Map<String, dynamic>>(
+                  requestOptions: options,
+                  data: {'allowed': accountWrites.last},
+                ),
+              );
+            }
             return;
           }
           if (options.method == 'PUT' &&
@@ -104,7 +146,7 @@ void main() {
     tester,
   ) async {
     await openPage(tester);
-    expect(find.byType(CheckboxListTile), findsNWidgets(7));
+    expect(find.byType(CheckboxListTile), findsNWidgets(8));
 
     await tester.tap(find.text('Manage DTR logs'));
     await tester.tap(find.text('Employee profiles'));
@@ -120,6 +162,63 @@ void main() {
     expect(writes.single['leave_allowed'], isTrue);
     expect(find.text('Unsaved'), findsNothing);
     expect(find.text('DTR permissions saved.'), findsOneWidget);
+  });
+
+  testWidgets(
+    'account creation and DTR access share one compact administrator card',
+    (tester) async {
+      await openPage(tester);
+      expect(find.text('Manage Access'), findsOneWidget);
+      expect(find.text('Account creation'), findsOneWidget);
+      expect(find.byType(TabBar), findsNothing);
+      expect(find.byType(CheckboxListTile), findsNWidgets(8));
+
+      await tester.tap(find.text('Account creation'));
+      await tester.pumpAndSettle();
+      expect(accountWrites, [true]);
+      expect(
+        tester
+            .widget<CheckboxListTile>(
+              find.widgetWithText(CheckboxListTile, 'Account creation'),
+            )
+            .value,
+        isTrue,
+      );
+      expect(writes, isEmpty);
+    },
+  );
+
+  testWidgets('failed account creation save leaves its checkbox unchanged', (
+    tester,
+  ) async {
+    rejectAccountSave = true;
+    await openPage(tester);
+    await tester.tap(find.text('Account creation'));
+    await tester.pumpAndSettle();
+    expect(accountWrites, [true]);
+    expect(
+      tester
+          .widget<CheckboxListTile>(
+            find.widgetWithText(CheckboxListTile, 'Account creation'),
+          )
+          .value,
+      isFalse,
+    );
+    expect(find.textContaining('Save failed'), findsOneWidget);
+  });
+
+  testWidgets('accordion keeps one rounded border during opening and closing', (
+    tester,
+  ) async {
+    await openPage(tester);
+    final tile = tester.widget<ExpansionTile>(find.byType(ExpansionTile));
+    expect(tile.shape, isA<RoundedRectangleBorder>());
+    expect(tile.collapsedShape, tile.shape);
+    expect(tile.clipBehavior, Clip.antiAlias);
+    await tester.tap(find.text('Admin User'));
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(tester.takeException(), isNull);
+    await tester.pumpAndSettle();
   });
 
   testWidgets('failed reviewer-protected save keeps draft for correction', (

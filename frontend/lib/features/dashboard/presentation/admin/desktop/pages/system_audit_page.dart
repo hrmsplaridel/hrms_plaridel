@@ -4,9 +4,14 @@ import 'package:flutter/material.dart';
 import 'package:hrms_plaridel/core/api/client.dart';
 import 'package:hrms_plaridel/core/api/user_facing_api_error.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
+import 'system_audit_description.dart';
 
 class SystemAuditPage extends StatefulWidget {
-  const SystemAuditPage({super.key});
+  const SystemAuditPage({super.key, this.load, this.pickDateRange});
+
+  final Future<Map<String, dynamic>> Function(Map<String, dynamic> query)? load;
+  final Future<DateTimeRange?> Function(BuildContext, DateTimeRange?)?
+  pickDateRange;
 
   @override
   State<SystemAuditPage> createState() => _SystemAuditPageState();
@@ -22,6 +27,8 @@ class _SystemAuditPageState extends State<SystemAuditPage> {
   int _total = 0;
   int _loadVersion = 0;
   bool _loading = true;
+  bool _hideViews = true;
+  DateTimeRange? _dateRange;
   String? _error;
 
   @override
@@ -45,19 +52,34 @@ class _SystemAuditPageState extends State<SystemAuditPage> {
       _error = null;
     });
     try {
-      final response = await ApiClient.instance.get<Map<String, dynamic>>(
-        '/api/system-audit',
-        queryParameters: {
-          'page': _page,
-          'limit': _pageSize,
-          if (_actor.text.trim().isNotEmpty) 'actor': _actor.text.trim(),
-          if (_action.text.trim().isNotEmpty) 'action': _action.text.trim(),
-          if (_entity.text.trim().isNotEmpty)
-            'entity_type': _entity.text.trim(),
+      final query = <String, dynamic>{
+        'page': _page,
+        'limit': _pageSize,
+        if (_hideViews) 'hide_views': '1',
+        if (_dateRange != null) ...{
+          'date_from': DateTime(
+            _dateRange!.start.year,
+            _dateRange!.start.month,
+            _dateRange!.start.day,
+          ).toUtc().toIso8601String(),
+          'date_before': DateTime(
+            _dateRange!.end.year,
+            _dateRange!.end.month,
+            _dateRange!.end.day + 1,
+          ).toUtc().toIso8601String(),
         },
-      );
+        if (_actor.text.trim().isNotEmpty) 'actor': _actor.text.trim(),
+        if (_action.text.trim().isNotEmpty) 'action': _action.text.trim(),
+        if (_entity.text.trim().isNotEmpty) 'entity_type': _entity.text.trim(),
+      };
+      final data = widget.load != null
+          ? await widget.load!(query)
+          : (await ApiClient.instance.get<Map<String, dynamic>>(
+                  '/api/system-audit',
+                  queryParameters: query,
+                )).data ??
+                {};
       if (!mounted || version != _loadVersion) return;
-      final data = response.data ?? {};
       setState(() {
         _entries = (data['entries'] as List? ?? [])
             .map((row) => Map<String, dynamic>.from(row as Map))
@@ -80,6 +102,46 @@ class _SystemAuditPageState extends State<SystemAuditPage> {
     _load();
   }
 
+  Future<void> _selectDates() async {
+    final range = widget.pickDateRange != null
+        ? await widget.pickDateRange!(context, _dateRange)
+        : await showDateRangePicker(
+            context: context,
+            firstDate: DateTime(2000),
+            lastDate: DateTime.now(),
+            initialDateRange: _dateRange,
+            helpText: 'Select audit log dates',
+            saveText: 'Apply',
+          );
+    if (!mounted || range == null) return;
+    setState(() => _dateRange = range);
+    _applyFilters();
+  }
+
+  String _dateLabel() {
+    final range = _dateRange;
+    if (range == null) return 'Select dates';
+    const months = [
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec',
+    ];
+    String day(DateTime date) => '${months[date.month - 1]} ${date.day}';
+    final startYear = range.start.year == range.end.year
+        ? ''
+        : ', ${range.start.year}';
+    return '${day(range.start)}$startYear – ${day(range.end)}, ${range.end.year}';
+  }
+
   String _when(dynamic value) {
     final date = DateTime.tryParse(value?.toString() ?? '')?.toLocal();
     if (date == null) return '-';
@@ -89,6 +151,7 @@ class _SystemAuditPageState extends State<SystemAuditPage> {
   }
 
   void _showDetails(Map<String, dynamic> entry) {
+    final description = describeAuditEntry(entry);
     final details = entry['details'];
     String formatted;
     try {
@@ -101,15 +164,53 @@ class _SystemAuditPageState extends State<SystemAuditPage> {
     showDialog<void>(
       context: context,
       builder: (context) => AlertDialog(
-        title: Text(entry['action']?.toString() ?? 'Audit entry'),
+        title: Text(description.title),
         content: SizedBox(
           width: 620,
           child: SingleChildScrollView(
-            child: SelectableText(
-              'Actor: ${entry['actor_name'] ?? entry['actor_email'] ?? 'System'}\n'
-              'Date: ${_when(entry['created_at'])}\n'
-              'Entity: ${entry['entity_type'] ?? '-'}\n'
-              'ID: ${entry['entity_id'] ?? '-'}\n\n$formatted',
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  description.summary,
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
+                const SizedBox(height: 14),
+                SelectableText(
+                  'Who: ${entry['actor_name'] ?? entry['actor_email'] ?? 'System'}\n'
+                  'When: ${_when(entry['created_at'])}\n'
+                  'Affected: ${description.target ?? auditLabel(entry['entity_type']?.toString())}',
+                ),
+                if (description.changes.isNotEmpty) ...[
+                  const SizedBox(height: 16),
+                  Text(
+                    'What changed',
+                    style: Theme.of(context).textTheme.titleSmall,
+                  ),
+                  const SizedBox(height: 8),
+                  for (final change in description.changes)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 5),
+                      child: SelectableText(change),
+                    ),
+                ],
+                const SizedBox(height: 12),
+                ExpansionTile(
+                  tilePadding: EdgeInsets.zero,
+                  title: const Text('Technical details'),
+                  children: [
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: SelectableText(
+                        'Action code: ${entry['action'] ?? '-'}\n'
+                        'Entity type: ${entry['entity_type'] ?? '-'}\n'
+                        'Entity ID: ${entry['entity_id'] ?? '-'}\n\n$formatted',
+                      ),
+                    ),
+                  ],
+                ),
+              ],
             ),
           ),
         ),
@@ -147,15 +248,28 @@ class _SystemAuditPageState extends State<SystemAuditPage> {
               ),
             ],
           ),
+          Text(
+            'See who changed access or records, what changed, and when.',
+            style: TextStyle(color: muted),
+          ),
           const SizedBox(height: 18),
           Wrap(
             spacing: 10,
             runSpacing: 10,
             crossAxisAlignment: WrapCrossAlignment.center,
             children: [
-              _filter(_actor, 'Actor', Icons.person_outline),
-              _filter(_action, 'Action', Icons.history),
-              _filter(_entity, 'Entity type', Icons.category_outlined),
+              _filter(_actor, 'Person who acted', Icons.person_outline),
+              _filter(_action, 'Action code (e.g. dtr)', Icons.history),
+              _filter(
+                _entity,
+                'Record type (e.g. user)',
+                Icons.category_outlined,
+              ),
+              OutlinedButton.icon(
+                onPressed: _selectDates,
+                icon: const Icon(Icons.date_range_outlined),
+                label: Text(_dateLabel()),
+              ),
               FilledButton.icon(
                 onPressed: _applyFilters,
                 icon: const Icon(Icons.search),
@@ -166,9 +280,28 @@ class _SystemAuditPageState extends State<SystemAuditPage> {
                   _actor.clear();
                   _action.clear();
                   _entity.clear();
+                  setState(() {
+                    _dateRange = null;
+                    _hideViews = true;
+                  });
                   _applyFilters();
                 },
                 child: const Text('Reset'),
+              ),
+              Tooltip(
+                message:
+                    'Include records created when an administrator opens or searches this Audit Log. This does not change the page number.',
+                child: FilterChip(
+                  label: const Text('Include audit log visits'),
+                  selected: !_hideViews,
+                  onSelected: (show) {
+                    setState(() {
+                      _hideViews = !show;
+                      _page = 1;
+                    });
+                    _load();
+                  },
+                ),
               ),
             ],
           ),
@@ -191,6 +324,7 @@ class _SystemAuditPageState extends State<SystemAuditPage> {
                           Divider(height: 1, color: border),
                       itemBuilder: (context, index) {
                         final entry = _entries[index];
+                        final description = describeAuditEntry(entry);
                         final actor =
                             entry['actor_name'] ??
                             entry['actor_email'] ??
@@ -198,9 +332,10 @@ class _SystemAuditPageState extends State<SystemAuditPage> {
                         final narrow = MediaQuery.sizeOf(context).width < 1100;
                         return ListTile(
                           dense: true,
-                          title: Text(entry['action']?.toString() ?? '-'),
+                          title: Text(description.title),
                           subtitle: Text(
-                            '$actor | ${entry['entity_type'] ?? '-'}'
+                            '${description.summary}\n'
+                            'By $actor${description.target == null ? '' : '  •  ${description.target}'}'
                             '${narrow ? '\n${_when(entry['created_at'])}' : ''}',
                           ),
                           trailing: Row(

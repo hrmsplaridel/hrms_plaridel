@@ -22,8 +22,10 @@ class _DtrAccessPageState extends State<DtrAccessPage> {
   };
 
   List<Map<String, dynamic>> _admins = [];
+  Map<String, bool> _accountAccess = {};
   final Map<String, Map<String, bool>> _drafts = {};
   final Set<String> _saving = {};
+  final Set<String> _accountSaving = {};
   bool _loading = true;
   String? _error;
 
@@ -76,17 +78,54 @@ class _DtrAccessPageState extends State<DtrAccessPage> {
       final response = await ApiClient.instance.get<Map<String, dynamic>>(
         '/api/dtr-access',
       );
+      final accountResponse = await ApiClient.instance
+          .get<Map<String, dynamic>>('/api/account-creation-access');
       if (!mounted) return;
       setState(() {
         _admins = (response.data?['admins'] as List? ?? [])
             .map((value) => Map<String, dynamic>.from(value as Map))
             .toList();
+        _accountAccess = {
+          for (final row in accountResponse.data?['admins'] as List? ?? [])
+            (row as Map)['id'].toString(): row['allowed'] == true,
+        };
         _drafts.clear();
       });
     } catch (error) {
       if (mounted) setState(() => _error = userFacingApiError(error));
     } finally {
       if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  Future<void> _setAccountAccess(
+    Map<String, dynamic> admin,
+    bool allowed,
+  ) async {
+    final id = admin['id'].toString();
+    if (_accountSaving.contains(id)) return;
+    setState(() => _accountSaving.add(id));
+    try {
+      await ApiClient.instance.put<Map<String, dynamic>>(
+        '/api/account-creation-access/$id',
+        data: {'allowed': allowed},
+      );
+      if (!mounted) return;
+      setState(() => _accountAccess[id] = allowed);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Account creation ${allowed ? 'enabled' : 'disabled'} for ${admin['full_name'] ?? admin['email']}.',
+          ),
+        ),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(userFacingApiError(error))));
+    } finally {
+      if (mounted) setState(() => _accountSaving.remove(id));
     }
   }
 
@@ -133,18 +172,24 @@ class _DtrAccessPageState extends State<DtrAccessPage> {
             children: [
               Expanded(
                 child: Text(
-                  'DTR Access',
+                  'Manage Access',
                   style: Theme.of(context).textTheme.headlineSmall,
                 ),
               ),
               IconButton(
-                tooltip: 'Refresh DTR access',
-                onPressed: _loading || _saving.isNotEmpty
+                tooltip: 'Refresh administrator access',
+                onPressed:
+                    _loading || _saving.isNotEmpty || _accountSaving.isNotEmpty
                     ? null
                     : () => _load(confirmDiscard: true),
                 icon: const Icon(Icons.refresh),
               ),
             ],
+          ),
+          const SizedBox(height: 6),
+          Text(
+            'Set who can create accounts and which DTR features each administrator can use.',
+            style: TextStyle(color: muted),
           ),
           const SizedBox(height: 20),
           Expanded(
@@ -167,13 +212,20 @@ class _DtrAccessPageState extends State<DtrAccessPage> {
                       final name = admin['full_name']?.toString().trim() ?? '';
                       final email = admin['email']?.toString() ?? '';
                       final displayName = name.isEmpty ? email : name;
-                      return DecoratedBox(
-                        decoration: BoxDecoration(
-                          border: Border.all(color: hairline),
-                          borderRadius: BorderRadius.circular(6),
+                      final tileShape = RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(6),
+                      );
+                      return Material(
+                        color: AppTheme.dashCanvasOf(context),
+                        shape: tileShape.copyWith(
+                          side: BorderSide(color: hairline),
                         ),
+                        clipBehavior: Clip.antiAlias,
                         child: ExpansionTile(
                           key: ValueKey(id),
+                          shape: tileShape,
+                          collapsedShape: tileShape,
+                          clipBehavior: Clip.antiAlias,
                           tilePadding: const EdgeInsets.symmetric(
                             horizontal: 16,
                             vertical: 4,
@@ -220,6 +272,38 @@ class _DtrAccessPageState extends State<DtrAccessPage> {
                           ),
                           children: [
                             Divider(height: 20, color: hairline),
+                            CheckboxListTile(
+                              dense: true,
+                              controlAffinity: ListTileControlAffinity.leading,
+                              contentPadding: EdgeInsets.zero,
+                              title: const Text('Account creation'),
+                              subtitle: const Text(
+                                'Can create employee and administrator accounts. Changes save immediately.',
+                              ),
+                              value: _accountAccess[id] ?? false,
+                              onChanged: active && !_accountSaving.contains(id)
+                                  ? (value) =>
+                                        _setAccountAccess(admin, value == true)
+                                  : null,
+                              secondary: _accountSaving.contains(id)
+                                  ? const SizedBox(
+                                      width: 20,
+                                      height: 20,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                      ),
+                                    )
+                                  : null,
+                            ),
+                            Divider(height: 20, color: hairline),
+                            Align(
+                              alignment: Alignment.centerLeft,
+                              child: Text(
+                                'DTR permissions',
+                                style: Theme.of(context).textTheme.titleSmall,
+                              ),
+                            ),
+                            const SizedBox(height: 10),
                             LayoutBuilder(
                               builder: (context, constraints) {
                                 final columns = constraints.maxWidth >= 1000

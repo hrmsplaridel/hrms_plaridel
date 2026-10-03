@@ -8,7 +8,6 @@ import 'package:hrms_plaridel/shared/widgets/collapsible_dashboard_sidebar.dart'
 import 'package:hrms_plaridel/shared/widgets/dashboard_header_actions.dart';
 import 'package:hrms_plaridel/shared/widgets/portal_sidebar_brand.dart';
 import 'package:hrms_plaridel/shared/widgets/sign_out_flow.dart';
-import 'package:hrms_plaridel/features/dashboard/presentation/super_admin/account_creation_access_page.dart';
 import 'package:hrms_plaridel/features/dashboard/presentation/super_admin/dtr_access_page.dart';
 import 'package:hrms_plaridel/features/dashboard/presentation/super_admin/system_health_page.dart';
 
@@ -34,24 +33,7 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
       return const SystemHealthPage();
     }
     if (_selectedPage == _SuperAdminPage.accountAccess) {
-      return const DefaultTabController(
-        length: 2,
-        child: Column(
-          children: [
-            TabBar(
-              tabs: [
-                Tab(text: 'Account Creation'),
-                Tab(text: 'DTR Access'),
-              ],
-            ),
-            Expanded(
-              child: TabBarView(
-                children: [AccountCreationAccessPage(), DtrAccessPage()],
-              ),
-            ),
-          ],
-        ),
-      );
+      return const DtrAccessPage();
     }
     if (_selectedPage == _SuperAdminPage.auditLog) {
       return const SystemAuditPage();
@@ -185,7 +167,7 @@ class _SuperAdminSidebar extends StatelessWidget {
                 ),
                 DashboardSidebarNavTile(
                   icon: Icons.admin_panel_settings_outlined,
-                  label: 'Account Access',
+                  label: 'Manage Access',
                   selected: selectedPage == _SuperAdminPage.accountAccess,
                   onTap: () => select(_SuperAdminPage.accountAccess),
                 ),
