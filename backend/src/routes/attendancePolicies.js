@@ -2,6 +2,7 @@ const express = require('express');
 const { pool } = require('../config/db');
 const { authMiddleware } = require('../middleware/auth');
 const { requireAdmin } = require('../middleware/rbac');
+const { requireDtrManageIfAdmin } = require('../middleware/dtrAccess');
 const {
   invalidateAttendancePolicyCache,
 } = require('../services/attendancePolicyCache');
@@ -144,7 +145,7 @@ router.get('/', protect, async (req, res) => {
 });
 
 // POST /api/attendance-policies - create (admin only)
-router.post('/', protect, requireAdmin, async (req, res) => {
+router.post('/', protect, requireAdmin, requireDtrManageIfAdmin, async (req, res) => {
   let client;
   try {
     const body = req.body || {};
@@ -256,7 +257,7 @@ router.post('/', protect, requireAdmin, async (req, res) => {
 });
 
 // PUT /api/attendance-policies/:id - update (admin only)
-router.put('/:id', protect, requireAdmin, async (req, res) => {
+router.put('/:id', protect, requireAdmin, requireDtrManageIfAdmin, async (req, res) => {
   let client;
   try {
     const { id } = req.params;
@@ -443,7 +444,7 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
 });
 
 // DELETE /api/attendance-policies/:id (admin only)
-router.delete('/:id', protect, requireAdmin, async (req, res) => {
+router.delete('/:id', protect, requireAdmin, requireDtrManageIfAdmin, async (req, res) => {
   try {
     const result = await pool.query(
       `DELETE FROM attendance_policies p

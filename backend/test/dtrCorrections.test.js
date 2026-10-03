@@ -3,7 +3,8 @@ const assert = require('node:assert/strict');
 const { createRouter: createBackendRouter } = require('../src/routes/dtrCorrections');
 const createRouter = options => createBackendRouter({
   notifications: { submitted: async () => {}, reviewed: async () => {} },
-  reviewers: async () => [{ id: reviewer }], ...options,
+  reviewers: async () => [{ id: reviewer }],
+  featureAccess: async () => ({ corrections_allowed: true, approvals_allowed: true }), ...options,
 });
 const employee = '11111111-1111-4111-8111-111111111111';
 const reviewer = '22222222-2222-4222-8222-222222222222';
@@ -91,6 +92,20 @@ test('only admins can configure two or more eligible reviewers', async () => {
   assert.equal(saved.code, 200);
   assert.ok(queries.some(sql => sql.includes('INSERT INTO dtr_correction_reviewer_configs')));
   assert.equal(queries.at(-1), 'COMMIT');
+});
+test('an admin without DTR Corrections access cannot be assigned as reviewer', async () => {
+  const client = { release() {}, async query(sql, values) {
+    if (sql.includes('FROM users WHERE id = ANY')) return { rows: values[0].map(id => ({ id })) };
+    if (sql.includes('LEFT JOIN dtr_admin_access')) return { rows: [{ id: reviewer }] };
+    return { rows: [] };
+  } };
+  const router = createRouter({ db: { connect: async () => client } });
+  const result = await invoke(router, 'put', '/reviewers', {
+    user: { id: reviewer, role: 'admin' },
+    body: { effective_from: '2099-01-01', reviewer_ids: [reviewer, employee] },
+  });
+  assert.equal(result.code, 409);
+  assert.match(result.body.error, /Enable DTR Corrections access/);
 });
 test('employee history is scoped to authenticated employee', async () => {
   let args;

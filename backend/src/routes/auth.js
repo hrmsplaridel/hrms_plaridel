@@ -240,66 +240,8 @@ async function issueTokensForUser(user, req, db = pool, options = {}) {
   return { accessToken, refreshToken };
 }
 
-/**
- * POST /auth/register
- * Body: { email, password, fullName?, role? }
- */
-router.post('/register', authRegisterLimiter, async (req, res) => {
-  try {
-    const { email, password, fullName, role } = req.body;
-    if (!email || !password) {
-      return res.status(400).json({ error: 'Email and password are required' });
-    }
-    if (role && role !== 'employee') {
-      return res.status(403).json({ error: 'Privileged accounts can only be created by an administrator' });
-    }
-    if (typeof password !== 'string' || password.length < 8) {
-      return res.status(400).json({ error: 'Password must be at least 8 characters' });
-    }
-
-    const passwordHash = await bcrypt.hash(password, SALT_ROUNDS);
-
-    const result = await pool.query(
-      `INSERT INTO users (email, password_hash, role, full_name, is_active)
-       VALUES ($1, $2, $3, $4, true)
-       RETURNING id, email, role, full_name, avatar_path, is_active, created_at`,
-      [email.trim().toLowerCase(), passwordHash, 'employee', fullName || null]
-    );
-    const user = result.rows[0];
-
-    try {
-      // VL/SL: earned credits come from monthly accrual only (1.25/mo each); no static seed.
-      await pool.query(
-        `INSERT INTO leave_balances (user_id, leave_type, earned_days, used_days, pending_days, adjusted_days)
-         VALUES ($1::uuid, 'vacationLeave', 0, 0, 0, 0), ($1::uuid, 'sickLeave', 0, 0, 0, 0)
-         ON CONFLICT (user_id, leave_type) DO NOTHING`,
-        [user.id]
-      );
-    } catch (lbErr) {
-      console.warn('[auth/register] Could not create default leave balances:', lbErr.message);
-    }
-
-    const { accessToken, refreshToken } = await issueTokensForUser(user, req);
-
-    res.status(201).json({
-      token: accessToken,
-      refreshToken,
-      user: {
-        id: user.id,
-        email: user.email,
-        role: user.role,
-        full_name: user.full_name,
-        avatar_path: user.avatar_path,
-        is_active: user.is_active,
-      },
-    });
-  } catch (err) {
-    if (err.code === '23505') {
-      return res.status(409).json({ error: 'Email already registered' });
-    }
-    console.error('[auth/register]', err);
-    res.status(500).json({ error: 'Registration failed' });
-  }
+router.post('/register', authRegisterLimiter, (_req, res) => {
+  res.status(403).json({ error: 'Accounts must be created by an authorized administrator' });
 });
 
 /**
@@ -333,13 +275,13 @@ router.post('/login', authLoginLimiter, async (req, res) => {
     }
 
     const normalizedRole = String(user.role || '').toLowerCase();
-    const privileged = normalizedRole === 'admin' || normalizedRole === 'hr';
+    const privileged = normalizedRole === 'admin' || normalizedRole === 'hr' || normalizedRole === 'super_admin';
     if (
       privileged &&
       isMobileClient(req.get('user-agent'), req.get('x-hrms-device'))
     ) {
       return res.status(403).json({
-        error: 'Admin and HR accounts can only sign in on a desktop computer.',
+        error: 'Administrative accounts can only sign in on a desktop computer.',
       });
     }
 
@@ -421,14 +363,14 @@ router.post('/refresh', authTokenLimiter, async (req, res) => {
     }
 
     const normalizedRole = String(user.role || '').toLowerCase();
-    const privileged = normalizedRole === 'admin' || normalizedRole === 'hr';
+    const privileged = normalizedRole === 'admin' || normalizedRole === 'hr' || normalizedRole === 'super_admin';
     if (
       privileged &&
       isMobileClient(req.get('user-agent'), req.get('x-hrms-device'))
     ) {
       await client.query('ROLLBACK');
       return res.status(403).json({
-        error: 'Admin and HR accounts can only sign in on a desktop computer.',
+        error: 'Administrative accounts can only sign in on a desktop computer.',
       });
     }
 

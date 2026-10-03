@@ -5,7 +5,7 @@ const fs = require('fs');
 const { v4: uuidv4 } = require('uuid');
 const { pool } = require('../config/db');
 const { authMiddleware } = require('../middleware/auth');
-const { requireAdmin } = require('../middleware/rbac');
+const { requireAdminOrSuperAdmin } = require('../middleware/rbac');
 
 const router = express.Router();
 
@@ -165,7 +165,7 @@ router.post('/avatar', authMiddleware, upload.single('file'), async (req, res) =
 router.post(
   '/avatar/for/:userId',
   authMiddleware,
-  requireAdmin,
+  requireAdminOrSuperAdmin,
   upload.single('file'),
   async (req, res) => {
     let avatarUpdated = false;

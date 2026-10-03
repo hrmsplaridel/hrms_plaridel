@@ -2,6 +2,7 @@ const express = require('express');
 const { pool } = require('../config/db');
 const { authMiddleware } = require('../middleware/auth');
 const { requireAdmin } = require('../middleware/rbac');
+const { requireDtrManageIfAdmin } = require('../middleware/dtrAccess');
 const {
   defaultWorkingDay,
   isIsoDate,
@@ -19,7 +20,7 @@ function cleanUuid(value) {
 }
 
 // GET /api/weekly-schedules?week_start=YYYY-MM-DD&department_id=<uuid>&q=<text>
-router.get('/', protect, requireAdmin, async (req, res) => {
+router.get('/', protect, requireAdmin, requireDtrManageIfAdmin, async (req, res) => {
   try {
     const weekStart = String(req.query.week_start || '').trim();
     const dates = weekDates(weekStart);
@@ -119,7 +120,7 @@ router.get('/', protect, requireAdmin, async (req, res) => {
 });
 
 // PUT /api/weekly-schedules/:employeeId/:weekStart
-router.put('/:employeeId/:weekStart', protect, requireAdmin, async (req, res) => {
+router.put('/:employeeId/:weekStart', protect, requireAdmin, requireDtrManageIfAdmin, async (req, res) => {
   let client;
   try {
     const employeeId = cleanUuid(req.params.employeeId);

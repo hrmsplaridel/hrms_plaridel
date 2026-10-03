@@ -2,6 +2,7 @@ const express = require('express');
 const { pool } = require('../config/db');
 const { authMiddleware } = require('../middleware/auth');
 const { requireAdmin } = require('../middleware/rbac');
+const { requireDtrManageIfAdmin } = require('../middleware/dtrAccess');
 const { normalizePunchMode } = require('../services/shiftAttendance');
 const {
   ShiftLifecycleError,
@@ -95,7 +96,7 @@ router.get('/', protect, requireAdmin, async (req, res) => {
 });
 
 // POST /api/shifts - create (admin only)
-router.post('/', protect, requireAdmin, async (req, res) => {
+router.post('/', protect, requireAdmin, requireDtrManageIfAdmin, async (req, res) => {
   let client;
   try {
     const { name, start_time, end_time, break_end, punch_mode, grace_period_minutes, working_days, is_active = true } = req.body;
@@ -187,7 +188,7 @@ router.post('/', protect, requireAdmin, async (req, res) => {
 });
 
 // PUT /api/shifts/:id - update (admin only)
-router.put('/:id', protect, requireAdmin, async (req, res) => {
+router.put('/:id', protect, requireAdmin, requireDtrManageIfAdmin, async (req, res) => {
   let client;
   try {
     const { id } = req.params;
@@ -368,7 +369,7 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
 });
 
 // DELETE /api/shifts/:id (admin only)
-router.delete('/:id', protect, requireAdmin, async (req, res) => {
+router.delete('/:id', protect, requireAdmin, requireDtrManageIfAdmin, async (req, res) => {
   let client;
   try {
     client = await pool.connect();

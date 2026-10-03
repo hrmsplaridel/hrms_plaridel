@@ -4,6 +4,7 @@ const path = require('path');
 const multer = require('multer');
 const { pool } = require('../config/db');
 const { authMiddleware } = require('../middleware/auth');
+const { requireDtrFeatureIfAdmin } = require('../middleware/dtrAccess');
 const { requireAdminOrHr } = require('../middleware/rbac');
 const {
   assertFinalLeaveReviewer,
@@ -919,7 +920,7 @@ router.get('/types', protect, async (req, res) => {
 });
 
 // POST /api/locator-slips/types — admin/HR creates a configurable locator type.
-router.post('/types', protect, requireAdminOrHr, async (req, res) => {
+router.post('/types', protect, requireAdminOrHr, requireDtrFeatureIfAdmin('locator_allowed'), async (req, res) => {
   try {
     const payload = locatorTypePayloadFromBody(req.body || {});
     const inserted = await pool.query(
@@ -956,7 +957,7 @@ router.post('/types', protect, requireAdminOrHr, async (req, res) => {
 });
 
 // PUT /api/locator-slips/types/:id — admin/HR updates labels and rules.
-router.put('/types/:id', protect, requireAdminOrHr, async (req, res) => {
+router.put('/types/:id', protect, requireAdminOrHr, requireDtrFeatureIfAdmin('locator_allowed'), async (req, res) => {
   try {
     const existingQ = await pool.query(
       'SELECT * FROM locator_request_types WHERE id = $1::uuid',
@@ -1003,7 +1004,7 @@ router.put('/types/:id', protect, requireAdminOrHr, async (req, res) => {
 });
 
 // DELETE /api/locator-slips/types/:id — delete unused custom type, otherwise deactivate it.
-router.delete('/types/:id', protect, requireAdminOrHr, async (req, res) => {
+router.delete('/types/:id', protect, requireAdminOrHr, requireDtrFeatureIfAdmin('locator_allowed'), async (req, res) => {
   try {
     const existingQ = await pool.query(
       'SELECT * FROM locator_request_types WHERE id = $1::uuid',
@@ -2415,7 +2416,7 @@ router.patch('/:id/department-head-return', protect, async (req, res) => {
 });
 
 // GET /api/locator-slips/admin
-router.get('/admin', protect, requireAdminOrHr, async (req, res) => {
+router.get('/admin', protect, requireAdminOrHr, requireDtrFeatureIfAdmin('locator_allowed'), async (req, res) => {
   try {
     const parsedFilters = parseLocatorAdminFilters(req.query);
     if (!parsedFilters.ok) {
@@ -2561,7 +2562,7 @@ router.get('/admin', protect, requireAdminOrHr, async (req, res) => {
 });
 
 // PATCH /api/locator-slips/:id/return-for-correction
-router.patch('/:id/return-for-correction', protect, requireAdminOrHr, async (req, res) => {
+router.patch('/:id/return-for-correction', protect, requireAdminOrHr, requireDtrFeatureIfAdmin('locator_allowed'), async (req, res) => {
   const reviewerId = req.user?.id;
   if (!reviewerId) return res.status(401).json({ error: 'Not authenticated' });
   const { id } = req.params;
@@ -2655,7 +2656,7 @@ router.patch('/:id/return-for-correction', protect, requireAdminOrHr, async (req
 });
 
 // PATCH /api/locator-slips/:id/approve
-router.patch('/:id/approve', protect, requireAdminOrHr, async (req, res) => {
+router.patch('/:id/approve', protect, requireAdminOrHr, requireDtrFeatureIfAdmin('locator_allowed'), async (req, res) => {
   const reviewerId = req.user?.id;
   if (!reviewerId) return res.status(401).json({ error: 'Not authenticated' });
   const { id } = req.params;
@@ -2785,7 +2786,7 @@ router.patch('/:id/approve', protect, requireAdminOrHr, async (req, res) => {
 // PATCH /api/locator-slips/:id/revoke
 // HR/Admin may undo an accidental final approval within three days. The
 // revoked status immediately removes locator coverage without deleting punches.
-router.patch('/:id/revoke', protect, requireAdminOrHr, async (req, res) => {
+router.patch('/:id/revoke', protect, requireAdminOrHr, requireDtrFeatureIfAdmin('locator_allowed'), async (req, res) => {
   const reviewerId = req.user?.id;
   if (!reviewerId) return res.status(401).json({ error: 'Not authenticated' });
   const { id } = req.params;
@@ -2901,7 +2902,7 @@ router.patch('/:id/revoke', protect, requireAdminOrHr, async (req, res) => {
 });
 
 // PATCH /api/locator-slips/:id/reject
-router.patch('/:id/reject', protect, requireAdminOrHr, async (req, res) => {
+router.patch('/:id/reject', protect, requireAdminOrHr, requireDtrFeatureIfAdmin('locator_allowed'), async (req, res) => {
   const reviewerId = req.user?.id;
   if (!reviewerId) return res.status(401).json({ error: 'Not authenticated' });
   const { id } = req.params;

@@ -2,6 +2,7 @@ const express = require('express');
 const { pool } = require('../config/db');
 const { authMiddleware } = require('../middleware/auth');
 const { requireAdmin } = require('../middleware/rbac');
+const { requireDtrManageIfAdmin } = require('../middleware/dtrAccess');
 const {
   EmployeePolicyAssignmentError,
   upsertEmployeePolicyAssignment,
@@ -95,7 +96,7 @@ router.get('/', protect, async (req, res) => {
 // POST /api/policy-assignments/employee-upsert (admin only)
 // Upsert employee-level policy assignment for a date range.
 // If attendance_policy_id is null, deactivates overlapping employee-level policy assignments.
-router.post('/employee-upsert', protect, requireAdmin, async (req, res) => {
+router.post('/employee-upsert', protect, requireAdmin, requireDtrManageIfAdmin, async (req, res) => {
   let client;
   try {
     const {

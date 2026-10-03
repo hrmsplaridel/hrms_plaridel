@@ -5,6 +5,7 @@ const fs = require('fs');
 const { v4: uuidv4 } = require('uuid');
 const { pool } = require('../config/db');
 const { authMiddleware } = require('../middleware/auth');
+const { requireDtrFeatureIfAdmin } = require('../middleware/dtrAccess');
 const { requireAdmin, requireAdminOrHr } = require('../middleware/rbac');
 const {
   LEAVE_TYPE_RULES,
@@ -1512,7 +1513,7 @@ router.get('/types', protect, async (req, res) => {
 });
 
 // POST /api/leave/types — admin/HR creates a custom leave type with rules.
-router.post('/types', protect, requireAdminOrHr, async (req, res) => {
+router.post('/types', protect, requireAdminOrHr, requireDtrFeatureIfAdmin('leave_allowed'), async (req, res) => {
   try {
     const payload = leaveTypePayloadFromBody(req.body || {});
     if (!payload.name || !payload.displayName) {
@@ -1568,7 +1569,7 @@ router.post('/types', protect, requireAdminOrHr, async (req, res) => {
 });
 
 // PUT /api/leave/types/:id — admin/HR updates display/rules.
-router.put('/types/:id', protect, requireAdminOrHr, async (req, res) => {
+router.put('/types/:id', protect, requireAdminOrHr, requireDtrFeatureIfAdmin('leave_allowed'), async (req, res) => {
   try {
     const existingQ = await pool.query('SELECT * FROM leave_types WHERE id = $1::uuid', [req.params.id]);
     if (existingQ.rows.length === 0) {
@@ -3399,7 +3400,7 @@ router.get('/signatories', protect, async (req, res) => {
 
 // POST /api/leave/admin/forced-leave-deduction
 // Admin/HR-only: applies a direct vacation leave balance deduction (no leave request row).
-router.post('/admin/forced-leave-deduction', protect, requireAdminOrHr, async (req, res) => {
+router.post('/admin/forced-leave-deduction', protect, requireAdminOrHr, requireDtrFeatureIfAdmin('leave_allowed'), async (req, res) => {
   const reviewerId = req.user?.id;
   if (!reviewerId) return res.status(401).json({ error: 'Not authenticated' });
   const userId = (req.body?.user_id || '').toString().trim();
@@ -3528,7 +3529,7 @@ router.post('/admin/forced-leave-deduction', protect, requireAdminOrHr, async (r
 // credit completed-month VL/SL accrual, then post the completed month's DTR
 // equivalent-day charge to Vacation Leave.
 // Body/query (optional): dry_run, target_month (YYYY-MM), max_catch_up_months (default 1)
-router.post('/admin/monthly-accrual', protect, requireAdminOrHr, async (req, res) => {
+router.post('/admin/monthly-accrual', protect, requireAdminOrHr, requireDtrFeatureIfAdmin('leave_allowed'), async (req, res) => {
   try {
     const dryRun =
       req.body?.dry_run === true ||
@@ -3658,7 +3659,7 @@ async function listLeaveReviewFilterOptions(db, scopeSql, params) {
   return result.rows;
 }
 
-router.get('/filter-options', protect, requireAdminOrHr, async (_req, res) => {
+router.get('/filter-options', protect, requireAdminOrHr, requireDtrFeatureIfAdmin('leave_allowed'), async (_req, res) => {
   try {
     const items = await listLeaveReviewFilterOptions(
       pool,
@@ -3672,7 +3673,7 @@ router.get('/filter-options', protect, requireAdminOrHr, async (_req, res) => {
   }
 });
 
-router.get('/', protect, requireAdminOrHr, async (req, res) => {
+router.get('/', protect, requireAdminOrHr, requireDtrFeatureIfAdmin('leave_allowed'), async (req, res) => {
   try {
     const paginated = req.query?.paginated === 'true';
     const status = (req.query?.status || '').toString().trim() || null;
@@ -3753,7 +3754,7 @@ router.get('/', protect, requireAdminOrHr, async (req, res) => {
 });
 
 // GET /api/leave/pending (admin/HR — returns pending_hr + legacy pending)
-router.get('/pending', protect, requireAdminOrHr, async (_req, res) => {
+router.get('/pending', protect, requireAdminOrHr, requireDtrFeatureIfAdmin('leave_allowed'), async (_req, res) => {
   try {
     const rows = await pool.query(
       `SELECT lr.*, lt.name AS leave_type_name, u.full_name AS employee_full_name,
@@ -4289,7 +4290,7 @@ router.patch('/:id/department-head-return', protect, async (req, res) => {
 });
 
 // PATCH /api/leave/:id/approve (admin/HR)
-router.patch('/:id/approve', protect, requireAdminOrHr, async (req, res) => {
+router.patch('/:id/approve', protect, requireAdminOrHr, requireDtrFeatureIfAdmin('leave_allowed'), async (req, res) => {
   const reviewerId = req.user?.id;
   if (!reviewerId) return res.status(401).json({ error: 'Not authenticated' });
   const { id } = req.params;
@@ -4521,7 +4522,7 @@ router.patch('/:id/approve', protect, requireAdminOrHr, async (req, res) => {
 });
 
 // PATCH /api/leave/:id/reject (admin/HR)
-router.patch('/:id/reject', protect, requireAdminOrHr, async (req, res) => {
+router.patch('/:id/reject', protect, requireAdminOrHr, requireDtrFeatureIfAdmin('leave_allowed'), async (req, res) => {
   const reviewerId = req.user?.id;
   if (!reviewerId) return res.status(401).json({ error: 'Not authenticated' });
   const { id } = req.params;
@@ -4641,7 +4642,7 @@ router.patch('/:id/reject', protect, requireAdminOrHr, async (req, res) => {
 // PATCH /api/leave/:id/revoke  (Phase 4 #15 — Admin only)
 // Revoke an approved leave: restore used_days balance + clean DTR.
 // ============================================================
-router.patch('/:id/revoke', protect, requireAdminOrHr, async (req, res) => {
+router.patch('/:id/revoke', protect, requireAdminOrHr, requireDtrFeatureIfAdmin('leave_allowed'), async (req, res) => {
   const reviewerId = req.user?.id;
   if (!reviewerId) return res.status(401).json({ error: 'Not authenticated' });
   const { id } = req.params;
@@ -4832,7 +4833,7 @@ router.patch('/:id/revoke', protect, requireAdminOrHr, async (req, res) => {
 });
 
 // PATCH /api/leave/:id/return
-router.patch('/:id/return', protect, requireAdminOrHr, async (req, res) => {
+router.patch('/:id/return', protect, requireAdminOrHr, requireDtrFeatureIfAdmin('leave_allowed'), async (req, res) => {
   const reviewerId = req.user?.id;
   if (!reviewerId) return res.status(401).json({ error: 'Not authenticated' });
   const { id } = req.params;
@@ -5294,7 +5295,7 @@ router.get('/balances/:userId', protect, async (req, res) => {
 });
 
 // POST /api/leave/balances/:userId/adjustments — admin/HR: append an audited correction.
-router.post('/balances/:userId/adjustments', protect, requireAdminOrHr, async (req, res) => {
+router.post('/balances/:userId/adjustments', protect, requireAdminOrHr, requireDtrFeatureIfAdmin('leave_allowed'), async (req, res) => {
   const reviewerId = req.user?.id;
   const targetId = req.params.userId;
   const b = req.body || {};
@@ -5382,7 +5383,7 @@ router.post('/balances/:userId/adjustments', protect, requireAdminOrHr, async (r
 
 // Direct bucket replacement is intentionally disabled. Pending, earned, and used
 // remain owned by leave workflow, accrual, and month-end posting transactions.
-router.put('/balances/:userId', protect, requireAdminOrHr, (_req, res) => {
+router.put('/balances/:userId', protect, requireAdminOrHr, requireDtrFeatureIfAdmin('leave_allowed'), (_req, res) => {
   res.set('Allow', 'GET, POST');
   return res.status(405).json({
     error: 'Direct balance replacement is disabled. Submit an audited balance adjustment instead.',
@@ -5701,7 +5702,7 @@ router.get('/:id', protect, async (req, res) => {
 
 // GET /api/leave/admin/year-end-forced-leave?year=YYYY
 // Returns per-employee forced leave compliance data for the given year.
-router.get('/admin/year-end-forced-leave', protect, requireAdminOrHr, async (req, res) => {
+router.get('/admin/year-end-forced-leave', protect, requireAdminOrHr, requireDtrFeatureIfAdmin('leave_allowed'), async (req, res) => {
   try {
     const yearRaw = req.query.year;
     const year = yearRaw ? parseInt(String(yearRaw).trim(), 10) : yearEndManilaYearNow();
@@ -5720,7 +5721,7 @@ router.get('/admin/year-end-forced-leave', protect, requireAdminOrHr, async (req
 // POST /api/leave/admin/year-end-forced-leave/apply
 // Body: { year, dry_run?, employee_ids?, remarks? }
 // If dry_run=true: returns preview without writing. Otherwise applies deductions.
-router.post('/admin/year-end-forced-leave/apply', protect, requireAdminOrHr, async (req, res) => {
+router.post('/admin/year-end-forced-leave/apply', protect, requireAdminOrHr, requireDtrFeatureIfAdmin('leave_allowed'), async (req, res) => {
   try {
     const actorUserId = req.user?.id;
     const yearRaw = req.body?.year ?? req.query?.year;

@@ -2,6 +2,7 @@ const express = require('express');
 const { pool } = require('../config/db');
 const { authMiddleware } = require('../middleware/auth');
 const { requireAdmin } = require('../middleware/rbac');
+const { requireDtrManageIfAdmin } = require('../middleware/dtrAccess');
 const {
   processBiometricLogsToSummary,
   evaluateBiometricDayGate,
@@ -142,7 +143,7 @@ function datCell(value) {
  * GET /api/biometric-attendance-logs
  * Paginated admin view of raw punches already synchronized into HRMS.
  */
-router.get('/', protect, requireAdmin, async (req, res) => {
+router.get('/', protect, requireAdmin, requireDtrManageIfAdmin, async (req, res) => {
   try {
     const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 25, 1), 100);
     const offset = Math.max(parseInt(req.query.offset, 10) || 0, 0);
@@ -222,7 +223,7 @@ router.get('/', protect, requireAdmin, async (req, res) => {
  * Download raw biometric punches for a Manila calendar-date range.
  * Query: date_from, date_to, format=dat|csv
  */
-router.get('/export', protect, requireAdmin, async (req, res) => {
+router.get('/export', protect, requireAdmin, requireDtrManageIfAdmin, async (req, res) => {
   try {
     const dateFromText = String(req.query.date_from || '').trim();
     const dateToText = String(req.query.date_to || '').trim();
@@ -534,7 +535,7 @@ router.post('/push', pushAuth, async (req, res) => {
  * Rejects rows outside the employee's known employment period.
  * Admin only.
  */
-router.post('/import', protect, requireAdmin, async (req, res) => {
+router.post('/import', protect, requireAdmin, requireDtrManageIfAdmin, async (req, res) => {
   try {
     const { rows = [], source_file_name } = req.body;
     if (!Array.isArray(rows) || rows.length === 0) {
@@ -710,7 +711,7 @@ router.post('/import', protect, requireAdmin, async (req, res) => {
  * If omitted, processes all biometric logs.
  * Admin only.
  */
-router.post('/process', protect, requireAdmin, async (req, res) => {
+router.post('/process', protect, requireAdmin, requireDtrManageIfAdmin, async (req, res) => {
   try {
     const { date_from, date_to } = req.body || {};
     let dateFrom = date_from && typeof date_from === 'string' ? date_from.trim() : null;

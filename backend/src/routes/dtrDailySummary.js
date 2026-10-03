@@ -3,6 +3,11 @@ const { pool } = require('../config/db');
 const { authMiddleware } = require('../middleware/auth');
 const { requireAdmin, requireAdminOrHr, requireAdminOrSupervisor } = require('../middleware/rbac');
 const {
+  requireDtrReportsIfAdmin,
+  requireDtrManageIfAdmin,
+  requireAnyDtrAccessForList,
+} = require('../middleware/dtrAccess');
+const {
   loadHolidayOverlayMap,
   resolveAttendanceHolidayOverlay,
 } = require('../services/holidayOverlay');
@@ -1976,13 +1981,13 @@ router.get('/report-years', protect, async (req, res) => {
   }
 });
 
-router.get('/', protect, listDtrDailySummaries);
+router.get('/', protect, requireAnyDtrAccessForList, listDtrDailySummaries);
 
 // POST /api/dtr-daily-summary/bulk-report
 // Returns report-ready DTR rows and historical assignment timelines in one
 // bounded request. The Flutter client may call this endpoint in batches when
 // more than MAX_DTR_BULK_REPORT_EMPLOYEES are selected.
-router.post('/bulk-report', protect, requireAdminOrSupervisor, async (req, res) => {
+router.post('/bulk-report', protect, requireAdminOrSupervisor, requireDtrReportsIfAdmin, async (req, res) => {
   try {
     const { employee_ids, start_date, end_date } = req.body || {};
     const parsedEmployeeIds = parseEmployeeIdList(employee_ids);
@@ -2088,7 +2093,7 @@ router.post('/bulk-report', protect, requireAdminOrSupervisor, async (req, res) 
 });
 
 // GET /api/dtr-daily-summary/summary - counts for dashboard (DTR + leave pipeline)
-router.get('/summary', protect, requireAdminOrSupervisor, async (req, res) => {
+router.get('/summary', protect, requireAdminOrSupervisor, requireDtrManageIfAdmin, async (req, res) => {
   try {
     const today = todayInHrmsTimezone();
     const todayHoliday = await getHolidayByDate(today);
@@ -2397,7 +2402,7 @@ function dtrAuditSnapshot(row) {
 }
 
 // POST /api/dtr-daily-summary - create a manual attendance record (Admin/HR only)
-router.post('/', protect, requireAdminOrHr, async (req, res) => {
+router.post('/', protect, requireAdminOrHr, requireDtrManageIfAdmin, async (req, res) => {
   try {
     const { employee_id, attendance_date, time_in, break_out, break_in, time_out, total_hours, reason } = req.body;
     const userId = req.user?.id;
@@ -2536,7 +2541,7 @@ router.post('/', protect, requireAdminOrHr, async (req, res) => {
 });
 
 // PUT /api/dtr-daily-summary/:id - correct an attendance record (Admin/HR only)
-router.put('/:id', protect, requireAdminOrHr, async (req, res) => {
+router.put('/:id', protect, requireAdminOrHr, requireDtrManageIfAdmin, async (req, res) => {
   let client;
   let transactionStarted = false;
   try {
@@ -2773,7 +2778,7 @@ router.put('/:id', protect, requireAdminOrHr, async (req, res) => {
 });
 
 // POST /api/dtr-daily-summary/:id/recalculate - recompute one saved day using current shift/policy
-router.post('/:id/recalculate', protect, requireAdminOrHr, async (req, res) => {
+router.post('/:id/recalculate', protect, requireAdminOrHr, requireDtrManageIfAdmin, async (req, res) => {
   let client;
   let transactionStarted = false;
   try {
@@ -2965,7 +2970,7 @@ router.post('/:id/recalculate', protect, requireAdminOrHr, async (req, res) => {
 });
 
 // GET /api/dtr-daily-summary/deletions - admin deletion history
-router.get('/deletions', protect, requireAdmin, async (req, res) => {
+router.get('/deletions', protect, requireAdmin, requireDtrManageIfAdmin, async (req, res) => {
   try {
     const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 100, 1), 500);
     const offset = Math.max(parseInt(req.query.offset, 10) || 0, 0);
@@ -3028,7 +3033,7 @@ router.get('/deletions', protect, requireAdmin, async (req, res) => {
 });
 
 // POST /api/dtr-daily-summary/deletions/:deletionId/restore - admin only
-router.post('/deletions/:deletionId/restore', protect, requireAdmin, async (req, res) => {
+router.post('/deletions/:deletionId/restore', protect, requireAdmin, requireDtrManageIfAdmin, async (req, res) => {
   const reason = String(req.body?.reason || '').trim();
   if (reason.length < 3) {
     return res.status(400).json({ error: 'A restoration reason of at least 3 characters is required' });
@@ -3161,7 +3166,7 @@ router.post('/deletions/:deletionId/restore', protect, requireAdmin, async (req,
 });
 
 // DELETE /api/dtr-daily-summary/:id - admin only; preserves raw biometric logs and an audit snapshot
-router.delete('/:id', protect, requireAdmin, async (req, res) => {
+router.delete('/:id', protect, requireAdmin, requireDtrManageIfAdmin, async (req, res) => {
   const reason = String(req.body?.reason || '').trim();
   if (reason.length < 3) {
     return res.status(400).json({ error: 'A deletion reason of at least 3 characters is required' });
@@ -3246,7 +3251,7 @@ router.delete('/:id', protect, requireAdmin, async (req, res) => {
 // POST /api/dtr-daily-summary/sync-holidays - compatibility endpoint. Holidays
 // are now resolved as date overlays, so syncing refreshes clients without
 // rewriting or destroying the underlying attendance state.
-router.post('/sync-holidays', protect, requireAdmin, async (req, res) => {
+router.post('/sync-holidays', protect, requireAdmin, requireDtrManageIfAdmin, async (req, res) => {
   try {
     const { start_date, end_date } = req.body;
     const start = start_date || new Date().toISOString().slice(0, 10);

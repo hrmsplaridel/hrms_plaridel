@@ -190,6 +190,9 @@ app.use('/api/overtime', overtimeRoutes);
 app.use('/api/calendar', calendarRoutes);
 app.use('/api/dtr-daily-summary', dtrDailySummaryRoutes);
 app.use('/api/dtr-corrections', require('./routes/dtrCorrections'));
+app.use('/api/system-audit', require('./routes/systemAudit'));
+app.use('/api/account-creation-access', require('./routes/accountCreationAccess'));
+app.use('/api/dtr-access', require('./routes/dtrAccess'));
 app.use('/api/dtr-assistant', dtrAssistantRoutes);
 app.use('/api/docutracker', docutrackerRoutes);
 app.use('/api/training-daily-reports', trainingDailyReportsRoutes);
@@ -255,7 +258,7 @@ async function startServer() {
     );
   }
   console.log('  POST /auth/login       - login');
-  console.log('  POST /auth/register    - register');
+  console.log('  POST /auth/register    - disabled (use Create Account)');
   console.log('  POST /auth/refresh     - new access token (refresh token body)');
   console.log('  POST /auth/logout      - revoke refresh token');
   console.log('  GET  /auth/me          - current user (requires JWT)');

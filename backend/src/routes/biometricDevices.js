@@ -3,6 +3,8 @@ const net = require('net');
 const { pool } = require('../config/db');
 const { authMiddleware } = require('../middleware/auth');
 const { requireAdmin } = require('../middleware/rbac');
+const { requireAccountCreationAccess } = require('../middleware/accountCreationAccess');
+const { requireDtrManageIfAdmin } = require('../middleware/dtrAccess');
 const { execFile } = require('child_process');
 const path = require('path');
 const bcrypt = require('bcrypt');
@@ -100,7 +102,7 @@ function pushUserScriptFailure(res, err, stdout, stderr) {
 
 // GET /api/biometric-devices - list (?status=Active|Inactive|All)
 // Optional: ?probe_online=0 — skip TCP probe (faster; no `online` field)
-router.get('/', protect, requireAdmin, async (req, res) => {
+router.get('/', protect, requireAdmin, requireDtrManageIfAdmin, async (req, res) => {
   try {
     const status = req.query.status || 'Active';
     let where = '';
@@ -218,7 +220,7 @@ function validateDevicePayload(body, { partial = false } = {}) {
 }
 
 // POST /api/biometric-devices - create (admin only)
-router.post('/', protect, requireAdmin, async (req, res) => {
+router.post('/', protect, requireAdmin, requireDtrManageIfAdmin, async (req, res) => {
   try {
     const validation = validateDevicePayload(req.body);
     if (validation.error) return res.status(400).json({ error: validation.error });
@@ -239,7 +241,7 @@ router.post('/', protect, requireAdmin, async (req, res) => {
 });
 
 // PUT /api/biometric-devices/:id - update (admin only)
-router.put('/:id', protect, requireAdmin, async (req, res) => {
+router.put('/:id', protect, requireAdmin, requireDtrManageIfAdmin, async (req, res) => {
   try {
     const { id } = req.params;
     const validation = validateDevicePayload(req.body, { partial: true });
@@ -271,7 +273,7 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
 });
 
 // DELETE /api/biometric-devices/:id (admin only)
-router.delete('/:id', protect, requireAdmin, async (req, res) => {
+router.delete('/:id', protect, requireAdmin, requireDtrManageIfAdmin, async (req, res) => {
   try {
     const result = await pool.query('DELETE FROM biometric_devices WHERE id = $1 RETURNING id', [req.params.id]);
     if (result.rowCount === 0) return res.status(404).json({ error: 'Biometric device not found' });
@@ -290,7 +292,7 @@ router.delete('/:id', protect, requireAdmin, async (req, res) => {
 });
 
 // GET /api/biometric-devices/:id/users - Fetch users from biometric device
-router.get('/:id/users', protect, requireAdmin, async (req, res) => {
+router.get('/:id/users', protect, requireAdmin, requireDtrManageIfAdmin, async (req, res) => {
   try {
     const { id } = req.params;
     const result = await pool.query(
@@ -341,7 +343,7 @@ router.get('/:id/users', protect, requireAdmin, async (req, res) => {
 });
 
 // POST /api/biometric-devices/:id/push-user — Create/update user on the device from HRMS (pyzk set_user)
-router.post('/:id/push-user', protect, requireAdmin, async (req, res) => {
+router.post('/:id/push-user', protect, requireAdmin, requireDtrManageIfAdmin, async (req, res) => {
   try {
     const { id } = req.params;
     const { employee_id, device_pin } = req.body || {};
@@ -425,7 +427,7 @@ router.post('/:id/push-user', protect, requireAdmin, async (req, res) => {
 });
 
 // POST /api/biometric-devices/:id/import-user - Import single user securely
-router.post('/:id/import-user', protect, requireAdmin, async (req, res) => {
+router.post('/:id/import-user', protect, requireAdmin, requireAccountCreationAccess, requireDtrManageIfAdmin, async (req, res) => {
   try {
     const { biometric_user_id, full_name, email, password, role } = req.body;
     

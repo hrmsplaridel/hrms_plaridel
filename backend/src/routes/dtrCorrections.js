@@ -11,6 +11,7 @@ const { applyApprovedCorrectionToSummary, getCorrectionShift } = require('./dtrD
 const { getShiftType } = require('../services/shiftAttendance');
 const { broadcastBiometricUpdate } = require('../websockets/biometricStream');
 const { resolveDtrCorrectionReviewers } = require('../services/dtrCorrectionReviewers');
+const { loadDtrAccess } = require('../middleware/dtrAccess');
 const { todayInHrmsTimezone } = require('../utils/dateRangeParser');
 
 const fields = ['time_in', 'break_out', 'break_in', 'time_out'];
@@ -25,7 +26,7 @@ function createRouter({ db = pool, auth = authMiddleware, apply = applyApprovedC
   shiftFor = getCorrectionShift, enqueue = enqueueEmployeeRangeReconciliation,
   broadcast = broadcastBiometricUpdate,
   notifications = require('../services/dtrCorrectionNotifications'),
-  reviewers = resolveDtrCorrectionReviewers } = {}) {
+  reviewers = resolveDtrCorrectionReviewers, featureAccess = loadDtrAccess } = {}) {
   const router = express.Router();
   router.use(auth);
   async function notify(action) {
@@ -39,9 +40,11 @@ function createRouter({ db = pool, auth = authMiddleware, apply = applyApprovedC
   };
   async function canReview(db, user) {
     if (!['admin', 'hr'].includes(user.role)) return false;
+    if (user.role === 'admin' && !(await featureAccess(user.id, db)).corrections_allowed) return false;
     return (await reviewers(db)).some(row => String(row.id) === String(user.id));
   }
   router.get('/reviewers', requireAdminOrHr, handle(async (req, res) => {
+    if (req.user.role === 'admin' && !(await featureAccess(req.user.id, db)).approvals_allowed) fail('Approvals access required.', 403);
     const date = String(req.query?.effective_date || todayInHrmsTimezone());
     if (!isValidIsoDate(date)) fail('Choose a valid effective date.');
     const [config, eligible] = await Promise.all([
@@ -56,6 +59,7 @@ function createRouter({ db = pool, auth = authMiddleware, apply = applyApprovedC
   }));
   router.put('/reviewers', requireAdminOrHr, handle(async (req, res) => {
     if (req.user.role !== 'admin') fail('Admin access required.', 403);
+    if (!(await featureAccess(req.user.id, db)).approvals_allowed) fail('Approvals access required.', 403);
     const date = String(req.body?.effective_from || '');
     const ids = req.body?.reviewer_ids;
     if (!isValidIsoDate(date) || date < todayInHrmsTimezone()) fail('Choose today or a future effective date.');
@@ -70,6 +74,11 @@ function createRouter({ db = pool, auth = authMiddleware, apply = applyApprovedC
         AND role IN ('admin','hr') AND is_active = true
         AND COALESCE(employment_status, 'active') = 'active'`, [ids]);
       if (eligible.rows.length !== ids.length) fail('Reviewers must be active admin or HR accounts.', 409);
+      const disabled = await client.query(`SELECT u.id FROM users u
+        LEFT JOIN dtr_admin_access a ON a.admin_user_id = u.id
+        WHERE u.id = ANY($1::uuid[]) AND u.role = 'admin'
+          AND COALESCE(a.corrections_allowed, false) = false`, [ids]);
+      if (disabled.rows.length) fail('Enable DTR Corrections access for each admin reviewer before assigning them.', 409);
       if (ids.length === 1) {
         const count = await client.query(`SELECT count(*)::int AS total FROM users
           WHERE role IN ('admin','hr') AND is_active = true

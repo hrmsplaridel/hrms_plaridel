@@ -2,6 +2,7 @@ const express = require('express');
 const { pool } = require('../config/db');
 const { authMiddleware } = require('../middleware/auth');
 const { requireAdmin } = require('../middleware/rbac');
+const { requireDtrManageIfAdmin } = require('../middleware/dtrAccess');
 const {
   assignmentAccessDeniedForRows,
   filterAssignmentRowsForAccess,
@@ -306,7 +307,7 @@ router.get('/', protect, async (req, res) => {
 });
 
 // POST /api/assignments - create (admin only)
-router.post('/', protect, requireAdmin, async (req, res) => {
+router.post('/', protect, requireAdmin, requireDtrManageIfAdmin, async (req, res) => {
   let client;
   try {
     client = await pool.connect();
@@ -438,7 +439,7 @@ router.post('/', protect, requireAdmin, async (req, res) => {
 });
 
 // PUT /api/assignments/:id - update (admin only)
-router.put('/:id', protect, requireAdmin, async (req, res) => {
+router.put('/:id', protect, requireAdmin, requireDtrManageIfAdmin, async (req, res) => {
   let client;
   try {
     client = await pool.connect();
@@ -654,7 +655,7 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
 });
 
 // DELETE /api/assignments/:id - archive without erasing history (admin only)
-router.delete('/:id', protect, requireAdmin, async (req, res) => {
+router.delete('/:id', protect, requireAdmin, requireDtrManageIfAdmin, async (req, res) => {
   let client;
   try {
     client = await pool.connect();
@@ -705,7 +706,7 @@ router.delete('/:id', protect, requireAdmin, async (req, res) => {
 });
 
 // DELETE /api/assignments/:id/permanent - remove an unused current/future mistake only
-router.delete('/:id/permanent', protect, requireAdmin, async (req, res) => {
+router.delete('/:id/permanent', protect, requireAdmin, requireDtrManageIfAdmin, async (req, res) => {
   let client;
   try {
     client = await pool.connect();

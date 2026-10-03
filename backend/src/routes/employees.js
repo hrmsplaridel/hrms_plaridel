@@ -3,7 +3,9 @@ const bcrypt = require('bcrypt');
 const crypto = require('crypto');
 const { pool } = require('../config/db');
 const { authMiddleware } = require('../middleware/auth');
-const { requireAdmin } = require('../middleware/rbac');
+const { requireAdmin, requireAdminOrSuperAdmin } = require('../middleware/rbac');
+const { requireAccountCreationAccess } = require('../middleware/accountCreationAccess');
+const { requireDtrFeatureIfAdmin } = require('../middleware/dtrAccess');
 const { sendSmtpMail, isSmtpConfigured } = require('../utils/smtpMail');
 const {
   normalizeEmploymentStatus,
@@ -225,7 +227,7 @@ function resolveEmployeeListDateRange(query = {}) {
 /** Shared FROM + filters for employee list / export (excludes biometric_user_ids shortcut). */
 function buildEmployeeListFromSql(req, options = {}) {
   const { deviceBiometricIds = null, historicalRange = null } = options;
-  const conditions = [];
+  const conditions = ["u.role <> 'super_admin'"];
   const params = [];
   let i = 1;
   const status = req.query.status || 'Active';
@@ -373,7 +375,7 @@ function resolveEmployeeOrderBy(sortRaw, orderRaw) {
 }
 
 function employeeRowsForRequester(rows, requester) {
-  const privileged = ['admin', 'hr', 'supervisor'].includes(requester?.role);
+  const privileged = ['admin', 'hr', 'supervisor', 'super_admin'].includes(requester?.role);
   if (privileged) return rows;
   return rows.map((row) => ({
     id: row.id,
@@ -410,7 +412,7 @@ router.get('/', protect, async (req, res) => {
                   cur.current_shift_punch_mode
            FROM users u
            ${employeeListLateralCurSql()}
-           WHERE u.biometric_user_id = ANY($1::text[])
+           WHERE u.role <> 'super_admin' AND u.biometric_user_id = ANY($1::text[])
            ORDER BY u.full_name`,
           [ids]
         );
@@ -492,7 +494,7 @@ router.get('/', protect, async (req, res) => {
 });
 
 // GET /api/employees/export/csv — same filters/search/sort as list; max MAX_EXPORT_ROWS rows (413 if exceeded).
-router.get('/export/csv', protect, requireAdmin, async (req, res) => {
+router.get('/export/csv', protect, requireAdmin, requireDtrFeatureIfAdmin('employees_allowed'), async (req, res) => {
   try {
     let deviceBiometricIds = null;
     const bioDeviceRaw =
@@ -573,7 +575,7 @@ router.get('/export/csv', protect, requireAdmin, async (req, res) => {
 });
 
 // POST /api/employees/bulk-status — set is_active for many users (admin only).
-router.post('/bulk-status', protect, requireAdmin, async (req, res) => {
+router.post('/bulk-status', protect, requireAdmin, requireDtrFeatureIfAdmin('employees_allowed'), async (req, res) => {
   let client;
   try {
     const { employee_ids: idsRaw, is_active: isActive } = req.body;
@@ -675,13 +677,13 @@ router.get('/:id', protect, async (req, res) => {
               cur.current_shift_punch_mode
        FROM users u
        ${employeeListLateralCurSql()}
-       WHERE u.id = $1`,
+       WHERE u.id = $1 AND u.role <> 'super_admin'`,
       [req.params.id]
     );
     const r = result.rows[0];
     if (!r) return res.status(404).json({ error: 'Employee not found' });
 
-    const privileged = ['admin', 'hr', 'supervisor'].includes(req.user?.role);
+    const privileged = ['admin', 'hr', 'supervisor', 'super_admin'].includes(req.user?.role);
     if (!privileged && String(req.user?.id) !== String(r.id)) {
       return res.json({
         id: r.id,
@@ -726,8 +728,8 @@ router.get('/:id', protect, async (req, res) => {
   }
 });
 
-// POST /api/employees - create employee (admin only); same as auth/register but admin creates
-router.post('/', protect, requireAdmin, async (req, res) => {
+// POST /api/employees - create employee (admin or super-admin); same as auth/register but privileged user creates
+router.post('/', protect, requireAdminOrSuperAdmin, requireAccountCreationAccess, async (req, res) => {
   try {
     const { email, password, first_name, full_name, last_name, role = 'employee', middle_name, suffix, sex, date_of_birth, contact_number, address, civil_status, nationality, employment_type, salary_grade, date_hired, separation_date, employment_status, biometric_user_id, leave_credit_eligible, setup } = req.body;
     const validationError = validateCreateEmployeePayload(req.body);
@@ -899,7 +901,7 @@ router.post('/', protect, requireAdmin, async (req, res) => {
 });
 
 // PUT /api/employees/:id - update employee (admin only)
-router.put('/:id', protect, requireAdmin, async (req, res) => {
+router.put('/:id', protect, requireAdmin, requireDtrFeatureIfAdmin('employees_allowed'), async (req, res) => {
   try {
     const { id } = req.params;
     const {
@@ -933,7 +935,7 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
       `SELECT biometric_user_id, employment_status, date_hired,
               separation_date::text AS separation_date,
               leave_credit_eligible, leave_credit_eligible_until::text
-       FROM users WHERE id = $1::uuid`,
+       FROM users WHERE id = $1::uuid AND role <> 'super_admin'`,
       [id]
     );
     if (existingRes.rowCount === 0) {
@@ -1200,7 +1202,7 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
 });
 
 // DELETE /api/employees/:id - deactivate (or soft-delete); optional hard delete
-router.delete('/:id', protect, requireAdmin, async (req, res) => {
+router.delete('/:id', protect, requireAdmin, requireDtrFeatureIfAdmin('employees_allowed'), async (req, res) => {
   let client;
   try {
     client = await pool.connect();

@@ -40,7 +40,7 @@ CREATE TABLE IF NOT EXISTS users (
   email TEXT UNIQUE NOT NULL,
   password_hash TEXT NOT NULL,
   role TEXT NOT NULL DEFAULT 'employee'
-    CHECK (role IN ('admin', 'hr', 'employee', 'supervisor', 'mayor')),
+    CHECK (role IN ('admin', 'hr', 'employee', 'supervisor', 'mayor', 'super_admin')),
 
   first_name TEXT,
   full_name TEXT NOT NULL,
@@ -77,6 +77,8 @@ CREATE TABLE IF NOT EXISTS users (
       COALESCE(employment_status, 'active') = 'active'
       OR (is_active = false AND leave_credit_eligible = false)
     ),
+  CONSTRAINT users_super_admin_not_employee_check
+    CHECK (role <> 'super_admin' OR (employee_number IS NULL AND leave_credit_eligible = false)),
   CONSTRAINT chk_users_separation_after_hire
     CHECK (
       separation_date IS NULL
@@ -91,6 +93,29 @@ CREATE TABLE IF NOT EXISTS users (
         AND leave_credit_eligible_until = separation_date
       )
     )
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS users_single_super_admin_idx
+  ON users (role) WHERE role = 'super_admin';
+
+CREATE TABLE IF NOT EXISTS account_creation_access (
+  admin_user_id UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  allowed BOOLEAN NOT NULL,
+  updated_by UUID REFERENCES users(id),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS dtr_admin_access (
+  admin_user_id UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  reports_allowed BOOLEAN NOT NULL DEFAULT false,
+  manage_allowed BOOLEAN NOT NULL DEFAULT false,
+  corrections_allowed BOOLEAN NOT NULL DEFAULT false,
+  employees_allowed BOOLEAN NOT NULL DEFAULT false,
+  leave_allowed BOOLEAN NOT NULL DEFAULT false,
+  approvals_allowed BOOLEAN NOT NULL DEFAULT false,
+  locator_allowed BOOLEAN NOT NULL DEFAULT false,
+  updated_by UUID REFERENCES users(id),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 -- =========================================
