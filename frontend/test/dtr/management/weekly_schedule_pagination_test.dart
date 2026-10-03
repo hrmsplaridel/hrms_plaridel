@@ -24,6 +24,9 @@ void main() {
             handler.resolve(Response(requestOptions: options, data: []));
           } else if (options.path == '/api/weekly-schedules') {
             reads++;
+            final monday = DateTime.parse(
+              '${options.queryParameters['week_start']}T00:00:00Z',
+            );
             handler.resolve(
               Response(
                 requestOptions: options,
@@ -36,7 +39,10 @@ void main() {
                       'days': List.generate(
                         7,
                         (day) => {
-                          'date': '2026-09-${21 + day}',
+                          'date': monday
+                              .add(Duration(days: day))
+                              .toIso8601String()
+                              .substring(0, 10),
                           'default_is_working_day': day < 5,
                           'start_time': '08:00',
                           'end_time': '17:00',

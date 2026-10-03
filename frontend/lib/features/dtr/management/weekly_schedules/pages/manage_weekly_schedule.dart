@@ -116,8 +116,10 @@ class _ManageWeeklyScheduleState extends State<ManageWeeklySchedule> {
           ? raw
                 .whereType<Map>()
                 .map(
-                  (item) =>
-                      _WeeklyEmployee.fromJson(Map<String, dynamic>.from(item)),
+                  (item) => _WeeklyEmployee.fromJson(
+                    Map<String, dynamic>.from(item),
+                    weekStart: requestedWeek,
+                  ),
                 )
                 .toList()
           : <_WeeklyEmployee>[];
@@ -178,6 +180,7 @@ class _ManageWeeklyScheduleState extends State<ManageWeeklySchedule> {
           '/api/weekly-schedules/${employee.id}/${_apiDate(_weekStart)}',
           data: {
             'days': employee.days
+                .where((day) => day.isDirty)
                 .map(
                   (day) => {
                     'date': day.date,
@@ -388,6 +391,7 @@ class _ManageWeeklyScheduleState extends State<ManageWeeklySchedule> {
       children: const [
         _Legend(color: Color(0xFF3D73DD), label: 'Work day'),
         _Legend(color: Color(0xFF2E9D57), label: 'Rest day'),
+        _Legend(color: Color(0xFF6B7280), label: 'No assignment'),
         _Legend(color: Color(0xFFE85D04), label: 'Weekly override'),
         _Legend(color: Color(0xFFD7373F), label: 'No rest day'),
       ],
@@ -519,12 +523,20 @@ class _ManageWeeklyScheduleState extends State<ManageWeeklySchedule> {
   Widget _buildDayCell(_WeeklyEmployee employee, int index) {
     final day = employee.days[index];
     final isWork = day.isWorking;
-    final color = isWork ? const Color(0xFF3D73DD) : const Color(0xFF2E9D57);
-    final shiftText = day.shiftName == null
+    final color = !day.hasAssignment
+        ? const Color(0xFF6B7280)
+        : isWork
+        ? const Color(0xFF3D73DD)
+        : const Color(0xFF2E9D57);
+    final shiftText = !day.hasAssignment
+        ? 'No assignment'
+        : day.shiftName == null
         ? 'No shift'
         : (isWork ? _clockRange(day.startTime, day.endTime) : 'REST');
     return Tooltip(
-      message: day.hasOverride
+      message: !day.hasAssignment
+          ? 'No active assignment on this date.'
+          : day.hasOverride
           ? 'Weekly override. Tap to use the shift default.'
           : 'Using shift default. Tap to change this day.',
       child: Padding(
@@ -534,7 +546,7 @@ class _ManageWeeklyScheduleState extends State<ManageWeeklySchedule> {
           borderRadius: BorderRadius.circular(6),
           child: InkWell(
             borderRadius: BorderRadius.circular(6),
-            onTap: day.shiftName == null
+            onTap: !day.hasAssignment || day.shiftName == null
                 ? null
                 : () => _toggleDay(employee, index),
             child: Container(
@@ -702,20 +714,32 @@ class _WeeklyEmployee {
     required this.days,
   });
 
-  factory _WeeklyEmployee.fromJson(Map<String, dynamic> json) {
+  factory _WeeklyEmployee.fromJson(
+    Map<String, dynamic> json, {
+    required String weekStart,
+  }) {
     final rawDays = json['days'];
+    final daysByDate = rawDays is List
+        ? {
+            for (final day in rawDays.whereType<Map>())
+              day['date']?.toString() ?? '': _WeeklyDay.fromJson(
+                Map<String, dynamic>.from(day),
+              ),
+          }
+        : <String, _WeeklyDay>{};
+    final firstDay = DateTime.parse('${weekStart}T00:00:00Z');
     return _WeeklyEmployee(
       id: json['employee_id']?.toString() ?? '',
       name: json['employee_name']?.toString() ?? 'Employee',
       departmentName: json['department_name']?.toString(),
-      days: rawDays is List
-          ? rawDays
-                .whereType<Map>()
-                .map(
-                  (day) => _WeeklyDay.fromJson(Map<String, dynamic>.from(day)),
-                )
-                .toList()
-          : <_WeeklyDay>[],
+      days: List.generate(7, (index) {
+        final day = firstDay.add(Duration(days: index));
+        final date =
+            '${day.year.toString().padLeft(4, '0')}-'
+            '${day.month.toString().padLeft(2, '0')}-'
+            '${day.day.toString().padLeft(2, '0')}';
+        return daysByDate[date] ?? _WeeklyDay.unassigned(date);
+      }),
     );
   }
 
@@ -735,7 +759,18 @@ class _WeeklyDay {
     required this.endTime,
     required this.defaultIsWorking,
     required this.savedOverride,
+    this.hasAssignment = true,
   }) : overrideIsWorking = savedOverride;
+
+  factory _WeeklyDay.unassigned(String date) => _WeeklyDay(
+    date: date,
+    shiftName: null,
+    startTime: null,
+    endTime: null,
+    defaultIsWorking: false,
+    savedOverride: null,
+    hasAssignment: false,
+  );
 
   factory _WeeklyDay.fromJson(Map<String, dynamic> json) => _WeeklyDay(
     date: json['date']?.toString() ?? '',
@@ -754,13 +789,15 @@ class _WeeklyDay {
   final String? endTime;
   final bool defaultIsWorking;
   final bool? savedOverride;
+  final bool hasAssignment;
   bool? overrideIsWorking;
 
   bool get isWorking => overrideIsWorking ?? defaultIsWorking;
   bool get hasOverride => overrideIsWorking != null;
-  bool get isDirty => overrideIsWorking != savedOverride;
+  bool get isDirty => hasAssignment && overrideIsWorking != savedOverride;
 
   void toggle() {
+    if (!hasAssignment) return;
     overrideIsWorking = hasOverride ? null : !defaultIsWorking;
   }
 }
