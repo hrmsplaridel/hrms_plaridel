@@ -79,6 +79,17 @@ void main() {
                 'backups': [],
                 'eligible_employees': [],
               };
+            case '/api/dtr-corrections/reviewers':
+              data = {
+                'config': {
+                  'effective_from': '2026-10-03',
+                  'reviewer_ids': ['dtr-primary', 'dtr-backup'],
+                },
+                'eligible': [
+                  {'id': 'dtr-primary', 'name': 'DTR Primary'},
+                  {'id': 'dtr-backup', 'name': 'DTR Backup'},
+                ],
+              };
             default:
               handler.reject(DioException(requestOptions: options));
               return;
@@ -283,6 +294,39 @@ void main() {
       findsOneWidget,
     );
     expect(find.text('Department Primary'), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets(
+    'DTR correction reviewer tab shows configured primary and backup',
+    (tester) async {
+      await mount(tester);
+      await tester.tap(find.text('DTR Corrections').first);
+      await tester.pumpAndSettle();
+      expect(find.text('DTR Primary'), findsOneWidget);
+      expect(find.text('DTR Backup'), findsOneWidget);
+      expect(
+        requests.any((r) => r.path == '/api/dtr-corrections/reviewers'),
+        isTrue,
+      );
+      expect(tester.takeException(), isNull);
+    },
+  );
+  testWidgets('saving DTR reviewers confirms success', (tester) async {
+    await mount(tester);
+    await tester.tap(find.text('DTR Corrections').first);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Save reviewers'));
+    await tester.pumpAndSettle();
+    expect(
+      requests.any(
+        (request) =>
+            request.path == '/api/dtr-corrections/reviewers' &&
+            request.method == 'PUT',
+      ),
+      isTrue,
+    );
+    expect(find.text('DTR correction reviewers saved.'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 }

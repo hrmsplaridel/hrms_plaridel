@@ -143,6 +143,7 @@ class _CorrectionReviewPanelState extends State<_CorrectionReviewPanel> {
       return _CorrectionDetails(
         row: _row!,
         review: true,
+        backTooltip: 'Close request',
         onClose: () => Navigator.of(context).pop(false),
         onReviewed: () => Navigator.of(context).pop(true),
       );
@@ -208,13 +209,13 @@ class DtrCorrectionsDialog extends StatefulWidget {
 }
 
 class _DtrCorrectionsDialogState extends State<DtrCorrectionsDialog> {
+  final _messengerKey = GlobalKey<ScaffoldMessengerState>();
   List<Map<String, dynamic>> _rows = [];
   bool _loading = true;
   String? _error;
   int _offset = 0;
   bool _creating = false;
   Map<String, dynamic>? _selected;
-  bool _openedRequest = false;
   @override
   void initState() {
     super.initState();
@@ -227,6 +228,17 @@ class _DtrCorrectionsDialogState extends State<DtrCorrectionsDialog> {
       _error = null;
     });
     try {
+      if (widget.requestId != null) {
+        final detail = await ApiClient.instance.dio.get(
+          '/api/dtr-corrections/${widget.requestId}',
+        );
+        if (mounted) {
+          setState(
+            () => _selected = Map<String, dynamic>.from(detail.data as Map),
+          );
+        }
+        return;
+      }
       final response = await ApiClient.instance.dio.get(
         '/api/dtr-corrections',
         queryParameters: {'review': widget.review, 'offset': _offset},
@@ -238,17 +250,6 @@ class _DtrCorrectionsDialogState extends State<DtrCorrectionsDialog> {
               .toList(),
         );
       }
-      if (!_openedRequest && widget.requestId != null) {
-        final detail = await ApiClient.instance.dio.get(
-          '/api/dtr-corrections/${widget.requestId}',
-        );
-        if (mounted) {
-          setState(() {
-            _selected = Map<String, dynamic>.from(detail.data as Map);
-            _openedRequest = true;
-          });
-        }
-      }
     } catch (e) {
       if (mounted) setState(() => _error = userFacingApiError(e));
     } finally {
@@ -258,41 +259,59 @@ class _DtrCorrectionsDialogState extends State<DtrCorrectionsDialog> {
 
   @override
   Widget build(BuildContext context) {
-    return Theme(
-      data: _correctionPanelTheme(context),
-      child: Builder(
-        builder: (context) {
-          if (_creating) {
-            return _CorrectionForm(
-              onClose: (saved) {
-                setState(() => _creating = false);
-                if (saved) {
-                  _offset = 0;
+    return ScaffoldMessenger(
+      key: _messengerKey,
+      child: Theme(
+        data: _correctionPanelTheme(context),
+        child: Builder(
+          builder: (context) {
+            if (_creating) {
+              return _CorrectionForm(
+                onClose: (saved) {
+                  setState(() => _creating = false);
+                  if (saved) {
+                    _offset = 0;
+                    _load();
+                    WidgetsBinding.instance.addPostFrameCallback((_) {
+                      if (!mounted) return;
+                      _messengerKey.currentState?.showSnackBar(
+                        const SnackBar(
+                          content: Text('DTR correction request submitted.'),
+                        ),
+                      );
+                    });
+                  }
+                },
+              );
+            }
+            if (_selected != null) {
+              return _CorrectionDetails(
+                row: _selected!,
+                review: widget.review,
+                backTooltip: widget.requestId == null
+                    ? 'Back to corrections'
+                    : 'Close request',
+                onClose: () {
+                  if (widget.requestId != null) {
+                    Navigator.of(context).pop();
+                    return;
+                  }
+                  setState(() => _selected = null);
                   _load();
-                }
-              },
-            );
-          }
-          if (_selected != null) {
-            return _CorrectionDetails(
-              row: _selected!,
-              review: widget.review,
-              onClose: () {
-                setState(() => _selected = null);
-                _load();
-              },
-            );
-          }
-          return _buildList(context);
-        },
+                },
+              );
+            }
+            return _buildList(context);
+          },
+        ),
       ),
     );
   }
 
   Widget _buildList(BuildContext context) {
-    return Material(
-      color: Theme.of(context).colorScheme.surface,
-      child: SafeArea(
+    return Scaffold(
+      backgroundColor: Theme.of(context).colorScheme.surface,
+      body: SafeArea(
         child: Padding(
           padding: const EdgeInsets.all(16),
           child: Column(
@@ -514,7 +533,8 @@ class _CorrectionFormState extends State<_CorrectionForm> {
                     );
                     if (picked != null && mounted) {
                       setState(() {
-                        if (!_times.containsKey(key) &&
+                        if (_original?['shift_crosses_midnight'] == true &&
+                            !_times.containsKey(key) &&
                             original != null &&
                             _date(original).compareTo(_date(_day)) > 0) {
                           _nextDay.add(key);
@@ -532,7 +552,8 @@ class _CorrectionFormState extends State<_CorrectionForm> {
               child: Text(_times[key]?.format(context) ?? 'Unchanged'),
             ),
           ),
-          if (_times.containsKey(key))
+          if (_times.containsKey(key) &&
+              _original?['shift_crosses_midnight'] == true)
             Wrap(
               crossAxisAlignment: WrapCrossAlignment.center,
               children: [
@@ -619,11 +640,15 @@ class _CorrectionFormState extends State<_CorrectionForm> {
         'reason': _reason.text.trim(),
       };
       for (final entry in _times.entries) {
-        final day = DateTime.utc(
-          _day.year,
-          _day.month,
-          _day.day,
-        ).add(Duration(days: _nextDay.contains(entry.key) ? 1 : 0));
+        final day = DateTime.utc(_day.year, _day.month, _day.day).add(
+          Duration(
+            days:
+                _original?['shift_crosses_midnight'] == true &&
+                    _nextDay.contains(entry.key)
+                ? 1
+                : 0,
+          ),
+        );
         data['requested_${entry.key}'] =
             '${_date(day)}T${entry.value.hour.toString().padLeft(2, '0')}:${entry.value.minute.toString().padLeft(2, '0')}:00+08:00';
       }
@@ -823,11 +848,13 @@ class _CorrectionDetails extends StatefulWidget {
     required this.review,
     required this.onClose,
     this.onReviewed,
+    this.backTooltip = 'Back to corrections',
   });
   final VoidCallback onClose;
   final VoidCallback? onReviewed;
   final Map<String, dynamic> row;
   final bool review;
+  final String backTooltip;
   @override
   State<_CorrectionDetails> createState() => _CorrectionDetailsState();
 }
@@ -886,69 +913,265 @@ class _CorrectionDetailsState extends State<_CorrectionDetails> {
     }
   }
 
+  Widget _sectionTitle(BuildContext context, String title) => Text(
+    title,
+    style: Theme.of(
+      context,
+    ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+  );
+
+  Widget _punchValue(BuildContext context, String label, String value) =>
+      Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 12,
+              color: AppTheme.dashTextSecondaryOf(context),
+            ),
+          ),
+          const SizedBox(height: 3),
+          Text(
+            value,
+            style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
+          ),
+        ],
+      );
+
+  Widget _punchComparison(BuildContext context, Map? original, Map? applied) {
+    final secondary = AppTheme.dashTextSecondaryOf(context);
+    final hairline = AppTheme.dashHairlineOf(context);
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final wide = constraints.maxWidth >= 680;
+        final values = [
+          for (final field in _punches.entries)
+            (
+              field.value,
+              _stamp(original?[field.key]),
+              widget.row['requested_${field.key}'] == null
+                  ? 'Unchanged'
+                  : _stamp(widget.row['requested_${field.key}']),
+              applied == null ? null : _stamp(applied[field.key]),
+            ),
+        ];
+        if (wide) {
+          Widget cell(String text, {int flex = 2, bool heading = false}) =>
+              Expanded(
+                flex: flex,
+                child: Text(
+                  text,
+                  softWrap: true,
+                  style: TextStyle(
+                    fontSize: heading ? 12 : 14,
+                    fontWeight: heading ? FontWeight.w700 : FontWeight.w500,
+                    color: heading ? secondary : null,
+                  ),
+                ),
+              );
+          return Column(
+            children: [
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 11,
+                ),
+                color: AppTheme.dashMutedSurfaceOf(context),
+                child: Row(
+                  children: [
+                    cell('Punch', flex: 1, heading: true),
+                    cell('Original', heading: true),
+                    cell('Requested', heading: true),
+                    if (applied != null) cell('Applied', heading: true),
+                  ],
+                ),
+              ),
+              for (final value in values) ...[
+                Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 14,
+                  ),
+                  child: Row(
+                    children: [
+                      cell(value.$1, flex: 1),
+                      cell(value.$2),
+                      cell(value.$3),
+                      if (value.$4 != null) cell(value.$4!),
+                    ],
+                  ),
+                ),
+                Divider(height: 1, color: hairline),
+              ],
+            ],
+          );
+        }
+        final cellWidth = constraints.maxWidth >= 500
+            ? (constraints.maxWidth - 24) / 3
+            : (constraints.maxWidth - 12) / 2;
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            for (final value in values) ...[
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 13),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      value.$1,
+                      style: const TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    Wrap(
+                      spacing: 12,
+                      runSpacing: 12,
+                      children: [
+                        SizedBox(
+                          width: cellWidth,
+                          child: _punchValue(context, 'Original', value.$2),
+                        ),
+                        SizedBox(
+                          width: cellWidth,
+                          child: _punchValue(context, 'Requested', value.$3),
+                        ),
+                        if (value.$4 != null)
+                          SizedBox(
+                            width: cellWidth,
+                            child: _punchValue(context, 'Applied', value.$4!),
+                          ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              Divider(height: 1, color: hairline),
+            ],
+          ],
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final row = widget.row;
     final original = row['original_record'] as Map?;
     final applied = row['applied_record'] as Map?;
     final canReview = widget.review && row['status'] == 'pending';
+    final status = (row['status'] ?? 'pending').toString().toLowerCase();
+    final statusColor = switch (status) {
+      'approved' => Colors.green,
+      'rejected' => Theme.of(context).colorScheme.error,
+      _ => AppTheme.primaryNavyLight,
+    };
+    final statusIcon = switch (status) {
+      'approved' => Icons.check_circle_outline,
+      'rejected' => Icons.cancel_outlined,
+      _ => Icons.schedule_outlined,
+    };
     return PopScope(
       canPop: !_busy,
       child: _CorrectionSurface(
         title: '${row['employee_name']} - ${row['attendance_date']}',
+        backTooltip: widget.backTooltip,
         onBack: _busy ? null : widget.onClose,
-        body: SizedBox(
-          width: double.infinity,
-          child: SingleChildScrollView(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
+        body: ListView(
+          children: [
+            Row(
               children: [
-                Text('Status: ${row['status']}'),
-                const SizedBox(height: 12),
-                Text('Reason: ${row['reason']}'),
-                if (row['attachment_name'] != null)
-                  TextButton.icon(
-                    onPressed: _openingAttachment ? null : _openAttachment,
-                    icon: const Icon(Icons.attach_file),
-                    label: Text(row['attachment_name'].toString()),
-                  )
-                else
-                  const Text('No supporting document'),
-                for (final field in _punches.entries)
-                  Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 8),
+                Icon(statusIcon, size: 20, color: statusColor),
+                const SizedBox(width: 8),
+                Text(
+                  '${status[0].toUpperCase()}${status.substring(1)}',
+                  style: TextStyle(
+                    color: statusColor,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                if (row['created_at'] != null) ...[
+                  const Spacer(),
+                  Flexible(
                     child: Text(
-                      '${field.value}\nOriginal: ${_stamp(original?[field.key])}\nRequested: ${row['requested_${field.key}'] == null ? 'Unchanged' : _stamp(row['requested_${field.key}'])}'
-                      '${applied == null ? '' : '\nApplied: ${_stamp(applied[field.key])}'}',
+                      _stamp(row['created_at']),
+                      textAlign: TextAlign.end,
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: AppTheme.dashTextSecondaryOf(context),
+                      ),
                     ),
                   ),
-                if (row['reviewed_at'] != null)
-                  Text(
-                    'Reviewed by: ${row['reviewer_name'] ?? '-'}\n${_stamp(row['reviewed_at'])}\n${row['review_notes'] ?? ''}',
-                  ),
-                if (canReview)
-                  TextField(
-                    controller: _notes,
-                    enabled: !_busy,
-                    maxLength: 1000,
-                    minLines: 2,
-                    maxLines: 4,
-                    decoration: const InputDecoration(
-                      labelText: 'Review notes',
-                      border: OutlineInputBorder(),
-                    ),
-                  ),
-                if (_error != null)
-                  Text(
-                    _error!,
-                    style: TextStyle(
-                      color: Theme.of(context).colorScheme.error,
-                    ),
-                  ),
+                ],
               ],
             ),
-          ),
+            const SizedBox(height: 24),
+            _sectionTitle(context, 'Reason'),
+            const SizedBox(height: 8),
+            Text((row['reason'] ?? '-').toString()),
+            const SizedBox(height: 14),
+            if (row['attachment_name'] != null)
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                onTap: _openingAttachment ? null : _openAttachment,
+                leading: const Icon(Icons.attach_file),
+                title: Text(
+                  row['attachment_name'].toString(),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                trailing: const Icon(Icons.open_in_new, size: 18),
+              )
+            else
+              Text(
+                'No supporting document',
+                style: TextStyle(color: AppTheme.dashTextSecondaryOf(context)),
+              ),
+            const SizedBox(height: 20),
+            Divider(color: AppTheme.dashHairlineOf(context)),
+            const SizedBox(height: 16),
+            _sectionTitle(context, 'Punch comparison'),
+            const SizedBox(height: 12),
+            _punchComparison(context, original, applied),
+            if (row['reviewed_at'] != null || canReview) ...[
+              const SizedBox(height: 24),
+              _sectionTitle(context, 'Review decision'),
+              const SizedBox(height: 12),
+            ],
+            if (row['reviewed_at'] != null) ...[
+              Text(
+                '${row['reviewer_name'] ?? '-'}  |  ${_stamp(row['reviewed_at'])}',
+                style: TextStyle(color: AppTheme.dashTextSecondaryOf(context)),
+              ),
+              if ((row['review_notes'] ?? '').toString().trim().isNotEmpty) ...[
+                const SizedBox(height: 10),
+                Text(row['review_notes'].toString()),
+              ],
+            ],
+            if (canReview)
+              TextField(
+                controller: _notes,
+                enabled: !_busy,
+                maxLength: 1000,
+                minLines: 2,
+                maxLines: 4,
+                decoration: const InputDecoration(
+                  labelText: 'Review notes',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+            if (_error != null) ...[
+              const SizedBox(height: 12),
+              Text(
+                _error!,
+                style: TextStyle(color: Theme.of(context).colorScheme.error),
+              ),
+            ],
+          ],
         ),
         actions: [
           TextButton(
@@ -977,11 +1200,13 @@ class _CorrectionSurface extends StatelessWidget {
     required this.body,
     required this.actions,
     required this.onBack,
+    this.backTooltip = 'Back to corrections',
   });
   final String title;
   final Widget body;
   final List<Widget> actions;
   final VoidCallback? onBack;
+  final String backTooltip;
 
   @override
   Widget build(BuildContext context) => Scaffold(
@@ -995,7 +1220,7 @@ class _CorrectionSurface extends StatelessWidget {
             child: Row(
               children: [
                 IconButton(
-                  tooltip: 'Back to corrections',
+                  tooltip: backTooltip,
                   onPressed: onBack,
                   icon: const Icon(Icons.arrow_back),
                 ),

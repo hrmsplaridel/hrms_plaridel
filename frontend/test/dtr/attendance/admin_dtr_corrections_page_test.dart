@@ -32,6 +32,12 @@ void main() {
                         'attendance_date': '2026-10-01',
                         'status': 'approved',
                         'reason': 'The biometric device was offline.',
+                        'original_record': {'time_in': null},
+                        'requested_time_in': '2026-10-01T00:00:00Z',
+                        'applied_record': {'time_in': '2026-10-01T00:00:00Z'},
+                        'reviewer_name': 'Admin User',
+                        'reviewed_at': '2026-10-02T07:16:00Z',
+                        'review_notes': 'Verified against device report.',
                       }
                     : [
                         {
@@ -61,7 +67,14 @@ void main() {
       await tester.tap(find.text('Earl D Bullet'));
       await tester.pumpAndSettle();
       expect(requests.last.path, '/api/dtr-corrections/request-1');
-      expect(find.text('Status: approved'), findsOneWidget);
+      expect(find.text('Punch comparison'), findsOneWidget);
+      await tester.scrollUntilVisible(
+        find.text('Review decision'),
+        200,
+        scrollable: find.byType(Scrollable).last,
+      );
+      expect(find.text('Review decision'), findsOneWidget);
+      expect(find.text('Verified against device report.'), findsOneWidget);
       expect(tester.takeException(), isNull);
     });
   }
