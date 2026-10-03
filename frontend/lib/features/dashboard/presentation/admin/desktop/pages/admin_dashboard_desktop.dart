@@ -939,6 +939,37 @@ class _AdminDashboardState extends State<AdminDashboard>
   }
 }
 
+class AdminSystemAdministrationSection extends StatelessWidget {
+  const AdminSystemAdministrationSection({
+    super.key,
+    required this.canCreateAccount,
+    required this.selected,
+    required this.onCreateAccount,
+  });
+
+  final bool canCreateAccount;
+  final bool selected;
+  final VoidCallback onCreateAccount;
+
+  @override
+  Widget build(BuildContext context) {
+    if (!canCreateAccount) return const SizedBox.shrink();
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        const DashboardSidebarSectionLabel('SYSTEM ADMINISTRATION'),
+        DashboardSidebarNavTile(
+          icon: Icons.person_add_outlined,
+          label: 'Create Account',
+          selected: selected,
+          onTap: onCreateAccount,
+        ),
+        const SizedBox(height: 12),
+      ],
+    );
+  }
+}
+
 class _Sidebar extends StatelessWidget {
   const _Sidebar({
     required this.selectedMenu,
@@ -1026,15 +1057,11 @@ class _Sidebar extends StatelessWidget {
           badgeCount: pendingSignatures,
           onTap: () => onTap(AdminMenu.docutracker),
         ),
-        DashboardSidebarSectionLabel('SYSTEM ADMINISTRATION'),
-        if (canCreateAccount)
-          DashboardSidebarNavTile(
-            icon: Icons.person_add_outlined,
-            label: 'Create Account',
-            selected: selectedMenu == AdminMenu.createAccount,
-            onTap: () => onTap(AdminMenu.createAccount),
-          ),
-        const SizedBox(height: 12),
+        AdminSystemAdministrationSection(
+          canCreateAccount: canCreateAccount,
+          selected: selectedMenu == AdminMenu.createAccount,
+          onCreateAccount: () => onTap(AdminMenu.createAccount),
+        ),
       ],
     );
   }
