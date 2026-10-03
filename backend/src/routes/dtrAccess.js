@@ -52,8 +52,10 @@ router.put('/:adminId', authMiddleware, requireSuperAdmin, async (req, res) => {
   if (typeof expectedRevision !== 'string' || !expectedRevision || expectedRevision.length > 100) {
     return res.status(400).json({ error: 'Refresh Manage Access before saving permissions.' });
   }
-  const client = await pool.connect();
+  let client;
+  let releaseError;
   try {
+    client = await pool.connect();
     await client.query('BEGIN');
     const target = await client.query('SELECT role FROM users WHERE id = $1::uuid FOR UPDATE', [adminId]);
     if (target.rows[0]?.role !== 'admin') {
@@ -116,11 +118,20 @@ router.put('/:adminId', authMiddleware, requireSuperAdmin, async (req, res) => {
     await client.query('COMMIT');
     res.json({ admin_id: adminId, ...after, revision: updated.rows[0].revision });
   } catch (error) {
-    await client.query('ROLLBACK');
+    if (client) {
+      try {
+        await client.query('ROLLBACK');
+      } catch (rollbackError) {
+        releaseError = rollbackError;
+        console.error('[DTR access PUT rollback]', rollbackError);
+      }
+    }
     console.error('[DTR access PUT]', error);
-    res.status(500).json({ error: 'Failed to update DTR access' });
+    res.status(client ? 500 : 503).json({
+      error: client ? 'Failed to update DTR access' : 'Database temporarily unavailable. Please try again.',
+    });
   } finally {
-    client.release();
+    if (client) client.release(releaseError);
   }
 });
 

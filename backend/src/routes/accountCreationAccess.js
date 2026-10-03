@@ -46,8 +46,10 @@ router.put('/:adminId', authMiddleware, requireSuperAdmin, async (req, res) => {
     return res.status(400).json({ error: 'Valid admin ID and allowed value are required' });
   }
 
-  const client = await pool.connect();
+  let client;
+  let releaseError;
   try {
+    client = await pool.connect();
     await client.query('BEGIN');
     const target = await client.query(
       `SELECT id, role FROM users WHERE id = $1::uuid FOR UPDATE`,
@@ -81,11 +83,20 @@ router.put('/:adminId', authMiddleware, requireSuperAdmin, async (req, res) => {
     await client.query('COMMIT');
     res.json({ admin_id: adminId, allowed });
   } catch (error) {
-    await client.query('ROLLBACK');
+    if (client) {
+      try {
+        await client.query('ROLLBACK');
+      } catch (rollbackError) {
+        releaseError = rollbackError;
+        console.error('[account creation access PUT rollback]', rollbackError);
+      }
+    }
     console.error('[account creation access PUT]', error);
-    res.status(500).json({ error: 'Failed to update account creation access' });
+    res.status(client ? 500 : 503).json({
+      error: client ? 'Failed to update account creation access' : 'Database temporarily unavailable. Please try again.',
+    });
   } finally {
-    client.release();
+    if (client) client.release(releaseError);
   }
 });
 
