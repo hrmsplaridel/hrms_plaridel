@@ -149,6 +149,44 @@ void main() {
 
   tearDownAll(() => ApiClient.instance.dio.interceptors.clear());
 
+  testWidgets('back navigation preserves drafts until discard is confirmed', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1200, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final navigator = GlobalKey<NavigatorState>();
+    await tester.pumpWidget(
+      MaterialApp(
+        navigatorKey: navigator,
+        home: const Scaffold(body: Text('Home')),
+      ),
+    );
+    navigator.currentState!.push(
+      MaterialPageRoute<void>(
+        builder: (_) => const Scaffold(body: DtrAccessPage()),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Admin User'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Manage DTR logs'));
+    await tester.pump();
+    await navigator.currentState!.maybePop();
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Keep editing'));
+    await tester.pumpAndSettle();
+    expect(find.text('Unsaved'), findsOneWidget);
+    await navigator.currentState!.maybePop();
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Discard and leave'));
+    await tester.pumpAndSettle();
+    expect(find.text('Home'), findsOneWidget);
+    expect(find.byType(DtrAccessPage), findsNothing);
+    expect(writes, isEmpty);
+  });
+
   Future<void> openPage(WidgetTester tester) async {
     tester.view.devicePixelRatio = 1;
     tester.view.physicalSize = const Size(1200, 900);
@@ -191,6 +229,36 @@ void main() {
     await tester.pumpAndSettle();
     expect(writes.last['expected_revision'], 'r2');
   });
+
+  testWidgets(
+    'leaving prompts only for unsaved drafts and preserves cancelled edits',
+    (tester) async {
+      await openPage(tester);
+      final state = tester.state<DtrAccessPageState>(
+        find.byType(DtrAccessPage),
+      );
+      expect(await state.confirmLeave(), isTrue);
+      await tester.tap(find.text('Manage DTR logs'));
+      await tester.pump();
+      final cancelled = state.confirmLeave();
+      await tester.pumpAndSettle();
+      expect(find.text('Discard unsaved changes?'), findsOneWidget);
+      await tester.tap(find.text('Keep editing'));
+      await tester.pumpAndSettle();
+      expect(await cancelled, isFalse);
+      expect(find.text('Unsaved'), findsOneWidget);
+      final discarded = state.confirmLeave();
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Discard and leave'));
+      await tester.pumpAndSettle();
+      expect(await discarded, isTrue);
+      expect(writes, isEmpty);
+      await tester.tap(find.text('Save permissions'));
+      await tester.pumpAndSettle();
+      expect(await state.confirmLeave(), isTrue);
+      expect(find.text('Discard unsaved changes?'), findsNothing);
+    },
+  );
 
   testWidgets('stale save retains draft and offers an explicit refresh', (
     tester,

@@ -23,9 +23,37 @@ class SuperAdminDashboard extends StatefulWidget {
 class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
   _SuperAdminPage _selectedPage = _SuperAdminPage.createAccount;
   bool _sidebarCollapsed = false;
+  final _accessKey = GlobalKey<DtrAccessPageState>();
+  bool _leaving = false;
 
-  void _selectPage(_SuperAdminPage page) {
-    if (_selectedPage != page) setState(() => _selectedPage = page);
+  Future<void> _selectPage(_SuperAdminPage page) async {
+    if (_selectedPage == page || _leaving) return;
+    _leaving = true;
+    try {
+      if (!await (_accessKey.currentState?.confirmLeave() ??
+              Future.value(true)) ||
+          !mounted) {
+        return;
+      }
+      setState(() => _selectedPage = page);
+    } finally {
+      _leaving = false;
+    }
+  }
+
+  Future<void> _signOut() async {
+    if (_leaving) return;
+    _leaving = true;
+    try {
+      if (!await (_accessKey.currentState?.confirmLeave() ??
+              Future.value(true)) ||
+          !mounted) {
+        return;
+      }
+      await performDashboardSignOut(context);
+    } finally {
+      _leaving = false;
+    }
   }
 
   Widget _content() {
@@ -33,7 +61,7 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
       return const SystemHealthPage();
     }
     if (_selectedPage == _SuperAdminPage.accountAccess) {
-      return const DtrAccessPage();
+      return DtrAccessPage(key: _accessKey);
     }
     if (_selectedPage == _SuperAdminPage.auditLog) {
       return const SystemAuditPage();
@@ -105,7 +133,7 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
                           : null,
                       trailing: IconButton(
                         tooltip: 'Sign out',
-                        onPressed: () => performDashboardSignOut(context),
+                        onPressed: _signOut,
                         icon: const Icon(Icons.logout_outlined),
                       ),
                     ),
@@ -141,8 +169,8 @@ class _SuperAdminSidebar extends StatelessWidget {
     final isDrawer = Scaffold.maybeOf(context)?.hasDrawer ?? false;
 
     void select(_SuperAdminPage page) {
-      onSelect(page);
       if (isDrawer) Navigator.of(context).pop();
+      onSelect(page);
     }
 
     return DashboardSidebarRailFrame(
