@@ -10,8 +10,9 @@ import 'package:hrms_plaridel/shared/widgets/portal_sidebar_brand.dart';
 import 'package:hrms_plaridel/shared/widgets/sign_out_flow.dart';
 import 'package:hrms_plaridel/features/dashboard/presentation/super_admin/account_creation_access_page.dart';
 import 'package:hrms_plaridel/features/dashboard/presentation/super_admin/dtr_access_page.dart';
+import 'package:hrms_plaridel/features/dashboard/presentation/super_admin/system_health_page.dart';
 
-enum _SuperAdminPage { createAccount, accountAccess, auditLog }
+enum _SuperAdminPage { createAccount, accountAccess, auditLog, systemHealth }
 
 class SuperAdminDashboard extends StatefulWidget {
   const SuperAdminDashboard({super.key});
@@ -29,6 +30,9 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
   }
 
   Widget _content() {
+    if (_selectedPage == _SuperAdminPage.systemHealth) {
+      return const SystemHealthPage();
+    }
     if (_selectedPage == _SuperAdminPage.accountAccess) {
       return const DefaultTabController(
         length: 2,
@@ -190,6 +194,12 @@ class _SuperAdminSidebar extends StatelessWidget {
                   label: 'Audit Log',
                   selected: selectedPage == _SuperAdminPage.auditLog,
                   onTap: () => select(_SuperAdminPage.auditLog),
+                ),
+                DashboardSidebarNavTile(
+                  icon: Icons.monitor_heart_outlined,
+                  label: 'System Health',
+                  selected: selectedPage == _SuperAdminPage.systemHealth,
+                  onTap: () => select(_SuperAdminPage.systemHealth),
                 ),
               ],
             ),
