@@ -67,8 +67,9 @@ test('only super-admin can save DTR permissions and changes are audited', async 
       queries.push({ sql, params });
       if (sql.includes('FROM users WHERE id')) return { rows: [{ role: 'admin' }] };
       if (sql.includes('FROM dtr_admin_access WHERE')) {
-        return { rows: [{ reports_allowed: true, manage_allowed: true }] };
+        return { rows: [{ reports_allowed: true, manage_allowed: true, revision: 'r1' }] };
       }
+      if (sql.includes('INSERT INTO dtr_admin_access')) return { rows: [{ revision: 'r2' }] };
       return { rows: [] };
     },
     release() {},
@@ -94,9 +95,10 @@ test('only super-admin can save DTR permissions and changes are audited', async 
     await route.stack[2].handle({
       user: { id: '00000000-0000-4000-8000-000000000002' },
       params: { adminId: '00000000-0000-4000-8000-000000000001' },
-      body: { reports_allowed: false, manage_allowed: true },
+      body: { reports_allowed: false, manage_allowed: true, expected_revision: 'r1' },
     }, success);
     assert.equal(success.statusCode, 200);
+    assert.equal(success.body.revision, 'r2');
     assert.ok(queries.some(({ sql }) => sql.includes('dtr_admin_access_changed')));
     assert.ok(queries.some(({ sql }) => sql === 'COMMIT'));
   } finally {
@@ -115,7 +117,7 @@ test('assigned reviewer access cannot be disabled before reassignment', async ()
       if (sql.includes('FROM dtr_admin_access WHERE')) return { rows: [{
         reports_allowed: true, manage_allowed: true, corrections_allowed: true,
         employees_allowed: true, leave_allowed: true, approvals_allowed: true,
-        locator_allowed: true,
+        locator_allowed: true, revision: 'r1',
       }] };
       return { rows: [] };
     },
@@ -136,7 +138,7 @@ test('assigned reviewer access cannot be disabled before reassignment', async ()
     await route.stack[2].handle({
       user: { id: '00000000-0000-4000-8000-000000000002' },
       params: { adminId: '00000000-0000-4000-8000-000000000001' },
-      body: { reports_allowed: true, manage_allowed: true, corrections_allowed: false },
+      body: { reports_allowed: true, manage_allowed: true, corrections_allowed: false, expected_revision: 'r1' },
     }, result);
     assert.equal(result.statusCode, 409);
     assert.match(result.body.error, /Reassign this active reviewer/);

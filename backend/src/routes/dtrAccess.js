@@ -28,6 +28,7 @@ router.get('/', authMiddleware, requireSuperAdmin, async (_req, res) => {
       `SELECT u.id, u.full_name, u.email, u.is_active,
               COALESCE(a.reports_allowed, false) AS reports_allowed,
               COALESCE(a.manage_allowed, false) AS manage_allowed,
+              COALESCE(a.updated_at::text, 'none') AS revision,
               ${featureFields.map((field) => `COALESCE(a.${field}, false) AS ${field}`).join(', ')}
          FROM users u
          LEFT JOIN dtr_admin_access a ON a.admin_user_id = u.id
@@ -44,8 +45,12 @@ router.get('/', authMiddleware, requireSuperAdmin, async (_req, res) => {
 router.put('/:adminId', authMiddleware, requireSuperAdmin, async (req, res) => {
   const { adminId } = req.params;
   const { reports_allowed: reportsAllowed, manage_allowed: manageAllowed } = req.body || {};
+  const expectedRevision = req.body?.expected_revision;
   if (!uuid.test(adminId) || typeof reportsAllowed !== 'boolean' || typeof manageAllowed !== 'boolean') {
     return res.status(400).json({ error: 'Valid admin ID and DTR permissions are required' });
+  }
+  if (typeof expectedRevision !== 'string' || !expectedRevision || expectedRevision.length > 100) {
+    return res.status(400).json({ error: 'Refresh Manage Access before saving permissions.' });
   }
   const client = await pool.connect();
   try {
@@ -56,14 +61,22 @@ router.put('/:adminId', authMiddleware, requireSuperAdmin, async (req, res) => {
       return res.status(404).json({ error: 'Administrator not found' });
     }
     const previous = await client.query(
-      `SELECT reports_allowed, manage_allowed, ${featureFields.join(', ')}
+      `SELECT reports_allowed, manage_allowed, ${featureFields.join(', ')}, updated_at::text AS revision
          FROM dtr_admin_access WHERE admin_user_id = $1::uuid`, [adminId]
     );
+    if (expectedRevision !== (previous.rows[0]?.revision ?? 'none')) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({
+        code: 'DTR_ACCESS_CONFLICT',
+        error: 'Permissions have changed since you opened this page. Refresh and review them before saving.',
+      });
+    }
     const before = {
       reports_allowed: false, manage_allowed: false,
       ...Object.fromEntries(featureFields.map((field) => [field, false])),
       ...previous.rows[0],
     };
+    delete before.revision;
     const after = { reports_allowed: reportsAllowed, manage_allowed: manageAllowed };
     for (const field of featureFields) {
       if (req.body?.[field] !== undefined && typeof req.body[field] !== 'boolean') {
@@ -80,7 +93,7 @@ router.put('/:adminId', authMiddleware, requireSuperAdmin, async (req, res) => {
         return res.status(409).json({ error: `Reassign this active reviewer before disabling ${blocked.replace('_allowed', '').replace('_', ' ')} access.` });
       }
     }
-    await client.query(
+    const updated = await client.query(
       `INSERT INTO dtr_admin_access (admin_user_id, reports_allowed, manage_allowed,
          ${featureFields.join(', ')}, updated_by)
        VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8, $9::uuid)
@@ -89,7 +102,8 @@ router.put('/:adminId', authMiddleware, requireSuperAdmin, async (req, res) => {
          manage_allowed = EXCLUDED.manage_allowed,
          ${featureFields.map((field) => `${field} = EXCLUDED.${field}`).join(',\n         ')},
          updated_by = EXCLUDED.updated_by,
-         updated_at = NOW()`,
+         updated_at = GREATEST(clock_timestamp(), dtr_admin_access.updated_at + interval '1 microsecond')
+       RETURNING updated_at::text AS revision`,
       [adminId, reportsAllowed, manageAllowed, ...featureFields.map((field) => after[field]), req.user.id]
     );
     if (Object.keys(after).some((field) => before[field] !== after[field])) {
@@ -100,7 +114,7 @@ router.put('/:adminId', authMiddleware, requireSuperAdmin, async (req, res) => {
       );
     }
     await client.query('COMMIT');
-    res.json({ admin_id: adminId, ...after });
+    res.json({ admin_id: adminId, ...after, revision: updated.rows[0].revision });
   } catch (error) {
     await client.query('ROLLBACK');
     console.error('[DTR access PUT]', error);

@@ -9,6 +9,8 @@ void main() {
   final accountWrites = <bool>[];
   var rejectSave = false;
   var rejectAccountSave = false;
+  var rejectConflict = false;
+  var revision = 'r1';
 
   setUpAll(() {
     TestWidgetsFlutterBinding.ensureInitialized();
@@ -20,6 +22,8 @@ void main() {
     accountWrites.clear();
     rejectSave = false;
     rejectAccountSave = false;
+    rejectConflict = false;
+    revision = 'r1';
     ApiClient.instance.dio.interceptors.clear();
     ApiClient.instance.dio.interceptors.add(
       InterceptorsWrapper(
@@ -32,6 +36,7 @@ void main() {
                   'admins': [
                     {
                       'id': 'admin-1',
+                      'revision': revision,
                       'full_name': 'Admin User',
                       'email': 'admin@test.com',
                       'is_active': true,
@@ -90,6 +95,23 @@ void main() {
           if (options.method == 'PUT' &&
               options.path == '/api/dtr-access/admin-1') {
             writes.add(Map<String, dynamic>.from(options.data as Map));
+            if (rejectConflict) {
+              handler.reject(
+                DioException(
+                  requestOptions: options,
+                  response: Response(
+                    requestOptions: options,
+                    statusCode: 409,
+                    data: {
+                      'code': 'DTR_ACCESS_CONFLICT',
+                      'error':
+                          'Permissions have changed. Refresh and review them before saving.',
+                    },
+                  ),
+                ),
+              );
+              return;
+            }
             if (rejectSave) {
               handler.reject(
                 DioException(
@@ -108,7 +130,7 @@ void main() {
               handler.resolve(
                 Response<Map<String, dynamic>>(
                   requestOptions: options,
-                  data: writes.last,
+                  data: {...writes.last, 'revision': revision = 'r2'},
                 ),
               );
             }
@@ -158,10 +180,36 @@ void main() {
     await tester.pumpAndSettle();
     expect(writes, hasLength(1));
     expect(writes.single['manage_allowed'], isTrue);
+    expect(writes.single['expected_revision'], 'r1');
     expect(writes.single['employees_allowed'], isTrue);
     expect(writes.single['leave_allowed'], isTrue);
     expect(find.text('Unsaved'), findsNothing);
     expect(find.text('DTR permissions saved.'), findsOneWidget);
+    await tester.tap(find.text('Employee profiles'));
+    await tester.pump();
+    await tester.tap(find.text('Save permissions'));
+    await tester.pumpAndSettle();
+    expect(writes.last['expected_revision'], 'r2');
+  });
+
+  testWidgets('stale save retains draft and offers an explicit refresh', (
+    tester,
+  ) async {
+    rejectConflict = true;
+    await openPage(tester);
+    await tester.tap(find.text('Manage DTR logs'));
+    await tester.pump();
+    await tester.tap(find.text('Save permissions'));
+    await tester.pumpAndSettle();
+    expect(find.text('Unsaved'), findsOneWidget);
+    expect(find.textContaining('Permissions have changed'), findsOneWidget);
+    expect(writes, hasLength(1));
+    await tester.tap(find.text('Refresh'));
+    await tester.pumpAndSettle();
+    expect(find.text('Discard unsaved changes?'), findsOneWidget);
+    await tester.tap(find.text('Keep editing'));
+    await tester.pumpAndSettle();
+    expect(find.text('Unsaved'), findsOneWidget);
   });
 
   testWidgets(

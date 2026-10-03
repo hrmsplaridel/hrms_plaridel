@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:dio/dio.dart';
 import 'package:hrms_plaridel/core/api/client.dart';
 import 'package:hrms_plaridel/core/api/user_facing_api_error.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
@@ -135,13 +136,14 @@ class _DtrAccessPageState extends State<DtrAccessPage> {
     final permissions = Map<String, bool>.from(_drafts[id]!);
     setState(() => _saving.add(id));
     try {
-      await ApiClient.instance.put<Map<String, dynamic>>(
+      final response = await ApiClient.instance.put<Map<String, dynamic>>(
         '/api/dtr-access/$id',
-        data: permissions,
+        data: {...permissions, 'expected_revision': admin['revision']},
       );
       if (!mounted) return;
       setState(() {
         admin.addAll(permissions);
+        admin['revision'] = response.data?['revision'];
         _drafts.remove(id);
       });
       ScaffoldMessenger.of(
@@ -149,9 +151,22 @@ class _DtrAccessPageState extends State<DtrAccessPage> {
       ).showSnackBar(const SnackBar(content: Text('DTR permissions saved.')));
     } catch (error) {
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text(userFacingApiError(error))));
+        final body = error is DioException ? error.response?.data : null;
+        final conflict = body is Map && body['code'] == 'DTR_ACCESS_CONFLICT';
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(userFacingApiError(error)),
+            duration: conflict
+                ? const Duration(seconds: 10)
+                : const Duration(seconds: 4),
+            action: conflict
+                ? SnackBarAction(
+                    label: 'Refresh',
+                    onPressed: () => _load(confirmDiscard: true),
+                  )
+                : null,
+          ),
+        );
       }
     } finally {
       if (mounted) setState(() => _saving.remove(id));
