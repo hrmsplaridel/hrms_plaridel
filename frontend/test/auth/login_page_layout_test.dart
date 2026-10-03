@@ -64,7 +64,7 @@ void main() {
     expect(find.text('Sign In to HRMS'), findsOneWidget);
     expect(find.text('Municipality of\nPlaridel'), findsOneWidget);
     expect(find.text('Welcome Back'), findsOneWidget);
-    expect(find.text('Email Address'), findsOneWidget);
+    expect(find.text('Email or username'), findsOneWidget);
     expect(find.text('Have a productive day!'), findsNothing);
     expect(find.text('Or quick access'), findsNothing);
     expect(find.bySemanticsLabel('HRMS system logo'), findsOneWidget);

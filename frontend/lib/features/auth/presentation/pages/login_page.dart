@@ -10,6 +10,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:hrms_plaridel/core/api/client.dart';
 import 'package:hrms_plaridel/features/dashboard/presentation/admin/admin_dashboard.dart';
 import 'package:hrms_plaridel/features/dashboard/presentation/employee/employee_dashboard.dart';
+import 'package:hrms_plaridel/features/dashboard/presentation/super_admin/super_admin_dashboard.dart';
 import 'package:hrms_plaridel/features/mayor/presentation/pages/mayor_dashboard_page.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/main.dart' show kLoginAsKey;
@@ -292,17 +293,22 @@ class _LoginPageState extends State<LoginPage> with TickerProviderStateMixin {
         final role = auth.user?.role ?? 'employee';
         final isPrivileged = role == 'admin' || role == 'hr';
         final isMayor = role == 'mayor';
+        final isSuperAdmin = role == 'super_admin';
 
         final prefs = await SharedPreferences.getInstance();
         await prefs.setString(
           kLoginAsKey,
-          isMayor ? 'Mayor' : (isPrivileged ? 'Admin' : 'Employee'),
+          isMayor
+              ? 'Mayor'
+              : (isPrivileged || isSuperAdmin ? 'Admin' : 'Employee'),
         );
 
         if (!mounted) return;
         Navigator.of(context).pushReplacement(
           MaterialPageRoute(
-            builder: (context) => isMayor
+            builder: (context) => isSuperAdmin
+                ? const SuperAdminDashboard()
+                : isMayor
                 ? const MayorDashboardPage()
                 : (isPrivileged
                       ? const AdminDashboard()
@@ -1062,7 +1068,7 @@ class _LoginFormContent extends StatelessWidget {
             children: [
               _LoginTextField(
                 controller: emailController,
-                label: embeddedCard ? 'Email' : 'Email Address',
+                label: 'Email or username',
                 mobile: !embeddedCard,
                 hintText: 'name@plaridel.gov.ph',
                 icon: Icons.mail_outline_rounded,

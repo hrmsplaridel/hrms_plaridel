@@ -203,6 +203,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Edgar C Jr. Jr. - 2026-10-02'), findsOneWidget);
     expect(find.text('Punch comparison'), findsOneWidget);
+    await tester.scrollUntilVisible(find.text('Review decision'), 180);
     expect(find.text('Review decision'), findsOneWidget);
     expect(find.text('Review notes'), findsOneWidget);
     expect(paths, ['/api/dtr-corrections/request-1']);

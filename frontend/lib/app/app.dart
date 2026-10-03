@@ -8,6 +8,7 @@ import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/features/auth/presentation/pages/login_page.dart';
 import 'package:hrms_plaridel/features/dashboard/presentation/admin/admin_dashboard.dart';
 import 'package:hrms_plaridel/features/dashboard/presentation/employee/employee_dashboard.dart';
+import 'package:hrms_plaridel/features/dashboard/presentation/super_admin/super_admin_dashboard.dart';
 import 'package:hrms_plaridel/features/mayor/presentation/pages/mayor_dashboard_page.dart';
 import 'package:hrms_plaridel/features/docutracker/services/docutracker_access_policy.dart';
 import 'package:hrms_plaridel/providers/auth_provider.dart';
@@ -282,7 +283,8 @@ Widget _initialHome(AuthProvider auth, {required double logicalWidth}) {
   if (auth.user != null) {
     final role = (auth.user!.role ?? 'employee').toLowerCase();
     if (role == 'mayor') return const MayorDashboardPage();
-    final isPrivileged = role == 'admin' || role == 'hr';
+    final isPrivileged =
+        role == 'admin' || role == 'hr' || role == 'super_admin';
     final isNativeMobile =
         !kIsWeb &&
         (defaultTargetPlatform == TargetPlatform.android ||
@@ -292,6 +294,7 @@ Widget _initialHome(AuthProvider auth, {required double logicalWidth}) {
     if (isPrivileged && isMobile) {
       return const _RestrictedMobileRouteScreen(attemptedRoute: '');
     }
+    if (role == 'super_admin') return const SuperAdminDashboard();
     return isPrivileged ? const AdminDashboard() : const EmployeeDashboard();
   }
 

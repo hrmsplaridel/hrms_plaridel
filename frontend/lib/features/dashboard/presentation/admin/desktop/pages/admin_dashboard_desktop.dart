@@ -5,6 +5,7 @@ import 'dart:ui' show lerpDouble;
 import 'package:flutter/material.dart';
 import 'package:shimmer/shimmer.dart';
 import 'package:hrms_plaridel/core/api/user_facing_api_error.dart';
+import 'package:hrms_plaridel/core/api/client.dart';
 import 'package:provider/provider.dart';
 import 'package:hrms_plaridel/providers/auth_provider.dart';
 import 'package:hrms_plaridel/features/recruitment/models/job_vacancy_announcement.dart';
@@ -353,6 +354,10 @@ class AdminDashboard extends StatefulWidget {
 class _AdminDashboardState extends State<AdminDashboard>
     with WidgetsBindingObserver {
   AdminMenu _selectedMenu = AdminMenu.dashboard;
+  bool? _canCreateAccount;
+  bool _canViewDtrReports = false;
+  bool _canManageDtr = false;
+  Map<String, bool> _dtrFeatureAccess = {};
   bool _sidebarCollapsed = false;
   final GlobalKey<_DtrContentState> _dtrContentKey =
       GlobalKey<_DtrContentState>();
@@ -374,6 +379,8 @@ class _AdminDashboardState extends State<AdminDashboard>
   @override
   void initState() {
     super.initState();
+    _loadAccountCreationAccess();
+    _loadDtrAccess();
     _settingsPanelWidget = DashboardProfilePanel(
       key: _settingsPanelKey,
       onBack: _closeMyProfile,
@@ -398,6 +405,8 @@ class _AdminDashboardState extends State<AdminDashboard>
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed && mounted) {
+      _loadAccountCreationAccess();
+      _loadDtrAccess();
       context.read<NotificationProvider>().refreshUnreadCount();
       context.read<DocuTrackerProvider>().loadNotifications();
       context.read<DocuTrackerProvider>().loadSourceSignatureRequests();
@@ -409,6 +418,62 @@ class _AdminDashboardState extends State<AdminDashboard>
     WidgetsBinding.instance.removeObserver(this);
     _notificationPollTimer?.cancel();
     super.dispose();
+  }
+
+  Future<void> _loadAccountCreationAccess() async {
+    try {
+      final response = await ApiClient.instance.get<Map<String, dynamic>>(
+        '/api/account-creation-access/me',
+      );
+      if (!mounted) return;
+      final allowed = response.data?['allowed'] == true;
+      setState(() {
+        _canCreateAccount = allowed;
+        if (!allowed && _selectedMenu == AdminMenu.createAccount) {
+          _selectedMenu = AdminMenu.dashboard;
+        }
+      });
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          _canCreateAccount = false;
+          if (_selectedMenu == AdminMenu.createAccount) {
+            _selectedMenu = AdminMenu.dashboard;
+          }
+        });
+      }
+    }
+  }
+
+  Future<void> _loadDtrAccess() async {
+    try {
+      final response = await ApiClient.instance.get<Map<String, dynamic>>(
+        '/api/dtr-access/me',
+      );
+      if (!mounted) return;
+      setState(() {
+        _canViewDtrReports = response.data?['reports_allowed'] == true;
+        _canManageDtr = response.data?['manage_allowed'] == true;
+        _dtrFeatureAccess = {
+          for (final field in const [
+            'corrections_allowed',
+            'employees_allowed',
+            'leave_allowed',
+            'approvals_allowed',
+            'locator_allowed',
+          ])
+            field: response.data?[field] == true,
+        };
+      });
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          _canViewDtrReports = false;
+          _canManageDtr = false;
+          _dtrFeatureAccess = {};
+        });
+      }
+    }
   }
 
   Future<void> _handleOpenNotifications() async {
@@ -538,6 +603,15 @@ class _AdminDashboardState extends State<AdminDashboard>
   }
 
   void _onMenuSelected(AdminMenu menu) {
+    if (menu == AdminMenu.createAccount && _canCreateAccount != true) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Account creation access is unavailable.'),
+        ),
+      );
+      return;
+    }
+    if (menu == AdminMenu.dtr) _loadDtrAccess();
     if (menu != AdminMenu.createAccount) {
       _rspHireReturnApplicationId = null;
     }
@@ -658,7 +732,13 @@ class _AdminDashboardState extends State<AdminDashboard>
       case AdminMenu.myProfile:
         return _settingsPanel();
       case AdminMenu.dtr:
-        return _DtrContent(key: _dtrContentKey);
+        return _DtrContent(
+          key: _dtrContentKey,
+          canViewReports: _canViewDtrReports,
+          canManageDtr: _canManageDtr,
+          canCreateAccount: _canCreateAccount == true,
+          featureAccess: _dtrFeatureAccess,
+        );
       case AdminMenu.rsp:
         return RspAdminContent(
           onOpenCreateAccount: _openCreateAccountFromRspHire,
@@ -734,6 +814,7 @@ class _AdminDashboardState extends State<AdminDashboard>
               child: SafeArea(
                 child: _Sidebar(
                   selectedMenu: _selectedMenu,
+                  canCreateAccount: _canCreateAccount == true,
                   avatarPath: avatarPath,
                   email: email,
                   displayName: displayName,
@@ -755,6 +836,7 @@ class _AdminDashboardState extends State<AdminDashboard>
                     collapsed: _sidebarCollapsed,
                     showBrand: false,
                     selectedMenu: _selectedMenu,
+                    canCreateAccount: _canCreateAccount == true,
                     avatarPath: avatarPath,
                     email: email,
                     displayName: displayName,
@@ -791,6 +873,10 @@ class _AdminDashboardState extends State<AdminDashboard>
                                 displayName,
                                 contentPadding,
                                 _rspHomeEpoch,
+                                _canViewDtrReports,
+                                _canManageDtr,
+                                _canCreateAccount,
+                                _dtrFeatureAccess,
                               ),
                               homeBuilder: () => _buildContent(displayName),
                               settingsPanel: _settingsPanel(),
@@ -834,6 +920,10 @@ class _AdminDashboardState extends State<AdminDashboard>
                           displayName,
                           contentPadding,
                           _rspHomeEpoch,
+                          _canViewDtrReports,
+                          _canManageDtr,
+                          _canCreateAccount,
+                          _dtrFeatureAccess,
                         ),
                         homeBuilder: () => _buildContent(displayName),
                         settingsPanel: _settingsPanel(),
@@ -852,6 +942,7 @@ class _AdminDashboardState extends State<AdminDashboard>
 class _Sidebar extends StatelessWidget {
   const _Sidebar({
     required this.selectedMenu,
+    required this.canCreateAccount,
     this.avatarPath,
     required this.email,
     required this.displayName,
@@ -862,6 +953,7 @@ class _Sidebar extends StatelessWidget {
   });
 
   final AdminMenu selectedMenu;
+  final bool canCreateAccount;
   final String? avatarPath;
   final String email;
   final String displayName;
@@ -934,12 +1026,14 @@ class _Sidebar extends StatelessWidget {
           badgeCount: pendingSignatures,
           onTap: () => onTap(AdminMenu.docutracker),
         ),
-        DashboardSidebarNavTile(
-          icon: Icons.person_add_outlined,
-          label: 'Create Account',
-          selected: selectedMenu == AdminMenu.createAccount,
-          onTap: () => onTap(AdminMenu.createAccount),
-        ),
+        DashboardSidebarSectionLabel('SYSTEM ADMINISTRATION'),
+        if (canCreateAccount)
+          DashboardSidebarNavTile(
+            icon: Icons.person_add_outlined,
+            label: 'Create Account',
+            selected: selectedMenu == AdminMenu.createAccount,
+            onTap: () => onTap(AdminMenu.createAccount),
+          ),
         const SizedBox(height: 12),
       ],
     );
@@ -1584,7 +1678,18 @@ class _RecruitmentOverviewCardState extends State<RecruitmentOverviewCard> {
 
 /// DTR module: hub with feature cards (like RSP). Choose a feature below.
 class _DtrContent extends StatefulWidget {
-  const _DtrContent({super.key});
+  const _DtrContent({
+    super.key,
+    required this.canViewReports,
+    required this.canManageDtr,
+    required this.canCreateAccount,
+    required this.featureAccess,
+  });
+
+  final bool canViewReports;
+  final bool canManageDtr;
+  final bool canCreateAccount;
+  final Map<String, bool> featureAccess;
 
   @override
   State<_DtrContent> createState() => _DtrContentState();
@@ -1605,6 +1710,40 @@ class _DtrContentState extends State<_DtrContent> {
 
   /// When opening **Assignment** from Employees, pre-select this employee once.
   String? _prefillAssignmentEmployeeId;
+
+  @override
+  void didUpdateWidget(covariant _DtrContent oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    for (final entry in const {
+      3: 'employees_allowed',
+      8: 'leave_allowed',
+      12: 'locator_allowed',
+      14: 'approvals_allowed',
+      15: 'corrections_allowed',
+    }.entries) {
+      if (oldWidget.featureAccess[entry.value] !=
+          widget.featureAccess[entry.value]) {
+        _featureCache.remove(entry.key);
+        if (_dtrSectionIndex == entry.key &&
+            widget.featureAccess[entry.value] != true) {
+          _dtrSectionIndex = 0;
+        }
+      }
+    }
+    if (oldWidget.canCreateAccount != widget.canCreateAccount) {
+      _featureCache.remove(3);
+    }
+    if (oldWidget.canViewReports && !widget.canViewReports) {
+      _featureCache.remove(2);
+      if (_dtrSectionIndex == 2) _dtrSectionIndex = 0;
+    }
+    if (oldWidget.canManageDtr && !widget.canManageDtr) {
+      for (final index in [1, 4, 5, 6, 7, 9, 10, 11, 13]) {
+        _featureCache.remove(index);
+        if (_dtrSectionIndex == index) _dtrSectionIndex = 0;
+      }
+    }
+  }
 
   /// Opens **Leave Management** (same as tapping the DTR hub card). Used after notification taps.
   void openLeaveManagement() {
@@ -1628,6 +1767,22 @@ class _DtrContentState extends State<_DtrContent> {
 
   void _openDtrSection(int index) {
     if (!mounted) return;
+    const features = {
+      3: 'employees_allowed',
+      8: 'leave_allowed',
+      12: 'locator_allowed',
+      14: 'approvals_allowed',
+      15: 'corrections_allowed',
+    };
+    if (features.containsKey(index) &&
+        widget.featureAccess[features[index]] != true) {
+      return;
+    }
+    if (index == 2 && !widget.canViewReports) return;
+    if ([1, 4, 5, 6, 7, 9, 10, 11, 13].contains(index) &&
+        !widget.canManageDtr) {
+      return;
+    }
     if (index == 0) {
       setState(() {
         _dtrSectionIndex = 0;
@@ -1751,6 +1906,7 @@ class _DtrContentState extends State<_DtrContent> {
     if (index == 15) return const AdminDtrCorrectionsPage();
     return _ManageContent(
       subIndex: index - 3,
+      canCreateAccount: widget.canCreateAccount,
       onOpenAssignmentForEmployee: _goToAssignmentWithEmployee,
       prefillAssignmentEmployeeId: index == 4
           ? _prefillAssignmentEmployeeId
@@ -1870,67 +2026,76 @@ class _DtrContentState extends State<_DtrContent> {
                 const SizedBox(height: 24),
                 FeatureCardGrid(
                   children: [
-                    FeatureCard(
-                      title: 'Time Logs',
-                      subtitle:
-                          'Manage and correct daily time-in/out records. Add, edit, or delete entries.',
-                      icon: Icons.schedule_rounded,
-                      onTap: () => _openDtrSection(1),
-                    ),
-                    FeatureCard(
-                      title: 'DTR Corrections',
-                      subtitle:
-                          'Review employee attendance correction requests and decisions.',
-                      icon: Icons.fact_check_outlined,
-                      onTap: () => _openDtrSection(15),
-                    ),
-                    FeatureCard(
-                      title: 'Reports',
-                      subtitle: 'View attendance and tardiness reports.',
-                      icon: Icons.summarize_rounded,
-                      onTap: () => _openDtrSection(2),
-                    ),
-                    FeatureCard(
-                      title: 'Employees',
-                      subtitle: 'Manage employee profiles and accounts.',
-                      icon: Icons.people_rounded,
-                      onTap: () => _openDtrSection(3),
-                    ),
-                    FeatureCard(
-                      title: 'Workforce Setup',
-                      subtitle:
-                          'Manage assignments, schedules, holidays, and attendance policies.',
-                      icon: Icons.settings_rounded,
-                      onTap: () => _openDtrSection(4),
-                    ),
-                    FeatureCard(
-                      title: 'Leave Management',
-                      subtitle:
-                          'Review employee leave requests, approvals, and leave-related records.',
-                      icon: Icons.event_note_rounded,
-                      onTap: () => _openDtrSection(8),
-                    ),
-                    FeatureCard(
-                      title: 'Approvals & Signatories',
-                      subtitle:
-                          'Department reviewers, final reviewers, backups, and report signatories.',
-                      icon: Icons.account_tree_outlined,
-                      onTap: () => _openDtrSection(14),
-                    ),
-                    FeatureCard(
-                      title: 'Locator Slip Management',
-                      subtitle:
-                          'Review locator slip approvals, department-head endorsements, and HR final decisions.',
-                      icon: Icons.pin_drop_rounded,
-                      onTap: () => _openDtrSection(12),
-                    ),
-                    FeatureCard(
-                      title: 'Biometric Devices',
-                      subtitle:
-                          'Register and manage biometric time clocks linked to your database.',
-                      icon: Icons.fingerprint_rounded,
-                      onTap: () => _openDtrSection(11),
-                    ),
+                    if (widget.canManageDtr)
+                      FeatureCard(
+                        title: 'Time Logs',
+                        subtitle:
+                            'Manage and correct daily time-in/out records. Add, edit, or delete entries.',
+                        icon: Icons.schedule_rounded,
+                        onTap: () => _openDtrSection(1),
+                      ),
+                    if (widget.featureAccess['corrections_allowed'] == true)
+                      FeatureCard(
+                        title: 'DTR Corrections',
+                        subtitle:
+                            'Review employee attendance correction requests and decisions.',
+                        icon: Icons.fact_check_outlined,
+                        onTap: () => _openDtrSection(15),
+                      ),
+                    if (widget.canViewReports)
+                      FeatureCard(
+                        title: 'Reports',
+                        subtitle: 'View attendance and tardiness reports.',
+                        icon: Icons.summarize_rounded,
+                        onTap: () => _openDtrSection(2),
+                      ),
+                    if (widget.featureAccess['employees_allowed'] == true)
+                      FeatureCard(
+                        title: 'Employees',
+                        subtitle: 'Manage employee profiles and accounts.',
+                        icon: Icons.people_rounded,
+                        onTap: () => _openDtrSection(3),
+                      ),
+                    if (widget.canManageDtr)
+                      FeatureCard(
+                        title: 'Workforce Setup',
+                        subtitle:
+                            'Manage assignments, schedules, holidays, and attendance policies.',
+                        icon: Icons.settings_rounded,
+                        onTap: () => _openDtrSection(4),
+                      ),
+                    if (widget.featureAccess['leave_allowed'] == true)
+                      FeatureCard(
+                        title: 'Leave Management',
+                        subtitle:
+                            'Review employee leave requests, approvals, and leave-related records.',
+                        icon: Icons.event_note_rounded,
+                        onTap: () => _openDtrSection(8),
+                      ),
+                    if (widget.featureAccess['approvals_allowed'] == true)
+                      FeatureCard(
+                        title: 'Approvals & Signatories',
+                        subtitle:
+                            'Department reviewers, final reviewers, backups, and report signatories.',
+                        icon: Icons.account_tree_outlined,
+                        onTap: () => _openDtrSection(14),
+                      ),
+                    if (widget.featureAccess['locator_allowed'] == true)
+                      FeatureCard(
+                        title: 'Locator Slip Management',
+                        subtitle:
+                            'Review locator slip approvals, department-head endorsements, and HR final decisions.',
+                        icon: Icons.pin_drop_rounded,
+                        onTap: () => _openDtrSection(12),
+                      ),
+                    if (widget.canManageDtr)
+                      FeatureCard(
+                        title: 'Biometric Devices',
+                        subtitle:
+                            'Register and manage biometric time clocks linked to your database.',
+                        icon: Icons.fingerprint_rounded,
+                        onTap: () => _openDtrSection(11),
+                      ),
                   ],
                 ),
               ] else
@@ -2558,12 +2723,14 @@ class _LdContentState extends State<_LdContent> {
 class _ManageContent extends StatelessWidget {
   const _ManageContent({
     required this.subIndex,
+    required this.canCreateAccount,
     this.onOpenAssignmentForEmployee,
     this.prefillAssignmentEmployeeId,
     this.onPrefillAssignmentConsumed,
   });
 
   final int subIndex;
+  final bool canCreateAccount;
   final void Function(String employeeId)? onOpenAssignmentForEmployee;
   final String? prefillAssignmentEmployeeId;
   final VoidCallback? onPrefillAssignmentConsumed;
@@ -2582,6 +2749,7 @@ class _ManageContent extends StatelessWidget {
   Widget build(BuildContext context) {
     if (subIndex == 0) {
       return ManageEmployee(
+        canCreateAccount: canCreateAccount,
         onOpenAssignmentForEmployee: onOpenAssignmentForEmployee,
       );
     }
