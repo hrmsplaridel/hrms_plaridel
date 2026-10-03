@@ -1,12 +1,9 @@
 const { insertNotification, insertNotificationForUsers } = require('./notificationService');
+const { resolveDtrCorrectionReviewers } = require('./dtrCorrectionReviewers');
 
 async function submitted(db, row) {
-  const reviewers = await db.query(
-    `SELECT id FROM users WHERE role IN ('admin','hr') AND is_active = true
-       AND COALESCE(employment_status, 'active') = 'active' AND id <> $1::uuid`,
-    [row.employee_id]
-  );
-  await insertNotificationForUsers(db, reviewers.rows.map(r => r.id), {
+  const reviewers = await resolveDtrCorrectionReviewers(db);
+  await insertNotificationForUsers(db, reviewers.filter(r => String(r.id) !== String(row.employee_id)).map(r => r.id), {
     category: 'dtr', type: 'dtr_correction_pending_review',
     title: 'DTR correction pending review',
     body: `An employee submitted an attendance correction for ${String(row.attendance_date).slice(0, 10)}.`,

@@ -14,10 +14,9 @@ test('DTR submission and decisions use the shared in-app/push notification servi
     const service = require(path);
     const row = { id: 'request', employee_id: 'employee', attendance_date: '2026-09-30' };
     const db = { query: async (sql, args) => {
-      assert.match(sql, /role IN \('admin','hr'\)/);
-      assert.match(sql, /is_active = true/);
-      assert.match(sql, /id <> \$1/);
-      assert.deepEqual(args, ['employee']);
+      assert.match(sql, /dtr_correction_reviewer_configs/);
+      assert.match(sql, /u.is_active = true/);
+      assert.equal(args.length, 1);
       return { rows: [{ id: 'reviewer' }] };
     } };
     await service.submitted(db, row);

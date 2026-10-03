@@ -10,6 +10,8 @@ const { enqueueEmployeeRangeReconciliation } = require('../services/dtrMonthEndR
 const { applyApprovedCorrectionToSummary, getCorrectionShift } = require('./dtrDailySummary');
 const { getShiftType } = require('../services/shiftAttendance');
 const { broadcastBiometricUpdate } = require('../websockets/biometricStream');
+const { resolveDtrCorrectionReviewers } = require('../services/dtrCorrectionReviewers');
+const { todayInHrmsTimezone } = require('../utils/dateRangeParser');
 
 const fields = ['time_in', 'break_out', 'break_in', 'time_out'];
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -22,7 +24,8 @@ function fingerprint(row) {
 function createRouter({ db = pool, auth = authMiddleware, apply = applyApprovedCorrectionToSummary,
   shiftFor = getCorrectionShift, enqueue = enqueueEmployeeRangeReconciliation,
   broadcast = broadcastBiometricUpdate,
-  notifications = require('../services/dtrCorrectionNotifications') } = {}) {
+  notifications = require('../services/dtrCorrectionNotifications'),
+  reviewers = resolveDtrCorrectionReviewers } = {}) {
   const router = express.Router();
   router.use(auth);
   async function notify(action) {
@@ -34,9 +37,56 @@ function createRouter({ db = pool, auth = authMiddleware, apply = applyApprovedC
       res.status(error.status || 500).json({ error: error.status ? error.message : 'Unable to process attendance correction.' });
     }
   };
+  async function canReview(db, user) {
+    if (!['admin', 'hr'].includes(user.role)) return false;
+    return (await reviewers(db)).some(row => String(row.id) === String(user.id));
+  }
+  router.get('/reviewers', requireAdminOrHr, handle(async (req, res) => {
+    const date = String(req.query?.effective_date || todayInHrmsTimezone());
+    if (!isValidIsoDate(date)) fail('Choose a valid effective date.');
+    const [config, eligible] = await Promise.all([
+      db.query(`SELECT effective_from::text AS effective_from, reviewer_ids, created_at
+        FROM dtr_correction_reviewer_configs WHERE effective_from <= $1::date
+        ORDER BY effective_from DESC, created_at DESC, id DESC LIMIT 1`, [date]),
+      db.query(`SELECT id, full_name AS name FROM users WHERE role IN ('admin','hr')
+        AND is_active = true AND COALESCE(employment_status, 'active') = 'active'
+        ORDER BY full_name, id`),
+    ]);
+    res.json({ config: config.rows[0] || null, eligible: eligible.rows });
+  }));
+  router.put('/reviewers', requireAdminOrHr, handle(async (req, res) => {
+    if (req.user.role !== 'admin') fail('Admin access required.', 403);
+    const date = String(req.body?.effective_from || '');
+    const ids = req.body?.reviewer_ids;
+    if (!isValidIsoDate(date) || date < todayInHrmsTimezone()) fail('Choose today or a future effective date.');
+    if (!Array.isArray(ids) || ids.length < 1 || ids.length > 6 ||
+        ids.some(id => typeof id !== 'string' || !uuid.test(id)) || new Set(ids).size !== ids.length) {
+      fail('Choose one primary and up to five distinct backup reviewers.');
+    }
+    const client = await db.connect();
+    try {
+      await client.query('BEGIN');
+      const eligible = await client.query(`SELECT id FROM users WHERE id = ANY($1::uuid[])
+        AND role IN ('admin','hr') AND is_active = true
+        AND COALESCE(employment_status, 'active') = 'active'`, [ids]);
+      if (eligible.rows.length !== ids.length) fail('Reviewers must be active admin or HR accounts.', 409);
+      if (ids.length === 1) {
+        const count = await client.query(`SELECT count(*)::int AS total FROM users
+          WHERE role IN ('admin','hr') AND is_active = true
+            AND COALESCE(employment_status, 'active') = 'active'`);
+        if (count.rows[0].total > 1) fail('Choose a backup reviewer when another eligible account is available.', 409);
+      }
+      await client.query(`INSERT INTO dtr_correction_reviewer_configs
+          (effective_from, reviewer_ids, created_by) VALUES ($1::date, $2::uuid[], $3::uuid)`,
+      [date, ids, req.user.id]);
+      await client.query('COMMIT');
+    } catch (error) { await client.query('ROLLBACK'); throw error; }
+    finally { client.release(); }
+    res.json({ effective_from: date, reviewer_ids: ids });
+  }));
   router.get('/', handle(async (req, res) => {
     const review = req.query.review === 'true';
-    if (review && !['admin', 'hr'].includes(req.user.role)) fail('HR or admin access required.', 403);
+    if (review && !(await canReview(db, req.user))) fail('Assigned DTR reviewer access required.', 403);
     const offset = Math.max(0, parseInt(req.query.offset, 10) || 0);
     const status = String(req.query.status || '').trim().toLowerCase();
     if (status && !['pending', 'approved', 'rejected'].includes(status)) fail('Invalid correction status.');
@@ -82,6 +132,9 @@ function createRouter({ db = pool, auth = authMiddleware, apply = applyApprovedC
     }
     const shift = await shiftFor(req.user.id, date);
     if (!shift) fail('No shift is assigned for this date.');
+    if (!(await reviewers(db)).some(row => String(row.id) !== String(req.user.id))) {
+      fail('No other active DTR correction reviewer is configured. Contact an administrator.', 409);
+    }
     const client = await db.connect();
     let submitted;
     try {
@@ -122,7 +175,12 @@ function createRouter({ db = pool, auth = authMiddleware, apply = applyApprovedC
         [req.user.id, req.params.date]),
       shiftFor(req.user.id, req.params.date),
     ]);
-    res.json({ ...(result.rows[0] || {}), shift_punch_mode: getShiftType(shift) });
+    res.json({
+      ...(result.rows[0] || {}),
+      shift_punch_mode: getShiftType(shift),
+      shift_crosses_midnight: shift?.startMinutes != null && shift?.endMinutes != null &&
+        Number(shift.endMinutes) < Number(shift.startMinutes),
+    });
   }));
 
   router.get('/:id', handle(async (req, res) => {
@@ -134,7 +192,7 @@ function createRouter({ db = pool, auth = authMiddleware, apply = applyApprovedC
       LEFT JOIN users r ON r.id=c.reviewed_by
       LEFT JOIN dtr_correction_attachments evidence ON evidence.correction_id=c.id
       WHERE c.id=$1 AND (c.employee_id=$2 OR $3::boolean)`,
-      [req.params.id, req.user.id, ['admin', 'hr'].includes(req.user.role)]);
+      [req.params.id, req.user.id, await canReview(db, req.user)]);
     if (!result.rows.length) fail('Correction not found or access denied.', 404);
     res.json(result.rows[0]);
   }));
@@ -144,7 +202,7 @@ function createRouter({ db = pool, auth = authMiddleware, apply = applyApprovedC
     const result = await db.query(`SELECT a.* FROM dtr_correction_attachments a
       JOIN dtr_corrections c ON c.id=a.correction_id
       WHERE c.id=$1 AND (c.employee_id=$2 OR $3::boolean)`,
-      [req.params.id, req.user.id, ['admin', 'hr'].includes(req.user.role)]);
+      [req.params.id, req.user.id, await canReview(db, req.user)]);
     if (!result.rows.length) fail('Attachment not found or access denied.', 404);
     const file = result.rows[0];
     res.set({ 'Content-Type': file.mime_type, 'Cache-Control': 'private, no-store',
@@ -162,6 +220,7 @@ function createRouter({ db = pool, auth = authMiddleware, apply = applyApprovedC
     let row;
     try {
       await client.query('BEGIN');
+      if (!(await canReview(client, req.user))) fail('Assigned DTR reviewer access required.', 403);
       const result = await client.query('SELECT *, attendance_date::text AS attendance_date FROM dtr_corrections WHERE id=$1 FOR UPDATE', [req.params.id]);
       row = result.rows[0];
       if (!row) fail('Correction not found.', 404);

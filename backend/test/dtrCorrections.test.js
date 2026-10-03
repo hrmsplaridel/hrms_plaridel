@@ -2,7 +2,8 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { createRouter: createBackendRouter } = require('../src/routes/dtrCorrections');
 const createRouter = options => createBackendRouter({
-  notifications: { submitted: async () => {}, reviewed: async () => {} }, ...options,
+  notifications: { submitted: async () => {}, reviewed: async () => {} },
+  reviewers: async () => [{ id: reviewer }], ...options,
 });
 const employee = '11111111-1111-4111-8111-111111111111';
 const reviewer = '22222222-2222-4222-8222-222222222222';
@@ -47,6 +48,50 @@ test('employees cannot access the review list', async () => {
   const res = await invoke(router, 'get', '/', { user: { id: employee, role: 'employee' }, query: { review: 'true' } });
   assert.equal(res.code, 403);
 });
+test('unassigned HR cannot view or decide correction requests', async () => {
+  let detailAccess;
+  const client = { release() {}, query: async () => ({ rows: [] }) };
+  const router = createRouter({ reviewers: async () => [], db: {
+    query: async (sql, values) => {
+      if (sql.includes('FROM dtr_corrections c')) detailAccess = values;
+      return { rows: [] };
+    }, connect: async () => client,
+  } });
+  const list = await invoke(router, 'get', '/', { user: { id: reviewer, role: 'hr' }, query: { review: 'true' } });
+  assert.equal(list.code, 403);
+  const detail = await invoke(router, 'get', '/:id', { user: { id: reviewer, role: 'hr' }, params: { id } });
+  assert.equal(detail.code, 404);
+  assert.deepEqual(detailAccess, [id, reviewer, false]);
+  const review = await invoke(router, 'post', '/:id/review', reviewRequest());
+  assert.equal(review.code, 403);
+});
+test('only admins can configure two or more eligible reviewers', async () => {
+  const queries = [];
+  let eligibleCount = 2;
+  const client = { release() {}, async query(sql, args) {
+    queries.push(sql);
+    if (sql.includes('FROM users WHERE id = ANY')) return { rows: args[0].map(id => ({ id })) };
+    if (sql.includes('count(*)')) return { rows: [{ total: eligibleCount }] };
+    return { rows: [] };
+  } };
+  const router = createRouter({ db: { connect: async () => client } });
+  const body = { effective_from: '2099-01-01', reviewer_ids: [reviewer, employee] };
+  const denied = await invoke(router, 'put', '/reviewers', { user: { id: reviewer, role: 'hr' }, body });
+  assert.equal(denied.code, 403);
+  const missingBackup = await invoke(router, 'put', '/reviewers', {
+    user: { id: reviewer, role: 'admin' }, body: { ...body, reviewer_ids: [reviewer] },
+  });
+  assert.equal(missingBackup.code, 409);
+  eligibleCount = 1;
+  const single = await invoke(router, 'put', '/reviewers', {
+    user: { id: reviewer, role: 'admin' }, body: { ...body, reviewer_ids: [reviewer] },
+  });
+  assert.equal(single.code, 200);
+  const saved = await invoke(router, 'put', '/reviewers', { user: { id: reviewer, role: 'admin' }, body });
+  assert.equal(saved.code, 200);
+  assert.ok(queries.some(sql => sql.includes('INSERT INTO dtr_correction_reviewer_configs')));
+  assert.equal(queries.at(-1), 'COMMIT');
+});
 test('employee history is scoped to authenticated employee', async () => {
   let args;
   const router = createRouter({ db: { query: async (_, values) => { args = values; return { rows: [] }; } } });
@@ -86,7 +131,7 @@ test('original attendance preview only reads the authenticated employee', async 
     user: { id: employee, role: 'admin' }, params: { date: '2026-10-02' }, query: { employee_id: reviewer },
   });
   assert.equal(result.code, 200);
-  assert.deepEqual(result.body, { shift_punch_mode: 'single_session' });
+  assert.deepEqual(result.body, { shift_punch_mode: 'single_session', shift_crosses_midnight: true });
   assert.deepEqual(args, [employee, '2026-10-02']);
   assert.deepEqual(shiftArgs, [employee, '2026-10-02']);
 });
@@ -97,7 +142,9 @@ test('original attendance preview resolves split shifts and missing assignments'
   const split = createRouter({ db, shiftFor: async () => ({ punchMode: 'full_day', startMinutes: 480, endMinutes: 1020 }) });
   const absent = createRouter({ db, shiftFor: async () => null });
   assert.equal((await invoke(split, 'get', '/original/:date', request)).body.shift_punch_mode, 'full_day');
+  assert.equal((await invoke(split, 'get', '/original/:date', request)).body.shift_crosses_midnight, false);
   assert.equal((await invoke(absent, 'get', '/original/:date', request)).body.shift_punch_mode, null);
+  assert.equal((await invoke(absent, 'get', '/original/:date', request)).body.shift_crosses_midnight, false);
 });
 for (const [name, options, code] of [
   ['self approval', { own: true }, 403], ['already reviewed', { status: 'approved' }, 409],
