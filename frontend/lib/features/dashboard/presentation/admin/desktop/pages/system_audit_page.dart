@@ -24,6 +24,9 @@ class _SystemAuditPageState extends State<SystemAuditPage> {
   final _entity = TextEditingController();
   List<Map<String, dynamic>> _entries = [];
   int _page = 1;
+  final List<String?> _pageCursors = [];
+  String? _nextCursor;
+  Map<String, dynamic>? _appliedQuery;
   int _total = 0;
   int _loadVersion = 0;
   bool _loading = true;
@@ -45,32 +48,40 @@ class _SystemAuditPageState extends State<SystemAuditPage> {
     super.dispose();
   }
 
-  Future<void> _load() async {
+  Future<void> _load({int page = 1, String? cursor}) async {
     final version = ++_loadVersion;
     setState(() {
       _loading = true;
       _error = null;
     });
     try {
-      final query = <String, dynamic>{
-        'page': _page,
-        'limit': _pageSize,
-        if (_hideViews) 'hide_views': '1',
-        if (_dateRange != null) ...{
-          'date_from': DateTime(
-            _dateRange!.start.year,
-            _dateRange!.start.month,
-            _dateRange!.start.day,
-          ).toUtc().toIso8601String(),
-          'date_before': DateTime(
-            _dateRange!.end.year,
-            _dateRange!.end.month,
-            _dateRange!.end.day + 1,
-          ).toUtc().toIso8601String(),
-        },
-        if (_actor.text.trim().isNotEmpty) 'actor': _actor.text.trim(),
-        if (_action.text.trim().isNotEmpty) 'action': _action.text.trim(),
-        if (_entity.text.trim().isNotEmpty) 'entity_type': _entity.text.trim(),
+      final filters = cursor != null && _appliedQuery != null
+          ? _appliedQuery!
+          : <String, dynamic>{
+              'pagination': 'cursor',
+              'limit': _pageSize,
+              if (_hideViews) 'hide_views': '1',
+              if (_dateRange != null) ...{
+                'date_from': DateTime(
+                  _dateRange!.start.year,
+                  _dateRange!.start.month,
+                  _dateRange!.start.day,
+                ).toUtc().toIso8601String(),
+                'date_before': DateTime(
+                  _dateRange!.end.year,
+                  _dateRange!.end.month,
+                  _dateRange!.end.day + 1,
+                ).toUtc().toIso8601String(),
+              },
+              if (_actor.text.trim().isNotEmpty) 'actor': _actor.text.trim(),
+              if (_action.text.trim().isNotEmpty) 'action': _action.text.trim(),
+              if (_entity.text.trim().isNotEmpty)
+                'entity_type': _entity.text.trim(),
+            };
+      final query = {
+        ...filters,
+        'page': page,
+        if (cursor != null) 'cursor': cursor,
       };
       final data = widget.load != null
           ? await widget.load!(query)
@@ -85,6 +96,16 @@ class _SystemAuditPageState extends State<SystemAuditPage> {
             .map((row) => Map<String, dynamic>.from(row as Map))
             .toList();
         _total = (data['total'] as num?)?.toInt() ?? 0;
+        _appliedQuery = Map.of(filters);
+        _page = page;
+        _nextCursor = data['next_cursor'] as String?;
+        if (cursor == null) _pageCursors.clear();
+        final currentCursor = cursor ?? data['first_cursor'] as String?;
+        if (_pageCursors.length < page) {
+          _pageCursors.add(currentCursor);
+        } else {
+          _pageCursors[page - 1] = currentCursor;
+        }
       });
     } catch (error) {
       if (mounted && version == _loadVersion) {
@@ -98,7 +119,6 @@ class _SystemAuditPageState extends State<SystemAuditPage> {
   }
 
   void _applyFilters() {
-    _page = 1;
     _load();
   }
 
@@ -297,7 +317,6 @@ class _SystemAuditPageState extends State<SystemAuditPage> {
                   onSelected: (show) {
                     setState(() {
                       _hideViews = !show;
-                      _page = 1;
                     });
                     _load();
                   },
@@ -366,8 +385,7 @@ class _SystemAuditPageState extends State<SystemAuditPage> {
                 tooltip: 'Previous page',
                 onPressed: _page > 1 && !_loading
                     ? () {
-                        _page--;
-                        _load();
+                        _load(page: _page - 1, cursor: _pageCursors[_page - 2]);
                       }
                     : null,
                 icon: const Icon(Icons.chevron_left),
@@ -375,10 +393,9 @@ class _SystemAuditPageState extends State<SystemAuditPage> {
               Text('Page $_page'),
               IconButton(
                 tooltip: 'Next page',
-                onPressed: _page * _pageSize < _total && !_loading
+                onPressed: _nextCursor != null && !_loading
                     ? () {
-                        _page++;
-                        _load();
+                        _load(page: _page + 1, cursor: _nextCursor);
                       }
                     : null,
                 icon: const Icon(Icons.chevron_right),
