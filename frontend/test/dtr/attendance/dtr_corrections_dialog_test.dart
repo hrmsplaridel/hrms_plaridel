@@ -238,14 +238,56 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    await tester.tap(find.text('2026-10-02 - Edgar C Jr. Jr.'));
+    await tester.tap(find.text('2026-10-02'));
     await tester.pumpAndSettle();
     expect(find.text('Edgar C Jr. Jr. - 2026-10-02'), findsOneWidget);
     await tester.tap(find.byTooltip('Back to corrections'));
     await tester.pumpAndSettle();
     expect(find.text('Review DTR Corrections'), findsOneWidget);
-    expect(find.text('2026-10-02 - Edgar C Jr. Jr.'), findsOneWidget);
+    expect(find.text('2026-10-02'), findsOneWidget);
+    expect(find.text('Edgar C Jr. Jr.'), findsOneWidget);
   });
+  for (final width in [390.0, 1000.0]) {
+    testWidgets('my corrections are scannable at $width', (tester) async {
+      tester.view.devicePixelRatio = 1;
+      tester.view.physicalSize = Size(width, 844);
+      addTearDown(tester.view.reset);
+      final queries = <RequestOptions>[];
+      ApiClient.instance.dio.interceptors.clear();
+      ApiClient.instance.dio.interceptors.add(
+        InterceptorsWrapper(
+          onRequest: (options, handler) {
+            queries.add(options);
+            handler.resolve(
+              Response(
+                requestOptions: options,
+                data: [
+                  {
+                    'id': 'request-1',
+                    'employee_name': 'Edgar C Jr. Jr.',
+                    'attendance_date': '2026-10-02',
+                    'status': 'approved',
+                    'reason': 'Biometric time was not captured.',
+                  },
+                ],
+              ),
+            );
+          },
+        ),
+      );
+      await tester.pumpWidget(
+        const MaterialApp(home: Scaffold(body: DtrCorrectionsDialog())),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('2026-10-02'), findsOneWidget);
+      expect(find.text('Edgar C Jr. Jr.'), findsNothing);
+      expect(find.text('Biometric time was not captured.'), findsOneWidget);
+      expect(find.text('Page 1'), findsNothing);
+      await tester.tap(find.widgetWithText(ChoiceChip, 'Pending'));
+      await tester.pumpAndSettle();
+      expect(queries.last.queryParameters['status'], 'pending');
+    });
+  }
   testWidgets('failed load offers retry and disables new requests', (
     tester,
   ) async {

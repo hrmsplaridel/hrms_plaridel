@@ -54,6 +54,17 @@ String normalizeAttendanceRemark(String remark) {
   return value;
 }
 
+String compactLocatorRemark(String remark) {
+  for (final label in [
+    'On Field',
+    'Pass Slip',
+    'Locator / Official Business',
+  ]) {
+    if (remark.startsWith('$label (') && remark.endsWith(')')) return label;
+  }
+  return remark;
+}
+
 /// Whether a record represents a completed workday attendance. Late and/or
 /// undertime employees were still present; incomplete and invalid logs were not.
 bool isCompletedAttendanceRecord(TimeRecord record) {
@@ -123,12 +134,13 @@ class AttendanceRemarksChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final dark = AppTheme.dashIsDark(context);
+    final displayRemark = compactLocatorRemark(remark);
     final (color, bg) = colorsForRemark(
-      remark,
+      displayRemark,
       isHoliday: isHoliday,
       dark: dark,
     );
-    return Container(
+    final chip = Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
         color: bg,
@@ -136,7 +148,7 @@ class AttendanceRemarksChip extends StatelessWidget {
         border: Border.all(color: color.withValues(alpha: 0.5), width: 1),
       ),
       child: Text(
-        remark,
+        displayRemark,
         style: TextStyle(
           fontSize: 11,
           fontWeight: FontWeight.w600,
@@ -145,6 +157,9 @@ class AttendanceRemarksChip extends StatelessWidget {
         overflow: TextOverflow.ellipsis,
       ),
     );
+    return displayRemark == remark
+        ? chip
+        : Tooltip(message: remark, child: chip);
   }
 
   static (Color color, Color bg) _chipPair(

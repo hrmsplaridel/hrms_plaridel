@@ -214,6 +214,7 @@ class _DtrCorrectionsDialogState extends State<DtrCorrectionsDialog> {
   bool _loading = true;
   String? _error;
   int _offset = 0;
+  String _statusFilter = 'All';
   bool _creating = false;
   Map<String, dynamic>? _selected;
   @override
@@ -241,7 +242,11 @@ class _DtrCorrectionsDialogState extends State<DtrCorrectionsDialog> {
       }
       final response = await ApiClient.instance.dio.get(
         '/api/dtr-corrections',
-        queryParameters: {'review': widget.review, 'offset': _offset},
+        queryParameters: {
+          'review': widget.review,
+          'offset': _offset,
+          if (_statusFilter != 'All') 'status': _statusFilter.toLowerCase(),
+        },
       );
       if (mounted) {
         setState(
@@ -255,6 +260,147 @@ class _DtrCorrectionsDialogState extends State<DtrCorrectionsDialog> {
     } finally {
       if (mounted) setState(() => _loading = false);
     }
+  }
+
+  void _setStatusFilter(String status) {
+    if (_statusFilter == status) return;
+    setState(() {
+      _statusFilter = status;
+      _offset = 0;
+      _rows = [];
+    });
+    _load();
+  }
+
+  Future<void> _openRequest(Map<String, dynamic> row) async {
+    try {
+      final response = await ApiClient.instance.dio.get(
+        '/api/dtr-corrections/${row['id']}',
+      );
+      if (mounted) {
+        setState(
+          () => _selected = Map<String, dynamic>.from(response.data as Map),
+        );
+      }
+    } catch (e) {
+      if (mounted) setState(() => _error = userFacingApiError(e));
+    }
+  }
+
+  Widget _statusMark(BuildContext context, dynamic raw) {
+    final status = (raw ?? 'pending').toString().toLowerCase();
+    final color = switch (status) {
+      'approved' => Colors.green,
+      'rejected' => Theme.of(context).colorScheme.error,
+      _ => AppTheme.primaryNavyLight,
+    };
+    final icon = switch (status) {
+      'approved' => Icons.check_circle_outline,
+      'rejected' => Icons.cancel_outlined,
+      _ => Icons.schedule_outlined,
+    };
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(icon, size: 16, color: color),
+        const SizedBox(width: 6),
+        Text(
+          '${status[0].toUpperCase()}${status.substring(1)}',
+          style: TextStyle(
+            fontSize: 13,
+            color: color,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _requestRow(
+    BuildContext context,
+    Map<String, dynamic> row,
+    bool compact,
+  ) {
+    final date = (row['attendance_date'] ?? '-').toString();
+    final reason = (row['reason'] ?? '-').toString();
+    final secondary = AppTheme.dashTextSecondaryOf(context);
+    return InkWell(
+      onTap: () => _openRequest(row),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 15),
+        child: compact
+            ? Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          date,
+                          style: const TextStyle(fontWeight: FontWeight.w700),
+                        ),
+                      ),
+                      _statusMark(context, row['status']),
+                      const SizedBox(width: 4),
+                      const Icon(Icons.chevron_right, size: 18),
+                    ],
+                  ),
+                  if (widget.review) ...[
+                    const SizedBox(height: 5),
+                    Text(
+                      (row['employee_name'] ?? '-').toString(),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                  const SizedBox(height: 5),
+                  Text(
+                    reason,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(color: secondary),
+                  ),
+                ],
+              )
+            : Row(
+                children: [
+                  Expanded(
+                    flex: 2,
+                    child: Text(
+                      date,
+                      style: const TextStyle(fontWeight: FontWeight.w700),
+                    ),
+                  ),
+                  if (widget.review)
+                    Expanded(
+                      flex: 3,
+                      child: Text(
+                        (row['employee_name'] ?? '-').toString(),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  Expanded(
+                    flex: 5,
+                    child: Text(
+                      reason,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(color: secondary),
+                    ),
+                  ),
+                  Expanded(
+                    flex: 2,
+                    child: Align(
+                      alignment: Alignment.centerLeft,
+                      child: _statusMark(context, row['status']),
+                    ),
+                  ),
+                  const Icon(Icons.chevron_right, size: 18),
+                ],
+              ),
+      ),
+    );
   }
 
   @override
@@ -312,127 +458,214 @@ class _DtrCorrectionsDialogState extends State<DtrCorrectionsDialog> {
     return Scaffold(
       backgroundColor: Theme.of(context).colorScheme.surface,
       body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            children: [
-              Row(
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final compact = constraints.maxWidth < 680;
+            final hairline = AppTheme.dashHairlineOf(context);
+            final secondary = AppTheme.dashTextSecondaryOf(context);
+            return Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
                 children: [
-                  Expanded(
-                    child: Text(
-                      widget.review
-                          ? 'Review DTR Corrections'
-                          : 'My DTR Corrections',
-                      style: Theme.of(context).textTheme.titleLarge,
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          widget.review
+                              ? 'Review DTR Corrections'
+                              : 'My DTR Corrections',
+                          style: Theme.of(context).textTheme.titleLarge,
+                        ),
+                      ),
+                      IconButton(
+                        tooltip: 'Refresh',
+                        onPressed: _loading ? null : _load,
+                        icon: const Icon(Icons.refresh),
+                      ),
+                      IconButton(
+                        tooltip: 'Close',
+                        onPressed: () => Navigator.pop(context),
+                        icon: const Icon(Icons.close),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+                  if (!widget.review) ...[
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: FilledButton.icon(
+                        icon: const Icon(Icons.add),
+                        label: const Text('Request correction'),
+                        onPressed: _loading || _error != null
+                            ? null
+                            : () => setState(() => _creating = true),
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                  ],
+                  SizedBox(
+                    height: 40,
+                    child: ListView(
+                      scrollDirection: Axis.horizontal,
+                      children: [
+                        for (final status in const [
+                          'All',
+                          'Pending',
+                          'Approved',
+                          'Rejected',
+                        ]) ...[
+                          ChoiceChip(
+                            label: Text(status),
+                            selected: _statusFilter == status,
+                            onSelected: _loading
+                                ? null
+                                : (_) => _setStatusFilter(status),
+                          ),
+                          const SizedBox(width: 8),
+                        ],
+                      ],
                     ),
                   ),
-                  IconButton(
-                    tooltip: 'Refresh',
-                    onPressed: _loading ? null : _load,
-                    icon: const Icon(Icons.refresh),
-                  ),
-                  IconButton(
-                    tooltip: 'Close',
-                    onPressed: () => Navigator.pop(context),
-                    icon: const Icon(Icons.close),
-                  ),
-                ],
-              ),
-              if (!widget.review)
-                Align(
-                  alignment: Alignment.centerLeft,
-                  child: TextButton.icon(
-                    icon: const Icon(Icons.add),
-                    label: const Text('Request correction'),
-                    onPressed: _loading || _error != null
-                        ? null
-                        : () => setState(() => _creating = true),
-                  ),
-                ),
-              if (_error != null)
-                Text(
-                  _error!,
-                  style: TextStyle(color: Theme.of(context).colorScheme.error),
-                ),
-              Expanded(
-                child: _loading
-                    ? const Center(child: CircularProgressIndicator())
-                    : _error != null
-                    ? Center(
-                        child: TextButton.icon(
-                          onPressed: _load,
-                          icon: const Icon(Icons.refresh),
-                          label: const Text('Retry'),
-                        ),
-                      )
-                    : _rows.isEmpty
-                    ? const Center(child: Text('No correction requests'))
-                    : ListView.separated(
-                        itemCount: _rows.length,
-                        separatorBuilder: (_, _) => const Divider(),
-                        itemBuilder: (context, i) {
-                          final row = _rows[i];
-                          return ListTile(
-                            title: Text(
-                              '${row['attendance_date']} - ${row['employee_name']}',
+                  const SizedBox(height: 16),
+                  Expanded(
+                    child: Column(
+                      children: [
+                        if (!compact &&
+                            !_loading &&
+                            _error == null &&
+                            _rows.isNotEmpty)
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 16,
+                              vertical: 11,
                             ),
-                            subtitle: Text(
-                              '${row['status']}\n${row['reason']}',
-                              maxLines: 3,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                            trailing: const Icon(Icons.chevron_right),
-                            onTap: () async {
-                              try {
-                                final response = await ApiClient.instance.dio
-                                    .get('/api/dtr-corrections/${row['id']}');
-                                if (mounted) {
-                                  setState(
-                                    () => _selected = Map<String, dynamic>.from(
-                                      response.data as Map,
+                            color: AppTheme.dashMutedSurfaceOf(context),
+                            child: Row(
+                              children: [
+                                Expanded(
+                                  flex: 2,
+                                  child: Text(
+                                    'Date',
+                                    style: TextStyle(
+                                      color: secondary,
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w700,
                                     ),
-                                  );
-                                }
-                              } catch (e) {
-                                if (mounted) {
-                                  setState(
-                                    () => _error = userFacingApiError(e),
-                                  );
-                                }
-                              }
-                            },
-                          );
-                        },
-                      ),
-              ),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.end,
-                children: [
-                  IconButton(
-                    tooltip: 'Previous page',
-                    onPressed: _loading || _offset == 0
-                        ? null
-                        : () {
-                            _offset -= 50;
-                            _load();
-                          },
-                    icon: const Icon(Icons.chevron_left),
+                                  ),
+                                ),
+                                if (widget.review)
+                                  Expanded(
+                                    flex: 3,
+                                    child: Text(
+                                      'Employee',
+                                      style: TextStyle(
+                                        color: secondary,
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w700,
+                                      ),
+                                    ),
+                                  ),
+                                Expanded(
+                                  flex: 5,
+                                  child: Text(
+                                    'Reason',
+                                    style: TextStyle(
+                                      color: secondary,
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                ),
+                                Expanded(
+                                  flex: 2,
+                                  child: Text(
+                                    'Status',
+                                    style: TextStyle(
+                                      color: secondary,
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(width: 18),
+                              ],
+                            ),
+                          ),
+                        Expanded(
+                          child: _loading
+                              ? const Center(child: CircularProgressIndicator())
+                              : _error != null
+                              ? Center(
+                                  child: Column(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Text(
+                                        _error!,
+                                        textAlign: TextAlign.center,
+                                        style: TextStyle(
+                                          color: Theme.of(
+                                            context,
+                                          ).colorScheme.error,
+                                        ),
+                                      ),
+                                      TextButton.icon(
+                                        onPressed: _load,
+                                        icon: const Icon(Icons.refresh),
+                                        label: const Text('Retry'),
+                                      ),
+                                    ],
+                                  ),
+                                )
+                              : _rows.isEmpty
+                              ? Center(
+                                  child: Text(
+                                    _statusFilter == 'All'
+                                        ? 'No correction requests'
+                                        : 'No ${_statusFilter.toLowerCase()} correction requests',
+                                  ),
+                                )
+                              : ListView.separated(
+                                  itemCount: _rows.length,
+                                  separatorBuilder: (_, _) =>
+                                      Divider(height: 1, color: hairline),
+                                  itemBuilder: (context, i) =>
+                                      _requestRow(context, _rows[i], compact),
+                                ),
+                        ),
+                      ],
+                    ),
                   ),
-                  Text('Page ${_offset ~/ 50 + 1}'),
-                  IconButton(
-                    tooltip: 'Next page',
-                    onPressed: _loading || _rows.length < 50
-                        ? null
-                        : () {
-                            _offset += 50;
-                            _load();
-                          },
-                    icon: const Icon(Icons.chevron_right),
-                  ),
+                  if (_offset > 0 || _rows.length >= 50)
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.end,
+                      children: [
+                        IconButton(
+                          tooltip: 'Previous page',
+                          onPressed: _loading || _offset == 0
+                              ? null
+                              : () {
+                                  _offset -= 50;
+                                  _load();
+                                },
+                          icon: const Icon(Icons.chevron_left),
+                        ),
+                        Text('Page ${_offset ~/ 50 + 1}'),
+                        IconButton(
+                          tooltip: 'Next page',
+                          onPressed: _loading || _rows.length < 50
+                              ? null
+                              : () {
+                                  _offset += 50;
+                                  _load();
+                                },
+                          icon: const Icon(Icons.chevron_right),
+                        ),
+                      ],
+                    ),
                 ],
               ),
-            ],
-          ),
+            );
+          },
         ),
       ),
     );

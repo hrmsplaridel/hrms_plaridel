@@ -1,6 +1,6 @@
 import 'dart:async';
 import 'package:hrms_plaridel/features/dtr/attendance/presentation/widgets/attendance_display.dart'
-    show formatWorkedHours;
+    show compactLocatorRemark, formatWorkedHours;
 import 'package:hrms_plaridel/features/dtr/reports/data/official_time.dart';
 import 'package:flutter/material.dart';
 import 'package:hrms_plaridel/shared/widgets/workforce_loading_skeleton.dart';
@@ -103,12 +103,13 @@ class _RemarksChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final dark = AppTheme.dashIsDark(context);
+    final displayRemark = compactLocatorRemark(remark);
     final (color, bg) = _colorsForRemark(
-      remark,
+      displayRemark,
       isHoliday: isHoliday,
       dark: dark,
     );
-    return Container(
+    final chip = Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
         color: bg,
@@ -116,7 +117,7 @@ class _RemarksChip extends StatelessWidget {
         border: Border.all(color: color.withValues(alpha: 0.5), width: 1),
       ),
       child: Text(
-        remark,
+        displayRemark,
         style: TextStyle(
           fontSize: 11,
           fontWeight: FontWeight.w600,
@@ -125,6 +126,9 @@ class _RemarksChip extends StatelessWidget {
         overflow: TextOverflow.ellipsis,
       ),
     );
+    return displayRemark == remark
+        ? chip
+        : Tooltip(message: remark, child: chip);
   }
 
   static (Color color, Color bg) _chipPair(
