@@ -5,9 +5,11 @@ import 'package:hrms_plaridel/core/api/user_facing_api_error.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/core/utils/form_pdf.dart';
 import 'package:hrms_plaridel/features/learning_development/models/ojt_work_immersion_evaluation.dart';
-import 'package:hrms_plaridel/features/recruitment/models/recruitment_application.dart';
 import 'package:hrms_plaridel/features/recruitment/presentation/admin/widgets/rsp_records_list_table.dart';
 import 'package:hrms_plaridel/shared/widgets/read_only_saved_entry_dialog.dart';
+import 'package:hrms_plaridel/features/recruitment/models/recruitment_application.dart';
+import 'package:hrms_plaridel/shared/widgets/form_document_preview.dart';
+import 'package:hrms_plaridel/shared/widgets/rsp_ld_form_header.dart';
 import 'package:hrms_plaridel/shared/widgets/rsp_ld_record_actions.dart';
 import 'package:hrms_plaridel/shared/widgets/rsp_ld_saved_records_browser.dart';
 
@@ -305,6 +307,18 @@ class _RspOjtWorkImmersionEvaluationSectionState
     } catch (_) {}
   }
 
+  Future<void> _preview(OjtWorkImmersionEvaluation entry) {
+    return openFormDocumentPreview(
+      context: context,
+      title: 'OJT / Work Immersion Evaluation',
+      filename: 'OJT_Work_Immersion_Evaluation.pdf',
+      format: FormPdf.pageLetter,
+      printModule: 'rsp',
+      printFormKey: 'ojt_work_immersion',
+      buildDocument: () => FormPdf.buildOjtWorkImmersionEvaluationPdf(entry),
+    );
+  }
+
   Future<void> _download(OjtWorkImmersionEvaluation entry) async {
     try {
       final doc = await FormPdf.buildOjtWorkImmersionEvaluationPdf(entry);
@@ -347,6 +361,9 @@ class _RspOjtWorkImmersionEvaluationSectionState
             onDownloadPdf: (_) async {},
           ),
           onPrint: () => _print(e),
+          onDocumentPreview: () => _preview(e),
+          onEdit: () => _edit(e),
+          onDelete: e.id == null ? null : () => _onDelete(e.id!),
         );
       }).toList(),
     );
@@ -376,59 +393,30 @@ class _RspOjtWorkImmersionEvaluationSectionState
             side: BorderSide(color: AppTheme.dashHairlineOf(context)),
           ),
         ),
-        OutlinedButton.icon(
-          onPressed: _loading ? null : _openSavedRecordsBrowser,
-          icon: const Icon(Icons.folder_open_outlined, size: 18),
-          label: const Text('View Records'),
-          style: OutlinedButton.styleFrom(
-            foregroundColor: AppTheme.dashTextPrimaryOf(context),
-            side: BorderSide(color: AppTheme.dashHairlineOf(context)),
+        if (_editing != null)
+          OutlinedButton.icon(
+            onPressed: _loading ? null : _openSavedRecordsBrowser,
+            icon: const Icon(Icons.folder_open_outlined, size: 18),
+            label: const Text('View Records'),
+            style: OutlinedButton.styleFrom(
+              foregroundColor: AppTheme.dashTextPrimaryOf(context),
+              side: BorderSide(color: AppTheme.dashHairlineOf(context)),
+            ),
           ),
-        ),
       ],
     );
   }
 
   @override
   Widget build(BuildContext context) {
-    final secondary = AppTheme.dashTextSecondaryOf(context);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Row(
-          children: [
-            Text(
-              'RSP',
-              style: TextStyle(
-                color: secondary,
-                fontSize: 12.5,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-            Icon(Icons.chevron_right_rounded, size: 16, color: secondary),
-            Text(
-              'OJT Evaluation',
-              style: TextStyle(
-                color: secondary,
-                fontSize: 12.5,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 6),
-        Text(
-          'OJT Evaluation',
-          style: TextStyle(
-            color: AppTheme.dashTextPrimaryOf(context),
-            fontSize: 22,
-            fontWeight: FontWeight.w700,
-          ),
-        ),
-        const SizedBox(height: 6),
-        Text(
-          'Interview scoring form.',
-          style: TextStyle(color: secondary, fontSize: 14),
+        RspLdFormHeader(
+          module: 'RSP',
+          title: 'OJT Evaluation',
+          subtitle: 'Interview scoring form.',
+          actions: _toolbar(context),
         ),
         const SizedBox(height: 20),
         if (_editing != null) ...[
@@ -438,31 +426,30 @@ class _RspOjtWorkImmersionEvaluationSectionState
             onSave: _onSave,
             onCancel: _cancelEdit,
             onPrint: _print,
+            onPreview: _preview,
             onDownloadPdf: _download,
           ),
           const SizedBox(height: 24),
+        ] else ...[
+          if (_loading)
+            const Padding(
+              padding: EdgeInsets.all(24),
+              child: Center(child: CircularProgressIndicator()),
+            )
+          else if (_entries.isEmpty)
+            const RspFormEmptyState(
+              message: 'No evaluations yet. Tap "New Evaluation" to add one.',
+              icon: Icons.school_outlined,
+            )
+          else
+            _OjtList(
+              entries: _entries,
+              onEdit: _edit,
+              onDelete: _onDelete,
+              onPrint: _print,
+              onDownloadPdf: _download,
+            ),
         ],
-        _toolbar(context),
-        const SizedBox(height: 16),
-        if (_loading)
-          const Padding(
-            padding: EdgeInsets.all(24),
-            child: Center(child: CircularProgressIndicator()),
-          )
-        else if (_entries.isEmpty)
-          const RspFormEmptyState(
-            message:
-                'No evaluations yet. Tap "New Evaluation" to add one.',
-            icon: Icons.school_outlined,
-          )
-        else
-          _OjtList(
-            entries: _entries,
-            onEdit: _edit,
-            onDelete: _onDelete,
-            onPrint: _print,
-            onDownloadPdf: _download,
-          ),
       ],
     );
   }
@@ -476,6 +463,7 @@ class OjtWorkImmersionEvaluationEditor extends StatefulWidget {
     required this.onSave,
     required this.onCancel,
     required this.onPrint,
+    this.onPreview,
     required this.onDownloadPdf,
   });
 
@@ -484,6 +472,7 @@ class OjtWorkImmersionEvaluationEditor extends StatefulWidget {
   final void Function(OjtWorkImmersionEvaluation) onSave;
   final VoidCallback onCancel;
   final Future<void> Function(OjtWorkImmersionEvaluation) onPrint;
+  final Future<void> Function(OjtWorkImmersionEvaluation)? onPreview;
   final Future<void> Function(OjtWorkImmersionEvaluation) onDownloadPdf;
 
   @override
@@ -1223,53 +1212,45 @@ class _OjtWorkImmersionEvaluationEditorState
     );
   }
 
-  Widget _actionBar() {
+  Widget _actionBar(bool ro) {
     return Wrap(
-      alignment: WrapAlignment.spaceBetween,
+      spacing: 8,
+      runSpacing: 8,
       crossAxisAlignment: WrapCrossAlignment.center,
-      runSpacing: 10,
-      spacing: 12,
       children: [
-        Wrap(
-          spacing: 10,
-          runSpacing: 10,
-          children: [
-            OutlinedButton.icon(
-              onPressed: widget.onCancel,
-              icon: const Icon(Icons.close_rounded, size: 18),
-              label: const Text('Cancel'),
+        if (!ro) ...[
+          OutlinedButton.icon(
+            onPressed: widget.onCancel,
+            icon: const Icon(Icons.close_rounded, size: 18),
+            label: const Text('Cancel'),
+          ),
+          FilledButton.icon(
+            onPressed: _save,
+            icon: const Icon(Icons.save_rounded, size: 18),
+            label: const Text('Save Evaluation'),
+            style: FilledButton.styleFrom(
+              backgroundColor: AppTheme.primaryNavy,
+              padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
             ),
-            FilledButton.icon(
-              onPressed: _save,
-              icon: const Icon(Icons.save_rounded, size: 18),
-              label: const Text('Save Evaluation'),
-              style: FilledButton.styleFrom(
-                backgroundColor: AppTheme.primaryNavy,
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 22,
-                  vertical: 14,
-                ),
-              ),
-            ),
-          ],
-        ),
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: [
-            IconButton(
-              tooltip: 'Print',
-              style: rspLdRecordIconButtonStyle(),
-              onPressed: () => widget.onPrint(_buildCurrent()),
-              icon: const Icon(Icons.print_rounded, size: 20),
-            ),
-            IconButton(
-              tooltip: 'PDF',
-              style: rspLdRecordIconButtonStyle(),
-              onPressed: () => widget.onDownloadPdf(_buildCurrent()),
-              icon: const Icon(Icons.picture_as_pdf_rounded, size: 20),
-            ),
-          ],
+          ),
+        ],
+        if (widget.onPreview != null)
+          FormPreviewPrintButtons(
+            onPreview: () => widget.onPreview!(_buildCurrent()),
+            onPrint: () => widget.onPrint(_buildCurrent()),
+          )
+        else
+          RspLdBusyIconButton(
+            tooltip: 'Print Form',
+            icon: Icons.print_rounded,
+            busyTooltip: 'Preparing print…',
+            onPressed: () => widget.onPrint(_buildCurrent()),
+          ),
+        IconButton(
+          tooltip: 'PDF',
+          style: rspLdRecordIconButtonStyle(),
+          onPressed: () => widget.onDownloadPdf(_buildCurrent()),
+          icon: const Icon(Icons.picture_as_pdf_rounded, size: 20),
         ),
       ],
     );
@@ -1287,44 +1268,57 @@ class _OjtWorkImmersionEvaluationEditorState
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Padding(
-            padding: const EdgeInsets.fromLTRB(20, 16, 20, 16),
-            child: Row(
+            padding: const EdgeInsets.fromLTRB(20, 16, 16, 16),
+            child: Wrap(
+              alignment: WrapAlignment.spaceBetween,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              runSpacing: 10,
+              spacing: 12,
               children: [
-                Flexible(
-                  child: Text(
-                    heading,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontSize: 17,
-                      fontWeight: FontWeight.w800,
-                      color: AppTheme.dashTextPrimaryOf(context),
-                    ),
+                ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 420),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Flexible(
+                        child: Text(
+                          heading,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: 17,
+                            fontWeight: FontWeight.w800,
+                            color: AppTheme.dashTextPrimaryOf(context),
+                          ),
+                        ),
+                      ),
+                      if (ro) ...[
+                        const SizedBox(width: 10),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 4,
+                          ),
+                          decoration: BoxDecoration(
+                            color: Colors.blueGrey.withValues(alpha: 0.12),
+                            borderRadius: BorderRadius.circular(999),
+                            border: Border.all(
+                              color: Colors.blueGrey.withValues(alpha: 0.32),
+                            ),
+                          ),
+                          child: const Text(
+                            'Read-only preview',
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w800,
+                              color: Colors.blueGrey,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ],
                   ),
                 ),
-                if (ro) ...[
-                  const SizedBox(width: 10),
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 10,
-                      vertical: 4,
-                    ),
-                    decoration: BoxDecoration(
-                      color: Colors.blueGrey.withValues(alpha: 0.12),
-                      borderRadius: BorderRadius.circular(999),
-                      border: Border.all(
-                        color: Colors.blueGrey.withValues(alpha: 0.32),
-                      ),
-                    ),
-                    child: const Text(
-                      'Read-only preview',
-                      style: TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w800,
-                        color: Colors.blueGrey,
-                      ),
-                    ),
-                  ),
-                ],
+                _actionBar(ro),
               ],
             ),
           ),
@@ -1343,10 +1337,6 @@ class _OjtWorkImmersionEvaluationEditorState
                   const SizedBox(height: 12),
                 ],
                 _summaryCard(),
-                if (!ro) ...[
-                  const SizedBox(height: 24),
-                  _actionBar(),
-                ],
               ],
             ),
           ),
@@ -1448,7 +1438,7 @@ class _OjtList extends StatelessWidget {
               rspRecordsTextCell(context, _formatDateShort(e.interviewDate)),
               rspRecordsTextCell(
                 context,
-                e.totalScore == null ? '—' : '${e.totalScore}/20',
+                e.totalScore == null ? 'ΓÇö' : '${e.totalScore}/20',
               ),
               rspRecordsTextCell(context, e.overallRecommendation ?? ''),
               RspRecordsCrudActions(
@@ -1456,7 +1446,7 @@ class _OjtList extends StatelessWidget {
                   context,
                   title: 'OJT / Work Immersion Evaluation',
                   subtitle:
-                      '${e.ojtImmersion ?? '—'} · ${_formatDateShort(e.interviewDate)}',
+                      '${e.ojtImmersion ?? 'ΓÇö'} ┬╖ ${_formatDateShort(e.interviewDate)}',
                   previewBuilder: () => OjtWorkImmersionEvaluationEditor(
                     readOnly: true,
                     entry: e,

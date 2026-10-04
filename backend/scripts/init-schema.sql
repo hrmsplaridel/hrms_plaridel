@@ -1954,9 +1954,17 @@ CREATE TABLE IF NOT EXISTS recruitment_exam_questions (
   question_text TEXT NOT NULL,
   options_json JSONB,
   correct_index INT,
+  question_image_path TEXT,
+  question_image_caption TEXT,
+  option_images_json JSONB,
   created_at TIMESTAMPTZ DEFAULT now(),
   updated_at TIMESTAMPTZ DEFAULT now()
 );
+
+-- Existing databases created before exam images were added.
+ALTER TABLE recruitment_exam_questions ADD COLUMN IF NOT EXISTS question_image_path TEXT;
+ALTER TABLE recruitment_exam_questions ADD COLUMN IF NOT EXISTS question_image_caption TEXT;
+ALTER TABLE recruitment_exam_questions ADD COLUMN IF NOT EXISTS option_images_json JSONB;
 
 CREATE TABLE IF NOT EXISTS recruitment_custom_exams (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),

@@ -21,11 +21,15 @@ class FormPrintCatalogItem {
     required this.key,
     required this.title,
     required this.defaultPaperSizeId,
+    this.pageCount,
+    this.summary = 'Official form',
   });
 
   final String key;
   final String title;
   final String defaultPaperSizeId;
+  final int? pageCount;
+  final String summary;
 }
 
 class FormPrintTemplate {
@@ -106,18 +110,50 @@ class FormPrintCatalog {
       widthPt: 1008,
       heightPt: 612,
     ),
+    FormPrintPaperSize(
+      id: 'a4_landscape',
+      label: 'A4 landscape',
+      subtitle: '297 × 210 mm',
+      widthPt: 841.89,
+      heightPt: 595.28,
+    ),
+    FormPrintPaperSize(
+      id: 'long_13_landscape',
+      label: 'Long 8.5 × 13 landscape',
+      subtitle: '13" × 8.5"',
+      widthPt: 936,
+      heightPt: 612,
+    ),
   ];
+
+  /// Portrait ids offered when the user picks a paper size at print time.
+  static const adjustablePaperIds = <String>['long_13', 'letter', 'a4'];
+
+  /// Names HR uses for the three sheets they actually print on.
+  static String hrPaperLabel(String id) {
+    switch (id) {
+      case 'long_13':
+        return 'Long (8.5 × 13 in)';
+      case 'letter':
+        return 'Short (8.5 × 11 in)';
+      case 'a4':
+        return 'A4 (210 × 297 mm)';
+    }
+    return id;
+  }
 
   static const rspForms = <FormPrintCatalogItem>[
     FormPrintCatalogItem(
       key: 'bi',
       title: 'Background Investigation (BI Form)',
       defaultPaperSizeId: 'a4',
+      pageCount: 3,
+      summary: 'Official BI form',
     ),
     FormPrintCatalogItem(
       key: 'applicants_profile',
       title: 'Applicants Profile',
-      defaultPaperSizeId: 'letter',
+      defaultPaperSizeId: 'long_landscape',
     ),
     FormPrintCatalogItem(
       key: 'selection_lineup',
@@ -132,7 +168,7 @@ class FormPrintCatalog {
     FormPrintCatalogItem(
       key: 'work_experience',
       title: 'Work Experience Sheet',
-      defaultPaperSizeId: 'letter',
+      defaultPaperSizeId: 'letter_landscape',
     ),
     FormPrintCatalogItem(
       key: 'turn_around_time',

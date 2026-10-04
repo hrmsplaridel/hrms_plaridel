@@ -9,6 +9,8 @@ import 'package:hrms_plaridel/features/learning_development/models/turn_around_t
 import 'package:hrms_plaridel/features/recruitment/models/job_vacancy_announcement.dart';
 import 'package:hrms_plaridel/features/recruitment/presentation/admin/widgets/rsp_records_list_table.dart';
 import 'package:hrms_plaridel/shared/widgets/read_only_saved_entry_dialog.dart';
+import 'package:hrms_plaridel/shared/widgets/form_document_preview.dart';
+import 'package:hrms_plaridel/shared/widgets/rsp_ld_form_header.dart';
 import 'package:hrms_plaridel/shared/widgets/rsp_ld_record_actions.dart';
 import 'package:hrms_plaridel/shared/widgets/rsp_ld_saved_records_browser.dart';
 import 'package:hrms_plaridel/features/docutracker/data/providers/docutracker_provider.dart';
@@ -318,7 +320,7 @@ class _RspTurnAroundTimeSectionState extends State<RspTurnAroundTimeSection> {
         buildDocument: () =>
             FormPdf.buildTurnAroundTimePdf(entry, signatures: signatures),
         filename: 'Turn_Around_Time.pdf',
-        format: FormPdf.pageLongLandscape,
+        format: FormPdf.pageLetterLandscape,
         printModule: 'rsp',
         printFormKey: 'turn_around_time',
       );
@@ -328,6 +330,34 @@ class _RspTurnAroundTimeSectionState extends State<RspTurnAroundTimeSection> {
         SnackBar(content: Text('Print failed. ${userFacingApiError(error)}')),
       );
     }
+  }
+
+  Future<void> _preview(TurnAroundTimeEntry entry) {
+    return openFormDocumentPreview(
+      context: context,
+      title: 'Turn Around Time',
+      filename: 'Turn_Around_Time.pdf',
+      format: FormPdf.pageLetterLandscape,
+      printModule: 'rsp',
+      printFormKey: 'turn_around_time',
+      buildDocument: () async {
+        final signatureProvider = context.read<DocuTrackerProvider>();
+        final signatures = entry.id == null
+            ? null
+            : await signatureProvider.loadSourceSignatures(
+                sourceModule: 'rsp',
+                sourceTable: TurnAroundTimeEntry.tableName,
+                sourceRecordId: entry.id!,
+              );
+        if (entry.id != null && signatures == null) {
+          throw StateError(
+            signatureProvider.sourceSignatureError ??
+                'The form signatures could not be loaded.',
+          );
+        }
+        return FormPdf.buildTurnAroundTimePdf(entry, signatures: signatures);
+      },
+    );
   }
 
   Future<void> _download(TurnAroundTimeEntry entry) async {
@@ -389,6 +419,9 @@ class _RspTurnAroundTimeSectionState extends State<RspTurnAroundTimeSection> {
             onDownloadPdf: (_) async {},
           ),
           onPrint: () => _print(e),
+          onDocumentPreview: () => _preview(e),
+          onEdit: () => _edit(e),
+          onDelete: e.id == null ? null : () => _onDelete(e.id!),
         );
       }).toList(),
     );
@@ -418,59 +451,31 @@ class _RspTurnAroundTimeSectionState extends State<RspTurnAroundTimeSection> {
             side: BorderSide(color: AppTheme.dashHairlineOf(context)),
           ),
         ),
-        OutlinedButton.icon(
-          onPressed: _loading ? null : _openSavedRecordsBrowser,
-          icon: const Icon(Icons.folder_open_outlined, size: 18),
-          label: const Text('View Records'),
-          style: OutlinedButton.styleFrom(
-            foregroundColor: AppTheme.dashTextPrimaryOf(context),
-            side: BorderSide(color: AppTheme.dashHairlineOf(context)),
+        if (_editing != null)
+          OutlinedButton.icon(
+            onPressed: _loading ? null : _openSavedRecordsBrowser,
+            icon: const Icon(Icons.folder_open_outlined, size: 18),
+            label: const Text('View Records'),
+            style: OutlinedButton.styleFrom(
+              foregroundColor: AppTheme.dashTextPrimaryOf(context),
+              side: BorderSide(color: AppTheme.dashHairlineOf(context)),
+            ),
           ),
-        ),
       ],
     );
   }
 
   @override
   Widget build(BuildContext context) {
-    final secondary = AppTheme.dashTextSecondaryOf(context);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Row(
-          children: [
-            Text(
-              'RSP',
-              style: TextStyle(
-                color: secondary,
-                fontSize: 12.5,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-            Icon(Icons.chevron_right_rounded, size: 16, color: secondary),
-            Text(
-              'Turn-Around Time',
-              style: TextStyle(
-                color: secondary,
-                fontSize: 12.5,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 6),
-        Text(
-          'Turn-Around Time',
-          style: TextStyle(
-            color: AppTheme.dashTextPrimaryOf(context),
-            fontSize: 22,
-            fontWeight: FontWeight.w700,
-          ),
-        ),
-        const SizedBox(height: 6),
-        Text(
-          'Track recruitment milestones from publication to assumption of duty.',
-          style: TextStyle(color: secondary, fontSize: 14),
+        RspLdFormHeader(
+          module: 'RSP',
+          title: 'Turn-Around Time',
+          subtitle:
+              'Track recruitment milestones from publication to assumption of duty.',
+          actions: _toolbar(context),
         ),
         const SizedBox(height: 20),
         if (_editing != null) ...[
@@ -480,6 +485,7 @@ class _RspTurnAroundTimeSectionState extends State<RspTurnAroundTimeSection> {
             onSave: _onSave,
             onCancel: _cancelEdit,
             onPrint: _print,
+            onPreview: _preview,
             onDownloadPdf: _download,
           ),
           if (_editing?.id != null) ...[
@@ -494,28 +500,27 @@ class _RspTurnAroundTimeSectionState extends State<RspTurnAroundTimeSection> {
             ),
           ],
           const SizedBox(height: 24),
+        ] else ...[
+          if (_loading)
+            const Padding(
+              padding: EdgeInsets.all(24),
+              child: Center(child: CircularProgressIndicator()),
+            )
+          else if (_entries.isEmpty)
+            const RspFormEmptyState(
+              message:
+                  'No turn-around time entries yet. Tap "Add Turn-Around Time" to add one.',
+              icon: Icons.schedule_rounded,
+            )
+          else
+            _TurnAroundTimeList(
+              entries: _entries,
+              onEdit: _edit,
+              onDelete: _onDelete,
+              onPrint: _print,
+              onDownloadPdf: _download,
+            ),
         ],
-        _toolbar(context),
-        const SizedBox(height: 16),
-        if (_loading)
-          const Padding(
-            padding: EdgeInsets.all(24),
-            child: Center(child: CircularProgressIndicator()),
-          )
-        else if (_entries.isEmpty)
-          const RspFormEmptyState(
-            message:
-                'No turn-around time entries yet. Tap "Add Turn-Around Time" to add one.',
-            icon: Icons.schedule_rounded,
-          )
-        else
-          _TurnAroundTimeList(
-            entries: _entries,
-            onEdit: _edit,
-            onDelete: _onDelete,
-            onPrint: _print,
-            onDownloadPdf: _download,
-          ),
       ],
     );
   }
@@ -536,6 +541,7 @@ class TurnAroundTimeEditor extends StatefulWidget {
     required this.onSave,
     required this.onCancel,
     required this.onPrint,
+    this.onPreview,
     required this.onDownloadPdf,
   });
 
@@ -544,6 +550,7 @@ class TurnAroundTimeEditor extends StatefulWidget {
   final void Function(TurnAroundTimeEntry) onSave;
   final VoidCallback onCancel;
   final Future<void> Function(TurnAroundTimeEntry) onPrint;
+  final Future<void> Function(TurnAroundTimeEntry)? onPreview;
   final Future<void> Function(TurnAroundTimeEntry) onDownloadPdf;
 
   @override
@@ -900,34 +907,47 @@ class _TurnAroundTimeEditorState extends State<TurnAroundTimeEditor> {
     final statusColor = ro ? Colors.blueGrey : _tatStatusColor(entryStatus);
 
     return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 16, 20, 16),
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 680),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Row(
+      padding: const EdgeInsets.fromLTRB(20, 16, 16, 16),
+      child: Wrap(
+        alignment: WrapAlignment.spaceBetween,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        runSpacing: 10,
+        spacing: 12,
+        children: [
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 420),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
-                Flexible(
-                  child: Text(
-                    title,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800, color: primary),
-                  ),
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Flexible(
+                      child: Text(
+                        title,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 17,
+                          fontWeight: FontWeight.w800,
+                          color: primary,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    _statusChip(statusLabel, statusColor),
+                  ],
                 ),
-                const SizedBox(width: 10),
-                _statusChip(statusLabel, statusColor),
+                const SizedBox(height: 4),
+                Text(
+                  'Track recruitment milestones from publication to assumption of duty.',
+                  style: TextStyle(fontSize: 12.5, color: secondary),
+                ),
               ],
             ),
-            const SizedBox(height: 4),
-            Text(
-              'Track recruitment milestones from publication to assumption of duty.',
-              style: TextStyle(fontSize: 12.5, color: secondary),
-            ),
-          ],
-        ),
+          ),
+          _actionBar(context, ro),
+        ],
       ),
     );
   }
@@ -1143,52 +1163,45 @@ class _TurnAroundTimeEditorState extends State<TurnAroundTimeEditor> {
     );
   }
 
-  Widget _actionBar(BuildContext context) {
+  Widget _actionBar(BuildContext context, bool ro) {
     return Wrap(
-      alignment: WrapAlignment.spaceBetween,
+      spacing: 8,
+      runSpacing: 8,
       crossAxisAlignment: WrapCrossAlignment.center,
-      runSpacing: 10,
-      spacing: 12,
       children: [
-        Wrap(
-          spacing: 10,
-          runSpacing: 10,
-          crossAxisAlignment: WrapCrossAlignment.center,
-          children: [
-            FilledButton.icon(
-              onPressed: _save,
-              icon: const Icon(Icons.save_rounded, size: 18),
-              label: const Text('Save'),
-              style: FilledButton.styleFrom(
-                backgroundColor: AppTheme.primaryNavy,
-                padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 14),
-              ),
+        if (!ro) ...[
+          FilledButton.icon(
+            onPressed: _save,
+            icon: const Icon(Icons.save_rounded, size: 18),
+            label: const Text('Save'),
+            style: FilledButton.styleFrom(
+              backgroundColor: AppTheme.primaryNavy,
+              padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
             ),
-            OutlinedButton.icon(
-              onPressed: widget.onCancel,
-              icon: const Icon(Icons.close_rounded, size: 18),
-              label: const Text('Cancel'),
-            ),
-          ],
-        ),
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          crossAxisAlignment: WrapCrossAlignment.center,
-          children: [
-            IconButton(
-              tooltip: 'Print',
-              style: rspLdRecordIconButtonStyle(),
-              onPressed: () => widget.onPrint(_buildEntry()),
-              icon: const Icon(Icons.print_rounded, size: 20),
-            ),
-            IconButton(
-              tooltip: 'Export PDF',
-              style: rspLdRecordIconButtonStyle(),
-              onPressed: () => widget.onDownloadPdf(_buildEntry()),
-              icon: const Icon(Icons.picture_as_pdf_rounded, size: 20),
-            ),
-          ],
+          ),
+          OutlinedButton.icon(
+            onPressed: widget.onCancel,
+            icon: const Icon(Icons.close_rounded, size: 18),
+            label: const Text('Cancel'),
+          ),
+        ],
+        if (widget.onPreview != null)
+          FormPreviewPrintButtons(
+            onPreview: () => widget.onPreview!(_buildEntry()),
+            onPrint: () => widget.onPrint(_buildEntry()),
+          )
+        else
+          RspLdBusyIconButton(
+            tooltip: 'Print Form',
+            icon: Icons.print_rounded,
+            busyTooltip: 'Preparing print…',
+            onPressed: () => widget.onPrint(_buildEntry()),
+          ),
+        IconButton(
+          tooltip: 'Export PDF',
+          style: rspLdRecordIconButtonStyle(),
+          onPressed: () => widget.onDownloadPdf(_buildEntry()),
+          icon: const Icon(Icons.picture_as_pdf_rounded, size: 20),
         ),
       ],
     );
@@ -1218,10 +1231,6 @@ class _TurnAroundTimeEditorState extends State<TurnAroundTimeEditor> {
                 _applicantsBody(context, ro),
                 const SizedBox(height: 20),
                 _preparedNotedByRow(context, ro),
-                if (!ro) ...[
-                  const SizedBox(height: 24),
-                  _actionBar(context),
-                ],
                 if (ro && (widget.entry.createdAt != null || widget.entry.updatedAt != null)) ...[
                   const SizedBox(height: 16),
                   if (widget.entry.createdAt != null)
@@ -2038,7 +2047,7 @@ class _TurnAroundTimeList extends StatelessWidget {
                 onView: () => showReadOnlySavedEntryDialog(
                   context,
                   title: 'Turn-around time',
-                  subtitle: '${e.position ?? ''} · ${e.office ?? ''}',
+                  subtitle: '${e.position ?? ''} ┬╖ ${e.office ?? ''}',
                   previewBuilder: () => TurnAroundTimeEditor(
                     readOnly: true,
                     entry: e,

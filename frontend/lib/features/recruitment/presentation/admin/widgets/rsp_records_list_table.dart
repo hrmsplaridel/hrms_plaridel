@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:hrms_plaridel/shared/widgets/form_document_preview.dart';
 
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/shared/widgets/rsp_ld_record_actions.dart';
@@ -172,6 +173,7 @@ class RspRecordsCrudActions extends StatelessWidget {
   const RspRecordsCrudActions({
     super.key,
     this.onView,
+    this.onPreview,
     required this.onEdit,
     required this.onPrint,
     required this.onDownloadPdf,
@@ -183,6 +185,7 @@ class RspRecordsCrudActions extends StatelessWidget {
   });
 
   final VoidCallback? onView;
+  final VoidCallback? onPreview;
   final VoidCallback onEdit;
   final VoidCallback onPrint;
   final VoidCallback onDownloadPdf;
@@ -249,12 +252,19 @@ class RspRecordsCrudActions extends StatelessWidget {
               style: TextStyle(fontWeight: FontWeight.w700),
             ),
           ),
-        IconButton(
-          onPressed: onPrint,
-          icon: const Icon(Icons.print_rounded, size: 20),
-          tooltip: 'Print',
-          style: iconStyle,
-        ),
+        if (onPreview != null)
+          FormPreviewPrintButtons(
+            fullLabels: false,
+            onPreview: onPreview!,
+            onPrint: onPrint,
+          )
+        else
+          RspLdBusyIconButton(
+            tooltip: 'Print Form',
+            icon: Icons.print_rounded,
+            busyTooltip: 'Preparing print…',
+            onPressed: onPrint,
+          ),
         IconButton(
           onPressed: onDownloadPdf,
           icon: const Icon(Icons.picture_as_pdf_rounded, size: 20),

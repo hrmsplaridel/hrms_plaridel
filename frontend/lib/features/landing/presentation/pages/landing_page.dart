@@ -209,8 +209,7 @@ class _LandingPageState extends State<LandingPage>
           Expanded(
             child: LayoutBuilder(
               builder: (context, constraints) {
-                final isMobile =
-                    MediaQuery.of(context).size.width < 768;
+                final isMobile = MediaQuery.of(context).size.width < 768;
                 return Stack(
                   children: [
                     SingleChildScrollView(

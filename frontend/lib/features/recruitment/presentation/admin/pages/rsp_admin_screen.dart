@@ -9,14 +9,16 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:hrms_plaridel/features/learning_development/models/bi_form.dart';
 import 'package:hrms_plaridel/features/learning_development/models/applicants_profile.dart';
 import 'package:hrms_plaridel/features/learning_development/models/selection_lineup.dart';
+import 'package:hrms_plaridel/features/recruitment/data/exam_image_support.dart';
 import 'package:hrms_plaridel/features/recruitment/models/job_vacancy_announcement.dart';
 import 'package:hrms_plaridel/features/recruitment/models/recruitment_application.dart';
 import 'package:hrms_plaridel/features/recruitment/models/rsp_screening_scores.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/core/utils/form_pdf.dart';
+import 'package:hrms_plaridel/shared/widgets/form_document_preview.dart';
 import 'package:hrms_plaridel/shared/widgets/read_only_saved_entry_dialog.dart';
-import 'package:hrms_plaridel/shared/widgets/rsp_form_header_footer.dart';
 import 'package:hrms_plaridel/shared/widgets/rsp_ld_saved_records_browser.dart';
+import 'package:hrms_plaridel/features/recruitment/presentation/admin/widgets/rsp_records_list_table.dart';
 import 'package:hrms_plaridel/features/recruitment/presentation/admin/widgets/rsp_bei_grading_dialog.dart';
 import 'package:hrms_plaridel/features/recruitment/presentation/admin/widgets/rsp_exam_editor_ui.dart';
 import 'package:hrms_plaridel/features/recruitment/presentation/admin/sections/rsp_scheduling_section.dart';
@@ -31,10 +33,11 @@ import 'package:hrms_plaridel/features/recruitment/presentation/admin/widgets/rs
 import 'package:hrms_plaridel/features/recruitment/presentation/admin/widgets/rsp_applications_report_preview_screen.dart';
 import 'package:hrms_plaridel/core/api/user_facing_api_error.dart';
 import 'package:hrms_plaridel/features/recruitment/presentation/shared/widgets/rsp_attachment_actions.dart';
-import 'package:hrms_plaridel/features/recruitment/presentation/admin/widgets/rsp_records_list_table.dart';
+import 'package:hrms_plaridel/shared/widgets/rsp_ld_form_header.dart';
 import 'package:hrms_plaridel/shared/widgets/rsp_ld_record_actions.dart';
 import 'package:hrms_plaridel/features/recruitment/presentation/admin/widgets/rsp_admin_hub.dart';
 import 'package:hrms_plaridel/features/forms/presentation/admin/pages/form_background_upload_page.dart';
+import 'package:hrms_plaridel/features/forms/presentation/admin/pages/rsp_print_background_page.dart';
 import 'package:hrms_plaridel/features/docutracker/data/providers/docutracker_provider.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_rsp_signature_section.dart';
 import 'package:hrms_plaridel/shared/models/philippine_address_data.dart';
@@ -847,9 +850,7 @@ class _RspFormsSectionState extends State<_RspFormsSection> {
         children: [
           _buildBreadcrumb(),
           const SizedBox(height: 12),
-          FormBackgroundUploadPage(
-            module: 'rsp',
-            embedded: true,
+          RspPrintBackgroundPage(
             onBack: () => setState(() => _showPrintBackground = false),
           ),
         ],
@@ -1370,6 +1371,7 @@ class _RspCustomOpenEndedExamEditorState
             children: [
               ...List.generate(_controllers.length, (i) {
                 return RspBeiQuestionRow(
+                  key: ObjectKey(_controllers[i]),
                   index: i,
                   controller: _controllers[i],
                   onChanged: () => setState(() {}),
@@ -1428,10 +1430,7 @@ class _RspCustomMcqExamEditorState extends State<_RspCustomMcqExamEditor> {
 
   void _disposeItems() {
     for (final item in _items) {
-      item.questionController.dispose();
-      for (final c in item.optionControllers) {
-        c.dispose();
-      }
+      item.dispose();
     }
     _items = [];
   }
@@ -1475,7 +1474,7 @@ class _RspCustomMcqExamEditorState extends State<_RspCustomMcqExamEditor> {
               q['question_text'] as String? ?? '',
               opts,
               (q['correct'] as num?)?.toInt() ?? 0,
-            ),
+            )..applyImages(q),
           );
         }
       }
@@ -1495,17 +1494,7 @@ class _RspCustomMcqExamEditorState extends State<_RspCustomMcqExamEditor> {
   }
 
   Future<void> _save() async {
-    final questions = <Map<String, dynamic>>[];
-    for (final item in _items) {
-      final q = item.questionController.text.trim();
-      final opts = item.optionControllers
-          .map((c) => c.text.trim())
-          .where((s) => s.isNotEmpty)
-          .toList();
-      if (q.isEmpty || opts.length < 2) continue;
-      final correct = item.correctIndex.clamp(0, opts.length - 1);
-      questions.add({'question_text': q, 'options': opts, 'correct': correct});
-    }
+    final questions = _buildMcqSavePayload(_items);
     if (questions.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -1696,6 +1685,7 @@ class _RspBeiQuestionsEditorState extends State<_RspBeiQuestionsEditor> {
             children: [
               ...List.generate(_controllers.length, (i) {
                 return RspBeiQuestionRow(
+                  key: ObjectKey(_controllers[i]),
                   index: i,
                   controller: _controllers[i],
                   onChanged: () => setState(() {}),
@@ -1736,10 +1726,122 @@ class _GeneralExamItem {
     required this.questionController,
     required this.optionControllers,
     required this.correctIndex,
-  });
+  }) : collapsed =
+           questionController.text.trim().isNotEmpty &&
+           optionControllers.where((c) => c.text.trim().isNotEmpty).length >= 2;
   final TextEditingController questionController;
   final List<TextEditingController> optionControllers;
   int correctIndex;
+
+  /// Optional figure / diagram for the question (relative path from the API).
+  String? questionImagePath;
+  final TextEditingController captionController = TextEditingController();
+
+  /// Optional image per answer choice, parallel to [optionControllers].
+  final List<String?> _optionImagePaths = [];
+
+  /// Finished questions load collapsed; new blank ones start open.
+  bool collapsed;
+
+  String? optionImageAt(int j) =>
+      j >= 0 && j < _optionImagePaths.length ? _optionImagePaths[j] : null;
+
+  void setOptionImage(int j, String? path) {
+    while (_optionImagePaths.length <= j) {
+      _optionImagePaths.add(null);
+    }
+    _optionImagePaths[j] = path;
+  }
+
+  /// Fills image fields from a loaded API question map.
+  void applyImages(Map<String, dynamic> q) {
+    questionImagePath = examImagePathOrNull(q['question_image']);
+    captionController.text = q['question_image_caption']?.toString() ?? '';
+    _optionImagePaths
+      ..clear()
+      ..addAll(examOptionImagesFrom(q['option_images'], optionControllers.length));
+    collapsed = isComplete;
+  }
+
+  bool _optionFilled(int j) =>
+      optionControllers[j].text.trim().isNotEmpty || optionImageAt(j) != null;
+
+  int get filledOptionCount {
+    var n = 0;
+    for (var j = 0; j < optionControllers.length; j++) {
+      if (_optionFilled(j)) n++;
+    }
+    return n;
+  }
+
+  bool get hasQuestionContent =>
+      questionController.text.trim().isNotEmpty || questionImagePath != null;
+
+  bool get isComplete => hasQuestionContent && filledOptionCount >= 2;
+
+  /// Short label for choice [j] in summaries ("text", "Image" or both).
+  String optionLabel(int j) {
+    if (j < 0 || j >= optionControllers.length) return '';
+    final t = optionControllers[j].text.trim();
+    final hasImg = optionImageAt(j) != null;
+    if (t.isEmpty) return hasImg ? 'Image' : '';
+    return hasImg ? '$t (+ image)' : t;
+  }
+
+  String get collapsedSummary {
+    final count = filledOptionCount;
+    final opts = '$count ${count == 1 ? 'option' : 'options'}';
+    final fig = questionImagePath != null ? '  •  Has image' : '';
+    if (optionControllers.isEmpty) return '$opts$fig';
+    final safeIndex = correctIndex.clamp(0, optionControllers.length - 1);
+    final answer = optionLabel(safeIndex);
+    if (answer.isEmpty) return '$opts$fig';
+    final shown = answer.length > 48 ? '${answer.substring(0, 48)}…' : answer;
+    return '$opts$fig  •  Answer: $shown';
+  }
+
+  /// Payload for the API, or null when the question is not complete. Blank
+  /// choices are dropped and `correct` is remapped to the compacted list.
+  Map<String, dynamic>? toSavePayload() {
+    if (!hasQuestionContent) return null;
+    final options = <String>[];
+    final images = <String?>[];
+    var correct = 0;
+    final wanted = correctIndex.clamp(0, optionControllers.length - 1);
+    for (var j = 0; j < optionControllers.length; j++) {
+      if (!_optionFilled(j)) continue;
+      if (j == wanted) correct = options.length;
+      options.add(optionControllers[j].text.trim());
+      images.add(optionImageAt(j));
+    }
+    if (options.length < 2) return null;
+    final caption = captionController.text.trim();
+    return {
+      'question_text': questionController.text.trim(),
+      'options': options,
+      'correct': correct,
+      if (questionImagePath != null) 'question_image': questionImagePath,
+      if (questionImagePath != null && caption.isNotEmpty)
+        'question_image_caption': caption,
+      if (images.any((p) => p != null)) 'option_images': images,
+    };
+  }
+
+  void dispose() {
+    questionController.dispose();
+    captionController.dispose();
+    for (final c in optionControllers) {
+      c.dispose();
+    }
+  }
+}
+
+/// Valid questions from [items] in API format (see [_GeneralExamItem.toSavePayload]).
+List<Map<String, dynamic>> _buildMcqSavePayload(List<_GeneralExamItem> items) {
+  return [
+    for (final item in items)
+      if (item.toSavePayload() case final payload?) payload,
+  ];
 }
 
 /// Admin-only: minutes per exam (0 = no time limit for applicants).
@@ -1845,18 +1947,66 @@ Widget _rspMcqQuestionsPanel({
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
+        if (items.length > 1) ...[
+          Builder(
+            builder: (_) {
+              final allCollapsed = items.every((e) => e.collapsed);
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 14),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        '${items.length} questions',
+                        style: TextStyle(
+                          color: secondary,
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                    TextButton.icon(
+                      onPressed: () {
+                        for (final e in items) {
+                          e.collapsed = !allCollapsed;
+                        }
+                        onRefresh();
+                      },
+                      icon: Icon(
+                        allCollapsed
+                            ? Icons.unfold_more_rounded
+                            : Icons.unfold_less_rounded,
+                        size: 18,
+                      ),
+                      label: Text(allCollapsed ? 'Expand all' : 'Collapse all'),
+                      style: RspExamEditorUi.ghostAction(context),
+                    ),
+                  ],
+                ),
+              );
+            },
+          ),
+        ],
         ...List.generate(items.length, (i) {
           final item = items[i];
           final optCount = item.optionControllers.length;
           return RspMcqQuestionCard(
+            key: ObjectKey(item),
             index: i,
+            collapsed: item.collapsed,
+            onToggle: () {
+              item.collapsed = !item.collapsed;
+              onRefresh();
+            },
+            questionPreview: item.questionController.text.trim().isEmpty &&
+                    item.questionImagePath != null
+                ? 'Image question'
+                : item.questionController.text,
+            summary: item.collapsedSummary,
+            isComplete: item.isComplete,
             onRemove: items.length > 1
                 ? () {
-                    final removed = items.removeAt(i);
-                    removed.questionController.dispose();
-                    for (final c in removed.optionControllers) {
-                      c.dispose();
-                    }
+                    items.removeAt(i).dispose();
                     onRefresh();
                   }
                 : null,
@@ -1870,12 +2020,33 @@ Widget _rspMcqQuestionsPanel({
                   style: AppTheme.dashFieldTextStyle(context),
                   decoration: RspExamEditorUi.inputDecoration(
                     context,
-                    hintText: 'Question textÃ¢â‚¬Â¦',
+                    hintText: 'Question text (optional if you add an image)',
                   ).copyWith(labelText: null),
                 ),
+                const SizedBox(height: 10),
+                RspExamImagePicker(
+                  path: item.questionImagePath,
+                  onChanged: (p) {
+                    item.questionImagePath = p;
+                    if (p == null) item.captionController.clear();
+                    onRefresh();
+                  },
+                ),
+                if (item.questionImagePath != null) ...[
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: item.captionController,
+                    maxLength: 300,
+                    style: AppTheme.dashFieldTextStyle(context),
+                    decoration: RspExamEditorUi.inputDecoration(
+                      context,
+                      hintText: 'Caption (optional), e.g. Figure 1',
+                    ).copyWith(labelText: null, counterText: ''),
+                  ),
+                ],
                 const SizedBox(height: 14),
                 Text(
-                  'OPTIONS (SELECT CORRECT ONE)',
+                  'ANSWER CHOICES (SELECT CORRECT ONE)',
                   style: TextStyle(
                     color: secondary,
                     fontSize: 11,
@@ -1897,6 +2068,11 @@ Widget _rspMcqQuestionsPanel({
                         index: j,
                         groupValue: item.correctIndex,
                         controller: item.optionControllers[j],
+                        imagePath: item.optionImageAt(j),
+                        onImageChanged: (p) {
+                          item.setOptionImage(j, p);
+                          onRefresh();
+                        },
                         onSelected: (v) {
                           item.correctIndex = v ?? 0;
                           onRefresh();
@@ -1917,10 +2093,7 @@ Widget _rspMcqQuestionsPanel({
                             0,
                             optCount - 1,
                           );
-                          final selected = item
-                              .optionControllers[safeIndex]
-                              .text
-                              .trim();
+                          final selected = item.optionLabel(safeIndex);
                           if (selected.isEmpty) {
                             return 'Correct answer: Option ${safeIndex + 1}';
                           }
@@ -1967,10 +2140,9 @@ Widget _rspMcqQuestionsPanel({
                                                 children: List.generate(
                                                   optCount,
                                                   (idx) {
-                                                    final txt = item
-                                                        .optionControllers[idx]
-                                                        .text
-                                                        .trim();
+                                                    final txt = item.optionLabel(
+                                                      idx,
+                                                    );
                                                     return RadioListTile<int>(
                                                       value: idx,
                                                       title: Text(
@@ -2038,7 +2210,8 @@ Widget _rspMcqQuestionsPanel({
         }),
         TextButton.icon(
           onPressed: () {
-            items.add(onCreateItem());
+            final created = onCreateItem()..collapsed = false;
+            items.add(created);
             onRefresh();
           },
           icon: const Icon(Icons.add_rounded, size: 20),
@@ -2070,10 +2243,7 @@ class _RspGeneralExamEditorState extends State<_RspGeneralExamEditor> {
 
   void _disposeItems() {
     for (final item in _items) {
-      item.questionController.dispose();
-      for (final c in item.optionControllers) {
-        c.dispose();
-      }
+      item.dispose();
     }
     _items = [];
   }
@@ -2103,7 +2273,7 @@ class _RspGeneralExamEditorState extends State<_RspGeneralExamEditor> {
                 q['question_text'] as String? ?? '',
                 opts,
                 (q['correct'] as num?)?.toInt() ?? 0,
-              ),
+              )..applyImages(q),
             );
           }
         }
@@ -2139,17 +2309,7 @@ class _RspGeneralExamEditorState extends State<_RspGeneralExamEditor> {
   }
 
   Future<void> _save() async {
-    final questions = <Map<String, dynamic>>[];
-    for (final item in _items) {
-      final q = item.questionController.text.trim();
-      final opts = item.optionControllers
-          .map((c) => c.text.trim())
-          .where((s) => s.isNotEmpty)
-          .toList();
-      if (q.isEmpty || opts.length < 2) continue;
-      final correct = item.correctIndex.clamp(0, opts.length - 1);
-      questions.add({'question_text': q, 'options': opts, 'correct': correct});
-    }
+    final questions = _buildMcqSavePayload(_items);
     if (questions.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -2237,10 +2397,7 @@ class _RspMathExamEditorState extends State<_RspMathExamEditor> {
 
   void _disposeItems() {
     for (final item in _items) {
-      item.questionController.dispose();
-      for (final c in item.optionControllers) {
-        c.dispose();
-      }
+      item.dispose();
     }
     _items = [];
   }
@@ -2270,7 +2427,7 @@ class _RspMathExamEditorState extends State<_RspMathExamEditor> {
                 q['question_text'] as String? ?? '',
                 opts,
                 (q['correct'] as num?)?.toInt() ?? 0,
-              ),
+              )..applyImages(q),
             );
           }
         }
@@ -2306,17 +2463,7 @@ class _RspMathExamEditorState extends State<_RspMathExamEditor> {
   }
 
   Future<void> _save() async {
-    final questions = <Map<String, dynamic>>[];
-    for (final item in _items) {
-      final q = item.questionController.text.trim();
-      final opts = item.optionControllers
-          .map((c) => c.text.trim())
-          .where((s) => s.isNotEmpty)
-          .toList();
-      if (q.isEmpty || opts.length < 2) continue;
-      final correct = item.correctIndex.clamp(0, opts.length - 1);
-      questions.add({'question_text': q, 'options': opts, 'correct': correct});
-    }
+    final questions = _buildMcqSavePayload(_items);
     if (questions.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -2405,10 +2552,7 @@ class _RspGeneralInfoExamEditorState extends State<_RspGeneralInfoExamEditor> {
 
   void _disposeItems() {
     for (final item in _items) {
-      item.questionController.dispose();
-      for (final c in item.optionControllers) {
-        c.dispose();
-      }
+      item.dispose();
     }
     _items = [];
   }
@@ -2438,7 +2582,7 @@ class _RspGeneralInfoExamEditorState extends State<_RspGeneralInfoExamEditor> {
                 q['question_text'] as String? ?? '',
                 opts,
                 (q['correct'] as num?)?.toInt() ?? 0,
-              ),
+              )..applyImages(q),
             );
           }
         }
@@ -2474,17 +2618,7 @@ class _RspGeneralInfoExamEditorState extends State<_RspGeneralInfoExamEditor> {
   }
 
   Future<void> _save() async {
-    final questions = <Map<String, dynamic>>[];
-    for (final item in _items) {
-      final q = item.questionController.text.trim();
-      final opts = item.optionControllers
-          .map((c) => c.text.trim())
-          .where((s) => s.isNotEmpty)
-          .toList();
-      if (q.isEmpty || opts.length < 2) continue;
-      final correct = item.correctIndex.clamp(0, opts.length - 1);
-      questions.add({'question_text': q, 'options': opts, 'correct': correct});
-    }
+    final questions = _buildMcqSavePayload(_items);
     if (questions.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -2622,21 +2756,74 @@ class _RspBiFormSectionState extends State<_RspBiFormSection> {
               title: e.applicantName.trim().isEmpty
                   ? '(No applicant name)'
                   : e.applicantName,
-              subtitle: '${e.respondentName} Ã‚Â· ${e.respondentRelationship}',
-              detailDialogTitle: 'BI form Ã¢â‚¬â€ ${e.applicantName}',
+              subtitle: '${e.respondentName} · ${e.respondentRelationship}',
+              detailDialogTitle: 'BI form — ${e.applicantName}',
               previewContentWidth: 920,
               previewBuilder: () => _BiFormEditor(
                 readOnly: true,
                 entry: e,
                 onSave: (_) {},
                 onCancel: () {},
-                onPrint: (_) async {},
-                onDownloadPdf: (_) async {},
+                onPrint: _printBi,
+                onDownloadPdf: _downloadBi,
               ),
               onPrint: () => _printBi(e),
+              onDocumentPreview: () => _previewBi(e),
+              onEdit: () => _edit(e),
+              onDelete: e.id == null ? null : () => _onDeleteBi(e.id!),
             ),
           )
           .toList(),
+    );
+  }
+
+  Future<void> _previewBi(BiFormEntry entry) {
+    return openFormDocumentPreview(
+      context: context,
+      title: 'Background Investigation',
+      filename: 'BI_Form.pdf',
+      format: FormPdf.biPrintPageFormat,
+      printModule: 'rsp',
+      printFormKey: 'bi',
+      buildDocument: () => FormPdf.buildBiFormPdf(entry),
+    );
+  }
+
+  Widget _toolbar(BuildContext context) {
+    return Wrap(
+      spacing: 12,
+      runSpacing: 12,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      children: [
+        FilledButton.icon(
+          onPressed: _loading ? null : _startNew,
+          icon: const Icon(Icons.add_rounded, size: 20),
+          label: const Text('Add Record'),
+          style: FilledButton.styleFrom(
+            backgroundColor: AppTheme.primaryNavy,
+            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+          ),
+        ),
+        OutlinedButton.icon(
+          onPressed: _loading ? null : _load,
+          icon: const Icon(Icons.refresh_rounded, size: 18),
+          label: const Text('Refresh'),
+          style: OutlinedButton.styleFrom(
+            foregroundColor: AppTheme.dashTextPrimaryOf(context),
+            side: BorderSide(color: AppTheme.dashHairlineOf(context)),
+          ),
+        ),
+        if (_editing != null)
+          OutlinedButton.icon(
+            onPressed: _loading ? null : _openSavedRecordsBrowser,
+            icon: const Icon(Icons.folder_open_outlined, size: 18),
+            label: const Text('View Records'),
+            style: OutlinedButton.styleFrom(
+              foregroundColor: AppTheme.dashTextPrimaryOf(context),
+              side: BorderSide(color: AppTheme.dashHairlineOf(context)),
+            ),
+          ),
+      ],
     );
   }
 
@@ -2645,23 +2832,14 @@ class _RspBiFormSectionState extends State<_RspBiFormSection> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          'Background Investigation (BI) Form',
-          style: TextStyle(
-            color: AppTheme.dashTextPrimaryOf(context),
-            fontSize: 22,
-            fontWeight: FontWeight.w700,
-          ),
+        RspLdFormHeader(
+          module: 'RSP',
+          title: 'Background Investigation',
+          subtitle:
+              'Applicant background investigation and competency assessment.',
+          actions: _toolbar(context),
         ),
-        const SizedBox(height: 8),
-        Text(
-          'Record BI evaluations: applicant and respondent details, plus competency ratings (1\u20135).',
-          style: TextStyle(
-            color: AppTheme.dashTextSecondaryOf(context),
-            fontSize: 14,
-          ),
-        ),
-        const SizedBox(height: 24),
+        const SizedBox(height: 20),
         if (_editing != null) ...[
           _BiFormEditor(
             key: ValueKey(_editing?.id ?? 'new'),
@@ -2672,53 +2850,27 @@ class _RspBiFormSectionState extends State<_RspBiFormSection> {
             onDownloadPdf: _downloadBi,
           ),
           const SizedBox(height: 24),
+        ] else ...[
+          if (_loading)
+            const Padding(
+              padding: EdgeInsets.all(24),
+              child: Center(child: CircularProgressIndicator()),
+            )
+          else if (_entries.isEmpty)
+            const RspFormEmptyState(
+              message:
+                  'No background investigation records yet. Tap "Add Record" to create one.',
+              icon: Icons.fact_check_outlined,
+            )
+          else
+            _BiFormList(
+              entries: _entries,
+              onEdit: _edit,
+              onDelete: _onDeleteBi,
+              onPrint: _printBi,
+              onDownloadPdf: _downloadBi,
+            ),
         ],
-        Row(
-          children: [
-            FilledButton.icon(
-              onPressed: _loading ? null : _startNew,
-              icon: const Icon(Icons.add_rounded, size: 20),
-              label: const Text('Add BI entry'),
-            ),
-            const SizedBox(width: 12),
-            TextButton.icon(
-              onPressed: _loading ? null : _load,
-              icon: const Icon(Icons.refresh_rounded, size: 20),
-              label: const Text('Refresh'),
-              style: TextButton.styleFrom(
-                foregroundColor: AppTheme.primaryNavy,
-              ),
-            ),
-            const SizedBox(width: 4),
-            TextButton.icon(
-              onPressed: _loading ? null : _openSavedRecordsBrowser,
-              icon: const Icon(Icons.folder_open_outlined, size: 20),
-              label: const Text('View records'),
-              style: TextButton.styleFrom(
-                foregroundColor: AppTheme.primaryNavy,
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 16),
-        if (_loading)
-          const Padding(
-            padding: EdgeInsets.all(24),
-            child: Center(child: CircularProgressIndicator()),
-          )
-        else if (_entries.isEmpty)
-          const RspFormEmptyState(
-            message: 'No BI entries yet. Tap "Add BI entry" to add one.',
-            icon: Icons.fact_check_outlined,
-          )
-        else
-          _BiFormList(
-            entries: _entries,
-            onEdit: _edit,
-            onDelete: _onDeleteBi,
-            onPrint: _printBi,
-            onDownloadPdf: _downloadBi,
-          ),
       ],
     );
   }
@@ -2837,6 +2989,13 @@ class _BiFormEditorState extends State<_BiFormEditor> {
   late TextEditingController _challenges;
   late TextEditingController _compliance;
   late TextEditingController _otherRelevant;
+  int _step = 0;
+  bool _dirty = false;
+  bool _otherSpecifyOpen = false;
+  String? _applicantError;
+  String? _respondentError;
+  final _applicantFieldKey = GlobalKey();
+  final _respondentFieldKey = GlobalKey();
 
   @override
   void initState() {
@@ -2863,6 +3022,7 @@ class _BiFormEditorState extends State<_BiFormEditor> {
       e.rating9,
     ];
     _otherArea = TextEditingController(text: e.otherFunctionalArea ?? '');
+    _otherSpecifyOpen = (e.otherFunctionalArea ?? '').trim().isNotEmpty;
     _perf3Years = TextEditingController(text: e.performance3Years ?? '');
     _challenges = TextEditingController(text: e.challengesCoping ?? '');
     _compliance = TextEditingController(text: e.complianceAttendance ?? '');
@@ -2873,6 +3033,26 @@ class _BiFormEditorState extends State<_BiFormEditor> {
       BiFormEntry.functionalAreaOptions.length,
       (i) => e.functionalAreas.contains(BiFormEntry.functionalAreaOptions[i]),
     );
+    for (final controller in [
+      _applicantName,
+      _applicantDept,
+      _applicantPosition,
+      _positionApplied,
+      _respondentName,
+      _respondentPosition,
+      _otherArea,
+      _perf3Years,
+      _challenges,
+      _compliance,
+      _otherRelevant,
+    ]) {
+      controller.addListener(_markDirty);
+    }
+  }
+
+  void _markDirty() {
+    if (_dirty || !mounted) return;
+    setState(() => _dirty = true);
   }
 
   @override
@@ -2945,609 +3125,1187 @@ class _BiFormEditorState extends State<_BiFormEditor> {
     );
   }
 
+  bool _validateStep1() {
+    final nameMissing = _applicantName.text.trim().isEmpty;
+    final respondentMissing = _respondentName.text.trim().isEmpty;
+    setState(() {
+      _applicantError = nameMissing ? 'Required' : null;
+      _respondentError = respondentMissing ? 'Required' : null;
+    });
+    if (nameMissing) {
+      _revealField(_applicantFieldKey);
+    } else if (respondentMissing) {
+      _revealField(_respondentFieldKey);
+    }
+    return !nameMissing && !respondentMissing;
+  }
+
+  void _revealField(GlobalKey key) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final target = key.currentContext;
+      if (target == null) return;
+      Scrollable.ensureVisible(
+        target,
+        alignment: 0.12,
+        duration: const Duration(milliseconds: 250),
+      );
+    });
+  }
+
   void _save() {
     if (widget.readOnly) return;
-    if (!_formKey.currentState!.validate()) return;
+    if (!_validateStep1()) {
+      setState(() => _step = 0);
+      return;
+    }
     widget.onSave(_buildCurrentEntry());
+  }
+
+  Future<void> _cancel() async {
+    if (_dirty && !widget.readOnly) {
+      final leave = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Discard unsaved changes?'),
+          content: const Text(
+            'This BI entry has changes that have not been saved.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(false),
+              child: const Text('Keep editing'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(ctx).pop(true),
+              child: const Text('Discard'),
+            ),
+          ],
+        ),
+      );
+      if (leave != true) return;
+    }
+    widget.onCancel();
+  }
+
+  Future<void> _previewCurrent() {
+    return openFormDocumentPreview(
+      context: context,
+      title: 'Background Investigation',
+      filename: 'BI_Form.pdf',
+      format: FormPdf.biPrintPageFormat,
+      printModule: 'rsp',
+      printFormKey: 'bi',
+      buildDocument: () => FormPdf.buildBiFormPdf(_buildCurrentEntry()),
+    );
+  }
+
+  void _continue() {
+    if (_step == 0 && !_validateStep1()) return;
+    setState(() => _step = (_step + 1).clamp(0, 2));
   }
 
   @override
   Widget build(BuildContext context) {
     final ro = widget.readOnly;
-    const functionalOptions = BiFormEntry.functionalAreaOptions;
-    const functionalLeftCount = 6;
-    return Container(
-      padding: const EdgeInsets.all(24),
-      decoration: BoxDecoration(
-        color: AppTheme.white,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
-      ),
-      child: Form(
-        key: _formKey,
-        child: SingleChildScrollView(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const RspFormHeader(
-                formTitle: 'BACKGROUND INVESTIGATION (BI FORM)',
-              ),
-              // Two-column: Applicant under BI | Respondents
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'APPLICANT UNDER BI:',
-                          style: TextStyle(
-                            color: AppTheme.primaryNavy,
-                            fontSize: 14,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                        RspSpacedOutlineField(
-                          child: TextFormField(
-                            controller: _applicantName,
-                            readOnly: ro,
-                            decoration: rspUnderlinedField('Name:'),
-                            validator: (v) =>
-                                v?.trim().isEmpty ?? true ? 'Required' : null,
-                          ),
-                        ),
-                        RspSpacedOutlineField(
-                          child: TextFormField(
-                            controller: _applicantDept,
-                            readOnly: ro,
-                            decoration: rspUnderlinedField('Department:'),
-                          ),
-                        ),
-                        RspSpacedOutlineField(
-                          child: TextFormField(
-                            controller: _applicantPosition,
-                            readOnly: ro,
-                            decoration: rspUnderlinedField('Position:'),
-                          ),
-                        ),
-                        RspSpacedOutlineField(
-                          child: TextFormField(
-                            controller: _positionApplied,
-                            readOnly: ro,
-                            decoration: rspUnderlinedField(
-                              'Position Applied for in LGU-Plaridel:',
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(width: 24),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'RESPONDENTS:',
-                          style: TextStyle(
-                            color: AppTheme.primaryNavy,
-                            fontSize: 14,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                        RspSpacedOutlineField(
-                          child: TextFormField(
-                            controller: _respondentName,
-                            decoration: rspUnderlinedField('Name:'),
-                            validator: (v) =>
-                                v?.trim().isEmpty ?? true ? 'Required' : null,
-                          ),
-                        ),
-                        RspSpacedOutlineField(
-                          child: TextFormField(
-                            controller: _respondentPosition,
-                            decoration: rspUnderlinedField('Position:'),
-                          ),
-                        ),
-                        const SizedBox(height: 16),
-                        Text(
-                          'Work relationship to the applicants: (Kindly check the appropriate box)',
-                          style: TextStyle(
-                            color: AppTheme.dashTextSecondaryOf(context),
-                            fontSize: 12,
-                          ),
-                        ),
-                        const SizedBox(height: 6),
-                        // ignore: deprecated_member_use
-                        RadioGroup<String>(
-                          groupValue: _relationship,
-                          onChanged: (v) => setState(() => _relationship = v!),
-                          child: Column(
-                            children: [
-                              ...BiFormEntry.relationshipOptions.map(
-                                (r) => RadioListTile<String>(
-                                  dense: true,
-                                  contentPadding: EdgeInsets.zero,
-                                  title: Text(
-                                    r == 'supervisor'
-                                        ? 'Applicants Supervisor'
-                                        : r == 'peer'
-                                        ? 'Applicants Peer/ Co-Employee'
-                                        : 'Applicants Subordinates',
-                                    style: const TextStyle(fontSize: 13),
-                                  ),
-                                  value: r,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 24),
-              // I. ON COMPETENCIES
-              Text(
-                'I. ON COMPETENCIES',
-                style: TextStyle(
-                  color: AppTheme.primaryNavy,
-                  fontSize: 14,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              Text(
-                'Core and Organizational Competencies:',
-                style: TextStyle(
-                  color: AppTheme.dashTextPrimaryOf(context),
-                  fontSize: 13,
-                ),
-              ),
-              const SizedBox(height: 8),
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Expanded(
-                    child: Text(
-                      'Using the following rating guide please check (/) the appropriate box opposite each behavioral Indicator:',
-                      style: TextStyle(
-                        color: AppTheme.dashTextSecondaryOf(context),
-                        fontSize: 12,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 16),
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 8,
-                    ),
-                    decoration: BoxDecoration(
-                      border: Border.all(color: AppTheme.lightGray),
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Rating Guide:',
-                          style: TextStyle(
-                            color: AppTheme.primaryNavy,
-                            fontSize: 12,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          '5- Shows Strength',
-                          style: TextStyle(fontSize: 11),
-                        ),
-                        Text(
-                          '4- Very Proficient',
-                          style: TextStyle(fontSize: 11),
-                        ),
-                        Text('3- Proficient', style: TextStyle(fontSize: 11)),
-                        Text(
-                          '2- Minimal Development',
-                          style: TextStyle(fontSize: 11),
-                        ),
-                        Text(
-                          '1- Much Development Needed',
-                          style: TextStyle(fontSize: 11),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 16),
-              // Competency table: AREA | CORE DESCRIPTION | 5 | 4 | 3 | 2 | 1
-              Table(
-                border: TableBorder.all(color: Colors.black87),
-                columnWidths: const {
-                  0: FlexColumnWidth(0.5),
-                  1: FlexColumnWidth(4),
-                  2: FlexColumnWidth(0.4),
-                  3: FlexColumnWidth(0.4),
-                  4: FlexColumnWidth(0.4),
-                  5: FlexColumnWidth(0.4),
-                  6: FlexColumnWidth(0.4),
-                },
-                children: [
-                  TableRow(
-                    decoration: BoxDecoration(
-                      color: AppTheme.primaryNavy.withValues(alpha: 0.08),
-                    ),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final raw = constraints.maxWidth;
+        final width = raw.isFinite ? raw : 1280.0;
+        final wide = width >= 720;
+        final showTable = width >= 900;
+        final horizontalSteps = width >= 980;
+        return Form(
+          key: _formKey,
+          child: Container(
+            decoration: AppTheme.dashSurfaceCard(context, radius: 16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                _editorHeader(ro),
+                Divider(height: 1, color: AppTheme.dashHairlineOf(context)),
+                Padding(
+                  padding: const EdgeInsets.all(20),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      _tableCell('AREA', bold: true),
-                      _tableCell('CORE DESCRIPTION', bold: true),
-                      _tableCell('5', bold: true),
-                      _tableCell('4', bold: true),
-                      _tableCell('3', bold: true),
-                      _tableCell('2', bold: true),
-                      _tableCell('1', bold: true),
+                      _stepper(horizontalSteps),
+                      const SizedBox(height: 16),
+                      _stepBody(wide, showTable, ro),
+                      const SizedBox(height: 24),
+                      _actionBar(ro),
                     ],
                   ),
-                  ...List.generate(
-                    9,
-                    (i) => TableRow(
-                      children: [
-                        _tableCell('${i + 1}'),
-                        _tableCell(
-                          BiFormEntry.competencyDescriptions[i],
-                          small: true,
-                        ),
-                        _ratingCell(i, 5),
-                        _ratingCell(i, 4),
-                        _ratingCell(i, 3),
-                        _ratingCell(i, 2),
-                        _ratingCell(i, 1),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 28),
-              Divider(color: AppTheme.lightGray, height: 1),
-              const SizedBox(height: 20),
-              Text(
-                'Page 2 Ã¢â‚¬â€ Functional areas & performance',
-                style: TextStyle(
-                  color: AppTheme.primaryNavy,
-                  fontSize: 13,
-                  fontWeight: FontWeight.w800,
                 ),
-              ),
-              const SizedBox(height: 12),
-              Text(
-                'A. Functional Areas:',
-                style: TextStyle(
-                  color: AppTheme.primaryNavy,
-                  fontSize: 14,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              const SizedBox(height: 6),
-              Text(
-                'Please check (/) the boxes opposite the functional area where the applicant can perform effectively.',
-                style: TextStyle(
-                  color: AppTheme.dashTextSecondaryOf(context),
-                  fontSize: 12,
-                ),
-              ),
-              const SizedBox(height: 12),
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        for (
-                          var i = 0;
-                          i < functionalLeftCount &&
-                              i < functionalOptions.length;
-                          i++
-                        )
-                          CheckboxListTile(
-                            dense: true,
-                            contentPadding: EdgeInsets.zero,
-                            title: Text(
-                              functionalOptions[i],
-                              style: const TextStyle(fontSize: 13),
-                            ),
-                            value: _functionalChecks[i],
-                            onChanged: ro
-                                ? null
-                                : (v) => setState(
-                                    () => _functionalChecks[i] = v ?? false,
-                                  ),
-                          ),
-                      ],
-                    ),
-                  ),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        for (
-                          var i = functionalLeftCount;
-                          i < functionalOptions.length;
-                          i++
-                        )
-                          CheckboxListTile(
-                            dense: true,
-                            contentPadding: EdgeInsets.zero,
-                            title: Text(
-                              functionalOptions[i],
-                              style: const TextStyle(fontSize: 13),
-                            ),
-                            value: _functionalChecks[i],
-                            onChanged: ro
-                                ? null
-                                : (v) => setState(
-                                    () => _functionalChecks[i] = v ?? false,
-                                  ),
-                          ),
-                        const SizedBox(height: 8),
-                        Text(
-                          'Other (Please specify)',
-                          style: TextStyle(
-                            color: AppTheme.dashTextPrimaryOf(context),
-                            fontSize: 13,
-                          ),
-                        ),
-                        RspSpacedOutlineField(
-                          child: TextFormField(
-                            controller: _otherArea,
-                            readOnly: ro,
-                            decoration: rspUnderlinedField(''),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 20),
-              Text(
-                'I. On performance and other relevant information.',
-                style: TextStyle(
-                  color: AppTheme.primaryNavy,
-                  fontSize: 14,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-              const SizedBox(height: 12),
-              Text(
-                'Please tell us about the work performance of the applicants in the last three (3) years. What are the applicant\'s outstanding accomplishments recognition received and significant contributions to your office if any?',
-                style: TextStyle(
-                  color: AppTheme.dashTextSecondaryOf(context),
-                  fontSize: 12,
-                ),
-              ),
-              const SizedBox(height: 6),
-              RspSpacedOutlineField(
-                child: TextFormField(
-                  controller: _perf3Years,
-                  readOnly: ro,
-                  decoration: rspUnderlinedField(''),
-                  maxLines: 4,
-                ),
-              ),
-              const SizedBox(height: 16),
-              Text(
-                'What do you think are the challenges or difficulties of the applicant in performing his/her duties and responsibilities in his/her position? How did the applicant cope with these challenges?',
-                style: TextStyle(
-                  color: AppTheme.dashTextSecondaryOf(context),
-                  fontSize: 12,
-                ),
-              ),
-              const SizedBox(height: 6),
-              RspSpacedOutlineField(
-                child: TextFormField(
-                  controller: _challenges,
-                  readOnly: ro,
-                  decoration: rspUnderlinedField(''),
-                  maxLines: 4,
-                ),
-              ),
-              const SizedBox(height: 16),
-              Text(
-                'In terms of compliance with rules and regulation, please provide us information on the applicant\'s attendance to flag ceremonies/ retreats and other office programs and activities?',
-                style: TextStyle(
-                  color: AppTheme.dashTextSecondaryOf(context),
-                  fontSize: 12,
-                ),
-              ),
-              const SizedBox(height: 6),
-              RspSpacedOutlineField(
-                child: TextFormField(
-                  controller: _compliance,
-                  readOnly: ro,
-                  decoration: rspUnderlinedField(''),
-                  maxLines: 4,
-                ),
-              ),
-              const SizedBox(height: 28),
-              Divider(color: AppTheme.lightGray, height: 1),
-              const SizedBox(height: 20),
-              Text(
-                'Page 3 Ã¢â‚¬â€ Other relevant information',
-                style: TextStyle(
-                  color: AppTheme.primaryNavy,
-                  fontSize: 13,
-                  fontWeight: FontWeight.w800,
-                ),
-              ),
-              const SizedBox(height: 12),
-              Text(
-                'Other relevant information/ data (critical incidents, family background, health profile habits, vices, membership in unions/ associations, or any derogatory records) about the applicants, if any.',
-                style: TextStyle(
-                  color: AppTheme.dashTextPrimaryOf(context),
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-              const SizedBox(height: 8),
-              RspSpacedOutlineField(
-                child: TextFormField(
-                  controller: _otherRelevant,
-                  readOnly: ro,
-                  decoration: rspUnderlinedField(''),
-                  maxLines: 8,
-                ),
-              ),
-              const SizedBox(height: 24),
-              const RspFormFooter(),
-              const SizedBox(height: 24),
-              if (!ro) ...[
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _editorHeader(bool ro) {
+    final primary = AppTheme.dashTextPrimaryOf(context);
+    final secondary = AppTheme.dashTextSecondaryOf(context);
+    final name = _applicantName.text.trim();
+    final title = name.isEmpty ? 'New Background Investigation' : name;
+    final String statusLabel;
+    final Color statusColor;
+    if (ro) {
+      statusLabel = 'Read-only preview';
+      statusColor = Colors.blueGrey;
+    } else if (_dirty) {
+      statusLabel = 'Unsaved';
+      statusColor = const Color(0xFFB26A00);
+    } else if (widget.entry.id == null) {
+      statusLabel = 'Draft';
+      statusColor = const Color(0xFFB26A00);
+    } else {
+      statusLabel = 'Saved';
+      statusColor = const Color(0xFF2E7D32);
+    }
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 16, 16, 16),
+      child: Wrap(
+        alignment: WrapAlignment.spaceBetween,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        runSpacing: 10,
+        spacing: 12,
+        children: [
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 420),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
                 Row(
+                  mainAxisSize: MainAxisSize.min,
                   children: [
-                    FilledButton(onPressed: _save, child: const Text('Save')),
-                    const SizedBox(width: 12),
-                    TextButton(
-                      onPressed: widget.onCancel,
-                      child: const Text('Cancel'),
+                    Flexible(
+                      child: Text(
+                        title,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 17,
+                          fontWeight: FontWeight.w800,
+                          color: primary,
+                        ),
+                      ),
                     ),
-                    const SizedBox(width: 12),
-                    IconButton(
-                      onPressed: () => widget.onPrint(_buildCurrentEntry()),
-                      icon: const Icon(Icons.print_rounded),
-                      tooltip: 'Print',
-                    ),
-                    IconButton(
-                      onPressed: () =>
-                          widget.onDownloadPdf(_buildCurrentEntry()),
-                      icon: const Icon(Icons.picture_as_pdf_rounded),
-                      tooltip: 'Download PDF',
+                    const SizedBox(width: 10),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 4,
+                      ),
+                      decoration: BoxDecoration(
+                        color: statusColor.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(999),
+                        border: Border.all(
+                          color: statusColor.withValues(alpha: 0.32),
+                        ),
+                      ),
+                      child: Text(
+                        statusLabel,
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w800,
+                          color: statusColor,
+                        ),
+                      ),
                     ),
                   ],
                 ),
-              ] else ...[
+                const SizedBox(height: 4),
                 Text(
-                  widget.entry.createdAt != null
-                      ? 'Created: ${widget.entry.createdAt!.toLocal()}'
-                      : '',
-                  style: TextStyle(
-                    fontSize: 11,
-                    color: AppTheme.dashTextSecondaryOf(context),
-                  ),
+                  'Applicant background investigation and competency assessment',
+                  style: TextStyle(fontSize: 12.5, color: secondary),
                 ),
-                if (widget.entry.updatedAt != null)
-                  Text(
-                    'Last updated: ${widget.entry.updatedAt!.toLocal()}',
-                    style: TextStyle(
-                      fontSize: 11,
-                      color: AppTheme.dashTextSecondaryOf(context),
+              ],
+            ),
+          ),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              FormPreviewPrintButtons(
+                onPreview: _previewCurrent,
+                onPrint: () => widget.onPrint(_buildCurrentEntry()),
+              ),
+              IconButton(
+                tooltip: 'Export PDF',
+                style: rspLdRecordIconButtonStyle(),
+                onPressed: () => widget.onDownloadPdf(_buildCurrentEntry()),
+                icon: const Icon(Icons.picture_as_pdf_rounded, size: 20),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _stepper(bool wide) {
+    const titles = [
+      'Applicant & Competencies',
+      'Functional & Performance',
+      'Other Information',
+    ];
+    if (!wide) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Step ${_step + 1} of 3',
+            style: TextStyle(
+              color: AppTheme.primaryNavy,
+              fontWeight: FontWeight.w700,
+              fontSize: 12.5,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            titles[_step],
+            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
+          ),
+          const SizedBox(height: 8),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(99),
+            child: LinearProgressIndicator(
+              value: (_step + 1) / 3,
+              minHeight: 4,
+              color: AppTheme.primaryNavy,
+              backgroundColor: const Color(0xFFE7E9EE),
+            ),
+          ),
+        ],
+      );
+    }
+    return Row(
+      children: [
+        for (var i = 0; i < titles.length; i++) ...[
+          if (i > 0)
+            Container(
+              width: 28,
+              height: 2,
+              margin: const EdgeInsets.symmetric(horizontal: 6),
+              color: i <= _step
+                  ? AppTheme.primaryNavy
+                  : const Color(0xFFE2E6EB),
+            ),
+          Expanded(
+            child: InkWell(
+              onTap: () {
+                if (i > _step && _step == 0 && !_validateStep1()) return;
+                setState(() => _step = i);
+              },
+              borderRadius: BorderRadius.circular(12),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
+                child: Row(
+                  children: [
+                    _stepBadge(i),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        titles[i],
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontWeight: i == _step
+                              ? FontWeight.w800
+                              : FontWeight.w600,
+                          color: i == _step
+                              ? const Color(0xFF1E293B)
+                              : const Color(0xFF64748B),
+                          fontSize: 13.5,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+
+  Widget _stepBadge(int index) {
+    final done = index < _step;
+    final current = index == _step;
+    return Container(
+      width: 28,
+      height: 28,
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        color: done || current ? AppTheme.primaryNavy : const Color(0xFFE7E9EE),
+        border: current
+            ? Border.all(color: AppTheme.primaryNavy, width: 1.4)
+            : null,
+      ),
+      child: done
+          ? const Icon(Icons.check_rounded, size: 16, color: Colors.white)
+          : Text(
+              '${index + 1}',
+              style: TextStyle(
+                color: current ? Colors.white : const Color(0xFF64748B),
+                fontWeight: FontWeight.w800,
+                fontSize: 13,
+              ),
+            ),
+    );
+  }
+
+  Widget _stepBody(bool wide, bool showTable, bool ro) {
+    final child = switch (_step) {
+      0 => _stepApplicant(wide, showTable, ro),
+      1 => _stepPerformance(ro),
+      _ => _stepOther(ro),
+    };
+    return child;
+  }
+
+  Widget _sectionCard({
+    required IconData icon,
+    required String title,
+    String? subtitle,
+    required Widget child,
+  }) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppTheme.dashMutedSurfaceOf(context),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: AppTheme.dashHairlineOf(context)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(icon, size: 18, color: AppTheme.primaryNavy),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(title, style: AppTheme.dashSectionTitle(context)),
+              ),
+            ],
+          ),
+          if (subtitle != null) ...[
+            const SizedBox(height: 4),
+            Text(
+              subtitle,
+              style: TextStyle(
+                color: AppTheme.dashTextSecondaryOf(context),
+                fontSize: 12.5,
+                height: 1.35,
+              ),
+            ),
+          ],
+          const SizedBox(height: 14),
+          child,
+        ],
+      ),
+    );
+  }
+
+  Widget _labeledField({
+    required String label,
+    required TextEditingController controller,
+    bool readOnly = false,
+    String? errorText,
+    int maxLines = 1,
+    String? hint,
+    Key? anchorKey,
+  }) {
+    return KeyedSubtree(
+      key: anchorKey,
+      child: TextFormField(
+        controller: controller,
+        readOnly: readOnly,
+        maxLines: maxLines,
+        minLines: maxLines > 1 ? 4 : 1,
+        style: AppTheme.dashFieldTextStyle(context),
+        onChanged: (_) {
+          if (errorText != null) {
+            setState(() {
+              if (controller == _applicantName) _applicantError = null;
+              if (controller == _respondentName) _respondentError = null;
+            });
+          }
+        },
+        decoration: AppTheme.dashInputDecoration(
+          context,
+          labelText: label,
+          hintText: hint,
+        ).copyWith(errorText: errorText),
+      ),
+    );
+  }
+
+  Widget _stepApplicant(bool wide, bool showTable, bool ro) {
+    final fields = wide
+        ? Column(
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: _labeledField(
+                      label: 'Name',
+                      controller: _applicantName,
+                      readOnly: ro,
+                      errorText: _applicantError,
+                      hint: 'Enter applicant name',
+                      anchorKey: _applicantFieldKey,
                     ),
                   ),
-              ],
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: _labeledField(
+                      label: 'Department',
+                      controller: _applicantDept,
+                      readOnly: ro,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 14),
+              Row(
+                children: [
+                  Expanded(
+                    child: _labeledField(
+                      label: 'Position',
+                      controller: _applicantPosition,
+                      readOnly: ro,
+                    ),
+                  ),
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: _labeledField(
+                      label: 'Position Applied for in LGU-Plaridel',
+                      controller: _positionApplied,
+                      readOnly: ro,
+                    ),
+                  ),
+                ],
+              ),
             ],
+          )
+        : Column(
+            children: [
+              _labeledField(
+                label: 'Name',
+                controller: _applicantName,
+                readOnly: ro,
+                errorText: _applicantError,
+                hint: 'Enter applicant name',
+                anchorKey: _applicantFieldKey,
+              ),
+              const SizedBox(height: 14),
+              _labeledField(
+                label: 'Department',
+                controller: _applicantDept,
+                readOnly: ro,
+              ),
+              const SizedBox(height: 14),
+              _labeledField(
+                label: 'Position',
+                controller: _applicantPosition,
+                readOnly: ro,
+              ),
+              const SizedBox(height: 14),
+              _labeledField(
+                label: 'Position Applied for in LGU-Plaridel',
+                controller: _positionApplied,
+                readOnly: ro,
+              ),
+            ],
+          );
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          'Applicant & Competencies',
+          style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          'Applicant, respondent and competency assessment details.',
+          style: TextStyle(color: AppTheme.dashTextSecondaryOf(context)),
+        ),
+        const SizedBox(height: 16),
+        _sectionCard(
+          icon: Icons.person_outline_rounded,
+          title: 'Applicant Information',
+          child: fields,
+        ),
+        const SizedBox(height: 16),
+        _sectionCard(
+          icon: Icons.badge_outlined,
+          title: 'Respondent Information',
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              if (wide)
+                Row(
+                  children: [
+                    Expanded(
+                      child: _labeledField(
+                        label: 'Name',
+                        controller: _respondentName,
+                        readOnly: ro,
+                        errorText: _respondentError,
+                        anchorKey: _respondentFieldKey,
+                      ),
+                    ),
+                    const SizedBox(width: 16),
+                    Expanded(
+                      child: _labeledField(
+                        label: 'Position',
+                        controller: _respondentPosition,
+                        readOnly: ro,
+                      ),
+                    ),
+                  ],
+                )
+              else ...[
+                _labeledField(
+                  label: 'Name',
+                  controller: _respondentName,
+                  readOnly: ro,
+                  errorText: _respondentError,
+                  anchorKey: _respondentFieldKey,
+                ),
+                const SizedBox(height: 14),
+                _labeledField(
+                  label: 'Position',
+                  controller: _respondentPosition,
+                  readOnly: ro,
+                ),
+              ],
+              const SizedBox(height: 14),
+              const Text(
+                'Work relationship to the applicants: (Kindly check the appropriate box)',
+                style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600),
+              ),
+              const SizedBox(height: 8),
+              if (wide)
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    for (final option in BiFormEntry.relationshipOptions)
+                      _relationshipChip(option, ro),
+                  ],
+                )
+              else
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    for (final option in BiFormEntry.relationshipOptions) ...[
+                      _relationshipChip(option, ro, expand: true),
+                      const SizedBox(height: 8),
+                    ],
+                  ],
+                ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 16),
+        _competencySection(showTable, ro),
+      ],
+    );
+  }
+
+  Widget _relationshipChip(String value, bool ro, {bool expand = false}) {
+    final selected = _relationship == value;
+    final label = value == 'supervisor'
+        ? "Applicant's Supervisor"
+        : value == 'peer'
+        ? "Applicant's Peer / Co-Employee"
+        : "Applicant's Subordinate";
+    return InkWell(
+      onTap: ro
+          ? null
+          : () => setState(() {
+              _relationship = value;
+              _dirty = true;
+            }),
+      borderRadius: BorderRadius.circular(12),
+      child: Container(
+        width: expand ? double.infinity : null,
+        constraints: BoxConstraints(minHeight: 48, minWidth: expand ? 0 : 220),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        decoration: BoxDecoration(
+          color: selected ? const Color(0xFFFFF4EC) : Colors.white,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: selected ? AppTheme.primaryNavy : const Color(0xFFE2E6EB),
+            width: selected ? 1.5 : 1,
+          ),
+        ),
+        child: Row(
+          mainAxisSize: expand ? MainAxisSize.max : MainAxisSize.min,
+          children: [
+            Icon(
+              selected
+                  ? Icons.radio_button_checked_rounded
+                  : Icons.radio_button_off_rounded,
+              size: 20,
+              color: selected ? AppTheme.primaryNavy : const Color(0xFF94A3B8),
+            ),
+            const SizedBox(width: 8),
+            if (expand)
+              Expanded(
+                child: Text(
+                  label,
+                  style: TextStyle(
+                    fontWeight: FontWeight.w600,
+                    color: selected
+                        ? const Color(0xFF9A3412)
+                        : const Color(0xFF1E293B),
+                  ),
+                ),
+              )
+            else
+              Text(
+                label,
+                style: TextStyle(
+                  fontWeight: FontWeight.w600,
+                  color: selected
+                      ? const Color(0xFF9A3412)
+                      : const Color(0xFF1E293B),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _competencySection(bool showTable, bool ro) {
+    return _sectionCard(
+      icon: Icons.fact_check_outlined,
+      title: 'Core & Organizational Competencies',
+      subtitle:
+          'Using the following rating guide please check (/) the appropriate box opposite each behavioral Indicator.',
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Rate each competency from 1 to 5.',
+            style: TextStyle(fontSize: 12.5),
+          ),
+          const SizedBox(height: 8),
+          _ratingGuide(),
+          const SizedBox(height: 14),
+          if (showTable) _competencyTable(ro) else _competencyCards(ro),
+        ],
+      ),
+    );
+  }
+
+  Widget _ratingGuide() {
+    const items = [
+      '5  Shows Strength',
+      '4  Very Proficient',
+      '3  Proficient',
+      '2  Minimal Development',
+      '1  Much Development Needed',
+    ];
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: const Color(0xFFFFF8F4),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFFF3D7C4)),
+      ),
+      child: Wrap(
+        spacing: 16,
+        runSpacing: 6,
+        children: [
+          const Text(
+            'Rating Guide',
+            style: TextStyle(fontWeight: FontWeight.w800, fontSize: 12.5),
+          ),
+          for (final item in items)
+            Text(item, style: const TextStyle(fontSize: 12.5)),
+        ],
+      ),
+    );
+  }
+
+  Widget _competencyTable(bool ro) {
+    return Table(
+      columnWidths: const {
+        0: FixedColumnWidth(36),
+        1: FlexColumnWidth(5),
+        2: FixedColumnWidth(44),
+        3: FixedColumnWidth(44),
+        4: FixedColumnWidth(44),
+        5: FixedColumnWidth(44),
+        6: FixedColumnWidth(44),
+      },
+      children: [
+        TableRow(
+          decoration: const BoxDecoration(color: Color(0xFFF4F6F8)),
+          children: [
+            _tableHead('#'),
+            _tableHead('Competency / Description'),
+            for (final n in [5, 4, 3, 2, 1]) _tableHead('$n'),
+          ],
+        ),
+        for (var i = 0; i < 9; i++)
+          TableRow(
+            decoration: BoxDecoration(
+              color: i.isEven ? Colors.white : const Color(0xFFFAFBFC),
+            ),
+            children: [
+              _tableHead('${i + 1}', bold: false),
+              Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 8,
+                  vertical: 10,
+                ),
+                child: Text(
+                  BiFormEntry.competencyDescriptions[i],
+                  style: const TextStyle(fontSize: 12.5, height: 1.35),
+                ),
+              ),
+              for (final rating in [5, 4, 3, 2, 1]) _ratingDot(i, rating, ro),
+            ],
+          ),
+      ],
+    );
+  }
+
+  Widget _tableHead(String text, {bool bold = true}) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 10),
+      child: Text(
+        text,
+        textAlign: TextAlign.center,
+        style: TextStyle(
+          fontSize: 12,
+          fontWeight: bold ? FontWeight.w800 : FontWeight.w600,
+        ),
+      ),
+    );
+  }
+
+  Widget _ratingDot(int row, int rating, bool ro) {
+    final selected = _ratings[row] == rating;
+    return InkWell(
+      onTap: ro
+          ? null
+          : () => setState(() {
+              _ratings[row] = rating;
+              _dirty = true;
+            }),
+      child: SizedBox(
+        height: 44,
+        child: Icon(
+          selected
+              ? Icons.radio_button_checked_rounded
+              : Icons.radio_button_off_rounded,
+          size: 20,
+          color: selected ? AppTheme.primaryNavy : const Color(0xFFCBD5E1),
+        ),
+      ),
+    );
+  }
+
+  Widget _competencyCards(bool ro) {
+    return Column(
+      children: [
+        for (var i = 0; i < 9; i++) ...[
+          Container(
+            width: double.infinity,
+            margin: const EdgeInsets.only(bottom: 10),
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: const Color(0xFFE6E9EE)),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Competency ${(i + 1).toString().padLeft(2, '0')}',
+                  style: TextStyle(
+                    color: AppTheme.primaryNavy,
+                    fontWeight: FontWeight.w800,
+                    fontSize: 12,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  BiFormEntry.competencyDescriptions[i],
+                  style: const TextStyle(fontSize: 13, height: 1.35),
+                ),
+                const SizedBox(height: 10),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    for (final rating in [1, 2, 3, 4, 5])
+                      _ratingChoice(i, rating, ro),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+
+  Widget _ratingChoice(int row, int rating, bool ro) {
+    final selected = _ratings[row] == rating;
+    return InkWell(
+      onTap: ro
+          ? null
+          : () => setState(() {
+              _ratings[row] = rating;
+              _dirty = true;
+            }),
+      borderRadius: BorderRadius.circular(10),
+      child: Container(
+        constraints: const BoxConstraints(minWidth: 44, minHeight: 44),
+        alignment: Alignment.center,
+        padding: const EdgeInsets.symmetric(horizontal: 12),
+        decoration: BoxDecoration(
+          color: selected ? const Color(0xFFFFF4EC) : const Color(0xFFF8F9FB),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(
+            color: selected ? AppTheme.primaryNavy : const Color(0xFFE2E6EB),
+          ),
+        ),
+        child: Text(
+          '$rating',
+          style: TextStyle(
+            fontWeight: FontWeight.w800,
+            color: selected ? AppTheme.primaryNavy : const Color(0xFF334155),
           ),
         ),
       ),
     );
   }
 
-  Widget _tableCell(String text, {bool bold = false, bool small = false}) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 8),
-      child: Text(
-        text,
-        style: TextStyle(
-          fontSize: small ? 9 : 11,
-          fontWeight: bold ? FontWeight.bold : null,
+  Widget _stepPerformance(bool ro) {
+    const options = BiFormEntry.functionalAreaOptions;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          'Functional & Performance',
+          style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          'Select applicable functional areas and provide performance information.',
+          style: TextStyle(color: AppTheme.dashTextSecondaryOf(context)),
+        ),
+        const SizedBox(height: 16),
+        _sectionCard(
+          icon: Icons.grid_view_rounded,
+          title: 'Functional Areas',
+          subtitle:
+              'Please check (/) the boxes opposite the functional area where the applicant can perform effectively.',
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              LayoutBuilder(
+                builder: (context, constraints) {
+                  final cols = constraints.maxWidth >= 900
+                      ? 3
+                      : constraints.maxWidth >= 560
+                      ? 2
+                      : 1;
+                  const gap = 8.0;
+                  final tileWidth =
+                      (constraints.maxWidth - gap * (cols - 1)) / cols;
+                  return Wrap(
+                    spacing: gap,
+                    runSpacing: gap,
+                    children: [
+                      for (var i = 0; i < options.length; i++)
+                        SizedBox(
+                          width: tileWidth,
+                          child: _areaTile(options[i], i, ro),
+                        ),
+                      SizedBox(
+                        width: tileWidth,
+                        child: _areaTile('Other (Please specify)', -1, ro),
+                      ),
+                    ],
+                  );
+                },
+              ),
+              if (_showOtherSpecify) ...[
+                const SizedBox(height: 10),
+                _labeledField(
+                  label: 'Please specify',
+                  controller: _otherArea,
+                  readOnly: ro,
+                ),
+              ],
+            ],
+          ),
+        ),
+        const SizedBox(height: 16),
+        _sectionCard(
+          icon: Icons.notes_rounded,
+          title: 'Performance & Relevant Information',
+          subtitle: 'I. On performance and other relevant information.',
+          child: Column(
+            children: [
+              _labeledField(
+                label:
+                    "Please tell us about the work performance of the applicants in the last three (3) years. What are the applicant's outstanding accomplishments recognition received and significant contributions to your office if any?",
+                controller: _perf3Years,
+                readOnly: ro,
+                maxLines: 5,
+              ),
+              const SizedBox(height: 14),
+              _labeledField(
+                label:
+                    'What do you think are the challenges or difficulties of the applicant in performing his/her duties and responsibilities in his/her position? How did the applicant cope with these challenges?',
+                controller: _challenges,
+                readOnly: ro,
+                maxLines: 5,
+              ),
+              const SizedBox(height: 14),
+              _labeledField(
+                label:
+                    "In terms of compliance with rules and regulation, please provide us information on the applicant's attendance to flag ceremonies/ retreats and other office programs and activities?",
+                controller: _compliance,
+                readOnly: ro,
+                maxLines: 5,
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  bool get _showOtherSpecify =>
+      _otherArea.text.trim().isNotEmpty || _otherSpecifyOpen;
+
+  Widget _areaTile(String label, int index, bool ro) {
+    final selected = index < 0 ? _showOtherSpecify : _functionalChecks[index];
+    return InkWell(
+      onTap: ro
+          ? null
+          : () {
+              if (index < 0) {
+                final open = !_showOtherSpecify;
+                if (!open) _otherArea.clear();
+                setState(() {
+                  _otherSpecifyOpen = open;
+                  _dirty = true;
+                });
+              } else {
+                setState(() {
+                  _functionalChecks[index] = !_functionalChecks[index];
+                  _dirty = true;
+                });
+              }
+            },
+      borderRadius: BorderRadius.circular(12),
+      child: Container(
+        constraints: const BoxConstraints(minHeight: 48),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+        decoration: BoxDecoration(
+          color: selected ? const Color(0xFFFFF4EC) : Colors.white,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: selected ? AppTheme.primaryNavy : const Color(0xFFE2E6EB),
+          ),
+        ),
+        child: Row(
+          children: [
+            Icon(
+              selected
+                  ? Icons.check_box_rounded
+                  : Icons.check_box_outline_blank_rounded,
+              size: 20,
+              color: selected ? AppTheme.primaryNavy : const Color(0xFF94A3B8),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                label,
+                style: const TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          ],
         ),
       ),
     );
   }
 
-  Widget _ratingCell(int rowIndex, int rating) {
-    final selected = _ratings[rowIndex] == rating;
-    final cell = Container(
-      alignment: Alignment.center,
-      padding: const EdgeInsets.symmetric(vertical: 8),
-      child: Text(
-        selected ? '/' : '',
-        style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
+  Widget _stepOther(bool ro) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          'Other Information',
+          style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          'Provide any additional relevant background information.',
+          style: TextStyle(color: AppTheme.dashTextSecondaryOf(context)),
+        ),
+        const SizedBox(height: 16),
+        _reviewSummary(),
+        const SizedBox(height: 16),
+        _sectionCard(
+          icon: Icons.info_outline_rounded,
+          title: 'Other Relevant Information',
+          child: _labeledField(
+            label:
+                'Other relevant information/ data (critical incidents, family background, health profile habits, vices, membership in unions/ associations, or any derogatory records) about the applicants, if any.',
+            controller: _otherRelevant,
+            readOnly: ro,
+            maxLines: 6,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _reviewSummary() {
+    final items = <(String, bool, int)>[
+      ('Applicant Information', _applicantName.text.trim().isNotEmpty, 0),
+      ('Respondent Information', _respondentName.text.trim().isNotEmpty, 0),
+      ('Competency Ratings', _ratings.every((r) => r != null), 0),
+      (
+        'Functional Areas',
+        _functionalChecks.any((v) => v) || _otherArea.text.trim().isNotEmpty,
+        1,
+      ),
+      (
+        'Performance Information',
+        _perf3Years.text.trim().isNotEmpty ||
+            _challenges.text.trim().isNotEmpty ||
+            _compliance.text.trim().isNotEmpty,
+        1,
+      ),
+      ('Other Information', _otherRelevant.text.trim().isNotEmpty, 2),
+    ];
+    return _sectionCard(
+      icon: Icons.checklist_rounded,
+      title: 'Review',
+      subtitle: 'Completion status only. Sensitive answers stay in the form.',
+      child: Column(
+        children: [
+          for (final item in items)
+            InkWell(
+              onTap: () => setState(() => _step = item.$3),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 8),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        item.$1,
+                        style: const TextStyle(fontWeight: FontWeight.w600),
+                      ),
+                    ),
+                    Text(
+                      item.$2 ? 'Complete' : 'Needs attention',
+                      style: TextStyle(
+                        color: item.$2
+                            ? const Color(0xFF15803D)
+                            : const Color(0xFFB45309),
+                        fontWeight: FontWeight.w700,
+                        fontSize: 12.5,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+        ],
       ),
     );
-    if (widget.readOnly) return cell;
-    return InkWell(
-      onTap: () => setState(() => _ratings[rowIndex] = rating),
-      child: cell,
-    );
   }
-}
 
-class _BiFormList extends StatelessWidget {
-  const _BiFormList({
-    required this.entries,
-    required this.onEdit,
-    required this.onDelete,
-    required this.onPrint,
-    required this.onDownloadPdf,
-  });
-
-  final List<BiFormEntry> entries;
-  final void Function(BiFormEntry) onEdit;
-  final void Function(String id) onDelete;
-  final Future<void> Function(BiFormEntry) onPrint;
-  final Future<void> Function(BiFormEntry) onDownloadPdf;
-
-  @override
-  Widget build(BuildContext context) {
-    const columns = [
-      RspRecordsColumn('Applicant', flex: 2.2),
-      RspRecordsColumn('Respondent', flex: 2.2),
-      RspRecordsColumn('Relationship', flex: 1.4),
-      RspRecordsColumn('Actions', flex: 2.4, align: TextAlign.center),
-    ];
-    return RspRecordsListTable(
-      columns: columns,
-      rows: entries
-          .map(
-            (e) => [
-              rspRecordsTextCell(context, e.applicantName, bold: true),
-              rspRecordsTextCell(context, e.respondentName, bold: true),
-              rspRecordsTextCell(context, e.respondentRelationship),
-              RspRecordsCrudActions(
-                onView: () => showReadOnlySavedEntryDialog(
-                  context,
-                  title: 'BI form Ã¢â‚¬â€ ${e.applicantName}',
-                  subtitle:
-                      '${e.respondentName} Ã‚Â· ${e.respondentRelationship}',
-                  previewBuilder: () => _BiFormEditor(
-                    readOnly: true,
-                    entry: e,
-                    onSave: (_) {},
-                    onCancel: () {},
-                    onPrint: (_) async {},
-                    onDownloadPdf: (_) async {},
-                  ),
-                  contentWidth: 920,
-                  onPrint: () => onPrint(e),
+  Widget _actionBar(bool ro) {
+    final editing = widget.entry.id != null;
+    final primaryLabel = _step < 2
+        ? 'Save & Continue'
+        : (editing ? 'Update' : 'Save');
+    return Wrap(
+      spacing: 10,
+      runSpacing: 10,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      children: [
+        if (!ro)
+          FilledButton.icon(
+                onPressed: _step < 2 ? _continue : _save,
+                icon: Icon(
+                  _step < 2 ? Icons.arrow_forward_rounded : Icons.save_rounded,
+                  size: 18,
                 ),
-                onEdit: () => onEdit(e),
-                onPrint: () => onPrint(e),
-                onDownloadPdf: () => onDownloadPdf(e),
-                onDelete: () async {
-                  if (e.id != null) onDelete(e.id!);
-                },
-                deleteDialogTitle: 'Delete BI entry?',
+                label: Text(primaryLabel),
+                style: FilledButton.styleFrom(
+                  backgroundColor: AppTheme.primaryNavy,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 22,
+                    vertical: 14,
+                  ),
+                ),
+              )
+            else if (_step < 2)
+              FilledButton.icon(
+                onPressed: _continue,
+                icon: const Icon(Icons.arrow_forward_rounded, size: 18),
+                label: const Text('Continue'),
+                style: FilledButton.styleFrom(
+                  backgroundColor: AppTheme.primaryNavy,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 22,
+                    vertical: 14,
+                  ),
+                ),
               ),
-            ],
-          )
-          .toList(),
+            if (_step > 0)
+              OutlinedButton.icon(
+                onPressed: () => setState(() => _step -= 1),
+                icon: const Icon(Icons.arrow_back_rounded, size: 18),
+                label: const Text('Previous'),
+              ),
+            if (!ro && _step < 2)
+              OutlinedButton.icon(
+                onPressed: _save,
+                icon: const Icon(Icons.save_outlined, size: 18),
+                label: const Text('Save'),
+              ),
+        if (!ro)
+          OutlinedButton.icon(
+            onPressed: _cancel,
+            icon: const Icon(Icons.close_rounded, size: 18),
+            label: const Text('Cancel'),
+          ),
+      ],
     );
   }
 }
 
-/// RSP: Applicants Profile ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â job vacancy details + list of applicants.
 class _RspApplicantsProfileSection extends StatefulWidget {
   const _RspApplicantsProfileSection();
 
@@ -4122,6 +4880,34 @@ class _RspApplicantsProfileSectionState
     }
   }
 
+  Future<void> _previewProfile(ApplicantsProfileEntry entry) {
+    return openFormDocumentPreview(
+      context: context,
+      title: 'Applicants Profile',
+      filename: 'Applicants_Profile.pdf',
+      format: FormPdf.pageLongLandscape,
+      printModule: 'rsp',
+      printFormKey: 'applicants_profile',
+      buildDocument: () async {
+        final signatureProvider = context.read<DocuTrackerProvider>();
+        final signatures = entry.id == null
+            ? null
+            : await signatureProvider.loadSourceSignatures(
+                sourceModule: 'rsp',
+                sourceTable: ApplicantsProfileEntry.tableName,
+                sourceRecordId: entry.id!,
+              );
+        if (entry.id != null && signatures == null) {
+          throw StateError(
+            signatureProvider.sourceSignatureError ??
+                'The form signatures could not be loaded.',
+          );
+        }
+        return FormPdf.buildApplicantsProfilePdf(entry, signatures: signatures);
+      },
+    );
+  }
+
   Future<void> _printProfile(ApplicantsProfileEntry entry) async {
     try {
       final signatureProvider = context.read<DocuTrackerProvider>();
@@ -4184,9 +4970,7 @@ class _RspApplicantsProfileSectionState
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(
+        ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Download failed. ${userFacingApiError(e)}')),
         );
       }
@@ -4214,10 +4998,14 @@ class _RspApplicantsProfileSectionState
             entry: e,
             onSave: (_) {},
             onCancel: () {},
-            onPrint: (_) async {},
+            onPrint: _printProfile,
+            onPreview: _previewProfile,
             onDownloadPdf: (_) async {},
           ),
           onPrint: () => _printProfile(e),
+          onDocumentPreview: () => _previewProfile(e),
+          onEdit: () => _edit(e),
+          onDelete: e.id == null ? null : () => _onDelete(e.id!),
         );
       }).toList(),
     );
@@ -4228,41 +5016,43 @@ class _RspApplicantsProfileSectionState
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Row(
-          children: [
-            Text(
-              'RSP',
-              style: TextStyle(
-                color: AppTheme.dashTextSecondaryOf(context),
-                fontSize: 12.5,
-                fontWeight: FontWeight.w600,
+        RspLdFormHeader(
+          module: 'RSP',
+          title: 'Applicants Profile',
+          actions: Wrap(
+            spacing: 4,
+            runSpacing: 8,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              FilledButton.icon(
+                onPressed: _loading ? null : _startNew,
+                icon: const Icon(Icons.add_rounded, size: 20),
+                label: const Text('Add profile'),
               ),
-            ),
-            Icon(
-              Icons.chevron_right_rounded,
-              size: 16,
-              color: AppTheme.dashTextSecondaryOf(context),
-            ),
-            Text(
-              'Applicants Profile',
-              style: TextStyle(
-                color: AppTheme.dashTextSecondaryOf(context),
-                fontSize: 12.5,
-                fontWeight: FontWeight.w700,
+              const SizedBox(width: 12),
+              TextButton.icon(
+                onPressed: _loading ? null : _load,
+                icon: const Icon(Icons.refresh_rounded, size: 20),
+                label: const Text('Refresh'),
+                style: TextButton.styleFrom(
+                  foregroundColor: AppTheme.primaryNavy,
+                ),
               ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 6),
-        Text(
-          'Applicants Profile',
-          style: TextStyle(
-            color: AppTheme.dashTextPrimaryOf(context),
-            fontSize: 22,
-            fontWeight: FontWeight.w700,
+              if (_editing != null) ...[
+                const SizedBox(width: 4),
+                TextButton.icon(
+                  onPressed: _loading ? null : _openSavedRecordsBrowser,
+                  icon: const Icon(Icons.folder_open_outlined, size: 20),
+                  label: const Text('View records'),
+                  style: TextButton.styleFrom(
+                    foregroundColor: AppTheme.primaryNavy,
+                  ),
+                ),
+              ],
+            ],
           ),
         ),
-        const SizedBox(height: 24),
+        const SizedBox(height: 20),
         if (_editing != null) ...[
           _ApplicantsProfileFormEditor(
             key: ValueKey(_editing?.id ?? 'new'),
@@ -4270,6 +5060,7 @@ class _RspApplicantsProfileSectionState
             onSave: _onSave,
             onCancel: _cancelEdit,
             onPrint: _printProfile,
+            onPreview: _previewProfile,
             onDownloadPdf: _downloadProfile,
           ),
           if (_editing?.id != null) ...[
@@ -4284,54 +5075,27 @@ class _RspApplicantsProfileSectionState
             ),
           ],
           const SizedBox(height: 24),
+        ] else ...[
+          if (_loading)
+            const Padding(
+              padding: EdgeInsets.all(24),
+              child: Center(child: CircularProgressIndicator()),
+            )
+          else if (_entries.isEmpty)
+            const RspFormEmptyState(
+              message:
+                  'No applicants profiles yet. Tap "Add profile" to create one.',
+              icon: Icons.badge_outlined,
+            )
+          else
+            _ApplicantsProfileList(
+              entries: _entries,
+              onEdit: _edit,
+              onDelete: _onDelete,
+              onPrint: _printProfile,
+              onDownloadPdf: _downloadProfile,
+            ),
         ],
-        Row(
-          children: [
-            FilledButton.icon(
-              onPressed: _loading ? null : _startNew,
-              icon: const Icon(Icons.add_rounded, size: 20),
-              label: const Text('Add profile'),
-            ),
-            const SizedBox(width: 12),
-            TextButton.icon(
-              onPressed: _loading ? null : _load,
-              icon: const Icon(Icons.refresh_rounded, size: 20),
-              label: const Text('Refresh'),
-              style: TextButton.styleFrom(
-                foregroundColor: AppTheme.primaryNavy,
-              ),
-            ),
-            const SizedBox(width: 4),
-            TextButton.icon(
-              onPressed: _loading ? null : _openSavedRecordsBrowser,
-              icon: const Icon(Icons.folder_open_outlined, size: 20),
-              label: const Text('View records'),
-              style: TextButton.styleFrom(
-                foregroundColor: AppTheme.primaryNavy,
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 16),
-        if (_loading)
-          const Padding(
-            padding: EdgeInsets.all(24),
-            child: Center(child: CircularProgressIndicator()),
-          )
-        else if (_entries.isEmpty)
-          const RspFormEmptyState(
-            message:
-                'No applicants profiles yet. Tap "Add profile" to add one.',
-            icon: Icons.people_outline,
-          )
-        else
-          _ApplicantsProfileList(
-            entries: _entries,
-            onEdit: _edit,
-            onDelete: _onDelete,
-            onPrint: _printProfile,
-            onDownloadPdf: _downloadProfile,
-          ),
       ],
     );
   }
@@ -4345,6 +5109,7 @@ class _ApplicantsProfileFormEditor extends StatefulWidget {
     required this.onSave,
     required this.onCancel,
     required this.onPrint,
+    this.onPreview,
     required this.onDownloadPdf,
   });
 
@@ -4353,6 +5118,7 @@ class _ApplicantsProfileFormEditor extends StatefulWidget {
   final void Function(ApplicantsProfileEntry) onSave;
   final VoidCallback onCancel;
   final Future<void> Function(ApplicantsProfileEntry) onPrint;
+  final Future<void> Function(ApplicantsProfileEntry)? onPreview;
   final Future<void> Function(ApplicantsProfileEntry) onDownloadPdf;
 
   @override
@@ -4677,12 +5443,18 @@ class _ApplicantsProfileFormEditorState
               runSpacing: 8,
               crossAxisAlignment: WrapCrossAlignment.center,
               children: [
-                IconButton(
-                  tooltip: 'Print',
-                  style: rspLdRecordIconButtonStyle(),
-                  onPressed: () => widget.onPrint(_buildCurrentEntry()),
-                  icon: const Icon(Icons.print_rounded, size: 20),
-                ),
+                if (widget.onPreview != null)
+                  FormPreviewPrintButtons(
+                    onPreview: () => widget.onPreview!(_buildCurrentEntry()),
+                    onPrint: () => widget.onPrint(_buildCurrentEntry()),
+                  )
+                else
+                  RspLdBusyIconButton(
+                    tooltip: 'Print',
+                    icon: Icons.print_rounded,
+                    busyTooltip: 'Preparing print…',
+                    onPressed: () => widget.onPrint(_buildCurrentEntry()),
+                  ),
                 IconButton(
                   tooltip: 'Download PDF',
                   style: rspLdRecordIconButtonStyle(),
@@ -5723,77 +6495,6 @@ class _ApplicantDialogState extends State<_ApplicantDialog> {
   }
 }
 
-class _ApplicantsProfileList extends StatelessWidget {
-  const _ApplicantsProfileList({
-    required this.entries,
-    required this.onEdit,
-    required this.onDelete,
-    required this.onPrint,
-    required this.onDownloadPdf,
-  });
-
-  final List<ApplicantsProfileEntry> entries;
-  final void Function(ApplicantsProfileEntry) onEdit;
-  final void Function(String id) onDelete;
-  final Future<void> Function(ApplicantsProfileEntry) onPrint;
-  final Future<void> Function(ApplicantsProfileEntry) onDownloadPdf;
-
-  @override
-  Widget build(BuildContext context) {
-    const columns = [
-      RspRecordsColumn('Position applied for', flex: 2.8),
-      RspRecordsColumn('Posting date', flex: 1.4),
-      RspRecordsColumn('Applicants', flex: 1, align: TextAlign.center),
-      RspRecordsColumn('Actions', flex: 2.4, align: TextAlign.center),
-    ];
-    return RspRecordsListTable(
-      columns: columns,
-      rows: entries
-          .map(
-            (e) => [
-              rspRecordsTextCell(
-                context,
-                e.positionAppliedFor ?? '',
-                bold: true,
-              ),
-              rspRecordsTextCell(context, e.dateOfPosting ?? ''),
-              rspRecordsTextCell(
-                context,
-                '${e.applicants.length}',
-                align: TextAlign.center,
-                bold: true,
-              ),
-              RspRecordsCrudActions(
-                onView: () => showReadOnlySavedEntryDialog(
-                  context,
-                  title: 'Applicants profile',
-                  subtitle: e.positionAppliedFor ?? '',
-                  previewBuilder: () => _ApplicantsProfileFormEditor(
-                    readOnly: true,
-                    entry: e,
-                    onSave: (_) {},
-                    onCancel: () {},
-                    onPrint: (_) async {},
-                    onDownloadPdf: (_) async {},
-                  ),
-                  contentWidth: 1000,
-                  onPrint: () => onPrint(e),
-                ),
-                onEdit: () => onEdit(e),
-                onPrint: () => onPrint(e),
-                onDownloadPdf: () => onDownloadPdf(e),
-                onDelete: () async {
-                  if (e.id != null) onDelete(e.id!);
-                },
-                deleteDialogTitle: 'Delete applicants profile?',
-              ),
-            ],
-          )
-          .toList(),
-    );
-  }
-}
-
 class _RspSelectionLineupSection extends StatefulWidget {
   const _RspSelectionLineupSection();
 
@@ -5879,6 +6580,34 @@ class _RspSelectionLineupSectionState
     }
   }
 
+  Future<void> _previewSl(SelectionLineupEntry entry) {
+    return openFormDocumentPreview(
+      context: context,
+      title: 'Selection Line-Up',
+      filename: 'Selection_Lineup.pdf',
+      format: FormPdf.pageLetterLandscape,
+      printModule: 'rsp',
+      printFormKey: 'selection_lineup',
+      buildDocument: () async {
+        final signatureProvider = context.read<DocuTrackerProvider>();
+        final signatures = entry.id == null
+            ? null
+            : await signatureProvider.loadSourceSignatures(
+                sourceModule: 'rsp',
+                sourceTable: SelectionLineupEntry.tableName,
+                sourceRecordId: entry.id!,
+              );
+        if (entry.id != null && signatures == null) {
+          throw StateError(
+            signatureProvider.sourceSignatureError ??
+                'The form signatures could not be loaded.',
+          );
+        }
+        return FormPdf.buildSelectionLineupPdf(entry, signatures: signatures);
+      },
+    );
+  }
+
   Future<void> _printSl(SelectionLineupEntry entry) async {
     try {
       final signatureProvider = context.read<DocuTrackerProvider>();
@@ -5941,9 +6670,7 @@ class _RspSelectionLineupSectionState
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(
+        ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Download failed. ${userFacingApiError(e)}')),
         );
       }
@@ -5962,7 +6689,8 @@ class _RspSelectionLineupSectionState
             : '(No position)';
         return SavedRecordListItem(
           title: pos,
-          subtitle: '${e.date ?? "Ã¢â‚¬â€"} Ã‚Â· ${e.applicants.length} applicant(s)',
+          subtitle:
+              '${e.date ?? "Ã¢â‚¬â€"} Ã‚Â· ${e.applicants.length} applicant(s)',
           detailDialogTitle: 'Selection line-up Ã¢â‚¬â€ $pos',
           previewContentWidth: 1000,
           previewBuilder: () => _SelectionLineupEditor(
@@ -5970,10 +6698,14 @@ class _RspSelectionLineupSectionState
             entry: e,
             onSave: (_) {},
             onCancel: () {},
-            onPrint: (_) async {},
+            onPrint: _printSl,
+            onPreview: _previewSl,
             onDownloadPdf: (_) async {},
           ),
           onPrint: () => _printSl(e),
+          onDocumentPreview: () => _previewSl(e),
+          onEdit: () => _edit(e),
+          onDelete: e.id == null ? null : () => _onDelete(e.id!),
         );
       }).toList(),
     );
@@ -5984,49 +6716,45 @@ class _RspSelectionLineupSectionState
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Row(
-          children: [
-            Text(
-              'RSP',
-              style: TextStyle(
-                color: AppTheme.dashTextSecondaryOf(context),
-                fontSize: 12.5,
-                fontWeight: FontWeight.w600,
+        RspLdFormHeader(
+          module: 'RSP',
+          title: 'Selection Line-up',
+          subtitle:
+              'Manage the vacant position, item no., and applicant list for this line-up. Printing keeps the official Selection Line-Up format.',
+          actions: Wrap(
+            spacing: 4,
+            runSpacing: 8,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              FilledButton.icon(
+                onPressed: _loading ? null : _startNew,
+                icon: const Icon(Icons.add_rounded, size: 20),
+                label: const Text('Add line-up'),
               ),
-            ),
-            Icon(
-              Icons.chevron_right_rounded,
-              size: 16,
-              color: AppTheme.dashTextSecondaryOf(context),
-            ),
-            Text(
-              'Selection Line-Up',
-              style: TextStyle(
-                color: AppTheme.dashTextSecondaryOf(context),
-                fontSize: 12.5,
-                fontWeight: FontWeight.w700,
+              const SizedBox(width: 12),
+              TextButton.icon(
+                onPressed: _loading ? null : _load,
+                icon: const Icon(Icons.refresh_rounded, size: 20),
+                label: const Text('Refresh'),
+                style: TextButton.styleFrom(
+                  foregroundColor: AppTheme.primaryNavy,
+                ),
               ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 6),
-        Text(
-          'Selection Line-up',
-          style: TextStyle(
-            color: AppTheme.dashTextPrimaryOf(context),
-            fontSize: 22,
-            fontWeight: FontWeight.w700,
+              if (_editing != null) ...[
+                const SizedBox(width: 4),
+                TextButton.icon(
+                  onPressed: _loading ? null : _openSavedRecordsBrowser,
+                  icon: const Icon(Icons.folder_open_outlined, size: 20),
+                  label: const Text('View records'),
+                  style: TextButton.styleFrom(
+                    foregroundColor: AppTheme.primaryNavy,
+                  ),
+                ),
+              ],
+            ],
           ),
         ),
-        const SizedBox(height: 8),
-        Text(
-          'Manage the vacant position, item no., and applicant list for this line-up. Printing keeps the official Selection Line-Up format.',
-          style: TextStyle(
-            color: AppTheme.dashTextSecondaryOf(context),
-            fontSize: 14,
-          ),
-        ),
-        const SizedBox(height: 24),
+        const SizedBox(height: 20),
         if (_editing != null) ...[
           _SelectionLineupEditor(
             key: ValueKey(_editing?.id ?? 'new'),
@@ -6034,6 +6762,7 @@ class _RspSelectionLineupSectionState
             onSave: _onSave,
             onCancel: _cancelEdit,
             onPrint: _printSl,
+            onPreview: _previewSl,
             onDownloadPdf: _downloadSl,
           ),
           if (_editing?.id != null) ...[
@@ -6047,53 +6776,27 @@ class _RspSelectionLineupSectionState
             ),
           ],
           const SizedBox(height: 24),
+        ] else ...[
+          if (_loading)
+            const Padding(
+              padding: EdgeInsets.all(24),
+              child: Center(child: CircularProgressIndicator()),
+            )
+          else if (_entries.isEmpty)
+            const RspFormEmptyState(
+              message:
+                  'No selection line-ups yet. Tap "Add line-up" to create one.',
+              icon: Icons.list_alt_rounded,
+            )
+          else
+            _SelectionLineupList(
+              entries: _entries,
+              onEdit: _edit,
+              onDelete: _onDelete,
+              onPrint: _printSl,
+              onDownloadPdf: _downloadSl,
+            ),
         ],
-        Row(
-          children: [
-            FilledButton.icon(
-              onPressed: _loading ? null : _startNew,
-              icon: const Icon(Icons.add_rounded, size: 20),
-              label: const Text('Add line-up'),
-            ),
-            const SizedBox(width: 12),
-            TextButton.icon(
-              onPressed: _loading ? null : _load,
-              icon: const Icon(Icons.refresh_rounded, size: 20),
-              label: const Text('Refresh'),
-              style: TextButton.styleFrom(
-                foregroundColor: AppTheme.primaryNavy,
-              ),
-            ),
-            const SizedBox(width: 4),
-            TextButton.icon(
-              onPressed: _loading ? null : _openSavedRecordsBrowser,
-              icon: const Icon(Icons.folder_open_outlined, size: 20),
-              label: const Text('View records'),
-              style: TextButton.styleFrom(
-                foregroundColor: AppTheme.primaryNavy,
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 16),
-        if (_loading)
-          const Padding(
-            padding: EdgeInsets.all(24),
-            child: Center(child: CircularProgressIndicator()),
-          )
-        else if (_entries.isEmpty)
-          const RspFormEmptyState(
-            message: 'No selection line-ups yet. Tap "Add line-up" to add one.',
-            icon: Icons.list_alt_rounded,
-          )
-        else
-          _SelectionLineupList(
-            entries: _entries,
-            onEdit: _edit,
-            onDelete: _onDelete,
-            onPrint: _printSl,
-            onDownloadPdf: _downloadSl,
-          ),
       ],
     );
   }
@@ -6107,6 +6810,7 @@ class _SelectionLineupEditor extends StatefulWidget {
     required this.onSave,
     required this.onCancel,
     required this.onPrint,
+    this.onPreview,
     required this.onDownloadPdf,
   });
 
@@ -6115,6 +6819,7 @@ class _SelectionLineupEditor extends StatefulWidget {
   final void Function(SelectionLineupEntry) onSave;
   final VoidCallback onCancel;
   final Future<void> Function(SelectionLineupEntry) onPrint;
+  final Future<void> Function(SelectionLineupEntry)? onPreview;
   final Future<void> Function(SelectionLineupEntry) onDownloadPdf;
 
   @override
@@ -6566,12 +7271,18 @@ class _SelectionLineupEditorState extends State<_SelectionLineupEditor> {
             runSpacing: 8,
             crossAxisAlignment: WrapCrossAlignment.center,
             children: [
-              IconButton(
-                tooltip: 'Print',
-                style: rspLdRecordIconButtonStyle(),
-                onPressed: () => widget.onPrint(_buildCurrentEntry()),
-                icon: const Icon(Icons.print_rounded, size: 20),
-              ),
+              if (widget.onPreview != null)
+                FormPreviewPrintButtons(
+                  onPreview: () => widget.onPreview!(_buildCurrentEntry()),
+                  onPrint: () => widget.onPrint(_buildCurrentEntry()),
+                )
+              else
+                RspLdBusyIconButton(
+                  tooltip: 'Print',
+                  icon: Icons.print_rounded,
+                  busyTooltip: 'Preparing print…',
+                  onPressed: () => widget.onPrint(_buildCurrentEntry()),
+                ),
               IconButton(
                 tooltip: 'Download PDF',
                 style: rspLdRecordIconButtonStyle(),
@@ -7233,75 +7944,6 @@ class _SlApplicantDialogState extends State<_SlApplicantDialog> {
     );
   }
 }
-
-class _SelectionLineupList extends StatelessWidget {
-  const _SelectionLineupList({
-    required this.entries,
-    required this.onEdit,
-    required this.onDelete,
-    required this.onPrint,
-    required this.onDownloadPdf,
-  });
-
-  final List<SelectionLineupEntry> entries;
-  final void Function(SelectionLineupEntry) onEdit;
-  final void Function(String id) onDelete;
-  final Future<void> Function(SelectionLineupEntry) onPrint;
-  final Future<void> Function(SelectionLineupEntry) onDownloadPdf;
-
-  @override
-  Widget build(BuildContext context) {
-    const columns = [
-      RspRecordsColumn('Vacant position', flex: 2.6),
-      RspRecordsColumn('Date', flex: 1.4),
-      RspRecordsColumn('Applicants', flex: 1, align: TextAlign.center),
-      RspRecordsColumn('Actions', flex: 2.4, align: TextAlign.center),
-    ];
-    return RspRecordsListTable(
-      columns: columns,
-      rows: entries
-          .map(
-            (e) => [
-              rspRecordsTextCell(context, e.vacantPosition ?? '', bold: true),
-              rspRecordsTextCell(context, e.date ?? ''),
-              rspRecordsTextCell(
-                context,
-                '${e.applicants.length}',
-                align: TextAlign.center,
-                bold: true,
-              ),
-              RspRecordsCrudActions(
-                onView: () => showReadOnlySavedEntryDialog(
-                  context,
-                  title: 'Selection line-up',
-                  subtitle: e.vacantPosition ?? '',
-                  previewBuilder: () => _SelectionLineupEditor(
-                    readOnly: true,
-                    entry: e,
-                    onSave: (_) {},
-                    onCancel: () {},
-                    onPrint: (_) async {},
-                    onDownloadPdf: (_) async {},
-                  ),
-                  contentWidth: 1000,
-                  onPrint: () => onPrint(e),
-                ),
-                onEdit: () => onEdit(e),
-                onPrint: () => onPrint(e),
-                onDownloadPdf: () => onDownloadPdf(e),
-                onDelete: () async {
-                  if (e.id != null) onDelete(e.id!);
-                },
-                deleteDialogTitle: 'Delete line-up?',
-              ),
-            ],
-          )
-          .toList(),
-    );
-  }
-}
-
-/// RSP: Turn-Around Time -- moved to turn_around_time_section.dart (RspTurnAroundTimeSection).
 
 enum _RspMonitorView { applications, examResults }
 
@@ -8447,13 +9089,13 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                       color: fg,
                       height: 1.25,
                     ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
-        ),
         ),
       ),
     );
@@ -8581,7 +9223,9 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
           ),
           FilledButton(
             onPressed: () => Navigator.of(ctx).pop(true),
-            style: FilledButton.styleFrom(backgroundColor: AppTheme.primaryNavy),
+            style: FilledButton.styleFrom(
+              backgroundColor: AppTheme.primaryNavy,
+            ),
             child: const Text('Sync'),
           ),
         ],
@@ -8797,7 +9441,9 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
             const SizedBox(width: 5),
             Flexible(
               child: Text(
-                complete ? '$have / $total Complete' : '$have / $total Submitted',
+                complete
+                    ? '$have / $total Complete'
+                    : '$have / $total Submitted',
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(
@@ -8830,10 +9476,7 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
         const PopupMenuItem(value: 'edit', child: Text('Edit')),
         const PopupMenuItem(
           value: 'delete',
-          child: Text(
-            'Delete',
-            style: TextStyle(color: Color(0xFFC62828)),
-          ),
+          child: Text('Delete', style: TextStyle(color: Color(0xFFC62828))),
         ),
       ],
     );
@@ -8925,10 +9568,7 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                 (app.positionAppliedFor ?? '').trim().isEmpty
                     ? '—'
                     : app.positionAppliedFor!.trim(),
-                style: TextStyle(
-                  fontWeight: FontWeight.w600,
-                  color: primary,
-                ),
+                style: TextStyle(fontWeight: FontWeight.w600, color: primary),
               ),
               const SizedBox(height: 8),
               _applicationStatusBadge(context, _applicationDisplayStatus(app)),
@@ -9073,8 +9713,8 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                         (app.positionAppliedFor ?? '').trim().isEmpty
                             ? '—'
                             : app.positionAppliedFor!.trim(),
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
                         style: TextStyle(fontSize: 13, color: primary),
                       ),
                     ),
@@ -9096,10 +9736,10 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                                 style: TextStyle(
                                   fontSize: 12,
                                   color: secondary,
-                  ),
-                ),
-              ],
-            ),
+                                ),
+                              ),
+                          ],
+                        ),
                       ),
                     if (showContactAndDate)
                       Expanded(
@@ -9133,16 +9773,19 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                             ),
                             padding: EdgeInsets.zero,
                             onPressed: () => _openApplicantDetails(app),
-                            icon: const Icon(Icons.visibility_outlined, size: 20),
+                            icon: const Icon(
+                              Icons.visibility_outlined,
+                              size: 20,
+                            ),
                           ),
                           _applicantActionsMenu(app),
                         ],
                       ),
                     ),
                   ],
-          ),
-        ),
-      ),
+                ),
+              ),
+            ),
           );
         }),
       ],
@@ -9270,15 +9913,15 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                          pageTitle,
-                          style: TextStyle(
-                            color: AppTheme.dashTextPrimaryOf(context),
+                    pageTitle,
+                    style: TextStyle(
+                      color: AppTheme.dashTextPrimaryOf(context),
                       fontSize: 24,
-                            fontWeight: FontWeight.w800,
-                            letterSpacing: -0.4,
-                            height: 1.15,
-                          ),
-                        ),
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: -0.4,
+                      height: 1.15,
+                    ),
+                  ),
                   const SizedBox(height: 4),
                   Text(
                     pageSubtitle,
@@ -9297,8 +9940,8 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
               spacing: 8,
               runSpacing: 8,
               alignment: WrapAlignment.end,
-                  children: [
-                    generateReportBtn,
+              children: [
+                generateReportBtn,
                 OutlinedButton.icon(
                   onPressed: _loading ? null : _load,
                   icon: const Icon(Icons.refresh_rounded, size: 18),
@@ -9308,8 +9951,8 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                     side: BorderSide(color: hairline),
                     padding: const EdgeInsets.symmetric(
                       horizontal: 14,
-                          vertical: 12,
-                        ),
+                      vertical: 12,
+                    ),
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(12),
                     ),
@@ -9329,19 +9972,18 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                           _syncing
                               ? 'Syncing attachments…'
                               : 'Sync attachments from storage',
-                              ),
-                            ),
-                      ],
                         ),
-                      ],
-                    ),
-                  ],
+                      ),
+                    ],
+                  ),
+              ],
+            ),
+          ],
         ),
         if (isApplicationsView && !_loading) ...[
           const SizedBox(height: 16),
           LayoutBuilder(
-            builder: (context, c) =>
-                _summaryRow(compact: c.maxWidth < 900),
+            builder: (context, c) => _summaryRow(compact: c.maxWidth < 900),
           ),
         ],
         const SizedBox(height: 14),
@@ -9383,25 +10025,22 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
               width: 260,
               hairline: hairline,
               items: [
-                  const DropdownMenuItem<String>(
-                    value: null,
-                  child: Text(
-                    'All positions',
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  ),
-                  ...(_positionFilterOptions.toList()..sort(
-                        (a, b) => a.toLowerCase().compareTo(b.toLowerCase()),
-                      ))
-                      .map(
+                const DropdownMenuItem<String>(
+                  value: null,
+                  child: Text('All positions', overflow: TextOverflow.ellipsis),
+                ),
+                ...(_positionFilterOptions.toList()..sort(
+                      (a, b) => a.toLowerCase().compareTo(b.toLowerCase()),
+                    ))
+                    .map(
                       (p) => DropdownMenuItem<String>(
                         value: p,
                         child: Text(p, overflow: TextOverflow.ellipsis),
                       ),
-                      ),
-                ],
-                onChanged: _loading
-                    ? null
+                    ),
+              ],
+              onChanged: _loading
+                  ? null
                   : (value) => setState(() => _selectedPositionFilter = value),
             ),
             _filterDropdown(
@@ -9412,10 +10051,7 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
               items: [
                 const DropdownMenuItem<String>(
                   value: null,
-                  child: Text(
-                    'All statuses',
-                    overflow: TextOverflow.ellipsis,
-                  ),
+                  child: Text('All statuses', overflow: TextOverflow.ellipsis),
                 ),
                 ...(_statusFilterOptions.toList()..sort()).map(
                   (s) => DropdownMenuItem<String>(
@@ -9615,7 +10251,7 @@ class _ApplicantDetailsDrawer extends StatelessWidget {
         child: SafeArea(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
-                                    children: [
+            children: [
               Container(
                 height: 4,
                 decoration: const BoxDecoration(
@@ -9667,7 +10303,10 @@ class _ApplicantDetailsDrawer extends StatelessWidget {
                       ),
                       TextButton.icon(
                         onPressed: onDelete,
-                        icon: const Icon(Icons.delete_outline_rounded, size: 18),
+                        icon: const Icon(
+                          Icons.delete_outline_rounded,
+                          size: 18,
+                        ),
                         label: const Text('Delete'),
                         style: TextButton.styleFrom(
                           foregroundColor: const Color(0xFFC62828),
@@ -9696,7 +10335,7 @@ class _ApplicantDetailsDrawer extends StatelessWidget {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                                        Text(
+                            Text(
                               name,
                               style: TextStyle(
                                 fontSize: 18,
@@ -9732,7 +10371,7 @@ class _ApplicantDetailsDrawer extends StatelessWidget {
                                     ),
                                   ),
                                 ),
-                                        Text(
+                                Text(
                                   position,
                                   style: TextStyle(
                                     fontSize: 13,
@@ -9784,9 +10423,9 @@ class _ApplicantDetailsDrawer extends StatelessWidget {
   String _initialsOf(String name) {
     final parts = name
         .trim()
-                                        .split(RegExp(r'\s+'))
+        .split(RegExp(r'\s+'))
         .where((p) => p.isNotEmpty)
-                                        .toList();
+        .toList();
     if (parts.isEmpty) return '?';
     if (parts.length == 1) return parts.first.substring(0, 1).toUpperCase();
     return (parts.first.substring(0, 1) + parts.last.substring(0, 1))
@@ -9800,12 +10439,10 @@ class _ApplicantDetailsDrawer extends StatelessWidget {
       decoration: BoxDecoration(
         color: AppTheme.primaryNavy.withValues(alpha: 0.1),
         shape: BoxShape.circle,
-        border: Border.all(
-          color: AppTheme.primaryNavy.withValues(alpha: 0.22),
-        ),
+        border: Border.all(color: AppTheme.primaryNavy.withValues(alpha: 0.22)),
       ),
       alignment: Alignment.center,
-                                            child: Text(
+      child: Text(
         _initialsOf(name),
         style: TextStyle(
           fontWeight: FontWeight.w800,
@@ -9839,7 +10476,7 @@ class _ApplicantDetailsDrawer extends StatelessWidget {
             children: [
               Icon(icon, size: 16, color: AppTheme.primaryNavy),
               const SizedBox(width: 8),
-                                          Text(
+              Text(
                 title,
                 style: TextStyle(
                   fontWeight: FontWeight.w800,
@@ -9862,7 +10499,7 @@ class _ApplicantDetailsDrawer extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-                                          Text(
+          Text(
             label,
             style: TextStyle(
               fontSize: 11,
@@ -9872,7 +10509,7 @@ class _ApplicantDetailsDrawer extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 3),
-                                          Text(
+          Text(
             value,
             style: TextStyle(
               fontSize: 13.5,
@@ -9888,9 +10525,7 @@ class _ApplicantDetailsDrawer extends StatelessWidget {
 
   Widget _infoGrid(BuildContext context, List<(String, String)> fields) {
     final wide = MediaQuery.sizeOf(context).width >= 520;
-    final cells = fields
-        .map((f) => _infoField(context, f.$1, f.$2))
-        .toList();
+    final cells = fields.map((f) => _infoField(context, f.$1, f.$2)).toList();
     if (!wide) return Column(children: cells);
     return Column(
       children: [
@@ -10064,7 +10699,7 @@ class _ApplicantDetailsDrawer extends StatelessWidget {
                 color: AppTheme.dashTextSecondaryOf(context),
               ),
               const SizedBox(height: 10),
-                                          Text(
+              Text(
                 'No exam recorded yet',
                 style: TextStyle(
                   fontWeight: FontWeight.w800,
@@ -10177,11 +10812,7 @@ class _ApplicantDetailsDrawer extends StatelessWidget {
           ],
         ),
         const SizedBox(height: 8),
-        _scoreTile(
-          context,
-          label: 'BEI',
-          value: pct(beiScore(e.answersJson)),
-        ),
+        _scoreTile(context, label: 'BEI', value: pct(beiScore(e.answersJson))),
       ],
     );
   }
@@ -10203,7 +10834,7 @@ class _ApplicantDetailsDrawer extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Row(
-                                            children: [
+                children: [
                   const Icon(
                     Icons.flag_outlined,
                     size: 16,
@@ -10232,7 +10863,7 @@ class _ApplicantDetailsDrawer extends StatelessWidget {
               const SizedBox(height: 14),
               for (var i = 0; i < steps.length; i++)
                 _progressStep(
-                                                      context,
+                  context,
                   label: steps[i].label,
                   detail: steps[i].detail,
                   status: steps[i].status,
@@ -10249,8 +10880,7 @@ class _ApplicantDetailsDrawer extends StatelessWidget {
       app.status == 'registered' ||
       (app.hiredUserId != null && app.hiredUserId!.trim().isNotEmpty);
 
-  bool get _pipelineBeiPending =>
-      exam != null && !exam!.beiGradingComplete;
+  bool get _pipelineBeiPending => exam != null && !exam!.beiGradingComplete;
 
   bool get _pipelineExamPassed =>
       !_pipelineBeiPending &&
@@ -10374,7 +11004,8 @@ class _ApplicantDetailsDrawer extends StatelessWidget {
       reqDetail = 'All three documents uploaded. Awaiting HR review.';
     } else {
       reqTone = _PipelineTone.current;
-      reqDetail = 'Waiting for medical certificate, drug test, and NBI clearance.';
+      reqDetail =
+          'Waiting for medical certificate, drug test, and NBI clearance.';
     }
 
     late final _PipelineTone orientTone;
@@ -10394,7 +11025,8 @@ class _ApplicantDetailsDrawer extends StatelessWidget {
           'Scheduled: ${_pipelineWhen(context, app.orientationAt)}. Waiting for attendance.';
     } else {
       orientTone = _PipelineTone.current;
-      orientDetail = 'Final requirements approved. Waiting for orientation schedule.';
+      orientDetail =
+          'Final requirements approved. Waiting for orientation schedule.';
     }
 
     late final _PipelineTone accountTone;
@@ -10424,41 +11056,13 @@ class _ApplicantDetailsDrawer extends StatelessWidget {
         detail: 'Application and initial documents received.',
         status: _PipelineTone.done,
       ),
-      (
-        label: 'Document review',
-        detail: docsDetail,
-        status: docsTone,
-      ),
-      (
-        label: 'Screening exams',
-        detail: examDetail,
-        status: examTone,
-      ),
-      (
-        label: 'Exam result',
-        detail: resultDetail,
-        status: resultTone,
-      ),
-      (
-        label: 'Deliberation',
-        detail: interviewDetail,
-        status: interviewTone,
-      ),
-      (
-        label: 'Final requirements',
-        detail: reqDetail,
-        status: reqTone,
-      ),
-      (
-        label: 'Orientation',
-        detail: orientDetail,
-        status: orientTone,
-      ),
-      (
-        label: 'Account setup',
-        detail: accountDetail,
-        status: accountTone,
-      ),
+      (label: 'Document review', detail: docsDetail, status: docsTone),
+      (label: 'Screening exams', detail: examDetail, status: examTone),
+      (label: 'Exam result', detail: resultDetail, status: resultTone),
+      (label: 'Deliberation', detail: interviewDetail, status: interviewTone),
+      (label: 'Final requirements', detail: reqDetail, status: reqTone),
+      (label: 'Orientation', detail: orientDetail, status: orientTone),
+      (label: 'Account setup', detail: accountDetail, status: accountTone),
     ];
   }
 
@@ -10536,9 +11140,9 @@ class _ApplicantDetailsDrawer extends StatelessWidget {
                   ),
                 ],
               ),
+            ),
           ),
-        ),
-      ],
+        ],
       ),
     );
   }
@@ -11675,6 +12279,209 @@ class _AttachmentActions extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+class _BiFormList extends StatelessWidget {
+  const _BiFormList({
+    required this.entries,
+    required this.onEdit,
+    required this.onDelete,
+    required this.onPrint,
+    required this.onDownloadPdf,
+  });
+
+  final List<BiFormEntry> entries;
+  final void Function(BiFormEntry) onEdit;
+  final void Function(String id) onDelete;
+  final Future<void> Function(BiFormEntry) onPrint;
+  final Future<void> Function(BiFormEntry) onDownloadPdf;
+
+  @override
+  Widget build(BuildContext context) {
+    const columns = [
+      RspRecordsColumn('Applicant', flex: 2.2),
+      RspRecordsColumn('Respondent', flex: 2.2),
+      RspRecordsColumn('Relationship', flex: 1.4),
+      RspRecordsColumn('Actions', flex: 2.4, align: TextAlign.center),
+    ];
+    return RspRecordsListTable(
+      columns: columns,
+      rows: entries
+          .map(
+            (e) => [
+              rspRecordsTextCell(context, e.applicantName, bold: true),
+              rspRecordsTextCell(context, e.respondentName, bold: true),
+              rspRecordsTextCell(context, e.respondentRelationship),
+              RspRecordsCrudActions(
+                onView: () => showReadOnlySavedEntryDialog(
+                  context,
+                  title: 'BI form ├â┬ó├óΓÇÜ┬¼├óΓé¼┬¥ ${e.applicantName}',
+                  subtitle:
+                      '${e.respondentName} ├âΓÇÜ├é┬╖ ${e.respondentRelationship}',
+                  previewBuilder: () => _BiFormEditor(
+                    readOnly: true,
+                    entry: e,
+                    onSave: (_) {},
+                    onCancel: () {},
+                    onPrint: (_) async {},
+                    onDownloadPdf: (_) async {},
+                  ),
+                  contentWidth: 920,
+                  onPrint: () => onPrint(e),
+                ),
+                onEdit: () => onEdit(e),
+                onPrint: () => onPrint(e),
+                onDownloadPdf: () => onDownloadPdf(e),
+                onDelete: () async {
+                  if (e.id != null) onDelete(e.id!);
+                },
+                deleteDialogTitle: 'Delete BI entry?',
+              ),
+            ],
+          )
+          .toList(),
+    );
+  }
+}
+
+/// RSP: Applicants Profile ├â╞Æ├é┬ó├â┬ó├óΓé¼┼í├é┬¼├â┬ó├óΓÇÜ┬¼├é┬¥ job vacancy details + list of applicants.
+
+class _ApplicantsProfileList extends StatelessWidget {
+  const _ApplicantsProfileList({
+    required this.entries,
+    required this.onEdit,
+    required this.onDelete,
+    required this.onPrint,
+    required this.onDownloadPdf,
+  });
+
+  final List<ApplicantsProfileEntry> entries;
+  final void Function(ApplicantsProfileEntry) onEdit;
+  final void Function(String id) onDelete;
+  final Future<void> Function(ApplicantsProfileEntry) onPrint;
+  final Future<void> Function(ApplicantsProfileEntry) onDownloadPdf;
+
+  @override
+  Widget build(BuildContext context) {
+    const columns = [
+      RspRecordsColumn('Position applied for', flex: 2.8),
+      RspRecordsColumn('Posting date', flex: 1.4),
+      RspRecordsColumn('Applicants', flex: 1, align: TextAlign.center),
+      RspRecordsColumn('Actions', flex: 2.4, align: TextAlign.center),
+    ];
+    return RspRecordsListTable(
+      columns: columns,
+      rows: entries
+          .map(
+            (e) => [
+              rspRecordsTextCell(
+                context,
+                e.positionAppliedFor ?? '',
+                bold: true,
+              ),
+              rspRecordsTextCell(context, e.dateOfPosting ?? ''),
+              rspRecordsTextCell(
+                context,
+                '${e.applicants.length}',
+                align: TextAlign.center,
+                bold: true,
+              ),
+              RspRecordsCrudActions(
+                onView: () => showReadOnlySavedEntryDialog(
+                  context,
+                  title: 'Applicants profile',
+                  subtitle: e.positionAppliedFor ?? '',
+                  previewBuilder: () => _ApplicantsProfileFormEditor(
+                    readOnly: true,
+                    entry: e,
+                    onSave: (_) {},
+                    onCancel: () {},
+                    onPrint: (_) async {},
+                    onDownloadPdf: (_) async {},
+                  ),
+                  contentWidth: 1000,
+                  onPrint: () => onPrint(e),
+                ),
+                onEdit: () => onEdit(e),
+                onPrint: () => onPrint(e),
+                onDownloadPdf: () => onDownloadPdf(e),
+                onDelete: () async {
+                  if (e.id != null) onDelete(e.id!);
+                },
+                deleteDialogTitle: 'Delete applicants profile?',
+              ),
+            ],
+          )
+          .toList(),
+    );
+  }
+}
+
+class _SelectionLineupList extends StatelessWidget {
+  const _SelectionLineupList({
+    required this.entries,
+    required this.onEdit,
+    required this.onDelete,
+    required this.onPrint,
+    required this.onDownloadPdf,
+  });
+
+  final List<SelectionLineupEntry> entries;
+  final void Function(SelectionLineupEntry) onEdit;
+  final void Function(String id) onDelete;
+  final Future<void> Function(SelectionLineupEntry) onPrint;
+  final Future<void> Function(SelectionLineupEntry) onDownloadPdf;
+
+  @override
+  Widget build(BuildContext context) {
+    const columns = [
+      RspRecordsColumn('Vacant position', flex: 2.6),
+      RspRecordsColumn('Date', flex: 1.4),
+      RspRecordsColumn('Applicants', flex: 1, align: TextAlign.center),
+      RspRecordsColumn('Actions', flex: 2.4, align: TextAlign.center),
+    ];
+    return RspRecordsListTable(
+      columns: columns,
+      rows: entries
+          .map(
+            (e) => [
+              rspRecordsTextCell(context, e.vacantPosition ?? '', bold: true),
+              rspRecordsTextCell(context, e.date ?? ''),
+              rspRecordsTextCell(
+                context,
+                '${e.applicants.length}',
+                align: TextAlign.center,
+                bold: true,
+              ),
+              RspRecordsCrudActions(
+                onView: () => showReadOnlySavedEntryDialog(
+                  context,
+                  title: 'Selection line-up',
+                  subtitle: e.vacantPosition ?? '',
+                  previewBuilder: () => _SelectionLineupEditor(
+                    readOnly: true,
+                    entry: e,
+                    onSave: (_) {},
+                    onCancel: () {},
+                    onPrint: (_) async {},
+                    onDownloadPdf: (_) async {},
+                  ),
+                  contentWidth: 1000,
+                  onPrint: () => onPrint(e),
+                ),
+                onEdit: () => onEdit(e),
+                onPrint: () => onPrint(e),
+                onDownloadPdf: () => onDownloadPdf(e),
+                onDelete: () async {
+                  if (e.id != null) onDelete(e.id!);
+                },
+                deleteDialogTitle: 'Delete line-up?',
+              ),
+            ],
+          )
+          .toList(),
     );
   }
 }

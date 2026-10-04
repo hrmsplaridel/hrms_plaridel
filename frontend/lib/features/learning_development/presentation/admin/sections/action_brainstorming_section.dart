@@ -10,6 +10,8 @@ import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/d
 import 'package:hrms_plaridel/features/learning_development/models/action_brainstorming_coaching.dart';
 import 'package:hrms_plaridel/features/recruitment/presentation/admin/widgets/rsp_records_list_table.dart';
 import 'package:hrms_plaridel/shared/widgets/read_only_saved_entry_dialog.dart';
+import 'package:hrms_plaridel/shared/widgets/form_document_preview.dart';
+import 'package:hrms_plaridel/shared/widgets/rsp_ld_form_header.dart';
 import 'package:hrms_plaridel/shared/widgets/rsp_ld_record_actions.dart';
 import 'package:hrms_plaridel/shared/widgets/rsp_ld_saved_records_browser.dart';
 
@@ -351,6 +353,37 @@ class _ActionBrainstormingAdminSectionState
     }
   }
 
+  Future<void> _preview(ActionBrainstormingEntry entry) {
+    return openFormDocumentPreview(
+      context: context,
+      title: 'Action Brainstorming Worksheet',
+      filename: 'Action_Brainstorming_Coaching.pdf',
+      format: FormPdf.pageLetterLandscape,
+      printModule: 'ld',
+      printFormKey: 'action_brainstorming',
+      buildDocument: () async {
+        final signatureProvider = context.read<DocuTrackerProvider>();
+        final signatures = entry.id == null
+            ? null
+            : await signatureProvider.loadSourceSignatures(
+                sourceModule: 'ld',
+                sourceTable: ActionBrainstormingEntry.tableName,
+                sourceRecordId: entry.id!,
+              );
+        if (entry.id != null && signatures == null) {
+          throw StateError(
+            signatureProvider.sourceSignatureError ??
+                'The form signatures could not be loaded.',
+          );
+        }
+        return FormPdf.buildActionBrainstormingCoachingPdf(
+          entry,
+          signatures: signatures,
+        );
+      },
+    );
+  }
+
   Future<void> _download(ActionBrainstormingEntry entry) async {
     try {
       final signatureProvider = context.read<DocuTrackerProvider>();
@@ -409,6 +442,9 @@ class _ActionBrainstormingAdminSectionState
             onDownloadPdf: (_) async {},
           ),
           onPrint: () => _print(e),
+          onDocumentPreview: () => _preview(e),
+          onEdit: () => _edit(e),
+          onDelete: e.id == null ? null : () => _onDelete(e.id!),
         );
       }).toList(),
     );
@@ -438,37 +474,31 @@ class _ActionBrainstormingAdminSectionState
             side: BorderSide(color: AppTheme.dashHairlineOf(context)),
           ),
         ),
-        OutlinedButton.icon(
-          onPressed: _loading ? null : _openSavedRecordsBrowser,
-          icon: const Icon(Icons.folder_open_outlined, size: 18),
-          label: const Text('View Records'),
-          style: OutlinedButton.styleFrom(
-            foregroundColor: AppTheme.dashTextPrimaryOf(context),
-            side: BorderSide(color: AppTheme.dashHairlineOf(context)),
+        if (_editing != null)
+          OutlinedButton.icon(
+            onPressed: _loading ? null : _openSavedRecordsBrowser,
+            icon: const Icon(Icons.folder_open_outlined, size: 18),
+            label: const Text('View Records'),
+            style: OutlinedButton.styleFrom(
+              foregroundColor: AppTheme.dashTextPrimaryOf(context),
+              side: BorderSide(color: AppTheme.dashHairlineOf(context)),
+            ),
           ),
-        ),
       ],
     );
   }
 
   @override
   Widget build(BuildContext context) {
-    final secondary = AppTheme.dashTextSecondaryOf(context);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          'Action Brainstorming & Coaching Worksheet',
-          style: TextStyle(
-            color: AppTheme.dashTextPrimaryOf(context),
-            fontSize: 22,
-            fontWeight: FontWeight.w700,
-          ),
-        ),
-        const SizedBox(height: 6),
-        Text(
-          'Plan and document coaching actions that help employees contribute to department goals.',
-          style: TextStyle(color: secondary, fontSize: 14),
+        RspLdFormHeader(
+          module: 'L&D',
+          title: 'Action Brainstorming & Coaching Worksheet',
+          subtitle:
+              'Plan and document coaching actions that help employees contribute to department goals.',
+          actions: _toolbar(context),
         ),
         const SizedBox(height: 20),
         if (_editing != null) ...[
@@ -478,6 +508,7 @@ class _ActionBrainstormingAdminSectionState
             onSave: _onSave,
             onCancel: _cancelEdit,
             onPrint: _print,
+            onPreview: _preview,
             onDownloadPdf: _download,
           ),
           if (_editing?.id != null) ...[
@@ -494,28 +525,27 @@ class _ActionBrainstormingAdminSectionState
             ),
           ],
           const SizedBox(height: 24),
+        ] else ...[
+          if (_loading)
+            const Padding(
+              padding: EdgeInsets.all(24),
+              child: Center(child: CircularProgressIndicator()),
+            )
+          else if (_entries.isEmpty)
+            const RspFormEmptyState(
+              message:
+                  'No worksheets yet. Tap "New Worksheet" to create an Action Brainstorming and Coaching Worksheet.',
+              icon: Icons.lightbulb_outline_rounded,
+            )
+          else
+            _ActionBrainstormingList(
+              entries: _entries,
+              onEdit: _edit,
+              onDelete: _onDelete,
+              onPrint: _print,
+              onDownloadPdf: _download,
+            ),
         ],
-        _toolbar(context),
-        const SizedBox(height: 16),
-        if (_loading)
-          const Padding(
-            padding: EdgeInsets.all(24),
-            child: Center(child: CircularProgressIndicator()),
-          )
-        else if (_entries.isEmpty)
-          const RspFormEmptyState(
-            message:
-                'No worksheets yet. Tap "New Worksheet" to create an Action Brainstorming and Coaching Worksheet.',
-            icon: Icons.lightbulb_outline_rounded,
-          )
-        else
-          _ActionBrainstormingList(
-            entries: _entries,
-            onEdit: _edit,
-            onDelete: _onDelete,
-            onPrint: _print,
-            onDownloadPdf: _download,
-          ),
       ],
     );
   }
@@ -530,6 +560,7 @@ class ActionBrainstormingEditor extends StatefulWidget {
     required this.onSave,
     required this.onCancel,
     required this.onPrint,
+    this.onPreview,
     required this.onDownloadPdf,
   });
 
@@ -538,6 +569,7 @@ class ActionBrainstormingEditor extends StatefulWidget {
   final void Function(ActionBrainstormingEntry) onSave;
   final VoidCallback onCancel;
   final Future<void> Function(ActionBrainstormingEntry) onPrint;
+  final Future<void> Function(ActionBrainstormingEntry)? onPreview;
   final Future<void> Function(ActionBrainstormingEntry) onDownloadPdf;
 
   @override
@@ -1207,53 +1239,45 @@ class _ActionBrainstormingEditorState extends State<ActionBrainstormingEditor> {
     );
   }
 
-  Widget _actionBar(BuildContext context) {
+  Widget _actionBar(BuildContext context, bool ro) {
     return Wrap(
-      alignment: WrapAlignment.spaceBetween,
+      spacing: 8,
+      runSpacing: 8,
       crossAxisAlignment: WrapCrossAlignment.center,
-      runSpacing: 10,
-      spacing: 12,
       children: [
-        Wrap(
-          spacing: 10,
-          runSpacing: 10,
-          children: [
-            FilledButton.icon(
-              onPressed: _save,
-              icon: const Icon(Icons.save_rounded, size: 18),
-              label: const Text('Save Worksheet'),
-              style: FilledButton.styleFrom(
-                backgroundColor: AppTheme.primaryNavy,
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 22,
-                  vertical: 14,
-                ),
-              ),
+        if (!ro) ...[
+          FilledButton.icon(
+            onPressed: _save,
+            icon: const Icon(Icons.save_rounded, size: 18),
+            label: const Text('Save Worksheet'),
+            style: FilledButton.styleFrom(
+              backgroundColor: AppTheme.primaryNavy,
+              padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
             ),
-            OutlinedButton.icon(
-              onPressed: widget.onCancel,
-              icon: const Icon(Icons.close_rounded, size: 18),
-              label: const Text('Cancel'),
-            ),
-          ],
-        ),
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: [
-            IconButton(
-              tooltip: 'Print',
-              style: rspLdRecordIconButtonStyle(),
-              onPressed: () => widget.onPrint(_buildEntry()),
-              icon: const Icon(Icons.print_rounded, size: 20),
-            ),
-            IconButton(
-              tooltip: 'Export PDF',
-              style: rspLdRecordIconButtonStyle(),
-              onPressed: () => widget.onDownloadPdf(_buildEntry()),
-              icon: const Icon(Icons.picture_as_pdf_rounded, size: 20),
-            ),
-          ],
+          ),
+          OutlinedButton.icon(
+            onPressed: widget.onCancel,
+            icon: const Icon(Icons.close_rounded, size: 18),
+            label: const Text('Cancel'),
+          ),
+        ],
+        if (widget.onPreview != null)
+          FormPreviewPrintButtons(
+            onPreview: () => widget.onPreview!(_buildEntry()),
+            onPrint: () => widget.onPrint(_buildEntry()),
+          )
+        else
+          RspLdBusyIconButton(
+            tooltip: 'Print Form',
+            icon: Icons.print_rounded,
+            busyTooltip: 'Preparing print…',
+            onPressed: () => widget.onPrint(_buildEntry()),
+          ),
+        IconButton(
+          tooltip: 'Export PDF',
+          style: rspLdRecordIconButtonStyle(),
+          onPressed: () => widget.onDownloadPdf(_buildEntry()),
+          icon: const Icon(Icons.picture_as_pdf_rounded, size: 20),
         ),
       ],
     );
@@ -1269,56 +1293,70 @@ class _ActionBrainstormingEditorState extends State<ActionBrainstormingEditor> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Padding(
-            padding: const EdgeInsets.fromLTRB(20, 16, 20, 16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+            padding: const EdgeInsets.fromLTRB(20, 16, 16, 16),
+            child: Wrap(
+              alignment: WrapAlignment.spaceBetween,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              runSpacing: 10,
+              spacing: 12,
               children: [
-                Row(
-                  children: [
-                    Flexible(
-                      child: Text(
-                        _department == null
-                            ? 'New Coaching Worksheet'
-                            : _department!,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          fontSize: 17,
-                          fontWeight: FontWeight.w800,
-                          color: AppTheme.dashTextPrimaryOf(context),
-                        ),
+                ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 420),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Flexible(
+                            child: Text(
+                              _department == null
+                                  ? 'New Coaching Worksheet'
+                                  : _department!,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                fontSize: 17,
+                                fontWeight: FontWeight.w800,
+                                color: AppTheme.dashTextPrimaryOf(context),
+                              ),
+                            ),
+                          ),
+                          if (ro) ...[
+                            const SizedBox(width: 10),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 10,
+                                vertical: 4,
+                              ),
+                              decoration: BoxDecoration(
+                                color: Colors.blueGrey.withValues(alpha: 0.12),
+                                borderRadius: BorderRadius.circular(999),
+                                border: Border.all(
+                                  color: Colors.blueGrey.withValues(alpha: 0.32),
+                                ),
+                              ),
+                              child: const Text(
+                                'Read-only preview',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w800,
+                                  color: Colors.blueGrey,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ],
                       ),
-                    ),
-                    if (ro) ...[
-                      const SizedBox(width: 10),
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 10,
-                          vertical: 4,
-                        ),
-                        decoration: BoxDecoration(
-                          color: Colors.blueGrey.withValues(alpha: 0.12),
-                          borderRadius: BorderRadius.circular(999),
-                          border: Border.all(
-                            color: Colors.blueGrey.withValues(alpha: 0.32),
-                          ),
-                        ),
-                        child: const Text(
-                          'Read-only preview',
-                          style: TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w800,
-                            color: Colors.blueGrey,
-                          ),
-                        ),
+                      const SizedBox(height: 4),
+                      Text(
+                        'Plan and document coaching actions that help employees contribute to department goals.',
+                        style: TextStyle(fontSize: 12.5, color: secondary),
                       ),
                     ],
-                  ],
+                  ),
                 ),
-                const SizedBox(height: 4),
-                Text(
-                  'Plan and document coaching actions that help employees contribute to department goals.',
-                  style: TextStyle(fontSize: 12.5, color: secondary),
-                ),
+                _actionBar(context, ro),
               ],
             ),
           ),
@@ -1335,10 +1373,6 @@ class _ActionBrainstormingEditorState extends State<ActionBrainstormingEditor> {
                 _coachingBody(context, ro),
                 const SizedBox(height: 24),
                 _certificationCard(context, ro),
-                if (!ro) ...[
-                  const SizedBox(height: 24),
-                  _actionBar(context),
-                ],
                 if (ro &&
                     (widget.entry.createdAt != null ||
                         widget.entry.updatedAt != null)) ...[
@@ -1982,7 +2016,7 @@ class _ActionBrainstormingList extends StatelessWidget {
                 onView: () => showReadOnlySavedEntryDialog(
                   context,
                   title: 'Action Brainstorming Worksheet',
-                  subtitle: '${e.department ?? '—'} · ${e.date ?? '—'}',
+                  subtitle: '${e.department ?? 'ΓÇö'} ┬╖ ${e.date ?? 'ΓÇö'}',
                   previewBuilder: () => ActionBrainstormingEditor(
                     readOnly: true,
                     entry: e,

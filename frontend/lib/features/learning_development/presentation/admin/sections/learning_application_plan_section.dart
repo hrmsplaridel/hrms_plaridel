@@ -7,6 +7,8 @@ import 'package:hrms_plaridel/core/utils/form_pdf.dart';
 import 'package:hrms_plaridel/features/learning_development/models/learning_application_plan.dart';
 import 'package:hrms_plaridel/features/recruitment/presentation/admin/widgets/rsp_records_list_table.dart';
 import 'package:hrms_plaridel/shared/widgets/read_only_saved_entry_dialog.dart';
+import 'package:hrms_plaridel/shared/widgets/form_document_preview.dart';
+import 'package:hrms_plaridel/shared/widgets/rsp_ld_form_header.dart';
 import 'package:hrms_plaridel/shared/widgets/rsp_ld_record_actions.dart';
 import 'package:hrms_plaridel/shared/widgets/rsp_ld_saved_records_browser.dart';
 
@@ -250,6 +252,18 @@ class _LearningApplicationPlanAdminSectionState
     } catch (_) {}
   }
 
+  Future<void> _preview(LearningApplicationPlanEntry entry) {
+    return openFormDocumentPreview(
+      context: context,
+      title: 'Learning Application Plan',
+      filename: 'Learning_Application_Plan.pdf',
+      format: FormPdf.pageLetterLandscape,
+      printModule: 'ld',
+      printFormKey: 'learning_application_plan',
+      buildDocument: () => FormPdf.buildLearningApplicationPlanPdf(entry),
+    );
+  }
+
   Future<void> _download(LearningApplicationPlanEntry entry) async {
     try {
       final doc = await FormPdf.buildLearningApplicationPlanPdf(entry);
@@ -291,6 +305,9 @@ class _LearningApplicationPlanAdminSectionState
             onDownloadPdf: (_) async {},
           ),
           onPrint: () => _print(e),
+          onDocumentPreview: () => _preview(e),
+          onEdit: () => _edit(e),
+          onDelete: e.id == null ? null : () => _onDelete(e.id!),
         );
       }).toList(),
     );
@@ -320,37 +337,31 @@ class _LearningApplicationPlanAdminSectionState
             side: BorderSide(color: AppTheme.dashHairlineOf(context)),
           ),
         ),
-        OutlinedButton.icon(
-          onPressed: _loading ? null : _openSavedRecordsBrowser,
-          icon: const Icon(Icons.folder_open_outlined, size: 18),
-          label: const Text('View Records'),
-          style: OutlinedButton.styleFrom(
-            foregroundColor: AppTheme.dashTextPrimaryOf(context),
-            side: BorderSide(color: AppTheme.dashHairlineOf(context)),
+        if (_editing != null)
+          OutlinedButton.icon(
+            onPressed: _loading ? null : _openSavedRecordsBrowser,
+            icon: const Icon(Icons.folder_open_outlined, size: 18),
+            label: const Text('View Records'),
+            style: OutlinedButton.styleFrom(
+              foregroundColor: AppTheme.dashTextPrimaryOf(context),
+              side: BorderSide(color: AppTheme.dashHairlineOf(context)),
+            ),
           ),
-        ),
       ],
     );
   }
 
   @override
   Widget build(BuildContext context) {
-    final secondary = AppTheme.dashTextSecondaryOf(context);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          'Learning Application Plan',
-          style: TextStyle(
-            color: AppTheme.dashTextPrimaryOf(context),
-            fontSize: 22,
-            fontWeight: FontWeight.w700,
-          ),
-        ),
-        const SizedBox(height: 6),
-        Text(
-          'Document how learning from training will be applied in the workplace.',
-          style: TextStyle(color: secondary, fontSize: 14),
+        RspLdFormHeader(
+          module: 'L&D',
+          title: 'Learning Application Plan',
+          subtitle:
+              'Document how learning from training will be applied in the workplace.',
+          actions: _toolbar(context),
         ),
         const SizedBox(height: 20),
         if (_editing != null) ...[
@@ -360,30 +371,31 @@ class _LearningApplicationPlanAdminSectionState
             onSave: _onSave,
             onCancel: _cancelEdit,
             onPrint: _print,
+            onPreview: _preview,
             onDownloadPdf: _download,
           ),
           const SizedBox(height: 24),
+        ] else ...[
+          if (_loading)
+            const Padding(
+              padding: EdgeInsets.all(24),
+              child: Center(child: CircularProgressIndicator()),
+            )
+          else if (_entries.isEmpty)
+            const RspFormEmptyState(
+              message:
+                  'No Learning Application Plans yet. Tap "New Plan" to add one.',
+              icon: Icons.menu_book_rounded,
+            )
+          else
+            _LapList(
+              entries: _entries,
+              onEdit: _edit,
+              onDelete: _onDelete,
+              onPrint: _print,
+              onDownloadPdf: _download,
+            ),
         ],
-        _toolbar(context),
-        const SizedBox(height: 16),
-        if (_loading)
-          const Padding(
-            padding: EdgeInsets.all(24),
-            child: Center(child: CircularProgressIndicator()),
-          )
-        else if (_entries.isEmpty)
-          const RspFormEmptyState(
-            message: 'No Learning Application Plans yet. Tap "New Plan" to add one.',
-            icon: Icons.menu_book_rounded,
-          )
-        else
-          _LapList(
-            entries: _entries,
-            onEdit: _edit,
-            onDelete: _onDelete,
-            onPrint: _print,
-            onDownloadPdf: _download,
-          ),
       ],
     );
   }
@@ -398,6 +410,7 @@ class LearningApplicationPlanFormEditor extends StatefulWidget {
     required this.onSave,
     required this.onCancel,
     required this.onPrint,
+    this.onPreview,
     required this.onDownloadPdf,
   });
 
@@ -406,6 +419,7 @@ class LearningApplicationPlanFormEditor extends StatefulWidget {
   final void Function(LearningApplicationPlanEntry) onSave;
   final VoidCallback onCancel;
   final Future<void> Function(LearningApplicationPlanEntry) onPrint;
+  final Future<void> Function(LearningApplicationPlanEntry)? onPreview;
   final Future<void> Function(LearningApplicationPlanEntry) onDownloadPdf;
 
   @override
@@ -1141,53 +1155,45 @@ class _LearningApplicationPlanFormEditorState
     );
   }
 
-  Widget _actionBar() {
+  Widget _actionBar(bool ro) {
     return Wrap(
-      alignment: WrapAlignment.spaceBetween,
+      spacing: 8,
+      runSpacing: 8,
       crossAxisAlignment: WrapCrossAlignment.center,
-      runSpacing: 10,
-      spacing: 12,
       children: [
-        Wrap(
-          spacing: 10,
-          runSpacing: 10,
-          children: [
-            OutlinedButton.icon(
-              onPressed: widget.onCancel,
-              icon: const Icon(Icons.close_rounded, size: 18),
-              label: const Text('Cancel'),
+        if (!ro) ...[
+          OutlinedButton.icon(
+            onPressed: widget.onCancel,
+            icon: const Icon(Icons.close_rounded, size: 18),
+            label: const Text('Cancel'),
+          ),
+          FilledButton.icon(
+            onPressed: _save,
+            icon: const Icon(Icons.save_rounded, size: 18),
+            label: const Text('Save Plan'),
+            style: FilledButton.styleFrom(
+              backgroundColor: AppTheme.primaryNavy,
+              padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
             ),
-            FilledButton.icon(
-              onPressed: _save,
-              icon: const Icon(Icons.save_rounded, size: 18),
-              label: const Text('Save Plan'),
-              style: FilledButton.styleFrom(
-                backgroundColor: AppTheme.primaryNavy,
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 22,
-                  vertical: 14,
-                ),
-              ),
-            ),
-          ],
-        ),
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: [
-            IconButton(
-              tooltip: 'Print',
-              style: rspLdRecordIconButtonStyle(),
-              onPressed: () => widget.onPrint(_buildCurrent()),
-              icon: const Icon(Icons.print_rounded, size: 20),
-            ),
-            IconButton(
-              tooltip: 'PDF',
-              style: rspLdRecordIconButtonStyle(),
-              onPressed: () => widget.onDownloadPdf(_buildCurrent()),
-              icon: const Icon(Icons.picture_as_pdf_rounded, size: 20),
-            ),
-          ],
+          ),
+        ],
+        if (widget.onPreview != null)
+          FormPreviewPrintButtons(
+            onPreview: () => widget.onPreview!(_buildCurrent()),
+            onPrint: () => widget.onPrint(_buildCurrent()),
+          )
+        else
+          RspLdBusyIconButton(
+            tooltip: 'Print Form',
+            icon: Icons.print_rounded,
+            busyTooltip: 'Preparing print…',
+            onPressed: () => widget.onPrint(_buildCurrent()),
+          ),
+        IconButton(
+          tooltip: 'PDF',
+          style: rspLdRecordIconButtonStyle(),
+          onPressed: () => widget.onDownloadPdf(_buildCurrent()),
+          icon: const Icon(Icons.picture_as_pdf_rounded, size: 20),
         ),
       ],
     );
@@ -1206,54 +1212,68 @@ class _LearningApplicationPlanFormEditorState
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Padding(
-            padding: const EdgeInsets.fromLTRB(20, 16, 20, 16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+            padding: const EdgeInsets.fromLTRB(20, 16, 16, 16),
+            child: Wrap(
+              alignment: WrapAlignment.spaceBetween,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              runSpacing: 10,
+              spacing: 12,
               children: [
-                Row(
-                  children: [
-                    Flexible(
-                      child: Text(
-                        heading,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          fontSize: 17,
-                          fontWeight: FontWeight.w800,
-                          color: AppTheme.dashTextPrimaryOf(context),
-                        ),
+                ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 420),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Flexible(
+                            child: Text(
+                              heading,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                fontSize: 17,
+                                fontWeight: FontWeight.w800,
+                                color: AppTheme.dashTextPrimaryOf(context),
+                              ),
+                            ),
+                          ),
+                          if (ro) ...[
+                            const SizedBox(width: 10),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 10,
+                                vertical: 4,
+                              ),
+                              decoration: BoxDecoration(
+                                color: Colors.blueGrey.withValues(alpha: 0.12),
+                                borderRadius: BorderRadius.circular(999),
+                                border: Border.all(
+                                  color: Colors.blueGrey.withValues(alpha: 0.32),
+                                ),
+                              ),
+                              child: const Text(
+                                'Read-only preview',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w800,
+                                  color: Colors.blueGrey,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ],
                       ),
-                    ),
-                    if (ro) ...[
-                      const SizedBox(width: 10),
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 10,
-                          vertical: 4,
-                        ),
-                        decoration: BoxDecoration(
-                          color: Colors.blueGrey.withValues(alpha: 0.12),
-                          borderRadius: BorderRadius.circular(999),
-                          border: Border.all(
-                            color: Colors.blueGrey.withValues(alpha: 0.32),
-                          ),
-                        ),
-                        child: const Text(
-                          'Read-only preview',
-                          style: TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w800,
-                            color: Colors.blueGrey,
-                          ),
-                        ),
+                      const SizedBox(height: 4),
+                      Text(
+                        'Human Resource Management and Development Office',
+                        style: TextStyle(fontSize: 12.5, color: secondary),
                       ),
                     ],
-                  ],
+                  ),
                 ),
-                const SizedBox(height: 4),
-                Text(
-                  'Human Resource Management and Development Office',
-                  style: TextStyle(fontSize: 12.5, color: secondary),
-                ),
+                _actionBar(ro),
               ],
             ),
           ),
@@ -1270,10 +1290,6 @@ class _LearningApplicationPlanFormEditorState
                 _reapTypesSection(),
                 const SizedBox(height: 16),
                 _signOff(),
-                if (!ro) ...[
-                  const SizedBox(height: 24),
-                  _actionBar(),
-                ],
               ],
             ),
           ),
@@ -1596,7 +1612,7 @@ class _LapList extends StatelessWidget {
                 onView: () => showReadOnlySavedEntryDialog(
                   context,
                   title: 'Learning Application Plan',
-                  subtitle: '${e.title ?? '—'} · ${_formatLapDateShort(e.date)}',
+                  subtitle: '${e.title ?? 'ΓÇö'} ┬╖ ${_formatLapDateShort(e.date)}',
                   previewBuilder: () => LearningApplicationPlanFormEditor(
                     readOnly: true,
                     entry: e,

@@ -109,41 +109,29 @@ class _MobileNavDestination extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 1),
       child: Material(
-        color: Colors.transparent,
+        color: selected ? AppTheme.primaryNavy : Colors.transparent,
+        borderRadius: BorderRadius.circular(10),
         child: InkWell(
           onTap: onTap,
           borderRadius: BorderRadius.circular(10),
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 180),
-            curve: Curves.easeOutCubic,
-            padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 2),
-            decoration: BoxDecoration(
-              color: selected ? AppTheme.primaryNavy : Colors.transparent,
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(item.icon, size: 20, color: fg),
-                const SizedBox(height: 2),
-                FittedBox(
-                  fit: BoxFit.scaleDown,
-                  child: Text(
-                    label,
-                    maxLines: 1,
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      color: fg,
-                      fontSize: 9.5,
-                      fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
-                      height: 1.0,
-                      letterSpacing: -0.2,
-                    ),
-                  ),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(item.icon, size: 20, color: fg),
+              const SizedBox(height: 2),
+              Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: fg,
+                  fontSize: 11,
+                  fontWeight: selected ? FontWeight.w700 : FontWeight.w600,
+                  height: 1.0,
                 ),
-              ],
-            ),
+              ),
+            ],
           ),
         ),
       ),

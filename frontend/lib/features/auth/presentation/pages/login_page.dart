@@ -41,7 +41,7 @@ _LoginLayout _layoutForWidth(double width) {
 }
 
 /// Login: wide = hero image + branding left, light form right.
-/// Narrow = stacked municipal hero + mobile-app style form.
+/// Narrow = minimal centered login on a warm canvas (no card).
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
 
@@ -130,7 +130,7 @@ class _LoginPageState extends State<LoginPage> with TickerProviderStateMixin {
     );
   }
 
-  Widget _form({required bool embeddedCard}) {
+  Widget _form({required bool embeddedCard, bool minimal = false}) {
     return _LoginFormContent(
       emailController: _emailController,
       passwordController: _passwordController,
@@ -139,6 +139,7 @@ class _LoginPageState extends State<LoginPage> with TickerProviderStateMixin {
       isLoading: _isLoading,
       formError: _formError,
       embeddedCard: embeddedCard,
+      minimal: minimal,
       onRememberMeChanged: (v) => setState(() => _rememberMe = v ?? false),
       onLogin: _onLogin,
       onForgotPassword: _onForgotPassword,
@@ -208,57 +209,61 @@ class _LoginPageState extends State<LoginPage> with TickerProviderStateMixin {
   }
 
   Widget _buildStacked(BuildContext context, {required bool canPop}) {
-    final media = MediaQuery.of(context);
-    final keyboardOpen = media.viewInsets.bottom > 80;
-    final landscape = media.size.height < 520;
-    final double heroHeight;
-    if (keyboardOpen) {
-      heroHeight = 0;
-    } else if (landscape) {
-      heroHeight = 220;
-    } else {
-      heroHeight = math.max(
-        (media.size.height * 0.42).clamp(330.0, 390.0),
-        150 * MediaQuery.textScalerOf(context).scale(14) / 14 +
-            (canPop ? 48 : 0),
-      );
-    }
-
-    return SingleChildScrollView(
-      keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
-      child: Column(
+    final width = MediaQuery.sizeOf(context).width;
+    final horizontal = width < 360 ? 22.0 : 30.0;
+    return ColoredBox(
+      color: const Color(0xFFFFF9F4),
+      child: Stack(
         children: [
-          if (heroHeight > 0)
-            _LoginMobileHero(height: heroHeight, showBack: canPop),
-          Transform.translate(
-            offset: Offset(0, heroHeight > 0 ? -40 : 0),
-            child: SafeArea(
-              top: heroHeight == 0,
-              child: Padding(
-                padding: EdgeInsets.symmetric(
-                  horizontal: 20,
-                  vertical: keyboardOpen ? 36 : 0,
-                ),
-                child: Center(
+          const Positioned.fill(
+            child: IgnorePointer(
+              child: CustomPaint(painter: _LoginMinimalWashPainter()),
+            ),
+          ),
+          SafeArea(
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                return SingleChildScrollView(
+                  keyboardDismissBehavior:
+                      ScrollViewKeyboardDismissBehavior.onDrag,
                   child: ConstrainedBox(
-                    constraints: const BoxConstraints(maxWidth: 520),
-                    child: Column(
-                      children: [
-                        if (heroHeight == 0 && canPop)
-                          Align(
-                            alignment: Alignment.centerLeft,
-                            child: _LoginIconBackButton(
-                              onPressed: () => Navigator.of(context).pop(),
-                              light: false,
-                            ),
+                    constraints: BoxConstraints(
+                      minHeight: constraints.maxHeight,
+                    ),
+                    child: Padding(
+                      padding: EdgeInsets.fromLTRB(
+                        horizontal,
+                        28,
+                        horizontal,
+                        20,
+                      ),
+                      child: Center(
+                        child: ConstrainedBox(
+                          constraints: const BoxConstraints(maxWidth: 440),
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              if (canPop)
+                                Align(
+                                  alignment: Alignment.centerLeft,
+                                  child: _LoginIconBackButton(
+                                    onPressed: () =>
+                                        Navigator.of(context).pop(),
+                                    light: false,
+                                  ),
+                                ),
+                              _shakeForm(
+                                _form(embeddedCard: false, minimal: true),
+                              ),
+                            ],
                           ),
-                        _shakeForm(_form(embeddedCard: false)),
-                        const SizedBox(height: 12),
-                      ],
+                        ),
+                      ),
                     ),
                   ),
-                ),
-              ),
+                );
+              },
             ),
           ),
         ],
@@ -764,166 +769,6 @@ class _LoginRightShelf extends StatelessWidget {
   }
 }
 
-class _LoginMobileHero extends StatelessWidget {
-  const _LoginMobileHero({required this.height, required this.showBack});
-
-  final double height;
-  final bool showBack;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      key: const ValueKey('mobile-login-hero'),
-      constraints: BoxConstraints(
-        minHeight: height + MediaQuery.paddingOf(context).top,
-      ),
-      width: double.infinity,
-      child: Stack(
-        children: [
-          const Positioned.fill(
-            child: _LoginHeroImage(alignment: Alignment.topCenter),
-          ),
-          const Positioned.fill(
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                  colors: [
-                    Color(0x66132236),
-                    Color(0x11132236),
-                    Color(0x18E85D04),
-                  ],
-                  stops: [0, 0.45, 1],
-                ),
-              ),
-            ),
-          ),
-          const Positioned(
-            bottom: 0,
-            left: 0,
-            right: 0,
-            height: 48,
-            child: IgnorePointer(
-              child: CustomPaint(painter: _MobileHeroAccentPainter()),
-            ),
-          ),
-          SafeArea(
-            bottom: false,
-            child: Container(
-              constraints: BoxConstraints(minHeight: height),
-              padding: const EdgeInsets.fromLTRB(24, 26, 24, 72),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  if (showBack)
-                    _LoginIconBackButton(
-                      onPressed: () => Navigator.of(context).pop(),
-                      light: true,
-                    ),
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const _MunicipalityLogoCircle(
-                        size: 58,
-                        borderColor: Colors.white,
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            const Text.rich(
-                              TextSpan(
-                                children: [
-                                  TextSpan(text: 'Municipality of\n'),
-                                  TextSpan(
-                                    text: 'Plaridel',
-                                    style: TextStyle(
-                                      fontSize: 21,
-                                      fontWeight: FontWeight.w700,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                              semanticsLabel: 'Municipality of Plaridel',
-                              style: TextStyle(
-                                color: Colors.white,
-                                fontSize: 17,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                            const SizedBox(height: 4),
-                            Text(
-                              'Human Resource\nManagement System',
-                              style: TextStyle(
-                                color: Colors.white.withValues(alpha: 0.9),
-                                fontSize: 13,
-                                height: 1.35,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 14),
-                  Container(
-                    width: 40,
-                    height: 3,
-                    decoration: BoxDecoration(
-                      color: LoginTheme.bluePrimary,
-                      borderRadius: BorderRadius.circular(3),
-                    ),
-                  ),
-                  const SizedBox(height: 10),
-                  const Text(
-                    'People First.\nProgress Together.',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 14,
-                      height: 1.35,
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _MobileHeroAccentPainter extends CustomPainter {
-  const _MobileHeroAccentPainter();
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final wave = Path()
-      ..moveTo(0, size.height * 0.6)
-      ..cubicTo(
-        size.width * 0.35,
-        size.height,
-        size.width * 0.65,
-        0,
-        size.width,
-        size.height * 0.3,
-      )
-      ..lineTo(size.width, size.height)
-      ..lineTo(0, size.height)
-      ..close();
-    canvas.drawPath(
-      wave,
-      Paint()..color = LoginTheme.bluePrimary.withValues(alpha: 0.6),
-    );
-  }
-
-  @override
-  bool shouldRepaint(covariant _MobileHeroAccentPainter oldDelegate) => false;
-}
-
 class _LoginIconBackButton extends StatelessWidget {
   const _LoginIconBackButton({required this.onPressed, required this.light});
 
@@ -1017,6 +862,7 @@ class _LoginFormContent extends StatelessWidget {
     required this.isLoading,
     required this.formError,
     required this.embeddedCard,
+    this.minimal = false,
     required this.onRememberMeChanged,
     required this.onLogin,
     required this.onForgotPassword,
@@ -1030,6 +876,7 @@ class _LoginFormContent extends StatelessWidget {
   final bool isLoading;
   final String? formError;
   final bool embeddedCard;
+  final bool minimal;
   final ValueChanged<bool?> onRememberMeChanged;
   final VoidCallback onLogin;
   final VoidCallback onForgotPassword;
@@ -1040,6 +887,65 @@ class _LoginFormContent extends StatelessWidget {
     final showFieldError = formError == 'Please enter email and password';
     final emailEmpty = emailController.text.trim().isEmpty;
     final passwordEmpty = passwordController.text.isEmpty;
+
+    if (minimal) {
+      return Column(
+        key: const ValueKey('mobile-minimal-login'),
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const _LoginMinimalBrand(),
+          if (formError != null) ...[
+            const SizedBox(height: 16),
+            _LoginInlineError(message: formError!),
+          ],
+          const SizedBox(height: 30),
+          AutofillGroup(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                _LoginTextField(
+                  controller: emailController,
+                  label: 'Email Address',
+                  mobile: true,
+                  hintText: 'name@plaridel.gov.ph',
+                  icon: Icons.mail_outline_rounded,
+                  nextFocusNode: passwordFocusNode,
+                  autofillHints: const [AutofillHints.email],
+                  error: showFieldError && emailEmpty,
+                  onChanged: (_) => onClearError(),
+                ),
+                const SizedBox(height: 18),
+                _PasswordTextField(
+                  mobile: true,
+                  controller: passwordController,
+                  focusNode: passwordFocusNode,
+                  onSubmitted: onLogin,
+                  error: showFieldError && passwordEmpty,
+                  onChanged: (_) => onClearError(),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 14),
+          _LoginRememberForgotRow(
+            mobile: true,
+            rememberMe: rememberMe,
+            onRememberMeChanged: onRememberMeChanged,
+            onForgotPassword: onForgotPassword,
+          ),
+          const SizedBox(height: 22),
+          _LoginToHrmsButton(
+            mobile: true,
+            onPressed: isLoading ? null : onLogin,
+            isLoading: isLoading,
+          ),
+          const SizedBox(height: 22),
+          const _LoginMinimalSecureNote(),
+          const SizedBox(height: 32),
+          const _LoginFooterLinks(mobile: true),
+        ],
+      );
+    }
 
     final cardBody = Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1096,10 +1002,7 @@ class _LoginFormContent extends StatelessWidget {
           onPressed: isLoading ? null : onLogin,
           isLoading: isLoading,
         ),
-        if (embeddedCard) ...[
-          const SizedBox(height: 16),
-          const _LoginQuickAccess(),
-        ] else ...[
+        if (!embeddedCard) ...[
           const SizedBox(height: 24),
           const Divider(height: 1, color: Color(0xFFE9EDF2)),
           const SizedBox(height: 14),
@@ -1189,6 +1092,141 @@ class _LoginFormContent extends StatelessWidget {
       ],
     );
   }
+}
+
+class _LoginMinimalBrand extends StatelessWidget {
+  const _LoginMinimalBrand();
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        const _MunicipalityLogoCircle(
+          size: 76,
+          borderColor: Color(0xFFE8ECF0),
+          shadowAlpha: 0.06,
+        ),
+        const SizedBox(height: 12),
+        const Text(
+          'Municipality of',
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            color: Color(0xFF707784),
+            fontSize: 14,
+            fontWeight: FontWeight.w600,
+            height: 1.2,
+          ),
+        ),
+        const Text(
+          'Plaridel',
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            color: Color(0xFF172033),
+            fontSize: 28,
+            fontWeight: FontWeight.w800,
+            height: 1.15,
+            letterSpacing: -0.3,
+          ),
+        ),
+        const SizedBox(height: 4),
+        const Text(
+          'Human Resource Management\nSystem',
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            color: Color(0xFF707784),
+            fontSize: 13.5,
+            fontWeight: FontWeight.w500,
+            height: 1.35,
+          ),
+        ),
+        const SizedBox(height: 20),
+        Container(
+          width: 46,
+          height: 3.5,
+          decoration: BoxDecoration(
+            color: LoginTheme.bluePrimary,
+            borderRadius: BorderRadius.circular(99),
+          ),
+        ),
+        const SizedBox(height: 28),
+        const Text(
+          'Welcome Back',
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            color: Color(0xFF172033),
+            fontSize: 30,
+            fontWeight: FontWeight.w700,
+            letterSpacing: -0.4,
+          ),
+        ),
+        const SizedBox(height: 7),
+        const Text(
+          'Sign in to continue to your HRMS portal.',
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            color: Color(0xFF707784),
+            fontSize: 14.5,
+            fontWeight: FontWeight.w500,
+            height: 1.4,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _LoginMinimalSecureNote extends StatelessWidget {
+  const _LoginMinimalSecureNote();
+
+  @override
+  Widget build(BuildContext context) {
+    return const Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        Icon(Icons.lock_outline_rounded, size: 15, color: Color(0xFF707784)),
+        SizedBox(width: 6),
+        Flexible(
+          child: Text(
+            'Secure access for municipal employees',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: Color(0xFF707784),
+              fontSize: 12.5,
+              fontWeight: FontWeight.w500,
+              height: 1.3,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _LoginMinimalWashPainter extends CustomPainter {
+  const _LoginMinimalWashPainter();
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final top = Paint()..color = const Color(0x14F45A00);
+    canvas.drawOval(
+      Rect.fromCircle(
+        center: Offset(size.width * 0.92, size.height * 0.06),
+        radius: size.shortestSide * 0.42,
+      ),
+      top,
+    );
+    final bottom = Paint()..color = const Color(0x12E85D04);
+    canvas.drawOval(
+      Rect.fromCircle(
+        center: Offset(size.width * 0.02, size.height * 0.92),
+        radius: size.shortestSide * 0.38,
+      ),
+      bottom,
+    );
+  }
+
+  @override
+  bool shouldRepaint(covariant _LoginMinimalWashPainter oldDelegate) => false;
 }
 
 class _LoginMobileCardHeader extends StatelessWidget {
@@ -1322,68 +1360,6 @@ class _LoginSecurityPill extends StatelessWidget {
           ),
         ],
       ),
-    );
-  }
-}
-
-class _LoginQuickAccess extends StatelessWidget {
-  const _LoginQuickAccess();
-
-  @override
-  Widget build(BuildContext context) {
-    const items = [
-      (Icons.verified_user_outlined, 'Secure login'),
-      (Icons.admin_panel_settings_outlined, 'Admin portal'),
-      (Icons.badge_outlined, 'Employee portal'),
-    ];
-    return Column(
-      children: [
-        Text(
-          'Or quick access',
-          style: TextStyle(
-            color: AppTheme.textSecondary.withValues(alpha: 0.85),
-            fontSize: 12,
-            fontWeight: FontWeight.w500,
-          ),
-        ),
-        const SizedBox(height: 10),
-        Wrap(
-          alignment: WrapAlignment.center,
-          spacing: 8,
-          runSpacing: 8,
-          children: [
-            for (final item in items)
-              Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 9,
-                ),
-                decoration: BoxDecoration(
-                  color: const Color(0xFFF7F8FA),
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: const Color(0xFFE6E9EE)),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(item.$1, size: 16, color: AppTheme.textSecondary),
-                    const SizedBox(width: 6),
-                    Flexible(
-                      child: Text(
-                        item.$2,
-                        style: const TextStyle(
-                          color: AppTheme.textPrimary,
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-          ],
-        ),
-      ],
     );
   }
 }

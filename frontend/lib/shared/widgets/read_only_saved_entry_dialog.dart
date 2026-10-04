@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
+import 'package:hrms_plaridel/shared/widgets/form_document_preview.dart';
 
 const Color _kSavedFormDialogBg = Color(0xFFFFF8F4);
 const Color _kSavedFormContentBg = Color(0xFFFFFFFF);
@@ -20,6 +21,7 @@ void showReadOnlySavedEntryDialog(
   Widget Function()? previewBuilder,
   double contentWidth = 520,
   Future<void> Function()? onPrint,
+  Future<void> Function()? onDocumentPreview,
   IconData? icon,
 }) {
   assert(
@@ -209,34 +211,50 @@ void showReadOnlySavedEntryDialog(
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.end,
                   children: [
-                    if (onPrint != null) ...[
-                      OutlinedButton.icon(
+                    if (onDocumentPreview != null && onPrint != null) ...[
+                      Flexible(
+                        child: FormPreviewPrintButtons(
+                          onPreview: () {
+                            onDocumentPreview();
+                          },
+                          onPrint: () async {
+                            try {
+                              await onPrint();
+                            } catch (_) {
+                              if (ctx.mounted) {
+                                ScaffoldMessenger.of(ctx).showSnackBar(
+                                  const SnackBar(
+                                    content: Text(
+                                      'Unable to prepare the document for printing.',
+                                    ),
+                                  ),
+                                );
+                              }
+                            }
+                          },
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                    ] else if (onPrint != null) ...[
+                      RspLdBusyOutlinedButton(
+                        icon: Icons.print_rounded,
+                        label: 'Print Form',
+                        busyLabel: 'Preparing print…',
                         onPressed: () async {
                           try {
                             await onPrint();
-                          } catch (e) {
+                          } catch (_) {
                             if (ctx.mounted) {
                               ScaffoldMessenger.of(ctx).showSnackBar(
-                                SnackBar(content: Text('Print failed: $e')),
+                                const SnackBar(
+                                  content: Text(
+                                    'Unable to prepare the document for printing.',
+                                  ),
+                                ),
                               );
                             }
                           }
                         },
-                        icon: const Icon(Icons.print_rounded, size: 20),
-                        label: const Text('Print'),
-                        style: OutlinedButton.styleFrom(
-                          foregroundColor: AppTheme.primaryNavy,
-                          side: BorderSide(
-                            color: AppTheme.primaryNavy.withValues(alpha: 0.4),
-                          ),
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 16,
-                            vertical: 12,
-                          ),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                        ),
                       ),
                       const SizedBox(width: 10),
                     ],

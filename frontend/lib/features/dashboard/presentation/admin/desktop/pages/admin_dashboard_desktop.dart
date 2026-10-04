@@ -15,6 +15,7 @@ import 'package:hrms_plaridel/features/learning_development/presentation/admin/s
 import 'package:hrms_plaridel/features/learning_development/presentation/admin/sections/ld_training_requirements_admin_section.dart';
 import 'package:hrms_plaridel/features/learning_development/presentation/admin/widgets/ld_admin_hub.dart';
 import 'package:hrms_plaridel/features/forms/presentation/admin/pages/form_background_upload_page.dart';
+import 'package:hrms_plaridel/features/forms/presentation/admin/pages/rsp_print_background_page.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/core/utils/form_pdf.dart';
 import 'package:hrms_plaridel/shared/screens/profile_page.dart'
@@ -113,11 +114,7 @@ class _AdminDashUi {
 }
 
 class _AdminSectionHeader extends StatelessWidget {
-  const _AdminSectionHeader({
-    required this.title,
-    this.icon,
-    this.subtitle,
-  });
+  const _AdminSectionHeader({required this.title, this.icon, this.subtitle});
 
   final String title;
   final IconData? icon;
@@ -1326,10 +1323,7 @@ class _AdminDashboardShimmer extends StatelessWidget {
 }
 
 class _AdminDashboardBone extends StatelessWidget {
-  const _AdminDashboardBone({
-    required this.height,
-    this.radius = 7,
-  });
+  const _AdminDashboardBone({required this.height, this.radius = 7});
 
   final double height;
   final double radius;
@@ -1438,8 +1432,9 @@ class _RecruitmentOverviewCardState extends State<RecruitmentOverviewCard> {
     unawaited(_loadVacancyAnnouncement());
 
     try {
-      final apps = await (widget.loadApplications?.call() ??
-          RecruitmentRepo.instance.listApplications());
+      final apps =
+          await (widget.loadApplications?.call() ??
+              RecruitmentRepo.instance.listApplications());
       if (!mounted) return;
       setState(() {
         _all = apps.where((a) => !a.isFromMayorModule).toList();
@@ -1460,8 +1455,9 @@ class _RecruitmentOverviewCardState extends State<RecruitmentOverviewCard> {
 
   Future<void> _loadVacancyAnnouncement() async {
     try {
-      final announcement = await (widget.loadAnnouncement?.call() ??
-          JobVacancyAnnouncementRepo.instance.fetch());
+      final announcement =
+          await (widget.loadAnnouncement?.call() ??
+              JobVacancyAnnouncementRepo.instance.fetch());
       if (!mounted) return;
       setState(() {
         _announcement = announcement;
@@ -2125,9 +2121,8 @@ class _LdFormsSectionState extends State<_LdFormsSection> {
         children: [
           _buildBreadcrumb(),
           const SizedBox(height: 12),
-          FormBackgroundUploadPage(
+          RspPrintBackgroundPage(
             module: 'ld',
-            embedded: true,
             onBack: () => setState(() => _showPrintBackground = false),
           ),
         ],

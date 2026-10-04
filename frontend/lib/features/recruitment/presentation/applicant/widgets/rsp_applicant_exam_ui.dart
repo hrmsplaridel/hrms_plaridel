@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
+import 'package:hrms_plaridel/features/recruitment/presentation/shared/widgets/exam_image_widgets.dart';
 
 /// Shared modern UI for applicant-facing RSP exams (BEI, MCQ, results, hiring).
 class RspApplicantExamUi {
@@ -507,6 +508,9 @@ class RspApplicantMcqQuestionCard extends StatelessWidget {
     required this.selectedIndex,
     required this.onSelect,
     this.useLetterPrefix = false,
+    this.questionImage,
+    this.questionImageCaption,
+    this.optionImages = const [],
   });
 
   final int index;
@@ -515,9 +519,24 @@ class RspApplicantMcqQuestionCard extends StatelessWidget {
   final int selectedIndex;
   final void Function(int optionIndex) onSelect;
   final bool useLetterPrefix;
+  final String? questionImage;
+  final String? questionImageCaption;
+
+  /// Parallel to [options]; null / empty = text-only choice.
+  final List<String?> optionImages;
+
+  bool _hasOptionImage(int j) =>
+      j < optionImages.length && (optionImages[j] ?? '').trim().isNotEmpty;
 
   @override
   Widget build(BuildContext context) {
+    final hasQuestionImage = (questionImage ?? '').trim().isNotEmpty;
+    final anyOptionImage = List.generate(
+      options.length,
+      _hasOptionImage,
+    ).any((v) => v);
+    final hasText = questionText.trim().isNotEmpty;
+
     return Container(
       margin: const EdgeInsets.only(bottom: 16),
       padding: const EdgeInsets.all(18),
@@ -556,32 +575,216 @@ class RspApplicantMcqQuestionCard extends StatelessWidget {
               ),
               const SizedBox(width: 12),
               Expanded(
-                child: Text(
-                  questionText,
-                  style: TextStyle(
-                    fontSize: 15,
-                    fontWeight: FontWeight.w600,
-                    height: 1.4,
-                    color: AppTheme.dashTextPrimaryOf(context),
-                  ),
-                ),
+                child: hasText
+                    ? Text(
+                        questionText,
+                        style: TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w600,
+                          height: 1.4,
+                          color: AppTheme.dashTextPrimaryOf(context),
+                        ),
+                      )
+                    : const SizedBox(height: 32),
               ),
             ],
           ),
+          if (hasQuestionImage) ...[
+            const SizedBox(height: 12),
+            ExamQuestionFigure(
+              path: questionImage!,
+              caption: questionImageCaption,
+            ),
+          ],
           const SizedBox(height: 14),
-          ...List.generate(options.length, (j) {
-            final letter = useLetterPrefix ? String.fromCharCode(97 + j) : null;
-            final label = useLetterPrefix
-                ? options[j].toString()
-                : options[j].toString();
-            return RspApplicantMcqOptionTile(
-              optionLetter: letter,
-              label: label,
-              selected: selectedIndex == j,
-              onTap: () => onSelect(j),
-            );
-          }),
+          if (anyOptionImage)
+            _buildImageChoices(context)
+          else
+            ...List.generate(options.length, (j) {
+              final letter = useLetterPrefix
+                  ? String.fromCharCode(97 + j)
+                  : null;
+              return RspApplicantMcqOptionTile(
+                optionLetter: letter,
+                label: options[j].toString(),
+                selected: selectedIndex == j,
+                onTap: () => onSelect(j),
+              );
+            }),
         ],
+      ),
+    );
+  }
+
+  Widget _buildImageChoices(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        const gap = 10.0;
+        final w = constraints.maxWidth;
+        final cols = w >= 640 ? 3 : (w >= 300 ? 2 : 1);
+        final rows = <Widget>[];
+        for (var start = 0; start < options.length; start += cols) {
+          final cells = <Widget>[];
+          for (var c = 0; c < cols; c++) {
+            final j = start + c;
+            if (c > 0) cells.add(const SizedBox(width: gap));
+            cells.add(
+              Expanded(
+                child: j < options.length
+                    ? RspApplicantMcqImageOptionTile(
+                        letter: String.fromCharCode(65 + j),
+                        label: options[j].toString(),
+                        imagePath: _hasOptionImage(j) ? optionImages[j] : null,
+                        selected: selectedIndex == j,
+                        onTap: () => onSelect(j),
+                      )
+                    : const SizedBox.shrink(),
+              ),
+            );
+          }
+          if (rows.isNotEmpty) rows.add(const SizedBox(height: gap));
+          rows.add(
+            IntrinsicHeight(
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: cells,
+              ),
+            ),
+          );
+        }
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: rows,
+        );
+      },
+    );
+  }
+}
+
+/// MCQ choice card used when any choice of the question has an image.
+/// The whole card is the tap target; the image keeps its aspect ratio.
+class RspApplicantMcqImageOptionTile extends StatelessWidget {
+  const RspApplicantMcqImageOptionTile({
+    super.key,
+    required this.letter,
+    required this.label,
+    required this.imagePath,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final String letter;
+  final String label;
+  final String? imagePath;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final primary = AppTheme.dashTextPrimaryOf(context);
+    final hasImage = (imagePath ?? '').trim().isNotEmpty;
+    final hasLabel = label.trim().isNotEmpty;
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(14),
+        child: Ink(
+          decoration: BoxDecoration(
+            color: selected
+                ? RspApplicantExamUi.accent.withValues(alpha: 0.12)
+                : (AppTheme.dashIsDark(context)
+                      ? const Color(0xFF1E2430)
+                      : Colors.white),
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(
+              color: selected
+                  ? RspApplicantExamUi.accent
+                  : AppTheme.primaryNavy.withValues(alpha: 0.15),
+              width: selected ? 2 : 1,
+            ),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.all(10),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Row(
+                  children: [
+                    Icon(
+                      selected
+                          ? Icons.radio_button_checked_rounded
+                          : Icons.radio_button_off_rounded,
+                      size: 20,
+                      color: selected
+                          ? RspApplicantExamUi.accent
+                          : AppTheme.dashTextSecondaryOf(context),
+                    ),
+                    const SizedBox(width: 8),
+                    Container(
+                      width: 24,
+                      height: 24,
+                      alignment: Alignment.center,
+                      decoration: BoxDecoration(
+                        color: selected
+                            ? RspApplicantExamUi.accent.withValues(alpha: 0.2)
+                            : AppTheme.primaryNavy.withValues(alpha: 0.08),
+                        borderRadius: BorderRadius.circular(7),
+                      ),
+                      child: Text(
+                        letter,
+                        style: TextStyle(
+                          fontWeight: FontWeight.w800,
+                          fontSize: 12.5,
+                          color: selected ? RspApplicantExamUi.accent : primary,
+                        ),
+                      ),
+                    ),
+                    const Spacer(),
+                    if (hasImage)
+                      InkWell(
+                        borderRadius: BorderRadius.circular(8),
+                        onTap: () => showExamImageViewer(
+                          context,
+                          path: imagePath!,
+                          caption: hasLabel ? label : null,
+                        ),
+                        child: Padding(
+                          padding: const EdgeInsets.all(4),
+                          child: Tooltip(
+                            message: 'Enlarge image',
+                            child: Icon(
+                              Icons.zoom_in_rounded,
+                              size: 20,
+                              color: AppTheme.dashTextSecondaryOf(context),
+                            ),
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+                if (hasImage) ...[
+                  const SizedBox(height: 8),
+                  ExamImage(path: imagePath!, boxHeight: 130),
+                ],
+                if (hasLabel) ...[
+                  const SizedBox(height: 8),
+                  Text(
+                    label,
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
+                      color: primary,
+                      height: 1.35,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }

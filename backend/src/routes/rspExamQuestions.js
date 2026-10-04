@@ -1,7 +1,17 @@
 const express = require('express');
+const fs = require('fs');
+const path = require('path');
 const { pool } = require('../config/db');
 const { authMiddleware } = require('../middleware/auth');
 const { requireAdminOrSupervisor } = require('../middleware/rbac');
+const {
+  sanitizeExamImagePath,
+  sanitizeExamImageCaption,
+  normalizeOptionImages,
+  imagePathsFromRow,
+} = require('../utils/examQuestionImages');
+
+const UPLOAD_DIR = process.env.UPLOAD_DIR || path.join(__dirname, '../../uploads');
 
 const router = express.Router();
 const protect = [authMiddleware];
@@ -30,6 +40,40 @@ async function ensureExamQuestionsTable() {
     ALTER TABLE public.recruitment_exam_questions
       ADD COLUMN IF NOT EXISTS correct_index INT;
   `);
+  // Optional images/diagrams (nullable, so existing text-only rows are untouched).
+  await pool.query(`
+    ALTER TABLE public.recruitment_exam_questions
+      ADD COLUMN IF NOT EXISTS question_image_path TEXT;
+  `);
+  await pool.query(`
+    ALTER TABLE public.recruitment_exam_questions
+      ADD COLUMN IF NOT EXISTS question_image_caption TEXT;
+  `);
+  await pool.query(`
+    ALTER TABLE public.recruitment_exam_questions
+      ADD COLUMN IF NOT EXISTS option_images_json JSONB;
+  `);
+}
+
+/** Best-effort removal of image files no longer referenced by any question. */
+async function deleteUnreferencedExamImages(candidatePaths) {
+  for (const p of candidatePaths) {
+    try {
+      const { rows } = await pool.query(
+        `SELECT 1 FROM public.recruitment_exam_questions
+         WHERE question_image_path = $1 OR option_images_json @> $2::jsonb
+         LIMIT 1`,
+        [p, JSON.stringify([p])]
+      );
+      if (rows.length > 0) continue;
+      const root = path.resolve(UPLOAD_DIR);
+      const abs = path.resolve(root, p);
+      if (!abs.startsWith(root + path.sep)) continue;
+      await fs.promises.unlink(abs).catch(() => {});
+    } catch (err) {
+      console.warn('[rspExamQuestions image cleanup]', err?.message ?? err);
+    }
+  }
 }
 
 // Replace all recruitment exam questions for a given exam type.
@@ -56,20 +100,14 @@ router.put('/:examType', protect, requireAdminOrSupervisor, async (req, res) => 
       return res.status(400).json({ error: 'Missing questions array' });
     }
 
-    // Replace: delete then insert in order.
-    await pool.query(
-      `DELETE FROM public.recruitment_exam_questions WHERE exam_type = $1`,
-      [examType]
-    );
-
-    if (questions.length === 0) {
-      return res.json({ ok: true, inserted: 0 });
-    }
-
-    // Insert rows.
     // Each question can be either:
     //  - string (question_text)
-    //  - object { question_text, options, correct }
+    //  - object {
+    //      question_text, options, correct,
+    //      question_image?, question_image_caption?, option_images?
+    //    }
+    // A question needs text OR an image. `option_images` is parallel to `options`;
+    // `options[i]` may be '' when choice i is image-only. `correct` stays an index.
     const rows = questions.map((q, idx) => {
       if (typeof q === 'string') {
         return {
@@ -78,12 +116,16 @@ router.put('/:examType', protect, requireAdminOrSupervisor, async (req, res) => 
           question_text: q,
           options_json: null,
           correct_index: null,
+          question_image_path: null,
+          question_image_caption: null,
+          option_images_json: null,
         };
       }
 
       const questionText = typeof q?.question_text === 'string' ? q.question_text : '';
       const options = Array.isArray(q?.options) ? q.options.map(String) : [];
       const correct = Number.isInteger(q?.correct) ? q.correct : (q?.correct != null ? parseInt(q.correct, 10) : null);
+      const questionImage = sanitizeExamImagePath(q?.question_image);
 
       return {
         exam_type: examType,
@@ -91,28 +133,68 @@ router.put('/:examType', protect, requireAdminOrSupervisor, async (req, res) => 
         question_text: questionText,
         options_json: options,
         correct_index: typeof correct === 'number' && !Number.isNaN(correct) ? correct : null,
+        question_image_path: questionImage,
+        question_image_caption: questionImage
+          ? sanitizeExamImageCaption(q?.question_image_caption)
+          : null,
+        option_images_json: normalizeOptionImages(q?.option_images, options.length),
       };
-    }).filter((r) => r.question_text && String(r.question_text).trim().length > 0);
+    }).filter(
+      (r) =>
+        (r.question_text && String(r.question_text).trim().length > 0) ||
+        r.question_image_path
+    );
 
-    if (rows.length === 0) {
-      return res.json({ ok: true, inserted: 0 });
+    const client = await pool.connect();
+    let previousImagePaths = [];
+    try {
+      await client.query('BEGIN');
+
+      const previous = await client.query(
+        `SELECT question_image_path, option_images_json
+         FROM public.recruitment_exam_questions WHERE exam_type = $1`,
+        [examType]
+      );
+      previousImagePaths = previous.rows.flatMap(imagePathsFromRow);
+
+      // Replace: delete then insert in order.
+      await client.query(
+        `DELETE FROM public.recruitment_exam_questions WHERE exam_type = $1`,
+        [examType]
+      );
+
+      for (const r of rows) {
+        await client.query(
+          `INSERT INTO public.recruitment_exam_questions
+            (exam_type, sort_order, question_text, options_json, correct_index,
+             question_image_path, question_image_caption, option_images_json,
+             created_at, updated_at)
+           VALUES ($1, $2, $3, $4::jsonb, $5, $6, $7, $8::jsonb, now(), now())`,
+          [
+            r.exam_type,
+            r.sort_order,
+            String(r.question_text),
+            r.options_json ? JSON.stringify(r.options_json) : JSON.stringify([]),
+            r.correct_index,
+            r.question_image_path,
+            r.question_image_caption,
+            r.option_images_json ? JSON.stringify(r.option_images_json) : null,
+          ]
+        );
+      }
+
+      await client.query('COMMIT');
+    } catch (txErr) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw txErr;
+    } finally {
+      client.release();
     }
 
-    // Bulk insert
-    // Use parameterized query per row (keeps it simple/safe).
-    for (const r of rows) {
-      await pool.query(
-        `INSERT INTO public.recruitment_exam_questions
-          (exam_type, sort_order, question_text, options_json, correct_index, created_at, updated_at)
-         VALUES ($1, $2, $3, $4::jsonb, $5, now(), now())`,
-        [
-          r.exam_type,
-          r.sort_order,
-          String(r.question_text),
-          r.options_json ? JSON.stringify(r.options_json) : JSON.stringify([]),
-          r.correct_index,
-        ]
-      );
+    const keptPaths = new Set(rows.flatMap(imagePathsFromRow));
+    const removed = [...new Set(previousImagePaths)].filter((p) => !keptPaths.has(p));
+    if (removed.length > 0) {
+      deleteUnreferencedExamImages(removed).catch(() => {});
     }
 
     return res.json({ ok: true, inserted: rows.length });
@@ -134,7 +216,8 @@ router.get('/:examType', async (req, res) => {
     await ensureExamQuestionsTable();
 
     const result = await pool.query(
-      `SELECT sort_order, question_text, options_json, correct_index
+      `SELECT sort_order, question_text, options_json, correct_index,
+              question_image_path, question_image_caption, option_images_json
        FROM public.recruitment_exam_questions
        WHERE exam_type = $1
        ORDER BY sort_order ASC`,
@@ -147,6 +230,9 @@ router.get('/:examType', async (req, res) => {
         question_text: r.question_text,
         options_json: r.options_json,
         correct_index: r.correct_index,
+        question_image_path: r.question_image_path ?? null,
+        question_image_caption: r.question_image_caption ?? null,
+        option_images_json: r.option_images_json ?? null,
       })),
     });
   } catch (err) {

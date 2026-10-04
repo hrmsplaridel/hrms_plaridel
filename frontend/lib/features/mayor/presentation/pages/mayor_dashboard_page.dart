@@ -1,4 +1,5 @@
 import 'package:dio/dio.dart';
+import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 import 'package:hrms_plaridel/core/api/client.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
@@ -9,6 +10,7 @@ import 'package:hrms_plaridel/shared/screens/profile_page.dart'
 import 'package:hrms_plaridel/shared/widgets/collapsible_dashboard_sidebar.dart';
 import 'package:hrms_plaridel/shared/widgets/dashboard_content_navigator.dart';
 import 'package:hrms_plaridel/shared/widgets/dashboard_header_actions.dart';
+import 'package:hrms_plaridel/shared/widgets/dashboard_mobile_bottom_nav.dart';
 import 'package:hrms_plaridel/shared/widgets/portal_sidebar_brand.dart';
 import 'package:hrms_plaridel/shared/widgets/admin_welcome_status_card.dart';
 import 'package:hrms_plaridel/shared/models/philippine_address_data.dart';
@@ -315,7 +317,7 @@ class _MayorDashboardPageState extends State<MayorDashboardPage> {
       builder: (ctx) => AlertDialog(
         title: const Text('Reject endorsement?'),
         content: SizedBox(
-          width: 420,
+          width: (MediaQuery.sizeOf(ctx).width - 80).clamp(240.0, 420.0),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -696,11 +698,50 @@ class _MayorDashboardPageState extends State<MayorDashboardPage> {
     }
   }
 
+  static const _mobileNavItems = <DashboardMobileNavItem>[
+    DashboardMobileNavItem(
+      icon: Icons.dashboard_outlined,
+      label: 'Dashboard',
+    ),
+    DashboardMobileNavItem(
+      icon: Icons.assignment_outlined,
+      label: 'Requests',
+    ),
+    DashboardMobileNavItem(
+      icon: Icons.history_outlined,
+      label: 'History',
+    ),
+  ];
+
+  int get _mobileNavIndex {
+    switch (_selectedMenu) {
+      case _MayorMenu.requests:
+        return 1;
+      case _MayorMenu.history:
+        return 2;
+      case _MayorMenu.profile:
+        return -1;
+      case _MayorMenu.dashboard:
+        return 0;
+    }
+  }
+
+  void _onMobileNav(int index) {
+    switch (index) {
+      case 1:
+        _onMenuSelected(_MayorMenu.requests);
+      case 2:
+        _onMenuSelected(_MayorMenu.history);
+      default:
+        _onMenuSelected(_MayorMenu.dashboard);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final width = MediaQuery.of(context).size.width;
     final isWide = width > 900;
-    final contentPadding = width > 900 ? 28.0 : (width > 600 ? 22.0 : 18.0);
+    final contentPadding = width > 900 ? 28.0 : (width > 600 ? 16.0 : 12.0);
     final displayName = context.select<AuthProvider, String>(
       (a) => a.displayName.isNotEmpty ? a.displayName : 'Mayor',
     );
@@ -713,24 +754,15 @@ class _MayorDashboardPageState extends State<MayorDashboardPage> {
 
     return Scaffold(
       backgroundColor: AppTheme.dashCanvasOf(context),
-      drawer: isWide
+      bottomNavigationBar: isWide
           ? null
-          : Drawer(
-              child: SafeArea(
-                child: _MayorSidebar(
-                  selectedMenu: _selectedMenu,
-                  avatarPath: avatarPath,
-                  email: email,
-                  displayName: displayName,
-                  showBrand: true,
-                  onTap: (menu) {
-                    _onMenuSelected(menu);
-                    if (context.mounted) Navigator.of(context).pop();
-                  },
-                ),
-              ),
+          : DashboardMobileBottomNav(
+              items: _mobileNavItems,
+              selectedIndex: _mobileNavIndex,
+              onSelected: _onMobileNav,
             ),
       body: SafeArea(
+        bottom: isWide,
         child: isWide
             ? Row(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -790,36 +822,23 @@ class _MayorDashboardPageState extends State<MayorDashboardPage> {
               )
             : Column(
                 children: [
-                  Builder(
-                    builder: (innerContext) => DashboardAppHeaderBar(
-                      showMenuButton: true,
-                      onMenuPressed: () =>
-                          Scaffold.of(innerContext).openDrawer(),
-                      compactActions: width < 600,
-                      trailing: DashboardAccountMenuButton(
-                        avatarPath: avatarPath,
-                        compact: width < 600,
-                        tooltip: displayName,
-                        onProfile: _openProfile,
-                      ),
+                  DashboardAppHeaderBar(
+                    showBrand: true,
+                    compactActions: true,
+                    trailing: DashboardAccountMenuButton(
+                      avatarPath: avatarPath,
+                      compact: true,
+                      tooltip: displayName,
+                      onProfile: _openProfile,
                     ),
                   ),
                   Expanded(
                     child: ColoredBox(
                       color: AppTheme.dashCanvasOf(context),
-                      child: DashboardContentNavigator(
-                        navigatorKey: _contentNavKey,
-                        homeCacheKey: _selectedMenu,
-                        homeRefreshKey: Object.hash(
-                          _selectedMenu,
-                          displayName,
-                          contentPadding,
-                          _contentEpoch,
-                        ),
-                        homeBuilder: _buildContent,
-                        settingsPanel: _settingsPanel(),
-                        homeScrollPadding: EdgeInsets.all(contentPadding),
-                        settingsScrollPadding: kDashboardSettingsScrollPadding,
+                      child: SingleChildScrollView(
+                        key: ValueKey(_selectedMenu),
+                        padding: EdgeInsets.all(contentPadding),
+                        child: _buildContent(),
                       ),
                     ),
                   ),
@@ -1043,17 +1062,17 @@ class _MayorDashboardTab extends StatelessWidget {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Expanded(
-                            flex: 7,
-                            child: _MayorRecentRequestsPanel(
-                              requests: data.recentRequests,
-                              onOpenRequest: onOpenRequest,
-                              onViewAll: onViewAllRequests,
-                              compactTable: true,
+                            flex: 6,
+                            child: _MayorMonitoringPanel(
+                              pending: data.pendingCount,
+                              awaiting: data.mayorApprovedCount,
+                              endorsed: data.endorsedCount,
+                              rejected: data.rejectedCount,
                             ),
                           ),
                           const SizedBox(width: 14),
                           Expanded(
-                            flex: 3,
+                            flex: 4,
                             child: _MayorOfficeOverviewPanel(
                               offices: data.officeStatistics,
                             ),
@@ -1061,17 +1080,24 @@ class _MayorDashboardTab extends StatelessWidget {
                         ],
                       )
                     else ...[
-                      _MayorRecentRequestsPanel(
-                        requests: data.recentRequests,
-                        onOpenRequest: onOpenRequest,
-                        onViewAll: onViewAllRequests,
-                        compactTable: isTablet,
+                      _MayorMonitoringPanel(
+                        pending: data.pendingCount,
+                        awaiting: data.mayorApprovedCount,
+                        endorsed: data.endorsedCount,
+                        rejected: data.rejectedCount,
                       ),
                       const SizedBox(height: 14),
                       _MayorOfficeOverviewPanel(
                         offices: data.officeStatistics,
                       ),
                     ],
+                    const SizedBox(height: 14),
+                    _MayorRecentRequestsPanel(
+                      requests: data.recentRequests,
+                      onOpenRequest: onOpenRequest,
+                      onViewAll: onViewAllRequests,
+                      compactTable: isDesktop || isTablet,
+                    ),
                   ],
                 ),
               ),
@@ -1146,37 +1172,73 @@ class _MayorRequestsTab extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Column(
+    final primary = AppTheme.dashTextPrimaryOf(context);
+    final secondary = AppTheme.dashTextSecondaryOf(context);
+    final narrow = MediaQuery.sizeOf(context).width < 640;
+    final newButton = FilledButton.icon(
+      onPressed: submittingIntake ? null : onOpenIntakeForm,
+      icon: submittingIntake
+          ? const SizedBox(
+              width: 14,
+              height: 14,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            )
+          : const Icon(Icons.add_rounded, size: 18),
+      label: Text(submittingIntake ? 'Submitting...' : 'New Endorsement'),
+      style: FilledButton.styleFrom(
+        backgroundColor: AppTheme.primaryNavy,
+        foregroundColor: Colors.white,
+        minimumSize: const Size(0, 44),
+      ),
+    );
+    final titleBlock = Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const _MayorTabHero(
-          icon: Icons.assignment_outlined,
-          title: 'All Endorsement Requests',
-          subtitle:
-              '1) Fill the Endorsement Intake Form. '
-              '2) The applicant must talk to / see the Mayor — if they cannot, schedule a meeting '
-              '(reschedule if they did not appear). '
-              '3) After the meeting, approve and assign an office, or reject.',
-        ),
-        const SizedBox(height: 10),
-        Align(
-          alignment: Alignment.centerRight,
-          child: FilledButton.icon(
-            onPressed: submittingIntake ? null : onOpenIntakeForm,
-            icon: submittingIntake
-                ? const SizedBox(
-                    width: 14,
-                    height: 14,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : const Icon(Icons.note_add_rounded),
-            label: Text(
-              submittingIntake
-                  ? 'Submitting...'
-                  : 'New Endorsement Intake Form',
-            ),
+        Text(
+          'Endorsement Requests',
+          style: TextStyle(
+            color: primary,
+            fontSize: narrow ? 20 : 22,
+            fontWeight: FontWeight.w800,
+            height: 1.15,
           ),
         ),
+        const SizedBox(height: 4),
+        Text(
+          'Manage applicant meetings, endorsements, and office confirmations.',
+          style: TextStyle(color: secondary, fontSize: 13.5, height: 1.35),
+        ),
+      ],
+    );
+    return Column(
+      children: [
+        if (narrow)
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              titleBlock,
+              const SizedBox(height: 10),
+              newButton,
+            ],
+          )
+        else
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(child: titleBlock),
+              const SizedBox(width: 12),
+              newButton,
+            ],
+          ),
         const SizedBox(height: 12),
+        _MayorStatusChips(
+          selected: status,
+          onSelected: (value) async {
+            onStatusChanged(value);
+            await onApplyFilters();
+          },
+        ),
+        const SizedBox(height: 10),
         _FilterPanel(
           search: search,
           office: office,
@@ -1291,7 +1353,7 @@ class _MayorRequestCard extends StatelessWidget {
         onTap: onOpen,
         borderRadius: BorderRadius.circular(14),
         child: Container(
-          padding: const EdgeInsets.all(16),
+          padding: const EdgeInsets.fromLTRB(14, 12, 14, 10),
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(14),
             border: Border.all(color: AppTheme.dashHairlineOf(context)),
@@ -1338,10 +1400,10 @@ class _MayorRequestCard extends StatelessWidget {
                   _MayorPriorityPill(priority: item.priority),
                 ],
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: 8),
               Wrap(
-                spacing: 16,
-                runSpacing: 8,
+                spacing: 12,
+                runSpacing: 6,
                 children: [
                   _MayorMetaChip(
                     icon: Icons.account_balance_outlined,
@@ -1370,10 +1432,10 @@ class _MayorRequestCard extends StatelessWidget {
                     ),
                 ],
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: 8),
               Wrap(
                 spacing: 8,
-                runSpacing: 8,
+                runSpacing: 6,
                 children: [
                   if (awaitingMeeting) ...[
                     FilledButton.icon(
@@ -1537,17 +1599,36 @@ class _MayorHistoryTab extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final narrow = MediaQuery.sizeOf(context).width < 700;
     return Column(
       children: [
-        const _MayorTabHero(
-          icon: Icons.history_outlined,
-          title: 'Endorsement History',
-          subtitle: 'Review all approved and rejected endorsements.',
-        ),
-        const SizedBox(height: 12),
         Row(
-          mainAxisAlignment: MainAxisAlignment.end,
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Endorsement History',
+                    style: TextStyle(
+                      color: AppTheme.dashTextPrimaryOf(context),
+                      fontSize: 22,
+                      fontWeight: FontWeight.w800,
+                      height: 1.15,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    'Review processed endorsements and previous decisions.',
+                    style: TextStyle(
+                      color: AppTheme.dashTextSecondaryOf(context),
+                      fontSize: 13.5,
+                    ),
+                  ),
+                ],
+              ),
+            ),
             OutlinedButton.icon(
               onPressed: loading ? null : onRefresh,
               icon: loading
@@ -1577,7 +1658,17 @@ class _MayorHistoryTab extends StatelessWidget {
         else
           _MayorSectionCard(
             title: 'Processed Endorsements',
-            child: Column(
+            child: narrow
+                ? Column(
+                    children: [
+                      for (final item in history.items)
+                        _MayorHistoryMobileCard(
+                          item: item,
+                          onTap: () => onOpenRequest(item),
+                        ),
+                    ],
+                  )
+                : Column(
               children: [
                 _MayorTableHeader(
                   columns: const [
@@ -1685,6 +1776,111 @@ class _MayorHistoryTab extends StatelessWidget {
           ],
         ),
       ],
+    );
+  }
+}
+
+class _MayorStatusChips extends StatelessWidget {
+  const _MayorStatusChips({required this.selected, required this.onSelected});
+
+  final String selected;
+  final ValueChanged<String> onSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    const chips = <(String, String)>[
+      ('', 'All'),
+      ('pending', 'Needs Action'),
+      ('mayor_approved', 'Awaiting Office Form'),
+      ('endorsed', 'Endorsed'),
+      ('rejected', 'Rejected'),
+    ];
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: Row(
+        children: [
+          for (final chip in chips) ...[
+            Padding(
+              padding: const EdgeInsets.only(right: 8),
+              child: ChoiceChip(
+                label: Text(chip.$2),
+                selected: selected == chip.$1,
+                onSelected: (_) => onSelected(chip.$1),
+                selectedColor: AppTheme.primaryNavy.withValues(alpha: 0.14),
+                labelStyle: TextStyle(
+                  fontWeight: FontWeight.w700,
+                  fontSize: 12.5,
+                  color: selected == chip.$1
+                      ? AppTheme.primaryNavy
+                      : AppTheme.dashTextPrimaryOf(context),
+                ),
+                side: BorderSide(
+                  color: selected == chip.$1
+                      ? AppTheme.primaryNavy
+                      : AppTheme.dashHairlineOf(context),
+                ),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _MayorHistoryMobileCard extends StatelessWidget {
+  const _MayorHistoryMobileCard({required this.item, required this.onTap});
+
+  final MayorEndorsementRequest item;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final processed =
+        item.rejectedAt ??
+        item.officeFormApprovedAt ??
+        item.approvedAt ??
+        item.submittedAt;
+    final office = item.officeName.isEmpty ? 'Unassigned' : item.officeName;
+    final secondary = AppTheme.dashTextSecondaryOf(context);
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Material(
+        color: AppTheme.dashCanvasOf(context),
+        borderRadius: BorderRadius.circular(12),
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(12),
+          child: Padding(
+            padding: const EdgeInsets.all(12),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  item.applicantName,
+                  style: const TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(office, style: TextStyle(fontSize: 13, color: secondary)),
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    _MayorStatusPill(status: item.status),
+                    const Spacer(),
+                    Text(
+                      _fmtShortDate(processed.toLocal()),
+                      style: TextStyle(fontSize: 12, color: secondary),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
     );
   }
 }
@@ -1862,6 +2058,20 @@ class _FilterPanelState extends State<_FilterPanel> {
                 widget.onOfficeChanged(_officeController.text.trim());
                 await widget.onApply();
               },
+            ),
+            TextButton(
+              onPressed: () async {
+                _searchController.clear();
+                _officeController.clear();
+                widget.onSearchChanged('');
+                widget.onOfficeChanged('');
+                widget.onStatusChanged('');
+                widget.onPriorityChanged('');
+                widget.onFromDateChanged(null);
+                widget.onToDateChanged(null);
+                await widget.onApply();
+              },
+              child: const Text('Clear'),
             ),
           ],
         ),
@@ -2055,11 +2265,17 @@ class _MayorEndorsementIntakeDialogState
 
   @override
   Widget build(BuildContext context) {
+    final screen = MediaQuery.sizeOf(context);
+    final dialogW = (screen.width - 32).clamp(280.0, 1000.0);
     return AlertDialog(
-      insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+      insetPadding: EdgeInsets.symmetric(
+        horizontal: screen.width < 640 ? 12 : 24,
+        vertical: 16,
+      ),
       title: const Text('Endorsement Intake Form'),
       content: SizedBox(
-        width: 920,
+        width: dialogW,
+        height: screen.height * (screen.width < 640 ? 0.62 : 0.72),
         child: SingleChildScrollView(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -2081,25 +2297,6 @@ class _MayorEndorsementIntakeDialogState
                         style: TextStyle(fontWeight: FontWeight.w700),
                       ),
                       const SizedBox(height: 10),
-                      DropdownButtonFormField<String>(
-                        initialValue: _priority,
-                        decoration: _dec('Priority'),
-                        items: const [
-                          DropdownMenuItem(value: 'low', child: Text('Low')),
-                          DropdownMenuItem(
-                            value: 'normal',
-                            child: Text('Normal'),
-                          ),
-                          DropdownMenuItem(value: 'high', child: Text('High')),
-                          DropdownMenuItem(
-                            value: 'urgent',
-                            child: Text('Urgent'),
-                          ),
-                        ],
-                        onChanged: (v) =>
-                            setState(() => _priority = v ?? 'normal'),
-                      ),
-                      const SizedBox(height: 12),
                       DropdownButtonFormField<String>(
                         initialValue: _requestedOfficeName,
                         isExpanded: true,
@@ -2436,8 +2633,11 @@ class _MayorReviewDialogState extends State<_MayorReviewDialog> {
     final canReject = canMayorApprove || canOfficeApproveForm;
     final statusColor = _statusColor(req.status);
     final priorityColor = _priorityColor(req.priority);
-    final screenH = MediaQuery.sizeOf(context).height;
-    final dialogH = (screenH * 0.88).clamp(560.0, 760.0);
+    final screen = MediaQuery.sizeOf(context);
+    final insetH = screen.width < 640 ? 10.0 : 20.0;
+    final insetV = screen.height < 700 ? 10.0 : 18.0;
+    final dialogH = (screen.height - insetV * 2 - 8).clamp(280.0, 760.0);
+    final dialogW = (screen.width - insetH * 2 - 8).clamp(260.0, 1000.0);
 
     InputDecoration fieldDec({
       required String label,
@@ -2480,7 +2680,7 @@ class _MayorReviewDialogState extends State<_MayorReviewDialog> {
     }
 
     return Dialog(
-      insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 18),
+      insetPadding: EdgeInsets.symmetric(horizontal: insetH, vertical: insetV),
       backgroundColor: Colors.transparent,
       child: Material(
         color: const Color(0xFFF4F6F8),
@@ -2489,7 +2689,7 @@ class _MayorReviewDialogState extends State<_MayorReviewDialog> {
         elevation: 12,
         shadowColor: Colors.black26,
         child: SizedBox(
-          width: 1000,
+          width: dialogW,
           height: dialogH,
           child: Column(
             children: [
@@ -3597,28 +3797,28 @@ class _MayorKpiRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final cards = [
       _StatCard(
-        title: 'Pending',
+        title: 'Pending Review',
         value: pending.toString(),
         color: const Color(0xFFD97706),
         icon: Icons.pending_actions_rounded,
-        hint: pending > 0 ? 'Requires attention' : 'No action needed',
+        hint: pending > 0 ? 'Meeting or decision needed' : 'No action needed',
         emphasized: pending > 0,
         onTap: () => onOpenFiltered('pending'),
       ),
       _StatCard(
-        title: 'Awaiting',
+        title: 'Awaiting Office Form',
         value: awaiting.toString(),
         color: const Color(0xFF1D4ED8),
         icon: Icons.assignment_turned_in_outlined,
-        hint: 'Office form',
+        hint: 'Mayor approved, form pending',
         onTap: () => onOpenFiltered('mayor_approved'),
       ),
       _StatCard(
-        title: 'Approved',
+        title: 'Endorsed',
         value: approved.toString(),
         color: const Color(0xFF15803D),
         icon: Icons.check_circle_rounded,
-        hint: 'Completed',
+        hint: 'Completed endorsements',
         onTap: () => onOpenFiltered('endorsed'),
       ),
       _StatCard(
@@ -3692,7 +3892,7 @@ class _MayorWelcomeBanner extends StatelessWidget {
           greeting,
           style: TextStyle(
             color: primary,
-            fontSize: isNarrow ? 24 : 28,
+            fontSize: isNarrow ? 20 : 22,
             fontWeight: FontWeight.w800,
             letterSpacing: -0.5,
             height: 1.1,
@@ -3763,73 +3963,6 @@ class _MayorWelcomeBanner extends StatelessWidget {
                 ),
               ],
             ),
-    );
-  }
-}
-
-class _MayorTabHero extends StatelessWidget {
-  const _MayorTabHero({
-    required this.icon,
-    required this.title,
-    required this.subtitle,
-  });
-
-  final IconData icon;
-  final String title;
-  final String subtitle;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: AppTheme.dashHairlineOf(context)),
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [
-            AppTheme.primaryNavy.withValues(alpha: 0.08),
-            AppTheme.primaryNavyLight.withValues(alpha: 0.04),
-            AppTheme.dashPanelOf(context),
-          ],
-        ),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Container(
-            padding: const EdgeInsets.all(10),
-            decoration: BoxDecoration(
-              color: AppTheme.primaryNavy.withValues(alpha: 0.12),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Icon(icon, color: AppTheme.primaryNavy),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  title,
-                  style: const TextStyle(
-                    fontSize: 17,
-                    fontWeight: FontWeight.w800,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  subtitle,
-                  style: TextStyle(
-                    color: AppTheme.dashTextSecondaryOf(context),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
     );
   }
 }
@@ -3908,7 +4041,7 @@ class _MayorRecentRequestsPanel extends StatelessWidget {
   Widget build(BuildContext context) {
     final secondary = AppTheme.dashTextSecondaryOf(context);
     return _MayorSectionCard(
-      title: 'Recent Endorsement Requests',
+      title: 'Needs Your Attention',
       trailing: TextButton(
         onPressed: onViewAll,
         child: const Text('View all requests →'),
@@ -4128,6 +4261,297 @@ class _MayorRecentRequestMobileRow extends StatelessWidget {
             ),
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _MayorMonitoringPanel extends StatelessWidget {
+  const _MayorMonitoringPanel({
+    required this.pending,
+    required this.awaiting,
+    required this.endorsed,
+    required this.rejected,
+  });
+
+  final int pending;
+  final int awaiting;
+  final int endorsed;
+  final int rejected;
+
+  static const _pending = Color(0xFFD97706);
+  static const _awaiting = Color(0xFF1D4ED8);
+  static const _endorsed = Color(0xFF15803D);
+  static const _rejected = Color(0xFFC62828);
+
+  @override
+  Widget build(BuildContext context) {
+    final stages = <({String label, int count, Color color})>[
+      (label: 'Pending Review', count: pending, color: _pending),
+      (label: 'Awaiting Office Form', count: awaiting, color: _awaiting),
+      (label: 'Endorsed', count: endorsed, color: _endorsed),
+    ];
+    final bars = <({String label, String tip, int count, Color color})>[
+      (label: 'Pending', tip: 'Pending Review', count: pending, color: _pending),
+      (
+        label: 'Office form',
+        tip: 'Awaiting Office Form',
+        count: awaiting,
+        color: _awaiting,
+      ),
+      (label: 'Endorsed', tip: 'Endorsed', count: endorsed, color: _endorsed),
+      (label: 'Rejected', tip: 'Rejected', count: rejected, color: _rejected),
+    ];
+    final maxVal = bars.fold<int>(0, (m, e) => e.count > m ? e.count : m);
+    final maxY = _axisMax(maxVal);
+    final interval = _axisInterval(maxY);
+
+    return _MayorSectionCard(
+      title: 'Endorsement Monitoring',
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(
+            'Where endorsement requests currently are',
+            style: TextStyle(
+              color: AppTheme.dashTextSecondaryOf(context),
+              fontSize: 12,
+              height: 1.35,
+            ),
+          ),
+          const SizedBox(height: 12),
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final compact = constraints.maxWidth < 520;
+              final chips = [
+                for (var i = 0; i < stages.length; i++) ...[
+                  if (compact)
+                    SizedBox(
+                      width: 132,
+                      child: _MayorPipelineChip(
+                        label: stages[i].label,
+                        count: stages[i].count,
+                        color: stages[i].color,
+                      ),
+                    )
+                  else
+                    Expanded(
+                      child: _MayorPipelineChip(
+                        label: stages[i].label,
+                        count: stages[i].count,
+                        color: stages[i].color,
+                      ),
+                    ),
+                  if (i < stages.length - 1)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 2),
+                      child: Icon(
+                        Icons.chevron_right_rounded,
+                        size: 16,
+                        color: AppTheme.dashTextSecondaryOf(context)
+                            .withValues(alpha: 0.55),
+                      ),
+                    ),
+                ],
+              ];
+              if (compact) {
+                return SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: Row(children: chips),
+                );
+              }
+              return Row(children: chips);
+            },
+          ),
+          const SizedBox(height: 16),
+          SizedBox(
+            height: 188,
+            child: BarChart(
+              BarChartData(
+                maxY: maxY,
+                barTouchData: BarTouchData(
+                  enabled: true,
+                  touchTooltipData: BarTouchTooltipData(
+                    getTooltipColor: (_) => const Color(0xFF1F2937),
+                    tooltipPadding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 8,
+                    ),
+                    getTooltipItem: (group, groupIndex, rod, rodIndex) {
+                      final i = group.x;
+                      if (i < 0 || i >= bars.length) return null;
+                      final n = rod.toY.toInt();
+                      return BarTooltipItem(
+                        '${bars[i].tip}\n$n ${n == 1 ? 'request' : 'requests'}',
+                        const TextStyle(
+                          color: Colors.white,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          height: 1.35,
+                        ),
+                      );
+                    },
+                  ),
+                ),
+                gridData: FlGridData(
+                  show: true,
+                  drawVerticalLine: false,
+                  horizontalInterval: interval,
+                  getDrawingHorizontalLine: (v) => FlLine(
+                    color: AppTheme.dashHairlineOf(context),
+                    strokeWidth: 1,
+                  ),
+                ),
+                borderData: FlBorderData(show: false),
+                titlesData: FlTitlesData(
+                  topTitles: const AxisTitles(
+                    sideTitles: SideTitles(showTitles: false),
+                  ),
+                  rightTitles: const AxisTitles(
+                    sideTitles: SideTitles(showTitles: false),
+                  ),
+                  leftTitles: AxisTitles(
+                    sideTitles: SideTitles(
+                      showTitles: true,
+                      reservedSize: 28,
+                      interval: interval,
+                      getTitlesWidget: (v, meta) {
+                        if ((v - v.roundToDouble()).abs() > 0.01) {
+                          return const SizedBox.shrink();
+                        }
+                        return Text(
+                          v.toInt().toString(),
+                          style: TextStyle(
+                            fontSize: 10,
+                            color: AppTheme.dashTextSecondaryOf(context),
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                  bottomTitles: AxisTitles(
+                    sideTitles: SideTitles(
+                      showTitles: true,
+                      reservedSize: 28,
+                      getTitlesWidget: (v, meta) {
+                        final i = v.toInt();
+                        if (i < 0 || i >= bars.length) {
+                          return const SizedBox.shrink();
+                        }
+                        return Padding(
+                          padding: const EdgeInsets.only(top: 6),
+                          child: Text(
+                            bars[i].label,
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                              color: AppTheme.dashTextSecondaryOf(context),
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                ),
+                barGroups: [
+                  for (var i = 0; i < bars.length; i++)
+                    BarChartGroupData(
+                      x: i,
+                      barRods: [
+                        BarChartRodData(
+                          toY: bars[i].count.toDouble(),
+                          width: 18,
+                          borderRadius: const BorderRadius.vertical(
+                            top: Radius.circular(5),
+                          ),
+                          color: maxVal > 0
+                              ? bars[i].color
+                              : bars[i].color.withValues(alpha: 0.28),
+                        ),
+                      ],
+                    ),
+                ],
+              ),
+              duration: const Duration(milliseconds: 280),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  static double _axisMax(int maxVal) {
+    if (maxVal <= 4) return 4;
+    final step = maxVal <= 10
+        ? 2
+        : maxVal <= 20
+        ? 5
+        : 10;
+    return (((maxVal + 1) / step).ceil() * step).toDouble();
+  }
+
+  static double _axisInterval(double maxY) {
+    if (maxY <= 6) return 1;
+    if (maxY <= 10) return 2;
+    if (maxY <= 20) return 5;
+    return 10;
+  }
+}
+
+class _MayorPipelineChip extends StatelessWidget {
+  const _MayorPipelineChip({
+    required this.label,
+    required this.count,
+    required this.color,
+  });
+
+  final String label;
+  final int count;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    final active = count > 0;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
+      decoration: BoxDecoration(
+        color: active
+            ? color.withValues(alpha: 0.08)
+            : AppTheme.dashMutedSurfaceOf(context),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: active
+              ? color.withValues(alpha: 0.28)
+              : AppTheme.dashHairlineOf(context),
+        ),
+      ),
+      child: Column(
+        children: [
+          Text(
+            '$count',
+            style: TextStyle(
+              color: active
+                  ? AppTheme.dashTextPrimaryOf(context)
+                  : AppTheme.dashTextSecondaryOf(context),
+              fontSize: 20,
+              fontWeight: FontWeight.w800,
+              height: 1.1,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            label,
+            textAlign: TextAlign.center,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              color: AppTheme.dashTextSecondaryOf(context),
+              fontSize: 10.5,
+              fontWeight: FontWeight.w600,
+              height: 1.2,
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -4476,16 +4900,15 @@ class _ApproveEndorsementDialogState extends State<_ApproveEndorsementDialog> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: const Text('Approve endorsement?'),
+      title: const Text('Confirm Endorsement'),
       content: SizedBox(
-        width: 420,
+        width: (MediaQuery.sizeOf(context).width - 80).clamp(240.0, 420.0),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              'Endorse ${widget.applicantName} as Municipal Mayor. '
-              'Confirm the office this applicant will enter.',
+              'You are endorsing ${widget.applicantName} to:',
             ),
             const SizedBox(height: 14),
             Autocomplete<_MayorOfficeOption>(
@@ -4533,7 +4956,7 @@ class _ApproveEndorsementDialogState extends State<_ApproveEndorsementDialog> {
             backgroundColor: AppTheme.primaryNavy,
             foregroundColor: Colors.white,
           ),
-          child: const Text('Approve'),
+          child: const Text('Confirm Endorsement'),
         ),
       ],
     );

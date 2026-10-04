@@ -232,11 +232,7 @@ class _MobileHeaderBar extends StatelessWidget {
             ),
           ),
           const SizedBox(width: 8),
-          _HamburgerButton(
-            size: menuSize,
-            open: menuOpen,
-            onTap: onToggleMenu,
-          ),
+          _HamburgerButton(size: menuSize, open: menuOpen, onTap: onToggleMenu),
         ],
       ),
     );

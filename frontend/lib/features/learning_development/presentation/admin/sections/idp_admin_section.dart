@@ -1,4 +1,4 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import 'package:hrms_plaridel/core/api/client.dart';
@@ -10,6 +10,8 @@ import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/d
 import 'package:hrms_plaridel/features/learning_development/models/individual_development_plan.dart';
 import 'package:hrms_plaridel/features/recruitment/presentation/admin/widgets/rsp_records_list_table.dart';
 import 'package:hrms_plaridel/shared/widgets/read_only_saved_entry_dialog.dart';
+import 'package:hrms_plaridel/shared/widgets/form_document_preview.dart';
+import 'package:hrms_plaridel/shared/widgets/rsp_ld_form_header.dart';
 import 'package:hrms_plaridel/shared/widgets/rsp_ld_record_actions.dart';
 import 'package:hrms_plaridel/shared/widgets/rsp_ld_saved_records_browser.dart';
 
@@ -213,6 +215,34 @@ class _IdpAdminSectionState extends State<IdpAdminSection> {
     }
   }
 
+  Future<void> _previewIdp(IdpEntry entry) {
+    return openFormDocumentPreview(
+      context: context,
+      title: 'Individual Development Plan (IDP)',
+      filename: 'Individual_Development_Plan.pdf',
+      format: FormPdf.idpLayoutPrintFormat,
+      printModule: 'ld',
+      printFormKey: 'idp',
+      buildDocument: () async {
+        final signatureProvider = context.read<DocuTrackerProvider>();
+        final signatures = entry.id == null
+            ? null
+            : await signatureProvider.loadSourceSignatures(
+                sourceModule: 'ld',
+                sourceTable: IdpEntry.tableName,
+                sourceRecordId: entry.id!,
+              );
+        if (entry.id != null && signatures == null) {
+          throw StateError(
+            signatureProvider.sourceSignatureError ??
+                'The form signatures could not be loaded.',
+          );
+        }
+        return FormPdf.buildIdpPdf(entry, signatures: signatures);
+      },
+    );
+  }
+
   Future<void> _downloadIdp(IdpEntry entry) async {
     try {
       final signatureProvider = context.read<DocuTrackerProvider>();
@@ -267,6 +297,9 @@ class _IdpAdminSectionState extends State<IdpAdminSection> {
             onDownloadPdf: (_) async {},
           ),
           onPrint: () => _printIdp(e),
+          onDocumentPreview: () => _previewIdp(e),
+          onEdit: () => _edit(e),
+          onDelete: e.id == null ? null : () => _onDelete(e.id!),
         );
       }).toList(),
     );
@@ -296,37 +329,31 @@ class _IdpAdminSectionState extends State<IdpAdminSection> {
             side: BorderSide(color: AppTheme.dashHairlineOf(context)),
           ),
         ),
-        OutlinedButton.icon(
-          onPressed: _loading ? null : _openSavedRecordsBrowser,
-          icon: const Icon(Icons.folder_open_outlined, size: 18),
-          label: const Text('View Records'),
-          style: OutlinedButton.styleFrom(
-            foregroundColor: AppTheme.dashTextPrimaryOf(context),
-            side: BorderSide(color: AppTheme.dashHairlineOf(context)),
+        if (_editing != null)
+          OutlinedButton.icon(
+            onPressed: _loading ? null : _openSavedRecordsBrowser,
+            icon: const Icon(Icons.folder_open_outlined, size: 18),
+            label: const Text('View Records'),
+            style: OutlinedButton.styleFrom(
+              foregroundColor: AppTheme.dashTextPrimaryOf(context),
+              side: BorderSide(color: AppTheme.dashHairlineOf(context)),
+            ),
           ),
-        ),
       ],
     );
   }
 
   @override
   Widget build(BuildContext context) {
-    final secondary = AppTheme.dashTextSecondaryOf(context);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          'Individual Development Plan (IDP)',
-          style: TextStyle(
-            color: AppTheme.dashTextPrimaryOf(context),
-            fontSize: 22,
-            fontWeight: FontWeight.w700,
-          ),
-        ),
-        const SizedBox(height: 6),
-        Text(
-          'Record employee qualifications, succession analysis, and short-term development actions.',
-          style: TextStyle(color: secondary, fontSize: 14),
+        RspLdFormHeader(
+          module: 'L&D',
+          title: 'Individual Development Plan (IDP)',
+          subtitle:
+              'Record employee qualifications, succession analysis, and short-term development actions.',
+          actions: _toolbar(context),
         ),
         const SizedBox(height: 20),
         if (_editing != null) ...[
@@ -336,6 +363,7 @@ class _IdpAdminSectionState extends State<IdpAdminSection> {
             onSave: _onSave,
             onCancel: _cancelEdit,
             onPrint: _printIdp,
+            onPreview: _previewIdp,
             onDownloadPdf: _downloadIdp,
           ),
           if (_editing?.id != null) ...[
@@ -355,27 +383,26 @@ class _IdpAdminSectionState extends State<IdpAdminSection> {
             ),
           ],
           const SizedBox(height: 24),
+        ] else ...[
+          if (_loading)
+            const Padding(
+              padding: EdgeInsets.all(24),
+              child: Center(child: CircularProgressIndicator()),
+            )
+          else if (_entries.isEmpty)
+            const RspFormEmptyState(
+              message: 'No IDP entries yet. Tap "Add IDP" to add one.',
+              icon: Icons.trending_up_rounded,
+            )
+          else
+            _IdpList(
+              entries: _entries,
+              onEdit: _edit,
+              onDelete: _onDelete,
+              onPrint: _printIdp,
+              onDownloadPdf: _downloadIdp,
+            ),
         ],
-        _toolbar(context),
-        const SizedBox(height: 16),
-        if (_loading)
-          const Padding(
-            padding: EdgeInsets.all(24),
-            child: Center(child: CircularProgressIndicator()),
-          )
-        else if (_entries.isEmpty)
-          const RspFormEmptyState(
-            message: 'No IDP entries yet. Tap "Add IDP" to add one.',
-            icon: Icons.trending_up_rounded,
-          )
-        else
-          _IdpList(
-            entries: _entries,
-            onEdit: _edit,
-            onDelete: _onDelete,
-            onPrint: _printIdp,
-            onDownloadPdf: _downloadIdp,
-          ),
       ],
     );
   }
@@ -390,6 +417,7 @@ class IdpFormEditor extends StatefulWidget {
     required this.onSave,
     required this.onCancel,
     required this.onPrint,
+    this.onPreview,
     required this.onDownloadPdf,
   });
 
@@ -398,6 +426,7 @@ class IdpFormEditor extends StatefulWidget {
   final void Function(IdpEntry) onSave;
   final VoidCallback onCancel;
   final Future<void> Function(IdpEntry) onPrint;
+  final Future<void> Function(IdpEntry)? onPreview;
   final Future<void> Function(IdpEntry) onDownloadPdf;
 
   @override
@@ -1388,53 +1417,45 @@ class _IdpFormEditorState extends State<IdpFormEditor> {
     );
   }
 
-  Widget _actionBar() {
+  Widget _actionBar(bool ro) {
     return Wrap(
-      alignment: WrapAlignment.spaceBetween,
+      spacing: 8,
+      runSpacing: 8,
       crossAxisAlignment: WrapCrossAlignment.center,
-      runSpacing: 10,
-      spacing: 12,
       children: [
-        Wrap(
-          spacing: 10,
-          runSpacing: 10,
-          children: [
-            FilledButton.icon(
-              onPressed: _save,
-              icon: const Icon(Icons.save_rounded, size: 18),
-              label: const Text('Save'),
-              style: FilledButton.styleFrom(
-                backgroundColor: AppTheme.primaryNavy,
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 22,
-                  vertical: 14,
-                ),
-              ),
+        if (!ro) ...[
+          FilledButton.icon(
+            onPressed: _save,
+            icon: const Icon(Icons.save_rounded, size: 18),
+            label: const Text('Save'),
+            style: FilledButton.styleFrom(
+              backgroundColor: AppTheme.primaryNavy,
+              padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
             ),
-            OutlinedButton.icon(
-              onPressed: widget.onCancel,
-              icon: const Icon(Icons.close_rounded, size: 18),
-              label: const Text('Cancel'),
-            ),
-          ],
-        ),
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: [
-            IconButton(
-              tooltip: 'Print Preview',
-              style: rspLdRecordIconButtonStyle(),
-              onPressed: () => widget.onPrint(_buildCurrentEntry()),
-              icon: const Icon(Icons.print_rounded, size: 20),
-            ),
-            IconButton(
-              tooltip: 'Export PDF',
-              style: rspLdRecordIconButtonStyle(),
-              onPressed: () => widget.onDownloadPdf(_buildCurrentEntry()),
-              icon: const Icon(Icons.picture_as_pdf_rounded, size: 20),
-            ),
-          ],
+          ),
+          OutlinedButton.icon(
+            onPressed: widget.onCancel,
+            icon: const Icon(Icons.close_rounded, size: 18),
+            label: const Text('Cancel'),
+          ),
+        ],
+        if (widget.onPreview != null)
+          FormPreviewPrintButtons(
+            onPreview: () => widget.onPreview!(_buildCurrentEntry()),
+            onPrint: () => widget.onPrint(_buildCurrentEntry()),
+          )
+        else
+          RspLdBusyIconButton(
+            tooltip: 'Print Form',
+            icon: Icons.print_rounded,
+            busyTooltip: 'Preparing print…',
+            onPressed: () => widget.onPrint(_buildCurrentEntry()),
+          ),
+        IconButton(
+          tooltip: 'Export PDF',
+          style: rspLdRecordIconButtonStyle(),
+          onPressed: () => widget.onDownloadPdf(_buildCurrentEntry()),
+          icon: const Icon(Icons.picture_as_pdf_rounded, size: 20),
         ),
       ],
     );
@@ -1450,56 +1471,70 @@ class _IdpFormEditorState extends State<IdpFormEditor> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Padding(
-            padding: const EdgeInsets.fromLTRB(20, 16, 20, 16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+            padding: const EdgeInsets.fromLTRB(20, 16, 16, 16),
+            child: Wrap(
+              alignment: WrapAlignment.spaceBetween,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              runSpacing: 10,
+              spacing: 12,
               children: [
-                Row(
-                  children: [
-                    Flexible(
-                      child: Text(
-                        _name.text.trim().isEmpty
-                            ? 'New Individual Development Plan'
-                            : _name.text.trim(),
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          fontSize: 17,
-                          fontWeight: FontWeight.w800,
-                          color: AppTheme.dashTextPrimaryOf(context),
-                        ),
+                ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 420),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Flexible(
+                            child: Text(
+                              _name.text.trim().isEmpty
+                                  ? 'New Individual Development Plan'
+                                  : _name.text.trim(),
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                fontSize: 17,
+                                fontWeight: FontWeight.w800,
+                                color: AppTheme.dashTextPrimaryOf(context),
+                              ),
+                            ),
+                          ),
+                          if (ro) ...[
+                            const SizedBox(width: 10),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 10,
+                                vertical: 4,
+                              ),
+                              decoration: BoxDecoration(
+                                color: Colors.blueGrey.withValues(alpha: 0.12),
+                                borderRadius: BorderRadius.circular(999),
+                                border: Border.all(
+                                  color: Colors.blueGrey.withValues(alpha: 0.32),
+                                ),
+                              ),
+                              child: const Text(
+                                'Read-only preview',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w800,
+                                  color: Colors.blueGrey,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ],
                       ),
-                    ),
-                    if (ro) ...[
-                      const SizedBox(width: 10),
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 10,
-                          vertical: 4,
-                        ),
-                        decoration: BoxDecoration(
-                          color: Colors.blueGrey.withValues(alpha: 0.12),
-                          borderRadius: BorderRadius.circular(999),
-                          border: Border.all(
-                            color: Colors.blueGrey.withValues(alpha: 0.32),
-                          ),
-                        ),
-                        child: const Text(
-                          'Read-only preview',
-                          style: TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w800,
-                            color: Colors.blueGrey,
-                          ),
-                        ),
+                      const SizedBox(height: 4),
+                      Text(
+                        'Local Government Unit of Plaridel',
+                        style: TextStyle(fontSize: 12.5, color: secondary),
                       ),
                     ],
-                  ],
+                  ),
                 ),
-                const SizedBox(height: 4),
-                Text(
-                  'Local Government Unit of Plaridel',
-                  style: TextStyle(fontSize: 12.5, color: secondary),
-                ),
+                _actionBar(ro),
               ],
             ),
           ),
@@ -1520,10 +1555,6 @@ class _IdpFormEditorState extends State<IdpFormEditor> {
                 _developmentPlan(),
                 const SizedBox(height: 16),
                 _certification(),
-                if (!ro) ...[
-                  const SizedBox(height: 24),
-                  _actionBar(),
-                ],
                 if (ro &&
                     (widget.entry.createdAt != null ||
                         widget.entry.updatedAt != null)) ...[

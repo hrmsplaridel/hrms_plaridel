@@ -97,6 +97,7 @@ class ProfileHeroHeader extends StatelessWidget {
     this.idLabel,
     this.wideLayout = false,
     this.onChangePhoto,
+    this.onViewPhoto,
     this.isUploading = false,
     this.onBack,
   });
@@ -108,6 +109,9 @@ class ProfileHeroHeader extends StatelessWidget {
   final String? idLabel;
   final bool wideLayout;
   final VoidCallback? onChangePhoto;
+
+  /// Opens a larger view of the current profile photo.
+  final VoidCallback? onViewPhoto;
   final bool isUploading;
   final VoidCallback? onBack;
 
@@ -142,25 +146,40 @@ class ProfileHeroHeader extends StatelessWidget {
           );
 
     Widget avatarFrame() {
+      final photo = Container(
+        width: _avatarRadius * 2,
+        height: _avatarRadius * 2,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          border: Border.all(color: Colors.white, width: 3),
+          boxShadow: const [
+            BoxShadow(
+              color: Color(0x40000000),
+              blurRadius: 10,
+              offset: Offset(0, 3),
+            ),
+          ],
+        ),
+        child: ClipOval(child: avatar),
+      );
       return Stack(
         clipBehavior: Clip.none,
         children: [
-          Container(
-            width: _avatarRadius * 2,
-            height: _avatarRadius * 2,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              border: Border.all(color: Colors.white, width: 3),
-              boxShadow: const [
-                BoxShadow(
-                  color: Color(0x40000000),
-                  blurRadius: 10,
-                  offset: Offset(0, 3),
+          if (onViewPhoto == null)
+            photo
+          else
+            Tooltip(
+              message: 'View profile photo',
+              child: Material(
+                type: MaterialType.transparency,
+                shape: const CircleBorder(),
+                child: InkWell(
+                  onTap: onViewPhoto,
+                  customBorder: const CircleBorder(),
+                  child: photo,
                 ),
-              ],
+              ),
             ),
-            child: ClipOval(child: avatar),
-          ),
           if (onChangePhoto != null)
             Positioned(
               right: -2,

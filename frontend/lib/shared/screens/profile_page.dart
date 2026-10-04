@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:dio/dio.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
@@ -614,7 +616,7 @@ class _ProfileContentState extends State<ProfileContent> {
       final result = await FilePicker.platform.pickFiles(
         type: FileType.image,
         allowMultiple: false,
-        withData: kIsWeb,
+        withData: true,
       );
       if (result == null || result.files.isEmpty) return;
 
@@ -631,17 +633,20 @@ class _ProfileContentState extends State<ProfileContent> {
         _showProfileSnackBar('Profile photo must be 5 MB or smaller.');
         return;
       }
-      if (!canUploadFromPath && (bytes == null || bytes.isEmpty)) {
+      if (bytes == null || bytes.isEmpty) {
         if (!mounted) return;
         _showProfileSnackBar(
           'Could not read the selected image. Try another file (JPG or PNG).',
         );
         return;
       }
+      if (!mounted) return;
 
-      if (bytes != null && bytes.isNotEmpty) {
-        _localAvatarPreview = Uint8List.fromList(bytes);
-      }
+      final previewBytes = Uint8List.fromList(bytes);
+      final usePhoto = await _confirmAvatarBeforeSave(previewBytes);
+      if (usePhoto != true || !mounted) return;
+
+      _localAvatarPreview = previewBytes;
 
       setState(() {
         _imageLoading = true;
@@ -658,7 +663,7 @@ class _ProfileContentState extends State<ProfileContent> {
       } else {
         uploadRes = await ApiClient.instance.uploadBytes<Map<String, dynamic>>(
           '/api/upload/avatar',
-          bytes: bytes!,
+          bytes: bytes,
           fileName: uploadName,
         );
       }
@@ -702,6 +707,151 @@ class _ProfileContentState extends State<ProfileContent> {
       });
       _showProfileSnackBar('Profile photo upload failed: ${msg ?? e}');
     }
+  }
+
+  Future<bool?> _confirmAvatarBeforeSave(Uint8List bytes) {
+    return showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) {
+        return Dialog(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 420),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(20, 20, 20, 16),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text(
+                    'Preview photo',
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    'Check this photo before it is saved to your profile.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontSize: 13,
+                      height: 1.35,
+                      color: AppTheme.textSecondary,
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  ClipOval(
+                    child: Image.memory(
+                      bytes,
+                      width: 220,
+                      height: 220,
+                      fit: BoxFit.cover,
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton(
+                          onPressed: () => Navigator.of(ctx).pop(false),
+                          child: const Text('Cancel'),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: FilledButton(
+                          style: FilledButton.styleFrom(
+                            backgroundColor: AppTheme.primaryNavy,
+                          ),
+                          onPressed: () => Navigator.of(ctx).pop(true),
+                          child: const Text('Save photo'),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  void _previewCurrentAvatar(AppUser? user) {
+    final bytes = _localAvatarPreview;
+    final path = (_avatarPath ?? user?.avatarPath ?? '').trim();
+    final url = path.isNotEmpty
+        ? userAvatarImageUrl(
+            user?.id ?? '',
+            avatarPath: path,
+            cacheRevision: _avatarCacheRevision,
+          )
+        : _avatarUrl;
+    final hasUrl = url != null && url.isNotEmpty;
+    if (bytes == null && !hasUrl) {
+      _showProfileSnackBar('No profile photo yet.');
+      return;
+    }
+
+    showDialog<void>(
+      context: context,
+      barrierColor: Colors.black.withValues(alpha: 0.82),
+      builder: (ctx) {
+        final size = MediaQuery.sizeOf(ctx);
+        final maxSide = math.min(520.0, size.shortestSide - 48);
+        return Dialog(
+          backgroundColor: Colors.transparent,
+          insetPadding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Align(
+                alignment: Alignment.centerRight,
+                child: IconButton(
+                  tooltip: 'Close',
+                  onPressed: () => Navigator.of(ctx).pop(),
+                  icon: const Icon(Icons.close_rounded, color: Colors.white),
+                ),
+              ),
+              ClipRRect(
+                borderRadius: BorderRadius.circular(16),
+                child: InteractiveViewer(
+                  minScale: 1,
+                  maxScale: 4,
+                  child: bytes != null
+                      ? Image.memory(
+                          bytes,
+                          width: maxSide,
+                          height: maxSide,
+                          fit: BoxFit.contain,
+                        )
+                      : Image.network(
+                          url!,
+                          width: maxSide,
+                          height: maxSide,
+                          fit: BoxFit.contain,
+                          errorBuilder: (_, __, ___) => SizedBox(
+                            width: maxSide,
+                            height: 160,
+                            child: const Center(
+                              child: Text(
+                                'Could not load this photo.',
+                                style: TextStyle(color: Colors.white),
+                              ),
+                            ),
+                          ),
+                        ),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
   }
 
   String _avatarUploadFileName(String? originalName) {
@@ -1682,6 +1832,9 @@ class _ProfileContentState extends State<ProfileContent> {
                   ),
                 ),
                 onChangePhoto: _imageLoading ? null : _pickAndUploadAvatar,
+                onViewPhoto: _imageLoading
+                    ? null
+                    : () => _previewCurrentAvatar(user),
                 isUploading: _imageLoading,
               ),
             ),

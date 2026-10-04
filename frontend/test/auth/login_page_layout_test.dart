@@ -44,49 +44,32 @@ void main() {
     expect(find.text('Municipality of Plaridel'), findsWidgets);
     expect(find.text('Remember me'), findsOneWidget);
     expect(find.text('Forgot password?'), findsOneWidget);
-    expect(find.text('Secure login'), findsOneWidget);
-    expect(find.text('Admin portal'), findsOneWidget);
+    expect(find.text('Or quick access'), findsNothing);
     expect(tester.takeException(), isNull);
   });
 
   testWidgets('tablet login keeps the form usable', (tester) async {
     await pumpAt(tester, const Size(820, 1180));
-    expect(find.text('Official HRMS Portal'), findsOneWidget);
+    expect(find.text('Welcome Back'), findsOneWidget);
     expect(find.text('Sign In to HRMS'), findsOneWidget);
+    expect(find.text('Or quick access'), findsNothing);
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('mobile login overlaps hero with crest and footer inside card', (
-    tester,
-  ) async {
+  testWidgets('mobile login uses the portal card layout', (tester) async {
     await pumpAt(tester, const Size(390, 844));
-    expect(find.text('Official HRMS Portal'), findsOneWidget);
-    expect(find.text('Sign In to HRMS'), findsOneWidget);
-    expect(find.text('Municipality of\nPlaridel'), findsOneWidget);
     expect(find.text('Welcome Back'), findsOneWidget);
+    expect(find.text('Sign in to continue to your HRMS portal.'), findsOneWidget);
+    expect(find.text('Sign In to HRMS'), findsOneWidget);
+    expect(find.text('Plaridel'), findsOneWidget);
     expect(find.text('Email Address'), findsOneWidget);
+    expect(find.text('Secure access for municipal employees'), findsOneWidget);
     expect(find.text('Have a productive day!'), findsNothing);
     expect(find.text('Or quick access'), findsNothing);
-    expect(find.bySemanticsLabel('HRMS system logo'), findsOneWidget);
-    final card = find.byKey(const ValueKey('mobile-login-card'));
-    final heroRect = tester.getRect(
-      find.byKey(const ValueKey('mobile-login-hero')),
-    );
-    final cardRect = tester.getRect(card);
-    final crestRect = tester.getRect(
-      find.byKey(const ValueKey('mobile-login-crest')),
-    );
-    expect(heroRect.bottom - cardRect.top, closeTo(40, 1));
-    expect(crestRect.top, lessThan(cardRect.top));
-    expect(crestRect.bottom, greaterThan(cardRect.top));
-    expect(
-      find.descendant(of: card, matching: find.text('Privacy')),
-      findsOneWidget,
-    );
-    expect(
-      find.descendant(of: card, matching: find.text('Terms')),
-      findsOneWidget,
-    );
+    expect(find.text('Official HRMS Portal'), findsNothing);
+    expect(find.byKey(const ValueKey('mobile-minimal-login')), findsOneWidget);
+    expect(find.text('Privacy'), findsOneWidget);
+    expect(find.text('Terms'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 

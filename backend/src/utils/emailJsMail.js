@@ -233,18 +233,14 @@ async function notifyNewRecruitmentApplication(row) {
  *
  *   Hello {{applicant_name}},
  *
- *   Congratulations on joining LGU Plaridel. Your HRMS login details are below.
+ *   Welcome to LGU Plaridel HRMS. Your login details:
  *
  *   Username: {{username}}
  *   Password: {{password}}
  *
  *   {{account_note}}
  *
- *   This email is not encrypted. Keep your password private. If you did not expect
- *   this email, contact HR immediately.
- *
- *   Best regards,
- *   Human Resource Management Office
+ *   HR Office
  *   LGU Plaridel
  */
 function isEmailJsConfiguredForHireEmail() {
@@ -256,19 +252,13 @@ function isEmailJsConfiguredForHireEmail() {
 const HIRE_CREDENTIALS_EMAIL_SUBJECT = 'Welcome — LGU Plaridel HRMS account';
 
 const HIRE_LOGIN_INSTRUCTIONS =
-  'Please wait for the HR Head or Admin before you sign in. They will tell you when and how to access HRMS.\n\n' +
-  'How to log in (only after HR instructs you):\n' +
-  '1. Keep this username and temporary password private. Do not share them with anyone.\n' +
-  '2. Open the LGU Plaridel HRMS login page when the HR Head or Admin tells you to.\n' +
-  '3. Enter the username and password in this email.\n' +
-  '4. Change your password if the system asks you to after the first login.\n\n' +
-  'Do not try to log in on your own before you receive those instructions.';
+  'Sign in only after HR tells you to. Keep this password private.';
 
 function buildHireCredentialsAccountNote(accountReady) {
   const readiness = accountReady
-    ? 'Your employee account has been created.'
-    : 'HR is finishing your employee account in the system. If you still cannot sign in after the HR Head or Admin has instructed you, reply to this email.';
-  return `${readiness}\n\n${HIRE_LOGIN_INSTRUCTIONS}`;
+    ? 'Your account is ready.'
+    : 'HR is still setting up your account.';
+  return `${readiness} ${HIRE_LOGIN_INSTRUCTIONS}`;
 }
 
 function buildHireCredentialsPlainText({
@@ -280,13 +270,11 @@ function buildHireCredentialsPlainText({
   const name = String(applicantName || '').trim() || 'Applicant';
   return (
     `Hello ${name},\n\n` +
-    'Congratulations on joining LGU Plaridel. Your HRMS login details are below.\n\n' +
+    'Welcome to LGU Plaridel HRMS. Your login details:\n\n' +
     `Username: ${username}\n` +
     `Password: ${password}\n\n` +
     `${accountNote}\n\n` +
-    'This email is not encrypted. Keep your password private. If you did not expect this email, contact HR immediately.\n\n' +
-    'Best regards,\n' +
-    'Human Resource Management Office\n' +
+    'HR Office\n' +
     'LGU Plaridel'
   );
 }

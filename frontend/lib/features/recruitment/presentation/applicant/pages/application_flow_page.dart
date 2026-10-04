@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:hrms_plaridel/core/api/user_facing_api_error.dart';
+import 'package:hrms_plaridel/features/recruitment/data/exam_image_support.dart';
 import 'package:hrms_plaridel/features/recruitment/models/recruitment_application.dart';
 import 'package:hrms_plaridel/features/recruitment/models/rsp_screening_scores.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
@@ -1748,6 +1749,14 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
           options: options,
           selectedIndex: i < selected.length ? selected[i] : -1,
           useLetterPrefix: useLetterPrefix,
+          questionImage: examImagePathOrNull(q['question_image']),
+          questionImageCaption: examImagePathOrNull(
+            q['question_image_caption'],
+          ),
+          optionImages: examOptionImagesFrom(
+            q['option_images'],
+            options.length,
+          ),
           onSelect: (j) => onSelect(i, j),
         );
       }),
@@ -1837,6 +1846,14 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
           options: options,
           selectedIndex: i < selected.length ? selected[i] : -1,
           useLetterPrefix: useLetterPrefix,
+          questionImage: examImagePathOrNull(q['question_image']),
+          questionImageCaption: examImagePathOrNull(
+            q['question_image_caption'],
+          ),
+          optionImages: examOptionImagesFrom(
+            q['option_images'],
+            options.length,
+          ),
           onSelect: (j) => setState(() => selected[i] = j),
         ),
         const SizedBox(height: 16),
@@ -2082,6 +2099,13 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
           <String>[];
       final backendCorrect = (q['correct'] as num?)?.toInt() ?? 0;
 
+      // Image questions/choices are scored by the saved correct index, never by
+      // matching text against the legacy answer key.
+      if (examQuestionHasImages(q)) {
+        out.add(backendCorrect);
+        continue;
+      }
+
       if (i < answerKey.length) {
         final expected = answerKey[i];
         for (int j = 0; j < options.length; j++) {
@@ -2096,6 +2120,19 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
       }
     }
     return out;
+  }
+
+  /// Image fields stored with the result so image-only questions stay readable
+  /// later. Omitted entirely for text-only exams (result JSON unchanged).
+  Map<String, dynamic> _examImageSnapshot(List<Map<String, dynamic>> qs) {
+    if (!qs.any(examQuestionHasImages)) return const {};
+    return {
+      'question_images': qs.map((q) => q['question_image']).toList(),
+      'question_image_captions': qs
+          .map((q) => q['question_image_caption'])
+          .toList(),
+      'option_images': qs.map((q) => q['option_images']).toList(),
+    };
   }
 
   double _computeScorePercent({
@@ -2189,6 +2226,7 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
         'general': {
           'questions': generalQuestions.map((q) => q['question_text']).toList(),
           'options': generalQuestions.map((q) => q['options']).toList(),
+          ..._examImageSnapshot(generalQuestions),
           'correct': generalCorrect,
           'selected': _generalSelected,
           'score': generalScore,
@@ -2198,6 +2236,7 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
         'math': {
           'questions': mathQuestions.map((q) => q['question_text']).toList(),
           'options': mathQuestions.map((q) => q['options']).toList(),
+          ..._examImageSnapshot(mathQuestions),
           'correct': mathCorrect,
           'selected': _mathSelected,
           'score': mathScore,
@@ -2208,6 +2247,7 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
             .map((q) => q['question_text'])
             .toList(),
         'options': generalInfoQuestions.map((q) => q['options']).toList(),
+        ..._examImageSnapshot(generalInfoQuestions),
         'correct': generalInfoCorrect,
         'selected': _generalInfoSelected,
         'score': infoScore,
