@@ -3,6 +3,44 @@ import 'package:hrms_plaridel/features/dashboard/presentation/admin/desktop/page
 
 void main() {
   test(
+    'identity labels distinguish captured, current, and unavailable identities',
+    () {
+      expect(
+        auditIdentityLabel({
+          'actor_name': 'Original',
+          'actor_identity_source': 'recorded',
+        }, 'actor'),
+        'Original',
+      );
+      expect(
+        auditIdentityLabel({
+          'actor_name': 'Renamed',
+          'actor_identity_source': 'current',
+        }, 'actor'),
+        'Renamed (current account information)',
+      );
+      expect(
+        auditIdentityLabel({'actor_identity_source': 'unavailable'}, 'actor'),
+        'Unknown actor (historical identity unavailable)',
+      );
+      expect(
+        describeAuditEntry({
+          'entity_type': 'user',
+          'target_name': 'Renamed',
+          'target_identity_source': 'current',
+        }).target,
+        'Renamed (current account information)',
+      );
+      expect(
+        auditIdentityLabel({
+          'actor_snapshot': {'id': 'saved-id'},
+          'actor_identity_source': 'recorded',
+        }, 'actor'),
+        'Account saved-id',
+      );
+    },
+  );
+  test(
     'explains a DTR permission change and names the affected administrator',
     () {
       final event = describeAuditEntry({
@@ -18,7 +56,7 @@ void main() {
       });
       expect(event.title, 'DTR access changed');
       expect(event.summary, contains('Report access granted'));
-      expect(event.target, 'Maria Santos');
+      expect(event.target, 'Maria Santos (current account information)');
       expect(event.changes, ['Report access: Off → On']);
     },
   );

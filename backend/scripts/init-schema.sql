@@ -1715,6 +1715,8 @@ CREATE TABLE IF NOT EXISTS audit_logs (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+\ir migrations/20261004_audit_identity_snapshots.sql
+
 -- =========================================
 -- L&D — RSP SAVED FORMS
 -- =========================================

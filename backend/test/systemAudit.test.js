@@ -67,7 +67,7 @@ test('audit query can hide page views and resolves the affected user', async () 
     const route = require(path).stack.find(entry => entry.route?.methods.get).route;
     await route.stack[2].handle({ user: { id: 'admin-id' }, query: { hide_views: '1' } }, response());
     assert.match(queries[1].sql, /a\.action <> 'audit_log_viewed'/);
-    assert.match(queries[2].sql, /target\.full_name AS target_name/);
+    assert.match(queries[2].sql, /a\.target_snapshot->>'name' ELSE target\.full_name END AS target_name/);
     assert.match(queries[2].sql, /LEFT JOIN users target ON target\.id = a\.entity_id/);
     queries.length = 0;
     await route.stack[2].handle({ user: { id: 'admin-id' }, query: {} }, response());

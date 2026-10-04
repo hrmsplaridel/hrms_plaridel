@@ -53,3 +53,20 @@ attendance-policy, and biometric management endpoints. The two grants are
 independent and audited on change. Admins may still view their own attendance.
 Employee profiles, leave/locator workflows, correction reviewer decisions,
 and other groups' modules retain their existing authorization rules.
+
+## Audit identity snapshots
+
+Apply `backend/scripts/migrations/20261004_audit_identity_snapshots.sql` before
+deploying the matching audit API. For a configured PostgreSQL connection, run
+`psql -v ON_ERROR_STOP=1 --single-transaction -f scripts/migrations/20261004_audit_identity_snapshots.sql`
+from `backend`. Fresh installations include this migration in `init-schema.sql`.
+
+An insert trigger captures the actor's ID, name, and email for every new system
+audit event. Events targeting `user`, `system_account`, `employee_account`, or
+`auth` also capture the affected account. Snapshots remain when accounts are
+renamed or deleted; they follow audit-log retention, independently of account
+deletion. No passwords, tokens, or other profile fields are captured. Existing
+entries are not backfilled: the UI labels their current account information or
+unavailable historical identity. Actor filters use captured identities when
+available. Roll back the application before removing these columns/trigger;
+dropping snapshot columns would permanently lose captured historical identities.

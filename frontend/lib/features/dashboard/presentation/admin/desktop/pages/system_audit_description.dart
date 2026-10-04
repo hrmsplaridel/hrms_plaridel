@@ -70,16 +70,42 @@ String _value(dynamic value) {
   return value.toString();
 }
 
+String auditIdentityLabel(Map<String, dynamic> entry, String kind) {
+  String? text(dynamic value) {
+    final result = value?.toString().trim();
+    return result == null || result.isEmpty ? null : result;
+  }
+
+  final name = text(entry['${kind}_name']) ?? text(entry['${kind}_email']);
+  final snapshot = entry['${kind}_snapshot'];
+  final id = snapshot is Map ? text(snapshot['id']) : null;
+  final label =
+      name ??
+      (id != null
+          ? 'Account $id'
+          : kind == 'actor'
+          ? 'Unknown actor'
+          : 'Unknown account');
+  if (entry['${kind}_identity_source'] == 'recorded') return label;
+  return name != null
+      ? '$label (current account information)'
+      : '$label (historical identity unavailable)';
+}
+
 AuditDescription describeAuditEntry(Map<String, dynamic> entry) {
   final action = entry['action']?.toString();
   final details = _details(entry['details']);
-  final target =
-      (entry['target_name']?.toString().trim().isNotEmpty == true
-              ? entry['target_name']
-              : entry['target_email']?.toString().trim().isNotEmpty == true
-              ? entry['target_email']
-              : null)
-          ?.toString();
+  final hasAccountTarget =
+      entry['target_name'] != null ||
+      entry['target_email'] != null ||
+      entry['target_snapshot'] != null ||
+      const [
+        'user',
+        'system_account',
+        'employee_account',
+        'auth',
+      ].contains(entry['entity_type']);
+  final target = hasAccountTarget ? auditIdentityLabel(entry, 'target') : null;
   final before = details?['before'];
   final after = details?['after'];
   final changes = <String>[];

@@ -5,6 +5,9 @@ const { requireSuperAdmin } = require('../middleware/rbac');
 
 const router = express.Router();
 const protect = authMiddleware;
+// Never substitute a current name into a captured identity with missing fields.
+const actorName = "CASE WHEN a.actor_snapshot IS NOT NULL THEN a.actor_snapshot->>'name' ELSE u.full_name END";
+const actorEmail = "CASE WHEN a.actor_snapshot IS NOT NULL THEN a.actor_snapshot->>'email' ELSE u.email END";
 
 router.get('/', protect, requireSuperAdmin, async (req, res) => {
   const cursorMode = req.query.pagination === 'cursor';
@@ -70,7 +73,7 @@ router.get('/', protect, requireSuperAdmin, async (req, res) => {
   }
   if (actor) {
     params.push(actor);
-    where.push(`(u.full_name ILIKE '%' || $${params.length} || '%' OR u.email ILIKE '%' || $${params.length} || '%')`);
+    where.push(`(${actorName} ILIKE '%' || $${params.length} || '%' OR ${actorEmail} ILIKE '%' || $${params.length} || '%')`);
   }
   try {
     if (cursorMode) {
@@ -101,12 +104,18 @@ router.get('/', protect, requireSuperAdmin, async (req, res) => {
         params
       ),
       pool.query(
-        `SELECT a.id, a.user_id, u.full_name AS actor_name, u.email AS actor_email,
+        `SELECT a.id, a.user_id, ${actorName} AS actor_name, ${actorEmail} AS actor_email,
+                a.actor_snapshot, a.target_snapshot,
+                CASE WHEN a.actor_snapshot IS NOT NULL THEN 'recorded'
+                     WHEN u.id IS NOT NULL THEN 'current' ELSE 'unavailable' END AS actor_identity_source,
+                CASE WHEN a.target_snapshot IS NOT NULL THEN 'recorded'
+                     WHEN target.id IS NOT NULL THEN 'current' ELSE 'unavailable' END AS target_identity_source,
                 a.action, a.entity_type, a.entity_id, a.details, a.created_at,
                 to_char(a.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS cursor_time,
-                target.full_name AS target_name, target.email AS target_email
+                CASE WHEN a.target_snapshot IS NOT NULL THEN a.target_snapshot->>'name' ELSE target.full_name END AS target_name,
+                CASE WHEN a.target_snapshot IS NOT NULL THEN a.target_snapshot->>'email' ELSE target.email END AS target_email
            FROM audit_logs a LEFT JOIN users u ON u.id = a.user_id
-           LEFT JOIN users target ON target.id = a.entity_id AND a.entity_type = 'user' ${rowFilter}
+           LEFT JOIN users target ON target.id = a.entity_id AND a.entity_type IN ('user', 'system_account', 'employee_account', 'auth') ${rowFilter}
           ORDER BY a.created_at DESC, a.id DESC
           LIMIT $${rowParams.length + 1}${cursorMode ? '' : ` OFFSET $${rowParams.length + 2}`}`,
         cursorMode ? [...rowParams, limit + 1] : [...rowParams, limit, (page - 1) * limit]

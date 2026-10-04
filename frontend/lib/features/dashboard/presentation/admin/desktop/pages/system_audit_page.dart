@@ -198,7 +198,7 @@ class _SystemAuditPageState extends State<SystemAuditPage> {
                 ),
                 const SizedBox(height: 14),
                 SelectableText(
-                  'Who: ${entry['actor_name'] ?? entry['actor_email'] ?? 'System'}\n'
+                  'Who: ${auditIdentityLabel(entry, 'actor')}\n'
                   'When: ${_when(entry['created_at'])}\n'
                   'Affected: ${description.target ?? auditLabel(entry['entity_type']?.toString())}',
                 ),
@@ -344,10 +344,7 @@ class _SystemAuditPageState extends State<SystemAuditPage> {
                       itemBuilder: (context, index) {
                         final entry = _entries[index];
                         final description = describeAuditEntry(entry);
-                        final actor =
-                            entry['actor_name'] ??
-                            entry['actor_email'] ??
-                            'System';
+                        final actor = auditIdentityLabel(entry, 'actor');
                         final narrow = MediaQuery.sizeOf(context).width < 1100;
                         return ListTile(
                           dense: true,
