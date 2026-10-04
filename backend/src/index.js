@@ -189,6 +189,8 @@ app.get('/health/db', async (_req, res) => {
 // API routes
 app.use('/api', generalApiReadLimiter, generalApiLimiter);
 app.use('/auth', authRoutes);
+app.use('/auth/password-reset-assistance', require('./routes/passwordResetAssistance').publicRouter);
+app.use('/api/password-reset-requests', require('./routes/passwordResetAssistance').adminRouter);
 app.use('/api/departments', departmentsRoutes);
 app.use('/api/offices', officesRoutes);
 app.use('/api/positions', positionsRoutes);

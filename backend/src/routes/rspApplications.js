@@ -64,8 +64,7 @@ async function requireApplicantProof(req, res, next) {
       try {
         const payload = jwt.verify(authorization.slice(7).trim(), process.env.JWT_SECRET);
         if (payload.typ !== 'refresh' && payload.role === 'admin') {
-          req.user = { id: payload.id, email: payload.email, role: payload.role };
-          return next();
+          return authMiddleware(req, res, () => requireAdmin(req, res, next));
         }
       } catch (_) {
         // It may instead be an applicant proof token; verify it below.

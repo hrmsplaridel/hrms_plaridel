@@ -1716,6 +1716,7 @@ CREATE TABLE IF NOT EXISTS audit_logs (
 );
 
 \ir migrations/20261004_audit_identity_snapshots.sql
+\ir migrations/20261004_password_reset_assistance.sql
 
 -- =========================================
 -- L&D — RSP SAVED FORMS

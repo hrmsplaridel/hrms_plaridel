@@ -3,6 +3,8 @@ const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const net = require('net');
+const { disconnectUserSessions } = require('../websockets/appEvents');
+const { notifyPasswordResetRequestsChanged } = require('../services/passwordResetEvents');
 const { pool } = require('../config/db');
 const { authMiddleware } = require('../middleware/auth');
 const {
@@ -30,75 +32,15 @@ const SALT_ROUNDS = 10;
 // Support JWT_EXPIRATION or legacy JWT_EXPIRY from .env
 const JWT_EXPIRATION = process.env.JWT_EXPIRATION || process.env.JWT_EXPIRY || '15m';
 const JWT_REFRESH_EXPIRATION = process.env.JWT_REFRESH_EXPIRATION || '30d';
-const PASSWORD_RESET_OTP_TTL_MS = parsePositiveInt(
-  process.env.AUTH_PASSWORD_RESET_OTP_TTL_MS,
-  5 * 60 * 1000
-);
-const PASSWORD_RESET_MAX_ATTEMPTS = parsePositiveInt(
-  process.env.AUTH_PASSWORD_RESET_OTP_MAX_ATTEMPTS,
-  5
-);
-const PASSWORD_RESET_MIN_PASSWORD_LENGTH = parsePositiveInt(
-  process.env.AUTH_PASSWORD_RESET_MIN_PASSWORD_LENGTH,
-  8
-);
-const PASSWORD_RESET_OTP_DIGITS = Math.min(
-  8,
-  Math.max(4, parsePositiveInt(process.env.AUTH_PASSWORD_RESET_OTP_DIGITS, 6))
-);
+const { createOtpCode, hashPasswordResetCode, timingSafeEqualHex, passwordResetTtlMinutes, PASSWORD_RESET_OTP_TTL_MS, PASSWORD_RESET_MAX_ATTEMPTS, PASSWORD_RESET_MIN_PASSWORD_LENGTH, PASSWORD_RESET_OTP_DIGITS } = require('../services/passwordResetOtp');
 const PASSWORD_RESET_REQUEST_MESSAGE =
   'If that email is registered and has a mobile number, an SMS reset code will be sent.';
 const PASSWORD_RESET_INVALID_CODE_MESSAGE = 'Invalid or expired reset code.';
 
 let passwordResetOtpTableReady = false;
 
-function parsePositiveInt(value, fallback) {
-  const parsed = Number.parseInt(value, 10);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
-}
-
-function getPasswordResetSecret() {
-  const secret = (
-    process.env.AUTH_PASSWORD_RESET_OTP_SECRET ||
-    process.env.JWT_SECRET ||
-    ''
-  ).trim();
-  if (!secret) {
-    const err = new Error('AUTH_PASSWORD_RESET_OTP_SECRET or JWT_SECRET is required');
-    err.code = 'PASSWORD_RESET_SECRET_MISSING';
-    throw err;
-  }
-  return secret;
-}
-
 function normalizeEmail(value) {
   return String(value || '').trim().toLowerCase();
-}
-
-function createOtpCode() {
-  const upperBound = 10 ** PASSWORD_RESET_OTP_DIGITS;
-  return String(crypto.randomInt(0, upperBound)).padStart(
-    PASSWORD_RESET_OTP_DIGITS,
-    '0'
-  );
-}
-
-function hashPasswordResetCode(userId, code) {
-  return crypto
-    .createHmac('sha256', getPasswordResetSecret())
-    .update(`${userId}:${String(code).trim()}`)
-    .digest('hex');
-}
-
-function timingSafeEqualHex(left, right) {
-  const leftBuf = Buffer.from(String(left || ''), 'hex');
-  const rightBuf = Buffer.from(String(right || ''), 'hex');
-  if (leftBuf.length !== rightBuf.length) return false;
-  return crypto.timingSafeEqual(leftBuf, rightBuf);
-}
-
-function passwordResetTtlMinutes() {
-  return Math.max(1, Math.ceil(PASSWORD_RESET_OTP_TTL_MS / 60_000));
 }
 
 function maskPhoneForLog(value) {
@@ -202,6 +144,7 @@ async function issueTokensForUser(user, req, db = pool, options = {}) {
     id: user.id,
     email: user.email,
     role: user.role,
+    auth_version: user.auth_version || 0,
     typ: 'access',
   };
   const accessToken = jwt.sign(accessPayload, process.env.JWT_SECRET, {
@@ -213,7 +156,7 @@ async function issueTokensForUser(user, req, db = pool, options = {}) {
   }
 
   const refreshToken = jwt.sign(
-    { id: user.id, typ: 'refresh', jti: createTokenId() },
+    { id: user.id, typ: 'refresh', jti: createTokenId(), auth_version: user.auth_version || 0 },
     process.env.JWT_REFRESH_SECRET,
     { expiresIn: JWT_REFRESH_EXPIRATION }
   );
@@ -256,7 +199,7 @@ router.post('/login', authLoginLimiter, async (req, res) => {
     }
 
     const result = await pool.query(
-      `SELECT id, email, password_hash, role, full_name, avatar_path, is_active
+      `SELECT id, email, password_hash, role, full_name, avatar_path, is_active, auth_version
        FROM users WHERE LOWER(email) = $1`,
       [email.trim().toLowerCase()]
     );
@@ -352,7 +295,7 @@ router.post('/refresh', authTokenLimiter, async (req, res) => {
     }
 
     const userResult = await client.query(
-      `SELECT id, email, role, full_name, avatar_path, is_active
+      `SELECT id, email, role, full_name, avatar_path, is_active, auth_version
        FROM users WHERE id = $1`,
       [decoded.id]
     );
@@ -360,6 +303,10 @@ router.post('/refresh', authTokenLimiter, async (req, res) => {
     if (!user || !user.is_active) {
       await client.query('ROLLBACK');
       return res.status(403).json({ error: 'Account is deactivated' });
+    }
+    if ((decoded.auth_version || 0) !== (user.auth_version || 0)) {
+      await client.query('ROLLBACK');
+      return res.status(401).json({ error: 'Session expired. Sign in again.' });
     }
 
     const normalizedRole = String(user.role || '').toLowerCase();
@@ -853,13 +800,15 @@ router.post('/forgot-password', authPasswordResetLimiter, async (req, res) => {
     return res.status(400).json({ error: 'Email is required' });
   }
 
+  let client;
   try {
     await ensurePasswordResetOtpTable();
-
-    const userResult = await pool.query(
+    client = await pool.connect();
+    await client.query('BEGIN');
+    const userResult = await client.query(
       `SELECT id, email, full_name, contact_number, is_active
        FROM users
-       WHERE LOWER(email) = $1`,
+       WHERE LOWER(email) = $1 FOR UPDATE`,
       [email]
     );
     const user = userResult.rows[0];
@@ -872,7 +821,13 @@ router.post('/forgot-password', authPasswordResetLimiter, async (req, res) => {
         const expiresAt = new Date(Date.now() + PASSWORD_RESET_OTP_TTL_MS);
         const ipForDb = normalizeIpForDb(req.ip || req.socket?.remoteAddress);
 
-        await pool.query(
+        const recent = await client.query(`SELECT id FROM auth_password_reset_otps
+          WHERE user_id = $1 AND created_at > now() - interval '60 seconds' LIMIT 1`, [user.id]);
+        if (recent.rowCount) {
+          await client.query('COMMIT');
+          return res.json({ message: PASSWORD_RESET_REQUEST_MESSAGE, expiresInMs: PASSWORD_RESET_OTP_TTL_MS });
+        }
+        await client.query(
           `UPDATE auth_password_reset_otps
            SET consumed_at = now()
            WHERE user_id = $1
@@ -880,16 +835,12 @@ router.post('/forgot-password', authPasswordResetLimiter, async (req, res) => {
           [user.id]
         );
 
-        await pool.query(
+        await client.query(
           `INSERT INTO auth_password_reset_otps
              (user_id, code_hash, sent_to, expires_at, ip_address)
            VALUES ($1, $2, $3, $4, $5::inet)`,
           [user.id, codeHash, phone, expiresAt, ipForDb]
         );
-
-        if (process.env.AUTH_PASSWORD_RESET_LOG_OTP === 'true') {
-          console.warn(`[auth/forgot-password] OTP for ${email}: ${code}`);
-        }
 
         try {
           await sendPasswordResetOtpSms({
@@ -898,10 +849,8 @@ router.post('/forgot-password', authPasswordResetLimiter, async (req, res) => {
             ttlMinutes: passwordResetTtlMinutes(),
           });
         } catch (smsErr) {
-          console.error(
-            `[auth/forgot-password] UniSMS send failed for user ${user.id}:`,
-            smsErr.message
-          );
+          await client.query('ROLLBACK');
+          return res.json({ message: PASSWORD_RESET_REQUEST_MESSAGE, expiresInMs: PASSWORD_RESET_OTP_TTL_MS });
         }
       } else {
         console.warn(
@@ -910,13 +859,16 @@ router.post('/forgot-password', authPasswordResetLimiter, async (req, res) => {
       }
     }
 
+    await client.query('COMMIT');
     return res.json({
       message: PASSWORD_RESET_REQUEST_MESSAGE,
       expiresInMs: PASSWORD_RESET_OTP_TTL_MS,
     });
   } catch (err) {
-    console.error('[auth/forgot-password]', err);
+    if (client) { try { await client.query('ROLLBACK'); } catch (_) {} }
     return res.status(500).json({ error: 'Failed to start password reset' });
+  } finally {
+    if (client) client.release();
   }
 });
 
@@ -926,13 +878,13 @@ router.post('/forgot-password', authPasswordResetLimiter, async (req, res) => {
  */
 router.post('/reset-password', authPasswordResetVerifyLimiter, async (req, res) => {
   const email = normalizeEmail(req.body?.email);
-  const code = String(req.body?.code || '').replace(/\D/g, '');
+  const code = String(req.body?.code || '').trim();
   const newPassword = String(req.body?.new_password || req.body?.newPassword || '');
 
   if (!email || !code || !newPassword) {
     return res.status(400).json({ error: 'Email, code, and new password are required' });
   }
-  if (code.length !== PASSWORD_RESET_OTP_DIGITS) {
+  if (!new RegExp(`^\\d{${PASSWORD_RESET_OTP_DIGITS}}$`).test(code)) {
     return res.status(400).json({ error: PASSWORD_RESET_INVALID_CODE_MESSAGE });
   }
   if (newPassword.length < PASSWORD_RESET_MIN_PASSWORD_LENGTH) {
@@ -944,20 +896,19 @@ router.post('/reset-password', authPasswordResetVerifyLimiter, async (req, res) 
   let client;
   try {
     await ensurePasswordResetOtpTable();
-
-    const userResult = await pool.query(
-      `SELECT id, is_active
+    client = await pool.connect();
+    await client.query('BEGIN');
+    const userResult = await client.query(
+      `SELECT id, is_active, employment_status
        FROM users
-       WHERE LOWER(email) = $1`,
+       WHERE LOWER(email) = $1 FOR UPDATE`,
       [email]
     );
     const user = userResult.rows[0];
-    if (!user || !user.is_active) {
+    if (!user || !user.is_active || user.employment_status !== 'active') {
+      await client.query('ROLLBACK');
       return res.status(400).json({ error: PASSWORD_RESET_INVALID_CODE_MESSAGE });
     }
-
-    client = await pool.connect();
-    await client.query('BEGIN');
 
     const otpResult = await client.query(
       `SELECT id, code_hash, failed_attempts, expires_at
@@ -994,7 +945,8 @@ router.post('/reset-password', authPasswordResetVerifyLimiter, async (req, res) 
     const passwordHash = await bcrypt.hash(newPassword, SALT_ROUNDS);
     await client.query(
       `UPDATE users
-       SET password_hash = $1,
+      SET password_hash = $1,
+           auth_version = auth_version + 1,
            updated_at = now()
        WHERE id = $2`,
       [passwordHash, user.id]
@@ -1002,8 +954,8 @@ router.post('/reset-password', authPasswordResetVerifyLimiter, async (req, res) 
     await client.query(
       `UPDATE auth_password_reset_otps
        SET consumed_at = now()
-       WHERE id = $1`,
-      [otp.id]
+       WHERE user_id = $1 AND consumed_at IS NULL`,
+      [user.id]
     );
     await client.query(
       `UPDATE auth_refresh_tokens
@@ -1013,7 +965,15 @@ router.post('/reset-password', authPasswordResetVerifyLimiter, async (req, res) 
       [user.id]
     );
 
+    const resolved = await client.query(`UPDATE password_reset_requests
+      SET status = 'closed', closed_at = now(), completed_at = now()
+      WHERE user_id = $1 AND status IN ('pending', 'sent') RETURNING id, handled_by`, [user.id]);
+    await client.query(`INSERT INTO audit_logs (user_id, action, entity_type, entity_id, details)
+      VALUES ($1, 'password_reset_completed', 'user', $1, $2)`,
+      [user.id, JSON.stringify({ assistance_request_ids: resolved.rows.map(r => r.id) })]);
     await client.query('COMMIT');
+    disconnectUserSessions(user.id);
+    if (resolved.rowCount) notifyPasswordResetRequestsChanged();
     return res.json({ message: 'Password has been reset' });
   } catch (err) {
     if (client) {
@@ -1021,7 +981,7 @@ router.post('/reset-password', authPasswordResetVerifyLimiter, async (req, res) 
         await client.query('ROLLBACK');
       } catch (_) {}
     }
-    console.error('[auth/reset-password]', err);
+    console.error('[auth/reset-password] Reset transaction failed');
     return res.status(500).json({ error: 'Failed to reset password' });
   } finally {
     if (client) client.release();
