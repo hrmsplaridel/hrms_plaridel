@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
+import 'package:hrms_plaridel/shared/widgets/workforce_loading_skeleton.dart';
 import 'package:flutter/services.dart';
 import 'package:pdf/pdf.dart';
 import 'package:printing/printing.dart';
@@ -13,6 +14,7 @@ import 'package:hrms_plaridel/features/dtr/attendance/models/time_record.dart';
 import 'package:hrms_plaridel/features/dtr/reports/data/dtr_export.dart';
 import 'package:hrms_plaridel/features/dtr/reports/data/official_time.dart';
 import 'package:hrms_plaridel/features/dtr/reports/data/dtr_report_readiness.dart';
+import 'package:hrms_plaridel/features/dtr/reports/data/dtr_summary_equivalent_day.dart';
 import 'package:hrms_plaridel/features/dtr/reports/data/dtr_report_request_guard.dart';
 import 'package:hrms_plaridel/features/dtr/reports/data/dtr_report_employee_status.dart';
 import 'package:hrms_plaridel/features/dtr/dtr_provider.dart';
@@ -206,7 +208,10 @@ class _DtrReportsState extends State<DtrReports> {
               officialHours: assignment.officialHours,
               scheduledWorkHoursPerDay: assignment.workHoursPerDay,
               punchMode: assignment.punchMode,
+              overnight: assignment.overnight,
+              shiftEndMinutes: assignment.shiftEndMinutes,
               workingDays: assignment.workingDays,
+              scheduleOverrides: assignment.scheduleOverrides,
             ),
           )
           .toList(growable: false);
@@ -686,7 +691,10 @@ class _DtrReportsState extends State<DtrReports> {
       return '${h12.toString().padLeft(2, '0')}:${m.toString().padLeft(2, '0')}${isPm ? 'PM' : 'AM'}';
     }
 
-    return '${toAmPm(start)}-${toAmPm(end)}';
+    final crossesMidnight =
+        (_parseShiftClockMinutes(end) ?? 1440) <
+        (_parseShiftClockMinutes(start) ?? 0);
+    return '${toAmPm(start)}-${toAmPm(end)}${crossesMidnight ? ' (+1 day)' : ''}';
   }
 
   Future<List<_DtrAssignmentInfo>> _fetchAssignmentTimelineForEmployee(
@@ -698,7 +706,16 @@ class _DtrReportsState extends State<DtrReports> {
     final effectiveMonth = month ?? _selectedMonth;
     final res = await ApiClient.instance.get<List<dynamic>>(
       '/api/assignments',
-      queryParameters: {'employee_id': employeeId, 'status': 'All'},
+      queryParameters: {
+        'employee_id': employeeId,
+        'status': 'All',
+        'start_date': _reportDateKey(
+          DateTime(effectiveYear, effectiveMonth, 1),
+        ),
+        'end_date': _reportDateKey(
+          DateTime(effectiveYear, effectiveMonth + 1, 0),
+        ),
+      },
     );
     return _parseAssignmentTimeline(
       res.data ?? const [],
@@ -737,6 +754,17 @@ class _DtrReportsState extends State<DtrReports> {
             .where((x) => x >= 1 && x <= 7)
             .toList();
       }
+      final scheduleOverrides = <String, bool>{};
+      final rawOverrides = m['schedule_overrides'];
+      if (rawOverrides is List) {
+        for (final rawOverride in rawOverrides.whereType<Map>()) {
+          final date = rawOverride['date']?.toString().trim() ?? '';
+          final value = rawOverride['is_working_day'];
+          if (RegExp(r'^\d{4}-\d{2}-\d{2}$').hasMatch(date) && value is bool) {
+            scheduleOverrides[date] = value;
+          }
+        }
+      }
       String? officialHours;
       final st = m['start_time'];
       final et = m['end_time'];
@@ -756,12 +784,19 @@ class _DtrReportsState extends State<DtrReports> {
       assignments.add(
         _DtrAssignmentInfo(
           workingDays: (days != null && days.isNotEmpty) ? days : null,
+          scheduleOverrides: scheduleOverrides,
           officialHours: officialHours,
+          overnight:
+              startMinutes != null &&
+              endMinutes != null &&
+              endMinutes < startMinutes,
+          shiftEndMinutes: endMinutes,
           workHoursPerDay: _reportShiftWorkHours(
             startMinutes: startMinutes,
             endMinutes: endMinutes,
             breakEndMinutes: breakEndMinutes,
             punchMode: punchMode,
+            breakStartMinutes: _parseShiftClockMinutes(m['break_start']),
           ),
           punchMode: punchMode,
           effectiveFrom: DateTime(from.year, from.month, from.day),
@@ -797,6 +832,8 @@ class _DtrReportsState extends State<DtrReports> {
   bool _isScheduledWorkDayFor(DateTime dt, List<_DtrAssignmentInfo> timeline) {
     final assignment = _assignmentForDate(dt, timeline);
     if (assignment == null) return false;
+    final override = assignment.scheduleOverrides[_reportDateKey(dt)];
+    if (override != null) return override;
     final shiftWd =
         assignment.workingDays != null && assignment.workingDays!.isNotEmpty
         ? assignment.workingDays!.toSet()
@@ -898,16 +935,17 @@ class _DtrReportsState extends State<DtrReports> {
     _load();
   }
 
-  static String _formatTime(DateTime? dt) {
-    return formatOfficialPhilippineTime(dt);
-  }
-
   static String _cellDisplayForSegment({
     required TimeRecord record,
     required DateTime? timeValue,
     required String segment,
   }) {
-    if (timeValue != null) return _formatTime(timeValue);
+    if (timeValue != null) {
+      return formatOfficialPhilippineTime(
+        timeValue,
+        attendanceDate: record.recordDate,
+      );
+    }
     final segs = record.locatorSlipSegments ?? const <String>[];
     if (segs.any((s) => s.toUpperCase() == segment)) {
       return record.locatorSlipSlotLabel;
@@ -1651,7 +1689,10 @@ class _DtrReportsState extends State<DtrReports> {
               officialHours: assignment.officialHours,
               scheduledWorkHoursPerDay: assignment.workHoursPerDay,
               punchMode: assignment.punchMode,
+              overnight: assignment.overnight,
+              shiftEndMinutes: assignment.shiftEndMinutes,
               workingDays: assignment.workingDays,
+              scheduleOverrides: assignment.scheduleOverrides,
             ),
           )
           .toList(growable: false),
@@ -2783,6 +2824,17 @@ class _DtrReportsState extends State<DtrReports> {
     BuildContext context,
     List<EmployeeOption> employees,
   ) {
+    if (_employeesState == DtrReportDataState.loading) {
+      return const SizedBox(
+        width: 260,
+        child: SingleChildScrollView(
+          child: WorkforceRowsSkeleton(
+            columns: [1, 3],
+            label: 'Loading employees',
+          ),
+        ),
+      );
+    }
     final dark = AppTheme.dashIsDark(context);
     return Container(
       width: 260,
@@ -2920,13 +2972,37 @@ class _DtrReportsState extends State<DtrReports> {
     bool compactColumns = false,
     double? availableWidth,
   }) {
+    final visibleRecords = sortedDates
+        .map((date) => recordsByDate[date])
+        .whereType<TimeRecord>()
+        .toList();
+    final singleSession = visibleRecords.isEmpty
+        ? _shiftPunchMode == 'single_session'
+        : visibleRecords.every(
+            (record) => record.shiftPunchMode == 'single_session',
+          );
+    final genericHeaders =
+        singleSession ||
+        visibleRecords.any(
+          (record) =>
+              record.shiftIsOvernight ||
+              record.shiftPunchMode == 'single_session',
+        );
     final colDate = compactColumns ? 80.0 : 90.0;
-    final colTime = compactColumns ? 58.0 : 70.0;
+    final colTime = compactColumns ? 84.0 : 96.0;
     final colLate = compactColumns ? 48.0 : 58.0;
     final colUndertime = compactColumns ? 72.0 : 78.0;
     final minTableWidth = compactColumns
-        ? (colDate + colTime * 4 + colLate + colUndertime + 70)
-        : 550.0 + colLate + colUndertime;
+        ? (colDate +
+              colTime * (singleSession ? 2 : 4) +
+              colLate +
+              colUndertime +
+              100)
+        : colDate +
+              colTime * (singleSession ? 2 : 4) +
+              colLate +
+              colUndertime +
+              140;
     final tableWidth = availableWidth != null
         ? availableWidth.clamp(minTableWidth, double.infinity)
         : minTableWidth;
@@ -2973,19 +3049,33 @@ class _DtrReportsState extends State<DtrReports> {
                     ),
                     SizedBox(
                       width: colTime,
-                      child: Text('AM IN', style: headerStyle),
+                      child: Text(
+                        genericHeaders ? 'TIME IN' : 'AM IN',
+                        style: headerStyle,
+                      ),
                     ),
+                    if (!singleSession)
+                      SizedBox(
+                        width: colTime,
+                        child: Text(
+                          genericHeaders ? 'BREAK OUT' : 'AM OUT',
+                          style: headerStyle,
+                        ),
+                      ),
+                    if (!singleSession)
+                      SizedBox(
+                        width: colTime,
+                        child: Text(
+                          genericHeaders ? 'BREAK IN' : 'PM IN',
+                          style: headerStyle,
+                        ),
+                      ),
                     SizedBox(
                       width: colTime,
-                      child: Text('AM OUT', style: headerStyle),
-                    ),
-                    SizedBox(
-                      width: colTime,
-                      child: Text('PM IN', style: headerStyle),
-                    ),
-                    SizedBox(
-                      width: colTime,
-                      child: Text('PM OUT', style: headerStyle),
+                      child: Text(
+                        genericHeaders ? 'TIME OUT' : 'PM OUT',
+                        style: headerStyle,
+                      ),
                     ),
                     SizedBox(
                       width: colLate,
@@ -3009,7 +3099,13 @@ class _DtrReportsState extends State<DtrReports> {
               ),
               Expanded(
                 child: _reportLoading
-                    ? const Center(child: CircularProgressIndicator())
+                    ? const SingleChildScrollView(
+                        child: WorkforceRowsSkeleton(
+                          columns: [2, 1, 1, 1, 1, 1, 1, 2],
+                          rows: 8,
+                          label: 'Loading attendance report',
+                        ),
+                      )
                     : sortedDates.isEmpty
                     ? Center(
                         child: Padding(
@@ -3071,38 +3167,44 @@ class _DtrReportsState extends State<DtrReports> {
                                         ? '—'
                                         : _cellDisplayForSegment(
                                             record: rec,
-                                            timeValue: rec.timeIn,
+                                            timeValue:
+                                                rec.timeIn ??
+                                                (singleSession
+                                                    ? rec.breakIn
+                                                    : null),
                                             segment: 'AM IN',
                                           ),
                                     style: cellStyle,
                                   ),
                                 ),
-                                SizedBox(
-                                  width: colTime,
-                                  child: Text(
-                                    rec == null
-                                        ? '—'
-                                        : _cellDisplayForSegment(
-                                            record: rec,
-                                            timeValue: rec.breakOut,
-                                            segment: 'AM OUT',
-                                          ),
-                                    style: cellStyle,
+                                if (!singleSession)
+                                  SizedBox(
+                                    width: colTime,
+                                    child: Text(
+                                      rec == null
+                                          ? '—'
+                                          : _cellDisplayForSegment(
+                                              record: rec,
+                                              timeValue: rec.breakOut,
+                                              segment: 'AM OUT',
+                                            ),
+                                      style: cellStyle,
+                                    ),
                                   ),
-                                ),
-                                SizedBox(
-                                  width: colTime,
-                                  child: Text(
-                                    rec == null
-                                        ? '—'
-                                        : _cellDisplayForSegment(
-                                            record: rec,
-                                            timeValue: rec.breakIn,
-                                            segment: 'PM IN',
-                                          ),
-                                    style: cellStyle,
+                                if (!singleSession)
+                                  SizedBox(
+                                    width: colTime,
+                                    child: Text(
+                                      rec == null
+                                          ? '—'
+                                          : _cellDisplayForSegment(
+                                              record: rec,
+                                              timeValue: rec.breakIn,
+                                              segment: 'PM IN',
+                                            ),
+                                      style: cellStyle,
+                                    ),
                                   ),
-                                ),
                                 SizedBox(
                                   width: colTime,
                                   child: Text(
@@ -3110,7 +3212,11 @@ class _DtrReportsState extends State<DtrReports> {
                                         ? '—'
                                         : _cellDisplayForSegment(
                                             record: rec,
-                                            timeValue: rec.timeOut,
+                                            timeValue:
+                                                rec.timeOut ??
+                                                (singleSession
+                                                    ? rec.breakOut
+                                                    : null),
                                             segment: 'PM OUT',
                                           ),
                                     style: cellStyle,
@@ -3215,23 +3321,41 @@ class _DtrReportsState extends State<DtrReports> {
     required DateTime start,
     required DateTime end,
   }) {
+    if (_reportLoading || _employeesState == DtrReportDataState.loading) {
+      return Container(
+        width: fullWidth ? double.infinity : 200,
+        padding: const EdgeInsets.all(16),
+        decoration: AppTheme.dashSurfaceCard(context, radius: 12),
+        child: const SingleChildScrollView(
+          child: WorkforceRowsSkeleton(
+            columns: [1, 1],
+            rows: 4,
+            cellHeight: 40,
+            label: 'Loading report summary',
+          ),
+        ),
+      );
+    }
     final dark = AppTheme.dashIsDark(context);
     final compactPanel = dense || !fullWidth;
-    final equivalentDay = _hasUnverifiedInactiveAttendance
-        ? null
-        : DtrExport.calculateOfficialTotals(
-            year: _selectedYear,
-            month: _selectedMonth,
-            start: start,
-            end: end,
-            recordsByDate: recordsByDate,
-            scheduledWorkHoursPerDay: _shiftWorkHoursPerDay,
-            workingDays: _shiftWorkingDays,
-            assignmentEffectiveFrom: _assignmentEffectiveFrom,
-            assignmentEffectiveTo: _assignmentEffectiveTo,
-            assignmentSegments: _exportAssignmentSegments,
-            reportableThrough: _reportableThrough,
-          ).equivalentDay;
+    final equivalentDay = summaryEquivalentDay(
+      employeeId: _selectedEmployeeId,
+      hasRecords: hasRecords,
+      hasUnverifiedInactiveAttendance: _hasUnverifiedInactiveAttendance,
+      calculate: () => DtrExport.calculateOfficialTotals(
+        year: _selectedYear,
+        month: _selectedMonth,
+        start: start,
+        end: end,
+        recordsByDate: recordsByDate,
+        scheduledWorkHoursPerDay: _shiftWorkHoursPerDay,
+        workingDays: _shiftWorkingDays,
+        assignmentEffectiveFrom: _assignmentEffectiveFrom,
+        assignmentEffectiveTo: _assignmentEffectiveTo,
+        assignmentSegments: _exportAssignmentSegments,
+        reportableThrough: _reportableThrough,
+      ).equivalentDay,
+    );
     return Container(
       width: fullWidth ? null : 200,
       constraints: fullWidth
@@ -3669,6 +3793,13 @@ class _DtrReportsState extends State<DtrReports> {
     BuildContext context,
     List<EmployeeOption> employees,
   ) {
+    if (_employeesState == DtrReportDataState.loading) {
+      return const WorkforceRowsSkeleton(
+        columns: [1, 3],
+        rows: 3,
+        label: 'Loading employees',
+      );
+    }
     final dark = AppTheme.dashIsDark(context);
     return Container(
       decoration: AppTheme.dashSurfaceCard(context, radius: 12),
@@ -3829,6 +3960,7 @@ String _resolveReportPunchMode(
     return mode;
   }
   if (startMinutes == null) return 'auto';
+  if (endMinutes != null && endMinutes < startMinutes) return 'single_session';
   if (startMinutes >= 12 * 60) return 'pm_only';
   if (breakEndMinutes == null && endMinutes != null && endMinutes <= 13 * 60) {
     return 'am_only';
@@ -3841,10 +3973,18 @@ double? _reportShiftWorkHours({
   required int? endMinutes,
   required int? breakEndMinutes,
   required String punchMode,
+  int? breakStartMinutes,
 }) {
   if (startMinutes == null || endMinutes == null) return null;
   var spanMinutes = endMinutes - startMinutes;
   if (spanMinutes <= 0) spanMinutes += 24 * 60;
+  if (punchMode == 'full_day' && endMinutes < startMinutes) {
+    int normalize(int value) => value < startMinutes ? value + 1440 : value;
+    final duration =
+        normalize(breakEndMinutes ?? 13 * 60) -
+        normalize(breakStartMinutes ?? 12 * 60);
+    return (spanMinutes - duration).clamp(0, 1440) / 60;
+  }
   if (punchMode == 'full_day') {
     final lunchMinutes = breakEndMinutes == null
         ? 60
@@ -3874,9 +4014,12 @@ class _DtrBulkReportBatch {
 class _DtrAssignmentInfo {
   const _DtrAssignmentInfo({
     this.workingDays,
+    this.scheduleOverrides = const {},
     this.officialHours,
     this.workHoursPerDay,
     this.punchMode,
+    this.overnight = false,
+    this.shiftEndMinutes,
     this.effectiveFrom,
     this.effectiveTo,
     this.department,
@@ -3884,14 +4027,22 @@ class _DtrAssignmentInfo {
   });
 
   final List<int>? workingDays;
+  final Map<String, bool> scheduleOverrides;
   final String? officialHours;
   final double? workHoursPerDay;
   final String? punchMode;
+  final bool overnight;
+  final int? shiftEndMinutes;
   final DateTime? effectiveFrom;
   final DateTime? effectiveTo;
   final String? department;
   final String? position;
 }
+
+String _reportDateKey(DateTime date) =>
+    '${date.year.toString().padLeft(4, '0')}-'
+    '${date.month.toString().padLeft(2, '0')}-'
+    '${date.day.toString().padLeft(2, '0')}';
 
 class _ToggleDtrMultiSelectIntent extends Intent {
   const _ToggleDtrMultiSelectIntent();

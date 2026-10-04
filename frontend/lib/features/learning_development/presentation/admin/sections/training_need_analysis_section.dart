@@ -7,6 +7,8 @@ import 'package:hrms_plaridel/core/utils/form_pdf.dart';
 import 'package:hrms_plaridel/features/learning_development/models/training_need_analysis.dart';
 import 'package:hrms_plaridel/features/recruitment/presentation/admin/widgets/rsp_records_list_table.dart';
 import 'package:hrms_plaridel/shared/widgets/read_only_saved_entry_dialog.dart';
+import 'package:hrms_plaridel/shared/widgets/form_document_preview.dart';
+import 'package:hrms_plaridel/shared/widgets/rsp_ld_form_header.dart';
 import 'package:hrms_plaridel/shared/widgets/rsp_ld_record_actions.dart';
 import 'package:hrms_plaridel/shared/widgets/rsp_ld_saved_records_browser.dart';
 
@@ -228,6 +230,18 @@ class _TrainingNeedAnalysisAdminSectionState
     } catch (_) {}
   }
 
+  Future<void> _preview(TrainingNeedAnalysisEntry entry) {
+    return openFormDocumentPreview(
+      context: context,
+      title: 'Training Need Analysis',
+      filename: 'Training_Need_Analysis.pdf',
+      format: FormPdf.pageLetterLandscape,
+      printModule: 'ld',
+      printFormKey: 'training_need_analysis',
+      buildDocument: () => FormPdf.buildTrainingNeedAnalysisPdf(entry),
+    );
+  }
+
   Future<void> _download(TrainingNeedAnalysisEntry entry) async {
     try {
       final doc = await FormPdf.buildTrainingNeedAnalysisPdf(entry);
@@ -269,6 +283,9 @@ class _TrainingNeedAnalysisAdminSectionState
             onDownloadPdf: (_) async {},
           ),
           onPrint: () => _print(e),
+          onDocumentPreview: () => _preview(e),
+          onEdit: () => _edit(e),
+          onDelete: e.id == null ? null : () => _onDelete(e.id!),
         );
       }).toList(),
     );
@@ -298,37 +315,31 @@ class _TrainingNeedAnalysisAdminSectionState
             side: BorderSide(color: AppTheme.dashHairlineOf(context)),
           ),
         ),
-        OutlinedButton.icon(
-          onPressed: _loading ? null : _openSavedRecordsBrowser,
-          icon: const Icon(Icons.folder_open_outlined, size: 18),
-          label: const Text('View Records'),
-          style: OutlinedButton.styleFrom(
-            foregroundColor: AppTheme.dashTextPrimaryOf(context),
-            side: BorderSide(color: AppTheme.dashHairlineOf(context)),
+        if (_editing != null)
+          OutlinedButton.icon(
+            onPressed: _loading ? null : _openSavedRecordsBrowser,
+            icon: const Icon(Icons.folder_open_outlined, size: 18),
+            label: const Text('View Records'),
+            style: OutlinedButton.styleFrom(
+              foregroundColor: AppTheme.dashTextPrimaryOf(context),
+              side: BorderSide(color: AppTheme.dashHairlineOf(context)),
+            ),
           ),
-        ),
       ],
     );
   }
 
   @override
   Widget build(BuildContext context) {
-    final secondary = AppTheme.dashTextSecondaryOf(context);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          'Training Need Analysis & Consolidated Report',
-          style: TextStyle(
-            color: AppTheme.dashTextPrimaryOf(context),
-            fontSize: 22,
-            fontWeight: FontWeight.w700,
-          ),
-        ),
-        const SizedBox(height: 6),
-        Text(
-          'Identify employee development needs and recommended training.',
-          style: TextStyle(color: secondary, fontSize: 14),
+        RspLdFormHeader(
+          module: 'L&D',
+          title: 'Training Need Analysis & Consolidated Report',
+          subtitle:
+              'Identify employee development needs and recommended training.',
+          actions: _toolbar(context),
         ),
         const SizedBox(height: 20),
         if (_editing != null) ...[
@@ -338,31 +349,31 @@ class _TrainingNeedAnalysisAdminSectionState
             onSave: _onSave,
             onCancel: _cancelEdit,
             onPrint: _print,
+            onPreview: _preview,
             onDownloadPdf: _download,
           ),
           const SizedBox(height: 24),
+        ] else ...[
+          if (_loading)
+            const Padding(
+              padding: EdgeInsets.all(24),
+              child: Center(child: CircularProgressIndicator()),
+            )
+          else if (_entries.isEmpty)
+            const RspFormEmptyState(
+              message:
+                  'No reports yet. Tap "New Report" to create a Training Need Analysis.',
+              icon: Icons.school_outlined,
+            )
+          else
+            _TrainingNeedAnalysisList(
+              entries: _entries,
+              onEdit: _edit,
+              onDelete: _onDelete,
+              onPrint: _print,
+              onDownloadPdf: _download,
+            ),
         ],
-        _toolbar(context),
-        const SizedBox(height: 16),
-        if (_loading)
-          const Padding(
-            padding: EdgeInsets.all(24),
-            child: Center(child: CircularProgressIndicator()),
-          )
-        else if (_entries.isEmpty)
-          const RspFormEmptyState(
-            message:
-                'No reports yet. Tap "New Report" to create a Training Need Analysis.',
-            icon: Icons.school_outlined,
-          )
-        else
-          _TrainingNeedAnalysisList(
-            entries: _entries,
-            onEdit: _edit,
-            onDelete: _onDelete,
-            onPrint: _print,
-            onDownloadPdf: _download,
-          ),
       ],
     );
   }
@@ -383,6 +394,7 @@ class TrainingNeedAnalysisEditor extends StatefulWidget {
     required this.onSave,
     required this.onCancel,
     required this.onPrint,
+    this.onPreview,
     required this.onDownloadPdf,
   });
 
@@ -391,6 +403,7 @@ class TrainingNeedAnalysisEditor extends StatefulWidget {
   final void Function(TrainingNeedAnalysisEntry) onSave;
   final VoidCallback onCancel;
   final Future<void> Function(TrainingNeedAnalysisEntry) onPrint;
+  final Future<void> Function(TrainingNeedAnalysisEntry)? onPreview;
   final Future<void> Function(TrainingNeedAnalysisEntry) onDownloadPdf;
 
   @override
@@ -784,55 +797,45 @@ class _TrainingNeedAnalysisEditorState
     );
   }
 
-  Widget _actionBar(BuildContext context) {
+  Widget _actionBar(BuildContext context, bool ro) {
     return Wrap(
-      alignment: WrapAlignment.spaceBetween,
+      spacing: 8,
+      runSpacing: 8,
       crossAxisAlignment: WrapCrossAlignment.center,
-      runSpacing: 10,
-      spacing: 12,
       children: [
-        Wrap(
-          spacing: 10,
-          runSpacing: 10,
-          crossAxisAlignment: WrapCrossAlignment.center,
-          children: [
-            FilledButton.icon(
-              onPressed: _save,
-              icon: const Icon(Icons.save_rounded, size: 18),
-              label: const Text('Save Report'),
-              style: FilledButton.styleFrom(
-                backgroundColor: AppTheme.primaryNavy,
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 22,
-                  vertical: 14,
-                ),
-              ),
+        if (!ro) ...[
+          FilledButton.icon(
+            onPressed: _save,
+            icon: const Icon(Icons.save_rounded, size: 18),
+            label: const Text('Save Report'),
+            style: FilledButton.styleFrom(
+              backgroundColor: AppTheme.primaryNavy,
+              padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
             ),
-            OutlinedButton.icon(
-              onPressed: widget.onCancel,
-              icon: const Icon(Icons.close_rounded, size: 18),
-              label: const Text('Cancel'),
-            ),
-          ],
-        ),
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          crossAxisAlignment: WrapCrossAlignment.center,
-          children: [
-            IconButton(
-              tooltip: 'Print',
-              style: rspLdRecordIconButtonStyle(),
-              onPressed: () => widget.onPrint(_buildEntry()),
-              icon: const Icon(Icons.print_rounded, size: 20),
-            ),
-            IconButton(
-              tooltip: 'Export PDF',
-              style: rspLdRecordIconButtonStyle(),
-              onPressed: () => widget.onDownloadPdf(_buildEntry()),
-              icon: const Icon(Icons.picture_as_pdf_rounded, size: 20),
-            ),
-          ],
+          ),
+          OutlinedButton.icon(
+            onPressed: widget.onCancel,
+            icon: const Icon(Icons.close_rounded, size: 18),
+            label: const Text('Cancel'),
+          ),
+        ],
+        if (widget.onPreview != null)
+          FormPreviewPrintButtons(
+            onPreview: () => widget.onPreview!(_buildEntry()),
+            onPrint: () => widget.onPrint(_buildEntry()),
+          )
+        else
+          RspLdBusyIconButton(
+            tooltip: 'Print Form',
+            icon: Icons.print_rounded,
+            busyTooltip: 'Preparing print…',
+            onPressed: () => widget.onPrint(_buildEntry()),
+          ),
+        IconButton(
+          tooltip: 'Export PDF',
+          style: rspLdRecordIconButtonStyle(),
+          onPressed: () => widget.onDownloadPdf(_buildEntry()),
+          icon: const Icon(Icons.picture_as_pdf_rounded, size: 20),
         ),
       ],
     );
@@ -845,60 +848,69 @@ class _TrainingNeedAnalysisEditorState
         ? 'Training Need Analysis — CY $_cyYear'
         : 'New Training Need Analysis';
     return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 16, 20, 16),
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 680),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Row(
+      padding: const EdgeInsets.fromLTRB(20, 16, 16, 16),
+      child: Wrap(
+        alignment: WrapAlignment.spaceBetween,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        runSpacing: 10,
+        spacing: 12,
+        children: [
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 420),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
-                Flexible(
-                  child: Text(
-                    title,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontSize: 17,
-                      fontWeight: FontWeight.w800,
-                      color: primary,
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Flexible(
+                      child: Text(
+                        title,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 17,
+                          fontWeight: FontWeight.w800,
+                          color: primary,
+                        ),
+                      ),
                     ),
-                  ),
+                    if (ro) ...[
+                      const SizedBox(width: 10),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 4,
+                        ),
+                        decoration: BoxDecoration(
+                          color: Colors.blueGrey.withValues(alpha: 0.12),
+                          borderRadius: BorderRadius.circular(999),
+                          border: Border.all(
+                            color: Colors.blueGrey.withValues(alpha: 0.32),
+                          ),
+                        ),
+                        child: const Text(
+                          'Read-only preview',
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w800,
+                            color: Colors.blueGrey,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ],
                 ),
-                if (ro) ...[
-                  const SizedBox(width: 10),
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 10,
-                      vertical: 4,
-                    ),
-                    decoration: BoxDecoration(
-                      color: Colors.blueGrey.withValues(alpha: 0.12),
-                      borderRadius: BorderRadius.circular(999),
-                      border: Border.all(
-                        color: Colors.blueGrey.withValues(alpha: 0.32),
-                      ),
-                    ),
-                    child: const Text(
-                      'Read-only preview',
-                      style: TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w800,
-                        color: Colors.blueGrey,
-                      ),
-                    ),
-                  ),
-                ],
+                const SizedBox(height: 4),
+                Text(
+                  'Identify employee development needs and recommended training.',
+                  style: TextStyle(fontSize: 12.5, color: secondary),
+                ),
               ],
             ),
-            const SizedBox(height: 4),
-            Text(
-              'Identify employee development needs and recommended training.',
-              style: TextStyle(fontSize: 12.5, color: secondary),
-            ),
-          ],
-        ),
+          ),
+          _actionBar(context, ro),
+        ],
       ),
     );
   }
@@ -924,10 +936,6 @@ class _TrainingNeedAnalysisEditorState
                 _employeesHeader(context, ro),
                 const SizedBox(height: 14),
                 _employeesBody(context, ro),
-                if (!ro) ...[
-                  const SizedBox(height: 24),
-                  _actionBar(context),
-                ],
                 if (ro &&
                     (widget.entry.createdAt != null ||
                         widget.entry.updatedAt != null)) ...[
@@ -1515,7 +1523,7 @@ class _TrainingNeedAnalysisList extends StatelessWidget {
   final Future<void> Function(TrainingNeedAnalysisEntry) onDownloadPdf;
 
   String _formatUpdated(DateTime? dt) {
-    if (dt == null) return '—';
+    if (dt == null) return 'ΓÇö';
     final l = dt.toLocal();
     const months = [
       'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
@@ -1554,7 +1562,7 @@ class _TrainingNeedAnalysisList extends StatelessWidget {
                 onView: () => showReadOnlySavedEntryDialog(
                   context,
                   title: 'Training Need Analysis',
-                  subtitle: 'CY ${e.cyYear ?? '—'} · ${e.department ?? '—'}',
+                  subtitle: 'CY ${e.cyYear ?? 'ΓÇö'} ┬╖ ${e.department ?? 'ΓÇö'}',
                   previewBuilder: () => TrainingNeedAnalysisEditor(
                     readOnly: true,
                     entry: e,

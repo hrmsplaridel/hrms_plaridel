@@ -2,6 +2,7 @@ const express = require('express');
 const { pool } = require('../config/db');
 const { authMiddleware } = require('../middleware/auth');
 const { requireAdmin } = require('../middleware/rbac');
+const { requireDtrManageIfAdmin } = require('../middleware/dtrAccess');
 const {
   assignmentAccessDeniedForRows,
   filterAssignmentRowsForAccess,
@@ -138,6 +139,20 @@ router.get('/', protect, async (req, res) => {
       return res.status(access.statusCode).json({ error: access.error });
     }
     const employeeId = access.employeeId;
+    const rangeStart = req.query.start_date == null
+      ? null
+      : parseDate(req.query.start_date);
+    const rangeEnd = req.query.end_date == null
+      ? null
+      : parseDate(req.query.end_date);
+    if ((req.query.start_date != null && !rangeStart) ||
+        (req.query.end_date != null && !rangeEnd) ||
+        ((rangeStart == null) !== (rangeEnd == null)) ||
+        (rangeStart && rangeEnd && rangeEnd < rangeStart)) {
+      return res.status(400).json({
+        error: 'start_date and end_date must be a valid ascending YYYY-MM-DD range',
+      });
+    }
     const statusContext = assignmentStatusContext(req.query.status);
     const statusWhere = assignmentStatusWhereSql(
       'a',
@@ -186,6 +201,7 @@ router.get('/', protect, async (req, res) => {
               employee_policy.attendance_policy_name,
               s.start_time AS shift_start_time, s.end_time AS shift_end_time,
               s.break_end AS shift_break_end, s.punch_mode,
+              s.break_start, s.capture_window_minutes,
               s.working_days AS shift_working_days
        FROM assignments a
        LEFT JOIN departments d ON a.department_id = d.id
@@ -228,6 +244,22 @@ router.get('/', protect, async (req, res) => {
       });
     }
 
+    let scheduleOverrides = [];
+    if (rangeStart && rangeEnd) {
+      const overridesResult = await pool.query(
+        `SELECT schedule_date::text AS date, is_working_day
+         FROM employee_schedule_overrides
+         WHERE employee_id = $1::uuid
+           AND schedule_date BETWEEN $2::date AND $3::date
+         ORDER BY schedule_date`,
+        [employeeId, rangeStart, rangeEnd]
+      );
+      scheduleOverrides = overridesResult.rows.map((row) => ({
+        date: String(row.date).slice(0, 10),
+        is_working_day: row.is_working_day === true,
+      }));
+    }
+
     res.json(visibleRows.map((r) => {
       const wd = r.shift_working_days;
       const workingDays = Array.isArray(wd)
@@ -255,8 +287,14 @@ router.get('/', protect, async (req, res) => {
         end_time: r.override_end_time || r.shift_end_time,
         break_end: r.override_break_end || r.shift_break_end,
         punch_mode: r.punch_mode || 'auto',
+        break_start: r.break_start || null,
+        capture_window_minutes: Number(r.capture_window_minutes ?? 120),
         date_assigned: r.effective_from,
         working_days: workingDays?.length ? workingDays : [1, 2, 3, 4, 5],
+        schedule_overrides: scheduleOverrides.filter((override) =>
+          override.date >= String(r.effective_from).slice(0, 10) &&
+          (!r.effective_to || override.date <= String(r.effective_to).slice(0, 10))
+        ),
       };
     }));
   } catch (err) {
@@ -269,7 +307,7 @@ router.get('/', protect, async (req, res) => {
 });
 
 // POST /api/assignments - create (admin only)
-router.post('/', protect, requireAdmin, async (req, res) => {
+router.post('/', protect, requireAdmin, requireDtrManageIfAdmin, async (req, res) => {
   let client;
   try {
     client = await pool.connect();
@@ -401,7 +439,7 @@ router.post('/', protect, requireAdmin, async (req, res) => {
 });
 
 // PUT /api/assignments/:id - update (admin only)
-router.put('/:id', protect, requireAdmin, async (req, res) => {
+router.put('/:id', protect, requireAdmin, requireDtrManageIfAdmin, async (req, res) => {
   let client;
   try {
     client = await pool.connect();
@@ -617,7 +655,7 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
 });
 
 // DELETE /api/assignments/:id - archive without erasing history (admin only)
-router.delete('/:id', protect, requireAdmin, async (req, res) => {
+router.delete('/:id', protect, requireAdmin, requireDtrManageIfAdmin, async (req, res) => {
   let client;
   try {
     client = await pool.connect();
@@ -668,7 +706,7 @@ router.delete('/:id', protect, requireAdmin, async (req, res) => {
 });
 
 // DELETE /api/assignments/:id/permanent - remove an unused current/future mistake only
-router.delete('/:id/permanent', protect, requireAdmin, async (req, res) => {
+router.delete('/:id/permanent', protect, requireAdmin, requireDtrManageIfAdmin, async (req, res) => {
   let client;
   try {
     client = await pool.connect();

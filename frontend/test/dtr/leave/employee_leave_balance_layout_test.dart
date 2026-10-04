@@ -61,11 +61,21 @@ void main() {
     );
     expect(find.byType(LeaveBalanceCard), findsNothing);
     expect(find.byType(LeaveDaysCard), findsNothing);
+    final sickRow = find.byKey(const ValueKey('leave-balance-row-sickLeave'));
+    final annualRow = find.byKey(
+      const ValueKey('leave-balance-row-soloParentLeave'),
+    );
+    expect(sickRow, findsOneWidget);
+    expect(annualRow, findsOneWidget);
+    expect(tester.getSize(sickRow).width, lessThanOrEqualTo(560));
+    expect(tester.getSize(annualRow).width, lessThanOrEqualTo(560));
 
     await tester.binding.setSurfaceSize(const Size(1120, 1100));
     await tester.pump();
     await tester.pump();
     expect(tester.takeException(), isNull);
+    expect(tester.getSize(sickRow).width, lessThanOrEqualTo(560));
+    expect(tester.getSize(annualRow).width, lessThanOrEqualTo(560));
     expect(
       tester.getTopLeft(credits).dy,
       closeTo(tester.getTopLeft(entitlements).dy, 1),

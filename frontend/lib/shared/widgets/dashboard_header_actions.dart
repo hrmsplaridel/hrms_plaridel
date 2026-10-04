@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
 import 'package:hrms_plaridel/core/api/app_user.dart';
@@ -463,6 +464,44 @@ class DashboardAccountMenuButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final auth = context.watch<AuthProvider>();
+    final role = (auth.user?.role ?? '').trim().toLowerCase();
+    if (role == 'admin') {
+      return _AdminAccountMenuButton(
+        onProfile: onProfile,
+        avatarPath: avatarPath ?? auth.user?.avatarPath,
+        compact: compact,
+        tooltip: tooltip,
+        displayName: auth.displayName,
+        email: auth.email,
+        roleLabel: (auth.user?.role ?? '').trim(),
+        employeeId: auth.user?.displayEmployeeId,
+      );
+    }
+    return _LegacyAccountMenuButton(
+      onProfile: onProfile,
+      avatarPath: avatarPath,
+      compact: compact,
+      tooltip: tooltip,
+    );
+  }
+}
+
+class _LegacyAccountMenuButton extends StatelessWidget {
+  const _LegacyAccountMenuButton({
+    required this.onProfile,
+    this.avatarPath,
+    this.compact = false,
+    this.tooltip,
+  });
+
+  final VoidCallback onProfile;
+  final String? avatarPath;
+  final bool compact;
+  final String? tooltip;
+
+  @override
+  Widget build(BuildContext context) {
+    final auth = context.watch<AuthProvider>();
     final displayName = auth.displayName;
     final email = auth.email;
     final user = auth.user;
@@ -754,4 +793,627 @@ class _AccountMenuActionRow extends StatelessWidget {
       ],
     );
   }
+}
+
+class _AdminAccountMenuButton extends StatefulWidget {
+  const _AdminAccountMenuButton({
+    required this.onProfile,
+    required this.displayName,
+    required this.email,
+    required this.roleLabel,
+    this.avatarPath,
+    this.employeeId,
+    this.compact = false,
+    this.tooltip,
+  });
+
+  final VoidCallback onProfile;
+  final String displayName;
+  final String email;
+  final String roleLabel;
+  final String? avatarPath;
+  final String? employeeId;
+  final bool compact;
+  final String? tooltip;
+
+  @override
+  State<_AdminAccountMenuButton> createState() => _AdminAccountMenuButtonState();
+}
+
+class _AdminAccountMenuButtonState extends State<_AdminAccountMenuButton> {
+  final LayerLink _link = LayerLink();
+  final GlobalKey<_AdminAccountDropdownState> _menuKey =
+      GlobalKey<_AdminAccountDropdownState>();
+  OverlayEntry? _entry;
+
+  @override
+  void dispose() {
+    _removeEntry();
+    super.dispose();
+  }
+
+  void _removeEntry() {
+    _entry?.remove();
+    _entry = null;
+  }
+
+  Future<void> _close() async {
+    final menu = _menuKey.currentState;
+    if (menu != null) {
+      await menu.close();
+    }
+    _removeEntry();
+  }
+
+  void _toggle() {
+    if (_entry != null) {
+      _close();
+      return;
+    }
+    final overlay = Overlay.of(context, rootOverlay: true);
+    _entry = OverlayEntry(
+      builder: (overlayContext) {
+        final screenW = MediaQuery.sizeOf(overlayContext).width;
+        final width = screenW < 720
+            ? (screenW - 28).clamp(260.0, 340.0)
+            : 340.0;
+        return _AdminAccountDropdown(
+          key: _menuKey,
+          link: _link,
+          width: width,
+          displayName: widget.displayName.isNotEmpty
+              ? widget.displayName
+              : 'User',
+          email: widget.email,
+          roleLabel: widget.roleLabel,
+          employeeId: widget.employeeId,
+          avatarPath: widget.avatarPath,
+          onDismiss: _removeEntry,
+          onSettings: () async {
+            await _close();
+            if (!mounted) return;
+            widget.onProfile();
+          },
+          onSignOut: () async {
+            await _close();
+            if (!mounted) return;
+            await performDashboardSignOut(context);
+          },
+        );
+      },
+    );
+    overlay.insert(_entry!);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return CompositedTransformTarget(
+      link: _link,
+      child: MouseRegion(
+        cursor: SystemMouseCursors.click,
+        child: GestureDetector(
+          onTap: _toggle,
+          child: DashboardHeaderProfileAvatar(
+            avatarPath: widget.avatarPath,
+            compact: widget.compact,
+            tooltip: widget.tooltip ?? widget.displayName,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _AdminAccountDropdown extends StatefulWidget {
+  const _AdminAccountDropdown({
+    super.key,
+    required this.link,
+    required this.width,
+    required this.displayName,
+    required this.email,
+    required this.roleLabel,
+    required this.employeeId,
+    required this.avatarPath,
+    required this.onDismiss,
+    required this.onSettings,
+    required this.onSignOut,
+  });
+
+  final LayerLink link;
+  final double width;
+  final String displayName;
+  final String email;
+  final String roleLabel;
+  final String? employeeId;
+  final String? avatarPath;
+  final VoidCallback onDismiss;
+  final Future<void> Function() onSettings;
+  final Future<void> Function() onSignOut;
+
+  @override
+  State<_AdminAccountDropdown> createState() => _AdminAccountDropdownState();
+}
+
+class _AdminAccountDropdownState extends State<_AdminAccountDropdown>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+  var _closing = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 180),
+    )..forward();
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  Future<void> close() async {
+    if (_closing) return;
+    _closing = true;
+    await _controller.reverse();
+  }
+
+  Future<void> _dismiss() async {
+    await close();
+    if (!mounted) return;
+    widget.onDismiss();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final curved = CurvedAnimation(
+      parent: _controller,
+      curve: Curves.easeOutCubic,
+      reverseCurve: Curves.easeInCubic,
+    );
+    return Stack(
+      children: [
+        Positioned.fill(
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: _dismiss,
+            child: const SizedBox.expand(),
+          ),
+        ),
+        CompositedTransformFollower(
+          link: widget.link,
+          showWhenUnlinked: false,
+          targetAnchor: Alignment.bottomRight,
+          followerAnchor: Alignment.topRight,
+          offset: const Offset(0, 8),
+          child: FadeTransition(
+            opacity: curved,
+            child: SlideTransition(
+              position: Tween<Offset>(
+                begin: const Offset(0, -0.06),
+                end: Offset.zero,
+              ).animate(curved),
+              child: Focus(
+                autofocus: true,
+                onKeyEvent: (node, event) {
+                  if (event is KeyDownEvent &&
+                      event.logicalKey == LogicalKeyboardKey.escape) {
+                    _dismiss();
+                    return KeyEventResult.handled;
+                  }
+                  return KeyEventResult.ignored;
+                },
+                child: _AdminAccountCard(
+                  width: widget.width,
+                  displayName: widget.displayName,
+                  email: widget.email,
+                  roleLabel: widget.roleLabel,
+                  employeeId: widget.employeeId,
+                  avatarPath: widget.avatarPath,
+                  onSettings: widget.onSettings,
+                  onSignOut: widget.onSignOut,
+                ),
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _AdminAccountCard extends StatelessWidget {
+  const _AdminAccountCard({
+    required this.width,
+    required this.displayName,
+    required this.email,
+    required this.roleLabel,
+    required this.employeeId,
+    required this.avatarPath,
+    required this.onSettings,
+    required this.onSignOut,
+  });
+
+  final double width;
+  final String displayName;
+  final String email;
+  final String roleLabel;
+  final String? employeeId;
+  final String? avatarPath;
+  final Future<void> Function() onSettings;
+  final Future<void> Function() onSignOut;
+
+  @override
+  Widget build(BuildContext context) {
+    final dark = AppTheme.dashIsDark(context);
+    final primary = AppTheme.dashTextPrimaryOf(context);
+    final secondary = AppTheme.dashTextSecondaryOf(context);
+    final surface = dark ? AppTheme.dashPanelOf(context) : const Color(0xFFFFFCF9);
+    final id = (employeeId ?? '').trim();
+
+    return Material(
+      color: surface,
+      elevation: 8,
+      shadowColor: Colors.black.withValues(alpha: 0.12),
+      borderRadius: BorderRadius.circular(20),
+      clipBehavior: Clip.antiAlias,
+      child: Container(
+        width: width,
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(
+            color: AppTheme.primaryNavy.withValues(alpha: dark ? 0.28 : 0.16),
+          ),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.fromLTRB(14, 14, 14, 12),
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [
+                    AppTheme.primaryNavy.withValues(alpha: dark ? 0.16 : 0.10),
+                    AppTheme.primaryNavy.withValues(alpha: dark ? 0.04 : 0.02),
+                  ],
+                ),
+              ),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _AdminMenuAvatar(
+                    name: displayName,
+                    avatarPath: avatarPath,
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          displayName,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            color: primary,
+                            fontSize: 16.5,
+                            fontWeight: FontWeight.w800,
+                            height: 1.15,
+                            letterSpacing: -0.2,
+                          ),
+                        ),
+                        if (email.isNotEmpty) ...[
+                          const SizedBox(height: 4),
+                          Row(
+                            children: [
+                              Icon(
+                                Icons.mail_outline_rounded,
+                                size: 13,
+                                color: secondary,
+                              ),
+                              const SizedBox(width: 4),
+                              Expanded(
+                                child: Text(
+                                  email,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                    color: secondary,
+                                    fontSize: 12.5,
+                                    height: 1.2,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                        if (roleLabel.isNotEmpty) ...[
+                          const SizedBox(height: 6),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 8,
+                              vertical: 3,
+                            ),
+                            decoration: BoxDecoration(
+                              color: AppTheme.primaryNavy.withValues(
+                                alpha: dark ? 0.18 : 0.12,
+                              ),
+                              borderRadius: BorderRadius.circular(999),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(
+                                  Icons.verified_user_outlined,
+                                  size: 12,
+                                  color: AppTheme.primaryNavy,
+                                ),
+                                const SizedBox(width: 4),
+                                Text(
+                                  roleLabel.toUpperCase(),
+                                  style: const TextStyle(
+                                    color: AppTheme.primaryNavy,
+                                    fontSize: 10.5,
+                                    fontWeight: FontWeight.w800,
+                                    letterSpacing: 0.4,
+                                    height: 1,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            if (id.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
+                child: Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 8,
+                  ),
+                  decoration: BoxDecoration(
+                    color: dark
+                        ? AppTheme.primaryNavy.withValues(alpha: 0.10)
+                        : const Color(0xFFFFF6EF),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: AppTheme.primaryNavy.withValues(alpha: 0.22),
+                    ),
+                  ),
+                  child: Row(
+                    children: [
+                      Container(
+                        width: 32,
+                        height: 32,
+                        alignment: Alignment.center,
+                        decoration: BoxDecoration(
+                          color: AppTheme.primaryNavy.withValues(alpha: 0.12),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: const Icon(
+                          Icons.badge_outlined,
+                          size: 18,
+                          color: AppTheme.primaryNavy,
+                        ),
+                      ),
+                      Container(
+                        width: 1,
+                        height: 28,
+                        margin: const EdgeInsets.symmetric(horizontal: 10),
+                        color: AppTheme.primaryNavy.withValues(alpha: 0.22),
+                      ),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Employee ID',
+                              style: TextStyle(
+                                color: secondary,
+                                fontSize: 11,
+                                fontWeight: FontWeight.w600,
+                                height: 1.1,
+                              ),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              id,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                color: primary,
+                                fontSize: 15,
+                                fontWeight: FontWeight.w800,
+                                height: 1.1,
+                                letterSpacing: 0.2,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            Divider(
+              height: 1,
+              thickness: 1,
+              color: AppTheme.dashHairlineOf(context),
+            ),
+            _AdminMenuAction(
+              icon: Icons.settings_outlined,
+              label: 'Settings',
+              iconColor: AppTheme.primaryNavy,
+              iconBackground: AppTheme.primaryNavy.withValues(alpha: 0.12),
+              hoverColor: AppTheme.primaryNavy.withValues(alpha: 0.08),
+              onTap: onSettings,
+            ),
+            Divider(
+              height: 1,
+              thickness: 1,
+              color: AppTheme.dashHairlineOf(context),
+            ),
+            _AdminMenuAction(
+              icon: Icons.logout_rounded,
+              label: 'Sign out',
+              iconColor: const Color(0xFFC62828),
+              iconBackground: const Color(0xFFFFEBEE),
+              hoverColor: const Color(0xFFFFEBEE),
+              labelColor: const Color(0xFFC62828),
+              onTap: onSignOut,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _AdminMenuAvatar extends StatelessWidget {
+  const _AdminMenuAvatar({required this.name, required this.avatarPath});
+
+  final String name;
+  final String? avatarPath;
+
+  @override
+  Widget build(BuildContext context) {
+    final hasPhoto = (avatarPath ?? '').trim().isNotEmpty;
+    return Container(
+      padding: const EdgeInsets.all(2),
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        border: Border.all(color: AppTheme.primaryNavy, width: 1.5),
+      ),
+      child: hasPhoto
+          ? UserAvatar(
+              avatarPath: avatarPath,
+              radius: 26,
+              backgroundColor: Colors.white,
+              placeholderIconColor: AppTheme.primaryNavy,
+            )
+          : CircleAvatar(
+              radius: 26,
+              backgroundColor: AppTheme.primaryNavy.withValues(alpha: 0.12),
+              child: Text(
+                _accountInitials(name),
+                style: const TextStyle(
+                  color: AppTheme.primaryNavy,
+                  fontSize: 16,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ),
+    );
+  }
+}
+
+class _AdminMenuAction extends StatefulWidget {
+  const _AdminMenuAction({
+    required this.icon,
+    required this.label,
+    required this.iconColor,
+    required this.iconBackground,
+    required this.hoverColor,
+    required this.onTap,
+    this.labelColor,
+  });
+
+  final IconData icon;
+  final String label;
+  final Color iconColor;
+  final Color iconBackground;
+  final Color hoverColor;
+  final Color? labelColor;
+  final Future<void> Function() onTap;
+
+  @override
+  State<_AdminMenuAction> createState() => _AdminMenuActionState();
+}
+
+class _AdminMenuActionState extends State<_AdminMenuAction> {
+  var _hovered = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final labelColor =
+        widget.labelColor ?? AppTheme.dashTextPrimaryOf(context);
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      onEnter: (_) => setState(() => _hovered = true),
+      onExit: (_) => setState(() => _hovered = false),
+      child: Material(
+        color: _hovered ? widget.hoverColor : Colors.transparent,
+        child: InkWell(
+          onTap: () => widget.onTap(),
+          child: SizedBox(
+            height: 54,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              child: Row(
+                children: [
+                  Container(
+                    width: 34,
+                    height: 34,
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                      color: widget.iconBackground,
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Icon(widget.icon, size: 18, color: widget.iconColor),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      widget.label,
+                      style: TextStyle(
+                        color: labelColor,
+                        fontSize: 14.5,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                  Icon(
+                    Icons.chevron_right_rounded,
+                    size: 20,
+                    color: (widget.labelColor ??
+                            AppTheme.dashTextSecondaryOf(context))
+                        .withValues(alpha: 0.8),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+String _accountInitials(String name) {
+  final parts = name
+      .trim()
+      .split(RegExp(r'\s+'))
+      .where((part) => part.isNotEmpty)
+      .toList();
+  if (parts.isEmpty) return '?';
+  String first(String value) {
+    final iterator = value.runes.iterator;
+    if (!iterator.moveNext()) return '';
+    return String.fromCharCode(iterator.current).toUpperCase();
+  }
+
+  if (parts.length == 1) return first(parts.first);
+  return '${first(parts.first)}${first(parts.last)}';
 }

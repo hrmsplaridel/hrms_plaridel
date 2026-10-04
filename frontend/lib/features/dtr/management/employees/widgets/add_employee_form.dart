@@ -12,7 +12,6 @@ class AddEmployeeForm extends StatefulWidget {
 
 class _AddEmployeeFormState extends State<AddEmployeeForm> {
   final _formKey = GlobalKey<FormState>();
-  final _setupSectionKey = GlobalKey<EmployeeSetupSectionState>();
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
   final _firstNameController = TextEditingController();
@@ -281,15 +280,10 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
       _selectedImageBytes = null;
       _passwordController.clear();
     });
-    _setupSectionKey.currentState?.clearSelection();
   }
 
   Future<void> _saveEmployee() async {
     if (!(_formKey.currentState?.validate() ?? false)) return;
-    if (!(_setupSectionKey.currentState?.validateAssignmentSelection() ??
-        true)) {
-      return;
-    }
 
     final email = _emailController.text.trim();
     _ensureTemporaryPassword();
@@ -337,15 +331,6 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
         'employment_status': _employmentStatus,
         'leave_credit_eligible': _leaveCreditEligible,
       };
-      final initialSetup = _setupSectionKey.currentState
-          ?.buildAtomicSetupPayload(
-            effectiveFrom: _dateHired!,
-            effectiveTo: _requiresSeparationDate(_employmentStatus)
-                ? _separationDate
-                : null,
-            isActive: !_requiresSeparationDate(_employmentStatus),
-          );
-      if (initialSetup != null) body['setup'] = initialSetup;
 
       final hire = context.read<RecruitmentHirePrefill>();
       final isRspHire = hire.hasPendingLink && hire.applicationId != null;
@@ -431,7 +416,7 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
       if (widget.onAccountCreated != null) {
         if (postCommitWarnings.isNotEmpty) {
           _showSnackBar(
-            'Account and setup were saved. ${postCommitWarnings.join(' ')}',
+            'Account was saved. ${postCommitWarnings.join(' ')}',
           );
         }
         widget.onAccountCreated!();
@@ -1197,43 +1182,37 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
             ),
           ],
           const SizedBox(height: 14),
-          SwitchListTile.adaptive(
-            contentPadding: EdgeInsets.zero,
-            value: _leaveCreditEligible,
-            title: Text(
-              _requiresSeparationDate(_employmentStatus)
-                  ? 'Eligible for VL/SL through separation'
-                  : 'Earn monthly VL/SL credits',
-              style: TextStyle(
-                color: _chromeHeadingColor(context),
-                fontWeight: FontWeight.w600,
+          Material(
+            type: MaterialType.transparency,
+            child: SwitchListTile.adaptive(
+              contentPadding: EdgeInsets.zero,
+              value: _leaveCreditEligible,
+              title: Text(
+                _requiresSeparationDate(_employmentStatus)
+                    ? 'Eligible for VL/SL through separation'
+                    : 'Earn monthly VL/SL credits',
+                style: TextStyle(
+                  color: _chromeHeadingColor(context),
+                  fontWeight: FontWeight.w600,
+                ),
               ),
+              subtitle: _requiresSeparationDate(_employmentStatus)
+                  ? const Text(
+                      'Used to calculate the prorated final-month credit.',
+                    )
+                  : (_employmentStatus == 'active'
+                        ? null
+                        : const Text('Available only for active employees')),
+              secondary: Icon(
+                Icons.account_balance_wallet_outlined,
+                color: AppTheme.primaryNavy,
+              ),
+              onChanged:
+                  _employmentStatus == 'active' ||
+                      _requiresSeparationDate(_employmentStatus)
+                  ? (value) => setState(() => _leaveCreditEligible = value)
+                  : null,
             ),
-            subtitle: _requiresSeparationDate(_employmentStatus)
-                ? const Text(
-                    'Used to calculate the prorated final-month credit.',
-                  )
-                : (_employmentStatus == 'active'
-                      ? null
-                      : const Text('Available only for active employees')),
-            secondary: Icon(
-              Icons.account_balance_wallet_outlined,
-              color: AppTheme.primaryNavy,
-            ),
-            onChanged:
-                _employmentStatus == 'active' ||
-                    _requiresSeparationDate(_employmentStatus)
-                ? (value) => setState(() => _leaveCreditEligible = value)
-                : null,
-          ),
-          EmployeeSetupSection(
-            key: _setupSectionKey,
-            title: 'Initial assignment',
-            subtitle:
-                'Optional assignment and policy saved together with the account.',
-            validationMessage:
-                'For initial assignment, select Department, Position, and Shift; or leave all three blank.',
-            showTopDivider: true,
           ),
         ],
       ),

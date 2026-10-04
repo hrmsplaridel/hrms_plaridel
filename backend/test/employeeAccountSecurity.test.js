@@ -42,6 +42,39 @@ test('administrator cannot deactivate their own account', async () => {
   );
 });
 
+test('system account cannot be modified through employee transitions', async () => {
+  let calls = 0;
+  const db = {
+    query: async () => ++calls === 1
+      ? { rowCount: 1, rows: [{}] }
+      : { rowCount: 1, rows: [targetRow({ role: 'super_admin' })] },
+  };
+  await assert.rejects(
+    lockAndValidateAccountTransition(db, {
+      actorId: OTHER_ADMIN_ID,
+      targetId: ADMIN_ID,
+      nextIsActive: false,
+    }),
+    (error) => error.code === 'SYSTEM_ACCOUNT_PROTECTED'
+  );
+});
+
+test('bulk employee status change rejects a system account', async () => {
+  let calls = 0;
+  const db = {
+    query: async () => ++calls === 1
+      ? { rowCount: 0, rows: [] }
+      : { rowCount: 1, rows: [targetRow({ role: 'super_admin' })] },
+  };
+  const plan = await lockAndPlanBulkAccountStatusTransition(db, {
+    actorId: OTHER_ADMIN_ID,
+    targetIds: [ADMIN_ID],
+    isActive: false,
+  });
+  assert.equal(plan.updateTargets.length, 0);
+  assert.equal(plan.results[0].code, 'SYSTEM_ACCOUNT_PROTECTED');
+});
+
 test('administrator cannot demote their own account', async () => {
   const db = {
     query: async () => ({ rowCount: 1, rows: [targetRow()] }),

@@ -42,6 +42,8 @@ const ALLOWED_SIZES = new Set([
   'long_13',
   'long_14',
   'long_landscape',
+  'a4_landscape',
+  'long_13_landscape',
 ]);
 
 if (!fs.existsSync(templateDir)) {

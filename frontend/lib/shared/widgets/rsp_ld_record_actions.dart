@@ -1,6 +1,9 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
+import 'package:hrms_plaridel/shared/widgets/form_document_preview.dart';
 
 /// Standard gap between RSP / L&D record action controls.
 const double kRspLdRecordActionGap = 8;
@@ -24,13 +27,15 @@ class RspLdViewPrintIconActions extends StatelessWidget {
     super.key,
     required this.onView,
     required this.onPrint,
+    this.onDocumentPreview,
     this.axis = Axis.vertical,
     this.iconSize = 22,
     this.gap = kRspLdRecordActionGap,
   });
 
   final VoidCallback onView;
-  final VoidCallback onPrint;
+  final FutureOr<void> Function() onPrint;
+  final FutureOr<void> Function()? onDocumentPreview;
   final Axis axis;
   final double iconSize;
   final double gap;
@@ -44,28 +49,44 @@ class RspLdViewPrintIconActions extends StatelessWidget {
       onPressed: onView,
       icon: Icon(Icons.visibility_rounded, size: iconSize),
     );
-    final printBtn = IconButton(
-      tooltip: 'Print',
-      style: style,
+    final previewBtn = onDocumentPreview == null
+        ? null
+        : RspLdBusyIconButton(
+            tooltip: 'Preview Form',
+            icon: Icons.visibility_outlined,
+            iconSize: iconSize,
+            busyTooltip: 'Opening preview…',
+            onPressed: onDocumentPreview!,
+          );
+    final printBtn = RspLdBusyIconButton(
+      tooltip: 'Print Form',
+      icon: Icons.print_rounded,
+      iconSize: iconSize,
+      busyTooltip: 'Preparing print…',
       onPressed: onPrint,
-      icon: Icon(Icons.print_rounded, size: iconSize),
     );
+    final buttons = [
+      viewBtn,
+      if (previewBtn != null) previewBtn,
+      printBtn,
+    ];
 
     if (axis == Axis.horizontal) {
       return Wrap(
         spacing: gap,
         runSpacing: gap,
         crossAxisAlignment: WrapCrossAlignment.center,
-        children: [viewBtn, printBtn],
+        children: buttons,
       );
     }
 
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        viewBtn,
-        SizedBox(height: gap),
-        printBtn,
+        for (var i = 0; i < buttons.length; i++) ...[
+          if (i > 0) SizedBox(height: gap),
+          buttons[i],
+        ],
       ],
     );
   }

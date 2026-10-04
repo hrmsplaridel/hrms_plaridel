@@ -341,7 +341,12 @@ class _PhilippineHolidayDefaultsDialogState
                     ],
                     Expanded(
                       child: _loading
-                          ? const Center(child: CircularProgressIndicator())
+                          ? const SingleChildScrollView(
+                              child: WorkforceRowsSkeleton(
+                                columns: [3, 1],
+                                label: 'Loading holiday defaults',
+                              ),
+                            )
                           : preview == null || preview.items.isEmpty
                           ? Center(
                               child: Text(

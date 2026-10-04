@@ -1,8 +1,10 @@
 import 'dart:convert';
+import 'dart:typed_data';
 import 'package:dio/dio.dart';
 
 import 'package:hrms_plaridel/core/api/client.dart';
 import 'package:hrms_plaridel/core/api/config.dart';
+import 'package:hrms_plaridel/features/recruitment/data/exam_image_support.dart';
 import 'rsp_screening_scores.dart';
 
 /// Required Step 1 documents (API `docKind` values match backend).
@@ -1451,10 +1453,22 @@ class RecruitmentRepo {
           'question_text': m['question_text']?.toString() ?? '',
           'options': optionsList,
           'correct': (m['correct_index'] as num?)?.toInt() ?? 0,
+          'question_image': examImagePathOrNull(m['question_image_path']),
+          'question_image_caption': examImagePathOrNull(
+            m['question_image_caption'],
+          ),
+          'option_images': examOptionImagesFrom(
+            m['option_images_json'],
+            optionsList.length,
+          ),
         });
       }
       return list
-          .where((x) => (x['question_text'] as String).isNotEmpty)
+          .where(
+            (x) =>
+                (x['question_text'] as String).isNotEmpty ||
+                x['question_image'] != null,
+          )
           .toList();
     } catch (_) {
       return [];
@@ -1476,6 +1490,13 @@ class RecruitmentRepo {
               'question_text': q['question_text'],
               'options': q['options'] ?? <dynamic>[],
               'correct': q['correct'],
+              if (q['question_image'] != null)
+                'question_image': q['question_image'],
+              if (q['question_image'] != null &&
+                  q['question_image_caption'] != null)
+                'question_image_caption': q['question_image_caption'],
+              if (q['option_images'] != null)
+                'option_images': q['option_images'],
             };
           }).toList(),
         },
@@ -1490,6 +1511,41 @@ class RecruitmentRepo {
         details != null
             ? 'Save failed: $details'
             : 'Save failed: ${e.message ?? e.toString()}',
+      );
+    }
+  }
+
+  /// Uploads an exam question / answer-choice image and returns its stored
+  /// relative path (`exam-images/<uuid>.png`). Throws [Exception] with a
+  /// user-facing message on failure.
+  Future<String> uploadExamImage({
+    required Uint8List bytes,
+    required String fileName,
+  }) async {
+    try {
+      final res = await ApiClient.instance.uploadBytes<Map<String, dynamic>>(
+        '/api/upload/exam-image',
+        bytes: bytes,
+        fileName: fileName,
+      );
+      final path = res.data?['path']?.toString().trim() ?? '';
+      if (path.isEmpty) {
+        throw Exception('Upload failed: the server did not return an image.');
+      }
+      return path;
+    } on DioException catch (e) {
+      final data = e.response?.data;
+      final msg = (data is Map && data['error'] != null)
+          ? data['error'].toString()
+          : null;
+      if (msg != null) throw Exception(msg);
+      if (e.response?.statusCode == 404) {
+        throw Exception(
+          'Image upload is not available yet. Restart the API server and try again.',
+        );
+      }
+      throw Exception(
+        'Image upload failed. Check your connection and try again.',
       );
     }
   }

@@ -31,6 +31,7 @@ class EmployeeDashboardMobileShell extends StatelessWidget {
     required this.onFileLocator,
     required this.onHrmsAssistant,
     required this.onTutorial,
+    required this.showMobileLeaveFab,
   });
 
   final double width;
@@ -52,8 +53,11 @@ class EmployeeDashboardMobileShell extends StatelessWidget {
   final VoidCallback onFileLocator;
   final VoidCallback onHrmsAssistant;
   final VoidCallback onTutorial;
+  final bool showMobileLeaveFab;
 
-  bool get _useMobileLeaveFab => width < 600 && selectedIndex == 2;
+  bool get _useMobileLeaveFab =>
+      width < 600 && selectedIndex == 2 && showMobileLeaveFab;
+  bool get _ownsMobileLeaveAction => width < 600 && selectedIndex == 2;
   bool get _useMobileLocatorFab => selectedIndex == 3;
   bool get _showAssistantFab =>
       selectedIndex >= 0 &&
@@ -116,11 +120,11 @@ class EmployeeDashboardMobileShell extends StatelessWidget {
                         selectedIndex,
                         displayName,
                         width,
-                        _useMobileLeaveFab,
+                        _ownsMobileLeaveAction,
                         _useMobileLocatorFab,
                       ),
                       homeBuilder: () => homeBuilder(
-                        useMobileLeaveFab: _useMobileLeaveFab,
+                        useMobileLeaveFab: _ownsMobileLeaveAction,
                         useMobileLocatorFab: _useMobileLocatorFab,
                       ),
                       settingsPanel: settingsPanel,

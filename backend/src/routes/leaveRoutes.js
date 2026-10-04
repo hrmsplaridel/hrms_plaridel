@@ -5,6 +5,7 @@ const fs = require('fs');
 const { v4: uuidv4 } = require('uuid');
 const { pool } = require('../config/db');
 const { authMiddleware } = require('../middleware/auth');
+const { requireDtrFeatureIfAdmin } = require('../middleware/dtrAccess');
 const { requireAdmin, requireAdminOrHr } = require('../middleware/rbac');
 const {
   LEAVE_TYPE_RULES,
@@ -379,8 +380,8 @@ pool
 
     await pool.query(`
       UPDATE leave_types
-      SET employee_can_file = CASE WHEN name = 'mandatoryForcedLeave' THEN false ELSE true END,
-          admin_only = CASE WHEN name = 'mandatoryForcedLeave' THEN true ELSE false END,
+      SET employee_can_file = true,
+          admin_only = false,
           allows_past_dates = CASE WHEN name IN ('vacationLeave', 'specialPrivilegeLeave') THEN false ELSE true END,
           requires_attachment = CASE
             WHEN name IN (
@@ -601,6 +602,7 @@ async function computeEmployeeLeaveWorkingDays(client, userId, startStr, endStr)
     `SELECT
         to_char(gs::date, 'YYYY-MM-DD') AS attendance_date,
         COALESCE(s.working_days, ARRAY[1,2,3,4,5]::int[]) AS working_days,
+        eso.is_working_day AS override_is_working_day,
         eff.assignment_id IS NOT NULL AS has_assignment,
         s.id IS NOT NULL AS has_shift
      FROM generate_series($2::date, $3::date, '1 day'::interval) AS gs
@@ -614,6 +616,9 @@ async function computeEmployeeLeaveWorkingDays(client, userId, startStr, endStr)
        LIMIT 1
      ) eff ON TRUE
      LEFT JOIN shifts s ON s.id = eff.shift_id
+     LEFT JOIN employee_schedule_overrides eso
+       ON eso.employee_id = $1::uuid
+      AND eso.schedule_date = gs::date
      ORDER BY gs::date`,
     [userId, startStr, endStr]
   );
@@ -631,7 +636,10 @@ async function computeEmployeeLeaveWorkingDays(client, userId, startStr, endStr)
     else sawNoAssignment = true;
     if (holidayDates.has(ds)) continue;
     const workingDays = normalizeWorkingDays(row.working_days);
-    if (workingDays.includes(isoWeekday)) countedDates.push(ds);
+    const isWorkingDay = typeof row.override_is_working_day === 'boolean'
+      ? row.override_is_working_day
+      : workingDays.includes(isoWeekday);
+    if (isWorkingDay) countedDates.push(ds);
   }
 
   const scheduleSource = sawShift
@@ -1362,20 +1370,53 @@ function leaveTypePayloadFromBody(body = {}, existing = null) {
     return ['true', '1', 'yes', 'y'].includes(String(value).trim().toLowerCase());
   }
 
-  function numberField(key, fallback = null) {
-    const value = bodyField(key);
-    if (value === undefined) return fallback;
-    if (value == null || value === '') return null;
-    const n = parseFloat(value);
-    return Number.isFinite(n) ? n : fallback;
+  function invalidNumericField(label, requirement) {
+    const err = new Error(`${label} ${requirement}.`);
+    err.statusCode = 400;
+    throw err;
   }
 
-  function integerField(key, fallback = null) {
+  function numberField(
+    key,
+    fallback = null,
+    { label = key, minimum = null, exclusiveMinimum = false } = {}
+  ) {
     const value = bodyField(key);
     if (value === undefined) return fallback;
     if (value == null || value === '') return null;
-    const n = parseInt(value, 10);
-    return Number.isFinite(n) && n >= 0 ? n : fallback;
+    const text = String(value).trim();
+    if (!/^-?(?:\d+(?:\.\d+)?|\.\d+)$/.test(text)) {
+      invalidNumericField(label, 'must be a valid number');
+    }
+    const n = Number(text);
+    if (!Number.isFinite(n)) invalidNumericField(label, 'must be a valid number');
+    if (minimum != null) {
+      const invalid = exclusiveMinimum ? n <= minimum : n < minimum;
+      if (invalid) {
+        invalidNumericField(
+          label,
+          exclusiveMinimum
+            ? `must be greater than ${minimum}`
+            : `must be at least ${minimum}`
+        );
+      }
+    }
+    return n;
+  }
+
+  function integerField(key, fallback = null, { label = key, minimum = 0 } = {}) {
+    const value = bodyField(key);
+    if (value === undefined) return fallback;
+    if (value == null || value === '') return null;
+    const text = String(value).trim();
+    if (!/^\d+$/.test(text)) {
+      invalidNumericField(label, 'must be a whole number');
+    }
+    const n = Number(text);
+    if (!Number.isSafeInteger(n) || n < minimum) {
+      invalidNumericField(label, `must be a whole number of ${minimum} or more`);
+    }
+    return n;
   }
 
   return {
@@ -1390,12 +1431,22 @@ function leaveTypePayloadFromBody(body = {}, existing = null) {
     requiresAttachment: boolField('requires_attachment', existing?.requires_attachment ?? base.requires_attachment === true),
     requiresAttachmentWhenOverDays: numberField(
       'requires_attachment_when_over_days',
-      existing?.requires_attachment_when_over_days ?? base.requires_attachment_when_over_days ?? null
+      existing?.requires_attachment_when_over_days ?? base.requires_attachment_when_over_days ?? null,
+      {
+        label: 'Attachment threshold days',
+        minimum: 0,
+        exclusiveMinimum: true,
+      }
     ),
-    maxDays: numberField('max_days', existing?.max_days ?? base.max_days ?? null),
+    maxDays: numberField(
+      'max_days',
+      existing?.max_days ?? base.max_days ?? null,
+      { label: 'Maximum working days', minimum: 0, exclusiveMinimum: true }
+    ),
     minimumAdvanceDays: integerField(
       'minimum_advance_days',
-      existing?.minimum_advance_days ?? base.minimum_advance_days ?? null
+      existing?.minimum_advance_days ?? base.minimum_advance_days ?? null,
+      { label: 'Minimum advance days', minimum: 0 }
     ),
     affectsDtrNormally: boolField('affects_dtr_normally', existing?.affects_dtr_normally ?? base.affects_dtr_normally !== false),
     balanceLedgerType: normalizeLedgerType(body.balance_ledger_type ?? body.balanceLedgerType ?? existing?.balance_ledger_type, name),
@@ -1462,7 +1513,7 @@ router.get('/types', protect, async (req, res) => {
 });
 
 // POST /api/leave/types — admin/HR creates a custom leave type with rules.
-router.post('/types', protect, requireAdminOrHr, async (req, res) => {
+router.post('/types', protect, requireAdminOrHr, requireDtrFeatureIfAdmin('leave_allowed'), async (req, res) => {
   try {
     const payload = leaveTypePayloadFromBody(req.body || {});
     if (!payload.name || !payload.displayName) {
@@ -1518,7 +1569,7 @@ router.post('/types', protect, requireAdminOrHr, async (req, res) => {
 });
 
 // PUT /api/leave/types/:id — admin/HR updates display/rules.
-router.put('/types/:id', protect, requireAdminOrHr, async (req, res) => {
+router.put('/types/:id', protect, requireAdminOrHr, requireDtrFeatureIfAdmin('leave_allowed'), async (req, res) => {
   try {
     const existingQ = await pool.query('SELECT * FROM leave_types WHERE id = $1::uuid', [req.params.id]);
     if (existingQ.rows.length === 0) {
@@ -3349,7 +3400,7 @@ router.get('/signatories', protect, async (req, res) => {
 
 // POST /api/leave/admin/forced-leave-deduction
 // Admin/HR-only: applies a direct vacation leave balance deduction (no leave request row).
-router.post('/admin/forced-leave-deduction', protect, requireAdminOrHr, async (req, res) => {
+router.post('/admin/forced-leave-deduction', protect, requireAdminOrHr, requireDtrFeatureIfAdmin('leave_allowed'), async (req, res) => {
   const reviewerId = req.user?.id;
   if (!reviewerId) return res.status(401).json({ error: 'Not authenticated' });
   const userId = (req.body?.user_id || '').toString().trim();
@@ -3478,7 +3529,7 @@ router.post('/admin/forced-leave-deduction', protect, requireAdminOrHr, async (r
 // credit completed-month VL/SL accrual, then post the completed month's DTR
 // equivalent-day charge to Vacation Leave.
 // Body/query (optional): dry_run, target_month (YYYY-MM), max_catch_up_months (default 1)
-router.post('/admin/monthly-accrual', protect, requireAdminOrHr, async (req, res) => {
+router.post('/admin/monthly-accrual', protect, requireAdminOrHr, requireDtrFeatureIfAdmin('leave_allowed'), async (req, res) => {
   try {
     const dryRun =
       req.body?.dry_run === true ||
@@ -3584,6 +3635,16 @@ router.post('/admin/monthly-accrual', protect, requireAdminOrHr, async (req, res
 // GET /api/leave (admin/HR list)
 // Query params: status, leave_type, user_id, limit,
 //               start_date_from, start_date_to, created_from, created_to
+const HR_REVIEW_SCOPE_SQL = `(
+  lr.status IN ('pending', 'pending_hr')
+  OR EXISTS (
+    SELECT 1 FROM leave_request_history review_history
+    WHERE review_history.leave_request_id = lr.id
+      AND (review_history.to_status IN ('pending', 'pending_hr')
+           OR review_history.from_status IN ('pending', 'pending_hr'))
+  )
+)`;
+
 async function listLeaveReviewFilterOptions(db, scopeSql, params) {
   const result = await db.query(
     `SELECT DISTINCT COALESCE(lr.user_id, lr.employee_id) AS user_id,
@@ -3598,11 +3659,11 @@ async function listLeaveReviewFilterOptions(db, scopeSql, params) {
   return result.rows;
 }
 
-router.get('/filter-options', protect, requireAdminOrHr, async (_req, res) => {
+router.get('/filter-options', protect, requireAdminOrHr, requireDtrFeatureIfAdmin('leave_allowed'), async (_req, res) => {
   try {
     const items = await listLeaveReviewFilterOptions(
       pool,
-      "lr.status <> 'pending_department_head'",
+      HR_REVIEW_SCOPE_SQL,
       []
     );
     res.json(items);
@@ -3612,7 +3673,7 @@ router.get('/filter-options', protect, requireAdminOrHr, async (_req, res) => {
   }
 });
 
-router.get('/', protect, requireAdminOrHr, async (req, res) => {
+router.get('/', protect, requireAdminOrHr, requireDtrFeatureIfAdmin('leave_allowed'), async (req, res) => {
   try {
     const paginated = req.query?.paginated === 'true';
     const status = (req.query?.status || '').toString().trim() || null;
@@ -3663,7 +3724,7 @@ router.get('/', protect, requireAdminOrHr, async (req, res) => {
          AND ($6::timestamptz IS NULL OR lr.created_at >= $6)
          AND ($7::date IS NULL OR lr.created_at < ($7::date + interval '1 day'))
          AND ($8::text IS NULL OR d.name = $8)
-         ${paginated ? "AND lr.status <> 'pending_department_head'" : ''}`;
+         AND ${HR_REVIEW_SCOPE_SQL}`;
     const params = [status, leaveType, userId, startDateFrom, startDateTo, createdFrom, createdTo, department];
     const rows = await pool.query(
       `SELECT lr.*, lt.name AS leave_type_name, u.full_name AS employee_full_name,
@@ -3693,7 +3754,7 @@ router.get('/', protect, requireAdminOrHr, async (req, res) => {
 });
 
 // GET /api/leave/pending (admin/HR — returns pending_hr + legacy pending)
-router.get('/pending', protect, requireAdminOrHr, async (_req, res) => {
+router.get('/pending', protect, requireAdminOrHr, requireDtrFeatureIfAdmin('leave_allowed'), async (_req, res) => {
   try {
     const rows = await pool.query(
       `SELECT lr.*, lt.name AS leave_type_name, u.full_name AS employee_full_name,
@@ -4229,7 +4290,7 @@ router.patch('/:id/department-head-return', protect, async (req, res) => {
 });
 
 // PATCH /api/leave/:id/approve (admin/HR)
-router.patch('/:id/approve', protect, requireAdminOrHr, async (req, res) => {
+router.patch('/:id/approve', protect, requireAdminOrHr, requireDtrFeatureIfAdmin('leave_allowed'), async (req, res) => {
   const reviewerId = req.user?.id;
   if (!reviewerId) return res.status(401).json({ error: 'Not authenticated' });
   const { id } = req.params;
@@ -4461,7 +4522,7 @@ router.patch('/:id/approve', protect, requireAdminOrHr, async (req, res) => {
 });
 
 // PATCH /api/leave/:id/reject (admin/HR)
-router.patch('/:id/reject', protect, requireAdminOrHr, async (req, res) => {
+router.patch('/:id/reject', protect, requireAdminOrHr, requireDtrFeatureIfAdmin('leave_allowed'), async (req, res) => {
   const reviewerId = req.user?.id;
   if (!reviewerId) return res.status(401).json({ error: 'Not authenticated' });
   const { id } = req.params;
@@ -4581,7 +4642,7 @@ router.patch('/:id/reject', protect, requireAdminOrHr, async (req, res) => {
 // PATCH /api/leave/:id/revoke  (Phase 4 #15 — Admin only)
 // Revoke an approved leave: restore used_days balance + clean DTR.
 // ============================================================
-router.patch('/:id/revoke', protect, requireAdminOrHr, async (req, res) => {
+router.patch('/:id/revoke', protect, requireAdminOrHr, requireDtrFeatureIfAdmin('leave_allowed'), async (req, res) => {
   const reviewerId = req.user?.id;
   if (!reviewerId) return res.status(401).json({ error: 'Not authenticated' });
   const { id } = req.params;
@@ -4772,7 +4833,7 @@ router.patch('/:id/revoke', protect, requireAdminOrHr, async (req, res) => {
 });
 
 // PATCH /api/leave/:id/return
-router.patch('/:id/return', protect, requireAdminOrHr, async (req, res) => {
+router.patch('/:id/return', protect, requireAdminOrHr, requireDtrFeatureIfAdmin('leave_allowed'), async (req, res) => {
   const reviewerId = req.user?.id;
   if (!reviewerId) return res.status(401).json({ error: 'Not authenticated' });
   const { id } = req.params;
@@ -5234,7 +5295,7 @@ router.get('/balances/:userId', protect, async (req, res) => {
 });
 
 // POST /api/leave/balances/:userId/adjustments — admin/HR: append an audited correction.
-router.post('/balances/:userId/adjustments', protect, requireAdminOrHr, async (req, res) => {
+router.post('/balances/:userId/adjustments', protect, requireAdminOrHr, requireDtrFeatureIfAdmin('leave_allowed'), async (req, res) => {
   const reviewerId = req.user?.id;
   const targetId = req.params.userId;
   const b = req.body || {};
@@ -5322,7 +5383,7 @@ router.post('/balances/:userId/adjustments', protect, requireAdminOrHr, async (r
 
 // Direct bucket replacement is intentionally disabled. Pending, earned, and used
 // remain owned by leave workflow, accrual, and month-end posting transactions.
-router.put('/balances/:userId', protect, requireAdminOrHr, (_req, res) => {
+router.put('/balances/:userId', protect, requireAdminOrHr, requireDtrFeatureIfAdmin('leave_allowed'), (_req, res) => {
   res.set('Allow', 'GET, POST');
   return res.status(405).json({
     error: 'Direct balance replacement is disabled. Submit an audited balance adjustment instead.',
@@ -5641,7 +5702,7 @@ router.get('/:id', protect, async (req, res) => {
 
 // GET /api/leave/admin/year-end-forced-leave?year=YYYY
 // Returns per-employee forced leave compliance data for the given year.
-router.get('/admin/year-end-forced-leave', protect, requireAdminOrHr, async (req, res) => {
+router.get('/admin/year-end-forced-leave', protect, requireAdminOrHr, requireDtrFeatureIfAdmin('leave_allowed'), async (req, res) => {
   try {
     const yearRaw = req.query.year;
     const year = yearRaw ? parseInt(String(yearRaw).trim(), 10) : yearEndManilaYearNow();
@@ -5660,7 +5721,7 @@ router.get('/admin/year-end-forced-leave', protect, requireAdminOrHr, async (req
 // POST /api/leave/admin/year-end-forced-leave/apply
 // Body: { year, dry_run?, employee_ids?, remarks? }
 // If dry_run=true: returns preview without writing. Otherwise applies deductions.
-router.post('/admin/year-end-forced-leave/apply', protect, requireAdminOrHr, async (req, res) => {
+router.post('/admin/year-end-forced-leave/apply', protect, requireAdminOrHr, requireDtrFeatureIfAdmin('leave_allowed'), async (req, res) => {
   try {
     const actorUserId = req.user?.id;
     const yearRaw = req.body?.year ?? req.query?.year;

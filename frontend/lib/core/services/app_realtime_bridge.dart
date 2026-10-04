@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 
 import 'package:hrms_plaridel/features/docutracker/data/providers/docutracker_provider.dart';
 import 'package:hrms_plaridel/features/dtr/leave/data/providers/leave_provider.dart';
+import 'package:hrms_plaridel/features/dtr/locator/data/repositories/locator_slip_data_cache.dart';
 import 'package:hrms_plaridel/features/notifications/data/notification_provider.dart';
 import 'app_realtime_provider.dart';
 import 'push_notification_service.dart';
@@ -39,6 +40,10 @@ class _AppRealtimeBridgeState extends State<AppRealtimeBridge> {
       try {
         context.read<LeaveProvider>().invalidateCachedLeaveData();
       } catch (_) {}
+      return;
+    }
+    if (event.name == 'locator_type_updated') {
+      LocatorSlipDataCache.instance.invalidateTypes();
       return;
     }
     if (event.name != 'notification_created') return;

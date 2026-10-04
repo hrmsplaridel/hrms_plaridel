@@ -6,7 +6,9 @@ import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/core/utils/form_pdf.dart';
 import 'package:hrms_plaridel/features/learning_development/models/computation_of_points.dart';
 import 'package:hrms_plaridel/features/recruitment/presentation/admin/widgets/rsp_records_list_table.dart';
+import 'package:hrms_plaridel/shared/widgets/form_document_preview.dart';
 import 'package:hrms_plaridel/shared/widgets/read_only_saved_entry_dialog.dart';
+import 'package:hrms_plaridel/shared/widgets/rsp_ld_form_header.dart';
 import 'package:hrms_plaridel/shared/widgets/rsp_ld_record_actions.dart';
 import 'package:hrms_plaridel/shared/widgets/rsp_ld_saved_records_browser.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_rsp_signature_section.dart';
@@ -191,6 +193,37 @@ class _RspComputationOfPointsSectionState
     }
   }
 
+  Future<void> _preview(ComputationOfPointsEntry entry) {
+    return openFormDocumentPreview(
+      context: context,
+      title: 'Computation of Points',
+      filename: 'Computation_of_Points.pdf',
+      format: FormPdf.pageLetterLandscape,
+      printModule: 'rsp',
+      printFormKey: 'computation_of_points',
+      buildDocument: () async {
+        final signatureProvider = context.read<DocuTrackerProvider>();
+        final signatures = entry.id == null
+            ? null
+            : await signatureProvider.loadSourceSignatures(
+                sourceModule: 'rsp',
+                sourceTable: ComputationOfPointsEntry.tableName,
+                sourceRecordId: entry.id!,
+              );
+        if (entry.id != null && signatures == null) {
+          throw StateError(
+            signatureProvider.sourceSignatureError ??
+                'The form signatures could not be loaded.',
+          );
+        }
+        return FormPdf.buildComputationOfPointsPdf(
+          entry,
+          signatures: signatures,
+        );
+      },
+    );
+  }
+
   Future<void> _download(ComputationOfPointsEntry entry) async {
     try {
       final signatureProvider = context.read<DocuTrackerProvider>();
@@ -248,6 +281,9 @@ class _RspComputationOfPointsSectionState
             onDownloadPdf: (_) async {},
           ),
           onPrint: () => _print(e),
+          onDocumentPreview: () => _preview(e),
+          onEdit: () => _edit(e),
+          onDelete: e.id == null ? null : () => _onDelete(e.id!),
         );
       }).toList(),
     );
@@ -277,59 +313,31 @@ class _RspComputationOfPointsSectionState
             side: BorderSide(color: AppTheme.dashHairlineOf(context)),
           ),
         ),
-        OutlinedButton.icon(
-          onPressed: _loading ? null : _openSavedRecordsBrowser,
-          icon: const Icon(Icons.folder_open_outlined, size: 18),
-          label: const Text('View Records'),
-          style: OutlinedButton.styleFrom(
-            foregroundColor: AppTheme.dashTextPrimaryOf(context),
-            side: BorderSide(color: AppTheme.dashHairlineOf(context)),
+        if (_editing != null)
+          OutlinedButton.icon(
+            onPressed: _loading ? null : _openSavedRecordsBrowser,
+            icon: const Icon(Icons.folder_open_outlined, size: 18),
+            label: const Text('View Records'),
+            style: OutlinedButton.styleFrom(
+              foregroundColor: AppTheme.dashTextPrimaryOf(context),
+              side: BorderSide(color: AppTheme.dashHairlineOf(context)),
+            ),
           ),
-        ),
       ],
     );
   }
 
   @override
   Widget build(BuildContext context) {
-    final secondary = AppTheme.dashTextSecondaryOf(context);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Row(
-          children: [
-            Text(
-              'RSP',
-              style: TextStyle(
-                color: secondary,
-                fontSize: 12.5,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-            Icon(Icons.chevron_right_rounded, size: 16, color: secondary),
-            Text(
-              'Computation of Points',
-              style: TextStyle(
-                color: secondary,
-                fontSize: 12.5,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 6),
-        Text(
-          'Computation of Points',
-          style: TextStyle(
-            color: AppTheme.dashTextPrimaryOf(context),
-            fontSize: 22,
-            fontWeight: FontWeight.w700,
-          ),
-        ),
-        const SizedBox(height: 6),
-        Text(
-          'Personnel Selection Board scoring and candidate evaluation.',
-          style: TextStyle(color: secondary, fontSize: 14),
+        RspLdFormHeader(
+          module: 'RSP',
+          title: 'Computation of Points',
+          subtitle:
+              'Personnel Selection Board scoring and candidate evaluation.',
+          actions: _toolbar(context),
         ),
         const SizedBox(height: 20),
         if (_editing != null) ...[
@@ -339,6 +347,7 @@ class _RspComputationOfPointsSectionState
             onSave: _onSave,
             onCancel: _cancelEdit,
             onPrint: _print,
+            onPreview: _preview,
             onDownloadPdf: _download,
           ),
           if (_editing?.id != null) ...[
@@ -352,28 +361,27 @@ class _RspComputationOfPointsSectionState
             ),
           ],
           const SizedBox(height: 24),
+        ] else ...[
+          if (_loading)
+            const Padding(
+              padding: EdgeInsets.all(24),
+              child: Center(child: CircularProgressIndicator()),
+            )
+          else if (_entries.isEmpty)
+            const RspFormEmptyState(
+              message:
+                  'No computation of points records yet. Tap "Add Record" to create one.',
+              icon: Icons.calculate_rounded,
+            )
+          else
+            _ComputationOfPointsList(
+              entries: _entries,
+              onEdit: _edit,
+              onDelete: _onDelete,
+              onPrint: _print,
+              onDownloadPdf: _download,
+            ),
         ],
-        _toolbar(context),
-        const SizedBox(height: 16),
-        if (_loading)
-          const Padding(
-            padding: EdgeInsets.all(24),
-            child: Center(child: CircularProgressIndicator()),
-          )
-        else if (_entries.isEmpty)
-          const RspFormEmptyState(
-            message:
-                'No computation of points records yet. Tap "Add Record" to create one.',
-            icon: Icons.calculate_rounded,
-          )
-        else
-          _ComputationOfPointsList(
-            entries: _entries,
-            onEdit: _edit,
-            onDelete: _onDelete,
-            onPrint: _print,
-            onDownloadPdf: _download,
-          ),
       ],
     );
   }
@@ -393,6 +401,7 @@ class ComputationOfPointsEditor extends StatefulWidget {
     required this.onSave,
     required this.onCancel,
     required this.onPrint,
+    this.onPreview,
     required this.onDownloadPdf,
   });
 
@@ -401,6 +410,7 @@ class ComputationOfPointsEditor extends StatefulWidget {
   final void Function(ComputationOfPointsEntry) onSave;
   final VoidCallback onCancel;
   final Future<void> Function(ComputationOfPointsEntry) onPrint;
+  final Future<void> Function(ComputationOfPointsEntry)? onPreview;
   final Future<void> Function(ComputationOfPointsEntry) onDownloadPdf;
 
   @override
@@ -801,38 +811,47 @@ class _ComputationOfPointsEditorState extends State<ComputationOfPointsEditor> {
               : const Color(0xFF2E7D32));
 
     return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 16, 20, 16),
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 640),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Row(
+      padding: const EdgeInsets.fromLTRB(20, 16, 16, 16),
+      child: Wrap(
+        alignment: WrapAlignment.spaceBetween,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        runSpacing: 10,
+        spacing: 12,
+        children: [
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 420),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
-                Flexible(
-                  child: Text(
-                    title,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontSize: 17,
-                      fontWeight: FontWeight.w800,
-                      color: primary,
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Flexible(
+                      child: Text(
+                        title,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 17,
+                          fontWeight: FontWeight.w800,
+                          color: primary,
+                        ),
+                      ),
                     ),
-                  ),
+                    const SizedBox(width: 10),
+                    _statusChip(statusLabel, statusColor),
+                  ],
                 ),
-                const SizedBox(width: 10),
-                _statusChip(statusLabel, statusColor),
+                const SizedBox(height: 4),
+                Text(
+                  'Personnel Selection Board scoring and candidate evaluation',
+                  style: TextStyle(fontSize: 12.5, color: secondary),
+                ),
               ],
             ),
-            const SizedBox(height: 4),
-            Text(
-              'Personnel Selection Board scoring and candidate evaluation',
-              style: TextStyle(fontSize: 12.5, color: secondary),
-            ),
-          ],
-        ),
+          ),
+          _actionBar(context, ro),
+        ],
       ),
     );
   }
@@ -1717,52 +1736,45 @@ class _ComputationOfPointsEditorState extends State<ComputationOfPointsEditor> {
     );
   }
 
-  Widget _actionBar(BuildContext context) {
+  Widget _actionBar(BuildContext context, bool ro) {
     return Wrap(
-      alignment: WrapAlignment.spaceBetween,
+      spacing: 8,
+      runSpacing: 8,
       crossAxisAlignment: WrapCrossAlignment.center,
-      runSpacing: 10,
-      spacing: 12,
       children: [
-        Wrap(
-          spacing: 10,
-          runSpacing: 10,
-          crossAxisAlignment: WrapCrossAlignment.center,
-          children: [
-            FilledButton.icon(
-              onPressed: _handleSaveTap,
-              icon: const Icon(Icons.save_rounded, size: 18),
-              label: const Text('Save'),
-              style: FilledButton.styleFrom(
-                backgroundColor: AppTheme.primaryNavy,
-                padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 14),
-              ),
+        if (!ro) ...[
+          FilledButton.icon(
+            onPressed: _handleSaveTap,
+            icon: const Icon(Icons.save_rounded, size: 18),
+            label: const Text('Save'),
+            style: FilledButton.styleFrom(
+              backgroundColor: AppTheme.primaryNavy,
+              padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
             ),
-            OutlinedButton.icon(
-              onPressed: widget.onCancel,
-              icon: const Icon(Icons.close_rounded, size: 18),
-              label: const Text('Cancel'),
-            ),
-          ],
-        ),
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          crossAxisAlignment: WrapCrossAlignment.center,
-          children: [
-            IconButton(
-              tooltip: 'Print',
-              style: rspLdRecordIconButtonStyle(),
-              onPressed: () => widget.onPrint(_buildEntry()),
-              icon: const Icon(Icons.print_rounded, size: 20),
-            ),
-            IconButton(
-              tooltip: 'Export PDF',
-              style: rspLdRecordIconButtonStyle(),
-              onPressed: () => widget.onDownloadPdf(_buildEntry()),
-              icon: const Icon(Icons.picture_as_pdf_rounded, size: 20),
-            ),
-          ],
+          ),
+          OutlinedButton.icon(
+            onPressed: widget.onCancel,
+            icon: const Icon(Icons.close_rounded, size: 18),
+            label: const Text('Cancel'),
+          ),
+        ],
+        if (widget.onPreview != null)
+          FormPreviewPrintButtons(
+            onPreview: () => widget.onPreview!(_buildEntry()),
+            onPrint: () => widget.onPrint(_buildEntry()),
+          )
+        else
+          RspLdBusyIconButton(
+            tooltip: 'Print Form',
+            icon: Icons.print_rounded,
+            busyTooltip: 'Preparing print…',
+            onPressed: () => widget.onPrint(_buildEntry()),
+          ),
+        IconButton(
+          tooltip: 'Export PDF',
+          style: rspLdRecordIconButtonStyle(),
+          onPressed: () => widget.onDownloadPdf(_buildEntry()),
+          icon: const Icon(Icons.picture_as_pdf_rounded, size: 20),
         ),
       ],
     );
@@ -1801,10 +1813,6 @@ class _ComputationOfPointsEditorState extends State<ComputationOfPointsEditor> {
                 ),
                 const SizedBox(height: 20),
                 _preparedByCard(context, ro),
-                if (!ro) ...[
-                  const SizedBox(height: 24),
-                  _actionBar(context),
-                ],
                 if (ro &&
                     (widget.entry.createdAt != null ||
                         widget.entry.updatedAt != null)) ...[
@@ -1899,7 +1907,7 @@ class _ComputationOfPointsList extends StatelessWidget {
             final top = _dashTopCandidate(e);
             final topLabel = top == null
                 ? ''
-                : '${top.name ?? "—"}${top.total != null ? " (${top.total})" : ""}';
+                : '${top.name ?? "ΓÇö"}${top.total != null ? " (${top.total})" : ""}';
             return [
               rspRecordsTextCell(context, e.position ?? '', bold: true),
               rspRecordsTextCell(context, e.date ?? ''),

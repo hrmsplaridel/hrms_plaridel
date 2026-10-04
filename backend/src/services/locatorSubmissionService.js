@@ -9,6 +9,7 @@ const {
 const {
   captureLocatorTypeSnapshot,
 } = require('./locatorTypeSnapshot');
+const { persistLocatorSignature } = require('./locatorSignatureService');
 
 function locatorSubmissionError(statusCode, payload) {
   const error = new Error(payload?.error || 'Failed to submit locator request');
@@ -35,6 +36,8 @@ function createLocatorSubmissionService({
   broadcastSubmitted,
   recordHistory,
   snapshotReviewers,
+  assertSubmissionReviewer,
+  saveApplicantSignature = persistLocatorSignature,
   nowProvider = () => new Date(),
   logger = console,
 }) {
@@ -51,6 +54,7 @@ function createLocatorSubmissionService({
   assertDependency('broadcastSubmitted', broadcastSubmitted);
   assertDependency('recordHistory', recordHistory);
   assertDependency('snapshotReviewers', snapshotReviewers);
+  assertDependency('assertSubmissionReviewer', assertSubmissionReviewer);
   assertDependency('nowProvider', nowProvider);
 
   async function submit({
@@ -64,6 +68,7 @@ function createLocatorSubmissionService({
     pmIn,
     pmOut,
     attachment = null,
+    signature = null,
   }) {
     const fieldValidation = validateLocatorRequiredFields({
       slipDate,
@@ -97,6 +102,7 @@ function createLocatorSubmissionService({
 
     try {
       await client.query('BEGIN');
+      await assertSubmissionReviewer(client, employeeUserId);
 
       const reviewSnapshot = await getReviewSnapshot(
         client,
@@ -256,6 +262,8 @@ function createLocatorSubmissionService({
         actorId: employeeUserId,
         actorRole: 'employee',
       });
+      await saveApplicantSignature(client, { id: employeeUserId, role: 'employee' },
+        insertedRow.id, 'applicant', signature, { requireInput: true });
       await client.query('COMMIT');
     } catch (error) {
       try {

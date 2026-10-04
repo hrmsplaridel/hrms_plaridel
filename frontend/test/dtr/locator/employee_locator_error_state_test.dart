@@ -12,6 +12,7 @@ import 'package:hrms_plaridel/core/api/client_device_header.dart';
 import 'package:hrms_plaridel/core/api/token_storage.dart';
 import 'package:hrms_plaridel/core/services/app_realtime_provider.dart';
 import 'package:hrms_plaridel/features/dtr/locator/data/repositories/locator_slip_data_cache.dart';
+import 'package:hrms_plaridel/features/docutracker/data/providers/docutracker_provider.dart';
 import 'package:hrms_plaridel/features/dtr/locator/presentation/employee/shared/pages/employee_locator_slip_content.dart';
 import 'package:hrms_plaridel/providers/auth_provider.dart';
 import 'package:provider/provider.dart';
@@ -193,6 +194,18 @@ void main() {
       previousCount = adapter.myRequestCount;
       realtime.setConnected(true);
       await _pumpUntil(tester, () => adapter.myRequestCount > previousCount);
+
+      final previousTypeCount = adapter.typeRequestCount;
+      realtime.emit(
+        const AppRealtimeEvent(
+          name: 'locator_type_updated',
+          payload: {'action': 'updated', 'code': 'locator'},
+        ),
+      );
+      await _pumpUntil(
+        tester,
+        () => adapter.typeRequestCount > previousTypeCount,
+      );
     },
   );
 
@@ -222,6 +235,9 @@ void main() {
         providers: [
           ChangeNotifierProvider<AuthProvider>.value(value: auth),
           ChangeNotifierProvider<AppRealtimeProvider>.value(value: realtime),
+          ChangeNotifierProvider<DocuTrackerProvider>(
+            create: (_) => DocuTrackerProvider(),
+          ),
         ],
         child: const MaterialApp(
           home: Scaffold(
@@ -338,6 +354,7 @@ class _LocatorErrorStateAdapter implements HttpClientAdapter {
 
 class _LocatorRefreshAdapter implements HttpClientAdapter {
   int myRequestCount = 0;
+  int typeRequestCount = 0;
 
   @override
   Future<ResponseBody> fetch(
@@ -347,6 +364,7 @@ class _LocatorRefreshAdapter implements HttpClientAdapter {
   ) async {
     switch (options.uri.path) {
       case '/api/locator-slips/types':
+        typeRequestCount += 1;
         return _jsonResponse([
           {
             'code': 'locator',
@@ -375,7 +393,11 @@ class _LocatorRefreshAdapter implements HttpClientAdapter {
 }
 
 class _FakeRealtimeProvider extends AppRealtimeProvider {
+  final _events = StreamController<AppRealtimeEvent>.broadcast();
   bool _connected = false;
+
+  @override
+  Stream<AppRealtimeEvent> get events => _events.stream;
 
   @override
   bool get connected => _connected;
@@ -384,6 +406,14 @@ class _FakeRealtimeProvider extends AppRealtimeProvider {
     if (_connected == value) return;
     _connected = value;
     notifyListeners();
+  }
+
+  void emit(AppRealtimeEvent event) => _events.add(event);
+
+  @override
+  void dispose() {
+    _events.close();
+    super.dispose();
   }
 }
 
@@ -441,6 +471,14 @@ class _LocatorHistoryAdapter implements HttpClientAdapter {
             'total': 1,
             'page_count': 1,
           },
+        });
+      case '/api/docutracker/sources/dtr/locator_slips/request-1/signatures':
+        return _jsonResponse({
+          'source_module': 'dtr',
+          'source_table': 'locator_slips',
+          'source_record_id': 'request-1',
+          'source_status': 'approved',
+          'signatures': [],
         });
       case '/api/locator-slips/request-1/history':
         historyRequestCount += 1;

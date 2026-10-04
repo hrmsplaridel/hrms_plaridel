@@ -15,6 +15,8 @@ const SHIFT_SCHEDULE_FIELDS = Object.freeze([
   'start_time',
   'end_time',
   'break_end',
+  'break_start',
+  'capture_window_minutes',
   'punch_mode',
   'grace_period_minutes',
   'working_days',
@@ -157,6 +159,8 @@ function shiftAuditSnapshot(shift) {
     start_time: normalizedTime(shift.start_time),
     end_time: normalizedTime(shift.end_time),
     break_end: normalizedTime(shift.break_end),
+    break_start: normalizedTime(shift.break_start),
+    capture_window_minutes: Number(shift.capture_window_minutes ?? 120),
     punch_mode: shift.punch_mode ?? 'auto',
     grace_period_minutes: Number(shift.grace_period_minutes ?? 0),
     working_days: Array.isArray(shift.working_days)
@@ -219,13 +223,13 @@ function ensureSupportedShiftRange(startTime, endTime) {
       }
     );
   }
-  if (endMinutes <= startMinutes) {
+  if (endMinutes === startMinutes) {
     throw new ShiftLifecycleError(
-      'Overnight shifts are not currently supported. End Time must be later than Start Time.',
+      'Start and End Time must differ; shifts must be shorter than 24 hours.',
       400,
       {
         fields: {
-          end_time: 'End Time must be later than Start Time.',
+          end_time: 'End Time must differ from Start Time.',
         },
       }
     );
@@ -243,6 +247,7 @@ function resolvedPunchModeForSchedule({
   const startMinutes = timeMinutes(startTime);
   const endMinutes = timeMinutes(endTime);
   const breakEndMinutes = timeMinutes(breakEnd);
+  if (endMinutes < startMinutes) return 'single_session';
   if (startMinutes != null && startMinutes >= 12 * 60) return 'pm_only';
   if (breakEndMinutes == null && endMinutes != null && endMinutes <= 13 * 60) {
     return 'am_only';
@@ -255,6 +260,7 @@ function ensureCompatiblePunchModeSchedule({
   endTime,
   breakEnd,
   punchMode,
+  breakStart,
 }) {
   const resolvedMode = resolvedPunchModeForSchedule({
     startTime,
@@ -265,6 +271,23 @@ function ensureCompatiblePunchModeSchedule({
   const startMinutes = timeMinutes(startTime);
   const endMinutes = timeMinutes(endTime);
   const breakEndMinutes = timeMinutes(breakEnd);
+
+  if (endMinutes < startMinutes) {
+    if (!['single_session', 'full_day'].includes(resolvedMode)) {
+      throw shiftFieldValidationError('punch_mode', 'Overnight shifts require Single session or Four punches.');
+    }
+    if (resolvedMode === 'full_day') {
+      const start = timeMinutes(breakStart);
+      const offset = (value) => value < startMinutes ? value + 1440 : value;
+      if (start == null || breakEndMinutes == null || offset(start) <= startMinutes ||
+          offset(breakEndMinutes) <= offset(start) || offset(breakEndMinutes) >= endMinutes + 1440) {
+        throw shiftFieldValidationError('break_start', 'Set a break start and end within the overnight shift, in chronological order.');
+      }
+    } else if (breakEndMinutes != null || breakStart != null) {
+      throw shiftFieldValidationError('break_end', 'Two-punch shifts do not use recorded break times.');
+    }
+    return resolvedMode;
+  }
 
   if (resolvedMode === 'full_day') {
     if (startMinutes >= 12 * 60) {
@@ -292,9 +315,18 @@ function ensureCompatiblePunchModeSchedule({
         { fields: { break_end: 'PM Start must be at or after 12:00 PM and before End Time.' } }
       );
     }
+    if (breakStart != null) {
+      const breakStartMinutes = timeMinutes(breakStart);
+      if (breakStartMinutes == null || breakStartMinutes <= startMinutes || breakStartMinutes >= breakEndMinutes) {
+        throw shiftFieldValidationError('break_start', 'Break Start must be after Start Time and before Break End.');
+      }
+    }
     return resolvedMode;
   }
 
+  if (breakStart != null) {
+    throw shiftFieldValidationError('break_start', 'Break Start is only used for four-punch shifts.');
+  }
   if (breakEndMinutes != null) {
     const modeLabel = resolvedMode.replace('_', '-');
     throw new ShiftLifecycleError(
@@ -320,7 +352,7 @@ function normalizedWorkingDays(value) {
 }
 
 function normalizedScheduleValue(field, value) {
-  if (field === 'start_time' || field === 'end_time' || field === 'break_end') {
+  if (field === 'start_time' || field === 'end_time' || field === 'break_end' || field === 'break_start') {
     return normalizedTime(value);
   }
   if (field === 'working_days') return normalizedWorkingDays(value);
@@ -343,7 +375,8 @@ function changedShiftScheduleFields(current = {}, changes = {}) {
 
 async function lockShiftForUpdate(db, shiftId) {
   const result = await db.query(
-    `SELECT id, shift_number, name, start_time, end_time, break_end,
+    `SELECT id, shift_number, name, start_time, end_time, break_end, break_start,
+            capture_window_minutes,
             punch_mode, grace_period_minutes, working_days, is_active
        FROM shifts
       WHERE id = $1::uuid

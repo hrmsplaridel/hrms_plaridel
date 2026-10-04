@@ -1,9 +1,7 @@
 import 'package:flutter/material.dart';
-import 'package:shimmer/shimmer.dart';
+import 'package:hrms_plaridel/shared/widgets/skeleton_bone.dart';
 
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
-
-const _kShimmerPeriod = Duration(milliseconds: 1200);
 
 /// Shimmer placeholder for [EmployeeLeaveScreen] initial load (empty data + loading).
 class MyLeaveLoadingSkeleton extends StatelessWidget {
@@ -86,40 +84,12 @@ class MyLeaveLoadingSkeleton extends StatelessWidget {
   }
 }
 
-class _Bone extends StatelessWidget {
+class _Bone extends SkeletonBone {
   const _Bone({
-    required this.width,
-    required this.height,
-    this.borderRadius = 6,
+    required super.width,
+    required super.height,
+    super.borderRadius = 6,
   });
-
-  final double? width;
-  final double height;
-  final double borderRadius;
-
-  @override
-  Widget build(BuildContext context) {
-    final dark = AppTheme.dashIsDark(context);
-    return Shimmer.fromColors(
-      baseColor: dark
-          ? AppTheme.dashMutedSurfaceOf(context)
-          : AppTheme.lightGray.withValues(alpha: 0.55),
-      highlightColor: dark ? AppTheme.dashHairlineOf(context) : AppTheme.white,
-      period: _kShimmerPeriod,
-      child: SizedBox(
-        width: width,
-        height: height,
-        child: DecoratedBox(
-          decoration: BoxDecoration(
-            color: dark
-                ? AppTheme.dashHairlineOf(context)
-                : AppTheme.lightGray.withValues(alpha: 0.85),
-            borderRadius: BorderRadius.circular(borderRadius),
-          ),
-        ),
-      ),
-    );
-  }
 }
 
 class _SummarySkeletonCard extends StatelessWidget {

@@ -1,5 +1,6 @@
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
+import 'package:hrms_plaridel/shared/widgets/workforce_loading_skeleton.dart';
 
 import 'package:hrms_plaridel/core/api/client.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
@@ -523,7 +524,13 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
   }
 
   Widget _buildList() {
-    if (_loading) return const Center(child: CircularProgressIndicator());
+    if (_loading)
+      return const SingleChildScrollView(
+        child: WorkforceRowsSkeleton(
+          columns: [2, 1],
+          label: 'Loading leave types',
+        ),
+      );
     final items = _filteredItems;
     _clampPage(items.length);
     final pageStart = items.isEmpty ? 0 : _page * _typesPerPage;
@@ -870,6 +877,7 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
                             'Minimum advance days',
                             helperText: 'Blank means no advance rule',
                           ),
+                          validator: _validateNonNegativeInteger,
                         ),
                       ),
                       const SizedBox(width: 12),
@@ -884,6 +892,10 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
                           decoration: _inputDecoration(
                             'Max working days',
                             helperText: 'Blank means no limit',
+                          ),
+                          validator: (value) => _validatePositiveNumber(
+                            value,
+                            label: 'Maximum working days',
                           ),
                         ),
                       ),
@@ -904,6 +916,12 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
                           ? 'Optional threshold'
                           : 'Turn on Require attachment first',
                     ),
+                    validator: _requiresAttachment
+                        ? (value) => _validatePositiveNumber(
+                            value,
+                            label: 'Attachment threshold days',
+                          )
+                        : null,
                   ),
                   if (!systemLocked) ...[
                     const SizedBox(height: 24),
@@ -1196,18 +1214,21 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
             child: Text(field.key, style: AppTheme.dashFieldTextStyle(context)),
           ),
           const SizedBox(height: 10),
-          CheckboxListTile(
-            contentPadding: EdgeInsets.zero,
-            dense: true,
-            controlAffinity: ListTileControlAffinity.leading,
-            title: const Text('Required'),
-            value: field.required,
-            onChanged: _saving
-                ? null
-                : (value) => _replaceCustomField(
-                    index,
-                    _updatedCustomField(field, required: value == true),
-                  ),
+          Material(
+            type: MaterialType.transparency,
+            child: CheckboxListTile(
+              contentPadding: EdgeInsets.zero,
+              dense: true,
+              controlAffinity: ListTileControlAffinity.leading,
+              title: const Text('Required'),
+              value: field.required,
+              onChanged: _saving
+                  ? null
+                  : (value) => _replaceCustomField(
+                      index,
+                      _updatedCustomField(field, required: value == true),
+                    ),
+            ),
           ),
           if (isText) ...[
             const SizedBox(height: 8),
@@ -1401,6 +1422,24 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
     final text = value.trim();
     if (text.isEmpty) return null;
     return double.tryParse(text);
+  }
+
+  String? _validatePositiveNumber(String? value, {required String label}) {
+    final text = value?.trim() ?? '';
+    if (text.isEmpty) return null;
+    final parsed = double.tryParse(text);
+    if (parsed == null) return '$label must be a valid number';
+    if (!parsed.isFinite || parsed <= 0) return '$label must be greater than 0';
+    return null;
+  }
+
+  String? _validateNonNegativeInteger(String? value) {
+    final text = value?.trim() ?? '';
+    if (text.isEmpty) return null;
+    if (!RegExp(r'^\d+$').hasMatch(text)) {
+      return 'Minimum advance days must be a whole number';
+    }
+    return null;
   }
 
   int? _intOrNull(String value) {

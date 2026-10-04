@@ -47,5 +47,22 @@ void main() {
     test('uses the requested placeholder for a missing timestamp', () {
       expect(formatOfficialPhilippineTime(null, emptyValue: '-'), '-');
     });
+
+    test('marks next-day punches relative to the shift starting date', () {
+      expect(
+        formatOfficialPhilippineTime(
+          DateTime.parse('2026-10-01T07:00:00+08:00'),
+          attendanceDate: DateTime(2026, 9, 30),
+        ),
+        '7:00 AM (+1 day)',
+      );
+      expect(
+        formatOfficialPhilippineTime(
+          DateTime.parse('2026-09-30T20:00:00+08:00'),
+          attendanceDate: DateTime(2026, 9, 30),
+        ),
+        '8:00 PM',
+      );
+    });
   });
 }

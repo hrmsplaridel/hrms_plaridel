@@ -625,51 +625,61 @@ class _CompactBalanceRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(vertical: 12),
-      decoration: BoxDecoration(
-        border: Border(
-          bottom: BorderSide(color: AppTheme.dashHairlineOf(context)),
-        ),
-      ),
-      child: Row(
-        children: [
-          Expanded(
-            flex: 3,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  balance.leaveTypeLabel,
-                  style: TextStyle(
-                    color: AppTheme.dashTextPrimaryOf(context),
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-                if (annual && balance.entitlementYear != null)
-                  Text(
-                    '${balance.entitlementYear}',
-                    style: TextStyle(
-                      color: AppTheme.dashTextSecondaryOf(context),
-                      fontSize: 11,
-                    ),
-                  ),
-              ],
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: ConstrainedBox(
+        key: ValueKey('leave-balance-row-${balance.effectiveLeaveTypeName}'),
+        constraints: const BoxConstraints(maxWidth: 560),
+        child: Container(
+          padding: const EdgeInsets.symmetric(vertical: 12),
+          decoration: BoxDecoration(
+            border: Border(
+              bottom: BorderSide(color: AppTheme.dashHairlineOf(context)),
             ),
           ),
-          _BalanceAmount(
-            label: annual ? 'Entitled' : 'Earned',
-            value: _days(balance.earnedDays),
+          child: Row(
+            children: [
+              Expanded(
+                flex: 3,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      balance.leaveTypeLabel,
+                      style: TextStyle(
+                        color: AppTheme.dashTextPrimaryOf(context),
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    if (annual && balance.entitlementYear != null)
+                      Text(
+                        '${balance.entitlementYear}',
+                        style: TextStyle(
+                          color: AppTheme.dashTextSecondaryOf(context),
+                          fontSize: 11,
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+              _BalanceAmount(
+                label: annual ? 'Entitled' : 'Earned',
+                value: _days(balance.earnedDays),
+              ),
+              _BalanceAmount(label: 'Used', value: _days(balance.usedDays)),
+              _BalanceAmount(
+                label: 'Pending',
+                value: _days(balance.pendingDays),
+              ),
+              _BalanceAmount(
+                label: 'Available',
+                value: _days(balance.availableDays),
+                emphasized: true,
+              ),
+            ],
           ),
-          _BalanceAmount(label: 'Used', value: _days(balance.usedDays)),
-          _BalanceAmount(label: 'Pending', value: _days(balance.pendingDays)),
-          _BalanceAmount(
-            label: 'Available',
-            value: _days(balance.availableDays),
-            emphasized: true,
-          ),
-        ],
+        ),
       ),
     );
   }

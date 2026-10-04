@@ -5,7 +5,7 @@ import 'package:printing/printing.dart';
 import 'package:hrms_plaridel/core/widgets/form_pdf_preview.dart';
 
 void main() {
-  testWidgets('form preview opens an in-app PDF viewer without print actions', (
+  testWidgets('form preview opens an in-app PDF viewer with print and share', (
     tester,
   ) async {
     final document = pw.Document()..addPage(pw.Page(build: (_) => pw.Text('Form')));
@@ -33,7 +33,7 @@ void main() {
     await tester.pump(const Duration(milliseconds: 400));
     expect(find.text('Form Preview'), findsOneWidget);
     final preview = tester.widget<PdfPreview>(find.byType(PdfPreview));
-    expect(preview.allowPrinting, isFalse);
-    expect(preview.allowSharing, isFalse);
+    expect(preview.allowPrinting, isTrue);
+    expect(preview.allowSharing, isTrue);
   });
 }

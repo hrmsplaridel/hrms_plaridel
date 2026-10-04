@@ -1,5 +1,6 @@
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
+import 'package:hrms_plaridel/shared/widgets/workforce_loading_skeleton.dart';
 
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/features/dtr/management/biometric_devices/data/biometric_attendance_log_repository.dart';
@@ -261,7 +262,10 @@ class _BiometricAttendanceLogsPanelState
           if (_loading && _rows.isEmpty)
             const Padding(
               padding: EdgeInsets.all(40),
-              child: Center(child: CircularProgressIndicator()),
+              child: WorkforceRowsSkeleton(
+                columns: [2, 2, 1, 1],
+                label: 'Loading attendance logs',
+              ),
             )
           else if (_rows.isEmpty)
             Padding(
@@ -276,7 +280,11 @@ class _BiometricAttendanceLogsPanelState
               ),
             )
           else ...[
-            if (_loading) const LinearProgressIndicator(minHeight: 2),
+            if (_loading)
+              const WorkforceRowsSkeleton(
+                rows: 1,
+                label: 'Refreshing attendance logs',
+              ),
             SingleChildScrollView(
               scrollDirection: Axis.horizontal,
               child: DataTable(

@@ -616,7 +616,9 @@ class _FormBackgroundUploadPageState extends State<FormBackgroundUploadPage> {
           spacing: 10,
           runSpacing: 10,
           children: [
-            for (final s in FormPrintCatalog.paperSizes)
+            for (final s in FormPrintCatalog.paperSizes.where(
+              (s) => s.id != 'long_14' && s.id != 'long_landscape',
+            ))
               _PaperSizeCard(
                 size: s,
                 selected: _paperSizeId == s.id,

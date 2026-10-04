@@ -40,7 +40,7 @@ CREATE TABLE IF NOT EXISTS users (
   email TEXT UNIQUE NOT NULL,
   password_hash TEXT NOT NULL,
   role TEXT NOT NULL DEFAULT 'employee'
-    CHECK (role IN ('admin', 'hr', 'employee', 'supervisor', 'mayor')),
+    CHECK (role IN ('admin', 'hr', 'employee', 'supervisor', 'mayor', 'super_admin')),
 
   first_name TEXT,
   full_name TEXT NOT NULL,
@@ -77,6 +77,8 @@ CREATE TABLE IF NOT EXISTS users (
       COALESCE(employment_status, 'active') = 'active'
       OR (is_active = false AND leave_credit_eligible = false)
     ),
+  CONSTRAINT users_super_admin_not_employee_check
+    CHECK (role <> 'super_admin' OR (employee_number IS NULL AND leave_credit_eligible = false)),
   CONSTRAINT chk_users_separation_after_hire
     CHECK (
       separation_date IS NULL
@@ -91,6 +93,29 @@ CREATE TABLE IF NOT EXISTS users (
         AND leave_credit_eligible_until = separation_date
       )
     )
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS users_single_super_admin_idx
+  ON users (role) WHERE role = 'super_admin';
+
+CREATE TABLE IF NOT EXISTS account_creation_access (
+  admin_user_id UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  allowed BOOLEAN NOT NULL,
+  updated_by UUID REFERENCES users(id),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS dtr_admin_access (
+  admin_user_id UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  reports_allowed BOOLEAN NOT NULL DEFAULT false,
+  manage_allowed BOOLEAN NOT NULL DEFAULT false,
+  corrections_allowed BOOLEAN NOT NULL DEFAULT false,
+  employees_allowed BOOLEAN NOT NULL DEFAULT false,
+  leave_allowed BOOLEAN NOT NULL DEFAULT false,
+  approvals_allowed BOOLEAN NOT NULL DEFAULT false,
+  locator_allowed BOOLEAN NOT NULL DEFAULT false,
+  updated_by UUID REFERENCES users(id),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 -- =========================================
@@ -243,6 +268,8 @@ CREATE TABLE IF NOT EXISTS shifts (
   start_time TIME NOT NULL,
   end_time TIME NOT NULL,
   break_end TIME,
+  break_start TIME,
+  capture_window_minutes INT NOT NULL DEFAULT 120 CHECK (capture_window_minutes BETWEEN 0 AND 240),
   punch_mode TEXT NOT NULL DEFAULT 'auto'
     CONSTRAINT shifts_punch_mode_check
     CHECK (punch_mode IN ('auto', 'full_day', 'am_only', 'pm_only', 'single_session')),
@@ -360,6 +387,23 @@ ALTER TABLE assignments
 CREATE INDEX IF NOT EXISTS idx_assignments_employee_effective_range
   ON assignments (employee_id, effective_from, effective_to)
   WHERE is_active = true;
+
+-- Date-specific work/rest exceptions. Shift working_days remains the recurring
+-- default; a row here overrides that default for one employee and one date.
+CREATE TABLE IF NOT EXISTS employee_schedule_overrides (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  employee_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  schedule_date DATE NOT NULL,
+  is_working_day BOOLEAN NOT NULL,
+  created_by UUID REFERENCES users(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT employee_schedule_overrides_employee_date_key
+    UNIQUE (employee_id, schedule_date)
+);
+
+CREATE INDEX IF NOT EXISTS idx_employee_schedule_overrides_date_employee
+  ON employee_schedule_overrides (schedule_date, employee_id);
 
 -- Effective-dated delegates who may review alongside the official Department
 -- Head. The primary reviewer is always resolved from the assignment history.
@@ -595,6 +639,7 @@ CREATE TABLE IF NOT EXISTS leave_types (
   affects_dtr_normally BOOLEAN NOT NULL DEFAULT true,
   balance_ledger_type TEXT NOT NULL DEFAULT 'none',
   entitlement_basis TEXT NOT NULL DEFAULT 'per_request',
+  sex_eligibility TEXT NOT NULL DEFAULT 'any',
   accrues_monthly BOOLEAN NOT NULL DEFAULT false,
   accrual_monthly_rate NUMERIC(6,3),
   accrual_annual_cap NUMERIC(10,3),
@@ -607,6 +652,18 @@ CREATE TABLE IF NOT EXISTS leave_types (
   ),
   CONSTRAINT chk_leave_type_entitlement_basis CHECK (
     entitlement_basis IN ('accrual', 'annual', 'per_event', 'per_request', 'compliance')
+  ),
+  CONSTRAINT chk_leave_type_sex_eligibility CHECK (
+    sex_eligibility IN ('any', 'female', 'male')
+  ),
+  CONSTRAINT chk_leave_type_max_days_positive CHECK (
+    max_days IS NULL OR max_days > 0
+  ),
+  CONSTRAINT chk_leave_type_attachment_threshold_positive CHECK (
+    requires_attachment_when_over_days IS NULL OR requires_attachment_when_over_days > 0
+  ),
+  CONSTRAINT chk_leave_type_minimum_advance_days_nonnegative CHECK (
+    minimum_advance_days IS NULL OR minimum_advance_days >= 0
   )
 );
 
@@ -631,8 +688,8 @@ ON CONFLICT (name) DO NOTHING;
 
 UPDATE leave_types
 SET display_name = COALESCE(NULLIF(display_name, ''), description, name),
-    employee_can_file = CASE WHEN name = 'mandatoryForcedLeave' THEN false ELSE true END,
-    admin_only = CASE WHEN name = 'mandatoryForcedLeave' THEN true ELSE false END,
+    employee_can_file = true,
+    admin_only = false,
     allows_past_dates = CASE WHEN name IN ('vacationLeave', 'specialPrivilegeLeave') THEN false ELSE true END,
     requires_attachment = CASE
       WHEN name IN (
@@ -703,6 +760,11 @@ SET display_name = COALESCE(NULLIF(display_name, ''), description, name),
         'adoptionLeave'
       ) THEN 'per_event'
       ELSE 'per_request'
+    END,
+    sex_eligibility = CASE
+      WHEN name IN ('maternityLeave', 'tenDayVawcLeave', 'specialLeaveBenefitsForWomen') THEN 'female'
+      WHEN name = 'paternityLeave' THEN 'male'
+      ELSE 'any'
     END,
     accrues_monthly = CASE WHEN name IN ('vacationLeave', 'sickLeave') THEN true ELSE false END,
     accrual_monthly_rate = CASE WHEN name IN ('vacationLeave', 'sickLeave') THEN 1.25 ELSE NULL END,
@@ -1083,24 +1145,41 @@ CREATE INDEX IF NOT EXISTS idx_user_push_tokens_user_active
   WHERE revoked_at IS NULL;
 
 -- =========================================
--- LOCATOR / PASS SLIP / WFH REQUESTS
+-- LOCATOR REQUESTS
 -- =========================================
 CREATE TABLE IF NOT EXISTS locator_request_types (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  code TEXT NOT NULL UNIQUE,
-  label TEXT NOT NULL,
-  short_label TEXT NOT NULL,
-  location_label TEXT NOT NULL DEFAULT 'Office / Destination',
-  location_hint TEXT NOT NULL DEFAULT 'Enter office or destination',
-  dtr_slot_label TEXT NOT NULL DEFAULT 'On Field',
-  dtr_print_label TEXT NOT NULL DEFAULT 'ON FIELD',
+  code TEXT NOT NULL
+    CONSTRAINT chk_locator_request_types_code_format
+    CHECK (code ~ '^[a-z0-9_][a-z0-9_-]{1,63}$')
+    UNIQUE,
+  label TEXT NOT NULL
+    CONSTRAINT chk_locator_request_types_label_length
+    CHECK (label = btrim(label) AND char_length(label) BETWEEN 1 AND 100),
+  short_label TEXT NOT NULL
+    CONSTRAINT chk_locator_request_types_short_label_length
+    CHECK (short_label = btrim(short_label) AND char_length(short_label) BETWEEN 1 AND 40),
+  location_label TEXT NOT NULL DEFAULT 'Office / Destination'
+    CONSTRAINT chk_locator_request_types_location_label_length
+    CHECK (location_label = btrim(location_label) AND char_length(location_label) BETWEEN 1 AND 100),
+  location_hint TEXT NOT NULL DEFAULT 'Enter office or destination'
+    CONSTRAINT chk_locator_request_types_location_hint_length
+    CHECK (location_hint = btrim(location_hint) AND char_length(location_hint) BETWEEN 1 AND 200),
+  dtr_slot_label TEXT NOT NULL DEFAULT 'On Field'
+    CONSTRAINT chk_locator_request_types_dtr_slot_label_length
+    CHECK (dtr_slot_label = btrim(dtr_slot_label) AND char_length(dtr_slot_label) BETWEEN 1 AND 40),
+  dtr_print_label TEXT NOT NULL DEFAULT 'ON FIELD'
+    CONSTRAINT chk_locator_request_types_dtr_print_label_length
+    CHECK (dtr_print_label = btrim(dtr_print_label) AND char_length(dtr_print_label) BETWEEN 1 AND 40),
   requires_attachment BOOLEAN NOT NULL DEFAULT false,
   coverage_mode TEXT NOT NULL DEFAULT 'manual'
     CONSTRAINT locator_request_types_coverage_mode_check
     CHECK (coverage_mode IN ('manual', 'wfh')),
   is_active BOOLEAN NOT NULL DEFAULT true,
   is_system BOOLEAN NOT NULL DEFAULT false,
-  sort_order INTEGER NOT NULL DEFAULT 0,
+  sort_order INTEGER NOT NULL DEFAULT 0
+    CONSTRAINT chk_locator_request_types_sort_order_nonnegative
+    CHECK (sort_order >= 0),
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
@@ -1115,10 +1194,7 @@ INSERT INTO locator_request_types (
    'On Field', 'ON FIELD', false, 'manual', true, true, 10),
   ('pass_slip', 'Pass Slip', 'Pass Slip',
    'Destination / Location', 'Enter destination or location',
-   'Pass Slip', 'PASS SLIP', false, 'manual', true, true, 20),
-  ('work_from_home', 'Work From Home', 'WFH',
-   'Work Location', 'Enter work location',
-   'WFH', 'WFH', false, 'wfh', true, true, 30)
+   'Pass Slip', 'PASS SLIP', false, 'manual', true, true, 20)
 ON CONFLICT (code) DO UPDATE SET
   is_system = true,
   updated_at = now();
@@ -1128,6 +1204,8 @@ CREATE TABLE IF NOT EXISTS locator_slips (
   employee_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   department_id UUID REFERENCES departments(id) ON DELETE SET NULL,
   assigned_department_head_id UUID REFERENCES users(id) ON DELETE SET NULL,
+  print_signatories JSONB,
+  signature_revision INTEGER NOT NULL DEFAULT 1,
   slip_date DATE NOT NULL,
   am_in BOOLEAN NOT NULL DEFAULT false,
   am_out BOOLEAN NOT NULL DEFAULT false,
@@ -1400,6 +1478,7 @@ CREATE TABLE IF NOT EXISTS dtr_daily_summary (
   undertime_minutes INT NOT NULL DEFAULT 0 CHECK (undertime_minutes >= 0),
   overtime_minutes INT NOT NULL DEFAULT 0 CHECK (overtime_minutes >= 0),
   total_hours NUMERIC(6,2) NOT NULL DEFAULT 0 CHECK (total_hours >= 0),
+  shift_snapshot JSONB,
 
   status TEXT NOT NULL DEFAULT 'incomplete'
     CHECK (status IN (
@@ -1552,6 +1631,18 @@ CREATE TABLE IF NOT EXISTS dtr_leave_coverage (
 -- =========================================
 -- DTR CORRECTION REQUESTS
 -- =========================================
+CREATE TABLE IF NOT EXISTS dtr_correction_reviewer_configs (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  effective_from DATE NOT NULL,
+  reviewer_ids UUID[] NOT NULL,
+  created_by UUID REFERENCES users(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CHECK (cardinality(reviewer_ids) BETWEEN 1 AND 6)
+);
+
+CREATE INDEX IF NOT EXISTS idx_dtr_correction_reviewer_configs_date
+  ON dtr_correction_reviewer_configs(effective_from DESC, created_at DESC, id DESC);
+
 CREATE TABLE IF NOT EXISTS dtr_corrections (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   employee_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -1563,6 +1654,8 @@ CREATE TABLE IF NOT EXISTS dtr_corrections (
   requested_break_out TIMESTAMPTZ,
 
   reason TEXT NOT NULL,
+  original_record JSONB,
+  applied_record JSONB,
 
   status TEXT NOT NULL DEFAULT 'pending'
     CHECK (status IN ('pending', 'approved', 'rejected')),
@@ -1577,6 +1670,14 @@ CREATE TABLE IF NOT EXISTS dtr_corrections (
 
 -- =========================================
 -- OVERTIME REQUESTS
+-- Private correction evidence, served only through authenticated API routes.
+CREATE TABLE IF NOT EXISTS dtr_correction_attachments (
+  correction_id UUID PRIMARY KEY REFERENCES dtr_corrections(id) ON DELETE CASCADE,
+  file_name TEXT NOT NULL,
+  mime_type TEXT NOT NULL CHECK (mime_type IN ('application/pdf', 'image/jpeg', 'image/png')),
+  content BYTEA NOT NULL CHECK (octet_length(content) BETWEEN 1 AND 5242880),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
 -- =========================================
 CREATE TABLE IF NOT EXISTS overtime_requests (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -1613,6 +1714,9 @@ CREATE TABLE IF NOT EXISTS audit_logs (
   details TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+\ir migrations/20261004_audit_identity_snapshots.sql
+\ir migrations/20261004_password_reset_assistance.sql
 
 -- =========================================
 -- L&D — RSP SAVED FORMS
@@ -1922,9 +2026,17 @@ CREATE TABLE IF NOT EXISTS recruitment_exam_questions (
   question_text TEXT NOT NULL,
   options_json JSONB,
   correct_index INT,
+  question_image_path TEXT,
+  question_image_caption TEXT,
+  option_images_json JSONB,
   created_at TIMESTAMPTZ DEFAULT now(),
   updated_at TIMESTAMPTZ DEFAULT now()
 );
+
+-- Existing databases created before exam images were added.
+ALTER TABLE recruitment_exam_questions ADD COLUMN IF NOT EXISTS question_image_path TEXT;
+ALTER TABLE recruitment_exam_questions ADD COLUMN IF NOT EXISTS question_image_caption TEXT;
+ALTER TABLE recruitment_exam_questions ADD COLUMN IF NOT EXISTS option_images_json JSONB;
 
 CREATE TABLE IF NOT EXISTS recruitment_custom_exams (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -2484,6 +2596,42 @@ CREATE TABLE IF NOT EXISTS docutracker_transition_requests (
   UNIQUE (document_id, action, idempotency_key)
 );
 
+-- Locator signatures are request-bound. The stored revision prevents an
+-- e-signature from being reused after the underlying slip is corrected.
+CREATE TABLE IF NOT EXISTS docutracker_locator_signatures (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  locator_slip_id UUID NOT NULL REFERENCES locator_slips(id) ON DELETE CASCADE,
+  revision INTEGER NOT NULL,
+  slot_key TEXT NOT NULL CHECK (slot_key IN ('applicant', 'department_head', 'hr_approver')),
+  signature_asset_id UUID NOT NULL REFERENCES docutracker_signature_assets(id) ON DELETE RESTRICT,
+  signed_by UUID NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+  signer_name_snapshot TEXT NOT NULL,
+  signed_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (locator_slip_id, revision, slot_key)
+);
+
+CREATE OR REPLACE FUNCTION invalidate_locator_signatures() RETURNS trigger AS $$
+BEGIN
+  IF ROW(NEW.slip_date, NEW.office, NEW.reason, NEW.request_type,
+         NEW.am_in, NEW.am_out, NEW.pm_in, NEW.pm_out, NEW.employee_id,
+         NEW.department_id, NEW.attachment_path, NEW.attachment_uploaded_at)
+     IS DISTINCT FROM
+     ROW(OLD.slip_date, OLD.office, OLD.reason, OLD.request_type,
+         OLD.am_in, OLD.am_out, OLD.pm_in, OLD.pm_out, OLD.employee_id,
+         OLD.department_id, OLD.attachment_path, OLD.attachment_uploaded_at)
+     OR (NEW.status IS DISTINCT FROM OLD.status AND
+         NEW.status IN ('returned_for_correction', 'returned', 'cancelled', 'revoked'))
+  THEN
+    NEW.signature_revision := OLD.signature_revision + 1;
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS locator_signature_revision ON locator_slips;
+CREATE TRIGGER locator_signature_revision BEFORE UPDATE ON locator_slips
+FOR EACH ROW EXECUTE FUNCTION invalidate_locator_signatures();
+
 CREATE TABLE IF NOT EXISTS docutracker_document_number_seq (
   year INT PRIMARY KEY,
   last_value BIGINT NOT NULL DEFAULT 0
@@ -2634,7 +2782,7 @@ CREATE TABLE IF NOT EXISTS docutracker_official_signatories (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   CONSTRAINT docutracker_official_signatories_role_check
-    CHECK (role_key IN ('leave_credit_certifier')),
+    CHECK (role_key IN ('leave_credit_certifier', 'dtr_office_hours_verifier', 'dtr_hr_officer')),
   CONSTRAINT docutracker_official_signatories_period_check
     CHECK (effective_to IS NULL OR effective_to >= effective_from),
   CONSTRAINT docutracker_official_signatories_name_check
@@ -3315,6 +3463,13 @@ BEFORE UPDATE ON assignments
 FOR EACH ROW
 EXECUTE PROCEDURE set_updated_at();
 
+DROP TRIGGER IF EXISTS trg_employee_schedule_overrides_updated_at
+  ON employee_schedule_overrides;
+CREATE TRIGGER trg_employee_schedule_overrides_updated_at
+BEFORE UPDATE ON employee_schedule_overrides
+FOR EACH ROW
+EXECUTE PROCEDURE set_updated_at();
+
 DROP TRIGGER IF EXISTS trg_policy_assignments_updated_at ON policy_assignments;
 CREATE TRIGGER trg_policy_assignments_updated_at
 BEFORE UPDATE ON policy_assignments
@@ -3370,3 +3525,97 @@ EXECUTE PROCEDURE set_updated_at();
 -- independently for upgrades while making this file the one-command installer.
 \ir migrations/docutracker/docutracker-install-all-in-order.sql
 \ir rsp-storage-attachment-policy.sql
+
+-- =========================================
+-- DOCUTRACKER WORKFLOW VERSIONING TABLES
+-- Added 2026-09-22: docutracker_workflows, docutracker_workflow_versions,
+-- and docutracker_workflow_step_assignments were applied via targeted
+-- migrations but were not yet in the fresh-install path.
+-- These depend on docutracker_document_types (created above via
+-- docutracker-install-post-production-hardening.sql), docutracker_roles
+-- and docutracker_workflow_steps (created inline above).
+-- =========================================
+
+CREATE TABLE IF NOT EXISTS docutracker_workflows (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  document_type TEXT NOT NULL UNIQUE,
+  active_version INT,
+  default_review_deadline_hours INT,
+  is_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  CONSTRAINT docutracker_workflows_document_type_fk
+    FOREIGN KEY (document_type)
+    REFERENCES docutracker_document_types(document_type)
+    ON UPDATE CASCADE ON DELETE RESTRICT,
+  CONSTRAINT docutracker_workflows_deadline_check
+    CHECK (default_review_deadline_hours IS NULL OR default_review_deadline_hours > 0),
+  CONSTRAINT docutracker_workflows_active_version_check
+    CHECK (active_version IS NULL OR active_version > 0)
+);
+
+DROP TRIGGER IF EXISTS trg_docutracker_workflows_updated_at ON docutracker_workflows;
+CREATE TRIGGER trg_docutracker_workflows_updated_at
+BEFORE UPDATE ON docutracker_workflows
+FOR EACH ROW EXECUTE FUNCTION docutracker_set_updated_at();
+
+CREATE TABLE IF NOT EXISTS docutracker_workflow_versions (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  workflow_id UUID NOT NULL,
+  version INT NOT NULL,
+  review_deadline_hours INT,
+  status TEXT NOT NULL DEFAULT 'draft',
+  notes TEXT,
+  snapshot JSONB,
+  created_by UUID,
+  published_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  CONSTRAINT docutracker_workflow_versions_workflow_fk
+    FOREIGN KEY (workflow_id) REFERENCES docutracker_workflows(id) ON DELETE CASCADE,
+  CONSTRAINT docutracker_workflow_versions_version_positive CHECK (version > 0),
+  CONSTRAINT docutracker_workflow_versions_deadline_check
+    CHECK (review_deadline_hours IS NULL OR review_deadline_hours > 0),
+  CONSTRAINT docutracker_workflow_versions_status_check
+    CHECK (status IN ('draft', 'published', 'retired')),
+  CONSTRAINT docutracker_workflow_versions_unique UNIQUE (workflow_id, version)
+);
+
+CREATE INDEX IF NOT EXISTS idx_docutracker_workflow_versions_workflow
+  ON docutracker_workflow_versions(workflow_id, version DESC);
+
+CREATE TABLE IF NOT EXISTS docutracker_workflow_step_assignments (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  step_id UUID NOT NULL,
+  assignee_type TEXT NOT NULL,
+  user_id UUID,
+  role_id TEXT,
+  department_id UUID,
+  is_primary BOOLEAN NOT NULL DEFAULT FALSE,
+  backup_rank INT,
+  is_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+  allowed_actions TEXT[] NOT NULL DEFAULT ARRAY['view','approve','reject','return']::TEXT[],
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  CONSTRAINT docutracker_step_assignments_step_fk
+    FOREIGN KEY (step_id) REFERENCES docutracker_workflow_steps(id) ON DELETE CASCADE,
+  CONSTRAINT docutracker_step_assignments_role_fk
+    FOREIGN KEY (role_id) REFERENCES docutracker_roles(role_id) ON UPDATE CASCADE ON DELETE RESTRICT,
+  CONSTRAINT docutracker_step_assignments_type_check
+    CHECK (assignee_type IN ('user','role','department','department_head','sender_supervisor','document_creator')),
+  CONSTRAINT docutracker_step_assignments_backup_rank_check
+    CHECK (backup_rank IS NULL OR backup_rank >= 0)
+);
+
+CREATE INDEX IF NOT EXISTS idx_docutracker_step_assignments_step
+  ON docutracker_workflow_step_assignments(step_id);
+CREATE INDEX IF NOT EXISTS idx_docutracker_step_assignments_user
+  ON docutracker_workflow_step_assignments(user_id) WHERE user_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_docutracker_step_assignments_role
+  ON docutracker_workflow_step_assignments(role_id) WHERE role_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_docutracker_step_assignments_department
+  ON docutracker_workflow_step_assignments(department_id) WHERE department_id IS NOT NULL;
+
+DROP TRIGGER IF EXISTS trg_docutracker_step_assignments_updated_at ON docutracker_workflow_step_assignments;
+CREATE TRIGGER trg_docutracker_step_assignments_updated_at
+BEFORE UPDATE ON docutracker_workflow_step_assignments
+FOR EACH ROW EXECUTE FUNCTION docutracker_set_updated_at();

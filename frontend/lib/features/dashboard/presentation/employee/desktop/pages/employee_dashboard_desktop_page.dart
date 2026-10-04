@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:hrms_plaridel/features/dtr/attendance/presentation/widgets/dtr_corrections_dialog.dart';
 import 'dart:ui' show lerpDouble;
 
 import 'package:flutter/material.dart';
@@ -71,6 +72,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboardDesktopPage>
   int _selectedNavIndex = 0;
   bool _sidebarCollapsed = false;
   LeaveSection? _leaveInitialSection;
+  bool _showMobileLeaveFab = true;
   int _leaveNavKey = 0;
   Timer? _notificationPollTimer;
   bool? _isDepartmentHead;
@@ -359,6 +361,14 @@ class _EmployeeDashboardState extends State<EmployeeDashboardDesktopPage>
   void _applyNotificationTapResult(NotificationTapResult? result) {
     if (result == null || result.kind == NotificationTapKind.none) return;
     switch (result.kind) {
+      case NotificationTapKind.dtrCorrectionReview:
+      case NotificationTapKind.dtrCorrectionRequests:
+        showDtrCorrections(
+          context,
+          review: result.kind == NotificationTapKind.dtrCorrectionReview,
+          requestId: result.referenceId,
+        );
+        break;
       case NotificationTapKind.employeeLeaveApprovals:
       case NotificationTapKind.employeeLeaveRequests:
         final section = result.employeeLeaveSection;
@@ -558,6 +568,12 @@ class _EmployeeDashboardState extends State<EmployeeDashboardDesktopPage>
           initialSection: _leaveInitialSection,
           onFileLeavePressed: _openEmployeeLeaveRequestForm,
           hideFileLeaveAction: useMobileLeaveFab,
+          onSectionChanged: (section) {
+            final show = section == LeaveSection.requests;
+            if (_showMobileLeaveFab != show && mounted) {
+              setState(() => _showMobileLeaveFab = show);
+            }
+          },
           tutorialHeaderKey: _leaveHeaderKey,
           tutorialContentKey: _leaveContentKey,
         );
@@ -651,6 +667,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboardDesktopPage>
         onFileLocator: _openEmployeeLocatorRequestForm,
         onHrmsAssistant: _openHrmsAssistant,
         onTutorial: _openDashboardTutorial,
+        showMobileLeaveFab: _showMobileLeaveFab,
       );
     }
 
@@ -911,6 +928,7 @@ class _EmployeeLeaveMainEntry extends StatefulWidget {
     this.hideFileLeaveAction = false,
     this.tutorialHeaderKey,
     this.tutorialContentKey,
+    this.onSectionChanged,
   });
 
   final LeaveSection? initialSection;
@@ -918,6 +936,7 @@ class _EmployeeLeaveMainEntry extends StatefulWidget {
   final bool hideFileLeaveAction;
   final GlobalKey? tutorialHeaderKey;
   final GlobalKey? tutorialContentKey;
+  final ValueChanged<LeaveSection>? onSectionChanged;
 
   @override
   State<_EmployeeLeaveMainEntry> createState() =>
@@ -974,6 +993,7 @@ class _EmployeeLeaveMainEntryState extends State<_EmployeeLeaveMainEntry> {
           hideEmployeeFileLeaveAction: widget.hideFileLeaveAction,
           tutorialHeaderKey: widget.tutorialHeaderKey,
           tutorialContentKey: widget.tutorialContentKey,
+          onSectionChanged: widget.onSectionChanged,
         );
       },
     );
@@ -2477,6 +2497,8 @@ class _EmployeeAttendanceContentState extends State<EmployeeAttendanceContent>
   int _selectedMonth = 1;
   int _selectedYear = 2000;
   int? _selectedDay;
+  bool _dateAscending = true;
+  String _attendanceView = 'auto';
   bool _didApplyMobileDefault = false;
   String _mobileAttendanceMode = 'today';
   DateTime? _officialHrmsDate;
@@ -2823,14 +2845,14 @@ class _EmployeeAttendanceContentState extends State<EmployeeAttendanceContent>
     );
   }
 
-  static String _formatTime(DateTime? dt) => formatOfficialPhilippineTime(dt);
-
   static String _formatTimeWithLocator(
     TimeRecord r,
     DateTime? dt,
     String segment,
   ) {
-    if (dt != null) return _formatTime(dt);
+    if (dt != null) {
+      return formatOfficialPhilippineTime(dt, attendanceDate: r.recordDate);
+    }
     final segs = r.locatorSlipSegments ?? const <String>[];
     if (segs.any((s) => s.toUpperCase() == segment)) {
       return r.locatorSlipSlotLabel;
@@ -3043,6 +3065,7 @@ class _EmployeeAttendanceContentState extends State<EmployeeAttendanceContent>
   Widget _buildMobileAttendanceList(List<TimeRecord> records) {
     return EmployeeAttendanceMobileList(
       records: records,
+      viewMode: _attendanceView,
       formatDate: _formatDate,
       formatTime: _formatTimeWithLocator,
     );
@@ -3063,9 +3086,18 @@ class _EmployeeAttendanceContentState extends State<EmployeeAttendanceContent>
         return rd.isAfter(today);
       })
       ..sort(
-        (a, b) => a.recordDate.compareTo(b.recordDate),
-      ); // Day 1..N ascending
+        (a, b) => _dateAscending
+            ? a.recordDate.compareTo(b.recordDate)
+            : b.recordDate.compareTo(a.recordDate),
+      );
 
+    final singleView =
+        _attendanceView == 'single' ||
+        (_attendanceView == 'auto' &&
+            visibleRecords.isNotEmpty &&
+            visibleRecords.every(
+              (record) => record.shiftPunchMode == 'single_session',
+            ));
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -3096,6 +3128,14 @@ class _EmployeeAttendanceContentState extends State<EmployeeAttendanceContent>
           ),
           const SizedBox(height: 24),
         ],
+        Align(
+          alignment: Alignment.centerRight,
+          child: TextButton.icon(
+            icon: const Icon(Icons.edit_calendar_outlined),
+            label: const Text('DTR Corrections'),
+            onPressed: () => showDtrCorrections(context),
+          ),
+        ),
         LayoutBuilder(
           key: widget.filtersKey,
           builder: (context, constraints) {
@@ -3300,6 +3340,57 @@ class _EmployeeAttendanceContentState extends State<EmployeeAttendanceContent>
               ),
             );
 
+            final viewSelector = SizedBox(
+              width: 172,
+              child: DropdownButtonFormField<String>(
+                initialValue: _attendanceView,
+                decoration: AppTheme.dashInputDecoration(
+                  context,
+                  contentPadding: fieldPadding,
+                  radius: 8,
+                ),
+                isExpanded: true,
+                items: const [
+                  DropdownMenuItem(value: 'auto', child: Text('View: Auto')),
+                  DropdownMenuItem(
+                    value: 'split',
+                    child: Text('Split (AM/PM)'),
+                  ),
+                  DropdownMenuItem(
+                    value: 'single',
+                    child: Text('Single Session'),
+                  ),
+                ],
+                onChanged: (value) => setState(() => _attendanceView = value!),
+              ),
+            );
+            final sortButton = SizedBox(
+              width: 44,
+              height: 44,
+              child: PopupMenuButton<bool>(
+                tooltip: _dateAscending
+                    ? 'Date order: Ascending'
+                    : 'Date order: Descending',
+                initialValue: _dateAscending,
+                icon: const Icon(Icons.swap_vert_rounded),
+                onSelected: (ascending) {
+                  setState(() => _dateAscending = ascending);
+                },
+                itemBuilder: (context) => [
+                  CheckedPopupMenuItem(
+                    value: true,
+                    checked: _dateAscending,
+                    child: const Text('Day: Ascending'),
+                  ),
+                  CheckedPopupMenuItem(
+                    value: false,
+                    checked: !_dateAscending,
+                    child: const Text('Day: Descending'),
+                  ),
+                ],
+              ),
+            );
+
             final refreshButton = IconButton(
               onPressed: _officialDateLoading
                   ? null
@@ -3328,7 +3419,13 @@ class _EmployeeAttendanceContentState extends State<EmployeeAttendanceContent>
                     runSpacing: 8,
                     alignment: WrapAlignment.start,
                     crossAxisAlignment: WrapCrossAlignment.center,
-                    children: [monthField(), yearField(), refreshButton],
+                    children: [
+                      monthField(),
+                      yearField(),
+                      viewSelector,
+                      sortButton,
+                      refreshButton,
+                    ],
                   ),
                   const SizedBox(height: 12),
                   _buildMobileModeSelector(),
@@ -3340,15 +3437,16 @@ class _EmployeeAttendanceContentState extends State<EmployeeAttendanceContent>
               );
             }
 
-            return Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
+            return Wrap(
+              spacing: 12,
+              runSpacing: 8,
+              crossAxisAlignment: WrapCrossAlignment.center,
               children: [
                 monthField(),
-                const SizedBox(width: 12),
                 yearField(),
-                const SizedBox(width: 12),
                 dayField(),
-                const SizedBox(width: 4),
+                viewSelector,
+                sortButton,
                 refreshButton,
               ],
             );
@@ -3447,27 +3545,45 @@ class _EmployeeAttendanceContentState extends State<EmployeeAttendanceContent>
                               Expanded(
                                 flex: 1,
                                 child: Center(
-                                  child: Text('AM In', style: headerStyle),
+                                  child: Text(
+                                    singleView ? 'Time In' : 'AM In',
+                                    style: headerStyle,
+                                  ),
                                 ),
                               ),
+                              if (!singleView)
+                                Expanded(
+                                  flex: 1,
+                                  child: Center(
+                                    child: Text('AM Out', style: headerStyle),
+                                  ),
+                                ),
+                              if (!singleView)
+                                Expanded(
+                                  flex: 1,
+                                  child: Center(
+                                    child: Text('PM In', style: headerStyle),
+                                  ),
+                                ),
                               Expanded(
                                 flex: 1,
                                 child: Center(
-                                  child: Text('AM Out', style: headerStyle),
+                                  child: Text(
+                                    singleView ? 'Time Out' : 'PM Out',
+                                    style: headerStyle,
+                                  ),
                                 ),
                               ),
-                              Expanded(
-                                flex: 1,
-                                child: Center(
-                                  child: Text('PM In', style: headerStyle),
+                              if (singleView)
+                                Expanded(
+                                  flex: 1,
+                                  child: Center(
+                                    child: Text(
+                                      'Hours Worked',
+                                      style: headerStyle,
+                                    ),
+                                  ),
                                 ),
-                              ),
-                              Expanded(
-                                flex: 1,
-                                child: Center(
-                                  child: Text('PM Out', style: headerStyle),
-                                ),
-                              ),
                               Expanded(
                                 flex: 1,
                                 child: Center(
@@ -3499,10 +3615,14 @@ class _EmployeeAttendanceContentState extends State<EmployeeAttendanceContent>
                           final i = entry.key;
                           final isLastRow = i == visibleRecords.length - 1;
                           final r = entry.value;
-                          final timeIn = r.timeIn;
+                          final timeIn = singleView
+                              ? (r.timeIn ?? r.breakIn)
+                              : r.timeIn;
                           final breakOut = r.breakOut;
                           final breakIn = r.breakIn;
-                          final timeOut = r.timeOut;
+                          final timeOut = singleView
+                              ? (r.timeOut ?? r.breakOut)
+                              : r.timeOut;
                           final remark = getAttendanceRemark(r);
                           final lateStr = formatLateMinutes(r);
                           final underStr = formatUndertimeMinutes(r);
@@ -3552,34 +3672,36 @@ class _EmployeeAttendanceContentState extends State<EmployeeAttendanceContent>
                                     ),
                                   ),
                                 ),
-                                Expanded(
-                                  flex: 1,
-                                  child: Center(
-                                    child: Text(
-                                      _formatTimeWithLocator(
-                                        r,
-                                        breakOut,
-                                        'AM OUT',
+                                if (!singleView)
+                                  Expanded(
+                                    flex: 1,
+                                    child: Center(
+                                      child: Text(
+                                        _formatTimeWithLocator(
+                                          r,
+                                          breakOut,
+                                          'AM OUT',
+                                        ),
+                                        style: cellStyle,
+                                        overflow: TextOverflow.ellipsis,
                                       ),
-                                      style: cellStyle,
-                                      overflow: TextOverflow.ellipsis,
                                     ),
                                   ),
-                                ),
-                                Expanded(
-                                  flex: 1,
-                                  child: Center(
-                                    child: Text(
-                                      _formatTimeWithLocator(
-                                        r,
-                                        breakIn,
-                                        'PM IN',
+                                if (!singleView)
+                                  Expanded(
+                                    flex: 1,
+                                    child: Center(
+                                      child: Text(
+                                        _formatTimeWithLocator(
+                                          r,
+                                          breakIn,
+                                          'PM IN',
+                                        ),
+                                        style: cellStyle,
+                                        overflow: TextOverflow.ellipsis,
                                       ),
-                                      style: cellStyle,
-                                      overflow: TextOverflow.ellipsis,
                                     ),
                                   ),
-                                ),
                                 Expanded(
                                   flex: 1,
                                   child: Center(
@@ -3594,6 +3716,16 @@ class _EmployeeAttendanceContentState extends State<EmployeeAttendanceContent>
                                     ),
                                   ),
                                 ),
+                                if (singleView)
+                                  Expanded(
+                                    flex: 1,
+                                    child: Center(
+                                      child: Text(
+                                        formatWorkedHours(r),
+                                        style: cellStyle,
+                                      ),
+                                    ),
+                                  ),
                                 Expanded(
                                   flex: 1,
                                   child: Center(

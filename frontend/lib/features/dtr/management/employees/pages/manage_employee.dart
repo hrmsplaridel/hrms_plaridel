@@ -215,7 +215,13 @@ _EmployeeProfile _employeeProfileFromJson(Map<String, dynamic> m) {
 /// Matches reference: search, Privilege/Status filters, ID/Name/Privilege columns,
 /// right panel with avatar, Add/Edit/Deactivate buttons.
 class ManageEmployee extends StatefulWidget {
-  const ManageEmployee({super.key, this.onOpenAssignmentForEmployee});
+  const ManageEmployee({
+    super.key,
+    required this.canCreateAccount,
+    this.onOpenAssignmentForEmployee,
+  });
+
+  final bool canCreateAccount;
 
   /// When set (e.g. from admin DTR hub), detail panel can jump to Assignment with this employee.
   final void Function(String employeeId)? onOpenAssignmentForEmployee;
@@ -946,6 +952,7 @@ class _ManageEmployeeState extends State<ManageEmployee> {
   }
 
   Future<void> _openAddEmployeePanel() async {
+    if (!widget.canCreateAccount) return;
     final messenger = ScaffoldMessenger.of(context);
 
     await openResponsiveRightSidePanel<void>(
@@ -1205,7 +1212,7 @@ class _ManageEmployeeState extends State<ManageEmployee> {
           onSelected: (action) {
             switch (action) {
               case _EmployeeToolbarAction.importFromDevice:
-                _showImportDialog(context);
+                if (widget.canCreateAccount) _showImportDialog(context);
               case _EmployeeToolbarAction.biometricRoster:
                 _showBiometricRosterDialog(context);
               case _EmployeeToolbarAction.exportAllCsv:
@@ -1213,13 +1220,15 @@ class _ManageEmployeeState extends State<ManageEmployee> {
             }
           },
           itemBuilder: (context) => [
-            PopupMenuItem(
-              value: _EmployeeToolbarAction.importFromDevice,
-              child: _toolbarMenuItem(
-                icon: Icons.download_rounded,
-                label: 'Import from Device',
+            if (widget.canCreateAccount) ...[
+              PopupMenuItem(
+                value: _EmployeeToolbarAction.importFromDevice,
+                child: _toolbarMenuItem(
+                  icon: Icons.download_rounded,
+                  label: 'Import from Device',
+                ),
               ),
-            ),
+            ],
             PopupMenuItem(
               value: _EmployeeToolbarAction.biometricRoster,
               child: _toolbarMenuItem(
@@ -1256,19 +1265,20 @@ class _ManageEmployeeState extends State<ManageEmployee> {
             ),
           ),
         ),
-        FilledButton.icon(
-          onPressed: _openAddEmployeePanel,
-          icon: const Icon(Icons.person_add_rounded, size: 18),
-          label: const Text('Add employee'),
-          style: FilledButton.styleFrom(
-            backgroundColor: AppTheme.primaryNavy,
-            foregroundColor: Colors.white,
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(10),
+        if (widget.canCreateAccount)
+          FilledButton.icon(
+            onPressed: _openAddEmployeePanel,
+            icon: const Icon(Icons.person_add_rounded, size: 18),
+            label: const Text('Add employee'),
+            style: FilledButton.styleFrom(
+              backgroundColor: AppTheme.primaryNavy,
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10),
+              ),
             ),
           ),
-        ),
       ],
     );
   }

@@ -1,6 +1,10 @@
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
+import 'package:hrms_plaridel/features/recruitment/data/exam_image_support.dart';
+import 'package:hrms_plaridel/features/recruitment/models/recruitment_application.dart';
+import 'package:hrms_plaridel/features/recruitment/presentation/shared/widgets/exam_image_widgets.dart';
 
 /// Shared visual primitives for RSP exam / BEI question editors.
 class RspExamEditorUi {
@@ -304,84 +308,180 @@ class RspExamTimeLimitPanel extends StatelessWidget {
   }
 }
 
-/// Wraps one MCQ question block with card chrome and delete control.
+/// Wraps one MCQ question block with card chrome, delete control, and a
+/// collapsible body. Collapsed cards show the question text and a short
+/// summary so long exams stay readable.
 class RspMcqQuestionCard extends StatelessWidget {
   const RspMcqQuestionCard({
     super.key,
     required this.index,
     required this.onRemove,
     required this.child,
+    required this.collapsed,
+    required this.onToggle,
+    this.questionPreview = '',
+    this.summary,
+    this.isComplete = true,
   });
 
   final int index;
   final VoidCallback? onRemove;
   final Widget child;
+  final bool collapsed;
+  final VoidCallback onToggle;
+
+  /// Question text shown as the title while collapsed.
+  final String questionPreview;
+
+  /// Secondary line while collapsed (option count, correct answer).
+  final String? summary;
+
+  /// False when the question text or options are still missing.
+  final bool isComplete;
 
   @override
   Widget build(BuildContext context) {
     final primary = AppTheme.dashTextPrimaryOf(context);
+    final secondary = AppTheme.dashTextSecondaryOf(context);
+    final preview = questionPreview.trim();
+    final title = collapsed
+        ? (preview.isEmpty ? 'Untitled question' : preview)
+        : 'Question';
 
     return Container(
       margin: const EdgeInsets.only(bottom: 16),
-      padding: const EdgeInsets.fromLTRB(18, 16, 12, 18),
       decoration: RspExamEditorUi.questionCard(context),
+      clipBehavior: Clip.antiAlias,
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Row(
-            children: [
-              Container(
-                width: 32,
-                height: 32,
-                alignment: Alignment.center,
-                decoration: BoxDecoration(
-                  color: AppTheme.primaryNavy.withValues(alpha: 0.12),
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: Text(
-                  '${index + 1}',
-                  style: const TextStyle(
-                    color: AppTheme.primaryNavy,
-                    fontWeight: FontWeight.w800,
-                    fontSize: 14,
-                  ),
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Text(
-                  'Question',
-                  style: TextStyle(
-                    color: primary,
-                    fontSize: 15,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              ),
-              if (onRemove != null)
-                IconButton(
-                  onPressed: onRemove,
-                  tooltip: 'Remove question',
-                  icon: Container(
-                    padding: const EdgeInsets.all(6),
-                    decoration: BoxDecoration(
-                      color: Colors.red.withValues(alpha: 0.08),
-                      shape: BoxShape.circle,
-                      border: Border.all(
-                        color: Colors.red.withValues(alpha: 0.25),
+          Material(
+            color: Colors.transparent,
+            child: InkWell(
+              onTap: onToggle,
+              child: Padding(
+                padding: EdgeInsets.fromLTRB(18, collapsed ? 12 : 16, 8, collapsed ? 12 : 0),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 32,
+                      height: 32,
+                      alignment: Alignment.center,
+                      decoration: BoxDecoration(
+                        color: AppTheme.primaryNavy.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Text(
+                        '${index + 1}',
+                        style: const TextStyle(
+                          color: AppTheme.primaryNavy,
+                          fontWeight: FontWeight.w800,
+                          fontSize: 14,
+                        ),
                       ),
                     ),
-                    child: Icon(
-                      Icons.remove_rounded,
-                      size: 18,
-                      color: Colors.red.shade700,
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            title,
+                            maxLines: collapsed ? 2 : 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              color: collapsed && preview.isEmpty
+                                  ? secondary
+                                  : primary,
+                              fontSize: 15,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                          if (collapsed &&
+                              (summary != null || !isComplete)) ...[
+                            const SizedBox(height: 3),
+                            Text(
+                              isComplete
+                                  ? summary!
+                                  : 'Incomplete — add the question and at least 2 options',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                color: isComplete
+                                    ? secondary
+                                    : Colors.orange.shade800,
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                    if (onRemove != null)
+                      IconButton(
+                        onPressed: onRemove,
+                        tooltip: 'Remove question',
+                        icon: Container(
+                          padding: const EdgeInsets.all(6),
+                          decoration: BoxDecoration(
+                            color: Colors.red.withValues(alpha: 0.08),
+                            shape: BoxShape.circle,
+                            border: Border.all(
+                              color: Colors.red.withValues(alpha: 0.25),
+                            ),
+                          ),
+                          child: Icon(
+                            Icons.remove_rounded,
+                            size: 18,
+                            color: Colors.red.shade700,
+                          ),
+                        ),
+                      ),
+                    IconButton(
+                      onPressed: onToggle,
+                      tooltip: collapsed ? 'Expand question' : 'Collapse question',
+                      icon: Icon(
+                        collapsed
+                            ? Icons.keyboard_arrow_down_rounded
+                            : Icons.keyboard_arrow_up_rounded,
+                        color: AppTheme.primaryNavy,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          AnimatedSize(
+            duration: const Duration(milliseconds: 180),
+            curve: Curves.easeOutCubic,
+            alignment: Alignment.topCenter,
+            child: collapsed
+                ? const SizedBox(width: double.infinity)
+                : Padding(
+                    padding: const EdgeInsets.fromLTRB(18, 14, 12, 14),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        child,
+                        const SizedBox(height: 6),
+                        Align(
+                          alignment: Alignment.centerRight,
+                          child: TextButton.icon(
+                            onPressed: onToggle,
+                            icon: const Icon(
+                              Icons.keyboard_arrow_up_rounded,
+                              size: 20,
+                            ),
+                            label: const Text('Done'),
+                            style: RspExamEditorUi.ghostAction(context),
+                          ),
+                        ),
+                      ],
                     ),
                   ),
-                ),
-            ],
           ),
-          const SizedBox(height: 14),
-          child,
         ],
       ),
     );
@@ -397,6 +497,8 @@ class RspMcqOptionRow extends StatelessWidget {
     required this.controller,
     required this.onSelected,
     required this.onChanged,
+    this.imagePath,
+    this.onImageChanged,
   });
 
   final int index;
@@ -405,10 +507,17 @@ class RspMcqOptionRow extends StatelessWidget {
   final ValueChanged<int?> onSelected;
   final VoidCallback onChanged;
 
+  /// Optional image for this choice. The picker is shown only when
+  /// [onImageChanged] is provided.
+  final String? imagePath;
+  final ValueChanged<String?>? onImageChanged;
+
   @override
   Widget build(BuildContext context) {
     final selected = index == groupValue;
-    final hint = 'Option ${String.fromCharCode(97 + index)}';
+    final hint = imagePath != null
+        ? 'Label (optional)'
+        : 'Option ${String.fromCharCode(97 + index)}';
 
     return Padding(
       padding: const EdgeInsets.only(bottom: 10),
@@ -433,29 +542,51 @@ class RspMcqOptionRow extends StatelessWidget {
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
               child: Row(
+                crossAxisAlignment: onImageChanged == null
+                    ? CrossAxisAlignment.center
+                    : CrossAxisAlignment.start,
                 children: [
-                  Radio<int>(
-                    value: index,
-                    activeColor: AppTheme.primaryNavy,
-                    materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  Padding(
+                    padding: EdgeInsets.only(
+                      top: onImageChanged == null ? 0 : 6,
+                    ),
+                    child: Radio<int>(
+                      value: index,
+                      activeColor: AppTheme.primaryNavy,
+                      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    ),
                   ),
                   Expanded(
-                    child: TextField(
-                      controller: controller,
-                      onChanged: (_) => onChanged(),
-                      style: AppTheme.dashFieldTextStyle(context),
-                      decoration:
-                          RspExamEditorUi.inputDecoration(
-                            context,
-                            hintText: hint,
-                          ).copyWith(
-                            labelText: null,
-                            isDense: true,
-                            contentPadding: const EdgeInsets.symmetric(
-                              horizontal: 12,
-                              vertical: 12,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        TextField(
+                          controller: controller,
+                          onChanged: (_) => onChanged(),
+                          style: AppTheme.dashFieldTextStyle(context),
+                          decoration:
+                              RspExamEditorUi.inputDecoration(
+                                context,
+                                hintText: hint,
+                              ).copyWith(
+                                labelText: null,
+                                isDense: true,
+                                contentPadding: const EdgeInsets.symmetric(
+                                  horizontal: 12,
+                                  vertical: 12,
+                                ),
+                              ),
+                        ),
+                        if (onImageChanged != null)
+                          Padding(
+                            padding: const EdgeInsets.fromLTRB(0, 4, 8, 6),
+                            child: RspExamImagePicker(
+                              path: imagePath,
+                              compact: true,
+                              onChanged: onImageChanged!,
                             ),
                           ),
+                      ],
                     ),
                   ),
                 ],
@@ -468,8 +599,12 @@ class RspMcqOptionRow extends StatelessWidget {
   }
 }
 
-/// BEI question row with numbered badge.
-class RspBeiQuestionRow extends StatelessWidget {
+/// BEI / open-ended question row with numbered badge. Rows that already have
+/// text start collapsed; tap the row (or the arrow) to edit.
+///
+/// Give each row a stable key (e.g. `ObjectKey(controller)`) so the collapsed
+/// state follows the question when others are removed.
+class RspBeiQuestionRow extends StatefulWidget {
   const RspBeiQuestionRow({
     super.key,
     required this.index,
@@ -486,66 +621,356 @@ class RspBeiQuestionRow extends StatelessWidget {
   final bool canRemove;
 
   @override
+  State<RspBeiQuestionRow> createState() => _RspBeiQuestionRowState();
+}
+
+class _RspBeiQuestionRowState extends State<RspBeiQuestionRow> {
+  late bool _collapsed = widget.controller.text.trim().isNotEmpty;
+
+  void _toggle() => setState(() => _collapsed = !_collapsed);
+
+  @override
   Widget build(BuildContext context) {
+    final controller = widget.controller;
+    final canRemove = widget.canRemove;
+    final secondary = AppTheme.dashTextSecondaryOf(context);
+    final text = controller.text.trim();
+
+    final badge = Container(
+      width: 32,
+      height: 32,
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        color: AppTheme.primaryNavy.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Text(
+        '${widget.index + 1}',
+        style: const TextStyle(
+          color: AppTheme.primaryNavy,
+          fontWeight: FontWeight.w800,
+          fontSize: 14,
+        ),
+      ),
+    );
+
+    final removeButton = IconButton(
+      onPressed: canRemove ? widget.onRemove : null,
+      tooltip: 'Remove question',
+      icon: Container(
+        padding: const EdgeInsets.all(6),
+        decoration: BoxDecoration(
+          color: Colors.red.withValues(alpha: canRemove ? 0.08 : 0.03),
+          shape: BoxShape.circle,
+          border: Border.all(
+            color: Colors.red.withValues(alpha: canRemove ? 0.25 : 0.1),
+          ),
+        ),
+        child: Icon(
+          Icons.remove_rounded,
+          size: 18,
+          color: canRemove ? Colors.red.shade700 : secondary,
+        ),
+      ),
+    );
+
+    final toggleButton = IconButton(
+      onPressed: _toggle,
+      tooltip: _collapsed ? 'Expand question' : 'Collapse question',
+      icon: Icon(
+        _collapsed
+            ? Icons.keyboard_arrow_down_rounded
+            : Icons.keyboard_arrow_up_rounded,
+        color: AppTheme.primaryNavy,
+      ),
+    );
+
     return Container(
       margin: const EdgeInsets.only(bottom: 14),
-      padding: const EdgeInsets.fromLTRB(16, 14, 8, 14),
       decoration: RspExamEditorUi.questionCard(context),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Container(
-            width: 32,
-            height: 32,
-            alignment: Alignment.center,
-            decoration: BoxDecoration(
-              color: AppTheme.primaryNavy.withValues(alpha: 0.12),
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: Text(
-              '${index + 1}',
-              style: const TextStyle(
-                color: AppTheme.primaryNavy,
-                fontWeight: FontWeight.w800,
-                fontSize: 14,
-              ),
-            ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: TextField(
-              controller: controller,
-              onChanged: (_) => onChanged(),
-              maxLines: 3,
-              style: AppTheme.dashFieldTextStyle(context),
-              decoration: RspExamEditorUi.inputDecoration(
-                context,
-                hintText: 'Question text…',
-              ).copyWith(labelText: null),
-            ),
-          ),
-          IconButton(
-            onPressed: canRemove ? onRemove : null,
-            tooltip: 'Remove question',
-            icon: Container(
-              padding: const EdgeInsets.all(6),
-              decoration: BoxDecoration(
-                color: Colors.red.withValues(alpha: canRemove ? 0.08 : 0.03),
-                shape: BoxShape.circle,
-                border: Border.all(
-                  color: Colors.red.withValues(alpha: canRemove ? 0.25 : 0.1),
+      clipBehavior: Clip.antiAlias,
+      child: _collapsed
+          ? InkWell(
+              onTap: _toggle,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 10, 8, 10),
+                child: Row(
+                  children: [
+                    badge,
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
+                        text.isEmpty ? 'Untitled question' : text,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: text.isEmpty
+                              ? secondary
+                              : AppTheme.dashTextPrimaryOf(context),
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                          height: 1.35,
+                        ),
+                      ),
+                    ),
+                    removeButton,
+                    toggleButton,
+                  ],
                 ),
               ),
-              child: Icon(
-                Icons.remove_rounded,
-                size: 18,
-                color: canRemove
-                    ? Colors.red.shade700
-                    : AppTheme.dashTextSecondaryOf(context),
+            )
+          : Padding(
+              padding: const EdgeInsets.fromLTRB(16, 14, 8, 14),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  badge,
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: TextField(
+                      controller: controller,
+                      onChanged: (_) => widget.onChanged(),
+                      maxLines: 3,
+                      style: AppTheme.dashFieldTextStyle(context),
+                      decoration: RspExamEditorUi.inputDecoration(
+                        context,
+                        hintText: 'Question text…',
+                      ).copyWith(labelText: null),
+                    ),
+                  ),
+                  Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [removeButton, toggleButton],
+                  ),
+                ],
+              ),
+            ),
+    );
+  }
+}
+
+/// Optional image / diagram attachment for an exam question or answer choice.
+///
+/// Picks a PNG / JPG / WEBP file, validates it, uploads it through the API and
+/// reports the stored relative path via [onChanged] (null = removed).
+class RspExamImagePicker extends StatefulWidget {
+  const RspExamImagePicker({
+    super.key,
+    required this.path,
+    required this.onChanged,
+    this.compact = false,
+    this.addLabel,
+  });
+
+  final String? path;
+  final ValueChanged<String?> onChanged;
+
+  /// Small inline variant used inside answer-choice rows.
+  final bool compact;
+  final String? addLabel;
+
+  @override
+  State<RspExamImagePicker> createState() => _RspExamImagePickerState();
+}
+
+class _RspExamImagePickerState extends State<RspExamImagePicker> {
+  bool _busy = false;
+  String? _error;
+
+  Future<void> _pick() async {
+    if (_busy) return;
+    FilePickerResult? result;
+    try {
+      result = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: kExamImageExtensions,
+        allowMultiple: false,
+        withData: true,
+      );
+    } catch (_) {
+      if (mounted) setState(() => _error = 'Could not open the file picker.');
+      return;
+    }
+    if (result == null || result.files.isEmpty) return;
+
+    final picked = result.files.single;
+    final bytes = picked.bytes;
+    if (bytes == null) {
+      setState(() => _error = 'Could not read the selected file.');
+      return;
+    }
+    final problem = await validateExamImage(bytes: bytes, fileName: picked.name);
+    if (!mounted) return;
+    if (problem != null) {
+      setState(() => _error = problem);
+      return;
+    }
+
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      final stored = await RecruitmentRepo.instance.uploadExamImage(
+        bytes: bytes,
+        fileName: picked.name,
+      );
+      if (!mounted) return;
+      widget.onChanged(stored);
+    } catch (e) {
+      if (mounted) {
+        setState(
+          () => _error = e.toString().replaceFirst(RegExp(r'^Exception:\s*'), ''),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  void _remove() {
+    setState(() => _error = null);
+    widget.onChanged(null);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final path = widget.path;
+    final compact = widget.compact;
+    final secondary = AppTheme.dashTextSecondaryOf(context);
+
+    final Widget body;
+    if (_busy) {
+      body = Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const SizedBox(
+            width: 16,
+            height: 16,
+            child: CircularProgressIndicator(strokeWidth: 2),
+          ),
+          const SizedBox(width: 8),
+          Text(
+            'Uploading image…',
+            style: TextStyle(color: secondary, fontSize: 12.5),
+          ),
+        ],
+      );
+    } else if (path == null) {
+      body = compact
+          ? TextButton.icon(
+              onPressed: _pick,
+              icon: const Icon(Icons.add_photo_alternate_outlined, size: 18),
+              label: Text(widget.addLabel ?? 'Add image'),
+              style: RspExamEditorUi.ghostAction(context).copyWith(
+                padding: const WidgetStatePropertyAll(
+                  EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                ),
+                minimumSize: const WidgetStatePropertyAll(Size(0, 30)),
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+            )
+          : OutlinedButton.icon(
+              onPressed: _pick,
+              icon: const Icon(Icons.add_photo_alternate_outlined, size: 20),
+              label: Text(widget.addLabel ?? 'Add image / diagram'),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: AppTheme.primaryNavy,
+                side: BorderSide(
+                  color: AppTheme.primaryNavy.withValues(alpha: 0.4),
+                ),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 14,
+                  vertical: 12,
+                ),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+            );
+    } else {
+      final actions = Wrap(
+        spacing: 4,
+        runSpacing: 0,
+        children: [
+          TextButton.icon(
+            onPressed: _pick,
+            icon: const Icon(Icons.swap_horiz_rounded, size: 18),
+            label: const Text('Replace'),
+            style: RspExamEditorUi.ghostAction(context),
+          ),
+          TextButton.icon(
+            onPressed: _remove,
+            icon: const Icon(Icons.delete_outline_rounded, size: 18),
+            label: const Text('Remove'),
+            style: TextButton.styleFrom(
+              foregroundColor: Colors.red.shade700,
+              textStyle: const TextStyle(
+                fontWeight: FontWeight.w600,
+                fontSize: 13,
               ),
             ),
           ),
         ],
+      );
+      body = compact
+          ? Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                _thumb(path, 64, 64),
+                const SizedBox(width: 10),
+                Flexible(child: actions),
+              ],
+            )
+          : Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _thumb(path, double.infinity, 170),
+                const SizedBox(height: 6),
+                actions,
+              ],
+            );
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Align(alignment: Alignment.centerLeft, child: body),
+        if (_error != null) ...[
+          const SizedBox(height: 4),
+          Text(
+            _error!,
+            style: TextStyle(
+              color: Colors.red.shade700,
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+
+  Widget _thumb(String path, double width, double height) {
+    return Tooltip(
+      message: 'Click to enlarge',
+      child: InkWell(
+        borderRadius: BorderRadius.circular(10),
+        onTap: () => showExamImageViewer(context, path: path),
+        child: Container(
+          width: width,
+          height: height,
+          padding: const EdgeInsets.all(4),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(
+              color: AppTheme.primaryNavy.withValues(alpha: 0.2),
+            ),
+          ),
+          child: ExamImage(path: path, boxHeight: height - 8),
+        ),
       ),
     );
   }

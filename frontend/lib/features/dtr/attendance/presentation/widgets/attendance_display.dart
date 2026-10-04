@@ -32,7 +32,14 @@ String getAttendanceRemark(TimeRecord r) {
       r.breakOut != null &&
       r.breakIn != null &&
       r.timeOut != null;
-  if (!hasAllFour) return 'Incomplete';
+  final complete = switch (r.shiftPunchMode) {
+    'single_session' =>
+      (r.timeIn ?? r.breakIn) != null && (r.timeOut ?? r.breakOut) != null,
+    'am_only' => r.timeIn != null && r.breakOut != null,
+    'pm_only' => r.breakIn != null && r.timeOut != null,
+    _ => hasAllFour,
+  };
+  if (!complete) return 'Incomplete';
   final late = (r.lateMinutes ?? 0) > 0;
   final under = (r.undertimeMinutes ?? 0) > 0;
   if (late && under) return 'Late + Undertime';
@@ -47,6 +54,17 @@ String normalizeAttendanceRemark(String remark) {
   return value;
 }
 
+String compactLocatorRemark(String remark) {
+  for (final label in [
+    'On Field',
+    'Pass Slip',
+    'Locator / Official Business',
+  ]) {
+    if (remark.startsWith('$label (') && remark.endsWith(')')) return label;
+  }
+  return remark;
+}
+
 /// Whether a record represents a completed workday attendance. Late and/or
 /// undertime employees were still present; incomplete and invalid logs were not.
 bool isCompletedAttendanceRecord(TimeRecord record) {
@@ -54,6 +72,14 @@ bool isCompletedAttendanceRecord(TimeRecord record) {
     'On Time' || 'Late' || 'Undertime' || 'Late + Undertime' => true,
     _ => false,
   };
+}
+
+String formatWorkedHours(TimeRecord record) {
+  if (record.totalHours == null || record.totalHours! < 0) return '-';
+  final minutes = (record.totalHours! * 60).round();
+  final hours = minutes ~/ 60;
+  final remainder = minutes % 60;
+  return remainder == 0 ? '$hours h' : '$hours h $remainder min';
 }
 
 /// Display late minutes: "X min", "0 min", or "—" for holiday/leave.
@@ -108,12 +134,13 @@ class AttendanceRemarksChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final dark = AppTheme.dashIsDark(context);
+    final displayRemark = compactLocatorRemark(remark);
     final (color, bg) = colorsForRemark(
-      remark,
+      displayRemark,
       isHoliday: isHoliday,
       dark: dark,
     );
-    return Container(
+    final chip = Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
         color: bg,
@@ -121,7 +148,7 @@ class AttendanceRemarksChip extends StatelessWidget {
         border: Border.all(color: color.withValues(alpha: 0.5), width: 1),
       ),
       child: Text(
-        remark,
+        displayRemark,
         style: TextStyle(
           fontSize: 11,
           fontWeight: FontWeight.w600,
@@ -130,6 +157,9 @@ class AttendanceRemarksChip extends StatelessWidget {
         overflow: TextOverflow.ellipsis,
       ),
     );
+    return displayRemark == remark
+        ? chip
+        : Tooltip(message: remark, child: chip);
   }
 
   static (Color color, Color bg) _chipPair(

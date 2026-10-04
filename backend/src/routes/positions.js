@@ -1,6 +1,7 @@
 const express = require('express');
 const { pool } = require('../config/db');
 const { authMiddleware } = require('../middleware/auth');
+const { requireDtrFeatureIfAdmin } = require('../middleware/dtrAccess');
 const { requireAdmin } = require('../middleware/rbac');
 const {
   PositionLifecycleError,
@@ -227,7 +228,7 @@ router.get('/', protect, async (req, res) => {
 });
 
 // Final leave reviewers are a separate office-wide assignment, not department backups.
-router.get('/leave-final-reviewers', protect, requireAdmin, async (req, res) => {
+router.get('/leave-final-reviewers', protect, requireAdmin, requireDtrFeatureIfAdmin('approvals_allowed'), async (req, res) => {
   try {
     const date = String(req.query?.effective_date || todayInHrmsTimezone());
     const parsedDate = new Date(`${date}T00:00:00Z`);
@@ -265,7 +266,7 @@ router.get('/leave-final-reviewers', protect, requireAdmin, async (req, res) => 
   }
 });
 
-router.put('/leave-final-reviewers', protect, requireAdmin, async (req, res) => {
+router.put('/leave-final-reviewers', protect, requireAdmin, requireDtrFeatureIfAdmin('approvals_allowed'), async (req, res) => {
   const date = String(req.body?.effective_from || todayInHrmsTimezone());
   const ids = req.body?.employee_ids;
   const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -300,6 +301,14 @@ router.put('/leave-final-reviewers', protect, requireAdmin, async (req, res) => 
       );
       if (eligible.rows.length !== ids.length) {
         throw Object.assign(new Error('Backups must be active HR or admin accounts'), { statusCode: 409 });
+      }
+      const disabled = await client.query(`SELECT u.id FROM users u
+        LEFT JOIN dtr_admin_access access ON access.admin_user_id = u.id
+        WHERE u.id = ANY($1::uuid[]) AND u.role = 'admin'
+          AND (COALESCE(access.leave_allowed, false) = false
+            OR COALESCE(access.locator_allowed, false) = false)`, [ids]);
+      if (disabled.rows.length) {
+        throw Object.assign(new Error('Enable Leave and Locator access for each admin reviewer before assigning them.'), { statusCode: 409 });
       }
     }
     const previousDate = new Date(`${date}T00:00:00Z`);
@@ -337,7 +346,12 @@ router.put('/leave-final-reviewers', protect, requireAdmin, async (req, res) => 
 });
 
 // POST /api/positions - create (admin only)
-router.post('/', protect, requireAdmin, async (req, res) => {
+router.post('/', protect, requireAdmin, (req, res, next) => {
+  if (req.body?.is_leave_final_reviewer === true || req.body?.is_department_head === true) {
+    return requireDtrFeatureIfAdmin('approvals_allowed')(req, res, next);
+  }
+  next();
+}, async (req, res) => {
   let client;
   try {
     const {
@@ -454,7 +468,12 @@ router.post('/', protect, requireAdmin, async (req, res) => {
 });
 
 // PUT /api/positions/:id - update (admin only)
-router.put('/:id', protect, requireAdmin, async (req, res) => {
+router.put('/:id', protect, requireAdmin, (req, res, next) => {
+  if (req.body?.is_leave_final_reviewer !== undefined || req.body?.is_department_head !== undefined) {
+    return requireDtrFeatureIfAdmin('approvals_allowed')(req, res, next);
+  }
+  next();
+}, async (req, res) => {
   let client;
   try {
     const { id } = req.params;

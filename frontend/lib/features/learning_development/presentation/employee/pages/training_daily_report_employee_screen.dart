@@ -5,6 +5,8 @@ import 'package:provider/provider.dart';
 import 'package:hrms_plaridel/features/docutracker/data/providers/docutracker_provider.dart';
 import 'package:hrms_plaridel/features/learning_development/models/training_daily_report.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
+import 'package:hrms_plaridel/core/utils/form_pdf.dart';
+import 'package:hrms_plaridel/shared/widgets/form_document_preview.dart';
 import 'package:hrms_plaridel/shared/widgets/read_only_saved_entry_dialog.dart';
 import 'package:hrms_plaridel/shared/widgets/training_daily_report_read_only_view.dart';
 
@@ -180,6 +182,38 @@ class _TrainingDailyReportEmployeeScreenState
     _titleFocusNode.requestFocus();
   }
 
+  TrainingDailyReport _draftReport() {
+    return TrainingDailyReport(
+      id: '',
+      employeeId: '',
+      employeeName: null,
+      title: _titleController.text.trim(),
+      description: _descriptionController.text.trim(),
+      submittedAt: DateTime.now(),
+      status: 'draft',
+      attachmentName: _selectedFile?.name,
+    );
+  }
+
+  Future<void> _previewReport(TrainingDailyReport r) {
+    return openFormDocumentPreview(
+      context: context,
+      title: 'Training Daily Report',
+      filename: 'training-daily-report.pdf',
+      format: FormPdf.pageLetter,
+      buildDocument: () => FormPdf.buildTrainingDailyReportPdf(r),
+    );
+  }
+
+  Future<void> _printReport(TrainingDailyReport r) {
+    return FormPdf.printForm(
+      context: context,
+      buildDocument: () => FormPdf.buildTrainingDailyReportPdf(r),
+      filename: 'training-daily-report.pdf',
+      format: FormPdf.pageLetter,
+    );
+  }
+
   void _openReport(TrainingDailyReport r) {
     showReadOnlySavedEntryDialog(
       context,
@@ -189,6 +223,8 @@ class _TrainingDailyReportEmployeeScreenState
           : r.submittedAt.toLocal().toString().split('.').first,
       previewBuilder: () => TrainingDailyReportReadOnlyView(report: r),
       contentWidth: 640,
+      onPrint: () => _printReport(r),
+      onDocumentPreview: () => _previewReport(r),
     );
   }
 
@@ -722,6 +758,11 @@ class _TrainingDailyReportEmployeeScreenState
             ),
           ],
           const SizedBox(height: 16),
+          FormPreviewPrintButtons(
+            onPreview: () => _previewReport(_draftReport()),
+            onPrint: () => _printReport(_draftReport()),
+          ),
+          const SizedBox(height: 12),
           if (compact)
             Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1074,6 +1115,8 @@ class _TrainingDailyReportEmployeeScreenState
             dateLabel: _formatListDate(visible[i].submittedAt),
             submittedAtLabel: _formatSubmittedAt(visible[i].submittedAt),
             onView: () => _openReport(visible[i]),
+            onPreview: () => _previewReport(visible[i]),
+            onPrint: () => _printReport(visible[i]),
           ),
         ],
       ],
@@ -1138,12 +1181,16 @@ class _ReportHistoryRow extends StatelessWidget {
     required this.dateLabel,
     required this.submittedAtLabel,
     required this.onView,
+    required this.onPreview,
+    required this.onPrint,
   });
 
   final TrainingDailyReport report;
   final String dateLabel;
   final String submittedAtLabel;
   final VoidCallback onView;
+  final VoidCallback onPreview;
+  final VoidCallback onPrint;
 
   @override
   Widget build(BuildContext context) {
@@ -1205,6 +1252,12 @@ class _ReportHistoryRow extends StatelessWidget {
                   ),
                   TextButton(onPressed: onView, child: const Text('View →')),
                 ],
+              ),
+              const SizedBox(height: 8),
+              FormPreviewPrintButtons(
+                fullLabels: false,
+                onPreview: onPreview,
+                onPrint: onPrint,
               ),
             ],
           ),

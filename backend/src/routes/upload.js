@@ -5,7 +5,14 @@ const fs = require('fs');
 const { v4: uuidv4 } = require('uuid');
 const { pool } = require('../config/db');
 const { authMiddleware } = require('../middleware/auth');
-const { requireAdmin } = require('../middleware/rbac');
+const {
+  requireAdminOrSuperAdmin,
+  requireAdminOrSupervisor,
+} = require('../middleware/rbac');
+const {
+  EXAM_IMAGE_SUBDIR,
+  EXAM_IMAGE_MAX_BYTES,
+} = require('../utils/examQuestionImages');
 
 const router = express.Router();
 
@@ -118,6 +125,69 @@ function fileSignatureMatches(filePath, ext) {
   }
 }
 
+const examImageDir = path.join(UPLOAD_DIR, EXAM_IMAGE_SUBDIR);
+if (!fs.existsSync(examImageDir)) {
+  fs.mkdirSync(examImageDir, { recursive: true });
+}
+
+const examImageUpload = multer({
+  storage: multer.diskStorage({
+    destination: (_req, _file, cb) => cb(null, examImageDir),
+    filename: (_req, file, cb) => {
+      const ext = path.extname(file.originalname || '').toLowerCase();
+      cb(null, `${uuidv4()}${ext === '.jpeg' ? '.jpg' : ext}`);
+    },
+  }),
+  limits: { fileSize: EXAM_IMAGE_MAX_BYTES, files: 1 },
+  fileFilter: (_req, file, cb) => {
+    cb(null, /\.(png|jpe?g|webp)$/i.test(file.originalname || ''));
+  },
+});
+
+function receiveExamImage(req, res, next) {
+  examImageUpload.single('file')(req, res, (err) => {
+    if (!err) return next();
+    if (err instanceof multer.MulterError && err.code === 'LIMIT_FILE_SIZE') {
+      return res.status(413).json({
+        error: `Image is too large. Maximum size is ${Math.round(EXAM_IMAGE_MAX_BYTES / (1024 * 1024))} MB.`,
+      });
+    }
+    console.error('[upload exam-image]', err);
+    return res.status(400).json({ error: 'Could not read the uploaded image.' });
+  });
+}
+
+/**
+ * POST /api/upload/exam-image
+ * multipart/form-data: file (PNG, JPG/JPEG or WEBP, max 8 MB)
+ * Admin/HR/supervisor only. Stores the file under uploads/exam-images and returns the
+ * relative path to save on a question / answer choice (served by /api/files/exam-image).
+ */
+router.post(
+  '/exam-image',
+  authMiddleware,
+  requireAdminOrSupervisor,
+  receiveExamImage,
+  (req, res) => {
+    if (!req.file) {
+      return res
+        .status(400)
+        .json({ error: 'No valid image uploaded. Use a PNG, JPG or WEBP file.' });
+    }
+    const ext = path.extname(req.file.filename).toLowerCase();
+    if (!fileSignatureMatches(req.file.path, ext)) {
+      fs.unlink(req.file.path, () => {});
+      return res.status(400).json({
+        error: 'The file is not a valid PNG, JPG or WEBP image (it may be corrupted).',
+      });
+    }
+    res.json({
+      path: `${EXAM_IMAGE_SUBDIR}/${req.file.filename}`,
+      url: `/api/files/exam-image/${req.file.filename}`,
+    });
+  }
+);
+
 /**
  * POST /api/upload/avatar
  * multipart/form-data: file (image)
@@ -165,7 +235,7 @@ router.post('/avatar', authMiddleware, upload.single('file'), async (req, res) =
 router.post(
   '/avatar/for/:userId',
   authMiddleware,
-  requireAdmin,
+  requireAdminOrSuperAdmin,
   upload.single('file'),
   async (req, res) => {
     let avatarUpdated = false;

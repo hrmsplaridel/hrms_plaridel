@@ -4,15 +4,22 @@ const path = require('path');
 const multer = require('multer');
 const { pool } = require('../config/db');
 const { authMiddleware } = require('../middleware/auth');
+const { requireDtrFeatureIfAdmin } = require('../middleware/dtrAccess');
 const { requireAdminOrHr } = require('../middleware/rbac');
+const {
+  assertFinalLeaveReviewer,
+  assertLeaveSubmissionReviewer,
+  resolveFinalLeaveReviewers,
+} = require('../services/leaveFinalReviewerService');
 const {
   findDepartmentHeadUserId,
   getDepartmentReviewSnapshotForDate,
   isDepartmentHead,
 } = require('../services/departmentHeadService');
 const {
-  replaceRequestReviewerSnapshot,
-} = require('../services/departmentReviewerService');
+  snapshotLocatorReviewers,
+  persistLocatorSignature,
+} = require('../services/locatorSignatureService');
 const locatorNotifications = require('../services/locatorNotifications');
 const {
   recordLocatorAttachmentAccess,
@@ -67,6 +74,14 @@ const {
 
 const router = express.Router();
 const protect = [authMiddleware];
+const LOCATOR_TYPE_TEXT_LIMITS = Object.freeze({
+  label: 100,
+  shortLabel: 40,
+  locationLabel: 100,
+  locationHint: 200,
+  dtrSlotLabel: 40,
+  dtrPrintLabel: 40,
+});
 const DEFAULT_LOCATOR_TYPES = [
   {
     code: 'locator',
@@ -91,18 +106,6 @@ const DEFAULT_LOCATOR_TYPES = [
     requires_attachment: false,
     coverage_mode: 'manual',
     sort_order: 20,
-  },
-  {
-    code: 'work_from_home',
-    label: 'Work From Home',
-    short_label: 'WFH',
-    location_label: 'Work Location',
-    location_hint: 'Enter work location',
-    dtr_slot_label: 'WFH',
-    dtr_print_label: 'WFH',
-    requires_attachment: false,
-    coverage_mode: 'wfh',
-    sort_order: 30,
   },
 ];
 const DEFAULT_LOCATOR_TYPE_CODES = new Set(DEFAULT_LOCATOR_TYPES.map((t) => t.code));
@@ -138,6 +141,24 @@ function broadcastLocatorUpdated(action, row = {}, extra = {}) {
   }
 }
 
+function broadcastLocatorTypeUpdated(action, row = {}, extra = {}) {
+  try {
+    broadcastAppEvent('locator_type_updated', {
+      action,
+      locatorTypeId: row.id || extra.locatorTypeId || null,
+      code: row.code || extra.code || null,
+      isActive:
+        typeof row.is_active === 'boolean'
+          ? row.is_active
+          : extra.isActive ?? null,
+      updatedAt: new Date().toISOString(),
+      ...extra,
+    });
+  } catch (e) {
+    console.error('[locator type websocket]', e);
+  }
+}
+
 function normalizeRequestType(value) {
   const type = (value || 'locator').toString().trim().toLowerCase();
   return /^[a-z0-9_][a-z0-9_-]{1,63}$/.test(type) ? type : null;
@@ -149,51 +170,119 @@ function boolField(value, fallback = false) {
   return fallback;
 }
 
-function textField(value, fallback = '') {
-  const text = (value ?? '').toString().trim();
-  return text || fallback;
+function locatorTypeValidationError(message) {
+  const error = new Error(message);
+  error.statusCode = 400;
+  throw error;
+}
+
+function locatorTypeBooleanField(value, fallback, label) {
+  if (value === undefined || value === null) return fallback;
+  if (value === true || value === 'true' || value === 1 || value === '1') return true;
+  if (value === false || value === 'false' || value === 0 || value === '0') return false;
+  return locatorTypeValidationError(`${label} must be a boolean.`);
+}
+
+function locatorTypeTextField(value, fallback, label, maximumLength) {
+  const source = value === undefined || value === null ? fallback : value;
+  const text = (source ?? '').toString().trim();
+  if (!text) {
+    return locatorTypeValidationError(`${label} is required.`);
+  }
+  if (text.length > maximumLength) {
+    return locatorTypeValidationError(
+      `${label} must be ${maximumLength} characters or less.`
+    );
+  }
+  return text;
 }
 
 function intField(value, fallback = 0) {
-  const parsed = Number.parseInt(value, 10);
-  return Number.isFinite(parsed) ? parsed : fallback;
+  if (value === undefined || value === null) return fallback;
+  const text = String(value).trim();
+  if (!/^\d+$/.test(text)) {
+    return locatorTypeValidationError(
+      'Sort order must be a whole number between 0 and 2147483647.'
+    );
+  }
+  const parsed = Number(text);
+  if (!Number.isSafeInteger(parsed) || parsed > 2147483647) {
+    return locatorTypeValidationError(
+      'Sort order must be a whole number between 0 and 2147483647.'
+    );
+  }
+  return parsed;
 }
 
 function normalizeCoverageMode(value) {
-  const mode = (value || 'manual').toString().trim().toLowerCase();
-  return mode === 'wfh' ? 'wfh' : 'manual';
+  if (value === undefined || value === null) return 'manual';
+  const mode = value.toString().trim().toLowerCase();
+  if (mode === 'manual' || mode === 'wfh') return mode;
+  return locatorTypeValidationError('Coverage mode must be manual or wfh.');
 }
 
 function locatorTypePayloadFromBody(body, existing = null) {
-  const rawCode = existing?.code || body.code;
+  const rawCode = existing?.code ?? body.code;
+  if (rawCode === undefined || rawCode === null || !String(rawCode).trim()) {
+    return locatorTypeValidationError('System code is required.');
+  }
   const code = normalizeRequestType(rawCode);
-  if (!code) throw new Error('Valid code is required.');
-  const label = textField(body.label, existing?.label || '');
-  if (!label) throw new Error('Label is required.');
+  if (!code) {
+    return locatorTypeValidationError(
+      'System code must be 2 to 64 letters, numbers, underscores, or hyphens.'
+    );
+  }
+  const label = locatorTypeTextField(
+    body.label,
+    existing?.label,
+    'Request type name',
+    LOCATOR_TYPE_TEXT_LIMITS.label
+  );
   return {
     code,
     label,
-    short_label: textField(body.short_label ?? body.shortLabel, existing?.short_label || label),
-    location_label: textField(
+    short_label: locatorTypeTextField(
+      body.short_label ?? body.shortLabel,
+      existing?.short_label ?? label,
+      'Short display name',
+      LOCATOR_TYPE_TEXT_LIMITS.shortLabel
+    ),
+    location_label: locatorTypeTextField(
       body.location_label ?? body.locationLabel,
-      existing?.location_label || 'Office / Destination'
+      existing?.location_label ?? 'Office / Destination',
+      'Destination field name',
+      LOCATOR_TYPE_TEXT_LIMITS.locationLabel
     ),
-    location_hint: textField(
+    location_hint: locatorTypeTextField(
       body.location_hint ?? body.locationHint,
-      existing?.location_hint || 'Enter office or destination'
+      existing?.location_hint ?? 'Enter office or destination',
+      'Destination placeholder',
+      LOCATOR_TYPE_TEXT_LIMITS.locationHint
     ),
-    dtr_slot_label: textField(body.dtr_slot_label ?? body.dtrSlotLabel, existing?.dtr_slot_label || label),
-    dtr_print_label: textField(
+    dtr_slot_label: locatorTypeTextField(
+      body.dtr_slot_label ?? body.dtrSlotLabel,
+      existing?.dtr_slot_label ?? label,
+      'DTR display text',
+      LOCATOR_TYPE_TEXT_LIMITS.dtrSlotLabel
+    ),
+    dtr_print_label: locatorTypeTextField(
       body.dtr_print_label ?? body.dtrPrintLabel,
-      existing?.dtr_print_label || label.toUpperCase()
+      existing?.dtr_print_label ?? label.toUpperCase(),
+      'DTR print text',
+      LOCATOR_TYPE_TEXT_LIMITS.dtrPrintLabel
     ),
-    requires_attachment: boolField(
+    requires_attachment: locatorTypeBooleanField(
       body.requires_attachment ?? body.requiresAttachment,
-      existing?.requires_attachment === true
+      existing?.requires_attachment === true,
+      'Requires attachment'
     ),
     coverage_mode: normalizeCoverageMode(body.coverage_mode ?? body.coverageMode ?? existing?.coverage_mode),
-    is_active: boolField(body.is_active ?? body.isActive, existing?.is_active !== false),
-    sort_order: intField(body.sort_order ?? body.sortOrder, existing?.sort_order || 0),
+    is_active: locatorTypeBooleanField(
+      body.is_active ?? body.isActive,
+      existing?.is_active !== false,
+      'Available for filing'
+    ),
+    sort_order: intField(body.sort_order ?? body.sortOrder, existing?.sort_order ?? 0),
   };
 }
 
@@ -240,7 +329,7 @@ const locatorAttachmentStorage = multer.diskStorage({
 
 const uploadLocatorAttachment = multer({
   storage: locatorAttachmentStorage,
-  limits: { fileSize: MAX_LOCATOR_ATTACHMENT_SIZE },
+  limits: { fileSize: MAX_LOCATOR_ATTACHMENT_SIZE, fieldSize: 3 * 1024 * 1024 },
   fileFilter: (_req, file, cb) => {
     const name = file.originalname || '';
     if (!ALLOWED_LOCATOR_ATTACHMENT_EXT.test(name)) {
@@ -708,7 +797,29 @@ const locatorSubmissionService = createLocatorSubmissionService({
   notifyAfterSubmit: locatorNotifications.notifyAfterSubmit,
   broadcastSubmitted: (row) => broadcastLocatorUpdated('submitted', row),
   recordHistory: recordLocatorWorkflowEvent,
-  snapshotReviewers: replaceRequestReviewerSnapshot,
+  snapshotReviewers: snapshotLocatorReviewers,
+  assertSubmissionReviewer: (db, applicantId) => assertLeaveSubmissionReviewer(db, applicantId, 'locator'),
+});
+
+router.get('/final-reviewer/me', protect, requireAdminOrHr, async (req, res) => {
+  try {
+    const reviewers = await resolveFinalLeaveReviewers(pool);
+    res.json({ can_review: reviewers.some((reviewer) => String(reviewer.id) === String(req.user.id)) });
+  } catch (err) {
+    console.error('[locator GET final-reviewer/me]', err);
+    res.status(500).json({ error: 'Failed to check locator final reviewer assignment' });
+  }
+});
+
+router.get('/submission-availability', protect, async (req, res) => {
+  try {
+    await assertLeaveSubmissionReviewer(pool, req.user.id, 'locator');
+    res.json({ can_submit: true });
+  } catch (err) {
+    if (err.statusCode === 409) return res.json({ can_submit: false, reason: err.message });
+    console.error('[locator GET submission-availability]', err);
+    res.status(500).json({ error: 'Failed to check locator reviewer availability' });
+  }
 });
 
 function isValidStatus(status) {
@@ -809,7 +920,7 @@ router.get('/types', protect, async (req, res) => {
 });
 
 // POST /api/locator-slips/types — admin/HR creates a configurable locator type.
-router.post('/types', protect, requireAdminOrHr, async (req, res) => {
+router.post('/types', protect, requireAdminOrHr, requireDtrFeatureIfAdmin('locator_allowed'), async (req, res) => {
   try {
     const payload = locatorTypePayloadFromBody(req.body || {});
     const inserted = await pool.query(
@@ -836,7 +947,9 @@ router.post('/types', protect, requireAdminOrHr, async (req, res) => {
         payload.sort_order,
       ]
     );
-    res.status(201).json(mapLocatorTypeRow(inserted.rows[0]));
+    const item = mapLocatorTypeRow(inserted.rows[0]);
+    broadcastLocatorTypeUpdated('created', inserted.rows[0]);
+    res.status(201).json(item);
   } catch (err) {
     const message = err.code === '23505' ? 'A locator type with that code already exists.' : err.message;
     res.status(400).json({ error: message || 'Failed to create locator type' });
@@ -844,7 +957,7 @@ router.post('/types', protect, requireAdminOrHr, async (req, res) => {
 });
 
 // PUT /api/locator-slips/types/:id — admin/HR updates labels and rules.
-router.put('/types/:id', protect, requireAdminOrHr, async (req, res) => {
+router.put('/types/:id', protect, requireAdminOrHr, requireDtrFeatureIfAdmin('locator_allowed'), async (req, res) => {
   try {
     const existingQ = await pool.query(
       'SELECT * FROM locator_request_types WHERE id = $1::uuid',
@@ -882,14 +995,16 @@ router.put('/types/:id', protect, requireAdminOrHr, async (req, res) => {
         req.params.id,
       ]
     );
-    res.json(mapLocatorTypeRow(updated.rows[0]));
+    const item = mapLocatorTypeRow(updated.rows[0]);
+    broadcastLocatorTypeUpdated('updated', updated.rows[0]);
+    res.json(item);
   } catch (err) {
     res.status(400).json({ error: err.message || 'Failed to update locator type' });
   }
 });
 
 // DELETE /api/locator-slips/types/:id — delete unused custom type, otherwise deactivate it.
-router.delete('/types/:id', protect, requireAdminOrHr, async (req, res) => {
+router.delete('/types/:id', protect, requireAdminOrHr, requireDtrFeatureIfAdmin('locator_allowed'), async (req, res) => {
   try {
     const existingQ = await pool.query(
       'SELECT * FROM locator_request_types WHERE id = $1::uuid',
@@ -909,9 +1024,14 @@ router.delete('/types/:id', protect, requireAdminOrHr, async (req, res) => {
          RETURNING *`,
         [req.params.id]
       );
-      return res.json({ deleted: false, item: mapLocatorTypeRow(updated.rows[0]) });
+      const item = mapLocatorTypeRow(updated.rows[0]);
+      broadcastLocatorTypeUpdated('deactivated', updated.rows[0], {
+        deleted: false,
+      });
+      return res.json({ deleted: false, item });
     }
     await pool.query('DELETE FROM locator_request_types WHERE id = $1::uuid', [req.params.id]);
+    broadcastLocatorTypeUpdated('deleted', existing, { deleted: true });
     res.json({ deleted: true });
   } catch (err) {
     res.status(400).json({ error: err.message || 'Failed to delete locator type' });
@@ -1012,6 +1132,7 @@ router.post('/submit', protect, async (req, res) => {
 
   try {
     const mapped = await locatorSubmissionService.submit({
+      signature: req.body?.signature,
       employeeUserId: userId,
       slipDate,
       office,
@@ -1058,6 +1179,7 @@ router.post('/submit-with-attachment', protect, uploadLocatorAttachmentMw, async
 
   try {
     const mapped = await locatorSubmissionService.submit({
+      signature: req.body?.signature,
       employeeUserId: userId,
       slipDate,
       office,
@@ -1516,6 +1638,7 @@ router.patch('/:id/resubmit', protect, async (req, res) => {
       userId,
       correction.slipDate
     );
+    await assertLeaveSubmissionReviewer(client, userId, 'locator');
     const departmentHeadUserId =
       reviewSnapshot?.departmentHeadUserId || null;
     const submitStatus = departmentHeadUserId
@@ -1577,7 +1700,7 @@ router.patch('/:id/resubmit', protect, async (req, res) => {
         departmentHeadUserId,
       ]
     );
-    await replaceRequestReviewerSnapshot(client, {
+    await snapshotLocatorReviewers(client, {
       requestType: 'locator',
       requestId: id,
       departmentId: reviewSnapshot?.departmentId || null,
@@ -1592,6 +1715,7 @@ router.patch('/:id/resubmit', protect, async (req, res) => {
       actorRole: 'employee',
       metadata: { changes },
     });
+    await persistLocatorSignature(client, req.user, id, 'applicant', req.body?.signature, { requireInput: true });
     await client.query('COMMIT');
 
     notifySafe(() =>
@@ -1619,6 +1743,7 @@ router.patch('/:id/resubmit', protect, async (req, res) => {
       await client.query('ROLLBACK');
     } catch (_) {}
     console.error('[locator PATCH /:id/resubmit]', err);
+    if (err.statusCode) return res.status(err.statusCode).json({ error: err.message });
     res.status(500).json({ error: 'Failed to resubmit locator slip' });
   } finally {
     client.release();
@@ -2021,6 +2146,7 @@ router.patch('/:id/department-head-approve', protect, async (req, res) => {
       await client.query('ROLLBACK');
       return res.status(409).json(locatorConflictPayload(conflictCheck));
     }
+    await persistLocatorSignature(client, req.user, id, 'department_head', req.body?.signature);
     await client.query(
       `UPDATE locator_slips
        SET status = 'pending_hr',
@@ -2067,6 +2193,7 @@ router.patch('/:id/department-head-approve', protect, async (req, res) => {
       await client.query('ROLLBACK');
     } catch (_) {}
     console.error('[locator PATCH /:id/department-head-approve]', err);
+    if (err.statusCode) return res.status(err.statusCode).json({ error: err.message });
     res.status(500).json({ error: 'Failed to approve locator slip (department head)' });
   } finally {
     client.release();
@@ -2289,7 +2416,7 @@ router.patch('/:id/department-head-return', protect, async (req, res) => {
 });
 
 // GET /api/locator-slips/admin
-router.get('/admin', protect, requireAdminOrHr, async (req, res) => {
+router.get('/admin', protect, requireAdminOrHr, requireDtrFeatureIfAdmin('locator_allowed'), async (req, res) => {
   try {
     const parsedFilters = parseLocatorAdminFilters(req.query);
     if (!parsedFilters.ok) {
@@ -2330,6 +2457,16 @@ router.get('/admin', protect, requireAdminOrHr, async (req, res) => {
       LEFT JOIN users corrector ON corrector.id = ls.retroactive_corrected_by
       LEFT JOIN users revoker ON revoker.id = ls.revoked_by
       WHERE ($1::text[] IS NULL OR ls.status = ANY($1::text[]))
+        AND (
+          ls.status IN ('pending', 'pending_hr')
+          OR ls.is_retroactive_correction = true
+          OR EXISTS (
+            SELECT 1 FROM locator_slip_history review_history
+            WHERE review_history.locator_slip_id = ls.id
+              AND (review_history.to_status IN ('pending', 'pending_hr')
+                   OR review_history.from_status IN ('pending', 'pending_hr'))
+          )
+        )
         AND ($2::text IS NULL OR ls.request_type = $2::text)
         AND ($3::uuid IS NULL OR ls.department_id = $3::uuid)
         AND ($4::uuid IS NULL OR ls.employee_id = $4::uuid)
@@ -2425,7 +2562,7 @@ router.get('/admin', protect, requireAdminOrHr, async (req, res) => {
 });
 
 // PATCH /api/locator-slips/:id/return-for-correction
-router.patch('/:id/return-for-correction', protect, requireAdminOrHr, async (req, res) => {
+router.patch('/:id/return-for-correction', protect, requireAdminOrHr, requireDtrFeatureIfAdmin('locator_allowed'), async (req, res) => {
   const reviewerId = req.user?.id;
   if (!reviewerId) return res.status(401).json({ error: 'Not authenticated' });
   const { id } = req.params;
@@ -2460,6 +2597,7 @@ router.patch('/:id/return-for-correction', protect, requireAdminOrHr, async (req
         error: `Cannot return locator slip with status '${row.status}'`,
       });
     }
+    await assertFinalLeaveReviewer(client, row.employee_id, reviewerId, 'locator');
     const returnWindow = evaluateLocatorReturnWindow({
       slipDate: row.slip_date_text,
     });
@@ -2510,6 +2648,7 @@ router.patch('/:id/return-for-correction', protect, requireAdminOrHr, async (req
       await client.query('ROLLBACK');
     } catch (_) {}
     console.error('[locator PATCH /:id/return-for-correction]', err);
+    if (err.statusCode) return res.status(err.statusCode).json({ error: err.message });
     res.status(500).json({ error: 'Failed to return locator slip for correction' });
   } finally {
     client.release();
@@ -2517,7 +2656,7 @@ router.patch('/:id/return-for-correction', protect, requireAdminOrHr, async (req
 });
 
 // PATCH /api/locator-slips/:id/approve
-router.patch('/:id/approve', protect, requireAdminOrHr, async (req, res) => {
+router.patch('/:id/approve', protect, requireAdminOrHr, requireDtrFeatureIfAdmin('locator_allowed'), async (req, res) => {
   const reviewerId = req.user?.id;
   if (!reviewerId) return res.status(401).json({ error: 'Not authenticated' });
   const { id } = req.params;
@@ -2553,6 +2692,7 @@ router.patch('/:id/approve', protect, requireAdminOrHr, async (req, res) => {
         error: `Cannot approve locator slip with status '${current.rows[0].status}'`,
       });
     }
+    await assertFinalLeaveReviewer(client, current.rows[0].employee_id, reviewerId, 'locator');
     const attachmentError = locatorReviewAttachmentError(current.rows[0]);
     if (attachmentError) {
       await client.query('ROLLBACK');
@@ -2569,6 +2709,7 @@ router.patch('/:id/approve', protect, requireAdminOrHr, async (req, res) => {
       await client.query('ROLLBACK');
       return res.status(409).json(locatorConflictPayload(conflictCheck));
     }
+    await persistLocatorSignature(client, req.user, id, 'hr_approver', req.body?.signature);
     await client.query(
       `UPDATE locator_slips
        SET status = 'approved',
@@ -2635,6 +2776,7 @@ router.patch('/:id/approve', protect, requireAdminOrHr, async (req, res) => {
       await client.query('ROLLBACK');
     } catch (_) {}
     console.error('[locator PATCH /:id/approve]', err);
+    if (err.statusCode) return res.status(err.statusCode).json({ error: err.message });
     res.status(500).json({ error: 'Failed to approve locator slip' });
   } finally {
     client.release();
@@ -2644,7 +2786,7 @@ router.patch('/:id/approve', protect, requireAdminOrHr, async (req, res) => {
 // PATCH /api/locator-slips/:id/revoke
 // HR/Admin may undo an accidental final approval within three days. The
 // revoked status immediately removes locator coverage without deleting punches.
-router.patch('/:id/revoke', protect, requireAdminOrHr, async (req, res) => {
+router.patch('/:id/revoke', protect, requireAdminOrHr, requireDtrFeatureIfAdmin('locator_allowed'), async (req, res) => {
   const reviewerId = req.user?.id;
   if (!reviewerId) return res.status(401).json({ error: 'Not authenticated' });
   const { id } = req.params;
@@ -2760,7 +2902,7 @@ router.patch('/:id/revoke', protect, requireAdminOrHr, async (req, res) => {
 });
 
 // PATCH /api/locator-slips/:id/reject
-router.patch('/:id/reject', protect, requireAdminOrHr, async (req, res) => {
+router.patch('/:id/reject', protect, requireAdminOrHr, requireDtrFeatureIfAdmin('locator_allowed'), async (req, res) => {
   const reviewerId = req.user?.id;
   if (!reviewerId) return res.status(401).json({ error: 'Not authenticated' });
   const { id } = req.params;
@@ -2791,6 +2933,7 @@ router.patch('/:id/reject', protect, requireAdminOrHr, async (req, res) => {
         error: `Cannot reject locator slip with status '${current.rows[0].status}'`,
       });
     }
+    await assertFinalLeaveReviewer(client, current.rows[0].employee_id, reviewerId, 'locator');
     await client.query(
       `UPDATE locator_slips
        SET status = 'rejected_by_hr',
@@ -2857,6 +3000,7 @@ router.patch('/:id/reject', protect, requireAdminOrHr, async (req, res) => {
       await client.query('ROLLBACK');
     } catch (_) {}
     console.error('[locator PATCH /:id/reject]', err);
+    if (err.statusCode) return res.status(err.statusCode).json({ error: err.message });
     res.status(500).json({ error: 'Failed to reject locator slip' });
   } finally {
     client.release();

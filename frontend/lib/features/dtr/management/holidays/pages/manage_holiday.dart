@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:dio/dio.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:hrms_plaridel/shared/widgets/workforce_loading_skeleton.dart';
 import 'package:hrms_plaridel/core/api/client.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/core/utils/responsive_right_side_panel.dart';
@@ -855,7 +856,7 @@ class _ManageHolidayState extends State<ManageHoliday> {
         children: [
           _buildHolidayToolbar(total),
           if (_loading && _holidays.isNotEmpty)
-            const LinearProgressIndicator(minHeight: 2),
+            const WorkforceRowsSkeleton(rows: 1, label: 'Refreshing holidays'),
           Divider(height: 1, color: AppTheme.dashHairlineOf(context)),
           if (_loadError != null) ...[
             _buildLoadError(),
@@ -1242,7 +1243,10 @@ class _ManageHolidayState extends State<ManageHoliday> {
       child: Center(
         child: Column(
           children: [
-            const CircularProgressIndicator(),
+            const WorkforceRowsSkeleton(
+              columns: [3, 1],
+              label: 'Loading holidays',
+            ),
             const SizedBox(height: 14),
             Text(
               'Loading holidays...',

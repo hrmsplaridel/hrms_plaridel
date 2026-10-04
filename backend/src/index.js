@@ -6,6 +6,12 @@ require('dotenv').config({
 const express = require('express');
 const cors = require('cors');
 const { pool } = require('./config/db');
+const { Pool } = require('pg');
+const { HealthMonitor, createProbe } = require('./services/systemHealth');
+const { createSystemHealthRouter } = require('./routes/systemHealth');
+const { BackupService } = require('./services/systemBackups');
+const { createSystemBackupsRouter } = require('./routes/systemBackups');
+const backupService = new BackupService({ db: pool });
 const { initWebSocket } = require('./websockets/biometricStream');
 const { initAppEventsWebSocket } = require('./websockets/appEvents');
 const { scheduleLeaveMonthlyAccrualCron } = require('./jobs/leaveMonthlyAccrualScheduler');
@@ -25,11 +31,13 @@ const officesRoutes = require('./routes/offices');
 const positionsRoutes = require('./routes/positions');
 const shiftsRoutes = require('./routes/shifts');
 const assignmentsRoutes = require('./routes/assignments');
+const weeklySchedulesRoutes = require('./routes/weeklySchedules');
 const employeeOtherPositionsRoutes = require('./routes/employeeOtherPositions');
 const employeesRoutes = require('./routes/employees');
 const uploadRoutes = require('./routes/upload');
 const filesRoutes = require('./routes/files');
 const holidaysRoutes = require('./routes/holidays');
+const dtrReportSignatoriesRoutes = require('./routes/dtrReportSignatories');
 const attendancePoliciesRoutes = require('./routes/attendancePolicies');
 const policyAssignmentsRoutes = require('./routes/policyAssignments');
 const biometricDevicesRoutes = require('./routes/biometricDevices');
@@ -68,6 +76,22 @@ const { validateHolidayTemplateSchema } = require('./services/holidayTemplateSch
 
 const app = express();
 app.disable('x-powered-by');
+
+// Dedicated, bounded probe connection so an outage cannot exhaust the application pool.
+const healthDatabase = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  max: 1,
+  connectionTimeoutMillis: 5000,
+  query_timeout: 5000,
+  statement_timeout: 5000,
+  idleTimeoutMillis: 10000,
+  allowExitOnIdle: true,
+});
+healthDatabase.on('error', () => {}); // Failed probes are reported on the health page.
+const healthMonitor = new HealthMonitor({
+  directory: process.env.SYSTEM_HEALTH_DATA_DIR || path.resolve(__dirname, '../.system-health'),
+  probe: createProbe(healthDatabase, process.env.SYSTEM_HEALTH_DISK_PATH || path.resolve(__dirname, '../uploads')),
+});
 
 // Behind nginx/Caddy on Kamatera (HTTPS) so req.ip / rate limits see real client IP
 if (process.env.TRUST_PROXY === '1' || process.env.TRUST_PROXY === 'true') {
@@ -168,16 +192,20 @@ app.get('/health/db', async (_req, res) => {
 // API routes
 app.use('/api', generalApiReadLimiter, generalApiLimiter);
 app.use('/auth', authRoutes);
+app.use('/auth/password-reset-assistance', require('./routes/passwordResetAssistance').publicRouter);
+app.use('/api/password-reset-requests', require('./routes/passwordResetAssistance').adminRouter);
 app.use('/api/departments', departmentsRoutes);
 app.use('/api/offices', officesRoutes);
 app.use('/api/positions', positionsRoutes);
 app.use('/api/shifts', shiftsRoutes);
 app.use('/api/assignments', assignmentsRoutes);
+app.use('/api/weekly-schedules', weeklySchedulesRoutes);
 app.use('/api/employee-other-positions', employeeOtherPositionsRoutes);
 app.use('/api/employees', employeesRoutes);
 app.use('/api/upload', uploadRoutes);
 app.use('/api/files', filesRoutes);
 app.use('/api/holidays', holidaysRoutes);
+app.use('/api/dtr-report-signatories', dtrReportSignatoriesRoutes);
 app.use('/api/attendance-policies', attendancePoliciesRoutes);
 app.use('/api/policy-assignments', policyAssignmentsRoutes);
 app.use('/api/biometric-devices', biometricDevicesRoutes);
@@ -185,6 +213,12 @@ app.use('/api/biometric-attendance-logs', biometricAttendanceLogsRoutes);
 app.use('/api/overtime', overtimeRoutes);
 app.use('/api/calendar', calendarRoutes);
 app.use('/api/dtr-daily-summary', dtrDailySummaryRoutes);
+app.use('/api/dtr-corrections', require('./routes/dtrCorrections'));
+app.use('/api/system-audit', require('./routes/systemAudit'));
+app.use('/api/system-health', createSystemHealthRouter(healthMonitor, undefined, backupService));
+app.use('/api/system-backups', createSystemBackupsRouter(backupService));
+app.use('/api/account-creation-access', require('./routes/accountCreationAccess'));
+app.use('/api/dtr-access', require('./routes/dtrAccess'));
 app.use('/api/dtr-assistant', dtrAssistantRoutes);
 app.use('/api/docutracker', docutrackerRoutes);
 app.use('/api/training-daily-reports', trainingDailyReportsRoutes);
@@ -250,7 +284,7 @@ async function startServer() {
     );
   }
   console.log('  POST /auth/login       - login');
-  console.log('  POST /auth/register    - register');
+  console.log('  POST /auth/register    - disabled (use Create Account)');
   console.log('  POST /auth/refresh     - new access token (refresh token body)');
   console.log('  POST /auth/logout      - revoke refresh token');
   console.log('  GET  /auth/me          - current user (requires JWT)');
@@ -267,6 +301,8 @@ async function startServer() {
   console.log('  GET  /api/rsp/storage/signed-url - admin signed attachment URL (service role)');
   console.log('  API  /api/rsp-ld-saved-entries/:table - RSP/L&D saved forms (admin JWT, PostgreSQL)');
   scheduleLeaveMonthlyAccrualCron(pool);
+  void healthMonitor.start();
+  backupService.start();
   scheduleYearEndForcedLeaveCron(pool);
   scheduleAuthRefreshTokenCleanupCron(pool);
   // DocuTracker: server-side escalation worker (workflow control).
@@ -285,6 +321,11 @@ server.on('error', (err) => {
     process.exit(1);
   }
   throw err;
+});
+server.on('close', () => {
+  healthMonitor.stop();
+  backupService.stop();
+  void healthDatabase.end();
 });
 
 // Initialize WebSocket servers and route upgrade requests by path.

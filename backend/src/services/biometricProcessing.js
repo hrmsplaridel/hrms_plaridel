@@ -19,6 +19,7 @@ const {
   setAttendancePolicyCache,
 } = require('./attendancePolicyCache');
 
+const { isOvernight, overnightPenalties, groupPunchesForSchedules } = require('./shiftTimeline');
 const HRMS_TIMEZONE = process.env.HRMS_TIMEZONE || 'Asia/Manila';
 const NOON_MINUTES = 12 * 60;
 const ONE_PM_MINUTES = 13 * 60;
@@ -114,26 +115,35 @@ function timeToMinutes(timeStr) {
 
 async function getAssignmentShiftForDate(employeeId, dateStr) {
   const result = await pool.query(
-    `SELECT a.override_start_time::text AS override_start_time,
+    `SELECT saved.shift_snapshot, a.department_id, a.shift_id,
+            (SELECT o.is_working_day FROM employee_schedule_overrides o
+             WHERE o.employee_id = $1::uuid AND o.schedule_date = $2::date) AS scheduled_working_day,
+            a.override_start_time::text AS override_start_time,
             a.override_end_time::text AS override_end_time,
             a.override_break_end::text AS override_break_end,
             s.start_time::text AS shift_start,
             s.end_time::text AS shift_end,
             s.break_end::text AS shift_break_end,
-            s.punch_mode,
-            s.grace_period_minutes
-     FROM assignments a
-     LEFT JOIN shifts s ON a.shift_id = s.id
-     WHERE a.employee_id = $1
-       AND (a.is_active IS NULL OR a.is_active = true)
-       AND a.effective_from <= $2::date
-       AND (a.effective_to IS NULL OR a.effective_to >= $2::date)
-     ORDER BY a.effective_from DESC, a.created_at DESC, a.id DESC
-     LIMIT 1`,
+            s.punch_mode, s.break_start::text AS shift_break_start, s.capture_window_minutes,
+            s.working_days, s.grace_period_minutes
+     FROM (SELECT (SELECT d.shift_snapshot FROM dtr_daily_summary d
+                   WHERE d.employee_id = $1::uuid AND d.attendance_date = $2::date)
+                  AS shift_snapshot) saved
+     LEFT JOIN LATERAL (
+       SELECT a.* FROM assignments a
+       WHERE a.employee_id = $1::uuid
+         AND (a.is_active IS NULL OR a.is_active = true)
+         AND a.effective_from <= $2::date
+         AND (a.effective_to IS NULL OR a.effective_to >= $2::date)
+       ORDER BY a.effective_from DESC, a.created_at DESC, a.id DESC
+       LIMIT 1
+     ) a ON true
+     LEFT JOIN shifts s ON a.shift_id = s.id`,
     [employeeId, dateStr]
   );
   const row = result.rows[0];
   if (!row) return null;
+  if (row.shift_snapshot) return row.shift_snapshot;
   const startTimeStr = row.override_start_time || row.shift_start;
   if (!startTimeStr) return null;
   const startMinutes = timeToMinutes(startTimeStr);
@@ -144,11 +154,18 @@ async function getAssignmentShiftForDate(employeeId, dateStr) {
   const breakEndStr = row.override_break_end || row.shift_break_end;
   const breakEndMinutes = breakEndStr ? timeToMinutes(breakEndStr) : null;
   return {
+    departmentId: row.department_id || null,
+    shiftId: row.shift_id || null,
     startMinutes,
     endMinutes,
     graceMinutes,
     breakEndMinutes,
     punchMode: row.punch_mode || 'auto',
+    workingDays: row.working_days || [1, 2, 3, 4, 5],
+    isWorkingDay: typeof row.scheduled_working_day === 'boolean' ? row.scheduled_working_day :
+      require('./employeeScheduleOverrides').defaultWorkingDay(row.working_days, dateStr),
+    breakStartMinutes: timeToMinutes(row.shift_break_start),
+    captureWindowMinutes: Number(row.capture_window_minutes ?? 120),
   };
 }
 
@@ -207,6 +224,9 @@ async function evaluateBiometricDayGate(employeeId, dateStr) {
   if (!shiftInfo) {
     return { allowed: false, reason: 'no_schedule', shiftInfo: null };
   }
+  if (isOvernight(shiftInfo) && shiftInfo.isWorkingDay === false) {
+    return { allowed: false, reason: 'rest_day', shiftInfo };
+  }
   let holidayRow = null;
   try {
     holidayRow = await getHolidayForDate(dateStr);
@@ -221,6 +241,25 @@ async function evaluateBiometricDayGate(employeeId, dateStr) {
     return { allowed: false, reason: 'leave', shiftInfo };
   }
   return { allowed: true, reason: null, shiftInfo };
+}
+
+async function resolveBiometricPunchDate(employeeId, punch, cache = new Map()) {
+  const { localTimestampParts, addIsoDays } = require('./dtrPunchDateValidation');
+  const local = localTimestampParts(punch, HRMS_TIMEZONE);
+  if (!local) return null;
+  async function resolve(date) {
+    const key = `${employeeId}|${date}`;
+    if (!cache.has(key)) cache.set(key, await getAssignmentShiftForDate(employeeId, date));
+    return cache.get(key);
+  }
+  const previous = addIsoDays(local.date, -1);
+  const prior = await resolve(previous);
+  const current = await resolve(local.date);
+  const closerToCurrent = current?.isWorkingDay !== false && current?.startMinutes != null &&
+    Math.abs(local.minutes - current.startMinutes) < Math.abs(local.minutes - (prior?.endMinutes ?? -1440));
+  if (isOvernight(prior) && prior.isWorkingDay !== false && !closerToCurrent &&
+      local.minutes <= prior.endMinutes + (prior.captureWindowMinutes ?? 120)) return previous;
+  return local.date;
 }
 
 function minutesFromMidnightInTimeZone(val, timeZone = HRMS_TIMEZONE) {
@@ -274,6 +313,7 @@ async function computeLateMinutes(employeeId, dateStr, timeInIso, breakInIso, st
   if (isHolidayOrSuspension && (!coverage || coverage === 'whole_day')) return 0;
   const shiftInfo = await getAssignmentShiftForDate(employeeId, dateStr);
   if (!shiftInfo) return 0;
+  if (isOvernight(shiftInfo)) return overnightPenalties(shiftInfo, dateStr, { timeIn: timeInIso, breakIn: breakInIso }, new Date(), coverage).lateMinutes;
   const { startMinutes, graceMinutes } = shiftInfo;
   const type = getShiftType(shiftInfo);
   let total = 0;
@@ -315,6 +355,9 @@ async function computeUndertimeMinutes(employeeId, dateStr, timeOutIso, breakOut
   if (isHolidayOrSuspension && (!coverage || coverage === 'whole_day')) return 0;
   const shiftInfo = await getAssignmentShiftForDate(employeeId, dateStr);
   if (!shiftInfo || shiftInfo.endMinutes == null) return 0;
+  if (isOvernight(shiftInfo)) return overnightPenalties(shiftInfo, dateStr, {
+    timeIn: timeInIso, breakIn: breakInIso, timeOut: timeOutIso, breakOut: breakOutIso,
+  }, new Date(), coverage).undertimeMinutes;
   const type = getShiftType(shiftInfo);
   const evalAm = !isHolidayOrSuspension || coverage !== 'am_only';
   const evalPm = !isHolidayOrSuspension || coverage !== 'pm_only';
@@ -506,8 +549,8 @@ async function processBiometricLogsToSummary(userIds, dateFrom, dateTo) {
                 ((logged_at AT TIME ZONE $4)::date)::text AS punch_date
          FROM biometric_attendance_logs
          WHERE user_id = ANY($1::uuid[])
-           AND (logged_at AT TIME ZONE $4)::date >= $2::date
-           AND (logged_at AT TIME ZONE $4)::date <= $3::date
+           AND (logged_at AT TIME ZONE $4)::date >= $2::date - 1
+           AND (logged_at AT TIME ZONE $4)::date <= $3::date + 1
        )
        SELECT user_id,
               punch_date AS attendance_date,
@@ -521,13 +564,14 @@ async function processBiometricLogsToSummary(userIds, dateFrom, dateTo) {
     throw err;
   }
 
+  grouped.rows = await groupPunchesForSchedules(grouped.rows, getAssignmentShiftForDate, dateFrom, dateTo, tz);
   const rowCount = grouped.rows.length;
   console.log('[biometricProcessing] Grouped rows:', rowCount);
 
   const deletedDtrDateKeys = await getDeletedDtrDateKeys(
     pool,
     userIdArr,
-    dateFrom,
+    require('./dtrPunchDateValidation').addIsoDays(dateFrom, -1),
     dateTo
   );
 
@@ -536,7 +580,9 @@ async function processBiometricLogsToSummary(userIds, dateFrom, dateTo) {
   let removed = 0;
   let skipped = 0;
   const affected = [];
+  const reconciliationRetries = [];
 
+  try {
   for (const row of grouped.rows) {
     const { user_id, attendance_date, punches } = row;
     const attendanceDateStr = typeof attendance_date === 'string' ? attendance_date.slice(0, 10) : toDateStr(attendance_date);
@@ -556,7 +602,7 @@ async function processBiometricLogsToSummary(userIds, dateFrom, dateTo) {
     }
 
     const rawPunches = Array.isArray(punches) ? punches : [];
-    const punchList = rawPunches.filter((p) => getManilaDateStr(p) === attendanceDateStr);
+    const punchList = rawPunches;
     if (punchList.length === 0) {
       console.warn('[biometricProcessing] No punches match attendance_date after filter:', {
         user_id,
@@ -671,7 +717,7 @@ async function processBiometricLogsToSummary(userIds, dateFrom, dateTo) {
 
     const firstRecord = timeIn || breakIn;
     const firstRecordManilaDate = getManilaDateStr(firstRecord);
-    if (!firstRecord || firstRecordManilaDate !== attendanceDateStr) {
+    if (!firstRecord || (!isOvernight(shiftInfo) && firstRecordManilaDate !== attendanceDateStr)) {
       console.error('[biometricProcessing] REJECT: first record Manila date does not match attendance_date', {
         user_id,
         attendance_date: attendanceDateStr,
@@ -681,7 +727,7 @@ async function processBiometricLogsToSummary(userIds, dateFrom, dateTo) {
       skipped++;
       continue;
     }
-    if (timeOut && getManilaDateStr(timeOut) !== attendanceDateStr) {
+    if (!isOvernight(shiftInfo) && timeOut && getManilaDateStr(timeOut) !== attendanceDateStr) {
       console.error('[biometricProcessing] REJECT: time_out Manila date does not match attendance_date', {
         user_id,
         attendance_date: attendanceDateStr,
@@ -752,8 +798,8 @@ async function processBiometricLogsToSummary(userIds, dateFrom, dateTo) {
         await pool.query(
           `INSERT INTO dtr_daily_summary
              (employee_id, attendance_date, time_in, break_out, break_in, time_out, status, source,
-              late_minutes, undertime_minutes, overtime_minutes, total_hours)
-           VALUES ($1::uuid, $2::date, $3::timestamptz, $4::timestamptz, $5::timestamptz, $6::timestamptz, $7, 'system', $8, $9, 0, $10)`,
+              late_minutes, undertime_minutes, overtime_minutes, total_hours, shift_snapshot)
+           VALUES ($1::uuid, $2::date, $3::timestamptz, $4::timestamptz, $5::timestamptz, $6::timestamptz, $7, 'system', $8, $9, 0, $10, $11::jsonb)`,
           [
             user_id,
             attendanceDateStr,
@@ -765,6 +811,7 @@ async function processBiometricLogsToSummary(userIds, dateFrom, dateTo) {
             lateMinutes,
             undertimeMinutes,
             totalHours,
+            JSON.stringify(shiftInfo),
           ]
         );
         inserted++;
@@ -795,6 +842,8 @@ async function processBiometricLogsToSummary(userIds, dateFrom, dateTo) {
         undertimeMinutes,
       };
       if (!hasBiometricSummaryChanged(existingRow, candidateSummary)) {
+        // Retry queueing if an earlier import saved the DTR but queueing failed.
+        reconciliationRetries.push({ userId: String(user_id), date: attendanceDateStr });
         skipped++;
         console.log('[biometricProcessing] SKIP (system summary unchanged)', {
           employee_id: user_id,
@@ -815,6 +864,7 @@ async function processBiometricLogsToSummary(userIds, dateFrom, dateTo) {
              late_minutes = $9,
              undertime_minutes = $10,
              overtime_minutes = 0,
+             shift_snapshot = $11::jsonb,
              updated_at = now()
            WHERE employee_id = $1::uuid
              AND attendance_date = $2::date
@@ -831,6 +881,7 @@ async function processBiometricLogsToSummary(userIds, dateFrom, dateTo) {
             totalHours,
             lateMinutes,
             undertimeMinutes,
+            JSON.stringify(shiftInfo),
           ]
         );
         if (updateResult.rowCount > 0) {
@@ -866,6 +917,11 @@ async function processBiometricLogsToSummary(userIds, dateFrom, dateTo) {
     }
   }
 
+  } finally {
+    const { enqueueBiometricReconciliation } = require('./dtrMonthEndReconciliation');
+    await enqueueBiometricReconciliation(pool, [...affected, ...reconciliationRetries], HRMS_TIMEZONE);
+  }
+
   console.log('[biometricProcessing] Done:', { inserted, updated, removed, skipped });
   
   if (affected.length > 0) {
@@ -894,6 +950,7 @@ module.exports = {
   hasBiometricSummaryChanged,
   computeTotalHours,
   evaluateBiometricDayGate,
+  resolveBiometricPunchDate,
   isPunchAfterShiftEnd,
   isFirstPunchAfterShiftEnd,
   minutesFromMidnightInTimeZone,

@@ -5,6 +5,8 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:hrms_plaridel/core/api/user_facing_api_error.dart';
 import 'package:hrms_plaridel/features/docutracker/data/providers/docutracker_provider.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
+import 'package:hrms_plaridel/core/utils/form_pdf.dart';
+import 'package:hrms_plaridel/shared/widgets/form_document_preview.dart';
 import 'package:hrms_plaridel/features/learning_development/models/training_daily_report.dart';
 import 'package:hrms_plaridel/features/learning_development/presentation/shared/widgets/training_daily_report_date_filter.dart';
 import 'package:hrms_plaridel/shared/widgets/read_only_saved_entry_dialog.dart';
@@ -241,6 +243,8 @@ class _LdTrainingDailyReportsSectionState
                 report: r,
                 compact: mobile,
                 onView: () => _openReport(context, r),
+                onPreview: () => _previewReport(r),
+                onPrint: () => _printReport(r),
                 onViewFile: r.attachmentUrl != null
                     ? () => showTrainingReportAttachmentPreview(
                         context,
@@ -420,6 +424,25 @@ class _LdTrainingDailyReportsSectionState
     return Wrap(spacing: 8, runSpacing: 8, children: chips);
   }
 
+  Future<void> _previewReport(TrainingDailyReport r) {
+    return openFormDocumentPreview(
+      context: context,
+      title: 'Training Daily Report',
+      filename: 'training-daily-report.pdf',
+      format: FormPdf.pageLetter,
+      buildDocument: () => FormPdf.buildTrainingDailyReportPdf(r),
+    );
+  }
+
+  Future<void> _printReport(TrainingDailyReport r) {
+    return FormPdf.printForm(
+      context: context,
+      buildDocument: () => FormPdf.buildTrainingDailyReportPdf(r),
+      filename: 'training-daily-report.pdf',
+      format: FormPdf.pageLetter,
+    );
+  }
+
   void _openReport(BuildContext context, TrainingDailyReport r) {
     showReadOnlySavedEntryDialog(
       context,
@@ -429,6 +452,8 @@ class _LdTrainingDailyReportsSectionState
           : r.submittedAt.toLocal().toString().split('.').first,
       previewBuilder: () => TrainingDailyReportReadOnlyView(report: r),
       contentWidth: 640,
+      onPrint: () => _printReport(r),
+      onDocumentPreview: () => _previewReport(r),
     );
   }
 
@@ -602,6 +627,8 @@ class _TrainingReportCard extends StatelessWidget {
     required this.report,
     required this.compact,
     required this.onView,
+    required this.onPreview,
+    required this.onPrint,
     required this.onMarkSeen,
     required this.onDelete,
     this.onViewFile,
@@ -611,6 +638,8 @@ class _TrainingReportCard extends StatelessWidget {
   final TrainingDailyReport report;
   final bool compact;
   final VoidCallback onView;
+  final VoidCallback onPreview;
+  final VoidCallback onPrint;
   final VoidCallback onMarkSeen;
   final VoidCallback onDelete;
   final VoidCallback? onViewFile;
@@ -889,9 +918,17 @@ class _TrainingReportCard extends StatelessWidget {
       icon: Icon(Icons.delete_outline_rounded, color: Colors.red.shade700),
     );
 
+    final documentActions = FormPreviewPrintButtons(
+      onPreview: onPreview,
+      onPrint: onPrint,
+    );
+
     if (compact) {
       return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
+          documentActions,
+          const SizedBox(height: 8),
           viewBtn,
           const SizedBox(height: 8),
           seenBtn,
@@ -900,12 +937,14 @@ class _TrainingReportCard extends StatelessWidget {
       );
     }
 
-    return Row(
+    return Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      crossAxisAlignment: WrapCrossAlignment.center,
       children: [
+        documentActions,
         viewBtn,
-        const SizedBox(width: 8),
         seenBtn,
-        const Spacer(),
         deleteBtn,
       ],
     );

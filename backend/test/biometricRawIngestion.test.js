@@ -15,6 +15,7 @@ async function invokeIngestionRoute({
   insertRowCount = 1,
   hasStoredPunch = false,
   processError = null,
+  logicalDate = null,
   userLookupRows = [{
     id: userId,
     biometric_user_id: '1001',
@@ -76,6 +77,7 @@ async function invokeIngestionRoute({
   const restoreDb = withMockedModule('../src/config/db', { pool });
   const restoreProcessing = withMockedModule('../src/services/biometricProcessing', {
     getManilaDateStr: (value) => String(value).slice(0, 10),
+    resolveBiometricPunchDate: async (_employee, value) => logicalDate || String(value).slice(0, 10),
     evaluateBiometricDayGate: async () => {
       events.push('gate');
       return {
@@ -137,6 +139,17 @@ test('device push preserves a matched raw punch when no schedule is configured',
   assert.equal(res.body.skipped_no_schedule, 1);
   assert.ok(events.indexOf('insert') < events.indexOf('gate'));
   assert.deepEqual(processCalls, [[[userId], '2026-09-12', '2026-09-12']]);
+});
+
+test('next-morning device punch keeps its raw timestamp and uses the previous attendance date', async () => {
+  const nextMorning = '2026-10-01T07:00:00+08:00';
+  const { res, processCalls, rawInserts } = await invokeIngestionRoute({
+    path: '/push', logicalDate: '2026-09-30',
+    body: { punches: [{ biometric_user_id: '1001', logged_at: nextMorning }], biometric_device_id: deviceId },
+  });
+  assert.equal(res.statusCode, 200);
+  assert.equal(rawInserts[0].params[2], nextMorning);
+  assert.deepEqual(processCalls, [[[userId], '2026-09-30', '2026-09-30']]);
 });
 
 test('manual import preserves a matched raw punch during blocking leave', async () => {

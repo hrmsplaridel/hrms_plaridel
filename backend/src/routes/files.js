@@ -14,6 +14,11 @@ const {
   findLocalRspAttachment,
 } = require('../utils/rspLocalAttachment');
 
+const {
+  EXAM_IMAGE_SUBDIR,
+  EXAM_IMAGE_FILE_RE,
+} = require('../utils/examQuestionImages');
+
 const router = express.Router();
 const UPLOAD_DIR = process.env.UPLOAD_DIR || path.join(__dirname, '../../uploads');
 
@@ -44,6 +49,26 @@ router.get('/avatar/:userId', async (req, res) => {
     console.error('[files avatar]', err);
     res.status(500).json({ error: 'Failed to serve avatar' });
   }
+});
+
+/**
+ * GET /api/files/exam-image/:fileName
+ * Serves exam question / answer-choice images. Public (applicants take exams
+ * unauthenticated); file names are unguessable uuids and strictly validated.
+ */
+router.get('/exam-image/:fileName', (req, res) => {
+  const fileName = String(req.params.fileName || '');
+  if (!EXAM_IMAGE_FILE_RE.test(fileName)) {
+    return res.status(404).json({ error: 'Image not found' });
+  }
+  const root = path.resolve(UPLOAD_DIR, EXAM_IMAGE_SUBDIR);
+  const filePath = path.resolve(root, fileName);
+  if (!filePath.startsWith(`${root}${path.sep}`) || !fs.existsSync(filePath)) {
+    return res.status(404).json({ error: 'Image not found' });
+  }
+  res.setHeader('Cache-Control', 'public, max-age=86400');
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.sendFile(filePath);
 });
 
 /**

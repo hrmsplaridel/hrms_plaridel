@@ -2,6 +2,7 @@ const express = require('express');
 const { pool } = require('../config/db');
 const { authMiddleware } = require('../middleware/auth');
 const { requireAdmin } = require('../middleware/rbac');
+const { requireDtrManageIfAdmin } = require('../middleware/dtrAccess');
 const {
   deleteHolidayDefaultTemplate,
   getHolidayDefaultTemplate,
@@ -193,7 +194,7 @@ router.get('/ph-defaults/templates', protect, requireAdmin, async (_req, res) =>
 });
 
 // POST /api/holidays/ph-defaults/templates - add or replace a PH default template.
-router.post('/ph-defaults/templates', protect, requireAdmin, async (req, res) => {
+router.post('/ph-defaults/templates', protect, requireAdmin, requireDtrManageIfAdmin, async (req, res) => {
   try {
     const template = await upsertHolidayDefaultTemplate(req.body || {});
     res.status(201).json(template);
@@ -207,7 +208,7 @@ router.post('/ph-defaults/templates', protect, requireAdmin, async (req, res) =>
 });
 
 // DELETE /api/holidays/ph-defaults/templates/:year - remove an admin-maintained PH template.
-router.delete('/ph-defaults/templates/:year', protect, requireAdmin, async (req, res) => {
+router.delete('/ph-defaults/templates/:year', protect, requireAdmin, requireDtrManageIfAdmin, async (req, res) => {
   try {
     const deleted = await deleteHolidayDefaultTemplate(req.params.year);
     if (!deleted) return res.status(404).json({ error: 'Template not found' });
@@ -252,7 +253,7 @@ router.get('/ph-defaults', protect, requireAdmin, async (req, res) => {
 });
 
 // POST /api/holidays/ph-defaults/import - insert missing Philippine defaults for a supported year.
-router.post('/ph-defaults/import', protect, requireAdmin, async (req, res) => {
+router.post('/ph-defaults/import', protect, requireAdmin, requireDtrManageIfAdmin, async (req, res) => {
   let client;
   let transactionStarted = false;
   try {
@@ -333,7 +334,7 @@ router.post('/ph-defaults/import', protect, requireAdmin, async (req, res) => {
 });
 
 // POST /api/holidays - create (admin only)
-router.post('/', protect, requireAdmin, async (req, res) => {
+router.post('/', protect, requireAdmin, requireDtrManageIfAdmin, async (req, res) => {
   let client;
   let transactionStarted = false;
   try {
@@ -391,7 +392,7 @@ router.post('/', protect, requireAdmin, async (req, res) => {
 });
 
 // PUT /api/holidays/:id - update (admin only)
-router.put('/:id', protect, requireAdmin, async (req, res) => {
+router.put('/:id', protect, requireAdmin, requireDtrManageIfAdmin, async (req, res) => {
   let client;
   let transactionStarted = false;
   try {
@@ -504,7 +505,7 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
 });
 
 // DELETE /api/holidays/:id (admin only)
-router.delete('/:id', protect, requireAdmin, async (req, res) => {
+router.delete('/:id', protect, requireAdmin, requireDtrManageIfAdmin, async (req, res) => {
   let client;
   let transactionStarted = false;
   try {

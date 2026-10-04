@@ -1,5 +1,9 @@
 import 'dart:async';
+import 'package:hrms_plaridel/features/dtr/attendance/presentation/widgets/attendance_display.dart'
+    show compactLocatorRemark, formatWorkedHours;
+import 'package:hrms_plaridel/features/dtr/reports/data/official_time.dart';
 import 'package:flutter/material.dart';
+import 'package:hrms_plaridel/shared/widgets/workforce_loading_skeleton.dart';
 import 'package:provider/provider.dart';
 import 'package:hrms_plaridel/core/api/user_facing_api_error.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
@@ -99,12 +103,13 @@ class _RemarksChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final dark = AppTheme.dashIsDark(context);
+    final displayRemark = compactLocatorRemark(remark);
     final (color, bg) = _colorsForRemark(
-      remark,
+      displayRemark,
       isHoliday: isHoliday,
       dark: dark,
     );
-    return Container(
+    final chip = Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
         color: bg,
@@ -112,7 +117,7 @@ class _RemarksChip extends StatelessWidget {
         border: Border.all(color: color.withValues(alpha: 0.5), width: 1),
       ),
       child: Text(
-        remark,
+        displayRemark,
         style: TextStyle(
           fontSize: 11,
           fontWeight: FontWeight.w600,
@@ -121,6 +126,9 @@ class _RemarksChip extends StatelessWidget {
         overflow: TextOverflow.ellipsis,
       ),
     );
+    return displayRemark == remark
+        ? chip
+        : Tooltip(message: remark, child: chip);
   }
 
   static (Color color, Color bg) _chipPair(
@@ -262,6 +270,7 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
   int _selectedYear = DateTime.now().year;
   static const int _recordPageSize = 100;
   int _recordPage = 0;
+  String _attendanceView = 'auto';
 
   /// When non-null and >= 1, filter to this day only (realtime-style single-day view).
   int? _selectedDay;
@@ -456,7 +465,7 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
   static bool _isOvernightShift(EmployeeShiftForDate? shift) {
     final start = shift?.startMinutes;
     final end = shift?.endMinutes;
-    return start != null && end != null && end <= start;
+    return start != null && end != null && end < start;
   }
 
   static int? _orderedPunchMinutes(
@@ -465,7 +474,9 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
     required bool overnight,
   }) {
     if (value == null) return null;
-    return overnight && after != null && value <= after ? value + 1440 : value;
+    return overnight && value < 1440 && after != null && value < after
+        ? value + 1440
+        : value;
   }
 
   static DateTime _manualPunchTimestamp({
@@ -479,11 +490,17 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
         mayFallOnNextDay &&
         _isOvernightShift(shift) &&
         shift?.endMinutes != null &&
-        minutes <= shift!.endMinutes!;
+        minutes <= shift!.endMinutes! + shift.captureWindowMinutes;
     final date = nextDay
         ? attendanceDate.add(const Duration(days: 1))
         : attendanceDate;
-    return DateTime(date.year, date.month, date.day, time.hour, time.minute);
+    return DateTime.utc(
+      date.year,
+      date.month,
+      date.day,
+      time.hour,
+      time.minute,
+    ).subtract(const Duration(hours: 8));
   }
 
   static String _formatDate(DateTime d) {
@@ -518,7 +535,12 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
     required DateTime? timeValue,
     required String segment,
   }) {
-    if (timeValue != null) return _formatTime(timeValue);
+    if (timeValue != null) {
+      return formatOfficialPhilippineTime(
+        timeValue,
+        attendanceDate: record.recordDate,
+      );
+    }
     final segs = record.locatorSlipSegments ?? const <String>[];
     if (segs.any((s) => s.toUpperCase() == segment)) {
       return record.locatorSlipSlotLabel;
@@ -639,6 +661,11 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
       if (search.isEmpty) return true;
       return (r.employeeName ?? '').toLowerCase().contains(search);
     }).toList();
+    final singleView =
+        _attendanceView == 'single' ||
+        (_attendanceView == 'auto' &&
+            displayRecords.isNotEmpty &&
+            displayRecords.every((r) => r.shiftPunchMode == 'single_session'));
     final isHardcodedPreview =
         dtr.timeRecords.isEmpty && displayRecords.isNotEmpty;
 
@@ -912,6 +939,37 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
                           _applyFilters(resetPage: true);
                         },
                       ),
+                      SizedBox(
+                        width: 172,
+                        child: DropdownButtonFormField<String>(
+                          initialValue: _attendanceView,
+                          isExpanded: true,
+                          decoration: AppTheme.dashInputDecoration(
+                            context,
+                            labelText: 'View mode',
+                            radius: 8,
+                          ),
+                          dropdownColor: AppTheme.dashPanelOf(context),
+                          style: AppTheme.dashFieldTextStyle(context),
+                          items: const [
+                            DropdownMenuItem(
+                              value: 'auto',
+                              child: Text('Auto'),
+                            ),
+                            DropdownMenuItem(
+                              value: 'split',
+                              child: Text('Split (AM/PM)'),
+                            ),
+                            DropdownMenuItem(
+                              value: 'single',
+                              child: Text('Single session'),
+                            ),
+                          ],
+                          onChanged: (v) {
+                            if (v != null) setState(() => _attendanceView = v);
+                          },
+                        ),
+                      ),
                       DropdownButton<String?>(
                         value: _selectedDepartmentId,
                         dropdownColor: AppTheme.dashPanelOf(context),
@@ -1117,11 +1175,10 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
           ],
           const SizedBox(height: 20),
           if (dtr.loading)
-            const Center(
-              child: Padding(
-                padding: EdgeInsets.all(24),
-                child: CircularProgressIndicator(),
-              ),
+            const WorkforceRowsSkeleton(
+              columns: [2, 2, 1, 1, 1, 1],
+              rows: 6,
+              label: 'Loading time logs',
             ),
           if (!dtr.loading && displayRecords.isEmpty)
             Container(
@@ -1168,6 +1225,7 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
                   return _buildMobileTimeLogsList(
                     context: context,
                     records: displayRecords,
+                    singleView: singleView,
                     dtr: dtr,
                     isHardcodedPreview: isHardcodedPreview,
                   );
@@ -1226,27 +1284,51 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
                                   Expanded(
                                     flex: 1,
                                     child: Center(
-                                      child: _headerLabel(context, 'AM In'),
+                                      child: Tooltip(
+                                        message: 'Shift start',
+                                        child: _headerLabel(context, 'In'),
+                                      ),
                                     ),
                                   ),
+                                  if (!singleView)
+                                    Expanded(
+                                      flex: 1,
+                                      child: Center(
+                                        child: Tooltip(
+                                          message: 'Break start',
+                                          child: _headerLabel(context, 'Out'),
+                                        ),
+                                      ),
+                                    ),
+                                  if (!singleView)
+                                    Expanded(
+                                      flex: 1,
+                                      child: Center(
+                                        child: Tooltip(
+                                          message: 'Break end',
+                                          child: _headerLabel(context, 'In'),
+                                        ),
+                                      ),
+                                    ),
                                   Expanded(
                                     flex: 1,
                                     child: Center(
-                                      child: _headerLabel(context, 'AM Out'),
+                                      child: Tooltip(
+                                        message: 'Shift end',
+                                        child: _headerLabel(context, 'Out'),
+                                      ),
                                     ),
                                   ),
-                                  Expanded(
-                                    flex: 1,
-                                    child: Center(
-                                      child: _headerLabel(context, 'PM In'),
+                                  if (singleView)
+                                    Expanded(
+                                      flex: 1,
+                                      child: Center(
+                                        child: _headerLabel(
+                                          context,
+                                          'Hours Worked',
+                                        ),
+                                      ),
                                     ),
-                                  ),
-                                  Expanded(
-                                    flex: 1,
-                                    child: Center(
-                                      child: _headerLabel(context, 'PM Out'),
-                                    ),
-                                  ),
                                   Expanded(
                                     flex: 1,
                                     child: Center(
@@ -1287,6 +1369,7 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
                                       context: context,
                                       index: index,
                                       record: displayRecords[index],
+                                      singleView: singleView,
                                       dtr: dtr,
                                       isHardcodedPreview: isHardcodedPreview,
                                     ),
@@ -1358,6 +1441,7 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
   }
 
   Widget _buildMobileTimeLogsList({
+    required bool singleView,
     required BuildContext context,
     required List<TimeRecord> records,
     required DtrProvider dtr,
@@ -1372,26 +1456,32 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
             bottom: index == records.length - 1 ? 0 : 12,
           ),
           child: DtrTimeLogMobileCard(
+            singleSession: _attendanceView == 'auto'
+                ? record.shiftPunchMode == 'single_session'
+                : singleView,
+            overnight: record.shiftIsOvernight,
+            hoursWorked: formatWorkedHours(record),
             employeeName: record.employeeName ?? record.userId,
             dateLabel: _formatDate(record.recordDate),
             amIn: _cellDisplayForSegment(
               record: record,
-              timeValue: record.timeIn?.toLocal(),
+              timeValue: record.timeIn ?? (singleView ? record.breakIn : null),
               segment: 'AM IN',
             ),
             amOut: _cellDisplayForSegment(
               record: record,
-              timeValue: record.breakOut?.toLocal(),
+              timeValue: record.breakOut,
               segment: 'AM OUT',
             ),
             pmIn: _cellDisplayForSegment(
               record: record,
-              timeValue: record.breakIn?.toLocal(),
+              timeValue: record.breakIn,
               segment: 'PM IN',
             ),
             pmOut: _cellDisplayForSegment(
               record: record,
-              timeValue: record.timeOut?.toLocal(),
+              timeValue:
+                  record.timeOut ?? (singleView ? record.breakOut : null),
               segment: 'PM OUT',
             ),
             late: formatLateMinutes(record),
@@ -1412,6 +1502,7 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
   }
 
   Widget _buildTimeLogRow({
+    required bool singleView,
     required BuildContext context,
     required int index,
     required TimeRecord record,
@@ -1424,10 +1515,10 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
       fontSize: 13,
       color: AppTheme.dashTextPrimaryOf(context),
     );
-    final timeIn = record.timeIn?.toLocal();
-    final breakOut = record.breakOut?.toLocal();
-    final breakIn = record.breakIn?.toLocal();
-    final timeOut = record.timeOut?.toLocal();
+    final timeIn = record.timeIn ?? (singleView ? record.breakIn : null);
+    final breakOut = record.breakOut;
+    final breakIn = record.breakIn;
+    final timeOut = record.timeOut ?? (singleView ? record.breakOut : null);
     final remark = getAttendanceRemark(record);
     final lateStr = formatLateMinutes(record);
     final underStr = formatUndertimeMinutes(record);
@@ -1474,38 +1565,43 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
                   segment: 'AM IN',
                 ),
                 style: cellStyle,
-                overflow: TextOverflow.ellipsis,
+                textAlign: TextAlign.center,
+                softWrap: true,
               ),
             ),
           ),
-          Expanded(
-            flex: 1,
-            child: Center(
-              child: Text(
-                _cellDisplayForSegment(
-                  record: record,
-                  timeValue: breakOut,
-                  segment: 'AM OUT',
+          if (!singleView)
+            Expanded(
+              flex: 1,
+              child: Center(
+                child: Text(
+                  _cellDisplayForSegment(
+                    record: record,
+                    timeValue: breakOut,
+                    segment: 'AM OUT',
+                  ),
+                  style: cellStyle,
+                  textAlign: TextAlign.center,
+                  softWrap: true,
                 ),
-                style: cellStyle,
-                overflow: TextOverflow.ellipsis,
               ),
             ),
-          ),
-          Expanded(
-            flex: 1,
-            child: Center(
-              child: Text(
-                _cellDisplayForSegment(
-                  record: record,
-                  timeValue: breakIn,
-                  segment: 'PM IN',
+          if (!singleView)
+            Expanded(
+              flex: 1,
+              child: Center(
+                child: Text(
+                  _cellDisplayForSegment(
+                    record: record,
+                    timeValue: breakIn,
+                    segment: 'PM IN',
+                  ),
+                  style: cellStyle,
+                  textAlign: TextAlign.center,
+                  softWrap: true,
                 ),
-                style: cellStyle,
-                overflow: TextOverflow.ellipsis,
               ),
             ),
-          ),
           Expanded(
             flex: 1,
             child: Center(
@@ -1516,10 +1612,18 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
                   segment: 'PM OUT',
                 ),
                 style: cellStyle,
-                overflow: TextOverflow.ellipsis,
+                textAlign: TextAlign.center,
+                softWrap: true,
               ),
             ),
           ),
+          if (singleView)
+            Expanded(
+              flex: 1,
+              child: Center(
+                child: Text(formatWorkedHours(record), style: cellStyle),
+              ),
+            ),
           Expanded(
             flex: 1,
             child: Center(
@@ -1869,8 +1973,17 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
                         breakOut != null ||
                         breakIn != null ||
                         timeOut != null;
-              int? minutes(TimeOfDay? time) =>
-                  time == null ? null : (time.hour * 60) + time.minute;
+              int? minutes(TimeOfDay? time) {
+                if (time == null) return null;
+                final value = time.hour * 60 + time.minute;
+                return isOvernight &&
+                        value <=
+                            selectedShift!.endMinutes! +
+                                selectedShift!.captureWindowMinutes
+                    ? value + 1440
+                    : value;
+              }
+
               final amInMinutes = minutes(timeIn);
               final amOutMinutes = minutes(breakOut);
               final pmInMinutes = minutes(breakIn);
@@ -2056,7 +2169,10 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
                             if (employeesLoading)
                               const Padding(
                                 padding: EdgeInsets.only(bottom: 8),
-                                child: LinearProgressIndicator(minHeight: 3),
+                                child: WorkforceRowsSkeleton(
+                                  rows: 1,
+                                  label: 'Loading employees',
+                                ),
                               ),
                             if (!employeesLoading && empList.isEmpty)
                               Padding(
@@ -2198,7 +2314,10 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
                             ),
                             const SizedBox(height: 18),
                             if (shiftLoading) ...[
-                              const LinearProgressIndicator(minHeight: 3),
+                              const WorkforceRowsSkeleton(
+                                rows: 1,
+                                label: 'Loading shift',
+                              ),
                               const SizedBox(height: 12),
                             ],
                             if (shiftLookupError != null) ...[
@@ -2279,7 +2398,7 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
                               const SizedBox(height: 8),
                               _manualEntryPunchTile(
                                 ctx,
-                                label: isSingleSession
+                                label: isSingleSession || isOvernight
                                     ? 'Time In'
                                     : 'AM In (time in)',
                                 value: timeIn,
@@ -2296,7 +2415,9 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
                                 const SizedBox(height: 8),
                                 _manualEntryPunchTile(
                                   ctx,
-                                  label: 'AM Out (break out)',
+                                  label: isOvernight
+                                      ? 'Break Out'
+                                      : 'AM Out (break out)',
                                   value: breakOut,
                                   icon: Icons.restaurant_outlined,
                                   onTap: () async {
@@ -2328,7 +2449,9 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
                                 const SizedBox(height: 8),
                                 _manualEntryPunchTile(
                                   ctx,
-                                  label: 'PM In (break in)',
+                                  label: isOvernight
+                                      ? 'Break In'
+                                      : 'PM In (break in)',
                                   value: breakIn,
                                   icon: Icons.nightlight_outlined,
                                   onTap: () async {
@@ -2345,7 +2468,7 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
                               ],
                               _manualEntryPunchTile(
                                 ctx,
-                                label: isSingleSession
+                                label: isSingleSession || isOvernight
                                     ? 'Time Out'
                                     : 'PM Out (time out)',
                                 value: timeOut,
@@ -2425,6 +2548,7 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
                                         attendanceDate: date,
                                         time: timeIn!,
                                         shift: shift,
+                                        mayFallOnNextDay: true,
                                       );
                                     }
                                     if (!addIsPmOnly &&
@@ -2566,10 +2690,18 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
   }
 
   Future<void> _showEditDialog(DtrProvider dtr, TimeRecord r) async {
-    final timeInLocal = r.timeIn?.toLocal();
-    final breakOutLocal = r.breakOut?.toLocal();
-    final breakInLocal = r.breakIn?.toLocal();
-    final timeOutLocal = r.timeOut?.toLocal();
+    final timeInLocal = r.timeIn == null
+        ? null
+        : toOfficialPhilippineTime(r.timeIn!);
+    final breakOutLocal = r.breakOut == null
+        ? null
+        : toOfficialPhilippineTime(r.breakOut!);
+    final breakInLocal = r.breakIn == null
+        ? null
+        : toOfficialPhilippineTime(r.breakIn!);
+    final timeOutLocal = r.timeOut == null
+        ? null
+        : toOfficialPhilippineTime(r.timeOut!);
     TimeOfDay? timeIn = timeInLocal != null
         ? TimeOfDay(hour: timeInLocal.hour, minute: timeInLocal.minute)
         : null;
@@ -2617,8 +2749,15 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
       builder: (ctx) {
         return StatefulBuilder(
           builder: (ctx, setState) {
-            int? minutes(TimeOfDay? t) =>
-                t == null ? null : (t.hour * 60) + t.minute;
+            int? minutes(TimeOfDay? t) {
+              if (t == null) return null;
+              final value = t.hour * 60 + t.minute;
+              return isOvernight &&
+                      value <=
+                          editShift.endMinutes! + editShift.captureWindowMinutes
+                  ? value + 1440
+                  : value;
+            }
 
             Future<void> pickTime(
               TimeOfDay? current,
@@ -3007,7 +3146,7 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
                             const SizedBox(height: 8),
                             _manualEntryPunchTile(
                               ctx,
-                              label: isSingleSession
+                              label: isSingleSession || isOvernight
                                   ? 'Time In'
                                   : 'AM In (time in)',
                               value: timeIn,
@@ -3020,7 +3159,9 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
                               const SizedBox(height: 8),
                               _manualEntryPunchTile(
                                 ctx,
-                                label: 'AM Out (break out)',
+                                label: isOvernight
+                                    ? 'Break Out'
+                                    : 'AM Out (break out)',
                                 value: breakOut,
                                 icon: Icons.restaurant_outlined,
                                 onTap: () => pickTime(
@@ -3049,7 +3190,9 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
                               const SizedBox(height: 8),
                               _manualEntryPunchTile(
                                 ctx,
-                                label: 'PM In (break in)',
+                                label: isOvernight
+                                    ? 'Break In'
+                                    : 'PM In (break in)',
                                 value: breakIn,
                                 icon: Icons.nightlight_outlined,
                                 onTap: () => pickTime(
@@ -3062,7 +3205,7 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
                             ],
                             _manualEntryPunchTile(
                               ctx,
-                              label: isSingleSession
+                              label: isSingleSession || isOvernight
                                   ? 'Time Out'
                                   : 'PM Out (time out)',
                               value: timeOut,
@@ -3123,6 +3266,7 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
                                       attendanceDate: date,
                                       time: timeIn!,
                                       shift: editShift,
+                                      mayFallOnNextDay: true,
                                     );
                                   }
                                   if (!isPmOnly &&
@@ -3535,10 +3679,18 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
                     ],
                   ),
                 ),
-                if (loading) const LinearProgressIndicator(minHeight: 2),
+                if (loading && items.isNotEmpty)
+                  const WorkforceRowsSkeleton(
+                    rows: 1,
+                    label: 'Refreshing records',
+                  ),
                 Expanded(
                   child: loading && items.isEmpty
-                      ? const Center(child: CircularProgressIndicator())
+                      ? const SingleChildScrollView(
+                          child: WorkforceRowsSkeleton(
+                            label: 'Loading records',
+                          ),
+                        )
                       : error != null
                       ? _deletedEntriesError(
                           panelContext,

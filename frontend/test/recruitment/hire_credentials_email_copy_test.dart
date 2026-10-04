@@ -12,8 +12,8 @@ void main() {
     expect(body, contains('Hello Jane Doe,'));
     expect(body, contains('Username: jane@example.com'));
     expect(body, contains('Password: 8FDFxfs%t5Sk'));
-    expect(body, contains('Please wait for the HR Head or Admin before you sign in'));
-    expect(body, contains('Do not try to log in on your own'));
+    expect(body, contains('Sign in only after HR tells you to'));
+    expect(body, contains('Keep this password private'));
     expect(body, isNot(contains('Please sign in to the HRMS')));
   });
 }

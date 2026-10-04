@@ -37,6 +37,7 @@ class _RspFinalRequirementsSectionState
   bool _loading = true;
   final Set<String> _savingIds = {};
   final Set<String> _expandedIds = {};
+  final Set<String> _collapsedIds = {};
   final _searchController = TextEditingController();
   String _searchQuery = '';
   String? _selectedPositionFilter;
@@ -69,6 +70,7 @@ class _RspFinalRequirementsSectionState
     final trimmed = id?.trim();
     if (trimmed == null || trimmed.isEmpty) return;
     _expandedIds.add(trimmed);
+    _collapsedIds.remove(trimmed);
     _statusFilter = _FinalReqStatusFilter.all;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
@@ -290,11 +292,18 @@ class _RspFinalRequirementsSectionState
     });
   }
 
+  bool _isCardExpanded(String id, {required bool needsAttention}) {
+    if (_collapsedIds.contains(id)) return false;
+    return needsAttention || _expandedIds.contains(id);
+  }
+
   void _toggleExpanded(RecruitmentApplication app, {required bool needsAttention}) {
     setState(() {
-      if (_expandedIds.contains(app.id)) {
-        if (!needsAttention) _expandedIds.remove(app.id);
+      if (_isCardExpanded(app.id, needsAttention: needsAttention)) {
+        _collapsedIds.add(app.id);
+        _expandedIds.remove(app.id);
       } else {
+        _collapsedIds.remove(app.id);
         _expandedIds.add(app.id);
       }
     });
@@ -351,8 +360,6 @@ class _RspFinalRequirementsSectionState
             separatorBuilder: (_, __) => const SizedBox(height: 10),
             itemBuilder: (context, i) => _buildApplicantCard(filtered[i]),
           ),
-          const SizedBox(height: 14),
-          _sortHintBanner(),
         ],
       ],
     );
@@ -771,40 +778,6 @@ class _RspFinalRequirementsSectionState
     );
   }
 
-  Widget _sortHintBanner() {
-    return Center(
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-        decoration: BoxDecoration(
-          color: RspFinalReqUi.accentOf(context).withValues(alpha: 0.08),
-          borderRadius: BorderRadius.circular(999),
-          border: Border.all(
-            color: RspFinalReqUi.accentOf(context).withValues(alpha: 0.18),
-          ),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              Icons.swap_vert_rounded,
-              size: 16,
-              color: RspFinalReqUi.accentOf(context),
-            ),
-            const SizedBox(width: 8),
-            Text(
-              'Showing newest applicants first — Latest applications appear at the top of the list.',
-              style: TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.w600,
-                color: RspFinalReqUi.secondaryTextOf(context),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
   Widget _emptyState(
     BuildContext context, {
     required IconData icon,
@@ -856,7 +829,7 @@ class _RspFinalRequirementsSectionState
             !approved ||
             app.hasRejectedFinalRequirement ||
             saving);
-    final expanded = needsAttention || _expandedIds.contains(app.id);
+    final expanded = _isCardExpanded(app.id, needsAttention: needsAttention);
     final isNew = RspFinalReqUi.isNewApplication(app.createdAt);
     final ac = RspFinalReqUi.accentOf(context);
 
@@ -881,7 +854,7 @@ class _RspFinalRequirementsSectionState
                   statusColor: statusColor,
                   expanded: expanded,
                   isNew: isNew,
-                  canCollapse: !needsAttention,
+                  canCollapse: true,
                 ),
               ),
             ),

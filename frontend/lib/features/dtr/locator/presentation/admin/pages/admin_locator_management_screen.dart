@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
+import 'package:hrms_plaridel/shared/widgets/workforce_loading_skeleton.dart';
 import 'package:provider/provider.dart';
 
 import 'package:hrms_plaridel/core/api/client.dart';
@@ -15,6 +16,9 @@ import 'package:hrms_plaridel/core/services/app_realtime_provider.dart';
 import 'package:hrms_plaridel/features/dtr/locator/presentation/admin/pages/locator_type_management_screen.dart';
 import 'package:hrms_plaridel/features/dtr/locator/presentation/admin/widgets/admin_locator_correction_dialog.dart';
 import 'package:hrms_plaridel/features/dtr/locator/utils/locator_slip_print.dart';
+import 'package:hrms_plaridel/features/dtr/locator/utils/locator_form_signatories.dart';
+import 'package:hrms_plaridel/features/dtr/locator/utils/locator_signature_prompt.dart';
+import 'package:hrms_plaridel/features/dtr/locator/presentation/shared/widgets/locator_signature_section.dart';
 import 'package:hrms_plaridel/features/dtr/locator/utils/open_locator_attachment_io.dart'
     if (dart.library.html) 'package:hrms_plaridel/features/dtr/locator/utils/open_locator_attachment_web.dart'
     as locator_attachment;
@@ -30,7 +34,7 @@ typedef _LocatorHistoryStep = ({
 
 enum _LocatorAdminQueue {
   all('All'),
-  pendingDeptHead('Pending Dept Head'),
+  pendingDeptHead('Pending Department Review'),
   pendingHrAdmin('Pending HR Admin'),
   returned('Returned for Correction'),
   approved('Approved'),
@@ -67,7 +71,7 @@ class _AdminLocatorManagementScreenState
   DateTime? _toDate;
   bool _loading = false;
   String? _error;
-  List<LocatorRequestType> _locatorTypes = LocatorRequestType.values;
+  List<LocatorRequestType> _locatorTypes = [];
   List<LocatorAdminFilterOption> _departmentOptions = [];
   List<LocatorAdminFilterOption> _employeeOptions = [];
   List<_LocatorAdminRecord> _items = [];
@@ -78,6 +82,7 @@ class _AdminLocatorManagementScreenState
   int _loadVersion = 0;
   StreamSubscription<AppRealtimeEvent>? _locatorRealtimeSub;
   DateTime? _officialHrmsDate;
+  bool _canFinalReview = false;
 
   bool _isDark(BuildContext context) => AppTheme.dashIsDark(context);
 
@@ -92,7 +97,21 @@ class _AdminLocatorManagementScreenState
     super.initState();
     _loadLocatorTypes();
     _loadOfficialDate();
+    _loadFinalReviewerAccess();
     _load();
+  }
+
+  Future<void> _loadFinalReviewerAccess() async {
+    try {
+      final response = await ApiClient.instance.get<Map<String, dynamic>>(
+        '/api/locator-slips/final-reviewer/me',
+      );
+      if (mounted) {
+        setState(() => _canFinalReview = response.data?['can_review'] == true);
+      }
+    } catch (_) {
+      if (mounted) setState(() => _canFinalReview = false);
+    }
   }
 
   @override
@@ -101,6 +120,11 @@ class _AdminLocatorManagementScreenState
     _locatorRealtimeSub ??= context.read<AppRealtimeProvider>().events.listen((
       event,
     ) {
+      if (event.name == 'locator_type_updated') {
+        LocatorSlipDataCache.instance.invalidateTypes();
+        unawaited(_loadLocatorTypes(forceRefresh: true));
+        return;
+      }
       if (event.name != 'locator_updated') return;
       unawaited(_load(forceRefresh: true));
     });
@@ -240,7 +264,12 @@ class _AdminLocatorManagementScreenState
                     child: Center(
                       child: Semantics(
                         label: 'Loading locator requests',
-                        child: const CircularProgressIndicator(),
+                        child: const SingleChildScrollView(
+                          child: WorkforceRowsSkeleton(
+                            columns: [2, 2, 1],
+                            rows: 3,
+                          ),
+                        ),
                       ),
                     ),
                   ),
@@ -276,7 +305,12 @@ class _AdminLocatorManagementScreenState
                                 child: Center(
                                   child: Semantics(
                                     label: 'Refreshing locator requests',
-                                    child: const CircularProgressIndicator(),
+                                    child: const SingleChildScrollView(
+                                      child: WorkforceRowsSkeleton(
+                                        columns: [2, 2, 1],
+                                        rows: 3,
+                                      ),
+                                    ),
                                   ),
                                 ),
                               ),
@@ -793,7 +827,7 @@ class _AdminLocatorManagementScreenState
   }
 
   void _showDetailsDialog(_LocatorAdminRecord item) {
-    final canReview = item.canHrReview;
+    final canReview = _canFinalReview && item.canHrReview;
     final slipDate = item.slipDateValue;
     final returnBlockedByPastDate =
         canReview &&
@@ -1096,6 +1130,7 @@ class _AdminLocatorManagementScreenState
                           ],
                         ),
                       ),
+                      LocatorSignatureSection(requestId: item.id),
                     ],
                   ),
                 ),
@@ -1179,6 +1214,9 @@ class _AdminLocatorManagementScreenState
                             onPressed: () async {
                               try {
                                 final bytes = await LocatorSlipPrint.buildPdf(
+                                  signatories: await loadLocatorFormSignatories(
+                                    item.id,
+                                  ),
                                   id: item.id,
                                   employeeName: item.employeeName,
                                   dateText: item.slipDateLabel,
@@ -1200,10 +1238,9 @@ class _AdminLocatorManagementScreenState
                                 );
                               } catch (e) {
                                 if (!dialogContext.mounted) return;
-                                ScaffoldMessenger.of(
+                                await LocatorSlipPrint.showFailure(
                                   dialogContext,
-                                ).showSnackBar(
-                                  SnackBar(content: Text('Preview failed: $e')),
+                                  'Preview',
                                 );
                               }
                             },
@@ -1272,7 +1309,7 @@ class _AdminLocatorManagementScreenState
             .toList();
         if (item.status == 'pending_department_head') {
           history.add((
-            title: 'Pending Department Head',
+            title: 'Pending Department Review',
             actor: item.deptHeadReviewerName,
             date: null,
             remarks: null,
@@ -1581,7 +1618,7 @@ class _AdminLocatorManagementScreenState
       ),
       if (item.status == 'pending_department_head')
         (
-          title: 'Pending Department Head',
+          title: 'Pending Department Review',
           actor: item.deptHeadReviewerName,
           date: null,
           remarks: null,
@@ -1762,10 +1799,21 @@ class _AdminLocatorManagementScreenState
         includeInactive: true,
         forceRefresh: forceRefresh,
       );
-      if (!mounted || items.isEmpty) return;
-      setState(() => _locatorTypes = items);
+      if (!mounted) return;
+      final selectedType = _requestTypeFilter;
+      final clearMissingFilter =
+          selectedType != null && !items.contains(selectedType);
+      setState(() {
+        _locatorTypes = items;
+        if (clearMissingFilter) {
+          _requestTypeFilter = null;
+          _selectedItemId = null;
+          _page = 0;
+        }
+      });
+      if (clearMissingFilter) unawaited(_load(forceRefresh: true));
     } catch (_) {
-      // Keep built-in fallback types when configuration cannot be loaded.
+      // Keep the last persisted catalog rather than inventing local types.
     }
   }
 
@@ -1858,9 +1906,15 @@ class _AdminLocatorManagementScreenState
 
   Future<void> _approve(_LocatorAdminRecord item) async {
     try {
+      final signature = await promptLocatorSignature(
+        context,
+        requestId: item.id,
+        slot: 'hr_approver',
+      );
+      if (signature == null || !mounted) return;
       await ApiClient.instance.patch<Map<String, dynamic>>(
         '/api/locator-slips/${item.id}/approve',
-        data: const {},
+        data: signature.isEmpty ? const {} : {'signature': signature},
       );
       LocatorSlipDataCache.instance.invalidateRequests();
       await _load(forceRefresh: true);
@@ -2254,7 +2308,7 @@ class _LocatorAdminRecord {
   String get statusLabel {
     switch (status.toLowerCase()) {
       case 'pending_department_head':
-        return 'Pending Dept Head';
+        return 'Pending Department Review';
       case 'pending_hr':
       case 'pending':
         return 'Pending HR Admin';

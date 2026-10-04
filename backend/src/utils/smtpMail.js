@@ -35,6 +35,7 @@ async function sendSmtpMail(opts) {
     port: cfg.port,
     secure: cfg.secure,
     auth: cfg.auth,
+    ...(opts.timeoutMs ? { connectionTimeout: opts.timeoutMs, greetingTimeout: opts.timeoutMs, socketTimeout: opts.timeoutMs } : {}),
   });
   await transport.sendMail({
     from: cfg.from,
