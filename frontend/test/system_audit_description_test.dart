@@ -2,6 +2,56 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:hrms_plaridel/features/dashboard/presentation/admin/desktop/pages/system_audit_description.dart';
 
 void main() {
+  test('unknown account access details never imply access removal', () {
+    for (final details in <dynamic>[
+      null,
+      '{broken',
+      '{}',
+      'null',
+      '[]',
+      <String, dynamic>{},
+      {'allowed': null},
+      {'allowed': 'false'},
+      {'allowed': 'true'},
+      {'allowed': 0},
+      {'previous_allowed': true},
+    ]) {
+      final event = describeAuditEntry({
+        'action': 'account_creation_access_changed',
+        'details': details,
+      });
+      expect(
+        event.summary,
+        'Account creation access changed; details unavailable.',
+        reason: 'Details: $details',
+      );
+      expect(event.changes, isEmpty);
+    }
+  });
+
+  test('explicit account access booleans preserve grants and removals', () {
+    for (final allowed in [true, false]) {
+      for (final details in <dynamic>[
+        {'previous_allowed': !allowed, 'allowed': allowed},
+        '{"previous_allowed":${!allowed},"allowed":$allowed}',
+      ]) {
+        final event = describeAuditEntry({
+          'action': 'account_creation_access_changed',
+          'details': details,
+        });
+        expect(
+          event.summary,
+          allowed
+              ? 'Account creation access granted.'
+              : 'Account creation access removed.',
+        );
+        expect(event.changes, [
+          allowed ? 'Account creation: Off → On' : 'Account creation: On → Off',
+        ]);
+      }
+    }
+  });
+
   test(
     'identity labels distinguish captured, current, and unavailable identities',
     () {

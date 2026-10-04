@@ -144,7 +144,9 @@ AuditDescription describeAuditEntry(Map<String, dynamic> entry) {
     }
     summary = newValue == true
         ? 'Account creation access granted.'
-        : 'Account creation access removed.';
+        : newValue == false
+        ? 'Account creation access removed.'
+        : 'Account creation access changed; details unavailable.';
   } else {
     final entity = auditLabel(entry['entity_type']?.toString());
     summary = '${entity[0].toUpperCase()}${entity.substring(1)}';
