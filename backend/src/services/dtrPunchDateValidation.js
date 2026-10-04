@@ -62,7 +62,7 @@ function validateDtrPunchDates({
   const isOvernight =
     Number.isFinite(startMinutes) &&
     Number.isFinite(endMinutes) &&
-    endMinutes <= startMinutes;
+    endMinutes < startMinutes;
   const followingDate = isOvernight ? addIsoDays(attendanceDate, 1) : null;
 
   for (const [key, value] of Object.entries(punches || {})) {
@@ -76,7 +76,7 @@ function validateDtrPunchDates({
     if (
       isOvernight &&
       local.date === followingDate &&
-      local.minutes <= endMinutes
+      local.minutes <= endMinutes + (shiftInfo.captureWindowMinutes ?? 0)
     ) {
       continue;
     }
@@ -87,6 +87,17 @@ function validateDtrPunchDates({
       valid: false,
       error: `${label} must belong to ${attendanceDate} in ${timeZone}${overnightSuffix}.`,
     };
+  }
+
+  const ordered = ['time_in', 'break_out', 'break_in', 'time_out']
+    .map((key) => punches?.[key]).filter((value) => value != null && value !== '');
+  for (let i = 0; i < ordered.length; i++) {
+    if (new Date(ordered[i]).getTime() > Date.now()) {
+      return { valid: false, error: 'Future punches are not allowed.' };
+    }
+    if (i && new Date(ordered[i]) <= new Date(ordered[i - 1])) {
+      return { valid: false, error: 'Punches must be in chronological order.' };
+    }
   }
 
   return { valid: true, isOvernight, followingDate };

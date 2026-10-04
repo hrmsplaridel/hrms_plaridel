@@ -1,5 +1,6 @@
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
+import 'package:hrms_plaridel/shared/widgets/workforce_loading_skeleton.dart';
 import 'package:hrms_plaridel/core/api/client.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/features/dtr/management/biometric_devices/widgets/biometric_attendance_logs_panel.dart';
@@ -811,7 +812,10 @@ class _ManageBiometricDevicesState extends State<ManageBiometricDevices> {
             const Center(
               child: Padding(
                 padding: EdgeInsets.all(32),
-                child: CircularProgressIndicator(),
+                child: WorkforceRowsSkeleton(
+                  columns: [2, 2, 1],
+                  label: 'Loading biometric devices',
+                ),
               ),
             )
           else if (filtered.isEmpty)

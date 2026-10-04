@@ -9,9 +9,12 @@ function reviewError(message, statusCode) {
   return error;
 }
 
-async function resolveFinalLeaveReviewers(db, date = todayInHrmsTimezone()) {
+async function resolveFinalLeaveReviewerConfiguration(
+  db,
+  date = todayInHrmsTimezone()
+) {
   const primary = await db.query(
-    `SELECT u.id, u.full_name AS name
+    `SELECT u.id, u.full_name AS name, p.name AS position_title
      FROM positions p
      JOIN assignments a ON a.position_id = p.id
      JOIN users u ON u.id = a.employee_id
@@ -39,12 +42,27 @@ async function resolveFinalLeaveReviewers(db, date = todayInHrmsTimezone()) {
     [date]
   );
   const seen = new Set();
-  return [...primary.rows, ...backups.rows].filter((row) => {
+  const primaryReviewer = primary.rows[0] || null;
+  const backupReviewers = backups.rows.filter((row) => {
     const id = String(row.id);
+    if (primaryReviewer && id === String(primaryReviewer.id)) return false;
     if (seen.has(id)) return false;
     seen.add(id);
     return true;
   });
+  return {
+    primary: primaryReviewer,
+    backups: backupReviewers,
+    reviewers: [
+      ...(primaryReviewer ? [primaryReviewer] : []),
+      ...backupReviewers,
+    ],
+  };
+}
+
+async function resolveFinalLeaveReviewers(db, date = todayInHrmsTimezone()) {
+  const config = await resolveFinalLeaveReviewerConfiguration(db, date);
+  return config.reviewers;
 }
 
 async function assertFinalLeaveReviewer(db, applicantId, actorId, requestType = 'leave') {
@@ -67,4 +85,9 @@ async function assertLeaveSubmissionReviewer(db, applicantId, requestType = 'lea
   }
 }
 
-module.exports = { assertFinalLeaveReviewer, assertLeaveSubmissionReviewer, resolveFinalLeaveReviewers };
+module.exports = {
+  assertFinalLeaveReviewer,
+  assertLeaveSubmissionReviewer,
+  resolveFinalLeaveReviewerConfiguration,
+  resolveFinalLeaveReviewers,
+};

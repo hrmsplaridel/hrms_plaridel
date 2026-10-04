@@ -15,6 +15,7 @@ String formatOfficialPhilippineTime(
   String emptyValue = '—',
   bool lowercasePeriod = false,
   bool padHour = false,
+  DateTime? attendanceDate,
 }) {
   if (value == null) return emptyValue;
 
@@ -27,5 +28,16 @@ String formatOfficialPhilippineTime(
   final hour12 = hour > 12 ? hour - 12 : (hour == 0 ? 12 : hour);
   final hourLabel = padHour ? hour12.toString().padLeft(2, '0') : '$hour12';
 
-  return '$hourLabel:${minute.toString().padLeft(2, '0')}${lowercasePeriod ? '' : ' '}$period';
+  var suffix = '';
+  if (attendanceDate != null) {
+    final day = DateTime.utc(official.year, official.month, official.day);
+    final attendance = DateTime.utc(
+      attendanceDate.year,
+      attendanceDate.month,
+      attendanceDate.day,
+    );
+    final offset = day.difference(attendance).inDays;
+    if (offset > 0) suffix = ' (+$offset day)';
+  }
+  return '$hourLabel:${minute.toString().padLeft(2, '0')}${lowercasePeriod ? '' : ' '}$period$suffix';
 }

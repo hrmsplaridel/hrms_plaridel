@@ -4,6 +4,7 @@ const path = require('path');
 const multer = require('multer');
 const { pool } = require('../config/db');
 const { authMiddleware } = require('../middleware/auth');
+const { requireDtrFeatureIfAdmin } = require('../middleware/dtrAccess');
 const { requireAdminOrHr } = require('../middleware/rbac');
 const {
   assertFinalLeaveReviewer,
@@ -16,8 +17,9 @@ const {
   isDepartmentHead,
 } = require('../services/departmentHeadService');
 const {
-  replaceRequestReviewerSnapshot,
-} = require('../services/departmentReviewerService');
+  snapshotLocatorReviewers,
+  persistLocatorSignature,
+} = require('../services/locatorSignatureService');
 const locatorNotifications = require('../services/locatorNotifications');
 const {
   recordLocatorAttachmentAccess,
@@ -327,7 +329,7 @@ const locatorAttachmentStorage = multer.diskStorage({
 
 const uploadLocatorAttachment = multer({
   storage: locatorAttachmentStorage,
-  limits: { fileSize: MAX_LOCATOR_ATTACHMENT_SIZE },
+  limits: { fileSize: MAX_LOCATOR_ATTACHMENT_SIZE, fieldSize: 3 * 1024 * 1024 },
   fileFilter: (_req, file, cb) => {
     const name = file.originalname || '';
     if (!ALLOWED_LOCATOR_ATTACHMENT_EXT.test(name)) {
@@ -795,7 +797,7 @@ const locatorSubmissionService = createLocatorSubmissionService({
   notifyAfterSubmit: locatorNotifications.notifyAfterSubmit,
   broadcastSubmitted: (row) => broadcastLocatorUpdated('submitted', row),
   recordHistory: recordLocatorWorkflowEvent,
-  snapshotReviewers: replaceRequestReviewerSnapshot,
+  snapshotReviewers: snapshotLocatorReviewers,
   assertSubmissionReviewer: (db, applicantId) => assertLeaveSubmissionReviewer(db, applicantId, 'locator'),
 });
 
@@ -918,7 +920,7 @@ router.get('/types', protect, async (req, res) => {
 });
 
 // POST /api/locator-slips/types — admin/HR creates a configurable locator type.
-router.post('/types', protect, requireAdminOrHr, async (req, res) => {
+router.post('/types', protect, requireAdminOrHr, requireDtrFeatureIfAdmin('locator_allowed'), async (req, res) => {
   try {
     const payload = locatorTypePayloadFromBody(req.body || {});
     const inserted = await pool.query(
@@ -955,7 +957,7 @@ router.post('/types', protect, requireAdminOrHr, async (req, res) => {
 });
 
 // PUT /api/locator-slips/types/:id — admin/HR updates labels and rules.
-router.put('/types/:id', protect, requireAdminOrHr, async (req, res) => {
+router.put('/types/:id', protect, requireAdminOrHr, requireDtrFeatureIfAdmin('locator_allowed'), async (req, res) => {
   try {
     const existingQ = await pool.query(
       'SELECT * FROM locator_request_types WHERE id = $1::uuid',
@@ -1002,7 +1004,7 @@ router.put('/types/:id', protect, requireAdminOrHr, async (req, res) => {
 });
 
 // DELETE /api/locator-slips/types/:id — delete unused custom type, otherwise deactivate it.
-router.delete('/types/:id', protect, requireAdminOrHr, async (req, res) => {
+router.delete('/types/:id', protect, requireAdminOrHr, requireDtrFeatureIfAdmin('locator_allowed'), async (req, res) => {
   try {
     const existingQ = await pool.query(
       'SELECT * FROM locator_request_types WHERE id = $1::uuid',
@@ -1130,6 +1132,7 @@ router.post('/submit', protect, async (req, res) => {
 
   try {
     const mapped = await locatorSubmissionService.submit({
+      signature: req.body?.signature,
       employeeUserId: userId,
       slipDate,
       office,
@@ -1176,6 +1179,7 @@ router.post('/submit-with-attachment', protect, uploadLocatorAttachmentMw, async
 
   try {
     const mapped = await locatorSubmissionService.submit({
+      signature: req.body?.signature,
       employeeUserId: userId,
       slipDate,
       office,
@@ -1696,7 +1700,7 @@ router.patch('/:id/resubmit', protect, async (req, res) => {
         departmentHeadUserId,
       ]
     );
-    await replaceRequestReviewerSnapshot(client, {
+    await snapshotLocatorReviewers(client, {
       requestType: 'locator',
       requestId: id,
       departmentId: reviewSnapshot?.departmentId || null,
@@ -1711,6 +1715,7 @@ router.patch('/:id/resubmit', protect, async (req, res) => {
       actorRole: 'employee',
       metadata: { changes },
     });
+    await persistLocatorSignature(client, req.user, id, 'applicant', req.body?.signature, { requireInput: true });
     await client.query('COMMIT');
 
     notifySafe(() =>
@@ -2141,6 +2146,7 @@ router.patch('/:id/department-head-approve', protect, async (req, res) => {
       await client.query('ROLLBACK');
       return res.status(409).json(locatorConflictPayload(conflictCheck));
     }
+    await persistLocatorSignature(client, req.user, id, 'department_head', req.body?.signature);
     await client.query(
       `UPDATE locator_slips
        SET status = 'pending_hr',
@@ -2187,6 +2193,7 @@ router.patch('/:id/department-head-approve', protect, async (req, res) => {
       await client.query('ROLLBACK');
     } catch (_) {}
     console.error('[locator PATCH /:id/department-head-approve]', err);
+    if (err.statusCode) return res.status(err.statusCode).json({ error: err.message });
     res.status(500).json({ error: 'Failed to approve locator slip (department head)' });
   } finally {
     client.release();
@@ -2409,7 +2416,7 @@ router.patch('/:id/department-head-return', protect, async (req, res) => {
 });
 
 // GET /api/locator-slips/admin
-router.get('/admin', protect, requireAdminOrHr, async (req, res) => {
+router.get('/admin', protect, requireAdminOrHr, requireDtrFeatureIfAdmin('locator_allowed'), async (req, res) => {
   try {
     const parsedFilters = parseLocatorAdminFilters(req.query);
     if (!parsedFilters.ok) {
@@ -2555,7 +2562,7 @@ router.get('/admin', protect, requireAdminOrHr, async (req, res) => {
 });
 
 // PATCH /api/locator-slips/:id/return-for-correction
-router.patch('/:id/return-for-correction', protect, requireAdminOrHr, async (req, res) => {
+router.patch('/:id/return-for-correction', protect, requireAdminOrHr, requireDtrFeatureIfAdmin('locator_allowed'), async (req, res) => {
   const reviewerId = req.user?.id;
   if (!reviewerId) return res.status(401).json({ error: 'Not authenticated' });
   const { id } = req.params;
@@ -2649,7 +2656,7 @@ router.patch('/:id/return-for-correction', protect, requireAdminOrHr, async (req
 });
 
 // PATCH /api/locator-slips/:id/approve
-router.patch('/:id/approve', protect, requireAdminOrHr, async (req, res) => {
+router.patch('/:id/approve', protect, requireAdminOrHr, requireDtrFeatureIfAdmin('locator_allowed'), async (req, res) => {
   const reviewerId = req.user?.id;
   if (!reviewerId) return res.status(401).json({ error: 'Not authenticated' });
   const { id } = req.params;
@@ -2702,6 +2709,7 @@ router.patch('/:id/approve', protect, requireAdminOrHr, async (req, res) => {
       await client.query('ROLLBACK');
       return res.status(409).json(locatorConflictPayload(conflictCheck));
     }
+    await persistLocatorSignature(client, req.user, id, 'hr_approver', req.body?.signature);
     await client.query(
       `UPDATE locator_slips
        SET status = 'approved',
@@ -2778,7 +2786,7 @@ router.patch('/:id/approve', protect, requireAdminOrHr, async (req, res) => {
 // PATCH /api/locator-slips/:id/revoke
 // HR/Admin may undo an accidental final approval within three days. The
 // revoked status immediately removes locator coverage without deleting punches.
-router.patch('/:id/revoke', protect, requireAdminOrHr, async (req, res) => {
+router.patch('/:id/revoke', protect, requireAdminOrHr, requireDtrFeatureIfAdmin('locator_allowed'), async (req, res) => {
   const reviewerId = req.user?.id;
   if (!reviewerId) return res.status(401).json({ error: 'Not authenticated' });
   const { id } = req.params;
@@ -2894,7 +2902,7 @@ router.patch('/:id/revoke', protect, requireAdminOrHr, async (req, res) => {
 });
 
 // PATCH /api/locator-slips/:id/reject
-router.patch('/:id/reject', protect, requireAdminOrHr, async (req, res) => {
+router.patch('/:id/reject', protect, requireAdminOrHr, requireDtrFeatureIfAdmin('locator_allowed'), async (req, res) => {
   const reviewerId = req.user?.id;
   if (!reviewerId) return res.status(401).json({ error: 'Not authenticated' });
   const { id } = req.params;

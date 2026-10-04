@@ -1726,8 +1726,7 @@ class _LeaveRequestPdfFixedEngine {
         ? null
         : pw.MemoryImage(departmentHeadSignatureBytes);
     final hrApproverSignatureImage =
-        hrApproverSignatureBytes == null ||
-            hrApproverSignatureBytes.isEmpty
+        hrApproverSignatureBytes == null || hrApproverSignatureBytes.isEmpty
         ? null
         : pw.MemoryImage(hrApproverSignatureBytes);
     final hasDepartmentHeadRecommendation =
@@ -2324,10 +2323,14 @@ class _LeaveRequestPdfFixedEngine {
                                           LeaveCommutationOption.requested,
                                     ),
                                     if (applicantSignatureImage != null)
-                                      pw.SizedBox(
+                                      pw.Container(
                                         height: 28,
+                                        width: double.infinity,
+                                        alignment: pw.Alignment.center,
                                         child: pw.Image(
                                           applicantSignatureImage,
+                                          width: 140,
+                                          height: 28,
                                           fit: pw.BoxFit.contain,
                                         ),
                                       )
@@ -2719,10 +2722,14 @@ class _LeaveRequestPdfFixedEngine {
                                       ),
                                     ),
                                     if (departmentHeadSignatureImage != null)
-                                      pw.SizedBox(
+                                      pw.Container(
                                         height: 30,
+                                        width: double.infinity,
+                                        alignment: pw.Alignment.center,
                                         child: pw.Image(
                                           departmentHeadSignatureImage,
+                                          width: 140,
+                                          height: 30,
                                           fit: pw.BoxFit.contain,
                                         ),
                                       )
@@ -2879,10 +2886,14 @@ class _LeaveRequestPdfFixedEngine {
                               child: pw.Column(
                                 children: [
                                   if (hrApproverSignatureImage != null)
-                                    pw.SizedBox(
+                                    pw.Container(
                                       height: 30,
+                                      width: double.infinity,
+                                      alignment: pw.Alignment.center,
                                       child: pw.Image(
                                         hrApproverSignatureImage,
+                                        width: 140,
+                                        height: 30,
                                         fit: pw.BoxFit.contain,
                                       ),
                                     )

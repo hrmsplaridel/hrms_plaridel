@@ -2,6 +2,8 @@ const { writeGovernanceAudit } = require('./docutrackerGovernanceAudit');
 
 const ROLE_KEYS = Object.freeze({
   LEAVE_CREDIT_CERTIFIER: 'leave_credit_certifier',
+  DTR_OFFICE_HOURS_VERIFIER: 'dtr_office_hours_verifier',
+  DTR_HR_OFFICER: 'dtr_hr_officer',
 });
 const VALID_ROLE_KEYS = new Set(Object.values(ROLE_KEYS));
 const UUID_RE =
@@ -122,6 +124,29 @@ async function listOfficialSignatories(db, { effectiveDate = null } = {}) {
     params
   );
   return result.rows.map((row) => ({ ...mapRow(row), is_effective: row.is_effective === true }));
+}
+
+async function resolveDtrReportSignatories(db, effectiveDate) {
+  const date = normalizeDate(effectiveDate, 'Effective date');
+  const roles = [ROLE_KEYS.DTR_OFFICE_HOURS_VERIFIER, ROLE_KEYS.DTR_HR_OFFICER];
+  const result = await db.query(
+    `SELECT role_key, employee_name_snapshot AS name,
+            position_title_snapshot AS position_title,
+            (effective_from <= $2::date AND
+             (effective_to IS NULL OR effective_to >= $2::date)) AS is_effective
+       FROM docutracker_official_signatories
+      WHERE role_key = ANY($1::text[])
+      ORDER BY effective_from DESC, created_at DESC`,
+    [roles, date]
+  );
+  return Object.fromEntries(roles.map((role) => {
+    const periods = result.rows.filter((row) => row.role_key === role);
+    const current = periods.find((row) => row.is_effective === true);
+    return [role, {
+      configured: periods.length > 0,
+      current: current ? { name: current.name, position_title: current.position_title } : null,
+    }];
+  }));
 }
 
 async function configureOfficialSignatory(pool, {
@@ -280,5 +305,6 @@ module.exports = {
   configureOfficialSignatory,
   listOfficialSignatories,
   resolveOfficialSignatory,
+  resolveDtrReportSignatories,
   resolveActiveMayor,
 };

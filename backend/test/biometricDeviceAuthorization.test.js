@@ -25,7 +25,11 @@ test('biometric device management list requires Admin authorization', () => {
 
     assert.equal(handlers[0], authMiddleware);
     assert.equal(handlers[1], requireAdmin);
-    assert.equal(handlers.length, 3);
+    assert.equal(
+      handlers[2],
+      require('../src/middleware/dtrAccess').requireDtrManageIfAdmin
+    );
+    assert.equal(handlers.length, 4);
   } finally {
     clearModule(routePath);
     restoreRbac();

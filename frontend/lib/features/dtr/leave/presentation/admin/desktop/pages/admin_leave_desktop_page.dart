@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:hrms_plaridel/shared/widgets/workforce_loading_skeleton.dart';
 import 'package:printing/printing.dart';
 import 'package:provider/provider.dart';
 
@@ -797,7 +798,8 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
           initial: request,
           isDepartmentHead: widget.isDepartmentHead,
           currentReviewerId: context.read<AuthProvider>().user?.id,
-          canReviewPending: widget.canReviewPending &&
+          canReviewPending:
+              widget.canReviewPending &&
               (widget.isDepartmentHead || _canReviewFinal),
           onApprove: widget.isDepartmentHead ? _deptHeadApprove : _approve,
           onReturn: widget.isDepartmentHead ? _deptHeadReturn : _returnRequest,
@@ -1909,7 +1911,11 @@ class _EmployeeLeaveCardPickerDialogState
             if (_loadingEmployees)
               const Padding(
                 padding: EdgeInsets.symmetric(vertical: 12),
-                child: Center(child: CircularProgressIndicator()),
+                child: WorkforceRowsSkeleton(
+                  columns: [1, 3],
+                  rows: 3,
+                  label: 'Loading employees',
+                ),
               )
             else if (_employeesError != null)
               Text(
@@ -2130,7 +2136,11 @@ class _ForcedLeaveDeductionDialogState
                 if (_loadingEmployees)
                   const Padding(
                     padding: EdgeInsets.symmetric(vertical: 12),
-                    child: Center(child: CircularProgressIndicator()),
+                    child: WorkforceRowsSkeleton(
+                      columns: [1, 3],
+                      rows: 3,
+                      label: 'Loading employees',
+                    ),
                   )
                 else if (_employeesError != null)
                   Text(
@@ -2684,7 +2694,11 @@ class _ManualBalanceAdjustmentDialogState
         if (_loadingEmployees)
           const Padding(
             padding: EdgeInsets.symmetric(vertical: 12),
-            child: Center(child: CircularProgressIndicator()),
+            child: WorkforceRowsSkeleton(
+              columns: [1, 3],
+              rows: 3,
+              label: 'Loading employees',
+            ),
           )
         else if (_employeesError != null)
           Text(
@@ -2817,7 +2831,11 @@ class _ManualBalanceAdjustmentDialogState
                 ? const Padding(
                     key: ValueKey('balance-loading'),
                     padding: EdgeInsets.only(top: 12),
-                    child: LinearProgressIndicator(minHeight: 2),
+                    child: WorkforceRowsSkeleton(
+                      columns: [1, 1, 1],
+                      rows: 2,
+                      label: 'Loading leave balances',
+                    ),
                   )
                 : const SizedBox(key: ValueKey('balance-idle'), height: 12),
           ),

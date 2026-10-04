@@ -1,0 +1,177 @@
+import 'dart:convert';
+
+class AuditDescription {
+  const AuditDescription({
+    required this.title,
+    required this.summary,
+    required this.target,
+    required this.changes,
+  });
+
+  final String title;
+  final String summary;
+  final String? target;
+  final List<String> changes;
+}
+
+String auditLabel(String? code) {
+  if (code == null || code.trim().isEmpty) return 'Unknown';
+  const acronyms = {'dtr': 'DTR', 'hr': 'HR', 'id': 'ID', 'api': 'API'};
+  return code
+      .trim()
+      .split('_')
+      .map((part) => acronyms[part.toLowerCase()] ?? part)
+      .join(' ');
+}
+
+String _title(String? action) {
+  const titles = {
+    'audit_log_viewed': 'Audit log viewed',
+    'dtr_admin_access_changed': 'DTR access changed',
+    'account_creation_access_changed': 'Account creation access changed',
+  };
+  final label = titles[action] ?? auditLabel(action);
+  return label.isEmpty
+      ? 'Unknown action'
+      : '${label[0].toUpperCase()}${label.substring(1)}';
+}
+
+Map<String, dynamic>? _details(dynamic raw) {
+  if (raw is Map) return Map<String, dynamic>.from(raw);
+  if (raw is String) {
+    try {
+      final parsed = jsonDecode(raw);
+      if (parsed is Map) return Map<String, dynamic>.from(parsed);
+    } catch (_) {
+      /* Old rows may contain unstructured text. */
+    }
+  }
+  return null;
+}
+
+String _field(String key) {
+  const labels = {
+    'reports_allowed': 'Report access',
+    'manage_allowed': 'DTR management',
+    'corrections_allowed': 'Corrections',
+    'employees_allowed': 'Employees',
+    'leave_allowed': 'Leave',
+    'approvals_allowed': 'Approvals',
+    'locator_allowed': 'Locator slips',
+  };
+  return labels[key] ?? auditLabel(key);
+}
+
+String _value(dynamic value) {
+  if (value == true) return 'On';
+  if (value == false) return 'Off';
+  if (value == null) return 'Empty';
+  if (value is Map || value is List) return 'Changed';
+  return value.toString();
+}
+
+String auditIdentityLabel(Map<String, dynamic> entry, String kind) {
+  String? text(dynamic value) {
+    final result = value?.toString().trim();
+    return result == null || result.isEmpty ? null : result;
+  }
+
+  final name = text(entry['${kind}_name']) ?? text(entry['${kind}_email']);
+  final snapshot = entry['${kind}_snapshot'];
+  final id = snapshot is Map ? text(snapshot['id']) : null;
+  final label =
+      name ??
+      (id != null
+          ? 'Account $id'
+          : kind == 'actor'
+          ? 'Unknown actor'
+          : 'Unknown account');
+  if (entry['${kind}_identity_source'] == 'recorded') return label;
+  return name != null
+      ? '$label (current account information)'
+      : '$label (historical identity unavailable)';
+}
+
+AuditDescription describeAuditEntry(Map<String, dynamic> entry) {
+  final action = entry['action']?.toString();
+  final details = _details(entry['details']);
+  final hasAccountTarget =
+      entry['target_name'] != null ||
+      entry['target_email'] != null ||
+      entry['target_snapshot'] != null ||
+      const [
+        'user',
+        'system_account',
+        'employee_account',
+        'auth',
+      ].contains(entry['entity_type']);
+  final target = hasAccountTarget ? auditIdentityLabel(entry, 'target') : null;
+  final before = details?['before'];
+  final after = details?['after'];
+  final changes = <String>[];
+  if (before is Map && after is Map) {
+    for (final key in after.keys) {
+      if (before[key] != after[key]) {
+        changes.add(
+          '${_field(key.toString())}: ${_value(before[key])} → ${_value(after[key])}',
+        );
+      }
+    }
+  }
+
+  String summary;
+  if (action == 'audit_log_viewed') {
+    final page = details?['page'];
+    summary = page == null
+        ? 'An administrator opened the audit log.'
+        : 'Viewed audit log page $page.';
+  } else if (action == 'dtr_admin_access_changed') {
+    if (changes.isEmpty) {
+      summary = 'DTR permissions were updated.';
+    } else {
+      final first = changes.first.split(': ');
+      final granted = first.last.endsWith('→ On');
+      summary =
+          '${first.first} ${granted ? 'granted' : 'removed'}${changes.length > 1 ? ' and ${changes.length - 1} other permission${changes.length == 2 ? '' : 's'} changed' : ''}.';
+    }
+  } else if (action == 'account_created') {
+    summary = details?['role'] == 'admin'
+        ? 'Administrator account created.'
+        : details?['role'] == 'employee'
+        ? 'Employee account created.'
+        : 'Account created.';
+  } else if (action == 'password_reset_assistance_requested') {
+    summary =
+        'Password reset assistance requested through the public form. Requester identity is unverified.';
+  } else if (action == 'password_reset_assistance_sent') {
+    summary =
+        'Administrator verified the requester and sent a reset code to the registered email.';
+  } else if (action == 'password_reset_assistance_closed') {
+    summary =
+        'Assistance request closed. Its outstanding email code was invalidated.';
+  } else if (action == 'password_reset_completed') {
+    summary = 'Password reset completed. Existing sessions were invalidated.';
+  } else if (action == 'account_creation_access_changed') {
+    final oldValue = details?['previous_allowed'];
+    final newValue = details?['allowed'];
+    if (oldValue is bool && newValue is bool && oldValue != newValue) {
+      changes.add(
+        'Account creation: ${_value(oldValue)} → ${_value(newValue)}',
+      );
+    }
+    summary = newValue == true
+        ? 'Account creation access granted.'
+        : newValue == false
+        ? 'Account creation access removed.'
+        : 'Account creation access changed; details unavailable.';
+  } else {
+    final entity = auditLabel(entry['entity_type']?.toString());
+    summary = '${entity[0].toUpperCase()}${entity.substring(1)}';
+  }
+  return AuditDescription(
+    title: _title(action),
+    summary: summary,
+    target: target,
+    changes: changes,
+  );
+}

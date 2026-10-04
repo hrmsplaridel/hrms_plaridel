@@ -33,6 +33,35 @@ void main() {
     expect(result.referenceId, 'app-123');
   });
 
+  for (final role in ['admin', 'hr', 'employee']) {
+    for (final decision in ['approved', 'rejected']) {
+      test('$role opens own DTR $decision request, not the review queue', () {
+        final result = NotificationTapResult.fromNotification(
+          notification(
+            category: 'dtr',
+            type: 'dtr_correction_$decision',
+            referenceId: 'request-1',
+          ),
+          role: role,
+        );
+        expect(result.kind, NotificationTapKind.dtrCorrectionRequests);
+        expect(result.referenceId, 'request-1');
+      });
+    }
+  }
+  test('HR pending DTR notification opens the specific review', () {
+    final result = NotificationTapResult.fromNotification(
+      notification(
+        category: 'dtr',
+        type: 'dtr_correction_pending_review',
+        referenceId: 'request-2',
+      ),
+      role: 'hr',
+    );
+    expect(result.kind, NotificationTapKind.dtrCorrectionReview);
+    expect(result.referenceId, 'request-2');
+  });
+
   test('hr recruitment tap also deep-links to the application', () {
     final result = NotificationTapResult.fromNotification(
       notification(

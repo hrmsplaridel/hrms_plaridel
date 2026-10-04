@@ -20,6 +20,8 @@ enum NotificationTapKind {
 
   /// Employee: My Attendance (e.g. DTR correction approved/rejected).
   employeeMyAttendance,
+  dtrCorrectionReview,
+  dtrCorrectionRequests,
 
   /// Admin: Recruitment (RSP) applications.
   adminRecruitment,
@@ -68,6 +70,14 @@ class NotificationTapResult {
     final isPrivileged = role == 'admin' || role == 'hr';
 
     if (cat == 'dtr') {
+      if (t.startsWith('dtr_correction_')) {
+        return NotificationTapResult(
+          t == 'dtr_correction_pending_review' && isPrivileged
+              ? NotificationTapKind.dtrCorrectionReview
+              : NotificationTapKind.dtrCorrectionRequests,
+          referenceId: _trimmedOrNull(n.referenceId),
+        );
+      }
       if (!isPrivileged && (t.contains('approved') || t.contains('rejected'))) {
         return const NotificationTapResult(
           NotificationTapKind.employeeMyAttendance,
@@ -93,8 +103,7 @@ class NotificationTapResult {
         NotificationTapKind.docuTrackerDocuments,
         sourceModule: meta?['source_module']?.toString(),
         sourceTable: meta?['source_table']?.toString(),
-        sourceRecordId:
-            n.referenceId ?? meta?['source_record_id']?.toString(),
+        sourceRecordId: n.referenceId ?? meta?['source_record_id']?.toString(),
         slotKey: meta?['slot_key']?.toString(),
       );
     }

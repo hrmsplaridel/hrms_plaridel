@@ -10,6 +10,20 @@ function requireAdmin(req, res, next) {
   next();
 }
 
+function requireSuperAdmin(req, res, next) {
+  if (req.user?.role !== 'super_admin') {
+    return res.status(403).json({ error: 'Super-admin access required' });
+  }
+  next();
+}
+
+function requireAdminOrSuperAdmin(req, res, next) {
+  if (req.user?.role !== 'admin' && req.user?.role !== 'super_admin') {
+    return res.status(403).json({ error: 'Administrator access required' });
+  }
+  next();
+}
+
 /** Mayor-only module access. */
 function requireMayor(req, res, next) {
   if (req.user?.role !== 'mayor') {
@@ -47,6 +61,8 @@ function requireAdminOrHr(req, res, next) {
 
 module.exports = {
   requireAdmin,
+  requireSuperAdmin,
+  requireAdminOrSuperAdmin,
   requireMayor,
   requireAdminOrHr,
   requireAdminOrSupervisor,

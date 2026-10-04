@@ -22,6 +22,17 @@ const draft = LeaveRequest(
   status: LeaveRequestStatus.draft,
 );
 
+DateTime _futureWorkingDate() {
+  final now = DateTime.now();
+  var date = DateTime(now.year, now.month, now.day + 2);
+  // These tests exercise submission, so their single-day leave must be a weekday.
+  while (date.weekday == DateTime.saturday ||
+      date.weekday == DateTime.sunday) {
+    date = DateTime(date.year, date.month, date.day + 1);
+  }
+  return date;
+}
+
 class _Repository extends MockLeaveRepository {
   Future<LeaveRequest?> Function() read = () async => draft;
 
@@ -180,7 +191,7 @@ void main() {
   testWidgets('missing final reviewer blocks submit before signing or saving', (
     tester,
   ) async {
-    final date = DateTime.now().add(const Duration(days: 2));
+    final date = _futureWorkingDate();
     final validDraft = draft.copyWith(
       startDate: date,
       endDate: date,
@@ -244,7 +255,7 @@ void main() {
   testWidgets('cancelling applicant signature leaves the request as a draft', (
     tester,
   ) async {
-    final date = DateTime.now().add(const Duration(days: 2));
+    final date = _futureWorkingDate();
     final validDraft = draft.copyWith(
       startDate: date,
       endDate: date,

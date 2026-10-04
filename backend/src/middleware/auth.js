@@ -19,7 +19,7 @@ function createAuthMiddleware(db = pool) {
         return res.status(401).json({ error: 'Invalid token type' });
       }
       const accountResult = await db.query(
-        `SELECT id, email, role, is_active, employment_status
+        `SELECT id, email, role, is_active, employment_status, auth_version
            FROM users
           WHERE id = $1::uuid`,
         [payload.id]
@@ -27,6 +27,9 @@ function createAuthMiddleware(db = pool) {
       const account = accountResult.rows[0];
       if (!account) {
         return res.status(401).json({ error: 'Account no longer exists' });
+      }
+      if ((payload.auth_version || 0) !== (account.auth_version || 0)) {
+        return res.status(401).json({ error: 'Session expired. Sign in again.' });
       }
       if (
         account.is_active !== true ||

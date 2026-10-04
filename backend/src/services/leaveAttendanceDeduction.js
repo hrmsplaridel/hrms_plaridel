@@ -11,6 +11,7 @@
 const { loadHolidayOverlayMap } = require('./holidayOverlay');
 const {
   getExpectedWorkMinutes,
+  getExpectedAmEndMinutes,
   getExpectedPmStartMinutes,
   getShiftType,
 } = require('./shiftAttendance');
@@ -32,6 +33,10 @@ const {
   resolveReconciliationMonth,
 } = require('./dtrMonthEndReconciliation');
 const { normalizeAttendancePolicy } = require('./attendancePolicyResolver');
+const {
+  loadScheduleOverrides,
+  resolvedWorkingDay,
+} = require('./employeeScheduleOverrides');
 
 const VACATION_LEAVE = 'vacationLeave';
 const DEFAULT_TIME_ZONE = 'Asia/Manila';
@@ -159,6 +164,8 @@ function policyForDate({
 }
 
 function expectedMinutesForCoverage(assignment, coverage) {
+  const { isOvernight, expectedNightMinutes } = require('./shiftTimeline');
+  if (isOvernight(assignment)) return expectedNightMinutes(assignment, coverage);
   const full = getExpectedWorkMinutes(assignment);
   if (!coverage || coverage === 'none') return full;
   if (coverage === 'whole_day') return 0;
@@ -173,7 +180,7 @@ function expectedMinutesForCoverage(assignment, coverage) {
   if (coverage === 'pm_only') {
     if (shiftType === 'pm_only') return 0;
     if (shiftType === 'am_only' || shiftType === 'single_session') return full;
-    return Math.max(0, NOON_MINUTES - (assignment.startMinutes ?? NOON_MINUTES));
+    return Math.max(0, getExpectedAmEndMinutes(assignment) - (assignment.startMinutes ?? NOON_MINUTES));
   }
   return full;
 }
@@ -250,7 +257,8 @@ async function loadAssignments(client, employeeIds, startStr, endStr) {
             COALESCE(a.override_start_time, s.start_time)::text AS start_time,
             COALESCE(a.override_end_time, s.end_time)::text AS end_time,
             COALESCE(a.override_break_end, s.break_end)::text AS break_end,
-            s.punch_mode, s.working_days
+            s.punch_mode, s.working_days, s.break_start::text AS break_start,
+            s.capture_window_minutes
      FROM assignments a
      LEFT JOIN shifts s ON s.id = a.shift_id
      WHERE a.employee_id = ANY($1::uuid[])
@@ -274,6 +282,8 @@ async function loadAssignments(client, employeeIds, startStr, endStr) {
       endMinutes,
       breakEndMinutes: timeToMinutes(row.break_end),
       punchMode: row.punch_mode || 'auto',
+      breakStartMinutes: timeToMinutes(row.break_start),
+      captureWindowMinutes: Number(row.capture_window_minutes ?? 120),
       workingDays: Array.isArray(row.working_days)
         ? row.working_days.map((value) => parseInt(value, 10))
         : [],
@@ -354,7 +364,7 @@ async function loadDtrRows(client, employeeIds, startStr, endStr) {
   const result = await client.query(
     `SELECT employee_id, attendance_date::text AS attendance_date,
             time_in, break_out, break_in, time_out,
-            late_minutes, undertime_minutes, status, holiday_id, leave_request_id
+            late_minutes, undertime_minutes, status, holiday_id, leave_request_id, shift_snapshot
      FROM dtr_daily_summary
      WHERE employee_id = ANY($1::uuid[])
        AND attendance_date >= $2::date
@@ -547,6 +557,12 @@ async function calculateMonthlyAttendanceDeductions(
     assignmentsByEmployee,
     holidayCoverage
   );
+  const scheduleOverrides = await loadScheduleOverrides(
+    client,
+    employeeIds,
+    startStr,
+    endStr
+  );
 
   const monthDates = datesInRange(startStr, endStr);
   const summaries = [];
@@ -560,14 +576,22 @@ async function calculateMonthlyAttendanceDeductions(
     let syntheticAbsenceCount = 0;
 
     for (const dateStr of monthDates) {
-      const assignment = assignmentForDate(
+      const assignment = dtrRows.get(`${employee.userId}|${dateStr}`)?.shift_snapshot || assignmentForDate(
         assignmentsByEmployee,
         employee.userId,
         dateStr
       );
-      if (!assignment || !assignment.workingDays.includes(isoWeekday(dateStr))) {
+      if (!assignment || !resolvedWorkingDay({
+        employeeId: employee.userId,
+        dateStr,
+        workingDays: assignment.workingDays,
+        overrides: scheduleOverrides,
+      })) {
         continue;
       }
+
+      const { isOvernight, hasShiftEnded } = require('./shiftTimeline');
+      if (isOvernight(assignment) && !hasShiftEnded(assignment, dateStr)) continue;
 
       const key = `${employee.userId}|${dateStr}`;
       const holiday = holidayCoverage.get(dateStr) || null;

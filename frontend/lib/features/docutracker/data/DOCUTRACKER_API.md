@@ -238,9 +238,20 @@ committed or rolled back together.
 | GET | /api/docutracker/permission-records | Compatibility endpoint for raw permission rows |
 | POST | /api/docutracker/permissions | Compatibility endpoint for one validated permission change |
 | DELETE | /api/docutracker/permissions | Reset validated explicit rules and create audit entries |
-| GET | /api/docutracker/official-signatories | List effective-dated Leave Credit Certifiers (admin only) |
+| GET | /api/docutracker/official-signatories | List effective-dated official signatories (admin only) |
 | GET | /api/docutracker/official-signatories/automatic-mayor | Resolve the active Mayor used in leave forms (admin only) |
-| PUT | /api/docutracker/official-signatories/:roleKey | Configure a Leave Credit Certifier period (admin only) |
+| PUT | /api/docutracker/official-signatories/:roleKey | Configure an official signatory period (admin only) |
+
+Supported role keys are `leave_credit_certifier`, `dtr_office_hours_verifier`,
+and `dtr_hr_officer`. DTR's Approvals & Signatories screen uses the same registry
+and audited, effective-dated editor. DocuTracker continues to show its existing
+Leave Credit Certifier and automatic Mayor sections.
+
+`GET /api/dtr-report-signatories` requires authentication and returns the two DTR
+roles only, each with `configured` and `current` (name and position title, or null).
+It does not expose designation history or administrative write access. Printed DTR
+officials are resolved for today's official HRMS date. A role with no history may
+use the legacy position lookup; expired/future explicit designations do not.
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
@@ -259,6 +270,7 @@ and `reject`) cannot be granted through these system-access endpoints.
 |--------|----------|-------------|
 | GET | /api/docutracker/routing-configs | List workflow configs |
 | POST | /api/docutracker/routing-configs | Publish a workflow version with its step assignees and actions |
+| GET | /api/docutracker/hr-workflow-mirrors | List read-only Leave and Locator reviewer routes resolved from DTR configuration (admin only) |
 
 Each item in `steps` may include `user_ids` ordered as primary then backups and
 `allowed_actions`, containing one or more of `approve`, `forward`, `return`, or
@@ -266,6 +278,11 @@ Each item in `steps` may include `user_ids` ordered as primary then backups and
 creates the normalized step/assignee rows. Older configs
 without `allowed_actions` retain their stored assignee actions and otherwise
 use the legacy four-action default.
+
+The HR workflow mirror endpoint is display-only. Its Leave and Locator stages
+are resolved from effective department-head, department-backup, and final-HR
+reviewer assignments. They are not inserted into DocuTracker routing tables and
+cannot create DocuTracker approval tasks.
 
 ## Workflow Step Assignees
 

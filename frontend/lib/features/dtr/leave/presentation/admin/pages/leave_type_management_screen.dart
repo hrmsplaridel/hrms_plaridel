@@ -1,5 +1,6 @@
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
+import 'package:hrms_plaridel/shared/widgets/workforce_loading_skeleton.dart';
 
 import 'package:hrms_plaridel/core/api/client.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
@@ -523,7 +524,13 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
   }
 
   Widget _buildList() {
-    if (_loading) return const Center(child: CircularProgressIndicator());
+    if (_loading)
+      return const SingleChildScrollView(
+        child: WorkforceRowsSkeleton(
+          columns: [2, 1],
+          label: 'Loading leave types',
+        ),
+      );
     final items = _filteredItems;
     _clampPage(items.length);
     final pageStart = items.isEmpty ? 0 : _page * _typesPerPage;

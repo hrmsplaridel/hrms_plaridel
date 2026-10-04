@@ -15,3 +15,4 @@ export 'document_type.dart';
 export 'linked_source_document.dart';
 export 'official_signatory.dart';
 export 'workflow_step.dart';
+export 'hr_workflow_mirror.dart';

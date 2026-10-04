@@ -1,6 +1,4 @@
 import 'dart:async';
-import 'dart:convert';
-import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
 import 'package:flutter/widgets.dart';
@@ -29,12 +27,34 @@ void main() {
   testWidgets('locator type event invalidates the global type cache', (
     tester,
   ) async {
-    final adapter = _LocatorTypeAdapter();
-    ApiClient.instance.dio.httpClientAdapter = adapter;
+    var requestCount = 0;
+    ApiClient.instance.dio.interceptors.add(
+      InterceptorsWrapper(
+        onRequest: (options, handler) {
+          expect(options.method, 'GET');
+          expect(options.uri.path, '/api/locator-slips/types');
+          requestCount += 1;
+          handler.resolve(
+            Response(
+              requestOptions: options,
+              data: const [
+                {
+                  'code': 'locator',
+                  'label': 'Locator / Official Business',
+                  'is_active': true,
+                },
+              ],
+            ),
+          );
+        },
+      ),
+    );
 
-    await LocatorSlipDataCache.instance.listTypes();
-    await LocatorSlipDataCache.instance.listTypes();
-    expect(adapter.requestCount, 1);
+    await tester.runAsync(() async {
+      await LocatorSlipDataCache.instance.listTypes();
+      await LocatorSlipDataCache.instance.listTypes();
+    });
+    expect(requestCount, 1);
 
     final realtime = _FakeRealtimeProvider();
     addTearDown(realtime.dispose);
@@ -53,42 +73,11 @@ void main() {
     );
     await tester.pump();
 
-    await LocatorSlipDataCache.instance.listTypes();
-    expect(adapter.requestCount, 2);
+    await tester.runAsync(LocatorSlipDataCache.instance.listTypes);
+    expect(requestCount, 2);
 
     await tester.pumpWidget(const SizedBox());
   });
-}
-
-class _LocatorTypeAdapter implements HttpClientAdapter {
-  int requestCount = 0;
-
-  @override
-  Future<ResponseBody> fetch(
-    RequestOptions options,
-    Stream<Uint8List>? requestStream,
-    Future<void>? cancelFuture,
-  ) async {
-    expect(options.method, 'GET');
-    expect(options.uri.path, '/api/locator-slips/types');
-    requestCount += 1;
-    return ResponseBody.fromString(
-      jsonEncode(const [
-        {
-          'code': 'locator',
-          'label': 'Locator / Official Business',
-          'is_active': true,
-        },
-      ]),
-      200,
-      headers: {
-        Headers.contentTypeHeader: [Headers.jsonContentType],
-      },
-    );
-  }
-
-  @override
-  void close({bool force = false}) {}
 }
 
 class _FakeRealtimeProvider extends AppRealtimeProvider {

@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
+import 'package:hrms_plaridel/shared/widgets/workforce_loading_skeleton.dart';
 import 'package:provider/provider.dart';
 
 import 'package:hrms_plaridel/core/api/client.dart';
@@ -15,6 +16,9 @@ import 'package:hrms_plaridel/core/services/app_realtime_provider.dart';
 import 'package:hrms_plaridel/features/dtr/locator/presentation/admin/pages/locator_type_management_screen.dart';
 import 'package:hrms_plaridel/features/dtr/locator/presentation/admin/widgets/admin_locator_correction_dialog.dart';
 import 'package:hrms_plaridel/features/dtr/locator/utils/locator_slip_print.dart';
+import 'package:hrms_plaridel/features/dtr/locator/utils/locator_form_signatories.dart';
+import 'package:hrms_plaridel/features/dtr/locator/utils/locator_signature_prompt.dart';
+import 'package:hrms_plaridel/features/dtr/locator/presentation/shared/widgets/locator_signature_section.dart';
 import 'package:hrms_plaridel/features/dtr/locator/utils/open_locator_attachment_io.dart'
     if (dart.library.html) 'package:hrms_plaridel/features/dtr/locator/utils/open_locator_attachment_web.dart'
     as locator_attachment;
@@ -260,7 +264,12 @@ class _AdminLocatorManagementScreenState
                     child: Center(
                       child: Semantics(
                         label: 'Loading locator requests',
-                        child: const CircularProgressIndicator(),
+                        child: const SingleChildScrollView(
+                          child: WorkforceRowsSkeleton(
+                            columns: [2, 2, 1],
+                            rows: 3,
+                          ),
+                        ),
                       ),
                     ),
                   ),
@@ -296,7 +305,12 @@ class _AdminLocatorManagementScreenState
                                 child: Center(
                                   child: Semantics(
                                     label: 'Refreshing locator requests',
-                                    child: const CircularProgressIndicator(),
+                                    child: const SingleChildScrollView(
+                                      child: WorkforceRowsSkeleton(
+                                        columns: [2, 2, 1],
+                                        rows: 3,
+                                      ),
+                                    ),
                                   ),
                                 ),
                               ),
@@ -1116,6 +1130,7 @@ class _AdminLocatorManagementScreenState
                           ],
                         ),
                       ),
+                      LocatorSignatureSection(requestId: item.id),
                     ],
                   ),
                 ),
@@ -1199,6 +1214,9 @@ class _AdminLocatorManagementScreenState
                             onPressed: () async {
                               try {
                                 final bytes = await LocatorSlipPrint.buildPdf(
+                                  signatories: await loadLocatorFormSignatories(
+                                    item.id,
+                                  ),
                                   id: item.id,
                                   employeeName: item.employeeName,
                                   dateText: item.slipDateLabel,
@@ -1220,10 +1238,9 @@ class _AdminLocatorManagementScreenState
                                 );
                               } catch (e) {
                                 if (!dialogContext.mounted) return;
-                                ScaffoldMessenger.of(
+                                await LocatorSlipPrint.showFailure(
                                   dialogContext,
-                                ).showSnackBar(
-                                  SnackBar(content: Text('Preview failed: $e')),
+                                  'Preview',
                                 );
                               }
                             },
@@ -1889,9 +1906,15 @@ class _AdminLocatorManagementScreenState
 
   Future<void> _approve(_LocatorAdminRecord item) async {
     try {
+      final signature = await promptLocatorSignature(
+        context,
+        requestId: item.id,
+        slot: 'hr_approver',
+      );
+      if (signature == null || !mounted) return;
       await ApiClient.instance.patch<Map<String, dynamic>>(
         '/api/locator-slips/${item.id}/approve',
-        data: const {},
+        data: signature.isEmpty ? const {} : {'signature': signature},
       );
       LocatorSlipDataCache.instance.invalidateRequests();
       await _load(forceRefresh: true);

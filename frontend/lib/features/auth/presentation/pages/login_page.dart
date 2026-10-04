@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:math' as math;
 import 'dart:ui';
+import '../widgets/password_reset_assistance_dialog.dart';
 
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
@@ -10,6 +11,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:hrms_plaridel/core/api/client.dart';
 import 'package:hrms_plaridel/features/dashboard/presentation/admin/admin_dashboard.dart';
 import 'package:hrms_plaridel/features/dashboard/presentation/employee/employee_dashboard.dart';
+import 'package:hrms_plaridel/features/dashboard/presentation/super_admin/super_admin_dashboard.dart';
 import 'package:hrms_plaridel/features/mayor/presentation/pages/mayor_dashboard_page.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/main.dart' show kLoginAsKey;
@@ -297,17 +299,22 @@ class _LoginPageState extends State<LoginPage> with TickerProviderStateMixin {
         final role = auth.user?.role ?? 'employee';
         final isPrivileged = role == 'admin' || role == 'hr';
         final isMayor = role == 'mayor';
+        final isSuperAdmin = role == 'super_admin';
 
         final prefs = await SharedPreferences.getInstance();
         await prefs.setString(
           kLoginAsKey,
-          isMayor ? 'Mayor' : (isPrivileged ? 'Admin' : 'Employee'),
+          isMayor
+              ? 'Mayor'
+              : (isPrivileged || isSuperAdmin ? 'Admin' : 'Employee'),
         );
 
         if (!mounted) return;
         Navigator.of(context).pushReplacement(
           MaterialPageRoute(
-            builder: (context) => isMayor
+            builder: (context) => isSuperAdmin
+                ? const SuperAdminDashboard()
+                : isMayor
                 ? const MayorDashboardPage()
                 : (isPrivileged
                       ? const AdminDashboard()
@@ -905,7 +912,7 @@ class _LoginFormContent extends StatelessWidget {
               children: [
                 _LoginTextField(
                   controller: emailController,
-                  label: 'Email Address',
+                  label: 'Email or username',
                   mobile: true,
                   hintText: 'name@plaridel.gov.ph',
                   icon: Icons.mail_outline_rounded,
@@ -968,7 +975,7 @@ class _LoginFormContent extends StatelessWidget {
             children: [
               _LoginTextField(
                 controller: emailController,
-                label: embeddedCard ? 'Email' : 'Email Address',
+                label: 'Email or username',
                 mobile: !embeddedCard,
                 hintText: 'name@plaridel.gov.ph',
                 icon: Icons.mail_outline_rounded,
@@ -2283,6 +2290,30 @@ class _ForgotPasswordDialogState extends State<_ForgotPasswordDialog> {
   String? _errorText;
   String? _infoText;
 
+  void _enterCode() {
+    if (_emailController.text.trim().isEmpty) {
+      setState(() => _errorText = 'Enter your registered email first.');
+      return;
+    }
+    setState(() {
+      _step = _ForgotPasswordStep.resetPassword;
+      _errorText = null;
+      _infoText = null;
+    });
+  }
+
+  Future<void> _requestAssistance() async {
+    final email = await showDialog<String>(
+      context: context,
+      builder: (_) => PasswordResetAssistanceDialog(
+        initialEmail: _emailController.text.trim(),
+      ),
+    );
+    if (!mounted || email == null) return;
+    _emailController.text = email;
+    _enterCode();
+  }
+
   @override
   void initState() {
     super.initState();
@@ -2487,7 +2518,7 @@ class _ForgotPasswordDialogState extends State<_ForgotPasswordDialog> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          'Enter the SMS code and choose a new password.',
+          'Enter the reset code received by SMS or administrator-assisted email and choose a new password.',
           style: TextStyle(
             color: AppTheme.textSecondary,
             fontSize: 14,
@@ -2503,7 +2534,7 @@ class _ForgotPasswordDialogState extends State<_ForgotPasswordDialog> {
           autofillHints: const [AutofillHints.oneTimeCode],
           maxLength: 6,
           decoration: _dialogInputDecoration(
-            label: 'SMS code',
+            label: 'Reset code',
             hint: '6-digit code',
             icon: Icons.sms_outlined,
           ).copyWith(counterText: ''),
@@ -2578,10 +2609,19 @@ class _ForgotPasswordDialogState extends State<_ForgotPasswordDialog> {
           onPressed: _isLoading ? null : () => Navigator.of(context).pop(false),
           child: const Text('Cancel'),
         ),
+        TextButton(
+          onPressed: _isLoading ? null : _requestAssistance,
+          child: const Text('Request administrator assistance'),
+        ),
+        if (!isResetStep)
+          TextButton(
+            onPressed: _isLoading ? null : _enterCode,
+            child: const Text('Enter a reset code'),
+          ),
         if (isResetStep)
           TextButton(
             onPressed: _isLoading ? null : _requestCode,
-            child: const Text('Resend code'),
+            child: const Text('Send SMS code instead'),
           ),
         FilledButton(
           onPressed: _isLoading

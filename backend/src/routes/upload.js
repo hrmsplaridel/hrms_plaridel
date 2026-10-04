@@ -5,7 +5,10 @@ const fs = require('fs');
 const { v4: uuidv4 } = require('uuid');
 const { pool } = require('../config/db');
 const { authMiddleware } = require('../middleware/auth');
-const { requireAdmin, requireAdminOrSupervisor } = require('../middleware/rbac');
+const {
+  requireAdminOrSuperAdmin,
+  requireAdminOrSupervisor,
+} = require('../middleware/rbac');
 const {
   EXAM_IMAGE_SUBDIR,
   EXAM_IMAGE_MAX_BYTES,
@@ -232,7 +235,7 @@ router.post('/avatar', authMiddleware, upload.single('file'), async (req, res) =
 router.post(
   '/avatar/for/:userId',
   authMiddleware,
-  requireAdmin,
+  requireAdminOrSuperAdmin,
   upload.single('file'),
   async (req, res) => {
     let avatarUpdated = false;

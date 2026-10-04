@@ -3,6 +3,7 @@ import 'package:hrms_plaridel/features/docutracker/models/document_action.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document_permission.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document_routing_config.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document_type.dart';
+import 'package:hrms_plaridel/features/docutracker/models/hr_workflow_mirror.dart';
 import 'package:hrms_plaridel/features/docutracker/models/workflow_step.dart';
 import 'package:hrms_plaridel/features/docutracker/theme/docutracker_tokens.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_press_scale.dart';
@@ -690,6 +691,215 @@ class DocuTrackerActiveWorkflowCard extends StatelessWidget {
       child: Text(
         text,
         style: TextStyle(
+          fontSize: 11,
+          fontWeight: FontWeight.w600,
+          color: DocuTrackerTokens.textSecondary,
+        ),
+      ),
+    );
+  }
+}
+
+class DocuTrackerMirroredWorkflowCard extends StatelessWidget {
+  const DocuTrackerMirroredWorkflowCard({
+    super.key,
+    required this.workflow,
+    required this.onView,
+  });
+
+  final HrWorkflowMirror workflow;
+  final VoidCallback onView;
+
+  IconData get _icon => switch (workflow.key) {
+    'leave' => Icons.event_note_outlined,
+    'locator' => Icons.pin_drop_outlined,
+    _ => Icons.account_tree_outlined,
+  };
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final wide = constraints.maxWidth >= 760;
+        return Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(20),
+          decoration: DocuTrackerTokens.cardDecoration(context: context),
+          child: wide
+              ? Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    SizedBox(width: 240, child: _buildTitleBlock(context)),
+                    const SizedBox(width: 24),
+                    Expanded(child: _buildSteps(context)),
+                    _buildViewButton(),
+                  ],
+                )
+              : Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Expanded(child: _buildTitleBlock(context)),
+                        _buildViewButton(),
+                      ],
+                    ),
+                    const SizedBox(height: 20),
+                    _buildSteps(context),
+                  ],
+                ),
+        );
+      },
+    );
+  }
+
+  Widget _buildTitleBlock(BuildContext context) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          width: 44,
+          height: 44,
+          decoration: BoxDecoration(
+            color: DocuTrackerTokens.brandSoft,
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Icon(_icon, color: DocuTrackerTokens.brand),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                workflow.title,
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w800,
+                  color: DocuTrackerTokens.textPrimaryOf(context),
+                ),
+              ),
+              const SizedBox(height: 6),
+              Wrap(
+                spacing: 6,
+                runSpacing: 4,
+                children: [
+                  _metaPill('System-managed'),
+                  _metaPill(workflow.sourceLabel),
+                  _metaPill('${workflow.steps.length} steps'),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildSteps(BuildContext context) {
+    if (workflow.steps.isEmpty) {
+      return Text(
+        'No mirrored review stages are available.',
+        style: DocuTrackerTokens.subtitleStyle(context),
+      );
+    }
+    final steps = [...workflow.steps]
+      ..sort((a, b) => a.stepOrder.compareTo(b.stepOrder));
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        for (var index = 0; index < steps.length; index++) ...[
+          Expanded(child: _buildStep(context, steps[index], index == 0)),
+          if (index < steps.length - 1)
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.only(top: 15),
+                child: Container(
+                  height: 2,
+                  color: DocuTrackerTokens.borderSubtle,
+                ),
+              ),
+            ),
+        ],
+      ],
+    );
+  }
+
+  Widget _buildStep(
+    BuildContext context,
+    HrWorkflowMirrorStep step,
+    bool active,
+  ) {
+    return Column(
+      children: [
+        Container(
+          width: 32,
+          height: 32,
+          decoration: BoxDecoration(
+            color: active
+                ? DocuTrackerTokens.brand
+                : DocuTrackerTokens.surfaceCream,
+            shape: BoxShape.circle,
+            border: Border.all(
+              color: active
+                  ? DocuTrackerTokens.brand
+                  : DocuTrackerTokens.borderStrong,
+              width: 2,
+            ),
+          ),
+          alignment: Alignment.center,
+          child: Text(
+            '${step.stepOrder}',
+            style: TextStyle(
+              fontWeight: FontWeight.w800,
+              color: active ? Colors.white : DocuTrackerTokens.textMuted,
+            ),
+          ),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          step.label,
+          textAlign: TextAlign.center,
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.w800,
+            color: DocuTrackerTokens.textPrimaryOf(context),
+          ),
+        ),
+        const SizedBox(height: 2),
+        Text(
+          step.assigneeSummary,
+          textAlign: TextAlign.center,
+          maxLines: 3,
+          overflow: TextOverflow.ellipsis,
+          style: DocuTrackerTokens.metaStyle(context).copyWith(fontSize: 11),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildViewButton() {
+    return TextButton.icon(
+      onPressed: onView,
+      icon: const Icon(Icons.visibility_outlined, size: 18),
+      label: const Text('View details'),
+    );
+  }
+
+  Widget _metaPill(String text) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: DocuTrackerTokens.highlightPeach,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: DocuTrackerTokens.highlightPeachBorder),
+      ),
+      child: Text(
+        text,
+        style: const TextStyle(
           fontSize: 11,
           fontWeight: FontWeight.w600,
           color: DocuTrackerTokens.textSecondary,

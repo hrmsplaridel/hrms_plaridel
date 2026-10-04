@@ -1,5 +1,5 @@
 const express = require('express');
-const { publicSubmissionLimiter } = require('../middleware/rateLimiters');
+const { publicContactLimiter } = require('../middleware/rateLimiters');
 const {
   sendContactUsEmailJs,
   isEmailJsContactConfigured,
@@ -10,7 +10,7 @@ const router = express.Router();
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 /** POST /api/contact — public; sends EmailJS "Contact Us" template to HR inbox. */
-router.post('/', publicSubmissionLimiter, async (req, res) => {
+router.post('/', publicContactLimiter, async (req, res) => {
   try {
     if (!isEmailJsContactConfigured()) {
       return res.status(503).json({

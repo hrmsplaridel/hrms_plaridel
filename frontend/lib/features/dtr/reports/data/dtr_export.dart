@@ -85,7 +85,7 @@ class _ExportDailyDeduction {
   final double equivalentDay;
 }
 
-const String _meedoManagerPositionTitle = 'MEEDO A-Manager';
+const String _meedoManagerPositionTitle = 'HRAdminAide';
 const String _hrOfficerPositionTitle =
     'Human Resource Mgt. and Dev\'t. Officer';
 
@@ -161,6 +161,9 @@ class DtrAssignmentSegment {
     this.scheduledWorkHoursPerDay,
     this.punchMode,
     this.workingDays,
+    this.scheduleOverrides = const {},
+    this.overnight = false,
+    this.shiftEndMinutes,
   });
 
   final DateTime? effectiveFrom;
@@ -171,6 +174,9 @@ class DtrAssignmentSegment {
   final double? scheduledWorkHoursPerDay;
   final String? punchMode;
   final List<int>? workingDays;
+  final Map<String, bool> scheduleOverrides;
+  final bool overnight;
+  final int? shiftEndMinutes;
 }
 
 /// DTR export to PDF, Excel, and Word (HTML) — single page, matches official form.
@@ -264,32 +270,63 @@ class DtrExport {
     bool requireVerifiedSource = false,
   }) async {
     try {
+      final configuredResponse = await ApiClient.instance
+          .get<Map<String, dynamic>>('/api/dtr-report-signatories');
+      final roles = configuredResponse.data?['roles'] as Map;
+      DtrExportSignatory? configured(String role, String defaultTitle) {
+        final designation = roles[role] as Map;
+        if (designation['configured'] != true) return null;
+        final current = designation['current'] as Map?;
+        // An expired or future designation must not revive a legacy signatory.
+        return DtrExportSignatory(
+          positionTitle: current?['position_title']?.toString() ?? defaultTitle,
+          employeeName: current?['name']?.toString(),
+        );
+      }
+
+      final verifier = configured(
+        'dtr_office_hours_verifier',
+        _meedoManagerPositionTitle,
+      );
+      final officer = configured('dtr_hr_officer', _hrOfficerPositionTitle);
+      if (verifier != null && officer != null) {
+        return DtrExportSignatories(meedoManager: verifier, hrOfficer: officer);
+      }
       final res = await ApiClient.instance.get<List<dynamic>>(
         '/api/employees',
         queryParameters: {'status': 'Active', 'role': 'All'},
       );
       final rows = res.data ?? const <dynamic>[];
-      final meedoManagerName =
-          _findEmployeeNameByExactPosition(rows, _meedoManagerPositionTitle) ??
-          await _findOtherPositionEmployeeName(
-            _meedoManagerPositionTitle,
-            requireVerifiedSource: requireVerifiedSource,
-          );
-      final hrOfficerName =
-          _findEmployeeNameByExactPosition(rows, _hrOfficerPositionTitle) ??
-          await _findOtherPositionEmployeeName(
-            _hrOfficerPositionTitle,
-            requireVerifiedSource: requireVerifiedSource,
-          );
+      final meedoManagerName = verifier != null
+          ? verifier.employeeName
+          : _findEmployeeNameByExactPosition(
+                  rows,
+                  _meedoManagerPositionTitle,
+                ) ??
+                await _findOtherPositionEmployeeName(
+                  _meedoManagerPositionTitle,
+                  requireVerifiedSource: requireVerifiedSource,
+                );
+      final hrOfficerName = officer != null
+          ? officer.employeeName
+          : _findEmployeeNameByExactPosition(rows, _hrOfficerPositionTitle) ??
+                await _findOtherPositionEmployeeName(
+                  _hrOfficerPositionTitle,
+                  requireVerifiedSource: requireVerifiedSource,
+                );
       return DtrExportSignatories(
-        meedoManager: DtrExportSignatory(
-          positionTitle: _meedoManagerPositionTitle,
-          employeeName: meedoManagerName,
-        ),
-        hrOfficer: DtrExportSignatory(
-          positionTitle: _hrOfficerPositionTitle,
-          employeeName: hrOfficerName,
-        ),
+        meedoManager:
+            verifier ??
+            DtrExportSignatory(
+              positionTitle: _meedoManagerPositionTitle,
+              employeeName: meedoManagerName,
+            ),
+        hrOfficer:
+            officer ??
+            DtrExportSignatory(
+              positionTitle: _hrOfficerPositionTitle,
+              employeeName: hrOfficerName,
+            ),
       );
     } catch (_) {
       if (requireVerifiedSource) rethrow;
@@ -351,15 +388,20 @@ class DtrExport {
         .replaceAll("'", '&#39;');
   }
 
-  static String _formatTime(DateTime? dt) {
-    return formatOfficialPhilippineTime(dt, emptyValue: '-');
-  }
-
-  /// Time for print form (lowercase am/pm like reference).
-  static String _formatTimePrint(DateTime? dt) {
+  static String _formatTime(DateTime? dt, [DateTime? attendanceDate]) {
     return formatOfficialPhilippineTime(
       dt,
       emptyValue: '-',
+      attendanceDate: attendanceDate,
+    );
+  }
+
+  /// Time for print form (lowercase am/pm like reference).
+  static String _formatTimePrint(DateTime? dt, [DateTime? attendanceDate]) {
+    return formatOfficialPhilippineTime(
+      dt,
+      emptyValue: '-',
+      attendanceDate: attendanceDate,
       lowercasePeriod: true,
       padHour: true,
     );
@@ -422,6 +464,18 @@ class DtrExport {
     }
     final segment = _assignmentSegmentForDate(date, assignmentSegments);
     if (segment == null) return false;
+    if (segment.overnight && segment.shiftEndMinutes != null) {
+      final end = DateTime.utc(date.year, date.month, date.day + 1)
+          .add(Duration(minutes: segment.shiftEndMinutes!))
+          .subtract(const Duration(hours: 8));
+      if (DateTime.now().toUtc().isBefore(end)) return false;
+    }
+    final dateKey =
+        '${date.year.toString().padLeft(4, '0')}-'
+        '${date.month.toString().padLeft(2, '0')}-'
+        '${date.day.toString().padLeft(2, '0')}';
+    final override = segment.scheduleOverrides[dateKey];
+    if (override != null) return override;
     final workingDays = segment.workingDays?.toSet();
     return (workingDays == null || workingDays.isEmpty
             ? const {1, 2, 3, 4, 5}
@@ -744,7 +798,7 @@ class DtrExport {
         pw.SizedBox(height: 9),
         // Line for certifying officer (above the "Verified" text, like the handwritten signature line).
         pw.Container(width: lineWidth, height: 1, color: PdfColors.black),
-        // Extra space for handwritten signature above MEEDO A-Manager.
+        // Extra space for the handwritten first signatory signature.
         pw.SizedBox(height: 8),
         pw.Text(
           'Verified as to the prescribed office hours.',
@@ -1266,16 +1320,16 @@ class DtrExport {
         // For each slot, prefer the real punch time; if null, check whether a
         // locator slip covers that slot and show "ON FIELD" instead of blank.
         amInStr = rec.timeIn != null
-            ? _formatTimePrint(rec.timeIn)
+            ? _formatTimePrint(rec.timeIn, rec.recordDate)
             : _locatorSlotOrBlank(rec, 'AM IN');
         amOutStr = rec.breakOut != null
-            ? _formatTimePrint(rec.breakOut)
+            ? _formatTimePrint(rec.breakOut, rec.recordDate)
             : _locatorSlotOrBlank(rec, 'AM OUT');
         pmInStr = rec.breakIn != null
-            ? _formatTimePrint(rec.breakIn)
+            ? _formatTimePrint(rec.breakIn, rec.recordDate)
             : _locatorSlotOrBlank(rec, 'PM IN');
         pmOutStr = rec.timeOut != null
-            ? _formatTimePrint(rec.timeOut)
+            ? _formatTimePrint(rec.timeOut, rec.recordDate)
             : _locatorSlotOrBlank(rec, 'PM OUT');
       } else if (_isOnFieldByLocator(rec)) {
         amInStr = _locatorSlotOrBlank(rec, 'AM IN');
@@ -1709,16 +1763,16 @@ class DtrExport {
       String statusText = '';
       if (showTimes) {
         amInStr = rec.timeIn != null
-            ? _formatTime(rec.timeIn)
+            ? _formatTime(rec.timeIn, rec.recordDate)
             : _locatorSlotOrBlank(rec, 'AM IN');
         amOutStr = rec.breakOut != null
-            ? _formatTime(rec.breakOut)
+            ? _formatTime(rec.breakOut, rec.recordDate)
             : _locatorSlotOrBlank(rec, 'AM OUT');
         pmInStr = rec.breakIn != null
-            ? _formatTime(rec.breakIn)
+            ? _formatTime(rec.breakIn, rec.recordDate)
             : _locatorSlotOrBlank(rec, 'PM IN');
         pmOutStr = rec.timeOut != null
-            ? _formatTime(rec.timeOut)
+            ? _formatTime(rec.timeOut, rec.recordDate)
             : _locatorSlotOrBlank(rec, 'PM OUT');
       } else if (_isOnFieldByLocator(rec)) {
         amInStr = _locatorSlotOrBlank(rec, 'AM IN');
@@ -2052,16 +2106,16 @@ class DtrExport {
       String statusText = '';
       if (showTimes) {
         amIn = rec.timeIn != null
-            ? _formatTime(rec.timeIn)
+            ? _formatTime(rec.timeIn, rec.recordDate)
             : _locatorSlotOrBlank(rec, 'AM IN');
         amOut = rec.breakOut != null
-            ? _formatTime(rec.breakOut)
+            ? _formatTime(rec.breakOut, rec.recordDate)
             : _locatorSlotOrBlank(rec, 'AM OUT');
         pmIn = rec.breakIn != null
-            ? _formatTime(rec.breakIn)
+            ? _formatTime(rec.breakIn, rec.recordDate)
             : _locatorSlotOrBlank(rec, 'PM IN');
         pmOut = rec.timeOut != null
-            ? _formatTime(rec.timeOut)
+            ? _formatTime(rec.timeOut, rec.recordDate)
             : _locatorSlotOrBlank(rec, 'PM OUT');
       } else if (_isOnFieldByLocator(rec)) {
         amIn = _locatorSlotOrBlank(rec, 'AM IN');
@@ -2305,16 +2359,16 @@ class DtrExport {
       String statusText = '';
       if (showTimes) {
         amIn = rec.timeIn != null
-            ? _formatTime(rec.timeIn)
+            ? _formatTime(rec.timeIn, rec.recordDate)
             : _locatorSlotOrBlank(rec, 'AM IN');
         amOut = rec.breakOut != null
-            ? _formatTime(rec.breakOut)
+            ? _formatTime(rec.breakOut, rec.recordDate)
             : _locatorSlotOrBlank(rec, 'AM OUT');
         pmIn = rec.breakIn != null
-            ? _formatTime(rec.breakIn)
+            ? _formatTime(rec.breakIn, rec.recordDate)
             : _locatorSlotOrBlank(rec, 'PM IN');
         pmOut = rec.timeOut != null
-            ? _formatTime(rec.timeOut)
+            ? _formatTime(rec.timeOut, rec.recordDate)
             : _locatorSlotOrBlank(rec, 'PM OUT');
       } else if (_isOnFieldByLocator(rec)) {
         amIn = _locatorSlotOrBlank(rec, 'AM IN');

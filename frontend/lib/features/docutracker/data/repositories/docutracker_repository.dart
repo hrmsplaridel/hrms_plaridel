@@ -20,6 +20,7 @@ import 'package:hrms_plaridel/features/docutracker/models/document_status.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document_type.dart';
 import 'package:hrms_plaridel/features/docutracker/models/linked_source_document.dart';
 import 'package:hrms_plaridel/features/docutracker/models/official_signatory.dart';
+import 'package:hrms_plaridel/features/docutracker/models/hr_workflow_mirror.dart';
 import 'package:hrms_plaridel/features/docutracker/services/docutracker_document_visibility.dart';
 import 'package:hrms_plaridel/features/docutracker/services/docutracker_permission_service.dart';
 import 'package:hrms_plaridel/features/docutracker/services/docutracker_permissions_datasource.dart';
@@ -137,7 +138,9 @@ class DocuTrackerRepository implements DocuTrackerPermissionsDataSource {
       final path = module.isEmpty
           ? '$_base/sources/signature-assignments/re-resolve'
           : '$_base/sources/${Uri.encodeComponent(module)}/signature-assignments/re-resolve';
-      final response = await ApiClient.instance.post<Map<String, dynamic>>(path);
+      final response = await ApiClient.instance.post<Map<String, dynamic>>(
+        path,
+      );
       return response.data ?? const <String, dynamic>{};
     } catch (error) {
       throw Exception(_apiErrorMessage(error));
@@ -216,6 +219,25 @@ class DocuTrackerRepository implements DocuTrackerPermissionsDataSource {
           .toList();
     } catch (error) {
       _throwRequestError(error);
+    }
+  }
+
+  Future<List<HrWorkflowMirror>> listHrWorkflowMirrors() async {
+    try {
+      final response = await ApiClient.instance.get<Map<String, dynamic>>(
+        '$_base/hr-workflow-mirrors',
+      );
+      final workflows = response.data?['workflows'];
+      if (workflows is! List) return const [];
+      return workflows
+          .whereType<Map>()
+          .map(
+            (item) =>
+                HrWorkflowMirror.fromJson(Map<String, dynamic>.from(item)),
+          )
+          .toList(growable: false);
+    } catch (error) {
+      throw Exception(_apiErrorMessage(error));
     }
   }
 

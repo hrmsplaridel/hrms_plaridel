@@ -5,6 +5,7 @@ const {
   ROLE_KEYS,
   resolveActiveMayor,
   resolveOfficialSignatory,
+  resolveDtrReportSignatories,
 } = require('../src/services/officialSignatoryService');
 
 test('effective official signatory is resolved for the requested historical date', async () => {
@@ -33,6 +34,31 @@ test('effective official signatory is resolved for the requested historical date
   );
   assert.equal(result.name, 'Maria Certifier');
   assert.equal(result.position_title, 'Administrative Officer IV');
+});
+
+test('DTR signatories expose effective officials without exposing designation history', async () => {
+  const db = {
+    async query(sql, params) {
+      assert.deepEqual(params, [[ROLE_KEYS.DTR_OFFICE_HOURS_VERIFIER, ROLE_KEYS.DTR_HR_OFFICER], '2026-09-30']);
+      return { rows: [
+        { role_key: ROLE_KEYS.DTR_OFFICE_HOURS_VERIFIER, name: 'Future Verifier', position_title: 'Officer II', is_effective: false },
+        { role_key: ROLE_KEYS.DTR_OFFICE_HOURS_VERIFIER, name: 'Current Verifier', position_title: 'Officer I', is_effective: true },
+        { role_key: ROLE_KEYS.DTR_HR_OFFICER, name: 'Expired Officer', position_title: 'HR', is_effective: false },
+      ] };
+    },
+  };
+  const result = await resolveDtrReportSignatories(db, '2026-09-30');
+  assert.deepEqual(result[ROLE_KEYS.DTR_OFFICE_HOURS_VERIFIER], {
+    configured: true, current: { name: 'Current Verifier', position_title: 'Officer I' },
+  });
+  assert.deepEqual(result[ROLE_KEYS.DTR_HR_OFFICER], { configured: true, current: null });
+});
+
+test('DTR roles with no designations remain eligible for legacy resolution', async () => {
+  const result = await resolveDtrReportSignatories({ query: async () => ({ rows: [] }) }, '2026-09-30');
+  for (const role of Object.values(result)) {
+    assert.deepEqual(role, { configured: false, current: null });
+  }
 });
 
 test('latest active Mayor is resolved with the effective assignment title', async () => {

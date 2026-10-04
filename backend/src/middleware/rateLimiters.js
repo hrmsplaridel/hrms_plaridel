@@ -18,6 +18,7 @@ function createJsonLimiter({
   message,
   skipSuccessfulRequests = false,
   skip,
+  keyGenerator,
 }) {
   return rateLimit({
     windowMs,
@@ -26,6 +27,7 @@ function createJsonLimiter({
     legacyHeaders: false,
     skipSuccessfulRequests,
     skip,
+    keyGenerator,
     message: { error: message },
   });
 }
@@ -38,6 +40,29 @@ function authenticatedEmployeeKey(req) {
   const userId = String(req.user?.id || '').trim();
   if (userId) return `employee:${userId}`;
   return `ip:${ipKeyGenerator(req.ip)}`;
+}
+
+function verifiedApplicantKey(req) {
+  const applicationId = String(
+    req.params?.applicationId || req.body?.applicationId || '',
+  )
+    .trim()
+    .toLowerCase();
+  if (applicationId) return `application:${applicationId}`;
+  return `ip:${ipKeyGenerator(req.ip)}`;
+}
+
+function createPublicIpLimiter({ windowMs, limit, message }) {
+  return createJsonLimiter({ windowMs, limit, message });
+}
+
+function createApplicantWorkflowLimiter({ windowMs, limit, message }) {
+  return createJsonLimiter({
+    windowMs,
+    limit,
+    message,
+    keyGenerator: verifiedApplicantKey,
+  });
 }
 
 function assistantRequestLanguage(req) {
@@ -156,10 +181,46 @@ const authPasswordChangeLimiter = createJsonLimiter({
   message: 'Too many password change attempts. Please wait and try again.',
 });
 
-const publicSubmissionLimiter = createJsonLimiter({
+const publicApplicationCreateLimiter = createPublicIpLimiter({
   windowMs: ONE_HOUR_MS,
-  limit: parsePositiveInt(process.env.PUBLIC_SUBMISSION_RATE_LIMIT_MAX, 10),
-  message: 'Too many submissions. Please wait and try again.',
+  limit: parsePositiveInt(
+    process.env.PUBLIC_APPLICATION_CREATE_RATE_LIMIT_MAX,
+    parsePositiveInt(process.env.PUBLIC_SUBMISSION_RATE_LIMIT_MAX, 10),
+  ),
+  message: 'Too many application submissions. Please wait and try again.',
+});
+
+const publicApplicationUploadLimiter = createApplicantWorkflowLimiter({
+  windowMs: ONE_HOUR_MS,
+  limit: parsePositiveInt(
+    process.env.PUBLIC_APPLICATION_UPLOAD_RATE_LIMIT_MAX,
+    30,
+  ),
+  message: 'Too many document uploads. Please wait and try again.',
+});
+
+const publicApplicationResubmitLimiter = createApplicantWorkflowLimiter({
+  windowMs: ONE_HOUR_MS,
+  limit: parsePositiveInt(
+    process.env.PUBLIC_APPLICATION_RESUBMIT_RATE_LIMIT_MAX,
+    10,
+  ),
+  message: 'Too many document resubmission attempts. Please wait and try again.',
+});
+
+const publicApplicationExamLimiter = createApplicantWorkflowLimiter({
+  windowMs: ONE_HOUR_MS,
+  limit: parsePositiveInt(
+    process.env.PUBLIC_APPLICATION_EXAM_RATE_LIMIT_MAX,
+    10,
+  ),
+  message: 'Too many exam submissions. Please wait and try again.',
+});
+
+const publicContactLimiter = createPublicIpLimiter({
+  windowMs: ONE_HOUR_MS,
+  limit: parsePositiveInt(process.env.PUBLIC_CONTACT_RATE_LIMIT_MAX, 5),
+  message: 'Too many contact messages. Please wait and try again.',
 });
 
 const publicLookupLimiter = createJsonLimiter({
@@ -206,6 +267,8 @@ const dtrAssistantExportLimiter = createEmployeeAssistantLimiter({
 
 module.exports = {
   createEmployeeAssistantLimiter,
+  createPublicIpLimiter,
+  createApplicantWorkflowLimiter,
   generalApiReadLimiter,
   generalApiLimiter,
   authLoginLimiter,
@@ -214,7 +277,11 @@ module.exports = {
   authPasswordResetVerifyLimiter,
   authTokenLimiter,
   authPasswordChangeLimiter,
-  publicSubmissionLimiter,
+  publicApplicationCreateLimiter,
+  publicApplicationUploadLimiter,
+  publicApplicationResubmitLimiter,
+  publicApplicationExamLimiter,
+  publicContactLimiter,
   publicLookupLimiter,
   dtrAssistantChatBurstLimiter,
   dtrAssistantChatHourlyLimiter,

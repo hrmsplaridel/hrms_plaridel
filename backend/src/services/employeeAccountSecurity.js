@@ -48,6 +48,13 @@ async function lockAndValidateAccountTransition(
   }
 
   const target = targetResult.rows[0];
+  if (target.role === 'super_admin') {
+    throw new EmployeeAccountSecurityError(
+      'System account cannot be managed as an employee',
+      403,
+      'SYSTEM_ACCOUNT_PROTECTED'
+    );
+  }
   const previous = accountState(target);
   const next = {
     role:
@@ -177,6 +184,16 @@ async function lockAndPlanBulkAccountStatusTransition(
       employee_id: target.id,
       employee_name: target.full_name || target.email || 'Employee',
     };
+    if (target.role === 'super_admin') {
+      results.push({
+        ...resultBase,
+        outcome: 'rejected',
+        code: 'SYSTEM_ACCOUNT_PROTECTED',
+        reason: 'System account cannot be managed as an employee',
+        statusCode: 403,
+      });
+      continue;
+    }
     const employmentStatus = String(
       target.employment_status || 'active'
     ).toLowerCase();

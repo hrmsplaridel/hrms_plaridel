@@ -81,6 +81,7 @@ test('direct employee deactivation revokes sessions and audits on one client', a
   });
   const restoreRbac = withMockedModule('../src/middleware/rbac', {
     requireAdmin: (_req, _res, next) => next(),
+    requireAdminOrSuperAdmin: (_req, _res, next) => next(),
   });
   clearModule('../src/routes/employees');
   try {
@@ -164,6 +165,7 @@ test('ending employment closes dated assignments and disables login atomically',
   });
   const restoreRbac = withMockedModule('../src/middleware/rbac', {
     requireAdmin: (_req, _res, next) => next(),
+    requireAdminOrSuperAdmin: (_req, _res, next) => next(),
   });
   clearModule('../src/routes/employees');
   try {
@@ -260,6 +262,7 @@ test('bulk account status returns partial per-employee results', async () => {
   });
   const restoreRbac = withMockedModule('../src/middleware/rbac', {
     requireAdmin: (_req, _res, next) => next(),
+    requireAdminOrSuperAdmin: (_req, _res, next) => next(),
   });
   clearModule('../src/routes/employees');
   try {

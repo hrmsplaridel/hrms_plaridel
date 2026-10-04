@@ -1,5 +1,6 @@
 const NOON_MINUTES = 12 * 60;
 const ONE_PM_MINUTES = 13 * 60;
+const { isOvernight, scheduledMinute, timeline, expectedNightMinutes } = require('./shiftTimeline');
 const VALID_PUNCH_MODES = new Set([
   'auto',
   'full_day',
@@ -20,6 +21,7 @@ function getShiftType(shiftInfo) {
 
   const { startMinutes, endMinutes, breakEndMinutes } = shiftInfo;
   if (startMinutes == null) return null;
+  if (isOvernight(shiftInfo)) return 'single_session';
   if (startMinutes >= NOON_MINUTES) return 'pm_only';
   if (breakEndMinutes == null && endMinutes != null && endMinutes <= ONE_PM_MINUTES) {
     return 'am_only';
@@ -40,13 +42,16 @@ function getExpectedWorkMinutes(shiftInfo) {
   if (!shiftInfo || shiftInfo.startMinutes == null || shiftInfo.endMinutes == null) {
     return 0;
   }
-  const spanMinutes = Math.max(0, shiftInfo.endMinutes - shiftInfo.startMinutes);
+  const schedule = timeline(shiftInfo);
+  const spanMinutes = Math.max(0, schedule.endMinutes - shiftInfo.startMinutes);
   const type = getShiftType(shiftInfo);
+  if (isOvernight(shiftInfo)) {
+    return Math.max(0, spanMinutes - (type === 'full_day'
+      ? schedule.breakEndMinutes - schedule.breakStartMinutes : 0));
+  }
   if (type !== 'full_day') return spanMinutes;
-  const lunchMinutes =
-    shiftInfo.breakEndMinutes != null
-      ? Math.max(0, shiftInfo.breakEndMinutes - NOON_MINUTES)
-      : 60;
+  const lunchMinutes = Math.max(0,
+    (shiftInfo.breakEndMinutes ?? ONE_PM_MINUTES) - getExpectedAmEndMinutes(shiftInfo));
   return Math.max(0, spanMinutes - lunchMinutes);
 }
 
@@ -56,6 +61,7 @@ function getExpectedWorkMinutesForCoverage(shiftInfo, coverage) {
   const normalizedCoverage = String(coverage || '').trim().toLowerCase();
   if (!normalizedCoverage || normalizedCoverage === 'none') return fullMinutes;
   if (normalizedCoverage === 'whole_day') return 0;
+  if (isOvernight(shiftInfo)) return expectedNightMinutes(shiftInfo, normalizedCoverage);
 
   const type = getShiftType(shiftInfo);
   if (normalizedCoverage === 'am_only') {
@@ -104,8 +110,7 @@ function getExpectedAmEndMinutes(shiftInfo) {
  *
  * Full-day shifts have two possible early departures:
  * AM Out before the expected AM end, and PM Out before shift end.
- * The current shift schema does not store break_start, so full-day AM
- * work ends at noon unless a caller supplies breakStartMinutes.
+ * Older shifts without a scheduled break start retain the noon default.
  */
 function computeClockOutUndertimeMinutes({
   shiftInfo,
@@ -164,6 +169,7 @@ function getExpectedLogsForDay(shiftInfo, holidayInfo) {
   if (!holidayInfo || !holidayInfo.coverage) return getShiftExpectedLogs(shiftInfo);
   const cov = holidayInfo.coverage;
   if (cov === 'whole_day') return { needsAm: false, needsPm: false, needsInOut: false };
+  if (isOvernight(shiftInfo)) return getShiftExpectedLogs(shiftInfo);
   if (cov === 'am_only') return { needsAm: false, needsPm: true, needsInOut: false };
   if (cov === 'pm_only') return { needsAm: true, needsPm: false, needsInOut: false };
   return getShiftExpectedLogs(shiftInfo);
@@ -238,6 +244,9 @@ function computeTotalHoursFromRecord(record, shiftInfo = null) {
   const breakIn = record.break_in ?? record.breakIn ?? null;
   const timeOut = record.time_out ?? record.timeOut ?? null;
   const shiftType = getShiftType(shiftInfo);
+  if (shiftType === 'full_day' && isOvernight(shiftInfo) && !timeIn && breakIn && timeOut) {
+    return computeTotalHours(null, timeOut, null, breakIn, 'pm_only');
+  }
   if (shiftType === 'single_session') {
     const session = resolveSingleSessionPunches(record);
     return computeTotalHours(session.timeIn, session.timeOut, null, null, shiftType);
@@ -289,13 +298,16 @@ function interpretPunchesForShift(punches, shiftInfo = null, timeZone) {
     const firstPunchMins = minutesFromMidnightInTimeZone(punches[0], timeZone);
     const pmStartThreshold =
       getExpectedPmStartMinutes(shiftInfo) ?? ONE_PM_MINUTES;
-    const isAfternoonFirstPunch =
-      firstPunchMins != null && firstPunchMins >= pmStartThreshold;
+    const overnight = isOvernight(shiftInfo);
+    const isAfternoonFirstPunch = firstPunchMins != null && (overnight
+      ? scheduledMinute(shiftInfo, firstPunchMins) >= timeline(shiftInfo).breakEndMinutes
+      : firstPunchMins >= pmStartThreshold);
 
     if (isAfternoonFirstPunch) {
       breakIn = punches[0];
       if (n >= 2) timeOut = punches[n - 1];
-      status = n >= 2 ? 'present' : 'incomplete';
+      // A completed second session does not supply the missing first session.
+      status = !overnight && n >= 2 ? 'present' : 'incomplete';
       return {
         timeIn,
         breakOut,
@@ -304,7 +316,7 @@ function interpretPunchesForShift(punches, shiftInfo = null, timeZone) {
         status,
         totalHours: computeTotalHours(timeIn, timeOut, breakOut, breakIn, 'pm_only'),
         punchCount: n,
-        shiftType: 'pm_only',
+        shiftType: overnight ? 'full_day' : 'pm_only',
       };
     }
 
@@ -335,7 +347,7 @@ function interpretPunchesForShift(punches, shiftInfo = null, timeZone) {
     breakIn,
     timeOut,
     status,
-    totalHours: computeTotalHours(timeIn, timeOut, breakOut, breakIn, shiftType),
+    totalHours: computeTotalHoursFromRecord({ timeIn, timeOut, breakOut, breakIn }, shiftInfo),
     punchCount: n,
     shiftType,
   };

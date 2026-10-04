@@ -62,7 +62,7 @@ void main() {
     expect(find.text('Sign in to continue to your HRMS portal.'), findsOneWidget);
     expect(find.text('Sign In to HRMS'), findsOneWidget);
     expect(find.text('Plaridel'), findsOneWidget);
-    expect(find.text('Email Address'), findsOneWidget);
+    expect(find.text('Email or username'), findsOneWidget);
     expect(find.text('Secure access for municipal employees'), findsOneWidget);
     expect(find.text('Have a productive day!'), findsNothing);
     expect(find.text('Or quick access'), findsNothing);
@@ -218,6 +218,15 @@ void main() {
         tester.widget<TextField>(resetEmail).controller!.text,
         'employee@plaridel.gov.ph',
       );
+      await tester.tap(find.text('Request administrator assistance'));
+      await tester.pump(const Duration(milliseconds: 300));
+      expect(find.text('Password reset assistance'), findsOneWidget);
+      await tester.tap(find.text('Close'));
+      await tester.pump(const Duration(milliseconds: 300));
+      await tester.tap(find.text('Enter a reset code'));
+      await tester.pump(const Duration(milliseconds: 300));
+      expect(find.text('Reset code'), findsOneWidget);
+      expect(tester.takeException(), isNull);
       await tester.tap(find.text('Cancel'));
       await tester.pump(const Duration(milliseconds: 300));
 

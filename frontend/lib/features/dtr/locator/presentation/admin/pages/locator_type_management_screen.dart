@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
+import 'package:hrms_plaridel/shared/widgets/workforce_loading_skeleton.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
@@ -334,7 +335,13 @@ class _LocatorTypeManagementScreenState
   }
 
   Widget _buildList() {
-    if (_loading) return const Center(child: CircularProgressIndicator());
+    if (_loading)
+      return const SingleChildScrollView(
+        child: WorkforceRowsSkeleton(
+          columns: [2, 1],
+          label: 'Loading locator types',
+        ),
+      );
     if (_loadError != null) return _buildLoadError();
     _clampPage(_items.length);
     final pageStart = _items.isEmpty ? 0 : _page * _typesPerPage;

@@ -294,6 +294,7 @@ class EmployeeShiftForDate {
     this.startMinutes,
     this.endMinutes,
     this.breakEndMinutes,
+    this.captureWindowMinutes = 120,
   });
 
   final String punchMode;
@@ -301,6 +302,7 @@ class EmployeeShiftForDate {
   final int? startMinutes;
   final int? endMinutes;
   final int? breakEndMinutes;
+  final int captureWindowMinutes;
 
   factory EmployeeShiftForDate.fromJson(Map<String, dynamic> json) {
     final punches = json['expected_punches'];
@@ -312,6 +314,8 @@ class EmployeeShiftForDate {
       startMinutes: (json['start_minutes'] as num?)?.toInt(),
       endMinutes: (json['end_minutes'] as num?)?.toInt(),
       breakEndMinutes: (json['break_end_minutes'] as num?)?.toInt(),
+      captureWindowMinutes:
+          (json['capture_window_minutes'] as num?)?.toInt() ?? 120,
     );
   }
 }

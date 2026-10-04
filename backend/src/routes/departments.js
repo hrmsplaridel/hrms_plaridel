@@ -1,6 +1,7 @@
 const express = require('express');
 const { pool } = require('../config/db');
 const { authMiddleware } = require('../middleware/auth');
+const { requireDtrFeatureIfAdmin } = require('../middleware/dtrAccess');
 const { requireAdmin } = require('../middleware/rbac');
 const {
   DepartmentLifecycleError,
@@ -92,7 +93,7 @@ router.get('/:id/deactivation-preview', protect, requireAdmin, async (req, res) 
 });
 
 // GET /api/departments/:id/reviewer-config - current Head, backups, and roster
-router.get('/:id/reviewer-config', protect, requireAdmin, async (req, res) => {
+router.get('/:id/reviewer-config', protect, requireAdmin, requireDtrFeatureIfAdmin('approvals_allowed'), async (req, res) => {
   try {
     const effectiveDate = String(req.query.effective_date || dateInTimeZone());
     if (!/^\d{4}-\d{2}-\d{2}$/.test(effectiveDate)) {
@@ -135,7 +136,7 @@ router.get('/:id/reviewer-config', protect, requireAdmin, async (req, res) => {
 });
 
 // PUT /api/departments/:id/reviewer-backups - replace backups from a date onward
-router.put('/:id/reviewer-backups', protect, requireAdmin, async (req, res) => {
+router.put('/:id/reviewer-backups', protect, requireAdmin, requireDtrFeatureIfAdmin('approvals_allowed'), async (req, res) => {
   const effectiveFrom = String(req.body?.effective_from || dateInTimeZone());
   const employeeIds = Array.isArray(req.body?.employee_ids)
     ? [...new Set(req.body.employee_ids.map(String).map((id) => id.trim()).filter(Boolean))]
@@ -188,6 +189,15 @@ router.put('/:id/reviewer-backups', protect, requireAdmin, async (req, res) => {
           error: 'Every backup reviewer must be assigned to this department on the effective date',
           invalid_employee_ids: invalidIds,
         });
+      }
+      const disabled = await client.query(`SELECT u.id FROM users u
+        LEFT JOIN dtr_admin_access access ON access.admin_user_id = u.id
+        WHERE u.id = ANY($1::uuid[]) AND u.role = 'admin'
+          AND (COALESCE(access.leave_allowed, false) = false
+            OR COALESCE(access.locator_allowed, false) = false)`, [employeeIds]);
+      if (disabled.rows.length) {
+        await client.query('ROLLBACK');
+        return res.status(409).json({ error: 'Enable Leave and Locator access for each admin reviewer before assigning them.' });
       }
     }
 

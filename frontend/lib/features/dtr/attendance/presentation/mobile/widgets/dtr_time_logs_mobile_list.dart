@@ -22,6 +22,9 @@ class DtrTimeLogMobileCard extends StatelessWidget {
     required this.employeeName,
     required this.dateLabel,
     required this.amIn,
+    this.singleSession = false,
+    this.overnight = false,
+    this.hoursWorked,
     required this.amOut,
     required this.pmIn,
     required this.pmOut,
@@ -38,6 +41,9 @@ class DtrTimeLogMobileCard extends StatelessWidget {
   final String employeeName;
   final String dateLabel;
   final String amIn;
+  final bool singleSession;
+  final bool overnight;
+  final String? hoursWorked;
   final String amOut;
   final String pmIn;
   final String pmOut;
@@ -123,19 +129,33 @@ class DtrTimeLogMobileCard extends StatelessWidget {
                 children: [
                   SizedBox(
                     width: tileWidth,
-                    child: _DtrTimeLogTimeTile(label: 'AM In', value: amIn),
+                    child: _DtrTimeLogTimeTile(
+                      label: singleSession || overnight ? 'Time In' : 'AM In',
+                      value: amIn,
+                    ),
                   ),
+                  if (!singleSession)
+                    SizedBox(
+                      width: tileWidth,
+                      child: _DtrTimeLogTimeTile(
+                        label: overnight ? 'Break Out' : 'AM Out',
+                        value: amOut,
+                      ),
+                    ),
+                  if (!singleSession)
+                    SizedBox(
+                      width: tileWidth,
+                      child: _DtrTimeLogTimeTile(
+                        label: overnight ? 'Break In' : 'PM In',
+                        value: pmIn,
+                      ),
+                    ),
                   SizedBox(
                     width: tileWidth,
-                    child: _DtrTimeLogTimeTile(label: 'AM Out', value: amOut),
-                  ),
-                  SizedBox(
-                    width: tileWidth,
-                    child: _DtrTimeLogTimeTile(label: 'PM In', value: pmIn),
-                  ),
-                  SizedBox(
-                    width: tileWidth,
-                    child: _DtrTimeLogTimeTile(label: 'PM Out', value: pmOut),
+                    child: _DtrTimeLogTimeTile(
+                      label: singleSession || overnight ? 'Time Out' : 'PM Out',
+                      value: pmOut,
+                    ),
                   ),
                 ],
               );
@@ -147,6 +167,8 @@ class DtrTimeLogMobileCard extends StatelessWidget {
             runSpacing: 8,
             crossAxisAlignment: WrapCrossAlignment.center,
             children: [
+              if (singleSession && hoursWorked != null)
+                _DtrTimeLogMetaChip(label: 'Hours Worked', value: hoursWorked!),
               _DtrTimeLogMetaChip(label: 'Late', value: late),
               _DtrTimeLogMetaChip(label: 'Undertime', value: undertime),
               AttendanceSourceBadge(source: source, compact: true),

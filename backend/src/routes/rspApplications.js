@@ -30,7 +30,13 @@ const {
   verifyRspApplicantAccessToken,
 } = require('../utils/rspEmailVerifyToken');
 const rspEmailVerificationPublicRoutes = require('./rspEmailVerificationPublic');
-const { publicSubmissionLimiter, publicLookupLimiter } = require('../middleware/rateLimiters');
+const {
+  publicApplicationCreateLimiter,
+  publicApplicationUploadLimiter,
+  publicApplicationResubmitLimiter,
+  publicApplicationExamLimiter,
+  publicLookupLimiter,
+} = require('../middleware/rateLimiters');
 
 const router = express.Router();
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -58,8 +64,7 @@ async function requireApplicantProof(req, res, next) {
       try {
         const payload = jwt.verify(authorization.slice(7).trim(), process.env.JWT_SECRET);
         if (payload.typ !== 'refresh' && payload.role === 'admin') {
-          req.user = { id: payload.id, email: payload.email, role: payload.role };
-          return next();
+          return authMiddleware(req, res, () => requireAdmin(req, res, next));
         }
       } catch (_) {
         // It may instead be an applicant proof token; verify it below.
@@ -417,7 +422,7 @@ async function ensureRspApplicationsTables() {
 
 // POST /api/rsp/applications
 // Public create: applicants submit their basic info + documents.
-router.post('/', publicSubmissionLimiter, async (req, res) => {
+router.post('/', publicApplicationCreateLimiter, async (req, res) => {
   try {
     await ensureRspApplicationsTables();
     const {
@@ -745,9 +750,9 @@ router.put('/:applicationId/status', protect, async (req, res) => {
 // Applicant: after HR declined Step 1 documents, return the application to review.
 router.post(
   '/:applicationId/resubmit-documents',
-  publicSubmissionLimiter,
   rejectInvalidApplicationId,
   requireApplicantProof,
+  publicApplicationResubmitLimiter,
   async (req, res) => {
     try {
       await ensureRspApplicationsTables();
@@ -1459,9 +1464,9 @@ router.post('/:applicationId/send-hire-email', protect, async (req, res) => {
 // Query updateDb=0 to only store the file and return path (multi-upload helper).
 router.post(
   '/:applicationId/attachment-file',
-  publicSubmissionLimiter,
   rejectInvalidApplicationId,
   requireApplicantProof,
+  publicApplicationUploadLimiter,
   rspUpload.single('file'),
   async (req, res) => {
     try {
@@ -1717,7 +1722,7 @@ router.put('/:applicationId/attachment-if-missing', ...protect, async (req, res)
 
 // POST /api/rsp/exam-results
 // Public: applicant submits exam results + answers_json.
-router.post('/exam-results', publicSubmissionLimiter, requireApplicantProof, async (req, res) => {
+router.post('/exam-results', requireApplicantProof, publicApplicationExamLimiter, async (req, res) => {
   try {
     await ensureRspApplicationsTables();
     const { applicationId, scorePercent, passed, answersJson } = req.body || {};

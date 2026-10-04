@@ -4,6 +4,44 @@ import 'package:hrms_plaridel/features/dtr/attendance/models/time_record.dart';
 import 'package:hrms_plaridel/features/dtr/reports/data/dtr_export.dart';
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+
+  test(
+    'overnight export keeps the start-date row and marks the next-day departure',
+    () {
+      final date = DateTime(2026, 9, 30);
+      final record = TimeRecord(
+        userId: 'night-employee',
+        recordDate: date,
+        timeIn: DateTime.parse('2026-09-30T20:00:00+08:00'),
+        timeOut: DateTime.parse('2026-10-01T07:00:00+08:00'),
+        totalHours: 11,
+        undertimeMinutes: 0,
+        lateMinutes: 0,
+        status: 'present',
+        shiftPunchMode: 'single_session',
+        shiftIsOvernight: true,
+      );
+      final html = DtrExport.generateWordHtmlSync(
+        employeeName: 'Night Employee',
+        year: 2026,
+        month: 9,
+        start: date,
+        end: date,
+        recordsByDate: {date: record},
+        punchMode: 'single_session',
+        scheduledWorkHoursPerDay: 11,
+        assignmentEffectiveFrom: date,
+        workingDays: const [DateTime.wednesday],
+        reportableThrough: date,
+      );
+      expect(html, contains('30 Wed'));
+      expect(html, contains('8:00 PM'));
+      expect(html, contains('7:00 AM (+1 day)'));
+      expect(html, isNot(contains('ABSENT')));
+    },
+  );
+
   test('PM-only absence uses the shift column and scheduled duration', () {
     final date = DateTime(2024, 7, 1);
 
@@ -33,6 +71,46 @@ void main() {
         '<td class="right" style="color:#E65100;">0</td></tr>',
       ),
     );
+  });
+
+  test('weekly rest-day overrides are applied to official DTR rows', () {
+    final start = DateTime(2026, 10, 7); // Wednesday
+    final end = DateTime(2026, 10, 11); // Sunday
+    final segment = DtrAssignmentSegment(
+      effectiveFrom: DateTime(2026, 10, 1),
+      scheduledWorkHoursPerDay: 8,
+      punchMode: 'full_day',
+      workingDays: const [
+        DateTime.monday,
+        DateTime.tuesday,
+        DateTime.wednesday,
+        DateTime.thursday,
+        DateTime.friday,
+        DateTime.saturday,
+      ],
+      scheduleOverrides: const {'2026-10-07': false, '2026-10-11': true},
+    );
+
+    final html = DtrExport.generateWordHtmlSync(
+      employeeName: 'Rotating Schedule Employee',
+      year: 2026,
+      month: 10,
+      start: start,
+      end: end,
+      recordsByDate: const {},
+      assignmentSegments: [segment],
+      reportableThrough: end,
+    );
+
+    final wednesdayRow = RegExp(
+      r'<tr><td>7 Wed</td>.*?</tr>',
+    ).firstMatch(html)?.group(0);
+    final sundayRow = RegExp(
+      r'<tr><td>11 Sun</td>.*?</tr>',
+    ).firstMatch(html)?.group(0);
+    expect(wednesdayRow, isNotNull);
+    expect(wednesdayRow, isNot(contains('ABSENT')));
+    expect(sundayRow, contains('ABSENT'));
   });
 
   test('combined policy adds late to the official undertime column only', () {

@@ -168,6 +168,14 @@ test('equivalent day conversion preserves three-decimal DTR values', () => {
   assert.equal(equivalentDaysFromMinutes(0, 8), 0);
 });
 
+test('month-end respects a configured non-noon break', () => {
+  const assignment = { startMinutes: 480, endMinutes: 1020,
+    breakStartMinutes: 660, breakEndMinutes: 720, punchMode: 'full_day' };
+  assert.equal(expectedMinutesForCoverage(assignment, null), 480);
+  assert.equal(expectedMinutesForCoverage(assignment, 'pm_only'), 180);
+  assert.equal(expectedMinutesForCoverage(assignment, 'am_only'), 300);
+});
+
 test('partial holiday coverage removes only the covered shift session', () => {
   const assignment = {
     startMinutes: 8 * 60,
