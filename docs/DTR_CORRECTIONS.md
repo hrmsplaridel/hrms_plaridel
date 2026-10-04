@@ -14,6 +14,7 @@ Apply `backend/scripts/migrations/dtr/20261003_dtr_correction_reviewers.sql` to 
 - Approval applies the existing attendance calculations, preserves raw biometric logs, marks the summary Adjusted, saves before/after evidence, and queues closed-period reconciliation in one transaction. Rejection leaves attendance unchanged.
 - Month-End reconciliation follows the existing scheduler/manual rerun timing; it is not an immediate deduction adjustment.
 - Existing direct HR manual-entry access is unchanged.
+- Correction queues use creation-time/ID cursors with a creation cutoff, so approvals do not shift unseen requests past the next page. All requests are ordered newest first; use Pending to focus on outstanding work. Refresh or changing filters starts a new traversal and includes new submissions. Status membership is live, so refresh to discover requests that enter a filter behind your current position. Failed navigation keeps the last successful page index.
 
 Backend tests: `node --test test/dtrCorrections.test.js`
 

@@ -103,8 +103,26 @@ function createRouter({ db = pool, auth = authMiddleware, apply = applyApprovedC
     if (status && !['pending', 'approved', 'rejected'].includes(status)) fail('Invalid correction status.');
     const search = String(req.query.search || '').trim();
     if (search.length > 100) fail('Search is too long.');
-    const values = [review, req.user.id, offset];
+    const cursorMode = req.query.pagination === 'cursor';
+    let cursor;
+    if (cursorMode && req.query.cursor) {
+      try {
+        if (typeof req.query.cursor !== 'string' || req.query.cursor.length > 1024) throw new Error();
+        cursor = JSON.parse(Buffer.from(req.query.cursor, 'base64url').toString());
+        const stamp = value => typeof value === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3,6}Z$/.test(value) && Number.isFinite(Date.parse(value));
+        if (!stamp(cursor.cutoff) || (cursor.id != null && (!uuid.test(cursor.id) || !stamp(cursor.time)))) throw new Error();
+      } catch (_) { fail('Invalid page cursor. Refresh the queue.'); }
+    }
+    const cutoff = cursor?.cutoff || new Date().toISOString();
+    const values = [review, req.user.id, cursorMode ? cutoff : offset];
     let filters = '';
+    if (cursorMode) {
+      filters += ' AND c.created_at <= $3::timestamptz';
+      if (cursor?.id) {
+        values.push(cursor.time, cursor.id);
+        filters += ` AND (c.created_at, c.id) < ($${values.length - 1}::timestamptz, $${values.length}::uuid)`;
+      }
+    }
     if (status) {
       values.push(status);
       filters += ` AND c.status = $${values.length}`;
@@ -115,13 +133,19 @@ function createRouter({ db = pool, auth = authMiddleware, apply = applyApprovedC
     }
     const result = await db.query(
       `SELECT c.*, u.full_name AS employee_name, reviewer.full_name AS reviewer_name,
-              c.attendance_date::text AS attendance_date
+              c.attendance_date::text AS attendance_date,
+              to_char(c.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS cursor_time
          FROM dtr_corrections c JOIN users u ON u.id = c.employee_id
          LEFT JOIN users reviewer ON reviewer.id = c.reviewed_by
         WHERE ($1::boolean OR c.employee_id = $2::uuid)${filters}
-        ORDER BY (c.status = 'pending') DESC, c.created_at DESC, c.id DESC
-        LIMIT 50 OFFSET $3`, values);
-    res.json(result.rows);
+        ORDER BY ${cursorMode ? '' : "(c.status = 'pending') DESC, "}c.created_at DESC, c.id DESC
+        ${cursorMode ? 'LIMIT 51' : 'LIMIT 50 OFFSET $3'}`, values);
+    if (!cursorMode) return res.json(result.rows);
+    const encode = value => Buffer.from(JSON.stringify(value)).toString('base64url');
+    const entries = result.rows.slice(0, 50);
+    const last = entries.at(-1);
+    res.json({ entries, first_cursor: encode({ cutoff }),
+      next_cursor: result.rows.length > 50 ? encode({ cutoff, time: last.cursor_time, id: last.id }) : null });
   }));
 
   router.post('/', (req, res, next) => {

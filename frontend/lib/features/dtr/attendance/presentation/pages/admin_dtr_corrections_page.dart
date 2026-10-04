@@ -22,7 +22,9 @@ class _AdminDtrCorrectionsPageState extends State<AdminDtrCorrectionsPage> {
   String _status = 'All';
   String? _error;
   bool _loading = true;
-  int _offset = 0;
+  int _page = 0;
+  final List<String?> _cursors = [];
+  String? _nextCursor;
   int _loadVersion = 0;
 
   @override
@@ -38,7 +40,7 @@ class _AdminDtrCorrectionsPageState extends State<AdminDtrCorrectionsPage> {
     super.dispose();
   }
 
-  Future<void> _load() async {
+  Future<void> _load({int page = 0, String? cursor}) async {
     final version = ++_loadVersion;
     setState(() {
       _loading = true;
@@ -49,17 +51,29 @@ class _AdminDtrCorrectionsPageState extends State<AdminDtrCorrectionsPage> {
         '/api/dtr-corrections',
         queryParameters: {
           'review': true,
-          'offset': _offset,
+          'pagination': 'cursor',
+          if (cursor != null) 'cursor': cursor,
           if (_status != 'All') 'status': _status.toLowerCase(),
           if (_search.text.trim().isNotEmpty) 'search': _search.text.trim(),
         },
       );
       if (mounted && version == _loadVersion) {
-        setState(
-          () => _rows = (response.data as List)
-              .map((row) => Map<String, dynamic>.from(row as Map))
-              .toList(),
-        );
+        setState(() {
+          final data = response.data;
+          _rows = (data is List ? data : data['entries'] as List)
+              .map((r) => Map<String, dynamic>.from(r as Map))
+              .toList();
+          _nextCursor = data is Map ? data['next_cursor'] as String? : null;
+          if (page == 0) _cursors.clear();
+          final current =
+              cursor ?? (data is Map ? data['first_cursor'] as String? : null);
+          if (_cursors.length <= page) {
+            _cursors.add(current);
+          } else {
+            _cursors[page] = current;
+          }
+          _page = page;
+        });
       }
     } catch (e) {
       if (mounted && version == _loadVersion) {
@@ -77,7 +91,7 @@ class _AdminDtrCorrectionsPageState extends State<AdminDtrCorrectionsPage> {
     _searchTimer?.cancel();
     setState(() {
       _status = status;
-      _offset = 0;
+      _page = 0;
       _rows = [];
     });
     _load();
@@ -88,7 +102,7 @@ class _AdminDtrCorrectionsPageState extends State<AdminDtrCorrectionsPage> {
     _searchTimer = Timer(const Duration(milliseconds: 350), () {
       if (!mounted) return;
       setState(() {
-        _offset = 0;
+        _page = 0;
         _rows = [];
       });
       _load();
@@ -100,7 +114,7 @@ class _AdminDtrCorrectionsPageState extends State<AdminDtrCorrectionsPage> {
     _search.clear();
     setState(() {
       _status = 'All';
-      _offset = 0;
+      _page = 0;
       _rows = [];
     });
     _load();
@@ -112,7 +126,7 @@ class _AdminDtrCorrectionsPageState extends State<AdminDtrCorrectionsPage> {
       row['id'].toString(),
     );
     if (mounted && reviewed == true) {
-      _offset = 0;
+      _page = 0;
       _load();
     }
   }
@@ -297,27 +311,22 @@ class _AdminDtrCorrectionsPageState extends State<AdminDtrCorrectionsPage> {
             Row(
               mainAxisAlignment: MainAxisAlignment.end,
               children: [
-                Text(
-                  'Page ${_offset ~/ 50 + 1}',
-                  style: TextStyle(color: secondary),
-                ),
+                Text('Page ${_page + 1}', style: TextStyle(color: secondary)),
                 IconButton(
                   tooltip: 'Previous page',
-                  onPressed: _loading || _offset == 0
+                  onPressed: _loading || _page == 0
                       ? null
                       : () {
-                          setState(() => _offset -= 50);
-                          _load();
+                          _load(page: _page - 1, cursor: _cursors[_page - 1]);
                         },
                   icon: const Icon(Icons.chevron_left),
                 ),
                 IconButton(
                   tooltip: 'Next page',
-                  onPressed: _loading || _rows.length < 50
+                  onPressed: _loading || _nextCursor == null
                       ? null
                       : () {
-                          setState(() => _offset += 50);
-                          _load();
+                          _load(page: _page + 1, cursor: _nextCursor);
                         },
                   icon: const Icon(Icons.chevron_right),
                 ),

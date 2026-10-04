@@ -213,7 +213,9 @@ class _DtrCorrectionsDialogState extends State<DtrCorrectionsDialog> {
   List<Map<String, dynamic>> _rows = [];
   bool _loading = true;
   String? _error;
-  int _offset = 0;
+  int _page = 0;
+  final List<String?> _cursors = [];
+  String? _nextCursor;
   String _statusFilter = 'All';
   bool _creating = false;
   Map<String, dynamic>? _selected;
@@ -223,7 +225,7 @@ class _DtrCorrectionsDialogState extends State<DtrCorrectionsDialog> {
     _load();
   }
 
-  Future<void> _load() async {
+  Future<void> _load({int page = 0, String? cursor}) async {
     setState(() {
       _loading = true;
       _error = null;
@@ -244,16 +246,28 @@ class _DtrCorrectionsDialogState extends State<DtrCorrectionsDialog> {
         '/api/dtr-corrections',
         queryParameters: {
           'review': widget.review,
-          'offset': _offset,
+          'pagination': 'cursor',
+          if (cursor != null) 'cursor': cursor,
           if (_statusFilter != 'All') 'status': _statusFilter.toLowerCase(),
         },
       );
       if (mounted) {
-        setState(
-          () => _rows = (response.data as List)
+        setState(() {
+          final data = response.data;
+          _rows = (data is List ? data : data['entries'] as List)
               .map((r) => Map<String, dynamic>.from(r as Map))
-              .toList(),
-        );
+              .toList();
+          _nextCursor = data is Map ? data['next_cursor'] as String? : null;
+          if (page == 0) _cursors.clear();
+          final current =
+              cursor ?? (data is Map ? data['first_cursor'] as String? : null);
+          if (_cursors.length <= page) {
+            _cursors.add(current);
+          } else {
+            _cursors[page] = current;
+          }
+          _page = page;
+        });
       }
     } catch (e) {
       if (mounted) setState(() => _error = userFacingApiError(e));
@@ -266,7 +280,7 @@ class _DtrCorrectionsDialogState extends State<DtrCorrectionsDialog> {
     if (_statusFilter == status) return;
     setState(() {
       _statusFilter = status;
-      _offset = 0;
+      _page = 0;
       _rows = [];
     });
     _load();
@@ -416,7 +430,7 @@ class _DtrCorrectionsDialogState extends State<DtrCorrectionsDialog> {
                 onClose: (saved) {
                   setState(() => _creating = false);
                   if (saved) {
-                    _offset = 0;
+                    _page = 0;
                     _load();
                     WidgetsBinding.instance.addPostFrameCallback((_) {
                       if (!mounted) return;
@@ -635,28 +649,29 @@ class _DtrCorrectionsDialogState extends State<DtrCorrectionsDialog> {
                       ],
                     ),
                   ),
-                  if (_offset > 0 || _rows.length >= 50)
+                  if (_page > 0 || _nextCursor != null)
                     Row(
                       mainAxisAlignment: MainAxisAlignment.end,
                       children: [
                         IconButton(
                           tooltip: 'Previous page',
-                          onPressed: _loading || _offset == 0
+                          onPressed: _loading || _page == 0
                               ? null
                               : () {
-                                  _offset -= 50;
-                                  _load();
+                                  _load(
+                                    page: _page - 1,
+                                    cursor: _cursors[_page - 1],
+                                  );
                                 },
                           icon: const Icon(Icons.chevron_left),
                         ),
-                        Text('Page ${_offset ~/ 50 + 1}'),
+                        Text('Page ${_page + 1}'),
                         IconButton(
                           tooltip: 'Next page',
-                          onPressed: _loading || _rows.length < 50
+                          onPressed: _loading || _nextCursor == null
                               ? null
                               : () {
-                                  _offset += 50;
-                                  _load();
+                                  _load(page: _page + 1, cursor: _nextCursor);
                                 },
                           icon: const Icon(Icons.chevron_right),
                         ),

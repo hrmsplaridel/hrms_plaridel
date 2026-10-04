@@ -3,9 +3,76 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hrms_plaridel/core/api/client.dart';
 import 'package:hrms_plaridel/features/dtr/attendance/presentation/pages/admin_dtr_corrections_page.dart';
+import 'package:hrms_plaridel/features/dtr/attendance/presentation/widgets/dtr_corrections_dialog.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+
+  for (final admin in [true, false]) {
+    testWidgets(
+      'cursor navigation survives failure and returns to first page ($admin)',
+      (tester) async {
+        tester.view.devicePixelRatio = 1;
+        tester.view.physicalSize = const Size(1200, 1000);
+        addTearDown(tester.view.reset);
+        final cursors = <dynamic>[];
+        var fail = true;
+        ApiClient.instance.init();
+        ApiClient.instance.dio.interceptors.clear();
+        ApiClient.instance.dio.interceptors.add(
+          InterceptorsWrapper(
+            onRequest: (options, handler) {
+              expect(options.queryParameters['pagination'], 'cursor');
+              expect(options.queryParameters.containsKey('offset'), false);
+              final cursor = options.queryParameters['cursor'];
+              cursors.add(cursor);
+              if (cursor == 'next' && fail) {
+                fail = false;
+                handler.reject(
+                  DioException(
+                    requestOptions: options,
+                    type: DioExceptionType.connectionError,
+                  ),
+                );
+                return;
+              }
+              handler.resolve(
+                Response(
+                  requestOptions: options,
+                  data: {
+                    'entries': <dynamic>[],
+                    'first_cursor': 'first',
+                    'next_cursor': cursor == 'next' ? null : 'next',
+                  },
+                ),
+              );
+            },
+          ),
+        );
+        await tester.pumpWidget(
+          MaterialApp(
+            home: Scaffold(
+              body: admin
+                  ? const AdminDtrCorrectionsPage()
+                  : const DtrCorrectionsDialog(),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        await tester.tap(find.byTooltip('Next page'));
+        await tester.pumpAndSettle();
+        expect(find.text('Page 1'), findsOneWidget);
+        await tester.tap(find.byTooltip('Next page'));
+        await tester.pumpAndSettle();
+        expect(find.text('Page 2'), findsOneWidget);
+        expect(cursors, [null, 'next', 'next']);
+        await tester.tap(find.byTooltip('Previous page'));
+        await tester.pumpAndSettle();
+        expect(cursors.last, 'first');
+        expect(find.text('Page 1'), findsOneWidget);
+      },
+    );
+  }
 
   for (final width in [390.0, 1200.0]) {
     testWidgets('correction queue filters and opens a request at $width', (

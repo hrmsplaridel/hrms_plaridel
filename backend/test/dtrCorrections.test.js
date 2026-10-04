@@ -44,6 +44,26 @@ function fixture({ own = false, status = 'pending', stale = false, applyError = 
 }
 const reviewRequest = (role = 'hr') => ({ user: { id: reviewer, role }, params: { id }, body: { decision: 'approved', notes: 'Verified against supervisor report.' } });
 
+test('cursor queue uses immutable ordering and a precise boundary instead of offsets', async () => {
+  const calls = [];
+  const rows = Array.from({ length: 51 }, (_, i) => ({
+    id: `00000000-0000-4000-8000-${String(i).padStart(12, '0')}`,
+    cursor_time: '2026-09-30T00:00:00.123456Z',
+  }));
+  const router = createRouter({ db: { query: async (sql, args) => {
+    calls.push({ sql, args }); return { rows: calls.length === 1 ? rows : [] };
+  } } });
+  const request = { user: { id: employee, role: 'employee' }, query: { pagination: 'cursor' } };
+  const first = await invoke(router, 'get', '/', request);
+  assert.equal(first.body.entries.length, 50);
+  assert.ok(first.body.next_cursor);
+  await invoke(router, 'get', '/', { ...request, query: { pagination: 'cursor', cursor: first.body.next_cursor } });
+  assert.match(calls[1].sql, /\(c.created_at, c.id\) </);
+  assert.doesNotMatch(calls[1].sql, /OFFSET|ORDER BY \(c.status/);
+  assert.ok(calls[1].args.includes(rows[49].cursor_time));
+  assert.ok(calls[1].args.includes(rows[49].id));
+});
+
 test('submission refuses no eligible reviewer or only the requester', async () => {
   for (const assigned of [[], [{ id: employee }]]) {
     const router = createRouter({
