@@ -134,6 +134,12 @@ AuditDescription describeAuditEntry(Map<String, dynamic> entry) {
       summary =
           '${first.first} ${granted ? 'granted' : 'removed'}${changes.length > 1 ? ' and ${changes.length - 1} other permission${changes.length == 2 ? '' : 's'} changed' : ''}.';
     }
+  } else if (action == 'account_created') {
+    summary = details?['role'] == 'admin'
+        ? 'Administrator account created.'
+        : details?['role'] == 'employee'
+        ? 'Employee account created.'
+        : 'Account created.';
   } else if (action == 'account_creation_access_changed') {
     final oldValue = details?['previous_allowed'];
     final newValue = details?['allowed'];

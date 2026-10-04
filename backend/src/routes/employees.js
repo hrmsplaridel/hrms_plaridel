@@ -839,6 +839,11 @@ router.post('/', protect, requireAdminOrSuperAdmin, requireAccountCreationAccess
         setup: normalizedSetup,
         remarks: 'Initial assignment from employee setup',
       });
+      await client.query(
+        `INSERT INTO audit_logs (user_id, action, entity_type, entity_id, details)
+         VALUES ($1::uuid, 'account_created', 'user', $2::uuid, $3)`,
+        [req.user.id, createdEmployee.id, JSON.stringify({ role: createdEmployee.role })]
+      );
       await client.query('COMMIT');
     } catch (transactionError) {
       await client.query('ROLLBACK');

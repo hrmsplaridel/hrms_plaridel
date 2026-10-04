@@ -2,6 +2,28 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:hrms_plaridel/features/dashboard/presentation/admin/desktop/pages/system_audit_description.dart';
 
 void main() {
+  test('account creation explains role and affected account', () {
+    for (final role in ['admin', 'employee', null]) {
+      final event = describeAuditEntry({
+        'action': 'account_created',
+        'entity_type': 'user',
+        'target_name': 'New Account',
+        'target_identity_source': 'recorded',
+        'details': {'role': role},
+      });
+      expect(event.title, 'Account created');
+      expect(event.target, 'New Account');
+      expect(
+        event.summary,
+        role == 'admin'
+            ? 'Administrator account created.'
+            : role == 'employee'
+            ? 'Employee account created.'
+            : 'Account created.',
+      );
+    }
+  });
+
   test('unknown account access details never imply access removal', () {
     for (final details in <dynamic>[
       null,
