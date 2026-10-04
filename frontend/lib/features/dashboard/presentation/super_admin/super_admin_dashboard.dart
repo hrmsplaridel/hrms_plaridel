@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'password_reset_requests_page.dart';
 import 'package:provider/provider.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/features/dashboard/presentation/admin/desktop/pages/system_audit_page.dart';
@@ -11,7 +12,13 @@ import 'package:hrms_plaridel/shared/widgets/sign_out_flow.dart';
 import 'package:hrms_plaridel/features/dashboard/presentation/super_admin/dtr_access_page.dart';
 import 'package:hrms_plaridel/features/dashboard/presentation/super_admin/system_health_page.dart';
 
-enum _SuperAdminPage { createAccount, accountAccess, auditLog, systemHealth }
+enum _SuperAdminPage {
+  createAccount,
+  accountAccess,
+  auditLog,
+  systemHealth,
+  passwordResets,
+}
 
 class SuperAdminDashboard extends StatefulWidget {
   const SuperAdminDashboard({super.key});
@@ -57,6 +64,9 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
   }
 
   Widget _content() {
+    if (_selectedPage == _SuperAdminPage.passwordResets) {
+      return const PasswordResetRequestsPage();
+    }
     if (_selectedPage == _SuperAdminPage.systemHealth) {
       return const SystemHealthPage();
     }
@@ -187,6 +197,12 @@ class _SuperAdminSidebar extends StatelessWidget {
               padding: const EdgeInsets.only(top: 12),
               children: [
                 const DashboardSidebarSectionLabel('SYSTEM ADMINISTRATION'),
+                DashboardSidebarNavTile(
+                  icon: Icons.lock_reset,
+                  label: 'Password Reset Requests',
+                  selected: selectedPage == _SuperAdminPage.passwordResets,
+                  onTap: () => select(_SuperAdminPage.passwordResets),
+                ),
                 DashboardSidebarNavTile(
                   icon: Icons.person_add_outlined,
                   label: 'Create Account',

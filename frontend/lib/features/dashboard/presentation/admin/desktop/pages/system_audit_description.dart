@@ -140,6 +140,17 @@ AuditDescription describeAuditEntry(Map<String, dynamic> entry) {
         : details?['role'] == 'employee'
         ? 'Employee account created.'
         : 'Account created.';
+  } else if (action == 'password_reset_assistance_requested') {
+    summary =
+        'Password reset assistance requested through the public form. Requester identity is unverified.';
+  } else if (action == 'password_reset_assistance_sent') {
+    summary =
+        'Administrator verified the requester and sent a reset code to the registered email.';
+  } else if (action == 'password_reset_assistance_closed') {
+    summary =
+        'Assistance request closed. Its outstanding email code was invalidated.';
+  } else if (action == 'password_reset_completed') {
+    summary = 'Password reset completed. Existing sessions were invalidated.';
   } else if (action == 'account_creation_access_changed') {
     final oldValue = details?['previous_allowed'];
     final newValue = details?['allowed'];

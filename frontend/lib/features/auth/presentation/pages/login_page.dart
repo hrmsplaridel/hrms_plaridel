@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:math' as math;
 import 'dart:ui';
+import '../widgets/password_reset_assistance_dialog.dart';
 
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
@@ -2313,6 +2314,30 @@ class _ForgotPasswordDialogState extends State<_ForgotPasswordDialog> {
   String? _errorText;
   String? _infoText;
 
+  void _enterCode() {
+    if (_emailController.text.trim().isEmpty) {
+      setState(() => _errorText = 'Enter your registered email first.');
+      return;
+    }
+    setState(() {
+      _step = _ForgotPasswordStep.resetPassword;
+      _errorText = null;
+      _infoText = null;
+    });
+  }
+
+  Future<void> _requestAssistance() async {
+    final email = await showDialog<String>(
+      context: context,
+      builder: (_) => PasswordResetAssistanceDialog(
+        initialEmail: _emailController.text.trim(),
+      ),
+    );
+    if (!mounted || email == null) return;
+    _emailController.text = email;
+    _enterCode();
+  }
+
   @override
   void initState() {
     super.initState();
@@ -2517,7 +2542,7 @@ class _ForgotPasswordDialogState extends State<_ForgotPasswordDialog> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          'Enter the SMS code and choose a new password.',
+          'Enter the reset code received by SMS or administrator-assisted email and choose a new password.',
           style: TextStyle(
             color: AppTheme.textSecondary,
             fontSize: 14,
@@ -2533,7 +2558,7 @@ class _ForgotPasswordDialogState extends State<_ForgotPasswordDialog> {
           autofillHints: const [AutofillHints.oneTimeCode],
           maxLength: 6,
           decoration: _dialogInputDecoration(
-            label: 'SMS code',
+            label: 'Reset code',
             hint: '6-digit code',
             icon: Icons.sms_outlined,
           ).copyWith(counterText: ''),
@@ -2608,10 +2633,19 @@ class _ForgotPasswordDialogState extends State<_ForgotPasswordDialog> {
           onPressed: _isLoading ? null : () => Navigator.of(context).pop(false),
           child: const Text('Cancel'),
         ),
+        TextButton(
+          onPressed: _isLoading ? null : _requestAssistance,
+          child: const Text('Request administrator assistance'),
+        ),
+        if (!isResetStep)
+          TextButton(
+            onPressed: _isLoading ? null : _enterCode,
+            child: const Text('Enter a reset code'),
+          ),
         if (isResetStep)
           TextButton(
             onPressed: _isLoading ? null : _requestCode,
-            child: const Text('Resend code'),
+            child: const Text('Send SMS code instead'),
           ),
         FilledButton(
           onPressed: _isLoading

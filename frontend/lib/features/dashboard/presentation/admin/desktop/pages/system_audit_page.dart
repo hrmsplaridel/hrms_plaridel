@@ -132,6 +132,21 @@ class _SystemAuditPageState extends State<SystemAuditPage> {
             initialDateRange: _dateRange,
             helpText: 'Select audit log dates',
             saveText: 'Apply',
+            builder: (context, child) => Center(
+              child: Padding(
+                padding: const EdgeInsets.all(24),
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(
+                    maxWidth: 560,
+                    maxHeight: 640,
+                  ),
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(20),
+                    child: child!,
+                  ),
+                ),
+              ),
+            ),
           );
     if (!mounted || range == null) return;
     setState(() => _dateRange = range);
