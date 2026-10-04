@@ -10,7 +10,7 @@ const { enqueueEmployeeRangeReconciliation } = require('../services/dtrMonthEndR
 const { applyApprovedCorrectionToSummary, getCorrectionShift } = require('./dtrDailySummary');
 const { getShiftType } = require('../services/shiftAttendance');
 const { broadcastBiometricUpdate } = require('../websockets/biometricStream');
-const { resolveDtrCorrectionReviewers } = require('../services/dtrCorrectionReviewers');
+const { resolveDtrCorrectionReviewers, reviewerAccessSql } = require('../services/dtrCorrectionReviewers');
 const { loadDtrAccess } = require('../middleware/dtrAccess');
 const { todayInHrmsTimezone } = require('../utils/dateRangeParser');
 
@@ -51,8 +51,9 @@ function createRouter({ db = pool, auth = authMiddleware, apply = applyApprovedC
       db.query(`SELECT effective_from::text AS effective_from, reviewer_ids, created_at
         FROM dtr_correction_reviewer_configs WHERE effective_from <= $1::date
         ORDER BY effective_from DESC, created_at DESC, id DESC LIMIT 1`, [date]),
-      db.query(`SELECT id, full_name AS name FROM users WHERE role IN ('admin','hr')
+      db.query(`SELECT id, full_name AS name FROM users u WHERE role IN ('admin','hr')
         AND is_active = true AND COALESCE(employment_status, 'active') = 'active'
+        AND ${reviewerAccessSql}
         ORDER BY full_name, id`),
     ]);
     res.json({ config: config.rows[0] || null, eligible: eligible.rows });
@@ -80,9 +81,10 @@ function createRouter({ db = pool, auth = authMiddleware, apply = applyApprovedC
           AND COALESCE(a.corrections_allowed, false) = false`, [ids]);
       if (disabled.rows.length) fail('Enable DTR Corrections access for each admin reviewer before assigning them.', 409);
       if (ids.length === 1) {
-        const count = await client.query(`SELECT count(*)::int AS total FROM users
+        const count = await client.query(`SELECT count(*)::int AS total FROM users u
           WHERE role IN ('admin','hr') AND is_active = true
-            AND COALESCE(employment_status, 'active') = 'active'`);
+            AND COALESCE(employment_status, 'active') = 'active'
+            AND ${reviewerAccessSql}`);
         if (count.rows[0].total > 1) fail('Choose a backup reviewer when another eligible account is available.', 409);
       }
       await client.query(`INSERT INTO dtr_correction_reviewer_configs

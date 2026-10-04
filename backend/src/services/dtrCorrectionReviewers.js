@@ -1,5 +1,12 @@
 const { todayInHrmsTimezone } = require('../utils/dateRangeParser');
 
+// Queries using this predicate must alias users as u. HR has inherent access;
+// admins need an explicit, currently enabled corrections permission.
+const reviewerAccessSql = `(u.role = 'hr' OR EXISTS (
+  SELECT 1 FROM dtr_admin_access a
+  WHERE a.admin_user_id = u.id AND a.corrections_allowed = true
+))`;
+
 async function resolveDtrCorrectionReviewers(db, date = todayInHrmsTimezone()) {
   const result = await db.query(`
     SELECT u.id, u.full_name AS name
@@ -14,8 +21,9 @@ async function resolveDtrCorrectionReviewers(db, date = todayInHrmsTimezone()) {
        AND u.is_active = true
        AND COALESCE(u.employment_status, 'active') = 'active'
        AND u.role IN ('admin', 'hr')
+       AND ${reviewerAccessSql}
      ORDER BY assigned.rank`, [date]);
   return result.rows;
 }
 
-module.exports = { resolveDtrCorrectionReviewers };
+module.exports = { resolveDtrCorrectionReviewers, reviewerAccessSql };

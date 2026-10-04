@@ -44,6 +44,39 @@ function fixture({ own = false, status = 'pending', stale = false, applyError = 
 }
 const reviewRequest = (role = 'hr') => ({ user: { id: reviewer, role }, params: { id }, body: { decision: 'approved', notes: 'Verified against supervisor report.' } });
 
+test('submission refuses no eligible reviewer or only the requester', async () => {
+  for (const assigned of [[], [{ id: employee }]]) {
+    const router = createRouter({
+      reviewers: async () => assigned,
+      shiftFor: async () => ({ startMinutes: 480, endMinutes: 1020 }),
+      db: { connect: async () => { throw new Error('must not insert a request'); } },
+    });
+    const res = await invoke(router, 'post', '/', {
+      user: { id: employee, role: 'employee' },
+      body: { attendance_date: '2026-09-30', reason: 'Missing biometric punch.',
+        requested_time_in: '2026-09-30T08:00:00+08:00' },
+    });
+    assert.equal(res.code, 409);
+    assert.match(res.body.error, /No other active DTR correction reviewer/);
+  }
+});
+
+test('reviewer options use the same current corrections access rule', async () => {
+  const router = createRouter({ db: { query: async sql => {
+    if (sql.includes('FROM users')) {
+      assert.match(sql, /u.role = 'hr' OR EXISTS/);
+      assert.match(sql, /a.admin_user_id = u.id AND a.corrections_allowed = true/);
+      return { rows: [{ id: reviewer, name: 'Eligible reviewer' }] };
+    }
+    return { rows: [] };
+  } } });
+  const res = await invoke(router, 'get', '/reviewers', {
+    user: { id: reviewer, role: 'admin' }, query: {},
+  });
+  assert.equal(res.code, 200);
+  assert.deepEqual(res.body.eligible, [{ id: reviewer, name: 'Eligible reviewer' }]);
+});
+
 test('employees cannot access the review list', async () => {
   const router = createRouter({ db: { query: async () => { throw new Error('must not query'); } } });
   const res = await invoke(router, 'get', '/', { user: { id: employee, role: 'employee' }, query: { review: 'true' } });
@@ -72,7 +105,11 @@ test('only admins can configure two or more eligible reviewers', async () => {
   const client = { release() {}, async query(sql, args) {
     queries.push(sql);
     if (sql.includes('FROM users WHERE id = ANY')) return { rows: args[0].map(id => ({ id })) };
-    if (sql.includes('count(*)')) return { rows: [{ total: eligibleCount }] };
+    if (sql.includes('count(*)')) {
+      assert.match(sql, /u.role = 'hr' OR EXISTS/);
+      assert.match(sql, /a.admin_user_id = u.id AND a.corrections_allowed = true/);
+      return { rows: [{ total: eligibleCount }] };
+    }
     return { rows: [] };
   } };
   const router = createRouter({ db: { connect: async () => client } });

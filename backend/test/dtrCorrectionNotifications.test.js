@@ -16,6 +16,8 @@ test('DTR submission and decisions use the shared in-app/push notification servi
     const db = { query: async (sql, args) => {
       assert.match(sql, /dtr_correction_reviewer_configs/);
       assert.match(sql, /u.is_active = true/);
+      assert.match(sql, /u.role = 'hr' OR EXISTS/);
+      assert.match(sql, /a.admin_user_id = u.id AND a.corrections_allowed = true/);
       assert.equal(args.length, 1);
       return { rows: [{ id: 'reviewer' }] };
     } };
