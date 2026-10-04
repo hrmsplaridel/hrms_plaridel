@@ -20,6 +20,13 @@ class _SystemHealthPageState extends State<SystemHealthPage> {
   bool _loading = false;
   String? _error;
   int _hours = 24;
+  int? _displayedHours;
+
+  String _rangeLabel(int hours) => hours == 168
+      ? '7 days'
+      : hours == 1
+      ? '1 hour'
+      : '24 hours';
 
   @override
   void initState() {
@@ -36,24 +43,27 @@ class _SystemHealthPageState extends State<SystemHealthPage> {
 
   Future<void> _refresh() async {
     if (_loading) return;
+    final requestedHours = _hours;
     setState(() => _loading = true);
     try {
       final data = widget.load != null
-          ? await widget.load!(_hours)
+          ? await widget.load!(requestedHours)
           : (await ApiClient.instance.get<Map<String, dynamic>>(
               '/api/system-health',
-              queryParameters: {'hours': _hours},
+              queryParameters: {'hours': requestedHours},
             )).data!;
       if (!mounted) return;
       setState(() {
         _data = data;
+        _displayedHours = requestedHours;
         _error = null;
       });
     } catch (_) {
       if (!mounted) return;
       setState(
-        () => _error =
-            'Unable to refresh system health. Check your connection and account access. Displayed readings may be outdated.',
+        () => _error = _data != null && requestedHours != _displayedHours
+            ? 'Could not load ${_rangeLabel(requestedHours)}. Still showing ${_rangeLabel(_displayedHours!)}. Displayed readings may be outdated. Retry using Refresh or choose another range.'
+            : 'Unable to refresh system health. Check your connection and account access.${_data != null ? ' Displayed readings may be outdated.' : ''}',
       );
     } finally {
       if (mounted) setState(() => _loading = false);
@@ -143,7 +153,8 @@ class _SystemHealthPageState extends State<SystemHealthPage> {
         ),
       );
     }
-    final start = end - _hours * 3600000;
+    final displayedHours = _displayedHours!;
+    final start = end - displayedHours * 3600000;
     final colors = [Colors.orange, Colors.blue, Colors.teal];
     final keys = ['cpuPercent', 'memoryPercent', 'diskPercent'];
     return Column(
@@ -166,7 +177,7 @@ class _SystemHealthPageState extends State<SystemHealthPage> {
           child: LineChart(
             LineChartData(
               minX: 0,
-              maxX: _hours.toDouble(),
+              maxX: displayedHours.toDouble(),
               minY: 0,
               maxY: 100,
               clipData: const FlClipData.all(),
@@ -326,7 +337,7 @@ class _SystemHealthPageState extends State<SystemHealthPage> {
                   label: Text(status),
                 ),
                 Text('Last reading: ${_time(current?['timestamp'])}'),
-                Text('${_data!['sampleCount']} readings in selected range'),
+                Text('${_data!['sampleCount']} readings in displayed range'),
               ],
             ),
             if (storageFailed)
@@ -406,47 +417,61 @@ class _SystemHealthPageState extends State<SystemHealthPage> {
               },
             ),
             const SizedBox(height: 24),
-            _panel(
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Wrap(
-                    spacing: 20,
-                    runSpacing: 12,
-                    crossAxisAlignment: WrapCrossAlignment.center,
-                    children: [
-                      Text(
-                        'Resource history',
-                        style: Theme.of(context).textTheme.titleLarge,
-                      ),
-                      SegmentedButton<int>(
-                        segments: const [
-                          ButtonSegment(value: 1, label: Text('1 hour')),
-                          ButtonSegment(value: 24, label: Text('24 hours')),
-                          ButtonSegment(value: 168, label: Text('7 days')),
-                        ],
-                        selected: {_hours},
-                        onSelectionChanged: _loading
-                            ? null
-                            : (values) {
-                                setState(() {
-                                  _hours = values.first;
-                                  _data = null;
-                                });
-                                _refresh();
-                              },
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 20),
+          ],
+          _panel(
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Wrap(
+                  spacing: 20,
+                  runSpacing: 12,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    Text(
+                      'Resource history',
+                      style: Theme.of(context).textTheme.titleLarge,
+                    ),
+                    SegmentedButton<int>(
+                      segments: const [
+                        ButtonSegment(value: 1, label: Text('1 hour')),
+                        ButtonSegment(value: 24, label: Text('24 hours')),
+                        ButtonSegment(value: 168, label: Text('7 days')),
+                      ],
+                      selected: {_hours},
+                      onSelectionChanged: _loading
+                          ? null
+                          : (values) {
+                              setState(() {
+                                _hours = values.first;
+                              });
+                              _refresh();
+                            },
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 20),
+                if (_data != null) ...[
+                  Text('Showing ${_rangeLabel(_displayedHours!)}'),
+                  if (_loading && _hours != _displayedHours)
+                    Text(
+                      'Loading ${_rangeLabel(_hours)}… Previous readings remain visible.',
+                    ),
+                  const SizedBox(height: 12),
                   _chart(
                     _data!['history'] as List? ?? [],
                     _data!['generatedAt'] as num,
                     _data!['bucketMs'] as num,
                   ),
-                ],
-              ),
+                ] else
+                  Text(
+                    _loading
+                        ? 'Loading readings…'
+                        : 'No readings loaded. Refresh or choose another range to retry.',
+                  ),
+              ],
             ),
+          ),
+          if (_data != null) ...[
             const SizedBox(height: 24),
             _panel(
               Column(
