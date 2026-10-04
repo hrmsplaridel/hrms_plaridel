@@ -1105,6 +1105,37 @@ test('permission explanation denies an unassigned admin workflow action', async 
     }
   );
   assert.equal(result.final_decision, false);
+  assert.equal(result.reason, 'not_assigned_to_step');
+});
+
+test('permission explanation does not call a blocked step assignee unassigned', async () => {
+  const mockClient = {
+    query: async (sql) => {
+      if (sql.includes('FROM docutracker_workflow_steps s') && sql.includes('docutracker_workflow_step_assignees')) {
+        return {
+          rowCount: 1,
+          rows: [{ is_enabled: true, allowed_actions: ['approve'], is_primary: true, backup_rank: null }],
+        };
+      }
+      return { rowCount: 0, rows: [] };
+    },
+  };
+  const result = await getEffectivePermissionExplanation(mockClient, {
+    user: { id: 'assignee-1', role: 'employee' },
+    action: 'approve',
+    documentType: 'memo',
+    document: {
+      id: 'doc-closed',
+      document_type: 'memo',
+      status: 'approved',
+      current_step: 1,
+      current_holder_id: 'holder-1',
+      workflow_version: 2,
+      created_by: 'creator-1',
+    },
+  });
+  assert.equal(result.final_decision, false);
+  assert.equal(result.reason, 'blocked_by_workflow_rule');
 });
 
 test('removed normalized assignee is not restored from legacy workflow JSON', async () => {

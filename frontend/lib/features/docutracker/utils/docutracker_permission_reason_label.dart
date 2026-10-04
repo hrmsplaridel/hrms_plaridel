@@ -26,6 +26,8 @@ String docuTrackerPermissionReasonLabel(
       'You are not the current reviewer or step assignee, so you cannot $actionName.',
     'assigned_but_action_not_allowed' =>
       'You are on this step, but your role is not allowed to $actionName.',
+    'blocked_by_workflow_rule' =>
+      'You are on this step, but a workflow rule does not allow you to $actionName.',
     'relationship_required' =>
       'You must be the creator, current reviewer, or a step assignee to $actionName.',
     'explicit_permission' => 'Your account is not permitted to $actionName.',

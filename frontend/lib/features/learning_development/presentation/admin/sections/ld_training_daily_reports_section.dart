@@ -338,7 +338,8 @@ class _LdTrainingDailyReportsSectionState
               refresh,
             ],
           ),
-          if (_hasActiveFilters) Align(alignment: Alignment.centerLeft, child: clear),
+          if (_hasActiveFilters)
+            Align(alignment: Alignment.centerLeft, child: clear),
         ],
       );
     }
@@ -546,9 +547,7 @@ class _ReportEmptyState extends StatelessWidget {
   Widget build(BuildContext context) {
     final primary = AppTheme.dashTextPrimaryOf(context);
     final secondary = AppTheme.dashTextSecondaryOf(context);
-    final title = hasFilters
-        ? 'No reports found'
-        : 'No training reports yet';
+    final title = hasFilters ? 'No reports found' : 'No training reports yet';
     final subtitle = hasFilters
         ? (filterByDate != null
               ? 'No training reports match your current search or selected date.'
@@ -585,7 +584,10 @@ class _ReportEmptyState extends StatelessWidget {
               ),
               if (onClear != null) ...[
                 const SizedBox(height: 12),
-                TextButton(onPressed: onClear, child: const Text('Clear filters')),
+                TextButton(
+                  onPressed: onClear,
+                  child: const Text('Clear filters'),
+                ),
               ],
             ],
           ),
@@ -632,7 +634,12 @@ class _TrainingReportCard extends StatelessWidget {
         borderRadius: BorderRadius.circular(12),
         hoverColor: AppTheme.primaryNavy.withValues(alpha: 0.03),
         child: Container(
-          padding: EdgeInsets.fromLTRB(compact ? 14 : 16, 14, compact ? 12 : 16, 14),
+          padding: EdgeInsets.fromLTRB(
+            compact ? 14 : 16,
+            14,
+            compact ? 12 : 16,
+            14,
+          ),
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(12),
             border: Border.all(color: hairline),
@@ -667,7 +674,9 @@ class _TrainingReportCard extends StatelessWidget {
                         ),
                         const SizedBox(height: 3),
                         Text(
-                          r.title.trim().isEmpty ? 'Untitled training' : r.title,
+                          r.title.trim().isEmpty
+                              ? 'Untitled training'
+                              : r.title,
                           style: TextStyle(
                             color: secondary,
                             fontSize: 13,
@@ -686,8 +695,16 @@ class _TrainingReportCard extends StatelessWidget {
                 spacing: 14,
                 runSpacing: 4,
                 children: [
-                  _meta(context, Icons.event_outlined, _formatReportDate(r.submittedAt)),
-                  _meta(context, Icons.schedule_rounded, _formatReportTime(r.submittedAt)),
+                  _meta(
+                    context,
+                    Icons.event_outlined,
+                    _formatReportDate(r.submittedAt),
+                  ),
+                  _meta(
+                    context,
+                    Icons.schedule_rounded,
+                    _formatReportTime(r.submittedAt),
+                  ),
                 ],
               ),
               const SizedBox(height: 10),
@@ -705,7 +722,9 @@ class _TrainingReportCard extends StatelessWidget {
                 maxLines: 3,
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(
-                  color: desc.isEmpty ? secondary.withValues(alpha: 0.8) : primary,
+                  color: desc.isEmpty
+                      ? secondary.withValues(alpha: 0.8)
+                      : primary,
                   fontSize: 13.5,
                   height: 1.4,
                   fontStyle: desc.isEmpty ? FontStyle.italic : FontStyle.normal,
@@ -838,7 +857,9 @@ class _TrainingReportCard extends StatelessWidget {
             onPressed: onView,
             style: OutlinedButton.styleFrom(
               foregroundColor: AppTheme.primaryNavy,
-              side: BorderSide(color: AppTheme.primaryNavy.withValues(alpha: 0.35)),
+              side: BorderSide(
+                color: AppTheme.primaryNavy.withValues(alpha: 0.35),
+              ),
               minimumSize: const Size(0, 40),
             ),
             child: const Text('View'),
@@ -894,8 +915,18 @@ class _TrainingReportCard extends StatelessWidget {
 String _formatReportDate(DateTime utc) {
   final l = utc.toLocal();
   const months = [
-    'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-    'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+    'Jan',
+    'Feb',
+    'Mar',
+    'Apr',
+    'May',
+    'Jun',
+    'Jul',
+    'Aug',
+    'Sep',
+    'Oct',
+    'Nov',
+    'Dec',
   ];
   return '${months[l.month - 1]} ${l.day}, ${l.year}';
 }

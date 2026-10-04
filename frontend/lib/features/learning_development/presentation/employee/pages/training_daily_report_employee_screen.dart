@@ -83,9 +83,7 @@ class _TrainingDailyReportEmployeeScreenState
       ..sort((a, b) => b.submittedAt.compareTo(a.submittedAt));
     if (_filterByDate != null) {
       final day = _filterByDate!;
-      sorted = sorted
-          .where((r) => _toLocalDate(r.submittedAt) == day)
-          .toList();
+      sorted = sorted.where((r) => _toLocalDate(r.submittedAt) == day).toList();
     }
     final q = _searchController.text.trim().toLowerCase();
     if (q.isNotEmpty) {
@@ -228,10 +226,7 @@ class _TrainingDailyReportEmployeeScreenState
           ),
           if (hint != null) ...[
             const SizedBox(width: 6),
-            Text(
-              hint,
-              style: TextStyle(color: secondary, fontSize: 12),
-            ),
+            Text(hint, style: TextStyle(color: secondary, fontSize: 12)),
           ],
         ],
       ),
@@ -1001,7 +996,11 @@ class _TrainingDailyReportEmployeeScreenState
       padding: const EdgeInsets.symmetric(vertical: 28, horizontal: 8),
       child: Column(
         children: [
-          Icon(icon, size: 40, color: AppTheme.primaryNavy.withValues(alpha: 0.7)),
+          Icon(
+            icon,
+            size: 40,
+            color: AppTheme.primaryNavy.withValues(alpha: 0.7),
+          ),
           const SizedBox(height: 10),
           Text(
             title,
@@ -1037,8 +1036,7 @@ class _TrainingDailyReportEmployeeScreenState
         context: context,
         icon: Icons.description_outlined,
         title: 'No training reports yet',
-        body:
-            'When you submit your first daily report, it will show up here.',
+        body: 'When you submit your first daily report, it will show up here.',
         action: TextButton(
           onPressed: _focusCreateForm,
           child: const Text('Create your first report'),
@@ -1205,10 +1203,7 @@ class _ReportHistoryRow extends StatelessWidget {
                       style: TextStyle(color: secondary, fontSize: 12.5),
                     ),
                   ),
-                  TextButton(
-                    onPressed: onView,
-                    child: const Text('View →'),
-                  ),
+                  TextButton(onPressed: onView, child: const Text('View →')),
                 ],
               ),
             ],

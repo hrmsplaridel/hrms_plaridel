@@ -1748,14 +1748,12 @@ async function getEffectivePermissionExplanation(client, { user, action, documen
       action: canonicalAction,
     });
     const reason = allowed
-      ? (isHolder
-          ? 'current_holder'
-          : allowedByAssignedRule === false
+      ? (isHolder ? 'current_holder' : 'step_assignee')
+      : !stepAssigneeRow
+          ? 'not_assigned_to_step'
+          : !allowedByAssignedRule
               ? 'assigned_but_action_not_allowed'
-              : 'step_assignee')
-      : (allowedByAssignedRule === false
-          ? 'assigned_but_action_not_allowed'
-          : 'not_assigned_to_step');
+              : 'blocked_by_workflow_rule';
     return {
       scope: scopeType,
       action: canonicalAction,
