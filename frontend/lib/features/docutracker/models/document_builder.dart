@@ -191,6 +191,15 @@ class DocuTrackerSourceSignatureBundle {
   }
 }
 
+/// Signature progress of an RSP/L&D form as seen by the current viewer.
+/// [waitingOnOthers] includes partially signed forms.
+enum DocuTrackerSourceSignatureState {
+  needsSetup,
+  needsYourSignature,
+  waitingOnOthers,
+  fullySigned,
+}
+
 class DocuTrackerRspSignatureRequest {
   const DocuTrackerRspSignatureRequest({
     required this.sourceModule,
@@ -263,6 +272,11 @@ class DocuTrackerRspSignatureRequest {
             signature.assignedSignerId.trim().isNotEmpty && signature.isSigned,
       );
 
+  /// Number of signature slots already signed.
+  int get signedCount => signatureBundle.signatures
+      .where((signature) => signature.isSigned)
+      .length;
+
   /// Names of assigned signers who still have to sign.
   List<String> get pendingSignerNames => signatureBundle.signatures
       .where(
@@ -288,6 +302,16 @@ class DocuTrackerRspSignatureRequest {
         .toList(growable: false);
     if (mine.isEmpty) return false;
     return mine.every((signature) => signature.isSigned);
+  }
+
+  /// Where the form belongs for the viewer, from its signature progress.
+  DocuTrackerSourceSignatureState get signatureState {
+    if (requiresSetup) return DocuTrackerSourceSignatureState.needsSetup;
+    if (hasUnsignedAssignedSlot) {
+      return DocuTrackerSourceSignatureState.needsYourSignature;
+    }
+    if (isFullySigned) return DocuTrackerSourceSignatureState.fullySigned;
+    return DocuTrackerSourceSignatureState.waitingOnOthers;
   }
 
   /// Still needs attention (unsigned / setup). Used for sidebar badges.

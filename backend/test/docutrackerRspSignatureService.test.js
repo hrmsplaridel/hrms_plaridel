@@ -25,6 +25,7 @@ function sourceRow(overrides = {}) {
 function signatureRow(overrides = {}) {
   return {
     id: '66666666-6666-4666-8666-666666666666',
+    source_record_id: formId,
     slot_key: 'prepared_by',
     label: 'Prepared by',
     assigned_signer_id: signerId,
@@ -217,12 +218,15 @@ test('signature request list returns only forms assigned to the current user', a
         return sourceRow();
       }
       if (sql.includes('FROM docutracker_rsp_source_signatures s')) {
+        assert.deepEqual(params[1], [formId]);
         return { rowCount: 1, rows: [signatureRow()] };
       }
-      if (sql.includes('SELECT to_jsonb(source_row)')) {
+      if (sql.includes('to_jsonb(source_row)') && sql.includes('= ANY($1::uuid[])')) {
+        assert.deepEqual(params[0], [formId]);
         return {
           rowCount: 1,
           rows: [{
+            source_record_id: formId,
             source_record: {
               id: formId,
               vacant_position: 'Administrative Officer',
@@ -252,27 +256,22 @@ test('RSP admins can discover unassigned signature-bearing forms for setup', asy
         sql.includes('FROM "selection_lineup_entries"') &&
         sql.includes('ORDER BY updated_at')
       ) {
-        return { rowCount: 1, rows: [{ source_record_id: formId }] };
-      }
-      if (sql.includes('ORDER BY updated_at')) {
-        return { rowCount: 0, rows: [] };
-      }
-      if (sql.includes('SELECT id, created_by FROM "selection_lineup_entries"')) {
-        return sourceRow();
-      }
-      if (sql.includes('FROM docutracker_rsp_source_signatures s')) {
-        return { rowCount: 0, rows: [] };
-      }
-      if (sql.includes('SELECT to_jsonb(source_row)')) {
         return {
           rowCount: 1,
           rows: [{
+            source_record_id: formId,
             source_record: {
               id: formId,
               vacant_position: 'Administrative Officer',
             },
           }],
         };
+      }
+      if (sql.includes('ORDER BY updated_at')) {
+        return { rowCount: 0, rows: [] };
+      }
+      if (sql.includes('FROM docutracker_rsp_source_signatures s')) {
+        return { rowCount: 0, rows: [] };
       }
       throw new Error(`Unexpected query: ${sql}`);
     },
@@ -325,10 +324,11 @@ test('completed source signature requests stay visible for the assigned signer',
           ],
         };
       }
-      if (sql.includes('SELECT to_jsonb(source_row)')) {
+      if (sql.includes('to_jsonb(source_row)')) {
         return {
           rowCount: 1,
           rows: [{
+            source_record_id: formId,
             source_record: {
               id: formId,
               vacant_position: 'Administrative Officer',
@@ -349,6 +349,95 @@ test('completed source signature requests stay visible for the assigned signer',
   assert.equal(result[0].signature_bundle.signatures[0].can_sign, true);
   assert.ok(result[0].signature_bundle.signatures[0].signed_at);
   assert.equal(result[0].signature_bundle.source_status, 'completed');
+});
+
+test('fully signed source forms stay visible to admins who did not sign them', async () => {
+  const pool = {
+    async query(sql) {
+      if (sql.includes('FROM "selection_lineup_entries"') && sql.includes('ORDER BY updated_at')) {
+        return {
+          rowCount: 1,
+          rows: [{
+            source_record_id: formId,
+            source_record: { id: formId, vacant_position: 'Administrative Officer' },
+          }],
+        };
+      }
+      if (sql.includes('ORDER BY updated_at')) return { rowCount: 0, rows: [] };
+      if (sql.includes('FROM docutracker_rsp_source_signatures s')) {
+        return {
+          rowCount: 1,
+          rows: [
+            signatureRow({
+              signature_asset_id: assetId,
+              signed_by: signerId,
+              signed_at: new Date('2026-09-16T01:00:00.000Z'),
+            }),
+          ],
+        };
+      }
+      throw new Error(`Unexpected query: ${sql}`);
+    },
+  };
+
+  const result = await listRspSignatureRequests(pool, { id: adminId, role: 'admin' });
+  assert.equal(result.length, 1);
+  assert.equal(result[0].requires_setup, false);
+  assert.equal(result[0].signature_bundle.source_status, 'completed');
+  assert.equal(result[0].signature_bundle.signatures[0].can_sign, false);
+});
+
+test('admin signature feed batches lookups instead of querying per form', async () => {
+  const formIds = [
+    'a1111111-1111-4111-8111-111111111111',
+    'a2222222-2222-4222-8222-222222222222',
+    'a3333333-3333-4333-8333-333333333333',
+  ];
+  const queries = [];
+  const pool = {
+    async query(sql, params = []) {
+      queries.push(sql);
+      if (sql.includes('FROM "selection_lineup_entries"') && sql.includes('ORDER BY updated_at')) {
+        return {
+          rowCount: formIds.length,
+          rows: formIds.map((id) => ({
+            source_record_id: id,
+            source_record: { id, vacant_position: `Position ${id.slice(0, 2)}` },
+          })),
+        };
+      }
+      if (sql.includes('ORDER BY updated_at')) return { rowCount: 0, rows: [] };
+      if (sql.includes('FROM docutracker_rsp_source_signatures s')) {
+        assert.equal(params[0], 'selection_lineup_entries');
+        assert.deepEqual(params[1], formIds);
+        return {
+          rowCount: 2,
+          rows: [
+            signatureRow({ source_record_id: formIds[0] }),
+            signatureRow({
+              source_record_id: formIds[2],
+              signature_asset_id: assetId,
+              signed_at: new Date('2026-09-16T01:00:00.000Z'),
+            }),
+          ],
+        };
+      }
+      throw new Error(`Unexpected query: ${sql}`);
+    },
+  };
+
+  const result = await listRspSignatureRequests(pool, { id: adminId, role: 'admin' });
+  // One listing query per RSP form table, plus one signature query for the
+  // only table that has forms, regardless of how many forms it holds.
+  assert.equal(queries.length, 6);
+  assert.deepEqual(
+    result.map((request) => request.signature_bundle.source_status),
+    ['awaiting_signatures', 'needs_setup', 'completed']
+  );
+  assert.deepEqual(
+    result.map((request) => request.source_record_id),
+    formIds
+  );
 });
 
 test('completed source signature requests are omitted for unrelated viewers', async () => {
@@ -388,11 +477,12 @@ test('orphaned source signature rows for deleted forms are skipped', async () =>
           ],
         };
       }
-      if (sql.includes('SELECT to_jsonb(source_row)')) {
-        if (params[0] === missingFormId) return { rowCount: 0, rows: [] };
+      if (sql.includes('to_jsonb(source_row)')) {
+        assert.deepEqual(params[0], [missingFormId, formId]);
         return {
           rowCount: 1,
           rows: [{
+            source_record_id: formId,
             source_record: {
               id: formId,
               department: 'HR Office',
@@ -400,12 +490,6 @@ test('orphaned source signature rows for deleted forms are skipped', async () =>
             },
           }],
         };
-      }
-      if (
-        sql.includes('SELECT id FROM "action_brainstorming_coaching_entries"') ||
-        sql.includes('SELECT id, created_by FROM "action_brainstorming_coaching_entries"')
-      ) {
-        return sourceRow();
       }
       if (sql.includes('FROM docutracker_rsp_source_signatures s')) {
         return {
@@ -456,24 +540,10 @@ test('L&D admins can discover unassigned signature-bearing forms for setup', asy
   const pool = {
     async query(sql) {
       if (sql.includes('FROM "idp_entries"') && sql.includes('ORDER BY updated_at')) {
-        return { rowCount: 1, rows: [{ source_record_id: formId }] };
-      }
-      if (
-        sql.includes('FROM "action_brainstorming_coaching_entries"') &&
-        sql.includes('ORDER BY updated_at')
-      ) {
-        return { rowCount: 0, rows: [] };
-      }
-      if (sql.includes('SELECT id, created_by FROM "idp_entries"')) {
-        return sourceRow();
-      }
-      if (sql.includes('FROM docutracker_rsp_source_signatures s')) {
-        return { rowCount: 0, rows: [] };
-      }
-      if (sql.includes('SELECT to_jsonb(source_row)')) {
         return {
           rowCount: 1,
           rows: [{
+            source_record_id: formId,
             source_record: {
               id: formId,
               name: 'Juan Dela Cruz',
@@ -481,6 +551,15 @@ test('L&D admins can discover unassigned signature-bearing forms for setup', asy
             },
           }],
         };
+      }
+      if (
+        sql.includes('FROM "action_brainstorming_coaching_entries"') &&
+        sql.includes('ORDER BY updated_at')
+      ) {
+        return { rowCount: 0, rows: [] };
+      }
+      if (sql.includes('FROM docutracker_rsp_source_signatures s')) {
+        return { rowCount: 0, rows: [] };
       }
       throw new Error(`Unexpected query: ${sql}`);
     },

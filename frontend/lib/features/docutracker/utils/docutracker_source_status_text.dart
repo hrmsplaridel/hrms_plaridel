@@ -1,3 +1,4 @@
+import 'package:hrms_plaridel/features/docutracker/models/document.dart';
 import 'package:hrms_plaridel/features/recruitment/utils/rsp_applications_report_export.dart';
 
 /// Read-only status wording for records owned by other HRMS modules.
@@ -32,18 +33,39 @@ DocuTrackerSourceStatusText docuTrackerLinkedSourceStatusText({
   );
 }
 
+/// Badge wording for an L&D source row. Its DocuTracker status is coarser than
+/// the L&D lifecycle (a reviewed report maps to approved), so the badge uses
+/// the module's own label instead.
+String? docuTrackerSourceBadgeLabel(DocuTrackerDocument document) {
+  if (!document.sourceOnly) return null;
+  if (document.sourceModule?.trim().toLowerCase() != 'ld') return null;
+  final raw = document.sourceStatus?.trim().toLowerCase() ?? '';
+  if (raw.isEmpty) return null;
+  return _trainingReportStatusText(raw).label;
+}
+
+/// Whether [document] is an L&D report that L&D marked seen/reviewed: complete
+/// in DocuTracker, but never approved, so it stays out of approval counts.
+bool docuTrackerIsReviewedSourceCompletion(DocuTrackerDocument document) {
+  if (!document.sourceOnly) return false;
+  if (document.sourceModule?.trim().toLowerCase() != 'ld') return false;
+  final raw = document.sourceStatus?.trim().toLowerCase() ?? '';
+  return raw == 'seen' || raw == 'reviewed';
+}
+
 DocuTrackerSourceStatusText _trainingReportStatusText(String raw) {
   final description = switch (raw) {
     'submitted' => 'The report was submitted and is waiting for L&D review.',
-    'seen' => 'An L&D administrator has opened this report.',
-    'reviewed' => 'An L&D administrator has reviewed this report.',
+    'seen' || 'reviewed' =>
+      'An L&D administrator reviewed this report. No further '
+          'action is needed.',
     'approved' => 'The report was approved by L&D.',
     'needs_revision' ||
     'needs-revision' => 'L&D asked the employee to revise this report.',
     _ => 'Status is managed by the L&D module.',
   };
   return DocuTrackerSourceStatusText(
-    label: _humanize(raw),
+    label: raw == 'seen' ? 'Reviewed' : _humanize(raw),
     description: description,
   );
 }

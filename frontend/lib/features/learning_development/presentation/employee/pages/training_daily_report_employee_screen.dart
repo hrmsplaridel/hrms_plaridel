@@ -1,6 +1,8 @@
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 
+import 'package:hrms_plaridel/features/docutracker/data/providers/docutracker_provider.dart';
 import 'package:hrms_plaridel/features/learning_development/models/training_daily_report.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/shared/widgets/read_only_saved_entry_dialog.dart';
@@ -348,6 +350,9 @@ class _TrainingDailyReportEmployeeScreenState
       );
 
       if (!mounted) return;
+      try {
+        context.read<DocuTrackerProvider>().invalidateDocuments();
+      } catch (_) {}
       _titleController.clear();
       _descriptionController.clear();
       setState(() {

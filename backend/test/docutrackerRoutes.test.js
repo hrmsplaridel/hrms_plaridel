@@ -125,7 +125,7 @@ test('GET /governance-audit preserves entries for deleted actors', async () => {
   const queries = [];
   const auditRow = {
     id: 'audit-1',
-    actor_id: 'deleted-user-1',
+    actor_id: '33333333-3333-4333-8333-333333333333',
     actor_name: null,
     event_type: 'workflow_published',
     entity_type: 'workflow_version',
@@ -158,7 +158,7 @@ test('GET /governance-audit preserves entries for deleted actors', async () => {
     query: {
       document_type: 'memo',
       event_type: 'workflow_published, step_assignees_updated',
-      actor_id: 'deleted-user-1',
+      actor_id: '33333333-3333-4333-8333-333333333333',
       limit: '25',
       offset: '50',
     },
@@ -177,7 +177,7 @@ test('GET /governance-audit preserves entries for deleted actors', async () => {
   assert.deepEqual(queries[0].params, [
     'memo',
     ['workflow_published', 'step_assignees_updated'],
-    'deleted-user-1',
+    '33333333-3333-4333-8333-333333333333',
     25,
     50,
   ]);
@@ -225,6 +225,11 @@ test('GET /governance-audit filters permission history by target employee or rol
   const invalid = createMockResponse();
   await handler({ query: { target_user_id: 'not-a-uuid' } }, invalid);
   assert.equal(invalid.statusCode, 400);
+  assert.equal(queries.length, 1);
+
+  const invalidActor = createMockResponse();
+  await handler({ query: { actor_id: 'not-a-uuid' } }, invalidActor);
+  assert.equal(invalidActor.statusCode, 400);
   assert.equal(queries.length, 1);
 
   restoreWorkflow();

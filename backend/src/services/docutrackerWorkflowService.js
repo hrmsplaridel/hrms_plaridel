@@ -184,14 +184,27 @@ function sourceActionForRow(row, user) {
   return null;
 }
 
+/**
+ * An L&D report marked seen/reviewed is complete (mapped to approved) but was
+ * never approved, so the Approved filter must not list it.
+ */
+function isReviewedSourceCompletion(row) {
+  if (row?.source_module !== 'ld') return false;
+  const status = String(row.source_status || '').toLowerCase().trim();
+  return status === 'seen' || status === 'reviewed';
+}
+
 function mapSourceStatusToDocuTracker(sourceModule, sourceStatus) {
   const status = String(sourceStatus || '').toLowerCase().trim();
   if (!status) return 'pending';
 
   if (sourceModule === 'ld') {
-    if (status === 'approved') return 'approved';
+    // L&D's only review action is the admin "Mark as Seen", which the L&D
+    // module shows as "Reviewed" and which ends the report's workflow.
+    if (status === 'seen' || status === 'reviewed' || status === 'approved') {
+      return 'approved';
+    }
     if (status === 'needs_revision') return 'returned';
-    if (status === 'seen' || status === 'reviewed') return 'in_review';
     return 'pending';
   }
 
@@ -506,6 +519,7 @@ async function listSourceBackedDocuments(pool, user, filters = {}) {
     .filter((row) => {
       if (filters.status && filters.status !== 'All' && VALID_STATUSES.has(statusFilter)) {
         if (normalizeStatus(row.status) !== statusFilter) return false;
+        if (statusFilter === 'approved' && isReviewedSourceCompletion(row)) return false;
       }
       if (!q) return true;
       return (
@@ -3091,6 +3105,7 @@ module.exports = {
   mapDocumentRow,
   sourceActionForRow,
   mapSourceStatusToDocuTracker,
+  isReviewedSourceCompletion,
   permissionPriority,
   resolvePermissionDecisionFromRows,
   ensureValidWorkflowConfig,

@@ -17,6 +17,13 @@ void main() {
     expect(type.displayName, 'Travel Order');
   });
 
+  test('labels source-module types with their module names', () {
+    expect(documentTypeFromString('ld').displayName, 'L&D');
+    expect(documentTypeFromString('rsp').displayName, 'RSP');
+    expect(documentTypeFromString('dtr').displayName, 'DTR');
+    expect(documentTypeFromString('ld').value, 'ld');
+  });
+
   test('creates a stable value from an admin-entered name', () {
     final type = DocumentType.fromDisplayName('Travel Order');
 

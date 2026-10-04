@@ -210,6 +210,19 @@ test('RSP application statuses map to the hiring pipeline', () => {
   }
 });
 
+test('L&D daily report statuses map to the report review lifecycle', () => {
+  const expected = {
+    submitted: 'pending',
+    seen: 'approved',
+    reviewed: 'approved',
+    approved: 'approved',
+    needs_revision: 'returned',
+  };
+  for (const [status, mapped] of Object.entries(expected)) {
+    assert.equal(mapSourceStatusToDocuTracker('ld', status), mapped, status);
+  }
+});
+
 test('RSP source feed excludes Mayor endorsement records', async () => {
   let rspSql = '';
   const pool = {
@@ -242,6 +255,58 @@ test('RSP source feed excludes Mayor endorsement records', async () => {
   assert.equal(row.source_status, 'exam_taken');
   assert.equal(row.source_action, 'grade_exam_in_rsp');
   assert.equal(row.source_only, true);
+});
+
+test('Approved filter keeps approved documents but not reviewed L&D reports', async () => {
+  const sourceRow = (module, table, id, status) => ({
+    source_record_id: id,
+    source_module: module,
+    source_table: table,
+    source_title: id,
+    created_by: null,
+    creator_name: 'Someone',
+    created_at: '2026-09-01T00:00:00.000Z',
+    source_status: status,
+  });
+  const pool = {
+    query: async (sql) => {
+      if (sql.includes('FROM docutracker_documents d')) {
+        return {
+          rows: [{
+            id: 'memo-1', document_type: 'memo', title: 'Memo', status: 'approved',
+            created_at: '2026-09-02T00:00:00.000Z',
+          }],
+        };
+      }
+      if (sql.includes('FROM training_daily_reports r')) {
+        return {
+          rows: [
+            sourceRow('ld', 'training_daily_reports', 'report-seen', 'seen'),
+            sourceRow('ld', 'training_daily_reports', 'report-reviewed', 'reviewed'),
+            sourceRow('ld', 'training_daily_reports', 'report-approved', 'approved'),
+          ],
+        };
+      }
+      if (sql.includes('FROM recruitment_applications a')) {
+        return {
+          rows: [sourceRow('rsp', 'recruitment_applications', 'app-hired', 'registered')],
+        };
+      }
+      return { rowCount: 0, rows: [] };
+    },
+  };
+  const admin = { id: 'admin-1', role: 'admin' };
+
+  const approved = await listDocuments(pool, admin, { status: 'approved' });
+  assert.deepEqual(
+    approved.documents.map((d) => d.id).sort(),
+    ['memo-1', 'source:ld:report-approved', 'source:rsp:app-hired']
+  );
+
+  const all = await listDocuments(pool, admin, {});
+  const seen = all.documents.find((d) => d.id === 'source:ld:report-seen');
+  assert.equal(seen.status, 'approved');
+  assert.equal(seen.source_status, 'seen');
 });
 
 test('mapDocumentRow preserves server-owned source action metadata', () => {

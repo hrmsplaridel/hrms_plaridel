@@ -30,7 +30,7 @@ String _statusLabel(
       DocuTrackerDocumentVisibility.isWorkInProgressDraft(document)) {
     return 'Draft';
   }
-  return effectiveStatus.displayName;
+  return docuTrackerSourceBadgeLabel(document) ?? effectiveStatus.displayName;
 }
 
 String _assigneeLabel(DocuTrackerDocument document) {
@@ -229,11 +229,7 @@ class _DocuTrackerDocumentsScreenState
       userId: userId,
     );
     final pendingSourceRequests = provider.sourceSignatureRequests
-        .where((request) {
-          if (request.isAssignedToViewer) return true;
-          if (!widget.isAdmin) return false;
-          return request.requiresSetup || request.hasPendingAssignedSignature;
-        })
+        .where((request) => widget.isAdmin || request.isAssignedToViewer)
         .toList(growable: false);
 
     return Column(
@@ -649,17 +645,16 @@ class _RequiredActionsPanelState extends State<_RequiredActionsPanel> {
     final request = entry.sourceRequest;
     final document = entry.document;
     if (request != null) {
-      if (request.requiresSetup) return _ActionPriority.needsSetup;
-      if (request.hasUnsignedAssignedSlot) {
-        return _ActionPriority.needsSignature;
-      }
-      if (request.viewerHasCompletedAssignedSlots) {
-        return _ActionPriority.completed;
-      }
-      if (request.hasPendingAssignedSignature) {
-        return _ActionPriority.waiting;
-      }
-      return _ActionPriority.waiting;
+      return switch (request.signatureState) {
+        DocuTrackerSourceSignatureState.needsSetup =>
+          _ActionPriority.needsSetup,
+        DocuTrackerSourceSignatureState.needsYourSignature =>
+          _ActionPriority.needsSignature,
+        DocuTrackerSourceSignatureState.waitingOnOthers =>
+          _ActionPriority.waiting,
+        DocuTrackerSourceSignatureState.fullySigned =>
+          _ActionPriority.completed,
+      };
     }
     // Native / leave documents in this panel are already action-only.
     final action = (document?.sourceAction ?? '').trim();
@@ -1030,35 +1025,38 @@ class _RequiredActionsPanelState extends State<_RequiredActionsPanel> {
                 entries: _sorted(needsSetup),
               ),
             if (secondary.isNotEmpty) ...[
-              const SizedBox(height: 8),
-              Align(
-                alignment: Alignment.centerLeft,
-                child: TextButton.icon(
-                  onPressed: () =>
-                      setState(() => _showSecondary = !_showSecondary),
-                  icon: Icon(
-                    _showSecondary
-                        ? Icons.expand_less_rounded
-                        : Icons.expand_more_rounded,
-                  ),
-                  label: Text(
-                    _showSecondary
-                        ? 'Hide waiting & signed'
-                        : 'Show waiting & signed (${secondary.length})',
+              if (primary.isNotEmpty) ...[
+                const SizedBox(height: 8),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: TextButton.icon(
+                    onPressed: () =>
+                        setState(() => _showSecondary = !_showSecondary),
+                    icon: Icon(
+                      _showSecondary
+                          ? Icons.expand_less_rounded
+                          : Icons.expand_more_rounded,
+                    ),
+                    label: Text(
+                      _showSecondary
+                          ? 'Hide waiting & signed'
+                          : 'Show waiting (${waiting.length}) & fully signed '
+                                '(${completed.length})',
+                    ),
                   ),
                 ),
-              ),
-              if (_showSecondary) ...[
+              ],
+              if (_showSecondary || primary.isEmpty) ...[
                 if (waiting.isNotEmpty)
                   _buildSection(
                     context,
-                    title: 'Waiting on others',
+                    title: 'Waiting on other signers',
                     entries: _sorted(waiting),
                   ),
                 if (completed.isNotEmpty)
                   _buildSection(
                     context,
-                    title: 'Signed / completed',
+                    title: 'Fully signed',
                     entries: _sorted(completed),
                   ),
               ],
@@ -1155,17 +1153,24 @@ class _RequiredActionsPanelState extends State<_RequiredActionsPanel> {
     );
     final needsSetup = request?.requiresSetup == true;
     final canSignNow = request?.hasUnsignedAssignedSlot == true;
+    final fullySigned = request != null && !needsSetup && request.isFullySigned;
     final alreadySigned =
         request != null &&
         !needsSetup &&
         !canSignNow &&
-        request.viewerHasCompletedAssignedSlots;
+        (fullySigned || request.viewerHasCompletedAssignedSlots);
     final awaitingOthers =
         request != null &&
         !needsSetup &&
         !canSignNow &&
         !alreadySigned &&
         request.hasPendingAssignedSignature;
+    final partiallySigned =
+        request != null && !fullySigned && request.signedCount > 0;
+    final signatureProgress = request == null
+        ? ''
+        : '${request.signedCount} of '
+              '${request.signatureBundle.signatures.length} signed · ';
     final documentActionPending =
         document != null &&
         request == null &&
@@ -1191,6 +1196,17 @@ class _RequiredActionsPanelState extends State<_RequiredActionsPanel> {
         ? docuTrackerSourceModuleLabel(document?.sourceModule)
         : null;
     final pendingSigners = request?.pendingSignerNames ?? const <String>[];
+    final waitingHint = request?.viewerWaitingOnLabel != null
+        ? 'You sign after ${request!.viewerWaitingOnLabel}'
+        : alreadySigned
+        ? pendingSigners.isEmpty
+              ? 'You already signed — reopen to review'
+              : 'You signed — waiting on ${pendingSigners.join(', ')}'
+        : awaitingOthers
+        ? pendingSigners.isEmpty
+              ? 'Assigned signer has not signed yet'
+              : 'Waiting on ${pendingSigners.join(', ')}'
+        : 'Awaiting your e-signature';
     final statusHint = request == null
         ? sourceModuleLabel == null ||
                   (document?.sourceStatus ?? '').trim().isEmpty
@@ -1204,26 +1220,20 @@ class _RequiredActionsPanelState extends State<_RequiredActionsPanel> {
               ? '$unassignedCount signer${unassignedCount == 1 ? '' : 's'} still unassigned'
               : 'Assign required signers before this form can be completed'
         : canSignNow
-        ? 'Awaiting your e-signature'
-        : request.viewerWaitingOnLabel != null
-        ? 'You sign after ${request.viewerWaitingOnLabel}'
-        : alreadySigned
-        ? request.isFullySigned
-              ? 'All signatures complete'
-              : pendingSigners.isEmpty
-              ? 'You already signed — reopen to review'
-              : 'You signed — waiting on ${pendingSigners.join(', ')}'
-        : awaitingOthers
-        ? pendingSigners.isEmpty
-              ? 'Assigned signer has not signed yet'
-              : 'Waiting on ${pendingSigners.join(', ')}'
-        : 'Awaiting your e-signature';
+        ? '${partiallySigned ? signatureProgress : ''}Awaiting your e-signature'
+        : fullySigned
+        ? 'All signatures complete'
+        : '${partiallySigned ? signatureProgress : ''}$waitingHint';
     final chipLabel = needsSetup
         ? 'Needs setup'
         : documentActionPending && sourceModuleLabel != null
         ? 'Action'
         : canSignNow || documentActionPending
         ? 'Sign'
+        : fullySigned
+        ? 'Signed'
+        : partiallySigned
+        ? 'Partially signed'
         : alreadySigned
         ? 'Signed'
         : awaitingOthers

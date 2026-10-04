@@ -321,7 +321,7 @@ class _DocuTrackerSourceSignatureCardState
         : null;
     final unsignedMessage = waitingOnLabel != null
         ? 'Waiting for $waitingOnLabel'
-        : canAssign && !canSign
+        : !canSign && (canAssign || hasAssignedSigner)
         ? hasAssignedSigner
               ? 'Waiting for the assigned signer'
               : 'No signer assigned yet'

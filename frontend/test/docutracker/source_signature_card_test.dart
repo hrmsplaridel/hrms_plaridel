@@ -127,6 +127,29 @@ void main() {
     },
   );
 
+  testWidgets(
+    'admin viewing another person\'s creator slot is not asked to sign',
+    (tester) async {
+      await tester.pumpWidget(
+        _subject(
+          _bundle(
+            canAssign: true,
+            fieldCanAssign: false,
+            assignmentSource: 'creator',
+            assignedSignerId: 'employee-1',
+            assignedSignerName: 'Maria Santos',
+            canSign: false,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('Waiting for the assigned signer'), findsOneWidget);
+      expect(find.text('Your signature is required'), findsNothing);
+      expect(find.text('Add Signature'), findsNothing);
+    },
+  );
+
   testWidgets('automatic assignment shows recovery-capable change control', (
     tester,
   ) async {

@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import 'package:hrms_plaridel/core/api/user_facing_api_error.dart';
+import 'package:hrms_plaridel/features/docutracker/data/providers/docutracker_provider.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/features/learning_development/models/training_daily_report.dart';
 import 'package:hrms_plaridel/features/learning_development/presentation/shared/widgets/training_daily_report_date_filter.dart';
@@ -100,6 +102,7 @@ class _LdTrainingDailyReportsSectionState
         report.id,
       );
       if (!mounted) return;
+      _invalidateDocuTrackerDocuments();
       setState(() {
         final idx = _reports.indexWhere((r) => r.id == report.id);
         if (idx != -1) _reports[idx] = updated;
@@ -113,6 +116,12 @@ class _LdTrainingDailyReportsSectionState
         context,
       ).showSnackBar(SnackBar(content: Text('Failed to mark as seen: $e')));
     }
+  }
+
+  void _invalidateDocuTrackerDocuments() {
+    try {
+      context.read<DocuTrackerProvider>().invalidateDocuments();
+    } catch (_) {}
   }
 
   Future<void> _confirmAndDelete(TrainingDailyReport report) async {
@@ -146,6 +155,7 @@ class _LdTrainingDailyReportsSectionState
     try {
       await TrainingDailyReportRepo.instance.deleteReport(report.id);
       if (!mounted) return;
+      _invalidateDocuTrackerDocuments();
       setState(() {
         _reports.removeWhere((r) => r.id == report.id);
       });

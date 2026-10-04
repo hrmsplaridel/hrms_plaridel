@@ -130,6 +130,42 @@ void main() {
     expect(loadingStates, isNot(contains(true)));
   });
 
+  test(
+    'form_signature notifications refetch loaded signature requests',
+    () async {
+      provider.handleSourceModuleNotification('form_signature');
+      await Future<void>.delayed(Duration.zero);
+      expect(api.signatureRequests, 0);
+
+      await provider.loadSourceSignatureRequests();
+      expect(api.signatureRequests, 2);
+
+      final loadingStates = <bool>[];
+      provider.addListener(
+        () => loadingStates.add(provider.sourceSignatureRequestsLoading),
+      );
+      provider.handleSourceModuleNotification('form_signature');
+      await provider.loadSourceSignatureRequests();
+      expect(api.signatureRequests, 4);
+      expect(loadingStates, isNot(contains(true)));
+    },
+  );
+
+  test('recruitment and training notifications mark documents stale', () async {
+    await loadDocs();
+    provider.handleSourceModuleNotification('recruitment');
+    await loadDocs();
+    expect(api.count('/api/docutracker/documents'), 2);
+
+    provider.handleSourceModuleNotification('training');
+    await loadDocs();
+    expect(api.count('/api/docutracker/documents'), 3);
+
+    provider.handleSourceModuleNotification('leave');
+    await loadDocs();
+    expect(api.count('/api/docutracker/documents'), 3);
+  });
+
   test('cached notifications do not notify listeners again', () async {
     await provider.loadNotifications(forceRefresh: true);
     var notified = 0;

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document_builder.dart';
@@ -1204,6 +1206,19 @@ class DocuTrackerProvider extends ChangeNotifier {
   }
 
   Future<void> loadRspSignatureRequests() => loadSourceSignatureRequests();
+
+  /// Reacts to a live RSP/L&D notification. `form_signature` refreshes the
+  /// signature requests in place once they have been loaded this session;
+  /// `recruitment` / `training` mark source-backed documents stale.
+  void handleSourceModuleNotification(String? category) {
+    switch ((category ?? '').trim().toLowerCase()) {
+      case 'form_signature':
+        if (_sourceSignatureRequestsLoadedAt == null) return;
+        unawaited(loadSourceSignatureRequests(forceRefresh: true));
+      case 'recruitment' || 'training':
+        invalidateDocuments();
+    }
+  }
 
   List<String> get reviewedDepartmentNames => [
     for (final department in _reviewedDepartments) department.name,

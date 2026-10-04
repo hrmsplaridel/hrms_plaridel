@@ -2158,8 +2158,22 @@ CREATE TABLE IF NOT EXISTS docutracker_documents (
   reviewed_time TIMESTAMPTZ,
   escalation_level INT NOT NULL DEFAULT 0,
   needs_admin_intervention BOOLEAN DEFAULT false,
+  priority TEXT NOT NULL DEFAULT 'normal',
+  confidentiality_level TEXT NOT NULL DEFAULT 'internal',
+  metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+  submitted_at TIMESTAMPTZ,
+  completed_at TIMESTAMPTZ,
+  cancelled_at TIMESTAMPTZ,
+  archived_at TIMESTAMPTZ,
+  deleted_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT docutracker_documents_priority_check_v1
+    CHECK (priority IN ('low', 'normal', 'high', 'urgent')),
+  CONSTRAINT docutracker_documents_confidentiality_check_v1
+    CHECK (confidentiality_level IN ('public', 'internal', 'confidential', 'restricted')),
+  CONSTRAINT docutracker_documents_metadata_object_check_v1
+    CHECK (jsonb_typeof(metadata) = 'object'),
   CONSTRAINT docutracker_documents_status_check_prod_v2
     CHECK (status IN (
       'pending', 'in_review', 'approved', 'rejected', 'returned',
@@ -2291,7 +2305,17 @@ CREATE TABLE IF NOT EXISTS docutracker_notifications (
   body TEXT,
   read BOOLEAN DEFAULT false,
   event_key TEXT,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  channel TEXT NOT NULL DEFAULT 'in_app',
+  delivery_status TEXT NOT NULL DEFAULT 'sent',
+  read_at TIMESTAMPTZ,
+  sent_at TIMESTAMPTZ,
+  failed_at TIMESTAMPTZ,
+  failure_reason TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT docutracker_notifications_channel_check_v1
+    CHECK (channel IN ('in_app', 'email', 'sms', 'push')),
+  CONSTRAINT docutracker_notifications_delivery_status_check_v1
+    CHECK (delivery_status IN ('pending', 'sent', 'delivered', 'failed', 'cancelled'))
 );
 
 CREATE TABLE IF NOT EXISTS docutracker_permissions (
@@ -2480,6 +2504,94 @@ CREATE INDEX IF NOT EXISTS idx_docutracker_documents_holder_status_deadline
 CREATE INDEX IF NOT EXISTS idx_docutracker_documents_deadline_active
   ON docutracker_documents(deadline_time)
   WHERE status IN ('pending', 'in_review', 'escalated', 'overdue');
+CREATE INDEX IF NOT EXISTS idx_docutracker_documents_priority_status
+  ON docutracker_documents(priority, status, created_at DESC)
+  WHERE deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_docutracker_documents_source_record
+  ON docutracker_documents(source_module, source_table, source_record_id)
+  WHERE source_record_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_docutracker_documents_metadata_gin
+  ON docutracker_documents USING GIN (metadata);
+
+CREATE TABLE IF NOT EXISTS docutracker_document_types (
+  document_type TEXT PRIMARY KEY,
+  display_name TEXT NOT NULL,
+  description TEXT,
+  number_prefix TEXT,
+  default_priority TEXT NOT NULL DEFAULT 'normal',
+  is_enabled BOOLEAN NOT NULL DEFAULT true,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT docutracker_document_types_type_not_blank
+    CHECK (btrim(document_type) <> ''),
+  CONSTRAINT docutracker_document_types_display_name_not_blank
+    CHECK (btrim(display_name) <> ''),
+  CONSTRAINT docutracker_document_types_priority_check
+    CHECK (default_priority IN ('low', 'normal', 'high', 'urgent'))
+);
+
+INSERT INTO docutracker_document_types (document_type, display_name, description, number_prefix)
+VALUES
+  ('memo', 'Memo', 'Internal memorandum document', 'MEMO'),
+  ('purchaseRequest', 'Purchase Request', 'Purchase request document', 'PR')
+ON CONFLICT (document_type) DO NOTHING;
+
+CREATE TABLE IF NOT EXISTS docutracker_document_files (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  document_id UUID NOT NULL REFERENCES docutracker_documents(id) ON DELETE CASCADE,
+  file_name TEXT NOT NULL,
+  file_path TEXT NOT NULL,
+  mime_type TEXT,
+  file_size BIGINT,
+  checksum TEXT,
+  version INT NOT NULL DEFAULT 1,
+  uploaded_by UUID REFERENCES users(id) ON DELETE SET NULL,
+  is_current BOOLEAN NOT NULL DEFAULT true,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT docutracker_document_files_name_not_blank
+    CHECK (btrim(file_name) <> ''),
+  CONSTRAINT docutracker_document_files_path_not_blank
+    CHECK (btrim(file_path) <> ''),
+  CONSTRAINT docutracker_document_files_size_check
+    CHECK (file_size IS NULL OR file_size >= 0),
+  CONSTRAINT docutracker_document_files_version_check
+    CHECK (version > 0),
+  UNIQUE (document_id, file_name, version)
+);
+
+CREATE INDEX IF NOT EXISTS idx_docutracker_document_files_document
+  ON docutracker_document_files(document_id, created_at DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_docutracker_document_files_one_current
+  ON docutracker_document_files(document_id, file_name)
+  WHERE is_current = true;
+
+CREATE TABLE IF NOT EXISTS docutracker_document_number_sequences (
+  year INT NOT NULL,
+  document_type TEXT NOT NULL DEFAULT '*',
+  scope_type TEXT NOT NULL DEFAULT 'global',
+  scope_id UUID,
+  prefix TEXT,
+  last_value BIGINT NOT NULL DEFAULT 0,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT docutracker_number_sequences_year_check_v1
+    CHECK (year BETWEEN 2000 AND 9999),
+  CONSTRAINT docutracker_number_sequences_last_value_check_v1
+    CHECK (last_value >= 0),
+  CONSTRAINT docutracker_number_sequences_scope_check_v1
+    CHECK (
+      (scope_type = 'global' AND scope_id IS NULL)
+      OR
+      (scope_type IN ('department', 'office', 'campus') AND scope_id IS NOT NULL)
+    )
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_docutracker_number_sequences_unique
+  ON docutracker_document_number_sequences (
+    year,
+    document_type,
+    scope_type,
+    COALESCE(scope_id, '00000000-0000-0000-0000-000000000000'::uuid)
+  );
 
 CREATE INDEX IF NOT EXISTS idx_docutracker_signature_assets_owner_saved
   ON docutracker_signature_assets(owner_user_id, is_saved, created_at DESC);
@@ -2601,6 +2713,12 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_docutracker_notifications_event_key_unique
   WHERE event_key IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_docutracker_notifications_user_read_created
   ON docutracker_notifications(user_id, read, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_docutracker_notifications_user_unread_created
+  ON docutracker_notifications(user_id, created_at DESC)
+  WHERE read = false;
+CREATE INDEX IF NOT EXISTS idx_docutracker_notifications_delivery_pending
+  ON docutracker_notifications(delivery_status, created_at)
+  WHERE delivery_status IN ('pending', 'failed');
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_docutracker_permissions_user_unique
   ON docutracker_permissions(user_id, document_type, action)
@@ -2835,6 +2953,11 @@ FOR EACH ROW EXECUTE PROCEDURE docutracker_documents_set_doc_number();
 DROP TRIGGER IF EXISTS trg_docutracker_documents_updated_at ON docutracker_documents;
 CREATE TRIGGER trg_docutracker_documents_updated_at
 BEFORE UPDATE ON docutracker_documents
+FOR EACH ROW EXECUTE PROCEDURE docutracker_set_updated_at();
+
+DROP TRIGGER IF EXISTS trg_docutracker_document_types_updated_at ON docutracker_document_types;
+CREATE TRIGGER trg_docutracker_document_types_updated_at
+BEFORE UPDATE ON docutracker_document_types
 FOR EACH ROW EXECUTE PROCEDURE docutracker_set_updated_at();
 
 DROP TRIGGER IF EXISTS trg_docutracker_routing_configs_updated_at ON docutracker_routing_configs;

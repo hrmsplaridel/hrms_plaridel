@@ -570,6 +570,17 @@ async function reResolveAutomaticSourceSignatures(pool, user, sourceModule = nul
   return summary;
 }
 
+const SIGNATURE_ROWS_SELECT = `
+  SELECT s.id, s.source_record_id, s.slot_key, s.label, s.assigned_signer_id,
+         assigned.full_name AS assigned_signer_name,
+         s.assignment_source, s.recovery_remarks, s.created_by,
+         s.signature_asset_id, s.signed_by, s.signer_name_snapshot,
+         s.signed_at, a.mime_type,
+         encode(a.image_bytes, 'base64') AS signature_image_base64
+  FROM docutracker_rsp_source_signatures s
+  JOIN users assigned ON assigned.id = s.assigned_signer_id
+  LEFT JOIN docutracker_signature_assets a ON a.id = s.signature_asset_id`;
+
 async function loadContext(db, user, sourceModule, sourceTable, sourceRecordId, { forUpdate = false } = {}) {
   const config = sourceConfig(sourceModule, sourceTable, sourceRecordId);
   const creatorColumn = creatorOwnedSlotKeys(sourceTable).length ? ', created_by' : '';
@@ -579,15 +590,7 @@ async function loadContext(db, user, sourceModule, sourceTable, sourceRecordId, 
   );
   if (!source.rowCount) throw serviceError('NOT_FOUND', `${config.moduleConfig.label} form was not found`);
   const rows = await db.query(
-    `SELECT s.id, s.slot_key, s.label, s.assigned_signer_id,
-            assigned.full_name AS assigned_signer_name,
-            s.assignment_source, s.recovery_remarks, s.created_by,
-            s.signature_asset_id, s.signed_by, s.signer_name_snapshot,
-            s.signed_at, a.mime_type,
-            encode(a.image_bytes, 'base64') AS signature_image_base64
-     FROM docutracker_rsp_source_signatures s
-     JOIN users assigned ON assigned.id = s.assigned_signer_id
-     LEFT JOIN docutracker_signature_assets a ON a.id = s.signature_asset_id
+    `${SIGNATURE_ROWS_SELECT}
      WHERE s.source_table = $1 AND s.source_record_id = $2::uuid
      ORDER BY s.created_at, s.slot_key`,
     [sourceTable, sourceRecordId]
@@ -735,18 +738,21 @@ async function listSourceSignatureRequests(pool, user, sourceModule) {
     const moduleConfig = SOURCE_SIGNATURE_CONFIGS[normalizedModule];
     if (!moduleConfig) throw serviceError('NOT_FOUND', 'Source signature requests were not found');
     const isAdmin = String(user.role || '').toLowerCase() === 'admin';
+    const sourceTables = Object.keys(moduleConfig.slots);
     const assignedRows = [];
+    const recordsByKey = new Map();
+    const formKey = (sourceTable, sourceRecordId) => `${sourceTable}:${sourceRecordId}`;
     if (isAdmin && moduleConfig.includeUnassignedForAdmin) {
-      for (const sourceTable of Object.keys(moduleConfig.slots)) {
+      for (const sourceTable of sourceTables) {
         const sourceRows = await pool.query(
-          `SELECT id AS source_record_id
-           FROM "${sourceTable}"
+          `SELECT id AS source_record_id, to_jsonb(source_row) AS source_record
+           FROM "${sourceTable}" source_row
            ORDER BY updated_at DESC NULLS LAST, id`
         );
-        assignedRows.push(...sourceRows.rows.map((row) => ({
-          source_table: sourceTable,
-          source_record_id: row.source_record_id,
-        })));
+        for (const row of sourceRows.rows) {
+          assignedRows.push({ source_table: sourceTable, source_record_id: row.source_record_id });
+          recordsByKey.set(formKey(sourceTable, row.source_record_id), row.source_record);
+        }
       }
     } else {
       const assigned = await pool.query(
@@ -755,35 +761,59 @@ async function listSourceSignatureRequests(pool, user, sourceModule) {
          WHERE assigned_signer_id = $1::uuid
            AND source_table = ANY($2::text[])
          ORDER BY source_table, source_record_id`,
-        [user.id, Object.keys(moduleConfig.slots)]
+        [user.id, sourceTables]
       );
       assignedRows.push(...assigned.rows);
+      for (const sourceTable of sourceTables) {
+        const ids = assignedRows
+          .filter((row) => row.source_table === sourceTable)
+          .map((row) => row.source_record_id);
+        if (!ids.length) continue;
+        const sourceRows = await pool.query(
+          `SELECT id AS source_record_id, to_jsonb(source_row) AS source_record
+           FROM "${sourceTable}" source_row
+           WHERE id = ANY($1::uuid[])`,
+          [ids]
+        );
+        for (const row of sourceRows.rows) {
+          recordsByKey.set(formKey(sourceTable, row.source_record_id), row.source_record);
+        }
+      }
     }
+
+    const signatureRowsByKey = new Map();
+    for (const sourceTable of sourceTables) {
+      const ids = assignedRows
+        .filter((row) => row.source_table === sourceTable)
+        .map((row) => row.source_record_id);
+      if (!ids.length) continue;
+      const signatureRows = await pool.query(
+        `${SIGNATURE_ROWS_SELECT}
+         WHERE s.source_table = $1 AND s.source_record_id = ANY($2::uuid[])
+         ORDER BY s.source_record_id, s.created_at, s.slot_key`,
+        [sourceTable, ids]
+      );
+      for (const row of signatureRows.rows) {
+        const key = formKey(sourceTable, row.source_record_id);
+        if (!signatureRowsByKey.has(key)) signatureRowsByKey.set(key, []);
+        signatureRowsByKey.get(key).push(row);
+      }
+    }
+
     const requests = [];
     for (const assignment of assignedRows) {
-      sourceConfig(normalizedModule, assignment.source_table, assignment.source_record_id);
-      const source = await pool.query(
-        `SELECT to_jsonb(source_row) AS source_record
-         FROM "${assignment.source_table}" source_row
-         WHERE id = $1::uuid`,
-        [assignment.source_record_id]
-      );
+      const key = formKey(assignment.source_table, assignment.source_record_id);
+      const record = recordsByKey.get(key);
       // Orphaned signature rows (form deleted) must not fail the whole feed.
-      if (!source.rowCount) continue;
-      let context;
-      try {
-        context = await loadContext(
-          pool,
-          user,
-          normalizedModule,
-          assignment.source_table,
-          assignment.source_record_id
-        );
-      } catch (error) {
-        if (error?.code === 'NOT_FOUND' || error?.code === 'FORBIDDEN') continue;
-        throw error;
-      }
-      const record = source.rows[0].source_record;
+      if (!record) continue;
+      const context = {
+        ...sourceConfig(normalizedModule, assignment.source_table, assignment.source_record_id),
+        rows: signatureRowsByKey.get(key) || [],
+        isAdmin,
+        sourceCreatorId: creatorOwnedSlotKeys(assignment.source_table).length
+          ? record.created_by || null
+          : null,
+      };
       const signatureBundle = serialize(
         context,
         user,
@@ -795,34 +825,13 @@ async function listSourceSignatureRequests(pool, user, sourceModule) {
         signatureBundle.signatures.some(
           (signature) => !signature.assigned_signer_id
         );
-      const hasPendingSignature = signatureBundle.signatures.some(
-        (signature) =>
-          signature.can_sign &&
-          !(signature.signature_asset_id && signature.signed_at)
-      );
-      // Admins still need to see forms waiting on someone else's signature
-      // (e.g. Action Brainstorming certified_by after auto-assign).
-      const hasPendingAssignedSignature =
-        context.isAdmin &&
-        signatureBundle.signatures.some(
-          (signature) =>
-            Boolean(signature.assigned_signer_id) &&
-            !(signature.signature_asset_id && signature.signed_at)
-        );
-      // Keep forms visible for the assigned signer after they sign so they can
-      // reopen / confirm their ink (otherwise the card disappears immediately).
+      // Signers keep every form assigned to them, signed or not. Admins monitor
+      // all forms, including fully signed ones, so completed forms stay findable.
       const isAssignedToViewer = signatureBundle.signatures.some(
         (signature) =>
           String(signature.assigned_signer_id || '') === String(user.id)
       );
-      if (
-        !requiresSetup &&
-        !hasPendingSignature &&
-        !hasPendingAssignedSignature &&
-        !isAssignedToViewer
-      ) {
-        continue;
-      }
+      if (!context.isAdmin && !isAssignedToViewer) continue;
       requests.push({
         source_module: normalizedModule,
         source_table: assignment.source_table,

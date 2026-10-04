@@ -20,6 +20,7 @@ import 'package:hrms_plaridel/features/docutracker/data/navigation/docutracker_d
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_error_banner.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_summary_card.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_press_scale.dart';
+import 'package:hrms_plaridel/features/docutracker/utils/docutracker_source_status_text.dart';
 import 'package:hrms_plaridel/features/docutracker/utils/docutracker_workflow_phase.dart';
 
 /// Step 10 & 13: DocuTracker Dashboard.
@@ -237,7 +238,11 @@ class _DocuTrackerDashboardScreenState
         .where((d) => d.status == DocumentStatus.inReview)
         .toList();
     final approved = myDocs
-        .where((d) => d.status == DocumentStatus.approved)
+        .where(
+          (d) =>
+              d.status == DocumentStatus.approved &&
+              !docuTrackerIsReviewedSourceCompletion(d),
+        )
         .toList();
 
     final hasAnyDocs =

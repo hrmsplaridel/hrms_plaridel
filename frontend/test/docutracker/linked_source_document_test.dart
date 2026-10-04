@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 
 import 'package:hrms_plaridel/features/docutracker/data/providers/docutracker_provider.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document.dart';
+import 'package:hrms_plaridel/features/docutracker/models/document_status.dart';
 import 'package:hrms_plaridel/features/docutracker/models/linked_source_document.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/pages/docutracker_linked_source_document_screen.dart';
 import 'package:hrms_plaridel/features/docutracker/utils/docutracker_source_status_text.dart';
@@ -79,6 +80,80 @@ void main() {
       status: 'registered',
     );
     expect(rsp.label, 'Hired');
+  });
+
+  test('L&D "seen" reads as a finished review', () {
+    final seen = docuTrackerLinkedSourceStatusText(
+      sourceModule: 'ld',
+      status: 'seen',
+    );
+    expect(seen.label, 'Reviewed');
+    expect(seen.description, contains('No further action is needed'));
+  });
+
+  test('only reviewed L&D reports are kept out of approval counts', () {
+    const ldRow = DocuTrackerDocument(
+      documentType: 'ld',
+      title: 'Daily report',
+      status: DocumentStatus.approved,
+      sourceModule: 'ld',
+      sourceStatus: 'seen',
+      sourceOnly: true,
+    );
+    expect(docuTrackerIsReviewedSourceCompletion(ldRow), isTrue);
+    expect(
+      docuTrackerIsReviewedSourceCompletion(
+        ldRow.copyWith(sourceStatus: 'reviewed'),
+      ),
+      isTrue,
+    );
+    expect(
+      docuTrackerIsReviewedSourceCompletion(
+        ldRow.copyWith(sourceStatus: 'approved'),
+      ),
+      isFalse,
+    );
+    expect(
+      docuTrackerIsReviewedSourceCompletion(
+        ldRow.copyWith(sourceModule: 'rsp', sourceStatus: 'registered'),
+      ),
+      isFalse,
+    );
+    expect(
+      docuTrackerIsReviewedSourceCompletion(
+        const DocuTrackerDocument(
+          documentType: 'memo',
+          title: 'Memo',
+          status: DocumentStatus.approved,
+        ),
+      ),
+      isFalse,
+    );
+  });
+
+  test('source badge label uses L&D wording only for L&D source rows', () {
+    const ldRow = DocuTrackerDocument(
+      documentType: 'ld',
+      title: 'Daily report',
+      sourceModule: 'ld',
+      sourceStatus: 'seen',
+      sourceOnly: true,
+    );
+    expect(docuTrackerSourceBadgeLabel(ldRow), 'Reviewed');
+    expect(
+      docuTrackerSourceBadgeLabel(ldRow.copyWith(sourceStatus: 'submitted')),
+      'Submitted',
+    );
+    expect(
+      docuTrackerSourceBadgeLabel(
+        ldRow.copyWith(sourceModule: 'rsp', sourceStatus: 'registered'),
+      ),
+      isNull,
+    );
+    expect(
+      docuTrackerSourceBadgeLabel(ldRow.copyWith(sourceOnly: false)),
+      isNull,
+    );
   });
 
   for (final width in [360.0, 768.0, 1440.0]) {

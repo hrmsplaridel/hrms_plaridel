@@ -10,6 +10,7 @@ import 'package:hrms_plaridel/features/docutracker/services/docutracker_access_p
 import 'package:hrms_plaridel/features/docutracker/theme/docutracker_tokens.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_error_banner.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_status_badge.dart';
+import 'package:hrms_plaridel/features/docutracker/utils/docutracker_source_status_text.dart';
 
 /// Restricted DocuTracker mobile portal.
 ///
@@ -239,7 +240,11 @@ class _MobileMyFilesTab extends StatelessWidget {
                     runSpacing: 8,
                     crossAxisAlignment: WrapCrossAlignment.center,
                     children: [
-                      DocuTrackerStatusBadge(status: doc.status, compact: true),
+                      DocuTrackerStatusBadge(
+                        status: doc.status,
+                        compact: true,
+                        label: docuTrackerSourceBadgeLabel(doc),
+                      ),
                       Text(
                         doc.documentType.toUpperCase(),
                         style: const TextStyle(

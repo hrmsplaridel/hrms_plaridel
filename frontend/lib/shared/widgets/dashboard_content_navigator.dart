@@ -160,41 +160,66 @@ class _DashboardContentNavigatorState extends State<DashboardContentNavigator> {
 
   @override
   Widget build(BuildContext context) {
-    return Navigator(
-      key: widget.navigatorKey,
-      initialRoute: DashboardContentRoutes.home,
-      onGenerateRoute: (settings) {
-        final isSettings = settings.name == DashboardContentRoutes.settings;
-        return PageRouteBuilder<void>(
-          settings: settings,
-          pageBuilder: (_, __, ___) => isSettings
-              ? _DashboardScrollPage(
-                  listenable: _settingsVersion,
-                  paddingBuilder: () => widget.settingsScrollPadding,
-                  childBuilder: () => widget.settingsPanel,
-                )
-              : _DashboardHomeCachePage(
-                  listenable: _homeVersion,
-                  stackBuilder: _buildHomeCacheStack,
-                ),
-          transitionDuration: isSettings
-              ? const Duration(milliseconds: 180)
-              : Duration.zero,
-          reverseTransitionDuration: const Duration(milliseconds: 150),
-          transitionsBuilder: (_, animation, __, child) {
-            if (!isSettings) return child;
-            return FadeTransition(
-              opacity: CurvedAnimation(
-                parent: animation,
-                curve: Curves.easeOutCubic,
-              ),
-              child: child,
-            );
-          },
+    return _DashboardContentScope(
+      state: this,
+      child: Navigator(
+        key: widget.navigatorKey,
+        initialRoute: DashboardContentRoutes.home,
+        onGenerateRoute: _generateRoute,
+      ),
+    );
+  }
+
+  // Routes resolve the host through [_DashboardContentScope] instead of
+  // capturing `this`: the GlobalKey'd Navigator (and its routes) survive a
+  // wide/narrow layout switch while this State is recreated.
+  Route<void> _generateRoute(RouteSettings settings) {
+    final isSettings = settings.name == DashboardContentRoutes.settings;
+    return PageRouteBuilder<void>(
+      settings: settings,
+      pageBuilder: (context, __, ___) {
+        final host = _DashboardContentScope.of(context);
+        return isSettings
+            ? _DashboardScrollPage(
+                listenable: host._settingsVersion,
+                paddingBuilder: () => host.widget.settingsScrollPadding,
+                childBuilder: () => host.widget.settingsPanel,
+              )
+            : _DashboardHomeCachePage(
+                listenable: host._homeVersion,
+                stackBuilder: host._buildHomeCacheStack,
+              );
+      },
+      transitionDuration: isSettings
+          ? const Duration(milliseconds: 180)
+          : Duration.zero,
+      reverseTransitionDuration: const Duration(milliseconds: 150),
+      transitionsBuilder: (_, animation, __, child) {
+        if (!isSettings) return child;
+        return FadeTransition(
+          opacity: CurvedAnimation(
+            parent: animation,
+            curve: Curves.easeOutCubic,
+          ),
+          child: child,
         );
       },
     );
   }
+}
+
+class _DashboardContentScope extends InheritedWidget {
+  const _DashboardContentScope({required this.state, required super.child});
+
+  final _DashboardContentNavigatorState state;
+
+  static _DashboardContentNavigatorState of(BuildContext context) => context
+      .dependOnInheritedWidgetOfExactType<_DashboardContentScope>()!
+      .state;
+
+  @override
+  bool updateShouldNotify(_DashboardContentScope oldWidget) =>
+      !identical(state, oldWidget.state);
 }
 
 class _DashboardHomeCachePage extends StatelessWidget {
@@ -285,10 +310,7 @@ class _DashboardScrollPage extends StatelessWidget {
             child: SingleChildScrollView(
               key: ValueKey<int>(version),
               padding: paddingBuilder(),
-              child: SizedBox(
-                width: double.infinity,
-                child: childBuilder(),
-              ),
+              child: SizedBox(width: double.infinity, child: childBuilder()),
             ),
           ),
         );

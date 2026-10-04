@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/widgets.dart';
 import 'package:provider/provider.dart';
 
+import 'package:hrms_plaridel/features/docutracker/data/providers/docutracker_provider.dart';
 import 'package:hrms_plaridel/features/dtr/leave/data/providers/leave_provider.dart';
 import 'package:hrms_plaridel/features/notifications/data/notification_provider.dart';
 import 'app_realtime_provider.dart';
@@ -45,6 +46,11 @@ class _AppRealtimeBridgeState extends State<AppRealtimeBridge> {
     final rawNotification = event.payload['notification'];
     if (rawNotification is Map) {
       final notification = Map<String, dynamic>.from(rawNotification);
+      try {
+        context.read<DocuTrackerProvider>().handleSourceModuleNotification(
+          notification['category']?.toString(),
+        );
+      } catch (_) {}
       unawaited(
         PushNotificationService.instance.showDesktopNotification(
           id: notification['id']?.toString() ?? '',

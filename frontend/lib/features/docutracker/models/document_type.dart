@@ -23,8 +23,18 @@ class DocumentType {
     for (final type in values) {
       if (_comparisonKey(type.value) == _comparisonKey(value)) return type;
     }
-    return DocumentType._(value, _displayNameFor(value));
+    return DocumentType._(
+      value,
+      _sourceModuleNames[value.toLowerCase()] ?? _displayNameFor(value),
+    );
   }
+
+  /// Source-backed rows use the owning module code as their document type.
+  static const _sourceModuleNames = <String, String>{
+    'dtr': 'DTR',
+    'ld': 'L&D',
+    'rsp': 'RSP',
+  };
 
   /// Builds a stable machine value from an admin-entered display name.
   factory DocumentType.fromDisplayName(String name) {

@@ -116,4 +116,28 @@ void main() {
     expect(entry.category, DocuTrackerAuditCategory.workflow);
     expect(entry.summary, 'Memo workflow v13 is now live');
   });
+
+  test(
+    'signature replacements and signatory corrections are signature events',
+    () {
+      for (final (eventType, title) in [
+        ('source_signature_replaced', 'Source signature replaced'),
+        ('official_signatory_corrected', 'Official signatory corrected'),
+      ]) {
+        final entry = DocuTrackerGovernanceAuditEntry.fromJson({
+          'id': 'audit-$eventType',
+          'actor_id': 'admin-1',
+          'event_type': eventType,
+          'entity_type': 'idp_entries',
+        });
+
+        expect(entry.category, DocuTrackerAuditCategory.signature);
+        expect(entry.title, title);
+        expect(
+          DocuTrackerAuditCategory.signature.eventTypes,
+          contains(eventType),
+        );
+      }
+    },
+  );
 }

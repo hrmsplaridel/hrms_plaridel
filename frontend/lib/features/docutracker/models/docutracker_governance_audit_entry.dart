@@ -90,7 +90,9 @@ class DocuTrackerGovernanceAuditEntry {
     'escalation_updated' => 'Escalation settings updated',
     'source_signer_assigned' => 'Source signer assigned',
     'source_signed' => 'Source document signed',
+    'source_signature_replaced' => 'Source signature replaced',
     'official_signatory_configured' => 'Official signatory configured',
+    'official_signatory_corrected' => 'Official signatory corrected',
     _ => _humanize(eventType),
   };
 
@@ -118,10 +120,12 @@ class DocuTrackerGovernanceAuditEntry {
             : '$count reviewer${count == 1 ? '' : 's'} assigned to a workflow step';
       case 'escalation_created' || 'escalation_updated':
         return 'Overdue escalation rules for $documentScopeLabel';
-      case 'source_signer_assigned' || 'source_signed':
+      case 'source_signer_assigned' ||
+          'source_signed' ||
+          'source_signature_replaced':
         return '${_sourceLabel(entityType)} source signature'
             '${targetLabel == null ? '' : ' · $targetLabel'}';
-      case 'official_signatory_configured':
+      case 'official_signatory_configured' || 'official_signatory_corrected':
         return 'Official signatory settings were updated';
     }
     return [
@@ -202,7 +206,9 @@ enum DocuTrackerAuditCategory {
   signature('Signatures', {
     'source_signer_assigned',
     'source_signed',
+    'source_signature_replaced',
     'official_signatory_configured',
+    'official_signatory_corrected',
   }),
   other('Other', <String>{});
 

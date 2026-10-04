@@ -916,7 +916,7 @@ class _DocuTrackerDocumentDetailScreenState
               dotStyle: true,
               label: doc.status == DocumentStatus.pending && isDraft
                   ? 'Draft'
-                  : null,
+                  : docuTrackerSourceBadgeLabel(doc),
             ),
             if (deadlineLabel.isNotEmpty)
               Container(

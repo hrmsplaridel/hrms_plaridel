@@ -1054,7 +1054,12 @@ router.get('/governance-audit', protect, requireAdmin, async (req, res) => {
         .filter(Boolean);
       if (eventTypes.length) add('a.event_type = ANY(?::text[])', eventTypes);
     }
-    if (req.query.actor_id) add('a.actor_id = ?::uuid', String(req.query.actor_id));
+    if (req.query.actor_id) {
+      if (!isUuid(String(req.query.actor_id))) {
+        return res.status(400).json({ error: 'actor_id must be a valid UUID' });
+      }
+      add('a.actor_id = ?::uuid', String(req.query.actor_id));
+    }
     if (req.query.target_user_id) {
       if (!isUuid(String(req.query.target_user_id))) {
         return res.status(400).json({ error: 'target_user_id must be a valid UUID' });
