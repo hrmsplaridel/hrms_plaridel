@@ -9,6 +9,9 @@ const { pool } = require('./config/db');
 const { Pool } = require('pg');
 const { HealthMonitor, createProbe } = require('./services/systemHealth');
 const { createSystemHealthRouter } = require('./routes/systemHealth');
+const { BackupService } = require('./services/systemBackups');
+const { createSystemBackupsRouter } = require('./routes/systemBackups');
+const backupService = new BackupService({ db: pool });
 const { initWebSocket } = require('./websockets/biometricStream');
 const { initAppEventsWebSocket } = require('./websockets/appEvents');
 const { scheduleLeaveMonthlyAccrualCron } = require('./jobs/leaveMonthlyAccrualScheduler');
@@ -212,7 +215,8 @@ app.use('/api/calendar', calendarRoutes);
 app.use('/api/dtr-daily-summary', dtrDailySummaryRoutes);
 app.use('/api/dtr-corrections', require('./routes/dtrCorrections'));
 app.use('/api/system-audit', require('./routes/systemAudit'));
-app.use('/api/system-health', createSystemHealthRouter(healthMonitor));
+app.use('/api/system-health', createSystemHealthRouter(healthMonitor, undefined, backupService));
+app.use('/api/system-backups', createSystemBackupsRouter(backupService));
 app.use('/api/account-creation-access', require('./routes/accountCreationAccess'));
 app.use('/api/dtr-access', require('./routes/dtrAccess'));
 app.use('/api/dtr-assistant', dtrAssistantRoutes);
@@ -298,6 +302,7 @@ async function startServer() {
   console.log('  API  /api/rsp-ld-saved-entries/:table - RSP/L&D saved forms (admin JWT, PostgreSQL)');
   scheduleLeaveMonthlyAccrualCron(pool);
   void healthMonitor.start();
+  backupService.start();
   scheduleYearEndForcedLeaveCron(pool);
   scheduleAuthRefreshTokenCleanupCron(pool);
   // DocuTracker: server-side escalation worker (workflow control).
@@ -319,6 +324,7 @@ server.on('error', (err) => {
 });
 server.on('close', () => {
   healthMonitor.stop();
+  backupService.stop();
   void healthDatabase.end();
 });
 

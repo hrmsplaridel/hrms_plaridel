@@ -356,6 +356,20 @@ class _SystemHealthPageState extends State<SystemHealthPage> {
                     ? 2
                     : 1;
                 final cards = [
+                  if (_data?['backup'] is Map)
+                    _metric(
+                      'Backups',
+                      Icons.backup_outlined,
+                      (_data!['backup']['health'] ?? 'unavailable')
+                          .toString()
+                          .replaceAll('_', ' '),
+                      _data!['backup']['lastSuccessAt'] == null
+                          ? 'No successful backup. Open System Administration > Backups.'
+                          : 'Last success: ${DateTime.tryParse(_data!['backup']['lastSuccessAt'].toString())?.toLocal().toString().split('.').first ?? 'Unavailable'}',
+                      color: _data!['backup']['health'] == 'current'
+                          ? Colors.green
+                          : Colors.orange,
+                    ),
                   _metric(
                     'CPU usage',
                     Icons.memory,
