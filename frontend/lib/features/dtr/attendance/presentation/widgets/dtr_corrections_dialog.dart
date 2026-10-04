@@ -699,6 +699,7 @@ class _CorrectionFormState extends State<_CorrectionForm> {
   final _reason = TextEditingController();
   Map<String, dynamic>? _original;
   bool _loadingOriginal = true;
+  bool _stalePreview = false;
   String? _originalError;
   int _originalVersion = 0;
   @override
@@ -719,11 +720,12 @@ class _CorrectionFormState extends State<_CorrectionForm> {
         '/api/dtr-corrections/original/${_date(_day)}',
       );
       if (mounted && version == _originalVersion) {
-        setState(
-          () => _original = response.data == null
+        setState(() {
+          _original = response.data == null
               ? null
-              : Map<String, dynamic>.from(response.data as Map),
-        );
+              : Map<String, dynamic>.from(response.data as Map);
+          _stalePreview = false;
+        });
       }
     } catch (e) {
       if (mounted && version == _originalVersion) {
@@ -885,6 +887,7 @@ class _CorrectionFormState extends State<_CorrectionForm> {
     try {
       final data = <String, dynamic>{
         'attendance_date': _date(_day),
+        'original_revision': _original?['original_revision'],
         'reason': _reason.text.trim(),
       };
       for (final entry in _times.entries) {
@@ -912,7 +915,16 @@ class _CorrectionFormState extends State<_CorrectionForm> {
       );
       if (mounted) widget.onClose(true);
     } catch (e) {
-      if (mounted) setState(() => _error = userFacingApiError(e));
+      if (mounted) {
+        setState(() {
+          _error = userFacingApiError(e);
+          if (e is DioException &&
+              e.response?.data is Map &&
+              e.response?.data['code'] == 'attendance_preview_changed') {
+            _stalePreview = true;
+          }
+        });
+      }
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -1061,6 +1073,12 @@ class _CorrectionFormState extends State<_CorrectionForm> {
                     ),
                   ],
                 ),
+              if (_stalePreview)
+                TextButton.icon(
+                  onPressed: _busy || _loadingOriginal ? null : _loadOriginal,
+                  icon: const Icon(Icons.refresh),
+                  label: const Text('Load updated attendance'),
+                ),
               if (_error != null)
                 Text(
                   _error!,
@@ -1078,6 +1096,7 @@ class _CorrectionFormState extends State<_CorrectionForm> {
         FilledButton(
           onPressed:
               _busy ||
+                  _stalePreview ||
                   _loadingOriginal ||
                   _originalError != null ||
                   _original?['shift_punch_mode'] == null

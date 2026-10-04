@@ -35,7 +35,7 @@ function createRouter({ db = pool, auth = authMiddleware, apply = applyApprovedC
   const handle = fn => async (req, res) => {
     try { await fn(req, res); } catch (error) {
       if (!error.status) console.error('[dtrCorrections]', error);
-      res.status(error.status || 500).json({ error: error.status ? error.message : 'Unable to process attendance correction.' });
+      res.status(error.status || 500).json({ ...(error.code === 'attendance_preview_changed' ? { code: error.code } : {}), error: error.status ? error.message : 'Unable to process attendance correction.' });
     }
   };
   async function canReview(db, user) {
@@ -177,8 +177,14 @@ function createRouter({ db = pool, auth = authMiddleware, apply = applyApprovedC
       await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`dtr-correction:${req.user.id}:${date}`]);
       const pending = await client.query("SELECT id FROM dtr_corrections WHERE employee_id=$1 AND attendance_date=$2 AND status='pending'", [req.user.id, date]);
       if (pending.rows.length) fail('A correction for this date is already pending.', 409);
-      const before = await client.query('SELECT * FROM dtr_daily_summary WHERE employee_id=$1 AND attendance_date=$2 FOR UPDATE', [req.user.id, date]);
+      const before = await client.query('SELECT d.*, md5(to_jsonb(d)::text) AS original_revision FROM dtr_daily_summary d WHERE employee_id=$1 AND attendance_date=$2 FOR UPDATE', [req.user.id, date]);
       const original = before.rows[0] || null;
+      if (typeof req.body.original_revision !== 'string' ||
+          req.body.original_revision !== (original?.original_revision ?? 'absent')) {
+        throw Object.assign(new Error('Your attendance changed while you were preparing this request. Review the updated record before submitting again.'),
+          { status: 409, code: 'attendance_preview_changed' });
+      }
+      if (original) delete original.original_revision;
       const merged = Object.fromEntries(fields.map(k => [k, punches[k] ?? original?.[k] ?? null]));
       const check = validateDtrPunchDates({ attendanceDate: date, punches: merged, shiftInfo: shift,
         todayDate: new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Manila' }).format(new Date()) });
@@ -205,13 +211,14 @@ function createRouter({ db = pool, auth = authMiddleware, apply = applyApprovedC
   router.get('/original/:date', handle(async (req, res) => {
     if (!isValidIsoDate(req.params.date)) fail('Choose a valid attendance date.');
     const [result, shift] = await Promise.all([
-      db.query(`SELECT time_in, break_out, break_in, time_out, status
-        FROM dtr_daily_summary WHERE employee_id=$1 AND attendance_date=$2`,
+      db.query(`SELECT time_in, break_out, break_in, time_out, status, md5(to_jsonb(d)::text) AS original_revision
+        FROM dtr_daily_summary d WHERE employee_id=$1 AND attendance_date=$2`,
         [req.user.id, req.params.date]),
       shiftFor(req.user.id, req.params.date),
     ]);
     res.json({
       ...(result.rows[0] || {}),
+      original_revision: result.rows[0]?.original_revision ?? 'absent',
       shift_punch_mode: getShiftType(shift),
       shift_crosses_midnight: shift?.startMinutes != null && shift?.endMinutes != null &&
         Number(shift.endMinutes) < Number(shift.startMinutes),

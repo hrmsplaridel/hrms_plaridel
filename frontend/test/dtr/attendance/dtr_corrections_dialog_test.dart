@@ -7,6 +7,95 @@ import 'package:hrms_plaridel/features/dtr/attendance/presentation/widgets/dtr_c
 void main() {
   final paths = <String>[];
   TestWidgetsFlutterBinding.ensureInitialized();
+  testWidgets(
+    'stale preview preserves draft and requires reloading before resubmission',
+    (tester) async {
+      var previews = 0;
+      final submissions = <Map<String, dynamic>>[];
+      ApiClient.instance.dio.interceptors.clear();
+      ApiClient.instance.dio.interceptors.add(
+        InterceptorsWrapper(
+          onRequest: (options, handler) {
+            if (options.path.contains('/original/')) {
+              previews++;
+              handler.resolve(
+                Response(
+                  requestOptions: options,
+                  data: {
+                    'original_revision': 'revision-$previews',
+                    'shift_punch_mode': 'full_day',
+                    'shift_crosses_midnight': false,
+                  },
+                ),
+              );
+            } else if (options.method == 'POST') {
+              submissions.add(Map<String, dynamic>.from(options.data as Map));
+              if (submissions.length == 1) {
+                handler.reject(
+                  DioException(
+                    requestOptions: options,
+                    type: DioExceptionType.badResponse,
+                    response: Response(
+                      requestOptions: options,
+                      statusCode: 409,
+                      data: {
+                        'code': 'attendance_preview_changed',
+                        'error':
+                            'Attendance changed. Review the updated record.',
+                      },
+                    ),
+                  ),
+                );
+              } else {
+                handler.resolve(Response(requestOptions: options, data: {}));
+              }
+            } else {
+              handler.resolve(
+                Response(requestOptions: options, data: <dynamic>[]),
+              );
+            }
+          },
+        ),
+      );
+      await tester.pumpWidget(
+        const MaterialApp(home: Scaffold(body: DtrCorrectionsDialog())),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Request correction'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Unchanged').first);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('OK').last);
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.byType(TextField).last,
+        'Missing biometric punch evidence.',
+      );
+      await tester.tap(find.text('Submit request'));
+      await tester.pumpAndSettle();
+      expect(
+        tester
+            .widget<FilledButton>(
+              find.widgetWithText(FilledButton, 'Submit request'),
+            )
+            .onPressed,
+        isNull,
+      );
+      await tester.ensureVisible(find.text('Load updated attendance'));
+      await tester.tap(find.text('Load updated attendance'));
+      await tester.pumpAndSettle();
+      expect(find.text('Missing biometric punch evidence.'), findsOneWidget);
+      await tester.tap(find.text('Submit request'));
+      await tester.pumpAndSettle();
+      expect(submissions[0]['original_revision'], 'revision-1');
+      expect(submissions[1]['original_revision'], 'revision-2');
+      expect(
+        submissions[1]['requested_time_in'],
+        submissions[0]['requested_time_in'],
+      );
+      expect(submissions[1]['reason'], submissions[0]['reason']);
+    },
+  );
   setUp(() {
     paths.clear();
     ApiClient.instance.init();

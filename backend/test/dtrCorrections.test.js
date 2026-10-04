@@ -44,6 +44,48 @@ function fixture({ own = false, status = 'pending', stale = false, applyError = 
 }
 const reviewRequest = (role = 'hr') => ({ user: { id: reviewer, role }, params: { id }, body: { decision: 'approved', notes: 'Verified against supervisor report.' } });
 
+test('submission rejects stale, absent-then-inserted, and missing preview revisions before writing', async () => {
+  for (const revision of ['old-revision', 'absent', undefined]) {
+    const queries = [];
+    const router = createRouter({ shiftFor: async () => ({}), db: { connect: async () => ({
+      release() {}, query: async sql => {
+        queries.push(sql);
+        return { rows: sql.includes('FROM dtr_daily_summary') ? [{ id, original_revision: 'new-revision' }] : [] };
+      },
+    }) } });
+    const result = await invoke(router, 'post', '/', { user: { id: employee }, body: {
+      attendance_date: '2020-09-30', reason: 'Missing biometric time in.',
+      requested_time_in: '2020-09-30T08:00:00+08:00', original_revision: revision,
+    } });
+    assert.equal(result.code, 409);
+    assert.equal(result.body.code, 'attendance_preview_changed');
+    assert.ok(!queries.some(sql => sql.includes('INSERT INTO')));
+    assert.equal(queries.at(-1), 'ROLLBACK');
+  }
+});
+
+test('unchanged existing attendance revision from preview is accepted', async () => {
+  const original = { id, original_revision: 'exact-database-revision', time_in: null };
+  let inserted;
+  const query = async (sql, args) => {
+    if (sql.includes('FROM dtr_daily_summary')) {
+      assert.match(sql, /md5\(to_jsonb\(d\)::text\)/);
+      return { rows: [{ ...original }] };
+    }
+    if (sql.includes('INSERT INTO dtr_corrections')) { inserted = args; return { rows: [{ id }] }; }
+    return { rows: [] };
+  };
+  const router = createRouter({ db: { query, connect: async () => ({ query, release() {} }) },
+    shiftFor: async () => ({ startMinutes: 480, endMinutes: 1020 }) });
+  const preview = await invoke(router, 'get', '/original/:date', { user: { id: employee }, params: { date: '2020-09-30' } });
+  const result = await invoke(router, 'post', '/', { user: { id: employee }, body: {
+    original_revision: preview.body.original_revision, attendance_date: '2020-09-30',
+    reason: 'Missing biometric punch.', requested_time_in: '2020-09-30T08:00:00+08:00',
+  } });
+  assert.equal(result.code, 201);
+  assert.deepEqual(JSON.parse(inserted[7]), { id, time_in: null });
+});
+
 test('cursor queue uses immutable ordering and a precise boundary instead of offsets', async () => {
   const calls = [];
   const rows = Array.from({ length: 51 }, (_, i) => ({
@@ -203,7 +245,7 @@ test('original attendance preview only reads the authenticated employee', async 
     user: { id: employee, role: 'admin' }, params: { date: '2026-10-02' }, query: { employee_id: reviewer },
   });
   assert.equal(result.code, 200);
-  assert.deepEqual(result.body, { shift_punch_mode: 'single_session', shift_crosses_midnight: true });
+  assert.deepEqual(result.body, { original_revision: 'absent', shift_punch_mode: 'single_session', shift_crosses_midnight: true });
   assert.deepEqual(args, [employee, '2026-10-02']);
   assert.deepEqual(shiftArgs, [employee, '2026-10-02']);
 });
@@ -269,7 +311,7 @@ test('submission ignores a supplied employee ID and preserves original data', as
       notified = true;
     } },
     shiftFor: async () => ({ startMinutes: 1320, endMinutes: 420, punchMode: 'single_session', captureWindowMinutes: 120 }) });
-  const req = { user: { id: employee }, body: { employee_id: reviewer, attendance_date: '2020-09-30',
+  const req = { user: { id: employee }, body: { original_revision: 'absent', employee_id: reviewer, attendance_date: '2020-09-30',
     reason: 'Biometric device was unavailable.', requested_time_in: '2020-09-30T22:00:00+08:00', requested_time_out: '2020-10-01T07:00:00+08:00' } };
   assert.equal((await invoke(router, 'post', '/', req)).code, 201);
   assert.equal(insert[0], employee);
@@ -315,7 +357,7 @@ test('evidence is saved in the request transaction before commit', async () => {
   const router = createRouter({ db: { connect: async () => client }, shiftFor: async () => ({ startMinutes: 480, endMinutes: 1020 }) });
   const res = await invoke(router, 'post', '/', { user: { id: employee },
     file: { originalname: 'proof.pdf', buffer: Buffer.from('%PDF-1.4\n') },
-    body: { attendance_date: '2020-09-30', reason: 'Device was unavailable today.', requested_time_in: '2020-09-30T08:00:00+08:00' } });
+    body: { original_revision: 'absent', attendance_date: '2020-09-30', reason: 'Device was unavailable today.', requested_time_in: '2020-09-30T08:00:00+08:00' } });
   assert.equal(res.code, 201);
   const evidence = queries.findIndex(q => q.sql.includes('INSERT INTO dtr_correction_attachments'));
   assert.ok(evidence > 0);
