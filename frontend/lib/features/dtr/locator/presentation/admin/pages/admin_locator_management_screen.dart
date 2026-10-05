@@ -1,5 +1,7 @@
 import 'dart:async';
 
+import 'package:hrms_plaridel/shared/widgets/reviewer_access_notice.dart';
+
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:hrms_plaridel/shared/widgets/workforce_loading_skeleton.dart';
@@ -83,6 +85,9 @@ class _AdminLocatorManagementScreenState
   StreamSubscription<AppRealtimeEvent>? _locatorRealtimeSub;
   DateTime? _officialHrmsDate;
   bool _canFinalReview = false;
+  bool _checkingReviewer = true;
+  bool _reviewerCheckFailed = false;
+  int _reviewerCheckVersion = 0;
 
   bool _isDark(BuildContext context) => AppTheme.dashIsDark(context);
 
@@ -97,20 +102,32 @@ class _AdminLocatorManagementScreenState
     super.initState();
     _loadLocatorTypes();
     _loadOfficialDate();
-    _loadFinalReviewerAccess();
     _load();
   }
 
   Future<void> _loadFinalReviewerAccess() async {
+    final version = ++_reviewerCheckVersion;
+    setState(() {
+      _checkingReviewer = true;
+      _reviewerCheckFailed = false;
+      _canFinalReview = false;
+    });
     try {
       final response = await ApiClient.instance.get<Map<String, dynamic>>(
         '/api/locator-slips/final-reviewer/me',
       );
-      if (mounted) {
-        setState(() => _canFinalReview = response.data?['can_review'] == true);
-      }
+      if (!mounted || version != _reviewerCheckVersion) return;
+      setState(() {
+        _canFinalReview = response.data?['can_review'] == true;
+        _checkingReviewer = false;
+      });
     } catch (_) {
-      if (mounted) setState(() => _canFinalReview = false);
+      if (!mounted || version != _reviewerCheckVersion) return;
+      setState(() {
+        _canFinalReview = false;
+        _checkingReviewer = false;
+        _reviewerCheckFailed = true;
+      });
     }
   }
 
@@ -255,7 +272,16 @@ class _AdminLocatorManagementScreenState
                     style: TextStyle(color: Colors.red.shade900, fontSize: 12),
                   ),
                 ),
-              if (_loading && _items.isEmpty)
+              if (!_canFinalReview)
+                ReviewerAccessNotice(
+                  requestType: 'locator',
+                  checking: _checkingReviewer,
+                  failed: _reviewerCheckFailed,
+                  onRetry: () async {
+                    await _load(forceRefresh: true);
+                  },
+                )
+              else if (_loading && _items.isEmpty)
                 Padding(
                   padding: const EdgeInsets.only(top: 10),
                   child: SizedBox(
@@ -1839,6 +1865,8 @@ class _AdminLocatorManagementScreenState
       _error = null;
     });
     try {
+      await _loadFinalReviewerAccess();
+      if (!mounted || loadVersion != _loadVersion || !_canFinalReview) return;
       final user = context.read<AuthProvider>().user;
       final userId = (user?.id ?? '').trim();
       final role = (user?.role ?? '').trim().toLowerCase();
