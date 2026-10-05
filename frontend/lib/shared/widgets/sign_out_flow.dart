@@ -1026,7 +1026,9 @@ Future<void> performDashboardSignOut(BuildContext context) async {
     await Future<void>.delayed(kSignOutLoadingMinDuration);
   }
 
-  if (!context.mounted) return;
+  // Auth changes can dispose the dashboard while the root dialog stays open.
+  // Finish through the captured navigator, independent of that dashboard.
+  if (!rootNav.mounted) return;
 
   await rootNav.pushAndRemoveUntil(
     MaterialPageRoute(builder: (_) => const LoginPage()),
