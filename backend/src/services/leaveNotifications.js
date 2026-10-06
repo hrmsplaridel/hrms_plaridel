@@ -1,8 +1,14 @@
 const {
   insertNotification,
   insertNotificationForUsers,
-  getHrAdminUserIds,
 } = require('./notificationService');
+const { resolveFinalLeaveReviewers } = require('./leaveFinalReviewerService');
+
+async function finalReviewerIds(db, applicantId) {
+  if (!applicantId) return [];
+  const reviewers = await resolveFinalLeaveReviewers(db);
+  return reviewers.filter(r => String(r.id) !== String(applicantId)).map(r => r.id);
+}
 
 function fmtRange(startStr, endStr) {
   if (!startStr || !endStr) return '';
@@ -49,7 +55,7 @@ async function notifyAfterSubmit(pool, {
   }
 
   if (status === 'pending_hr' || status === 'pending') {
-    const hrIds = await getHrAdminUserIds(pool);
+    const hrIds = await finalReviewerIds(pool, employeeUserId);
     const targets = hrIds.filter((id) => id !== employeeUserId);
     await insertNotificationForUsers(pool, targets, {
       category: 'leave',
@@ -65,13 +71,14 @@ async function notifyAfterSubmit(pool, {
 
 /** Department head approved; request is now with HR. */
 async function notifyDepartmentHeadApprovedForHr(pool, {
+  employeeUserId,
   leaveRequestId,
   employeeName,
   leaveTypeName,
   startDateStr,
   endDateStr,
 }) {
-  const hrIds = await getHrAdminUserIds(pool);
+  const hrIds = await finalReviewerIds(pool, employeeUserId);
   const range = fmtRange(startDateStr, endDateStr);
   const who = employeeName || 'An employee';
   const lt = leaveLabel(leaveTypeName);
@@ -156,7 +163,7 @@ async function notifyStakeholdersLeaveCancelled(pool, {
   const lt = leaveLabel(leaveTypeName);
   const body = `${who} cancelled ${lt} (${range}).${cancelReason ? ` Reason: ${cancelReason}` : ''}`;
 
-  const hrIds = await getHrAdminUserIds(pool);
+  const hrIds = await finalReviewerIds(pool, employeeUserId);
   const hrTargets = hrIds.filter((id) => id !== employeeUserId);
   await insertNotificationForUsers(pool, hrTargets, {
     category: 'leave',

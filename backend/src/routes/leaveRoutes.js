@@ -4052,6 +4052,7 @@ router.patch('/:id/department-head-approve', protect, async (req, res) => {
     const mappedDhApprove = mapLeaveRowToApi(out.rows[0]);
     notifySafe(() =>
       leaveNotifications.notifyDepartmentHeadApprovedForHr(pool, {
+        employeeUserId: r.user_id || r.employee_id,
         leaveRequestId: id,
         employeeName: mappedDhApprove.employee_name,
         leaveTypeName: mappedDhApprove.leave_type_name || mappedDhApprove.leave_type,

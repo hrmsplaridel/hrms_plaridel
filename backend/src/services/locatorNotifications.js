@@ -1,8 +1,14 @@
 const {
   insertNotification,
   insertNotificationForUsers,
-  getHrAdminUserIds,
 } = require('./notificationService');
+const { resolveFinalLeaveReviewers } = require('./leaveFinalReviewerService');
+
+async function finalReviewerIds(db, applicantId) {
+  if (!applicantId) return [];
+  const reviewers = await resolveFinalLeaveReviewers(db);
+  return reviewers.filter(r => String(r.id) !== String(applicantId)).map(r => r.id);
+}
 
 function fmtDate(value) {
   if (!value) return '';
@@ -70,7 +76,7 @@ async function notifyAfterSubmit(
   }
 
   if (status === 'pending_hr' || status === 'pending') {
-    const hrIds = await getHrAdminUserIds(pool);
+    const hrIds = await finalReviewerIds(pool, employeeUserId);
     const targets = hrIds.filter((id) => id !== employeeUserId);
     await insertNotificationForUsers(pool, targets, {
       category: 'locator',
@@ -86,10 +92,10 @@ async function notifyAfterSubmit(
 
 async function notifyDepartmentHeadApprovedForHr(
   pool,
-  { slipId, employeeName, slipDate, requestType }
+  { slipId, employeeUserId, employeeName, slipDate, requestType }
 ) {
   const requestLabel = requestTypeLabel(requestType);
-  const hrIds = await getHrAdminUserIds(pool);
+  const hrIds = await finalReviewerIds(pool, employeeUserId);
   await insertNotificationForUsers(pool, hrIds, {
     category: 'locator',
     type: 'locator_forwarded_to_hr',

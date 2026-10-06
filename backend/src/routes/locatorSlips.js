@@ -2180,6 +2180,7 @@ router.patch('/:id/department-head-approve', protect, async (req, res) => {
     const mapped = await fetchLocatorSlipDetails(pool, id);
     notifySafe(() =>
       locatorNotifications.notifyDepartmentHeadApprovedForHr(pool, {
+        employeeUserId: mapped.employee_id,
         slipId: id,
         employeeName: mapped.employee_name,
         slipDate: mapped.slip_date,
