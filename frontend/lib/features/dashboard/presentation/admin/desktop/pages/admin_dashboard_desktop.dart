@@ -1,3 +1,6 @@
+import 'package:flutter/foundation.dart' show mapEquals;
+import 'package:hrms_plaridel/core/services/admin_access_refresh.dart';
+import 'package:hrms_plaridel/core/services/app_realtime_provider.dart';
 import 'dart:async';
 import 'dart:ui' show lerpDouble;
 import 'package:flutter/material.dart';
@@ -353,6 +356,9 @@ class AdminDashboard extends StatefulWidget {
 class _AdminDashboardState extends State<AdminDashboard>
     with WidgetsBindingObserver {
   AdminMenu _selectedMenu = AdminMenu.dashboard;
+  AdminAccessRefresh? _accessRefresh;
+  int _accountAccessVersion = 0;
+  int _dtrAccessVersion = 0;
   bool? _canCreateAccount;
   bool _canViewDtrReports = false;
   bool _canManageDtr = false;
@@ -378,8 +384,6 @@ class _AdminDashboardState extends State<AdminDashboard>
   @override
   void initState() {
     super.initState();
-    _loadAccountCreationAccess();
-    _loadDtrAccess();
     _settingsPanelWidget = DashboardProfilePanel(
       key: _settingsPanelKey,
       onBack: _closeMyProfile,
@@ -388,12 +392,20 @@ class _AdminDashboardState extends State<AdminDashboard>
     FormPdf.warmupThenPrefetchBackgrounds();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
+      _accessRefresh = AdminAccessRefresh(
+        realtime: context.read<AppRealtimeProvider>(),
+        onRefresh: () async {
+          await Future.wait([_loadAccountCreationAccess(), _loadDtrAccess()]);
+        },
+      );
+      unawaited(_accessRefresh!.refresh());
       context.read<NotificationProvider>().refreshUnreadCount();
       context.read<DocuTrackerProvider>().loadNotifications();
       context.read<DocuTrackerProvider>().loadSourceSignatureRequests();
       _notificationPollTimer?.cancel();
       _notificationPollTimer = Timer.periodic(const Duration(seconds: 30), (_) {
         if (!mounted) return;
+        unawaited(_accessRefresh?.refresh());
         context.read<NotificationProvider>().refreshUnreadCount();
         context.read<DocuTrackerProvider>().loadNotifications();
         context.read<DocuTrackerProvider>().loadSourceSignatureRequests();
@@ -404,8 +416,7 @@ class _AdminDashboardState extends State<AdminDashboard>
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed && mounted) {
-      _loadAccountCreationAccess();
-      _loadDtrAccess();
+      unawaited(_accessRefresh?.refresh());
       context.read<NotificationProvider>().refreshUnreadCount();
       context.read<DocuTrackerProvider>().loadNotifications();
       context.read<DocuTrackerProvider>().loadSourceSignatureRequests();
@@ -416,16 +427,19 @@ class _AdminDashboardState extends State<AdminDashboard>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _notificationPollTimer?.cancel();
+    _accessRefresh?.dispose();
     super.dispose();
   }
 
   Future<void> _loadAccountCreationAccess() async {
+    final version = ++_accountAccessVersion;
     try {
       final response = await ApiClient.instance.get<Map<String, dynamic>>(
         '/api/account-creation-access/me',
       );
-      if (!mounted) return;
+      if (!mounted || version != _accountAccessVersion) return;
       final allowed = response.data?['allowed'] == true;
+      if (_canCreateAccount == allowed) return;
       setState(() {
         _canCreateAccount = allowed;
         if (!allowed && _selectedMenu == AdminMenu.createAccount) {
@@ -433,7 +447,7 @@ class _AdminDashboardState extends State<AdminDashboard>
         }
       });
     } catch (_) {
-      if (mounted) {
+      if (mounted && version == _accountAccessVersion) {
         setState(() {
           _canCreateAccount = false;
           if (_selectedMenu == AdminMenu.createAccount) {
@@ -445,26 +459,35 @@ class _AdminDashboardState extends State<AdminDashboard>
   }
 
   Future<void> _loadDtrAccess() async {
+    final version = ++_dtrAccessVersion;
     try {
       final response = await ApiClient.instance.get<Map<String, dynamic>>(
         '/api/dtr-access/me',
       );
-      if (!mounted) return;
+      if (!mounted || version != _dtrAccessVersion) return;
+      final reports = response.data?['reports_allowed'] == true;
+      final manage = response.data?['manage_allowed'] == true;
+      final features = {
+        for (final field in const [
+          'employees_allowed',
+          'leave_allowed',
+          'approvals_allowed',
+          'locator_allowed',
+        ])
+          field: response.data?[field] == true,
+      };
+      if (_canViewDtrReports == reports &&
+          _canManageDtr == manage &&
+          mapEquals(_dtrFeatureAccess, features)) {
+        return;
+      }
       setState(() {
-        _canViewDtrReports = response.data?['reports_allowed'] == true;
-        _canManageDtr = response.data?['manage_allowed'] == true;
-        _dtrFeatureAccess = {
-          for (final field in const [
-            'employees_allowed',
-            'leave_allowed',
-            'approvals_allowed',
-            'locator_allowed',
-          ])
-            field: response.data?[field] == true,
-        };
+        _canViewDtrReports = reports;
+        _canManageDtr = manage;
+        _dtrFeatureAccess = features;
       });
     } catch (_) {
-      if (mounted) {
+      if (mounted && version == _dtrAccessVersion) {
         setState(() {
           _canViewDtrReports = false;
           _canManageDtr = false;
@@ -1748,6 +1771,9 @@ class _DtrContentState extends State<_DtrContent> {
     }
     if (oldWidget.canCreateAccount != widget.canCreateAccount) {
       _featureCache.remove(3);
+      if (!widget.canCreateAccount && _dtrSectionIndex == 3) {
+        _dtrSectionIndex = 0;
+      }
     }
     if (oldWidget.canViewReports && !widget.canViewReports) {
       _featureCache.remove(2);
