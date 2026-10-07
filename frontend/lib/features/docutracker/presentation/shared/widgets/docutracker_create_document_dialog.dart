@@ -496,10 +496,10 @@ String docuTrackerCreateStepLabel(WorkflowStep step) {
   final label = step.label?.trim();
   if (label != null && label.isNotEmpty) return label;
   if (step.assigneeSource == 'submitter_department_reviewers') {
-    return 'Your Department Head';
+    return 'Your department reviewer';
   }
   if (step.assigneeSource == 'department_reviewers') {
-    return 'Department Head';
+    return 'Department reviewer';
   }
   return 'Step ${step.stepOrder} reviewer';
 }

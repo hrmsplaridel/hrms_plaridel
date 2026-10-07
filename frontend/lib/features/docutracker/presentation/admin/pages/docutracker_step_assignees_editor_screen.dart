@@ -372,7 +372,7 @@ class _DocuTrackerStepAssigneesEditorScreenState
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text(
-            'This step uses the official Department Head and backups from Department Management.',
+            'This step uses the department\'s primary and backup reviewers from Department Management.',
           ),
         ),
       );

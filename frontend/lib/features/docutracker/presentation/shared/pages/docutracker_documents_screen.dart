@@ -227,6 +227,12 @@ class _DocuTrackerDocumentsScreenState
     final requiredDocuments = docuTrackerRequiredActionDocuments(
       documents: visibleDocuments,
       userId: userId,
+      isSingleReviewerStep: (document) => docuTrackerIsSingleReviewerStep(
+        provider.getRoutingConfigForType(
+          DocumentType.fromValue(document.documentType),
+        ),
+        document.currentStep ?? 1,
+      ),
     );
     final pendingSourceRequests = provider.sourceSignatureRequests
         .where((request) => widget.isAdmin || request.isAssignedToViewer)

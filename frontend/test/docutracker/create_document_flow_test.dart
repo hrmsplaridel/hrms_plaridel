@@ -62,7 +62,7 @@ void main() {
           assigneeSource: 'submitter_department_reviewers',
         ),
       ),
-      'Your Department Head',
+      'Your department reviewer',
     );
     expect(
       docuTrackerCreateStepLabel(

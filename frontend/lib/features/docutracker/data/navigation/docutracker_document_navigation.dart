@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 
 import 'package:hrms_plaridel/features/docutracker/data/repositories/docutracker_repository.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document.dart';
+import 'package:hrms_plaridel/features/docutracker/models/document_routing_config.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document_status.dart';
+import 'package:hrms_plaridel/features/docutracker/models/workflow_step.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/pages/docutracker_document_detail_screen.dart';
 import 'package:hrms_plaridel/features/docutracker/services/docutracker_document_visibility.dart';
 
@@ -16,11 +18,35 @@ List<DocuTrackerDocument> docuTrackerDocumentsForDisplay({
   return DocuTrackerDocumentVisibility.filterForUser(documents, userId: userId);
 }
 
+/// Department review steps have a single active reviewer: the persisted
+/// current holder. Older routing snapshots may still list backups.
+bool docuTrackerIsSingleReviewerStep(DocumentRoutingConfig? config, int step) {
+  for (final s in config?.steps ?? const <WorkflowStep>[]) {
+    if (s.stepOrder == step) return s.usesDynamicDepartmentAssignees;
+  }
+  return false;
+}
+
+/// Whether [userId] should be presented as a reviewer of the current step.
+bool docuTrackerIsCurrentStepReviewer({
+  required DocuTrackerDocument document,
+  required String userId,
+  required List<String> snapshotAssigneeIds,
+  required bool singleReviewerStep,
+}) {
+  final uid = userId.trim();
+  if (uid.isEmpty) return false;
+  if (document.currentHolderId?.trim() == uid) return true;
+  if (singleReviewerStep) return false;
+  return snapshotAssigneeIds.any((id) => id.trim() == uid);
+}
+
 /// Documents for Required actions: only items that still need the viewer to act.
 /// Completed / past-participant native docs stay in the Documents table instead.
 List<DocuTrackerDocument> docuTrackerRequiredActionDocuments({
   required List<DocuTrackerDocument> documents,
   required String userId,
+  bool Function(DocuTrackerDocument document)? isSingleReviewerStep,
 }) {
   final uid = userId.trim();
   return documents
@@ -47,7 +73,9 @@ List<DocuTrackerDocument> docuTrackerRequiredActionDocuments({
             status == DocumentStatus.overdue ||
             status == DocumentStatus.returned;
         final isRoutingOnActive =
-            document.viewerIsRoutingAssignee && isActiveReview;
+            document.viewerIsRoutingAssignee &&
+            isActiveReview &&
+            !(isSingleReviewerStep?.call(document) ?? false);
         final isSignatureAssignee = document.signatureSignerIds.any(
           (id) => id.trim() == uid,
         );

@@ -221,7 +221,7 @@ class _SimplifiedWorkflowStepEditorState
         (widget.initial.departmentId ?? '').trim().isEmpty) {
       setState(
         () => _error =
-            'This fixed-department head step has no department. Choose specific people or Department head of submitter instead.',
+            'This fixed-department reviewer step has no department. Choose specific people or Department reviewer of submitter instead.',
       );
       return;
     }
@@ -363,9 +363,9 @@ class _SimplifiedWorkflowStepEditorState
                   RadioListTile<_AssigneeMode>(
                     contentPadding: EdgeInsets.zero,
                     dense: true,
-                    title: const Text('Department head of submitter'),
+                    title: const Text('Department reviewer of submitter'),
                     subtitle: const Text(
-                      'Routes to the official head (+ backups) of the creator\'s department.',
+                      'Routes to the primary reviewer of the submitter\'s department. If the primary reviewer is the document creator, an eligible backup reviewer is used instead.',
                     ),
                     value: _AssigneeMode.submitterDepartmentHead,
                     groupValue: _assigneeMode,
@@ -378,7 +378,9 @@ class _SimplifiedWorkflowStepEditorState
                     RadioListTile<_AssigneeMode>(
                       contentPadding: EdgeInsets.zero,
                       dense: true,
-                      title: const Text('Official head of a fixed department'),
+                      title: const Text(
+                        'Department reviewer of a fixed department',
+                      ),
                       subtitle: const Text(
                         'Legacy: keeps the department stored on this step.',
                       ),
@@ -394,16 +396,18 @@ class _SimplifiedWorkflowStepEditorState
                     const _FieldHeading(number: 3, label: 'Resolved Assignees'),
                     const SizedBox(height: 8),
                     _infoCard(
-                      'Primary: official Department Head of the document creator\'s department at routing time\n'
-                      'Backup: that department\'s configured backup reviewers\n'
-                      'No person is stored on this step — each office routes to its own head.',
+                      'Primary: the primary reviewer (Department Head) of the submitter\'s department at routing time\n'
+                      'Backup: that department\'s backup reviewers, in their configured order\n'
+                      'The submitter never reviews their own document. If no other reviewer is eligible, submission is blocked.\n'
+                      'No person is stored on this step. Set each department\'s reviewers in Department Management.',
                     ),
                   ] else if (_usesFixedDepartmentHead) ...[
                     const _FieldHeading(number: 3, label: 'Resolved Assignees'),
                     const SizedBox(height: 8),
                     _infoCard(
-                      'Primary: official Department Head of the fixed department on this step\n'
-                      'Backup: configured department backup reviewers',
+                      'Primary: the primary reviewer (Department Head) of the fixed department on this step\n'
+                      'Backup: that department\'s backup reviewers, in their configured order\n'
+                      'The submitter never reviews their own document.',
                     ),
                   ] else ...[
                     const _FieldHeading(number: 3, label: 'Primary Assignee'),

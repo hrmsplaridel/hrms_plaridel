@@ -11,6 +11,7 @@ import 'package:hrms_plaridel/features/docutracker/models/document.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document_action.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document_history.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document_routing_config.dart';
+import 'package:hrms_plaridel/features/docutracker/data/navigation/docutracker_document_navigation.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document_routing_record.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document_status.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document_type.dart';
@@ -607,16 +608,19 @@ class _DocuTrackerDocumentDetailScreenState
         .firstWhere((_) => true, orElse: () => null);
 
     // isAssignedReviewer is true when:
-    // 1. current_holder matches this user (legacy single-holder), OR
-    // 2. user appears in routing_record_assignees snapshot (primary + backup)
+    // 1. current_holder matches this user, OR
+    // 2. user appears in routing_record_assignees snapshot (primary + backup),
+    //    except on department review steps, where only the holder reviews.
     // We gate on !_routingLoading so buttons don't flash-hide before data loads.
+    final singleReviewerStep = _isSingleReviewerStep(provider, doc);
     final isAssignedReviewer =
         !_routingLoading &&
-        userId.isNotEmpty &&
-        (doc.currentHolderId == userId ||
-            (currentRouting?.assigneeIds.contains(userId) ?? false) ||
-            // Fallback for legacy docs where snapshot table may be empty but holder is set.
-            (currentRouting == null && doc.currentHolderId == userId));
+        docuTrackerIsCurrentStepReviewer(
+          document: doc,
+          userId: userId,
+          snapshotAssigneeIds: currentRouting?.assigneeIds ?? const [],
+          singleReviewerStep: singleReviewerStep,
+        );
 
     final workflowReady = _workflowConfigIssue == null;
     final canSubmit =
@@ -660,7 +664,11 @@ class _DocuTrackerDocumentDetailScreenState
                 showYourTurn,
                 userId: userId,
                 isAssignedReviewer: isAssignedReviewer,
-                assigneeNames: currentRouting?.assigneeNames ?? const [],
+                assigneeNames: _currentReviewerNames(
+                  doc,
+                  currentRouting,
+                  singleReviewerStep: singleReviewerStep,
+                ),
               ),
               if (_workflowConfigIssue != null) ...[
                 const SizedBox(height: 16),
@@ -1191,6 +1199,26 @@ class _DocuTrackerDocumentDetailScreenState
     return null;
   }
 
+  bool _isSingleReviewerStep(
+    DocuTrackerProvider provider,
+    DocuTrackerDocument doc,
+  ) => docuTrackerIsSingleReviewerStep(
+    _routingConfigFor(provider, doc),
+    doc.currentStep ?? 1,
+  );
+
+  /// Department review steps show only the persisted holder; older routing
+  /// snapshots may still list backups who are not active reviewers.
+  List<String> _currentReviewerNames(
+    DocuTrackerDocument doc,
+    DocumentRoutingRecord? currentRouting, {
+    required bool singleReviewerStep,
+  }) {
+    if (!singleReviewerStep) return currentRouting?.assigneeNames ?? const [];
+    final holderName = doc.assigneeName?.trim();
+    return holderName == null || holderName.isEmpty ? const [] : [holderName];
+  }
+
   bool _shouldShowActionsPanel(
     DocuTrackerDocument doc, {
     required bool canApprove,
@@ -1343,14 +1371,21 @@ class _DocuTrackerDocumentDetailScreenState
         .where((r) => r.stepOrder == current)
         .cast<DocumentRoutingRecord?>()
         .firstWhere((_) => true, orElse: () => null);
-    final assigneeNames = currentRouting?.assigneeNames ?? const <String>[];
-    // Same logic as the build() permission gate: include both holder and snapshot assignees.
+    final singleReviewerStep = _isSingleReviewerStep(provider, doc);
+    final assigneeNames = _currentReviewerNames(
+      doc,
+      currentRouting,
+      singleReviewerStep: singleReviewerStep,
+    );
+    // Same logic as the build() permission gate.
     final isAssignedReviewer =
         !_routingLoading &&
-        currentUserId.isNotEmpty &&
-        (doc.currentHolderId == currentUserId ||
-            (currentRouting?.assigneeIds.contains(currentUserId) ?? false) ||
-            (currentRouting == null && doc.currentHolderId == currentUserId));
+        docuTrackerIsCurrentStepReviewer(
+          document: doc,
+          userId: currentUserId,
+          snapshotAssigneeIds: currentRouting?.assigneeIds ?? const [],
+          singleReviewerStep: singleReviewerStep,
+        );
     final phase = _workflowPhaseFor(doc, provider);
     final stepSubtitle = phase.detail ?? phase.label;
 

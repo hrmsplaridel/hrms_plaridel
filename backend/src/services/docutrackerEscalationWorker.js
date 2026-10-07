@@ -2,6 +2,7 @@ const { pool } = require('../config/db');
 const {
   ESCALATION_ELIGIBLE_WORKFLOW_STATUSES,
 } = require('./docutrackerStatusSemantics');
+const { resolveDepartmentReviewEscalation } = require('./docutrackerWorkflowService');
 
 let timer = null;
 let running = false;
@@ -131,9 +132,9 @@ async function upsertRoutingRecord(client, payload) {
     deadline_time,
     remarks,
   } = payload || {};
-  if (!document_id || !step_order) return;
-  if (!assignee_id) return;
-  await client.query(
+  if (!document_id || !step_order) return null;
+  if (!assignee_id) return null;
+  const result = await client.query(
     `INSERT INTO docutracker_routing_records
        (document_id, step_order, assignee_id, sent_time, deadline_time, reviewed_time, status, remarks)
      VALUES ($1, $2, $3, now(), $4, NULL, $5, $6)
@@ -144,7 +145,8 @@ async function upsertRoutingRecord(client, payload) {
                    reviewed_time = NULL,
                    status = EXCLUDED.status,
                    remarks = EXCLUDED.remarks,
-                   updated_at = now()`,
+                   updated_at = now()
+     RETURNING id`,
     [
       document_id,
       step_order,
@@ -154,6 +156,156 @@ async function upsertRoutingRecord(client, payload) {
       remarks ?? null,
     ]
   );
+  return result?.rows?.[0]?.id ?? null;
+}
+
+async function replaceRoutingSnapshot(client, routingRecordId, userId) {
+  if (!routingRecordId || !userId) return;
+  await client.query(
+    'DELETE FROM docutracker_routing_record_assignees WHERE routing_record_id = $1',
+    [routingRecordId]
+  );
+  await client.query(
+    `INSERT INTO docutracker_routing_record_assignees (routing_record_id, user_id)
+     VALUES ($1, $2)
+     ON CONFLICT DO NOTHING`,
+    [routingRecordId, userId]
+  );
+}
+
+const DEPARTMENT_REVIEW_RECOVERY_REASONS = {
+  HOLDER_NOT_ELIGIBLE_REVIEWER:
+    'the assigned reviewer is no longer an eligible department reviewer',
+  NO_OTHER_ELIGIBLE_REVIEWER:
+    'no other eligible department reviewer is available to escalate to',
+};
+
+/**
+ * Department review steps never escalate to a role-based recipient: only the next
+ * eligible configured reviewer may become the holder. Otherwise the holder is left
+ * unchanged and the document is flagged for Admin Recovery.
+ */
+async function escalateDepartmentReviewStep(client, doc, review, { nextLevel, nextDeadline }) {
+  if (!review.nextReviewerId) {
+    const reasonText = DEPARTMENT_REVIEW_RECOVERY_REASONS[review.reason] || 'no eligible department reviewer is available';
+    await client.query(
+      `UPDATE docutracker_documents
+       SET status = 'overdue',
+           needs_admin_intervention = true,
+           deadline_time = null,
+           updated_at = now()
+       WHERE id = $1`,
+      [doc.id]
+    );
+    await insertHistoryIfMissing(client, {
+      document_id: doc.id,
+      action: 'overdue',
+      from_step: doc.current_step,
+      to_step: doc.current_step,
+      from_status: doc.status,
+      to_status: 'overdue',
+      remarks: `Escalation stopped: ${reasonText}. Admin Recovery is required to reassign this department review step.`,
+      is_overdue_log: true,
+      is_escalation_log: true,
+      escalation_level: doc.escalation_level,
+    });
+    if (doc.current_holder_id) {
+      await upsertRoutingRecord(client, {
+        document_id: doc.id,
+        step_order: doc.current_step,
+        assignee_id: doc.current_holder_id,
+        status: 'overdue',
+        deadline_time: null,
+        remarks: 'Overdue (Admin Recovery required)',
+      });
+    }
+    if (doc.current_holder_id && review.reason === 'NO_OTHER_ELIGIBLE_REVIEWER') {
+      await insertNotificationIfNotRecent(client, {
+        document_id: doc.id,
+        user_id: doc.current_holder_id,
+        type: 'overdue',
+        escalation_level: doc.escalation_level,
+        event_key: `overdue:doc:${doc.id}:level:${doc.escalation_level ?? 0}:department-review`,
+        title: 'Document overdue',
+        body: 'This document is overdue for your review and has been flagged for admin intervention.',
+      });
+    }
+    if (doc.notify_original_sender && doc.created_by && doc.created_by !== doc.current_holder_id) {
+      await insertNotificationIfNotRecent(client, {
+        document_id: doc.id,
+        user_id: doc.created_by,
+        type: 'overdue',
+        escalation_level: doc.escalation_level,
+        event_key: `overdue:doc:${doc.id}:level:${doc.escalation_level ?? 0}:creator`,
+        title: 'Your document is overdue',
+        body: 'Your document could not be escalated to another reviewer and needs admin intervention.',
+      });
+    }
+    await notifyAdminsForIntervention(
+      client,
+      doc.id,
+      'Admin Recovery required',
+      `Document "${doc.title}" is overdue at a department review step and ${reasonText}. Reassign it to an eligible reviewer through Admin Recovery.`
+    );
+    return;
+  }
+
+  const nextReviewerId = review.nextReviewerId;
+  const reviewerLabel = review.backupRank ? `backup reviewer #${review.backupRank}` : 'department reviewer';
+  await client.query(
+    `UPDATE docutracker_documents
+     SET status = 'escalated',
+         escalation_level = $2,
+         current_step = $3,
+         current_holder_id = $4,
+         needs_admin_intervention = false,
+         deadline_time = $5,
+         sent_time = now(),
+         updated_at = now()
+     WHERE id = $1`,
+    [doc.id, nextLevel, doc.current_step, nextReviewerId, nextDeadline]
+  );
+  const routingRecordId = await upsertRoutingRecord(client, {
+    document_id: doc.id,
+    step_order: doc.current_step,
+    assignee_id: nextReviewerId,
+    status: 'escalated',
+    deadline_time: nextDeadline,
+    remarks: `Escalated to the next eligible ${reviewerLabel}`,
+  });
+  await replaceRoutingSnapshot(client, routingRecordId, nextReviewerId);
+  await insertHistoryIfMissing(client, {
+    document_id: doc.id,
+    action: 'escalated',
+    from_step: doc.current_step,
+    to_step: doc.current_step,
+    from_status: doc.status,
+    to_status: 'escalated',
+    remarks: `Automatically escalated to the next eligible ${reviewerLabel}`,
+    is_overdue_log: true,
+    is_escalation_log: true,
+    escalation_level: nextLevel,
+  });
+  await insertNotificationIfNotRecent(client, {
+    document_id: doc.id,
+    user_id: nextReviewerId,
+    type: 'escalated',
+    escalation_level: nextLevel,
+    event_key: `escalated:doc:${doc.id}:level:${nextLevel}:assignee:${nextReviewerId}`,
+    title: 'Document escalated to you',
+    body: 'An overdue department review has been escalated and assigned to you for review.',
+  });
+  if (doc.notify_original_sender && doc.created_by && doc.created_by !== nextReviewerId) {
+    await insertNotificationIfNotRecent(client, {
+      document_id: doc.id,
+      user_id: doc.created_by,
+      type: 'escalated',
+      escalation_level: nextLevel,
+      event_key: `escalated:doc:${doc.id}:level:${nextLevel}:creator:${doc.created_by}`,
+      title: 'Your document was escalated',
+      body: 'A document you created has been escalated due to overdue review.',
+    });
+  }
 }
 
 async function notifyAdminsForIntervention(client, documentId, title, body) {
@@ -211,21 +363,41 @@ async function resolveEscalationRecipient(client, doc) {
   return { assigneeId: candidate, reason: null };
 }
 
-async function processEscalationsOnce() {
+/**
+ * The in-process flag only prevents overlapping runs in this process; the
+ * PostgreSQL advisory lock still guards against other processes. The flag is
+ * reset no matter how the run or its connection cleanup ends.
+ */
+async function processEscalationsOnce({ db = pool } = {}) {
   if (running) return;
   running = true;
-  const client = await pool.connect();
+  try {
+    await runEscalationPass(db);
+  } catch (err) {
+    console.error('[docutracker escalation worker]', err);
+  } finally {
+    running = false;
+  }
+}
+
+async function runEscalationPass(db) {
+  const client = await db.connect();
   let hasAdvisoryLock = false;
+  let inTransaction = false;
+  // A client whose rollback or unlock failed may still hold the session-level
+  // advisory lock or an open transaction, so it must not return to the pool.
+  let discardClient = false;
   try {
     const lockRes = await client.query('SELECT pg_try_advisory_lock($1) AS locked', [
       ESCALATION_LOCK_KEY,
     ]);
-    if (!lockRes.rows[0]?.locked) {
+    if (!lockRes?.rows?.[0]?.locked) {
       return;
     }
     hasAdvisoryLock = true;
 
     await client.query('BEGIN');
+    inTransaction = true;
 
     const docsRes = await client.query(
       `SELECT
@@ -329,6 +501,13 @@ async function processEscalationsOnce() {
           `Document "${doc.title}" reached max escalation level and needs manual action.`
         );
       } else {
+        const departmentReview = normalizeRole(doc.escalation_target_role)
+          ? await resolveDepartmentReviewEscalation(client, doc)
+          : null;
+        if (departmentReview) {
+          await escalateDepartmentReviewStep(client, doc, departmentReview, { nextLevel, nextDeadline });
+          continue;
+        }
         const escalationRecipient = await resolveEscalationRecipient(client, doc);
         if (!escalationRecipient.assigneeId) {
           // Strict fallback: no escalation recipient means admin intervention required.
@@ -460,15 +639,31 @@ async function processEscalationsOnce() {
     }
 
     await client.query('COMMIT');
+    inTransaction = false;
   } catch (err) {
-    await client.query('ROLLBACK');
-    console.error('[docutracker escalation worker]', err);
+    if (inTransaction) {
+      try {
+        await client.query('ROLLBACK');
+      } catch (rollbackErr) {
+        discardClient = true;
+        console.error('[docutracker escalation worker] rollback failed', rollbackErr);
+      }
+    }
+    throw err;
   } finally {
     if (hasAdvisoryLock) {
-      await client.query('SELECT pg_advisory_unlock($1)', [ESCALATION_LOCK_KEY]);
+      try {
+        await client.query('SELECT pg_advisory_unlock($1)', [ESCALATION_LOCK_KEY]);
+      } catch (unlockErr) {
+        discardClient = true;
+        console.error('[docutracker escalation worker] advisory unlock failed', unlockErr);
+      }
     }
-    client.release();
-    running = false;
+    try {
+      client.release(discardClient);
+    } catch (releaseErr) {
+      console.error('[docutracker escalation worker] client release failed', releaseErr);
+    }
   }
 }
 

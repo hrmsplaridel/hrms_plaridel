@@ -6,7 +6,6 @@ const { GENERAL_PERMISSION_ACTIONS } = require('./docutrackerSystemAccessActions
 const { excludeMayorIntakeStubSql } = require('../utils/mayorIntakeStub');
 const {
   getEmployeeDepartmentForDate,
-  getEmployeeReviewSnapshot,
   resolveDepartmentReviewers,
 } = require('./departmentReviewerService');
 
@@ -1243,10 +1242,117 @@ function isCurrentHolder(document, userId) {
   return !!document && !!userId && sameEntityId(document.current_holder_id, userId);
 }
 
-async function getWorkflowStepAssigneeRecord(client, { document, userId }) {
+async function resolveEligibleDepartmentReviewers(client, { document, stepConfig, workflowVersion }) {
+  return (await resolveStepAssignees(client, {
+    explicitAssigneeId: null,
+    stepConfig,
+    currentHolderId: document.current_holder_id || null,
+    documentType: document.document_type,
+    workflowVersion,
+    submitterUserId: document.created_by || null,
+  })).map(String);
+}
+
+/**
+ * Department review steps have one active reviewer: the persisted current holder,
+ * and only while they are still an eligible reviewer. Authority never moves to
+ * another reviewer here; that requires a persisted Admin Recovery reassignment.
+ * The creator is never eligible. With activeOnly=false any eligible reviewer
+ * matches (used to validate an admin recovery target).
+ */
+async function getDepartmentReviewAssigneeRecord(client, { document, userId, stepConfig, workflowVersion, activeOnly }) {
+  if (document.created_by && sameEntityId(document.created_by, userId)) return null;
+  if (activeOnly && !sameEntityId(document.current_holder_id, userId)) return null;
+  let eligible;
+  try {
+    eligible = await resolveEligibleDepartmentReviewers(client, { document, stepConfig, workflowVersion });
+  } catch (error) {
+    if (activeOnly && error?.code === 'VALIDATION') return null;
+    throw error;
+  }
+  const index = eligible.indexOf(String(userId));
+  if (index < 0) return null;
+  return {
+    is_enabled: true,
+    is_primary: index === 0,
+    backup_rank: index === 0 ? null : index,
+    allowed_actions: Array.isArray(stepConfig.allowed_actions)
+      ? stepConfig.allowed_actions
+      : ['approve', 'forward', 'return', 'reject'],
+  };
+}
+
+const DEPARTMENT_REVIEW_REASSIGNMENT_MESSAGE =
+  'The assigned reviewer for this department review step is no longer an eligible reviewer. An administrator must reassign this document through Admin Recovery before any workflow action can be taken.';
+
+/** Null for non-department steps; otherwise whether the persisted holder may still review. */
+async function getDepartmentReviewHolderStatus(client, document) {
+  if (!document) return null;
+  const config = await getRoutingConfig(client, document.document_type, document.workflow_version || null);
+  const stepConfig = getStepByOrder(parseSteps(config?.steps || []), Number(document.current_step || 1));
+  if (!stepConfig || !isDynamicDepartmentAssigneeSource(stepConfig.assignee_source)) return null;
+  let eligible = [];
+  try {
+    eligible = await resolveEligibleDepartmentReviewers(client, {
+      document,
+      stepConfig,
+      workflowVersion: document.workflow_version || config?.version || null,
+    });
+  } catch (error) {
+    if (error?.code !== 'VALIDATION') throw error;
+  }
+  const holder = document.current_holder_id ? String(document.current_holder_id) : null;
+  return {
+    eligible,
+    holderEligible: Boolean(
+      holder && eligible.includes(holder) && !sameEntityId(holder, document.created_by)
+    ),
+  };
+}
+
+/**
+ * Escalation target for an overdue department review step, or null for other steps.
+ * Escalation only moves to the next eligible reviewer after the persisted holder
+ * (primary, then backups by rank). An ineligible holder or an exhausted reviewer
+ * chain yields no target so the document goes to Admin Recovery instead.
+ */
+async function resolveDepartmentReviewEscalation(client, document) {
+  const status = await getDepartmentReviewHolderStatus(client, document);
+  if (!status) return null;
+  if (!status.holderEligible) {
+    return { nextReviewerId: null, backupRank: null, reason: 'HOLDER_NOT_ELIGIBLE_REVIEWER' };
+  }
+  const candidates = status.eligible.filter((id) => !sameEntityId(id, document.created_by));
+  const nextIndex = candidates.indexOf(String(document.current_holder_id)) + 1;
+  const nextReviewerId = candidates[nextIndex] || null;
+  if (!nextReviewerId) {
+    return { nextReviewerId: null, backupRank: null, reason: 'NO_OTHER_ELIGIBLE_REVIEWER' };
+  }
+  return {
+    nextReviewerId,
+    backupRank: status.eligible.indexOf(nextReviewerId) || null,
+    reason: null,
+  };
+}
+
+async function getWorkflowStepAssigneeRecord(client, { document, userId, activeOnly = true }) {
   if (!document || !userId) return null;
   const step = Number(document.current_step || 1);
   const docType = document.document_type;
+
+  const config = await getRoutingConfig(client, docType, document.workflow_version || null);
+  const configuredStep = getStepByOrder(parseSteps(config?.steps || []), step);
+  if (configuredStep && isDynamicDepartmentAssigneeSource(configuredStep.assignee_source)) {
+    if (configuredStep.enabled === false) return null;
+    // Stored step-assignee rows are ignored here: department review is always dynamic.
+    return getDepartmentReviewAssigneeRecord(client, {
+      document,
+      userId,
+      stepConfig: configuredStep,
+      workflowVersion: document.workflow_version || config?.version || null,
+      activeOnly,
+    });
+  }
 
   let r;
   if (document.workflow_version != null) {
@@ -1293,25 +1399,17 @@ async function getWorkflowStepAssigneeRecord(client, { document, userId }) {
   const stored = r.rows?.[0] || null;
   if (stored) return stored;
 
-  // Compatibility path for dynamic department-reviewer and legacy JSON steps.
-  const config = await getRoutingConfig(
-    client,
-    docType,
-    document.workflow_version || null
-  );
-  const steps = parseSteps(config?.steps || []);
-  const stepConfig = getStepByOrder(steps, step);
+  // Compatibility path for legacy JSON steps.
+  const stepConfig = configuredStep;
   if (!stepConfig || stepConfig.enabled === false) return null;
-  if (!isDynamicDepartmentAssigneeSource(stepConfig.assignee_source)) {
-    const normalizedStep = await client.query(
-      `SELECT id FROM docutracker_workflow_steps
-       WHERE document_type = $1 AND workflow_version = $2 AND step_order = $3
-       LIMIT 1`,
-      [docType, document.workflow_version || config?.version || null, step]
-    );
-    // A removed assignment must not be resurrected from stale legacy JSON.
-    if (normalizedStep.rows?.length) return null;
-  }
+  const normalizedStep = await client.query(
+    `SELECT id FROM docutracker_workflow_steps
+     WHERE document_type = $1 AND workflow_version = $2 AND step_order = $3
+     LIMIT 1`,
+    [docType, document.workflow_version || config?.version || null, step]
+  );
+  // A removed assignment must not be resurrected from stale legacy JSON.
+  if (normalizedStep.rows?.length) return null;
   const assignees = await resolveStepAssignees(client, {
     explicitAssigneeId: null,
     stepConfig,
@@ -1364,6 +1462,74 @@ async function canUserPerformGeneralAction(client, { user, documentType, action 
   return explicit === true;
 }
 
+async function getDepartmentName(client, departmentId) {
+  const result = await client.query(
+    'SELECT name FROM departments WHERE id = $1::uuid LIMIT 1',
+    [departmentId]
+  );
+  return result.rows?.[0]?.name || null;
+}
+
+/**
+ * Department review: primary reviewer first, then backups by rank. The
+ * submitter is never eligible; when nobody else remains the step is blocked.
+ */
+async function resolveDepartmentReviewStepAssignees(client, { stepConfig, source, submitterUserId }) {
+  const stepLabel = stepConfig?.step_order ?? 'unknown';
+  const effectiveDate = todayInHrmsTimezone();
+  let departmentId = null;
+  let departmentName = null;
+
+  if (source === 'submitter_department_reviewers') {
+    if (!submitterUserId) {
+      throw validationError(
+        `Submitter department reviewer step ${stepLabel} has no document creator`
+      );
+    }
+    const department = await getEmployeeDepartmentForDate(client, submitterUserId, effectiveDate);
+    if (!department?.departmentId) {
+      throw validationError(
+        'The submitter has no active department assignment, so no department reviewer can be resolved. Assign the submitter to a department before submitting.'
+      );
+    }
+    departmentId = department.departmentId;
+    departmentName = department.departmentName;
+  } else {
+    if (!stepConfig?.department_id) {
+      throw validationError(`Department reviewer step ${stepLabel} has no department`);
+    }
+    departmentId = stepConfig.department_id;
+  }
+
+  const resolved = await resolveDepartmentReviewers(client, {
+    departmentId,
+    effectiveDate,
+    excludeUserId: submitterUserId || null,
+  });
+  const reviewerIds = resolved.reviewers
+    .map((reviewer) => String(reviewer.reviewerId))
+    .filter((id) => id && !(submitterUserId && sameEntityId(id, submitterUserId)));
+  if (reviewerIds.length) return reviewerIds;
+
+  const name = departmentName || (await getDepartmentName(client, departmentId)) || 'this department';
+  const configured = submitterUserId
+    ? await resolveDepartmentReviewers(client, { departmentId, effectiveDate })
+    : { primary: null, reviewers: [] };
+  if (configured.primary && sameEntityId(configured.primary.reviewerId, submitterUserId)) {
+    throw validationError(
+      `No eligible reviewer is configured for ${name}. The primary reviewer cannot review their own document. Assign a backup reviewer before submitting.`
+    );
+  }
+  if (configured.reviewers.length) {
+    throw validationError(
+      `No eligible reviewer is configured for ${name}. The submitter is the only configured reviewer and cannot review their own document. Assign another reviewer before submitting.`
+    );
+  }
+  throw validationError(
+    `No reviewer is configured for ${name}. Assign a primary reviewer (Department Head) or a backup reviewer before submitting.`
+  );
+}
+
 async function resolveStepAssignees(client, {
   explicitAssigneeId,
   stepConfig,
@@ -1379,48 +1545,22 @@ async function resolveStepAssignees(client, {
 
   // Explicit assignee (must be pre-sanitized at workflow entry points for non-admins).
   if (explicitAssigneeId) {
+    if (
+      isDynamicDepartmentAssigneeSource(source) &&
+      submitterUserId &&
+      sameEntityId(explicitAssigneeId, submitterUserId)
+    ) {
+      throw validationError(
+        'The document creator cannot review their own document at a department review step.'
+      );
+    }
     const valid = await validateAssignee(client, explicitAssigneeId);
     if (!valid) throw validationError(`Invalid assignee '${explicitAssigneeId}'`);
     return [explicitAssigneeId];
   }
 
-  if (source === 'submitter_department_reviewers') {
-    const submitterId = submitterUserId || null;
-    if (!submitterId) {
-      throw validationError(
-        `Submitter department reviewer step ${stepConfig?.step_order ?? 'unknown'} has no document creator`
-      );
-    }
-    const snapshot = await getEmployeeReviewSnapshot(client, {
-      employeeUserId: submitterId,
-      effectiveDate: todayInHrmsTimezone(),
-    });
-    const reviewerIds = (snapshot?.reviewerUserIds || []).map(String).filter(Boolean);
-    if (!reviewerIds.length) {
-      throw validationError(
-        `No active Department Head or backup reviewer is configured for the submitter's department (step ${stepConfig?.step_order ?? 'unknown'})`
-      );
-    }
-    return reviewerIds;
-  }
-
-  if (source === 'department_reviewers') {
-    if (!stepConfig?.department_id) {
-      throw validationError(
-        `Department reviewer step ${stepConfig?.step_order ?? 'unknown'} has no department`
-      );
-    }
-    const resolved = await resolveDepartmentReviewers(client, {
-      departmentId: stepConfig.department_id,
-      effectiveDate: todayInHrmsTimezone(),
-    });
-    const reviewerIds = resolved.reviewers.map((reviewer) => reviewer.reviewerId);
-    if (!reviewerIds.length) {
-      throw validationError(
-        `No active Department Head or backup reviewer is configured for step ${stepConfig?.step_order ?? 'unknown'}`
-      );
-    }
-    return reviewerIds;
+  if (isDynamicDepartmentAssigneeSource(source)) {
+    return resolveDepartmentReviewStepAssignees(client, { stepConfig, source, submitterUserId });
   }
 
   if (type === 'user' || !type) {
@@ -1747,8 +1887,11 @@ async function getEffectivePermissionExplanation(client, { user, action, documen
       document,
       action: canonicalAction,
     });
+    const holderStatus = allowed ? null : await getDepartmentReviewHolderStatus(client, document);
     const reason = allowed
       ? (isHolder ? 'current_holder' : 'step_assignee')
+      : holderStatus && !holderStatus.holderEligible && !isDraftOrWipDocument(document)
+          ? 'reassignment_required'
       : !stepAssigneeRow
           ? 'not_assigned_to_step'
           : !allowedByAssignedRule
@@ -2396,6 +2539,13 @@ async function transitionDocument(pool, user, documentId, action, payload = {}) 
       }
     }
 
+    if (WORKFLOW_STEP_ACTIONS.has(action)) {
+      const holderStatus = await getDepartmentReviewHolderStatus(client, doc);
+      if (holderStatus && !holderStatus.holderEligible) {
+        throw validationError(DEPARTMENT_REVIEW_REASSIGNMENT_MESSAGE);
+      }
+    }
+
     const allowed = await canUserPerformDocumentAction(client, {
       user,
       document: doc,
@@ -2698,7 +2848,10 @@ async function transitionDocument(pool, user, documentId, action, payload = {}) 
     if (nextHolder) {
       // Snapshot the assignee list for this step (allows multiple reviewers).
       const nextStepCfg = getStepByOrder(steps, nextStep);
-      const resolvedAssignees = nextStepCfg
+      // Department review backups are fallback candidates, not co-reviewers.
+      const resolvedAssignees = nextStepCfg && isDynamicDepartmentAssigneeSource(nextStepCfg.assignee_source)
+        ? [nextHolder]
+        : nextStepCfg
         ? await resolveStepAssignees(client, {
             explicitAssigneeId: transitionExplicitSanitized,
             stepConfig: nextStepCfg,
@@ -2952,6 +3105,7 @@ async function recoverDocumentAssignment(pool, user, documentId, payload = {}) {
     const configuredAssignee = await getWorkflowStepAssigneeRecord(client, {
       document: doc,
       userId: assigneeId,
+      activeOnly: false,
     });
     if (!configuredAssignee || configuredAssignee.is_enabled === false) {
       throw validationError('The recovery assignee is not configured for the current workflow step');
@@ -3001,14 +3155,16 @@ async function recoverDocumentAssignment(pool, user, documentId, payload = {}) {
       [assigneeId, deadline, status, remarks, routingRecordId]
     );
 
-    const resolvedAssignees = await resolveStepAssignees(client, {
-      explicitAssigneeId: null,
-      stepConfig,
-      currentHolderId: assigneeId,
-      documentType: doc.document_type,
-      workflowVersion: doc.workflow_version || config?.version || null,
-      submitterUserId: doc.created_by || null,
-    });
+    const resolvedAssignees = isDynamicDepartmentAssigneeSource(stepConfig.assignee_source)
+      ? [assigneeId]
+      : await resolveStepAssignees(client, {
+          explicitAssigneeId: null,
+          stepConfig,
+          currentHolderId: assigneeId,
+          documentType: doc.document_type,
+          workflowVersion: doc.workflow_version || config?.version || null,
+          submitterUserId: doc.created_by || null,
+        });
     const snapshotAssignees = Array.from(
       new Set([...resolvedAssignees, assigneeId].map(String).filter(Boolean))
     );
@@ -3116,6 +3272,7 @@ module.exports = {
   getEffectivePermissionExplanation,
   parseSteps,
   resolveStepAssignees,
+  resolveDepartmentReviewEscalation,
   isDraftOrWipDocument,
   listDocuments,
   getDocumentBundle,

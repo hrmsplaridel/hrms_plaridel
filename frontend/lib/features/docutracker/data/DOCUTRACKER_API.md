@@ -300,17 +300,48 @@ use the legacy four-action default.
 Each step's `assignee_source` selects how assignees are resolved:
 
 - `specific_users` (default): the fixed `user_ids` list.
-- `department_reviewers`: the Department Head and backups of the step's
-  `department_id`, resolved when the document enters the step.
-- `submitter_department_reviewers`: the Department Head and backups of the
-  document's `originating_department_id`. The step stores no `department_id` or
-  `user_ids`. The submitter is excluded from reviewing their own document, so a
-  Head's own submission goes to the rank-1 backup.
+- `department_reviewers`: the primary reviewer (Department Head) and backups of
+  the step's `department_id`, resolved when the document enters the step.
+- `submitter_department_reviewers` ("Department reviewer of submitter"): the
+  primary reviewer and backups of the submitter's active department assignment.
+  The step stores no `department_id` or `user_ids`.
 
-Dynamic steps are resolved at transition time. When no Department Head or backup
-can be found, the transition fails with a validation error. For example, submit
-returns 400 "No active Department Head or backup reviewer is configured for the
-submitter's department (step 1)", and the document stays unassigned.
+For both dynamic sources the order is primary reviewer, then backups by rank,
+and the document creator is always excluded: a primary reviewer's own document
+goes to the first eligible backup, and a backup's own document goes to the
+primary reviewer. Only one reviewer is active: the persisted `current_holder_id`.
+Backups are fallback candidates only; they are not snapshotted, notified, or
+allowed to act while another reviewer holds the step. If the holder later stops
+being an eligible reviewer (for example, Department Management changes), every
+workflow action on that step fails with 400 "The assigned reviewer for this
+department review step is no longer an eligible reviewer. An administrator must
+reassign this document through Admin Recovery…" and `permission-explain`
+returns reason `reassignment_required`; authority never moves implicitly. Admin
+Recovery may reassign the step to any currently eligible reviewer (never the
+creator), who then becomes the only active reviewer. The creator is also denied approve/forward/reject/return on
+these steps at action time, and an explicit assignee override (including an
+admin's) cannot name the creator.
+
+Overdue escalation on these steps ignores the escalation config's
+`escalation_target_role`. When the document type has an escalation config, the
+worker moves the step to the next eligible reviewer after the holder (primary,
+then backups by rank, never the creator): that reviewer becomes
+`current_holder_id`, the routing record and its assignee snapshot are replaced
+with that one reviewer, an `escalated` history row is written, and only that
+reviewer (plus the creator when `notify_original_sender`) is notified. If the
+holder is no longer eligible, or no later eligible reviewer exists, nobody is
+reassigned: the document becomes `overdue` with `needs_admin_intervention = true`,
+the history remarks state the reason and that Admin Recovery is required, and
+admins receive an "Admin Recovery required" notification. An ineligible holder
+is not notified. Admin Recovery then clears the flag and makes the chosen
+eligible reviewer the only active reviewer.
+
+Dynamic steps are resolved at transition time. When no eligible reviewer
+remains, the transition fails with 400 and the document is unchanged, e.g.
+"No eligible reviewer is configured for Engineering. The primary reviewer
+cannot review their own document. Assign a backup reviewer before submitting."
+or "No reviewer is configured for Engineering. Assign a primary reviewer
+(Department Head) or a backup reviewer before submitting."
 
 Admins can find these gaps before submitters hit them with
 `GET /api/departments/reviewer-readiness` (admin only; optional

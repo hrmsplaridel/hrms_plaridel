@@ -129,14 +129,15 @@ class _DocuTrackerWorkflowEditorScreenState
           .toList();
       if (blocked.isNotEmpty) {
         warnings.add(
-          'Staff in ${blocked.join(', ')} cannot submit this document: '
-          'their department has no Department Head or backup reviewer.',
+          'Incomplete reviewer setup — ${blocked.join(', ')}: no primary '
+          'or backup reviewer, so staff cannot submit this document.',
         );
       }
       if (headOnly.isNotEmpty) {
         warnings.add(
-          'The Department Head of ${headOnly.join(', ')} cannot submit this '
-          'document: no backup reviewer is set.',
+          'Incomplete reviewer setup — ${headOnly.join(', ')}: no backup '
+          'reviewer, so the primary reviewer cannot submit this document '
+          '(no one else can review it).',
         );
       }
     }
@@ -147,7 +148,13 @@ class _DocuTrackerWorkflowEditorScreenState
       if (readiness?.status == DepartmentReviewerStatus.noReviewer) {
         warnings.add(
           'Step ${s.stepOrder} routes to ${readiness!.departmentName}, which '
-          'has no Department Head or backup reviewer.',
+          'has no primary or backup reviewer.',
+        );
+      } else if (readiness?.status == DepartmentReviewerStatus.headOnly) {
+        warnings.add(
+          'Step ${s.stepOrder} routes to ${readiness!.departmentName}, which '
+          'has no backup reviewer, so its primary reviewer cannot submit '
+          'this document.',
         );
       }
     }
@@ -2474,10 +2481,10 @@ String _primaryUserLabel(
   _WorkflowStepAssigneeSnapshot? snapshot,
 ) {
   if (step.assigneeSource == 'submitter_department_reviewers') {
-    return 'Department Head of submitter';
+    return 'Department reviewer of submitter';
   }
   if (step.assigneeSource == 'department_reviewers') {
-    return 'Official Department Head';
+    return 'Department reviewer (fixed department)';
   }
   final snapshotName = snapshot?.primaryUserName?.trim();
   if (snapshotName != null && snapshotName.isNotEmpty) return snapshotName;
@@ -2505,10 +2512,10 @@ List<String> _backupUserLabels(
   _WorkflowStepAssigneeSnapshot? snapshot,
 ) {
   if (step.assigneeSource == 'submitter_department_reviewers') {
-    return const ['Submitter department backups'];
+    return const ['Backup reviewers of submitter\'s department'];
   }
   if (step.assigneeSource == 'department_reviewers') {
-    return const ['Configured department backups'];
+    return const ['Backup reviewers of this department'];
   }
   if (snapshot != null && snapshot.backupUserNames.isNotEmpty) {
     return snapshot.backupUserNames;
