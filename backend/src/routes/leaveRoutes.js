@@ -2707,6 +2707,31 @@ router.put('/:id', protect, async (req, res) => {
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
+      // Serialize edits/submissions of this request before any write or reservation.
+      const lockedRequest = await client.query(
+        `SELECT id, status, employee_official_snapshot
+         FROM leave_requests
+         WHERE id = $1 AND (user_id = $2 OR employee_id = $2)
+           AND discarded_at IS NULL
+         FOR UPDATE`,
+        [id, userId]
+      );
+      if (!lockedRequest.rows.length) {
+        await client.query('ROLLBACK');
+        return res.status(404).json({ error: 'Leave request not found' });
+      }
+      if (lockedRequest.rows[0].status !== status) {
+        await client.query('ROLLBACK');
+        return res.status(409).json({
+          error: 'This leave request has changed. Refresh before saving or submitting again.',
+        });
+      }
+      // Use the row read under lock for both the transition and filing snapshot.
+      existing.rows[0] = lockedRequest.rows[0];
+      ({ nextStatus, historyAction } = validateEmployeeUpdateTransition({
+        currentStatus: lockedRequest.rows[0].status,
+        desiredStatus,
+      }));
       const savingDraft = nextStatus === 'draft';
       const submitting = ['pending', 'pending_department_head', 'pending_hr'].includes(nextStatus);
       if (submitting && (!leave_type || !startStr || !endStr)) {
