@@ -1,6 +1,4 @@
 import 'dart:async';
-import 'package:hrms_plaridel/features/dtr/attendance/presentation/widgets/dtr_corrections_dialog.dart';
-import 'package:hrms_plaridel/features/dtr/attendance/presentation/pages/admin_dtr_corrections_page.dart';
 import 'dart:ui' show lerpDouble;
 import 'package:flutter/material.dart';
 import 'package:shimmer/shimmer.dart';
@@ -457,7 +455,6 @@ class _AdminDashboardState extends State<AdminDashboard>
         _canManageDtr = response.data?['manage_allowed'] == true;
         _dtrFeatureAccess = {
           for (final field in const [
-            'corrections_allowed',
             'employees_allowed',
             'leave_allowed',
             'approvals_allowed',
@@ -488,14 +485,6 @@ class _AdminDashboardState extends State<AdminDashboard>
   void _applyNotificationTapResult(NotificationTapResult? result) {
     if (result == null || result.kind == NotificationTapKind.none) return;
     switch (result.kind) {
-      case NotificationTapKind.dtrCorrectionReview:
-      case NotificationTapKind.dtrCorrectionRequests:
-        showDtrCorrections(
-          context,
-          review: result.kind == NotificationTapKind.dtrCorrectionReview,
-          requestId: result.referenceId,
-        );
-        break;
       case NotificationTapKind.adminDtrLeaveManagement:
         setState(() => _selectedMenu = AdminMenu.dtr);
         DashboardContentNavigator.showHome(_contentNavKey);
@@ -1731,7 +1720,7 @@ class _DtrContentState extends State<_DtrContent> {
   /// 5 = Department, 6 = Position, 7 = Shift, 8 = Leave Management,
   /// 9–10 = Holiday / Policy via [_ManageContent], 11 = Biometric Devices,
   /// 12 = Locator Slip Management, 13 = Weekly Schedule,
-  /// 14 = Approvals & Signatories, 15 = DTR Corrections
+  /// 14 = Approvals & Signatories
   int _dtrSectionIndex = 0;
   final Map<int, _DtrFeatureCacheEntry> _featureCache = {};
   int _featureCacheClock = 0;
@@ -1747,7 +1736,6 @@ class _DtrContentState extends State<_DtrContent> {
       8: 'leave_allowed',
       12: 'locator_allowed',
       14: 'approvals_allowed',
-      15: 'corrections_allowed',
     }.entries) {
       if (oldWidget.featureAccess[entry.value] !=
           widget.featureAccess[entry.value]) {
@@ -1800,7 +1788,6 @@ class _DtrContentState extends State<_DtrContent> {
       8: 'leave_allowed',
       12: 'locator_allowed',
       14: 'approvals_allowed',
-      15: 'corrections_allowed',
     };
     if (features.containsKey(index) &&
         widget.featureAccess[features[index]] != true) {
@@ -1931,7 +1918,6 @@ class _DtrContentState extends State<_DtrContent> {
     if (index == 12) return const AdminLocatorManagementScreen();
     if (index == 13) return const ManageWeeklySchedule();
     if (index == 14) return const ApprovalsSignatoriesPage();
-    if (index == 15) return const AdminDtrCorrectionsPage();
     return _ManageContent(
       subIndex: index - 3,
       canCreateAccount: widget.canCreateAccount,
@@ -2061,14 +2047,6 @@ class _DtrContentState extends State<_DtrContent> {
                             'Manage and correct daily time-in/out records. Add, edit, or delete entries.',
                         icon: Icons.schedule_rounded,
                         onTap: () => _openDtrSection(1),
-                      ),
-                    if (widget.featureAccess['corrections_allowed'] == true)
-                      FeatureCard(
-                        title: 'DTR Corrections',
-                        subtitle:
-                            'Review employee attendance correction requests and decisions.',
-                        icon: Icons.fact_check_outlined,
-                        onTap: () => _openDtrSection(15),
                       ),
                     if (widget.canViewReports)
                       FeatureCard(

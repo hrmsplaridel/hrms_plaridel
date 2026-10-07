@@ -35,7 +35,7 @@ void main() {
 
   for (final role in ['admin', 'hr', 'employee']) {
     for (final decision in ['approved', 'rejected']) {
-      test('$role opens own DTR $decision request, not the review queue', () {
+      test('$role ignores retired DTR $decision notification links', () {
         final result = NotificationTapResult.fromNotification(
           notification(
             category: 'dtr',
@@ -44,12 +44,12 @@ void main() {
           ),
           role: role,
         );
-        expect(result.kind, NotificationTapKind.dtrCorrectionRequests);
-        expect(result.referenceId, 'request-1');
+        expect(result.kind, NotificationTapKind.none);
+        expect(result.referenceId, isNull);
       });
     }
   }
-  test('HR pending DTR notification opens the specific review', () {
+  test('HR pending DTR notification does not open retired workflow', () {
     final result = NotificationTapResult.fromNotification(
       notification(
         category: 'dtr',
@@ -58,8 +58,8 @@ void main() {
       ),
       role: 'hr',
     );
-    expect(result.kind, NotificationTapKind.dtrCorrectionReview);
-    expect(result.referenceId, 'request-2');
+    expect(result.kind, NotificationTapKind.none);
+    expect(result.referenceId, isNull);
   });
 
   test('hr recruitment tap also deep-links to the application', () {

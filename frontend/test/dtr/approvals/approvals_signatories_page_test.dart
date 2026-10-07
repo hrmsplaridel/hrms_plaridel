@@ -297,36 +297,11 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets(
-    'DTR correction reviewer tab shows configured primary and backup',
-    (tester) async {
-      await mount(tester);
-      await tester.tap(find.text('DTR Corrections').first);
-      await tester.pumpAndSettle();
-      expect(find.text('DTR Primary'), findsOneWidget);
-      expect(find.text('DTR Backup'), findsOneWidget);
-      expect(
-        requests.any((r) => r.path == '/api/dtr-corrections/reviewers'),
-        isTrue,
-      );
-      expect(tester.takeException(), isNull);
-    },
-  );
-  testWidgets('saving DTR reviewers confirms success', (tester) async {
+  testWidgets('retired correction reviewer settings are not exposed', (tester) async {
     await mount(tester);
-    await tester.tap(find.text('DTR Corrections').first);
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Save reviewers'));
-    await tester.pumpAndSettle();
-    expect(
-      requests.any(
-        (request) =>
-            request.path == '/api/dtr-corrections/reviewers' &&
-            request.method == 'PUT',
-      ),
-      isTrue,
-    );
-    expect(find.text('DTR correction reviewers saved.'), findsOneWidget);
-    expect(tester.takeException(), isNull);
+    expect(find.text('DTR Corrections'), findsNothing);
+    expect(requests.any((r) => r.path == '/api/dtr-corrections/reviewers'), isFalse);
+    expect(find.text('Leave Workflow'), findsOneWidget);
+    expect(find.text('Locator Workflow'), findsOneWidget);
   });
 }

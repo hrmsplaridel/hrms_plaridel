@@ -18,10 +18,8 @@ enum NotificationTapKind {
   employeeLocatorApprovals,
   employeeLocatorRequests,
 
-  /// Employee: My Attendance (e.g. DTR correction approved/rejected).
+  /// Employee: My Attendance.
   employeeMyAttendance,
-  dtrCorrectionReview,
-  dtrCorrectionRequests,
 
   /// Admin: Recruitment (RSP) applications.
   adminRecruitment,
@@ -71,12 +69,7 @@ class NotificationTapResult {
 
     if (cat == 'dtr') {
       if (t.startsWith('dtr_correction_')) {
-        return NotificationTapResult(
-          t == 'dtr_correction_pending_review' && isPrivileged
-              ? NotificationTapKind.dtrCorrectionReview
-              : NotificationTapKind.dtrCorrectionRequests,
-          referenceId: _trimmedOrNull(n.referenceId),
-        );
+        return const NotificationTapResult(NotificationTapKind.none);
       }
       if (!isPrivileged && (t.contains('approved') || t.contains('rejected'))) {
         return const NotificationTapResult(

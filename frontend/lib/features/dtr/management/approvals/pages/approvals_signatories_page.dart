@@ -5,7 +5,6 @@ import 'package:hrms_plaridel/shared/widgets/settings_master_detail.dart';
 import 'package:hrms_plaridel/shared/widgets/settings_loading_skeleton.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/admin/pages/docutracker_official_signatories_screen.dart';
 import '../data/approval_configuration_repository.dart';
-import 'dtr_correction_reviewers_tab.dart';
 
 class ApprovalsSignatoriesPage extends StatefulWidget {
   const ApprovalsSignatoriesPage({super.key});
@@ -20,7 +19,7 @@ class _ApprovalsSignatoriesPageState extends State<ApprovalsSignatoriesPage> {
 
   @override
   Widget build(BuildContext context) => DefaultTabController(
-    length: 4,
+    length: 3,
     child: SizedBox(
       height: 760,
       child: Column(
@@ -95,28 +94,16 @@ class _ApprovalsSignatoriesPageState extends State<ApprovalsSignatoriesPage> {
                     ],
                   ),
                 ),
-                Tab(
-                  height: 46,
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(Icons.fact_check_outlined, size: 18),
-                      SizedBox(width: 8),
-                      Text('DTR Corrections'),
-                    ],
-                  ),
-                ),
               ],
             ),
           ),
           const SizedBox(height: 20),
           Expanded(
             child: IndexedStack(
-              index: _tab == 2 ? 1 : _tab == 3 ? 2 : 0,
+              index: _tab == 2 ? 1 : 0,
               children: [
                 _ReviewersPage(locator: _tab == 1),
                 const DocuTrackerOfficialSignatoriesScreen(dtrOnly: true),
-                const DtrCorrectionReviewersTab(),
               ],
             ),
           ),
