@@ -10,7 +10,6 @@ Use this document for P0/P1/P2 closure before go-live.
 - [ ] Required source tables exist:
   - [ ] `training_daily_reports`
   - [ ] `leave_requests`
-  - [ ] `dtr_corrections`
   - [ ] `overtime_requests`
   - [ ] `recruitment_applications`
 - [ ] Required DocuTracker tables exist:

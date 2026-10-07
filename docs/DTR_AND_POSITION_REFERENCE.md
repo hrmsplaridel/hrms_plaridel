@@ -69,10 +69,9 @@ On **Manage Assignment**, **Start Time** and **End Time** define the **exact wor
   - **Overrides:** Even when a **Shift** is selected (e.g. “Morning Shift”), you can set different times for this specific assignment (e.g. 9:00–18:00 instead of the shift’s default 8:00–17:00).
 - **With Shift:** The **Shift** dropdown gives the shift name and its default times; Start/End Time on the assignment can match that shift or override it for this assignment only.
 
-### 3. Backend schema (optional / future): `dtr_logs`, `dtr_daily_summary`, `dtr_corrections`
+### 3. Backend schema (optional / future): `dtr_logs`, `dtr_daily_summary`
 
 - **dtr_logs:** Raw logs (e.g. biometric/manual) – `employee_id`, `log_time`, `log_type` (`time_in`/`time_out`/`break_in`/`break_out`), `source`, etc.
 - **dtr_daily_summary:** One row per employee per day – `employee_id`, `attendance_date`, `shift_id`, `time_in`, `time_out`, `break_in`, `break_out`, `late_minutes`, `undertime_minutes`, `total_hours`, `status`, `remarks`.
-- **dtr_corrections:** Correction requests – `employee_id`, `attendance_date`, requested times, `reason`, `status` (pending/approved/rejected).
 
 For the **current Flutter app**, the main DTR inputs you work with are: **Employee (user_id)**, **Date**, **Time In**, **Time Out**, **Status**, and **Remarks**; Position and Department come from assignments/master data for display and filtering.
