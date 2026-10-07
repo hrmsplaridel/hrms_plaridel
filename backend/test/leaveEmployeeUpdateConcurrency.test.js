@@ -3,7 +3,7 @@ const {withMockedModule,clearModule}=require('./helpers/moduleMocks');
 for(const desired of ['draft','pending']) for(const changed of ['pending_hr','approved','discarded']) {
  test(`stale ${desired} update cannot change ${changed} request`,async()=>{
  const queries=[];let released=false;const original={id:'request',status:'draft',employee_official_snapshot:{}};
- const client={async query(sql){queries.push(sql);if(sql==='BEGIN'||sql==='ROLLBACK')return{rows:[]};if(sql.includes('FROM leave_requests')&&sql.includes('FOR UPDATE'))return {rows:changed==='discarded'?[]:[{...original,status:changed}]};throw Error('Unexpected query before locked status check');},release(){released=true}};
+ const client={async query(sql){queries.push(sql);if(sql==='BEGIN'||sql==='ROLLBACK'||sql.includes('pg_advisory_xact_lock'))return{rows:[]};if(sql.includes('FROM leave_requests')&&sql.includes('FOR UPDATE'))return {rows:changed==='discarded'?[]:[{...original,status:changed}]};throw Error('Unexpected query before locked status check');},release(){released=true}};
  const db=withMockedModule('../src/config/db',{pool:{query:async()=>({rows:[original]}),connect:async()=>client}});
  const path='../src/routes/leaveRoutes';clearModule(path);
  try {const route=require(path).stack.find(l=>l.route?.path==='/:id'&&l.route.methods.put).route;

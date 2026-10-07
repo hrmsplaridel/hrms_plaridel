@@ -4,6 +4,7 @@ const path = require('path');
 const fs = require('fs');
 const { v4: uuidv4 } = require('uuid');
 const { pool } = require('../config/db');
+const { lockEmployeeLeaveFiling } = require('../services/leaveFilingLock');
 const { authMiddleware } = require('../middleware/auth');
 const { requireDtrFeatureIfAdmin } = require('../middleware/dtrAccess');
 const { requireAdmin, requireAdminOrHr } = require('../middleware/rbac');
@@ -2190,6 +2191,7 @@ router.post('/submit', protect, async (req, res) => {
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
+      await lockEmployeeLeaveFiling(client, userId);
       await assertLeaveSubmissionReviewer(client, userId);
       const workingDayResult = await computeEmployeeLeaveWorkingDays(client, userId, startStr, endStr);
       const leaveTypeId = await ensureLeaveTypeIdByName(client, leave_type);
@@ -2430,6 +2432,7 @@ router.post('/submit-with-attachment', protect, uploadLeaveAttachmentMemoryMw, a
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
+      await lockEmployeeLeaveFiling(client, userId);
       await assertLeaveSubmissionReviewer(client, userId);
       const workingDayResult = await computeEmployeeLeaveWorkingDays(client, userId, startStr, endStr);
       const leaveTypeId = await ensureLeaveTypeIdByName(client, leave_type);
@@ -2707,6 +2710,7 @@ router.put('/:id', protect, async (req, res) => {
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
+      await lockEmployeeLeaveFiling(client, userId);
       // Serialize edits/submissions of this request before any write or reservation.
       const lockedRequest = await client.query(
         `SELECT id, status, employee_official_snapshot
