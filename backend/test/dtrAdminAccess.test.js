@@ -127,7 +127,7 @@ test('assigned reviewer access cannot be disabled before reassignment', async ()
     pool: { async connect() { return client; } },
   });
   const restoreReviewers = withMockedModule('../src/services/dtrFeatureReviewerAccess', {
-    activeReviewerFeatures: async () => ({ corrections_allowed: true, leave_allowed: false, locator_allowed: false }),
+    activeReviewerFeatures: async () => ({ leave_allowed: true, locator_allowed: false }),
   });
   const path = '../src/routes/dtrAccess';
   clearModule(path);
@@ -138,7 +138,7 @@ test('assigned reviewer access cannot be disabled before reassignment', async ()
     await route.stack[2].handle({
       user: { id: '00000000-0000-4000-8000-000000000002' },
       params: { adminId: '00000000-0000-4000-8000-000000000001' },
-      body: { reports_allowed: true, manage_allowed: true, corrections_allowed: false, expected_revision: 'r1' },
+      body: { reports_allowed: true, manage_allowed: true, leave_allowed: false, expected_revision: 'r1' },
     }, result);
     assert.equal(result.statusCode, 409);
     assert.match(result.body.error, /Reassign this active reviewer/);

@@ -17,7 +17,6 @@ BEGIN
         -- Source module tables consumed by DocuTracker source feed
         ('public.training_daily_reports'),
         ('public.leave_requests'),
-        ('public.dtr_corrections'),
         ('public.overtime_requests'),
         ('public.recruitment_applications'),
         -- DocuTracker core tables

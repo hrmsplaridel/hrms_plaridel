@@ -328,32 +328,6 @@ async function listSourceBackedDocuments(pool, user, filters = {}) {
   }
 
   if (shouldInclude('dtr') && (await canViewModule('dtr'))) {
-    const dtrParams = [];
-    const dtrWhere = ['1=1'];
-    if (user.role !== 'admin') {
-      dtrWhere.push(`c.employee_id = $${dtrParams.length + 1}`);
-      dtrParams.push(user.id);
-    }
-    const dtrRows = await safeSourceQuery(
-      'dtr.dtr_corrections',
-      `SELECT
-         c.id::text AS source_record_id,
-         'dtr'::text AS source_module,
-         'dtr_corrections'::text AS source_table,
-         ('Correction ' || to_char(c.attendance_date, 'YYYY-MM-DD')) AS source_title,
-         c.reason AS description,
-         c.employee_id::text AS created_by,
-         u.full_name AS creator_name,
-         c.created_at AS created_at,
-         c.updated_at AS updated_at,
-         c.status AS source_status
-       FROM dtr_corrections c
-       JOIN users u ON u.id = c.employee_id
-       WHERE ${dtrWhere.join(' AND ')}`,
-      dtrParams
-    );
-    pieces.push(...dtrRows);
-
     const otParams = [];
     const otWhere = ['1=1'];
     if (user.role !== 'admin') {

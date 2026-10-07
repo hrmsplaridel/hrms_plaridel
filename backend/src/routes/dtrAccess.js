@@ -7,7 +7,7 @@ const { activeReviewerFeatures } = require('../services/dtrFeatureReviewerAccess
 
 const router = express.Router();
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-const featureFields = ['corrections_allowed', 'employees_allowed', 'leave_allowed', 'approvals_allowed', 'locator_allowed'];
+const featureFields = ['employees_allowed', 'leave_allowed', 'approvals_allowed', 'locator_allowed'];
 
 router.get('/me', authMiddleware, async (req, res) => {
   if (req.user?.role !== 'admin') {
@@ -87,7 +87,7 @@ router.put('/:adminId', authMiddleware, requireSuperAdmin, async (req, res) => {
       }
       after[field] = req.body?.[field] ?? before[field];
     }
-    if (['corrections_allowed', 'leave_allowed', 'locator_allowed'].some((field) => before[field] && !after[field])) {
+    if (['leave_allowed', 'locator_allowed'].some((field) => before[field] && !after[field])) {
       const assigned = await activeReviewerFeatures(client, adminId);
       const blocked = Object.keys(assigned).find((field) => before[field] && !after[field] && assigned[field]);
       if (blocked) {
@@ -98,7 +98,7 @@ router.put('/:adminId', authMiddleware, requireSuperAdmin, async (req, res) => {
     const updated = await client.query(
       `INSERT INTO dtr_admin_access (admin_user_id, reports_allowed, manage_allowed,
          ${featureFields.join(', ')}, updated_by)
-       VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8, $9::uuid)
+       VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8::uuid)
        ON CONFLICT (admin_user_id) DO UPDATE SET
          reports_allowed = EXCLUDED.reports_allowed,
          manage_allowed = EXCLUDED.manage_allowed,

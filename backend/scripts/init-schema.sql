@@ -109,7 +109,6 @@ CREATE TABLE IF NOT EXISTS dtr_admin_access (
   admin_user_id UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
   reports_allowed BOOLEAN NOT NULL DEFAULT false,
   manage_allowed BOOLEAN NOT NULL DEFAULT false,
-  corrections_allowed BOOLEAN NOT NULL DEFAULT false,
   employees_allowed BOOLEAN NOT NULL DEFAULT false,
   leave_allowed BOOLEAN NOT NULL DEFAULT false,
   approvals_allowed BOOLEAN NOT NULL DEFAULT false,
@@ -1629,55 +1628,7 @@ CREATE TABLE IF NOT EXISTS dtr_leave_coverage (
 );
 
 -- =========================================
--- DTR CORRECTION REQUESTS
--- =========================================
-CREATE TABLE IF NOT EXISTS dtr_correction_reviewer_configs (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  effective_from DATE NOT NULL,
-  reviewer_ids UUID[] NOT NULL,
-  created_by UUID REFERENCES users(id) ON DELETE SET NULL,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  CHECK (cardinality(reviewer_ids) BETWEEN 1 AND 6)
-);
-
-CREATE INDEX IF NOT EXISTS idx_dtr_correction_reviewer_configs_date
-  ON dtr_correction_reviewer_configs(effective_from DESC, created_at DESC, id DESC);
-
-CREATE TABLE IF NOT EXISTS dtr_corrections (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  employee_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  attendance_date DATE NOT NULL,
-
-  requested_time_in TIMESTAMPTZ,
-  requested_time_out TIMESTAMPTZ,
-  requested_break_in TIMESTAMPTZ,
-  requested_break_out TIMESTAMPTZ,
-
-  reason TEXT NOT NULL,
-  original_record JSONB,
-  applied_record JSONB,
-
-  status TEXT NOT NULL DEFAULT 'pending'
-    CHECK (status IN ('pending', 'approved', 'rejected')),
-
-  reviewed_by UUID REFERENCES users(id) ON DELETE SET NULL,
-  reviewed_at TIMESTAMPTZ,
-  review_notes TEXT,
-
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-
--- =========================================
 -- OVERTIME REQUESTS
--- Private correction evidence, served only through authenticated API routes.
-CREATE TABLE IF NOT EXISTS dtr_correction_attachments (
-  correction_id UUID PRIMARY KEY REFERENCES dtr_corrections(id) ON DELETE CASCADE,
-  file_name TEXT NOT NULL,
-  mime_type TEXT NOT NULL CHECK (mime_type IN ('application/pdf', 'image/jpeg', 'image/png')),
-  content BYTEA NOT NULL CHECK (octet_length(content) BETWEEN 1 AND 5242880),
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-);
 -- =========================================
 CREATE TABLE IF NOT EXISTS overtime_requests (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -3330,9 +3281,6 @@ ON dtr_leave_coverage(leave_request_id);
 CREATE INDEX IF NOT EXISTS idx_locator_slips_status_employee_date
 ON locator_slips(status, employee_id, slip_date);
 
-CREATE INDEX IF NOT EXISTS idx_dtr_corrections_employee_id ON dtr_corrections(employee_id);
-CREATE INDEX IF NOT EXISTS idx_dtr_corrections_status ON dtr_corrections(status);
-CREATE INDEX IF NOT EXISTS idx_dtr_corrections_attendance_date ON dtr_corrections(attendance_date);
 
 CREATE INDEX IF NOT EXISTS idx_attendance_policies_is_active ON attendance_policies(is_active);
 
@@ -3491,12 +3439,6 @@ EXECUTE PROCEDURE set_updated_at();
 DROP TRIGGER IF EXISTS trg_dtr_daily_summary_updated_at ON dtr_daily_summary;
 CREATE TRIGGER trg_dtr_daily_summary_updated_at
 BEFORE UPDATE ON dtr_daily_summary
-FOR EACH ROW
-EXECUTE PROCEDURE set_updated_at();
-
-DROP TRIGGER IF EXISTS trg_dtr_corrections_updated_at ON dtr_corrections;
-CREATE TRIGGER trg_dtr_corrections_updated_at
-BEFORE UPDATE ON dtr_corrections
 FOR EACH ROW
 EXECUTE PROCEDURE set_updated_at();
 

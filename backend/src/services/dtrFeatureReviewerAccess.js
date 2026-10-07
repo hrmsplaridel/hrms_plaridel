@@ -1,10 +1,8 @@
 const { todayInHrmsTimezone } = require('../utils/dateRangeParser');
 const { resolveFinalLeaveReviewers } = require('./leaveFinalReviewerService');
-const { resolveDtrCorrectionReviewers } = require('./dtrCorrectionReviewers');
 
 async function activeReviewerFeatures(db, userId) {
   const date = todayInHrmsTimezone();
-  const correctionReviewers = await resolveDtrCorrectionReviewers(db, date);
   const finalReviewers = await resolveFinalLeaveReviewers(db, date);
   const departmentReviewer = await db.query(`SELECT EXISTS (
       SELECT 1 FROM department_reviewer_backups b
@@ -25,7 +23,6 @@ async function activeReviewerFeatures(db, userId) {
   const isAssigned = (rows) => rows.some((row) => String(row.id) === String(userId));
   const sharedReviewer = isAssigned(finalReviewers) || departmentReviewer.rows[0]?.assigned === true;
   return {
-    corrections_allowed: isAssigned(correctionReviewers),
     leave_allowed: sharedReviewer,
     locator_allowed: sharedReviewer,
   };
