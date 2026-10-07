@@ -500,6 +500,23 @@ function invalidProvidedDate(rawValue, normalizedValue) {
   return !isValidIsoCalendarDate(normalizedValue);
 }
 
+// Public filing dates are calendar dates, not timestamps or date-like prefixes.
+function requiredLeaveDateRangeError(startDate, endDate) {
+  if (startDate == null || endDate == null ||
+      (typeof startDate === 'string' && !startDate.trim()) ||
+      (typeof endDate === 'string' && !endDate.trim())) {
+    return 'start_date and end_date are required';
+  }
+  if (typeof startDate !== 'string' || !isValidIsoCalendarDate(startDate)) {
+    return 'start_date must be a valid date in YYYY-MM-DD format';
+  }
+  if (typeof endDate !== 'string' || !isValidIsoCalendarDate(endDate)) {
+    return 'end_date must be a valid date in YYYY-MM-DD format';
+  }
+  if (endDate < startDate) return 'end_date cannot be earlier than start_date';
+  return null;
+}
+
 function isWeekday(dateObj) {
   const d = dateObj.getDay(); // 0 Sun .. 6 Sat
   return d !== 0 && d !== 6;
@@ -1988,14 +2005,16 @@ async function releasePendingLeaveBalance(
 router.get('/working-days', protect, async (req, res) => {
   const userId = req.user?.id;
   if (!userId) return res.status(401).json({ error: 'Not authenticated' });
+  const dateError = requiredLeaveDateRangeError(
+    req.query.start_date || req.query.startDate,
+    req.query.end_date || req.query.endDate
+  );
+  if (dateError) return res.status(400).json({ error: dateError });
   const startStr = toIsoDateStr(req.query.start_date || req.query.startDate);
   const endStr = toIsoDateStr(req.query.end_date || req.query.endDate);
   const leaveTypeName = String(
     req.query.leave_type || req.query.leaveType || ''
   ).trim();
-  if (!startStr || !endStr) {
-    return res.status(400).json({ error: 'start_date and end_date are required' });
-  }
   try {
     const result = await computeEmployeeLeaveWorkingDays(pool, userId, startStr, endStr);
     if (result.days == null) {
@@ -2183,9 +2202,10 @@ router.post('/submit', protect, async (req, res) => {
       ...rest
     } = req.body || {};
 
+    const dateError = requiredLeaveDateRangeError(start_date, end_date);
+    if (dateError) return res.status(400).json({ error: dateError });
     const startStr = toIsoDateStr(start_date);
     const endStr = toIsoDateStr(end_date);
-    if (!startStr || !endStr) return res.status(400).json({ error: 'start_date and end_date are required' });
     const days = computeNumberOfDaysSync(startStr, endStr); // holiday-aware recomputed inside tx
 
     const client = await pool.connect();
@@ -2422,11 +2442,10 @@ router.post('/submit-with-attachment', protect, uploadLeaveAttachmentMemoryMw, a
       ...rest
     } = body;
 
+    const dateError = requiredLeaveDateRangeError(start_date, end_date);
+    if (dateError) return res.status(400).json({ error: dateError });
     const startStr = toIsoDateStr(start_date);
     const endStr = toIsoDateStr(end_date);
-    if (!startStr || !endStr) {
-      return res.status(400).json({ error: 'start_date and end_date are required' });
-    }
     const days = computeNumberOfDaysSync(startStr, endStr);
 
     const client = await pool.connect();
