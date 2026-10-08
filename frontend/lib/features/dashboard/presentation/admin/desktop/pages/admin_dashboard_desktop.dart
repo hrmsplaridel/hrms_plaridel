@@ -1,3 +1,4 @@
+import 'package:hrms_plaridel/features/dtr/locator/presentation/employee/pages/employee_locator_slip_screen.dart';
 import 'package:flutter/foundation.dart' show mapEquals;
 import 'package:hrms_plaridel/core/services/admin_access_refresh.dart';
 import 'package:hrms_plaridel/core/services/app_realtime_provider.dart';
@@ -336,6 +337,7 @@ enum AdminMenu {
   dashboard,
   myAttendance,
   myLeave,
+  myLocator,
   myProfile,
   dtr,
   rsp,
@@ -555,11 +557,14 @@ class _AdminDashboardState extends State<AdminDashboard>
         });
         DashboardContentNavigator.showHome(_contentNavKey);
         break;
+      case NotificationTapKind.employeeLocatorApprovals:
+      case NotificationTapKind.employeeLocatorRequests:
+        setState(() => _selectedMenu = AdminMenu.myLocator);
+        DashboardContentNavigator.showHome(_contentNavKey);
+        break;
       case NotificationTapKind.none:
       case NotificationTapKind.employeeLeaveApprovals:
       case NotificationTapKind.employeeLeaveRequests:
-      case NotificationTapKind.employeeLocatorApprovals:
-      case NotificationTapKind.employeeLocatorRequests:
       case NotificationTapKind.employeeMyAttendance:
         break;
     }
@@ -742,6 +747,8 @@ class _AdminDashboardState extends State<AdminDashboard>
         );
       case AdminMenu.myLeave:
         return EmployeeLeaveScreen(onFileLeavePressed: _openMyLeaveRequestForm);
+      case AdminMenu.myLocator:
+        return const EmployeeLocatorSlipScreen();
       case AdminMenu.myProfile:
         return _settingsPanel();
       case AdminMenu.dtr:
@@ -952,6 +959,36 @@ class _AdminDashboardState extends State<AdminDashboard>
   }
 }
 
+/// Personal filing remains available independently of DTR management grants.
+class AdminPersonalPortalSection extends StatelessWidget {
+  const AdminPersonalPortalSection({
+    super.key,
+    required this.selectedMenu,
+    required this.onTap,
+  });
+  final AdminMenu selectedMenu;
+  final ValueChanged<AdminMenu> onTap;
+
+  @override
+  Widget build(BuildContext context) => Column(
+    mainAxisSize: MainAxisSize.min,
+    children: [
+      const DashboardSidebarSectionLabel('MY PORTAL'),
+      for (final item in const [
+        (AdminMenu.myAttendance, 'My Attendance', Icons.schedule_outlined),
+        (AdminMenu.myLeave, 'My Leave', Icons.event_note_outlined),
+        (AdminMenu.myLocator, 'My Locator', Icons.location_on_outlined),
+      ])
+        DashboardSidebarNavTile(
+          icon: item.$3,
+          label: item.$2,
+          selected: selectedMenu == item.$1,
+          onTap: () => onTap(item.$1),
+        ),
+    ],
+  );
+}
+
 class AdminSystemAdministrationSection extends StatelessWidget {
   const AdminSystemAdministrationSection({
     super.key,
@@ -1031,19 +1068,7 @@ class _Sidebar extends StatelessWidget {
               color: AppTheme.dashHairlineOf(context),
             ),
           ),
-        DashboardSidebarSectionLabel('MY PORTAL'),
-        DashboardSidebarNavTile(
-          icon: Icons.schedule_outlined,
-          label: 'My Attendance',
-          selected: selectedMenu == AdminMenu.myAttendance,
-          onTap: () => onTap(AdminMenu.myAttendance),
-        ),
-        DashboardSidebarNavTile(
-          icon: Icons.event_note_outlined,
-          label: 'My Leave',
-          selected: selectedMenu == AdminMenu.myLeave,
-          onTap: () => onTap(AdminMenu.myLeave),
-        ),
+        AdminPersonalPortalSection(selectedMenu: selectedMenu, onTap: onTap),
         DashboardSidebarSectionLabel('MANAGEMENT'),
         DashboardSidebarNavTile(
           icon: Icons.how_to_reg_outlined,

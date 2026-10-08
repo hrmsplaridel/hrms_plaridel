@@ -113,7 +113,8 @@ class NotificationTapResult {
 
     if (cat != 'leave') {
       if (cat == 'locator') {
-        if (isPrivileged) {
+        if (isPrivileged && (t.contains('pending_hr') ||
+            t.contains('forwarded_to_hr') || t.contains('cancelled_hr'))) {
           return const NotificationTapResult(
             NotificationTapKind.adminDtrLocatorManagement,
           );
