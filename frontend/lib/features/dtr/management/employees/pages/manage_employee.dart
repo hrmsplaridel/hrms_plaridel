@@ -1061,29 +1061,36 @@ class _ManageEmployeeState extends State<ManageEmployee> {
 
   @override
   Widget build(BuildContext context) {
-    final w = MediaQuery.of(context).size.width;
-    final isNarrow = w < 700;
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final width = constraints.maxWidth.isFinite
+            ? constraints.maxWidth
+            : MediaQuery.of(context).size.width;
+        final isNarrow = width < 900;
 
-    return CallbackShortcuts(
-      bindings: <ShortcutActivator, VoidCallback>{
-        const SingleActivator(
-          LogicalKeyboardKey.keyM,
-          control: true,
-          shift: true,
-        ): _toggleMultiSelectMode,
-        const SingleActivator(LogicalKeyboardKey.escape): _exitMultiSelectMode,
+        return CallbackShortcuts(
+          bindings: <ShortcutActivator, VoidCallback>{
+            const SingleActivator(
+              LogicalKeyboardKey.keyM,
+              control: true,
+              shift: true,
+            ): _toggleMultiSelectMode,
+            const SingleActivator(LogicalKeyboardKey.escape):
+                _exitMultiSelectMode,
+          },
+          child: Focus(
+            autofocus: true,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _buildEmployeesHeader(isNarrow: isNarrow),
+                const SizedBox(height: 20),
+                isNarrow ? _buildNarrowLayout() : _buildWideLayout(),
+              ],
+            ),
+          ),
+        );
       },
-      child: Focus(
-        autofocus: true,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            _buildEmployeesHeader(isNarrow: isNarrow),
-            const SizedBox(height: 20),
-            isNarrow ? _buildNarrowLayout() : _buildWideLayout(),
-          ],
-        ),
-      ),
     );
   }
 
@@ -1160,11 +1167,12 @@ class _ManageEmployeeState extends State<ManageEmployee> {
             .clamp(150.0, 220.0)
             .toDouble();
 
-        return Row(
-          crossAxisAlignment: CrossAxisAlignment.center,
+        return Wrap(
+          spacing: gap,
+          runSpacing: gap,
+          crossAxisAlignment: WrapCrossAlignment.center,
           children: [
             SizedBox(width: searchWidth, child: _buildSearchField()),
-            const SizedBox(width: gap),
             SizedBox(
               width: roleWidth,
               child: _buildDropdown(
@@ -1179,7 +1187,6 @@ class _ManageEmployeeState extends State<ManageEmployee> {
                 },
               ),
             ),
-            const SizedBox(width: gap),
             SizedBox(
               width: statusWidth,
               child: _buildDropdown(
@@ -1194,9 +1201,7 @@ class _ManageEmployeeState extends State<ManageEmployee> {
                 },
               ),
             ),
-            const SizedBox(width: gap),
             _buildDepartmentFilterDropdown(width: departmentWidth),
-            const SizedBox(width: gap),
             _buildBiometricDeviceFilterDropdown(width: deviceWidth),
           ],
         );
