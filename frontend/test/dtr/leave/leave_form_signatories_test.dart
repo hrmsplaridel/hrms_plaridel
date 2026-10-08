@@ -19,6 +19,31 @@ DocuTrackerSourceSignature signedSlot(String slot, String signerId) {
 }
 
 void main() {
+  for (final signer in ['primary-hr', 'backup-hr', null]) {
+    test('7.A signature belongs only to the primary: $signer', () {
+      final signature = signer == null
+          ? null
+          : signedSlot('hr_approver', signer);
+      final result = composeLeaveFormSignatories(
+        certificationOfficer: const LeaveFormSignatoryInfo(
+          userId: 'primary-hr',
+          name: 'Primary HR',
+          title: 'HR Officer',
+        ),
+        approvingAuthority: const LeaveFormSignatoryInfo(
+          userId: 'mayor',
+          name: 'Mayor',
+        ),
+        hrApproverSignature: signature,
+      );
+      expect(result.certificationOfficer?.name, 'Primary HR');
+      expect(
+        result.certificationOfficerSignature,
+        signer == 'primary-hr' ? same(signature) : isNull,
+      );
+      expect(result.hrApproverSignature, isNull);
+    });
+  }
   test('backup review does not replace official form signatories', () {
     final signatories = composeLeaveFormSignatories(
       recommendationOfficer: const LeaveFormSignatoryInfo(

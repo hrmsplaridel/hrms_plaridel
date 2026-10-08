@@ -102,6 +102,8 @@ class EmployeeLeaveActions {
       final doc = await LeaveRequestPdf.buildPdf(
         request: target,
         balances: balances,
+        certificationOfficerSignatureBytes:
+            formSignatories.certificationOfficerSignature?.signatureImageBytes,
         certificationOfficerName: formSignatories.certificationOfficer?.name,
         certificationOfficerTitle: formSignatories.certificationOfficer?.title,
         recommendationOfficerName: formSignatories.recommendationOfficer?.name,
@@ -160,6 +162,8 @@ class EmployeeLeaveActions {
       await LeaveRequestPdf.printLeaveRequest(
         request: target,
         balances: balances,
+        certificationOfficerSignatureBytes:
+            formSignatories.certificationOfficerSignature?.signatureImageBytes,
         certificationOfficerName: formSignatories.certificationOfficer?.name,
         certificationOfficerTitle: formSignatories.certificationOfficer?.title,
         recommendationOfficerName: formSignatories.recommendationOfficer?.name,

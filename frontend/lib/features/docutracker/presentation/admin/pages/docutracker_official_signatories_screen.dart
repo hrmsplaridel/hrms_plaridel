@@ -7,11 +7,9 @@ import 'package:hrms_plaridel/features/docutracker/models/official_signatory.dar
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_slide_in_panel.dart';
 import 'package:hrms_plaridel/features/docutracker/services/employee_directory_lookup.dart';
 
-const _creditCertifier = 'leave_credit_certifier';
 const _dtrRoles = {
   'dtr_office_hours_verifier': 'Office-hours Verifier',
   'dtr_hr_officer': 'HR Report Officer',
-  _creditCertifier: 'Leave Credit Certifier',
 };
 
 class DocuTrackerOfficialSignatoriesScreen extends StatefulWidget {
@@ -217,9 +215,7 @@ class _DocuTrackerOfficialSignatoriesScreenState
                     const SizedBox(height: 16),
                   ],
                   if (widget.dtrOnly)
-                    for (final role in _dtrRoles.entries.where(
-                      (e) => e.key != _creditCertifier,
-                    )) ...[
+                    for (final role in _dtrRoles.entries) ...[
                       _SignatorySection(
                         roleKey: role.key,
                         title: role.value,
@@ -229,12 +225,14 @@ class _DocuTrackerOfficialSignatoriesScreenState
                       ),
                       const SizedBox(height: 16),
                     ],
-                  _SignatorySection(
-                    roleKey: _creditCertifier,
-                    title: 'Leave Credit Certifier',
-                    subtitle: 'Printed in section 7.A of the leave form.',
-                    periods: _forRole(_creditCertifier),
-                    onConfigure: () => _configure(_creditCertifier),
+                  const ListTile(
+                    leading: Icon(Icons.info_outline),
+                    title: Text('Leave credit certification (7.A)'),
+                    subtitle: Text(
+                      'Uses the primary Final HR Review assignment in Approvals & '
+                      'Signatories. The signature appears only when that reviewer '
+                      'personally signs the request.',
+                    ),
                   ),
                   const SizedBox(height: 16),
                   if (!widget.dtrOnly) _AutomaticMayorSection(mayor: _mayor),
@@ -268,6 +266,11 @@ class _DocuTrackerOfficialSignatoriesScreenState
               icon: const Icon(Icons.refresh),
             ),
           ],
+        ),
+        const SizedBox(height: 12),
+        const Text(
+          'Leave form 7.A uses the primary Final HR Review assignment in '
+          'Approvals & Signatories.',
         ),
         const SizedBox(height: 12),
         if (_loading) const Expanded(child: SettingsMasterDetailSkeleton()),
@@ -307,9 +310,7 @@ class _DocuTrackerOfficialSignatoriesScreenState
                   _SignatorySection(
                     roleKey: _selectedRole,
                     title: _dtrRoles[_selectedRole]!,
-                    subtitle: _selectedRole == _creditCertifier
-                        ? 'Printed in section 7.A of the leave form.'
-                        : 'DTR and tardiness reports',
+                    subtitle: 'DTR and tardiness reports',
                     periods: _forRole(_selectedRole),
                     onConfigure: () => _configure(_selectedRole),
                     framed: false,

@@ -31,6 +31,7 @@ class LeaveFormSignatoryInfo {
 class LeaveFormSignatories {
   const LeaveFormSignatories({
     this.certificationOfficer,
+    this.certificationOfficerSignature,
     this.recommendationOfficer,
     this.approvingAuthority,
     this.applicantSignature,
@@ -39,6 +40,7 @@ class LeaveFormSignatories {
   });
 
   final LeaveFormSignatoryInfo? certificationOfficer;
+  final DocuTrackerSourceSignature? certificationOfficerSignature;
   final LeaveFormSignatoryInfo? recommendationOfficer;
   final LeaveFormSignatoryInfo? approvingAuthority;
   final DocuTrackerSourceSignature? applicantSignature;
@@ -70,6 +72,10 @@ LeaveFormSignatories composeLeaveFormSignatories({
     certificationOfficer: certificationOfficer?.hasName == true
         ? certificationOfficer
         : null,
+    certificationOfficerSignature: officialSignature(
+      certificationOfficer,
+      hrApproverSignature,
+    ),
     recommendationOfficer: recommendationOfficer,
     approvingAuthority: approvingAuthority,
     applicantSignature: applicantSignature,

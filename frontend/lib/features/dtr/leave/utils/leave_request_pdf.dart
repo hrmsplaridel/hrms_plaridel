@@ -285,6 +285,7 @@ class LeaveRequestPdf {
     Uint8List? applicantSignatureBytes,
     Uint8List? departmentHeadSignatureBytes,
     Uint8List? hrApproverSignatureBytes,
+    Uint8List? certificationOfficerSignatureBytes,
   }) async {
     return _LeaveRequestPdfFixedEngine.buildPdf(
       request: request,
@@ -298,6 +299,7 @@ class LeaveRequestPdf {
       applicantSignatureBytes: applicantSignatureBytes,
       departmentHeadSignatureBytes: departmentHeadSignatureBytes,
       hrApproverSignatureBytes: hrApproverSignatureBytes,
+      certificationOfficerSignatureBytes: certificationOfficerSignatureBytes,
     );
   }
 
@@ -316,6 +318,7 @@ class LeaveRequestPdf {
     Uint8List? applicantSignatureBytes,
     Uint8List? departmentHeadSignatureBytes,
     Uint8List? hrApproverSignatureBytes,
+    Uint8List? certificationOfficerSignatureBytes,
   }) async {
     return _LeaveRequestPdfFixedEngine.printLeaveRequest(
       request: request,
@@ -330,6 +333,7 @@ class LeaveRequestPdf {
       applicantSignatureBytes: applicantSignatureBytes,
       departmentHeadSignatureBytes: departmentHeadSignatureBytes,
       hrApproverSignatureBytes: hrApproverSignatureBytes,
+      certificationOfficerSignatureBytes: certificationOfficerSignatureBytes,
     );
   }
 
@@ -1689,6 +1693,7 @@ class _LeaveRequestPdfFixedEngine {
     Uint8List? applicantSignatureBytes,
     Uint8List? departmentHeadSignatureBytes,
     Uint8List? hrApproverSignatureBytes,
+    Uint8List? certificationOfficerSignatureBytes,
   }) async {
     final b = balances ?? const <LeaveBalance>[];
     final vl = b
@@ -1725,6 +1730,12 @@ class _LeaveRequestPdfFixedEngine {
             departmentHeadSignatureBytes.isEmpty
         ? null
         : pw.MemoryImage(departmentHeadSignatureBytes);
+    final certificationOfficerSignatureImage =
+        certificationOfficerSignatureBytes == null ||
+            certificationOfficerSignatureBytes.isEmpty ||
+            certifierName.isEmpty
+        ? null
+        : pw.MemoryImage(certificationOfficerSignatureBytes);
     final hrApproverSignatureImage =
         hrApproverSignatureBytes == null || hrApproverSignatureBytes.isEmpty
         ? null
@@ -2631,7 +2642,21 @@ class _LeaveRequestPdfFixedEngine {
                                         ),
                                       ),
                                     ),
-                                    pw.SizedBox(height: 30),
+                                    pw.SizedBox(
+                                      height: 30,
+                                      child:
+                                          certificationOfficerSignatureImage ==
+                                              null
+                                          ? null
+                                          : pw.Center(
+                                              child: pw.Image(
+                                                certificationOfficerSignatureImage,
+                                                height: 28,
+                                                width: 110,
+                                                fit: pw.BoxFit.contain,
+                                              ),
+                                            ),
+                                    ),
                                     pw.Container(
                                       height: 1,
                                       color: _borderColor,
@@ -2999,6 +3024,7 @@ class _LeaveRequestPdfFixedEngine {
     Uint8List? applicantSignatureBytes,
     Uint8List? departmentHeadSignatureBytes,
     Uint8List? hrApproverSignatureBytes,
+    Uint8List? certificationOfficerSignatureBytes,
   }) async {
     final doc = await buildPdf(
       request: request,
@@ -3012,6 +3038,7 @@ class _LeaveRequestPdfFixedEngine {
       applicantSignatureBytes: applicantSignatureBytes,
       departmentHeadSignatureBytes: departmentHeadSignatureBytes,
       hrApproverSignatureBytes: hrApproverSignatureBytes,
+      certificationOfficerSignatureBytes: certificationOfficerSignatureBytes,
     );
     await Printing.layoutPdf(
       onLayout: (format) async => doc.save(),

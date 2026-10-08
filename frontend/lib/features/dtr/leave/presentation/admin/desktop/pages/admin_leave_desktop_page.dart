@@ -925,6 +925,8 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
       final document = await LeaveRequestPdf.buildPdf(
         request: target,
         balances: balances,
+        certificationOfficerSignatureBytes:
+            formSignatories.certificationOfficerSignature?.signatureImageBytes,
         certificationOfficerName: formSignatories.certificationOfficer?.name,
         certificationOfficerTitle: formSignatories.certificationOfficer?.title,
         recommendationOfficerName: formSignatories.recommendationOfficer?.name,

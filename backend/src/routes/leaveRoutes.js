@@ -100,12 +100,10 @@ const {
   requireHrApprovalSignature,
 } = require('../services/docutrackerLeaveSignatureService');
 const {
-  ROLE_KEYS: OFFICIAL_SIGNATORY_ROLES,
   resolveActiveMayor,
-  resolveOfficialSignatory,
 } = require('../services/officialSignatoryService');
 const { todayInHrmsTimezone } = require('../utils/dateRangeParser');
-const { assertFinalLeaveReviewer, assertLeaveSubmissionReviewer, resolveFinalLeaveReviewers } = require('../services/leaveFinalReviewerService');
+const { assertFinalLeaveReviewer, assertLeaveSubmissionReviewer, resolveFinalLeaveReviewers, resolveFinalLeaveReviewerConfiguration } = require('../services/leaveFinalReviewerService');
 
 const router = express.Router();
 
@@ -210,56 +208,6 @@ async function findAssignmentProfileByUserIdAtDate(db, userId, effectiveDate = n
   return result.rows[0] || null;
 }
 
-async function findActiveEmployeeByPositionTitle(db, positionTitle) {
-  const result = await db.query(
-    `WITH candidates AS (
-       SELECT u.id AS user_id,
-              u.full_name,
-              p.name AS position_title,
-              a.department_id,
-              d.name AS department_name,
-              0 AS source_priority,
-              a.effective_from
-       FROM assignments a
-       JOIN users u ON u.id = a.employee_id
-       JOIN positions p ON p.id = a.position_id
-       LEFT JOIN departments d ON d.id = a.department_id
-       WHERE (a.is_active IS NULL OR a.is_active = true)
-         AND (u.is_active IS NULL OR u.is_active = true)
-         AND (p.is_active IS NULL OR p.is_active = true)
-         AND (a.effective_from IS NULL OR a.effective_from <= CURRENT_DATE)
-         AND (a.effective_to IS NULL OR a.effective_to >= CURRENT_DATE)
-         AND LOWER(p.name) = LOWER($1)
-
-       UNION ALL
-
-       SELECT u.id AS user_id,
-              u.full_name,
-              p.name AS position_title,
-              eop.department_id,
-              d.name AS department_name,
-              1 AS source_priority,
-              eop.effective_from
-       FROM employee_other_positions eop
-       JOIN users u ON u.id = eop.employee_id
-       JOIN positions p ON p.id = eop.position_id
-       LEFT JOIN departments d ON d.id = eop.department_id
-       WHERE eop.is_active = true
-         AND (u.is_active IS NULL OR u.is_active = true)
-         AND (p.is_active IS NULL OR p.is_active = true)
-         AND eop.effective_from <= CURRENT_DATE
-         AND (eop.effective_to IS NULL OR eop.effective_to >= CURRENT_DATE)
-         AND LOWER(p.name) = LOWER($1)
-     )
-     SELECT user_id, full_name, position_title, department_id, department_name
-     FROM candidates
-     ORDER BY source_priority, effective_from DESC NULLS LAST, full_name
-     LIMIT 1`,
-    [positionTitle]
-  );
-  return result.rows[0] || null;
-}
-
 function mapSignatoryProfile(row) {
   if (!row) return null;
   return {
@@ -297,7 +245,6 @@ const CREDIT_BALANCE_BUCKET_TYPES = new Set([
   'vacationLeave',
   'sickLeave',
 ]);
-const HR_CERTIFICATION_POSITION_TITLE = 'Administrative Officer V';
 const SYSTEM_NO_CREDIT_LEAVE_TYPES = new Set([
   'maternityLeave',
   'paternityLeave',
@@ -3303,7 +3250,7 @@ router.get('/my/:id/history', protect, async (req, res) => {
 
 // GET /api/leave/signatories?employee_id=uuid&leave_request_id=uuid
 // Printable leave form signatories:
-// 7.A = configured certifier, with Administrative Officer V as legacy fallback.
+// 7.A = primary final HR leave reviewer effective at approval/submission.
 // 7.B = department head snapshotted when the leave request was submitted.
 // 7.C/7.D = latest active Mayor, snapshotted when final approval is recorded.
 router.get('/signatories', protect, async (req, res) => {
@@ -3388,15 +3335,12 @@ router.get('/signatories', protect, async (req, res) => {
       }
     }
 
-    const signatoryDate = requestContext?.submitted_on || todayInHrmsTimezone();
-    const configuredCertifier = await resolveOfficialSignatory(
+    const signatoryDate = requestContext?.approved_on ||
+      requestContext?.submitted_on || todayInHrmsTimezone();
+    const { primary: hrCertifier } = await resolveFinalLeaveReviewerConfiguration(
       pool,
-      OFFICIAL_SIGNATORY_ROLES.LEAVE_CREDIT_CERTIFIER,
       signatoryDate
     );
-    const hrCertifier = configuredCertifier
-      ? null
-      : await findActiveEmployeeByPositionTitle(pool, HR_CERTIFICATION_POSITION_TITLE);
     const approvingAuthority =
       requestContext?.status === 'approved' &&
       requestContext?.approving_authority_snapshot?.name
@@ -3423,9 +3367,9 @@ router.get('/signatories', protect, async (req, res) => {
       : null;
 
     res.json({
-      hr_certification_officer: configuredCertifier
-        ? mapOfficialSignatoryProfile(configuredCertifier)
-        : mapSignatoryProfile(hrCertifier),
+      hr_certification_officer: hrCertifier
+        ? mapOfficialSignatoryProfile({ ...hrCertifier, employee_id: hrCertifier.id })
+        : null,
       recommendation_officer: departmentHeadProfile
         ? mapSignatoryProfile({
             ...departmentHeadProfile,

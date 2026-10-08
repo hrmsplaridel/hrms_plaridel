@@ -1829,6 +1829,8 @@ class _LeaveRequestPrintLayoutState extends State<LeaveRequestPrintLayout> {
       await LeaveRequestPdf.printLeaveRequest(
         request: request,
         balances: balances,
+        certificationOfficerSignatureBytes:
+            formSignatories.certificationOfficerSignature?.signatureImageBytes,
         certificationOfficerName: formSignatories.certificationOfficer?.name,
         certificationOfficerTitle: formSignatories.certificationOfficer?.title,
         recommendationOfficerName: formSignatories.recommendationOfficer?.name,

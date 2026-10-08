@@ -228,7 +228,7 @@ void main() {
     },
   );
 
-  testWidgets('report tab offers DTR roles and the shared leave certifier', (
+  testWidgets('report tab no longer offers a separate leave certifier', (
     tester,
   ) async {
     await mount(tester);
@@ -244,15 +244,7 @@ void main() {
     );
     expect(
       find.byKey(const ValueKey('settings-entry-leave_credit_certifier')),
-      findsOneWidget,
-    );
-    await tester.tap(
-      find.byKey(const ValueKey('settings-entry-leave_credit_certifier')),
-    );
-    await tester.pumpAndSettle();
-    expect(
-      find.text('Printed in section 7.A of the leave form.'),
-      findsOneWidget,
+      findsNothing,
     );
     expect(requests.any((r) => r.path.endsWith('/automatic-mayor')), isFalse);
     expect(tester.takeException(), isNull);
@@ -297,10 +289,15 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('retired correction reviewer settings are not exposed', (tester) async {
+  testWidgets('retired correction reviewer settings are not exposed', (
+    tester,
+  ) async {
     await mount(tester);
     expect(find.text('DTR Corrections'), findsNothing);
-    expect(requests.any((r) => r.path == '/api/dtr-corrections/reviewers'), isFalse);
+    expect(
+      requests.any((r) => r.path == '/api/dtr-corrections/reviewers'),
+      isFalse,
+    );
     expect(find.text('Leave Workflow'), findsOneWidget);
     expect(find.text('Locator Workflow'), findsOneWidget);
   });
