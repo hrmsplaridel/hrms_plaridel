@@ -298,7 +298,11 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
         '$firstName${middleName.isNotEmpty ? ' $middleName' : ''} $lastName$suffixPart'
             .trim();
     final privilege = _privilege ?? 'Employee';
-    final role = privilege == 'Admin' ? 'admin' : 'employee';
+    final role = switch (privilege) {
+      'Admin' => 'admin',
+      'Mayor' => 'mayor',
+      _ => 'employee',
+    };
 
     setState(() => _saving = true);
     try {
@@ -415,9 +419,7 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
       _clearForm();
       if (widget.onAccountCreated != null) {
         if (postCommitWarnings.isNotEmpty) {
-          _showSnackBar(
-            'Account was saved. ${postCommitWarnings.join(' ')}',
-          );
+          _showSnackBar('Account was saved. ${postCommitWarnings.join(' ')}');
         }
         widget.onAccountCreated!();
       } else {
@@ -733,9 +735,14 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
             'Select role first',
             style: TextStyle(color: _chromeMutedColor(context)),
           ),
-          items: const [
-            DropdownMenuItem(value: 'Employee', child: Text('Employee')),
-            DropdownMenuItem(value: 'Admin', child: Text('Administrator')),
+          items: [
+            const DropdownMenuItem(value: 'Employee', child: Text('Employee')),
+            const DropdownMenuItem(
+              value: 'Admin',
+              child: Text('Administrator'),
+            ),
+            if (context.watch<AuthProvider>().user?.role == 'super_admin')
+              const DropdownMenuItem(value: 'Mayor', child: Text('Mayor')),
           ],
           onChanged: (v) => setState(() {
             _privilege = v;
@@ -743,6 +750,14 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
           }),
           validator: (v) => v == null ? 'Select a role first' : null,
         ),
+        if (_privilege == 'Mayor') ...[
+          const SizedBox(height: 10),
+          const Text(
+            'Only one Mayor account can be active. Deactivate the previous '
+            'Mayor in Employee Profiles before creating a replacement. '
+            'Department and position can be assigned below.',
+          ),
+        ],
         if (_privilege != null) ...[
           const SizedBox(height: 18),
           TextFormField(

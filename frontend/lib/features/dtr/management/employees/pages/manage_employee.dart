@@ -5,6 +5,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
+import 'package:hrms_plaridel/providers/auth_provider.dart';
 import 'package:shimmer/shimmer.dart';
 
 import 'package:hrms_plaridel/core/api/avatar_url.dart';
@@ -100,7 +101,11 @@ class _EmployeeProfile {
   final String? departmentName;
   final String? positionName;
 
-  String get roleDisplay => role == 'admin' ? 'Admin' : 'Employee';
+  String get roleDisplay => role == 'mayor'
+      ? 'Mayor'
+      : role == 'admin'
+      ? 'Admin'
+      : 'Employee';
 
   /// Current assignment from API (department · position), or em dash if none.
   String get assignmentDisplay {
@@ -1164,7 +1169,7 @@ class _ManageEmployeeState extends State<ManageEmployee> {
               width: roleWidth,
               child: _buildDropdown(
                 _privilegeFilter,
-                ['All', 'Admin', 'Employee'],
+                ['All', 'Admin', 'Employee', 'Mayor'],
                 (v) {
                   setState(() {
                     _privilegeFilter = v ?? 'All';

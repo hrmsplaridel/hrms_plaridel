@@ -98,6 +98,9 @@ CREATE TABLE IF NOT EXISTS users (
 CREATE UNIQUE INDEX IF NOT EXISTS users_single_super_admin_idx
   ON users (role) WHERE role = 'super_admin';
 
+CREATE UNIQUE INDEX IF NOT EXISTS users_single_active_mayor_idx
+  ON users (role) WHERE role = 'mayor' AND is_active = true;
+
 CREATE TABLE IF NOT EXISTS account_creation_access (
   admin_user_id UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
   allowed BOOLEAN NOT NULL,

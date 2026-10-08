@@ -45,7 +45,7 @@ const SALT_ROUNDS = 10;
 
 function employeeAccountEmailText({ name, email, password, role }) {
   const displayName = String(name || '').trim() || 'Employee';
-  const privilege = role === 'admin' ? 'administrator' : 'employee';
+  const privilege = role === 'mayor' ? 'Mayor' : role === 'admin' ? 'administrator' : 'employee';
   return (
     `Dear ${displayName},\n\n` +
     `Your LGU Plaridel HRMS ${privilege} account has been created.\n\n` +
@@ -246,6 +246,9 @@ function buildEmployeeListFromSql(req, options = {}) {
   } else if (roleFilter === 'User' || roleFilter === 'Employee') {
     conditions.push(`${tbl}.role = $${i++}`);
     params.push('employee');
+  } else if (roleFilter === 'Mayor') {
+    conditions.push(`${tbl}.role = $${i++}`);
+    params.push('mayor');
   }
   if (historicalRange?.startDate && historicalRange?.endDate) {
     const startIdx = i++;
@@ -656,6 +659,9 @@ router.post('/bulk-status', protect, requireAdmin, requireDtrFeatureIfAdmin('emp
     if (err instanceof EmployeeAccountSecurityError) {
       return res.status(err.statusCode).json({ error: err.message, code: err.code });
     }
+    if (err.code === '23505' && err.constraint === 'users_single_active_mayor_idx') {
+      return res.status(409).json({ error: 'An active Mayor account already exists. Deactivate the current Mayor before reactivating another.' });
+    }
     console.error('[employees POST /bulk-status]', err);
     res.status(500).json({ error: 'Failed to update employees' });
   } finally {
@@ -736,8 +742,11 @@ router.post('/', protect, requireAdminOrSuperAdmin, requireAccountCreationAccess
     if (validationError) {
       return res.status(400).json({ error: validationError });
     }
-    if (!['admin', 'employee'].includes(role)) {
-      return res.status(400).json({ error: 'Role must be admin or employee' });
+    if (!['admin', 'employee', 'mayor'].includes(role)) {
+      return res.status(400).json({ error: 'Role must be admin, employee, or mayor' });
+    }
+    if (role === 'mayor' && req.user?.role !== 'super_admin') {
+      return res.status(403).json({ error: 'Only the super admin can create a Mayor account' });
     }
 
     const temporaryPassword =
@@ -895,6 +904,9 @@ router.post('/', protect, requireAdminOrSuperAdmin, requireAccountCreationAccess
     }
     if (err.code === '23505') {
       const constraint = String(err.constraint || '');
+      if (constraint === 'users_single_active_mayor_idx') {
+        return res.status(409).json({ error: 'An active Mayor account already exists. Deactivate the previous Mayor before creating another.' });
+      }
       if (constraint.includes('biometric_user_id')) {
         return res.status(409).json({ error: 'Biometric User ID is already assigned to another employee' });
       }
@@ -1199,6 +1211,9 @@ router.put('/:id', protect, requireAdmin, requireDtrFeatureIfAdmin('employees_al
     }
     if (err.code === '22P02' || err.code === '23503') {
       return res.status(400).json({ error: 'Invalid employee setup selection' });
+    }
+    if (err.code === '23505' && err.constraint === 'users_single_active_mayor_idx') {
+      return res.status(409).json({ error: 'An active Mayor account already exists. Deactivate the current Mayor before reactivating another.' });
     }
     if (err.code === '23505') return res.status(409).json({ error: 'Email already exists' });
     console.error('[employees PUT]', err);

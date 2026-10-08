@@ -25,6 +25,18 @@ function targetRow(overrides = {}) {
   };
 }
 
+test('Mayor role is preserved while account deactivation remains available', async () => {
+  const db = { query: async () => ({ rowCount: 1, rows: [targetRow({ role: 'mayor' })] }) };
+  await assert.rejects(lockAndValidateAccountTransition(db, {
+    actorId: OTHER_ADMIN_ID, targetId: ADMIN_ID, nextRole: 'employee',
+  }), error => error.code === 'MAYOR_ROLE_PROTECTED');
+  const result = await lockAndValidateAccountTransition(db, {
+    actorId: OTHER_ADMIN_ID, targetId: ADMIN_ID, nextIsActive: false,
+  });
+  assert.equal(result.next.role, 'mayor');
+  assert.equal(result.revokeSessions, true);
+});
+
 test('administrator cannot deactivate their own account', async () => {
   const db = {
     query: async () => ({ rowCount: 1, rows: [targetRow()] }),
