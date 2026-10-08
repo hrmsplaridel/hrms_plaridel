@@ -9,6 +9,7 @@ import 'package:printing/printing.dart';
 
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_balance.dart';
 import 'package:hrms_plaridel/features/dtr/leave/utils/leave_certification_balance.dart';
+import 'package:hrms_plaridel/features/dtr/leave/utils/leave_form_remarks.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_request.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_type.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_type_definition.dart';
@@ -1391,6 +1392,44 @@ class _LeaveRequestPdfFixedEngine {
   static String _s(String? v) =>
       (v == null || v.trim().isEmpty) ? '' : v.trim();
 
+  static pw.Widget _ruledRemarks(
+    String text, {
+    required pw.Font font,
+    required double gap,
+  }) => pw.LayoutBuilder(
+    builder: (context, constraints) {
+      final layout = layoutLeaveFormRemarks(
+        text,
+        width: constraints!.maxWidth,
+        fontSize: _small,
+        measure: (value, size) =>
+            font.getFont(context).stringMetrics(value).advanceWidth * size,
+      );
+      return pw.Column(
+        crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+        children: [
+          for (var index = 0; index < 3; index++) ...[
+            if (index > 0) pw.SizedBox(height: gap),
+            pw.Container(
+              height: 10,
+              alignment: pw.Alignment.bottomLeft,
+              decoration: const pw.BoxDecoration(
+                border: pw.Border(
+                  bottom: pw.BorderSide(color: _borderColor, width: 0.8),
+                ),
+              ),
+              child: pw.Text(
+                index < layout.lines.length ? layout.lines[index] : '',
+                style: pw.TextStyle(font: font, fontSize: layout.fontSize),
+                softWrap: false,
+              ),
+            ),
+          ],
+        ],
+      );
+    },
+  );
+
   static String _fmtDate(DateTime? d) {
     if (d == null) return '';
     const m = [
@@ -1745,9 +1784,7 @@ class _LeaveRequestPdfFixedEngine {
     final hasDepartmentHeadDisapproval =
         request.departmentHeadAction == 'department_head_rejected' ||
         request.status == LeaveRequestStatus.rejectedByDepartmentHead;
-    final disapprovalReason = request.status.isRejected
-        ? _s(request.disapprovalReason)
-        : '';
+    final disapprovalReason = leaveFormDisapprovalReason(request);
     final customDetails = request.employeeDetailSchemaSnapshot
         .where((field) {
           final value = request.customDetails[field.key];
@@ -2704,47 +2741,10 @@ class _LeaveRequestPdfFixedEngine {
                                               LeaveRequestStatus.rejected,
                                     ),
                                     pw.SizedBox(height: 2),
-                                    pw.Container(
-                                      height: 10,
-                                      decoration: const pw.BoxDecoration(
-                                        border: pw.Border(
-                                          bottom: pw.BorderSide(
-                                            color: _borderColor,
-                                            width: 0.8,
-                                          ),
-                                        ),
-                                      ),
-                                      alignment: pw.Alignment.bottomLeft,
-                                      child: pw.Text(
-                                        _s(request.recommendationRemarks),
-                                        style: const pw.TextStyle(
-                                          fontSize: _small,
-                                        ),
-                                      ),
-                                    ),
-                                    pw.SizedBox(height: 8),
-                                    pw.Container(
-                                      height: 10,
-                                      decoration: const pw.BoxDecoration(
-                                        border: pw.Border(
-                                          bottom: pw.BorderSide(
-                                            color: _borderColor,
-                                            width: 0.8,
-                                          ),
-                                        ),
-                                      ),
-                                    ),
-                                    pw.SizedBox(height: 8),
-                                    pw.Container(
-                                      height: 10,
-                                      decoration: const pw.BoxDecoration(
-                                        border: pw.Border(
-                                          bottom: pw.BorderSide(
-                                            color: _borderColor,
-                                            width: 0.8,
-                                          ),
-                                        ),
-                                      ),
+                                    _ruledRemarks(
+                                      leaveFormRecommendationRemarks(request),
+                                      font: fonts.base,
+                                      gap: 8,
                                     ),
                                     if (departmentHeadSignatureImage != null)
                                       pw.Container(
@@ -2857,47 +2857,10 @@ class _LeaveRequestPdfFixedEngine {
                                             '7.D DISAPPROVED DUE TO',
                                           ),
                                           pw.SizedBox(height: 2),
-                                          pw.Container(
-                                            height: 10,
-                                            decoration: const pw.BoxDecoration(
-                                              border: pw.Border(
-                                                bottom: pw.BorderSide(
-                                                  color: _borderColor,
-                                                  width: 0.8,
-                                                ),
-                                              ),
-                                            ),
-                                            alignment: pw.Alignment.bottomLeft,
-                                            child: pw.Text(
-                                              disapprovalReason,
-                                              style: const pw.TextStyle(
-                                                fontSize: _small,
-                                              ),
-                                            ),
-                                          ),
-                                          pw.SizedBox(height: 6),
-                                          pw.Container(
-                                            height: 10,
-                                            decoration: const pw.BoxDecoration(
-                                              border: pw.Border(
-                                                bottom: pw.BorderSide(
-                                                  color: _borderColor,
-                                                  width: 0.8,
-                                                ),
-                                              ),
-                                            ),
-                                          ),
-                                          pw.SizedBox(height: 6),
-                                          pw.Container(
-                                            height: 10,
-                                            decoration: const pw.BoxDecoration(
-                                              border: pw.Border(
-                                                bottom: pw.BorderSide(
-                                                  color: _borderColor,
-                                                  width: 0.8,
-                                                ),
-                                              ),
-                                            ),
+                                          _ruledRemarks(
+                                            disapprovalReason,
+                                            font: fonts.base,
+                                            gap: 6,
                                           ),
                                         ],
                                       ),
