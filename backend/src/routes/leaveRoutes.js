@@ -3707,12 +3707,12 @@ async function listLeaveReviewFilterOptions(db, scopeSql, params) {
   return result.rows;
 }
 
-router.get('/filter-options', protect, requireAdminOrHr, requireDtrFeatureIfAdmin('leave_allowed'), async (_req, res) => {
+router.get('/filter-options', protect, requireAdminOrHr, requireDtrFeatureIfAdmin('leave_allowed'), async (req, res) => {
   try {
     const items = await listLeaveReviewFilterOptions(
       pool,
-      HR_REVIEW_SCOPE_SQL,
-      []
+      `${HR_REVIEW_SCOPE_SQL} AND COALESCE(lr.user_id, lr.employee_id) <> $1::uuid`,
+      [req.user?.id]
     );
     res.json(items);
   } catch (err) {
@@ -3772,8 +3772,9 @@ router.get('/', protect, requireAdminOrHr, requireDtrFeatureIfAdmin('leave_allow
          AND ($6::timestamptz IS NULL OR lr.created_at >= $6)
          AND ($7::date IS NULL OR lr.created_at < ($7::date + interval '1 day'))
          AND ($8::text IS NULL OR d.name = $8)
-         AND ${HR_REVIEW_SCOPE_SQL}`;
-    const params = [status, leaveType, userId, startDateFrom, startDateTo, createdFrom, createdTo, department];
+         AND ${HR_REVIEW_SCOPE_SQL}
+         AND COALESCE(lr.user_id, lr.employee_id) <> $9::uuid`;
+    const params = [status, leaveType, userId, startDateFrom, startDateTo, createdFrom, createdTo, department, req.user?.id];
     const rows = await pool.query(
       `SELECT lr.*, lt.name AS leave_type_name, u.full_name AS employee_full_name,
               d.name AS assignment_department_name,
@@ -3802,7 +3803,7 @@ router.get('/', protect, requireAdminOrHr, requireDtrFeatureIfAdmin('leave_allow
 });
 
 // GET /api/leave/pending (admin/HR — returns pending_hr + legacy pending)
-router.get('/pending', protect, requireAdminOrHr, requireDtrFeatureIfAdmin('leave_allowed'), async (_req, res) => {
+router.get('/pending', protect, requireAdminOrHr, requireDtrFeatureIfAdmin('leave_allowed'), async (req, res) => {
   try {
     const rows = await pool.query(
       `SELECT lr.*, lt.name AS leave_type_name, u.full_name AS employee_full_name,
@@ -3837,8 +3838,10 @@ router.get('/pending', protect, requireAdminOrHr, requireDtrFeatureIfAdmin('leav
          LIMIT 1
        ) dhh ON true
        WHERE lr.status IN ('pending', 'pending_hr')
+         AND COALESCE(lr.user_id, lr.employee_id) <> $1::uuid
        ORDER BY lr.updated_at DESC NULLS LAST, lr.created_at DESC
-       LIMIT 200`
+       LIMIT 200`,
+      [req.user?.id]
     );
     res.json(rows.rows.map(mapLeaveRowToApi));
   } catch (err) {
@@ -3920,7 +3923,7 @@ router.get('/department-head/filter-options', protect, async (req, res) => {
          SELECT 1 FROM leave_request_history h
          WHERE h.leave_request_id = lr.id AND h.acted_by = $1::uuid
            AND h.action IN ('department_head_approved', 'department_head_rejected', 'department_head_returned')
-       ))`,
+       )) AND COALESCE(lr.user_id, lr.employee_id) <> $1::uuid`,
       [userId]
     );
     res.json(items);
@@ -3990,6 +3993,7 @@ router.get('/department-head', protect, async (req, res) => {
             )
             OR dhh.department_head_reviewer_id IS NOT NULL
           )
+          AND COALESCE(lr.user_id, lr.employee_id) <> $1::uuid
           AND ($2::text IS NULL OR lr.status = $2)
           AND ($3::text IS NULL OR lt.name = $3)
           AND ($4::uuid IS NULL OR lr.user_id = $4 OR lr.employee_id = $4)

@@ -2000,7 +2000,8 @@ router.get('/department-head', protect, async (req, res) => {
        LEFT JOIN users dh ON dh.id = ls.dept_head_reviewer_id
        LEFT JOIN users hr ON hr.id = ls.hr_reviewer_id
        LEFT JOIN locator_request_types lrt ON lrt.code = ls.request_type
-       WHERE (
+       WHERE ls.employee_id <> $1::uuid
+         AND (
            (
              ls.status = 'pending_department_head'
              AND (
@@ -2447,6 +2448,7 @@ router.get('/admin', protect, requireAdminOrHr, requireDtrFeatureIfAdmin('locato
       from,
       to,
       search,
+      req.user?.id,
     ];
     const filterSql = `
       FROM locator_slips ls
@@ -2458,6 +2460,7 @@ router.get('/admin', protect, requireAdminOrHr, requireDtrFeatureIfAdmin('locato
       LEFT JOIN users corrector ON corrector.id = ls.retroactive_corrected_by
       LEFT JOIN users revoker ON revoker.id = ls.revoked_by
       WHERE ($1::text[] IS NULL OR ls.status = ANY($1::text[]))
+        AND ls.employee_id <> $8::uuid
         AND (
           ls.status IN ('pending', 'pending_hr')
           OR ls.is_retroactive_correction = true
@@ -2511,15 +2514,16 @@ router.get('/admin', protect, requireAdminOrHr, requireDtrFeatureIfAdmin('locato
               lrt.coverage_mode AS request_type_coverage_mode
        ${filterSql}
        ORDER BY ls.updated_at DESC, ls.created_at DESC, ls.id DESC
-       LIMIT $8::integer OFFSET $9::integer`,
+       LIMIT $9::integer OFFSET $10::integer`,
         [...filterParams, pageSize, offset]
       ),
       pool.query(
         `SELECT DISTINCT d.id, d.name
          FROM locator_slips ls
          JOIN departments d ON d.id = ls.department_id
-         WHERE d.name IS NOT NULL AND btrim(d.name) <> ''
-         ORDER BY d.name`
+         WHERE ls.employee_id <> $1::uuid AND d.name IS NOT NULL AND btrim(d.name) <> ''
+         ORDER BY d.name`,
+        [req.user?.id]
       ),
       pool.query(
         `SELECT u.id,
@@ -2531,9 +2535,10 @@ router.get('/admin', protect, requireAdminOrHr, requireDtrFeatureIfAdmin('locato
                 ) AS department_ids
          FROM locator_slips ls
          JOIN users u ON u.id = ls.employee_id
-         WHERE u.full_name IS NOT NULL AND btrim(u.full_name) <> ''
+         WHERE ls.employee_id <> $1::uuid AND u.full_name IS NOT NULL AND btrim(u.full_name) <> ''
          GROUP BY u.id, u.full_name
-         ORDER BY u.full_name`
+         ORDER BY u.full_name`,
+        [req.user?.id]
       ),
     ]);
     res.json({

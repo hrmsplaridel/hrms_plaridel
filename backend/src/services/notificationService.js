@@ -64,12 +64,30 @@ async function insertNotificationForUsers(db, userIds, payload) {
   }
 }
 
+// Obsolete self-review alerts may exist from older notification routing.
+const reviewNotificationVisibilitySql = `NOT (
+  type IN ('locator_pending_hr', 'locator_forwarded_to_hr', 'locator_pending_department_head')
+  AND EXISTS (
+    SELECT 1 FROM locator_slips ls
+    WHERE ls.id = user_notifications.reference_id
+      AND ls.employee_id = user_notifications.user_id
+  )
+) AND NOT (
+  type IN ('leave_pending_hr', 'leave_forwarded_to_hr', 'leave_pending_department_head')
+  AND EXISTS (
+    SELECT 1 FROM leave_requests lr
+    WHERE lr.id = user_notifications.reference_id
+      AND COALESCE(lr.user_id, lr.employee_id) = user_notifications.user_id
+  )
+)`;
+
 async function listNotifications(db, userId, { limit = 50, unreadOnly = false } = {}) {
   const safeLimit = Math.min(Math.max(parseInt(String(limit), 10) || 50, 1), 200);
   const r = await db.query(
     `SELECT id, user_id, category, type, title, body, read_at, reference_type, reference_id, metadata, created_at
      FROM user_notifications
      WHERE user_id = $1::uuid
+       AND ${reviewNotificationVisibilitySql}
        AND ($2::boolean = false OR read_at IS NULL)
      ORDER BY created_at DESC
      LIMIT $3`,
@@ -80,7 +98,8 @@ async function listNotifications(db, userId, { limit = 50, unreadOnly = false } 
 
 async function countUnread(db, userId) {
   const r = await db.query(
-    `SELECT count(*)::int AS c FROM user_notifications WHERE user_id = $1::uuid AND read_at IS NULL`,
+    `SELECT count(*)::int AS c FROM user_notifications WHERE user_id = $1::uuid AND read_at IS NULL
+       AND ${reviewNotificationVisibilitySql}`,
     [userId]
   );
   return r.rows[0]?.c ?? 0;
