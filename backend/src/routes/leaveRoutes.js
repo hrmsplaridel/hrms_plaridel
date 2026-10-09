@@ -1,3 +1,4 @@
+const { normalizeEligibleEmploymentTypes, assertLeaveEmploymentEligibility } = require('../services/leaveEmploymentEligibility');
 const { finalQueueVisibilitySql } = require('../services/approvalStageSeparation');
 const express = require('express');
 const multer = require('multer');
@@ -294,6 +295,7 @@ pool
         ADD COLUMN IF NOT EXISTS balance_ledger_type TEXT NOT NULL DEFAULT 'none',
         ADD COLUMN IF NOT EXISTS entitlement_basis TEXT NOT NULL DEFAULT 'per_request',
         ADD COLUMN IF NOT EXISTS sex_eligibility TEXT NOT NULL DEFAULT 'any',
+        ADD COLUMN IF NOT EXISTS eligible_employment_types TEXT[],
         ADD COLUMN IF NOT EXISTS employee_detail_schema JSONB NOT NULL DEFAULT '[]'::jsonb,
         ADD COLUMN IF NOT EXISTS is_system BOOLEAN NOT NULL DEFAULT false,
         ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT now();
@@ -971,6 +973,7 @@ function leaveTypeRowToApi(row = {}) {
       row.sex_eligibility ?? fallback.sex_eligibility,
       name
     ),
+    eligible_employment_types: row.eligible_employment_types ?? null,
     employee_detail_schema: normalizeEmployeeDetailSchema(
       row.employee_detail_schema
     ),
@@ -1431,6 +1434,10 @@ function leaveTypePayloadFromBody(body = {}, existing = null) {
         base.sex_eligibility,
       name
     ),
+    eligibleEmploymentTypes: normalizeEligibleEmploymentTypes(
+      Object.prototype.hasOwnProperty.call(body, 'eligible_employment_types')
+        ? body.eligible_employment_types : existing?.eligible_employment_types ?? null
+    ),
     employeeDetailSchema: normalizeEmployeeDetailSchema(
       bodyField('employee_detail_schema') ??
         existing?.employee_detail_schema ??
@@ -1498,7 +1505,7 @@ router.post('/types', protect, requireAdminOrHr, requireDtrFeatureIfAdmin('leave
           employee_can_file, admin_only, allows_past_dates,
           requires_attachment, requires_attachment_when_over_days,
           max_days, minimum_advance_days, affects_dtr_normally, balance_ledger_type,
-          entitlement_basis, sex_eligibility, employee_detail_schema,
+          entitlement_basis, sex_eligibility, employee_detail_schema, eligible_employment_types,
           created_at, updated_at
         )
         VALUES (
@@ -1506,7 +1513,7 @@ router.post('/types', protect, requireAdminOrHr, requireDtrFeatureIfAdmin('leave
           $5, $6, $7,
           $8, $9,
           $10, $11, $12, $13,
-          $14, $15, $16::jsonb,
+          $14, $15, $16::jsonb, $17::text[],
           now(), now()
         )
         RETURNING *`,
@@ -1527,6 +1534,7 @@ router.post('/types', protect, requireAdminOrHr, requireDtrFeatureIfAdmin('leave
         payload.entitlementBasis,
         payload.sexEligibility,
         serializeEmployeeDetailSchema(payload.employeeDetailSchema),
+        payload.eligibleEmploymentTypes,
       ]
     );
     res.status(201).json(leaveTypeRowToApi(q.rows[0]));
@@ -1545,6 +1553,21 @@ router.put('/types/:id', protect, requireAdminOrHr, requireDtrFeatureIfAdmin('le
     }
     const existing = existingQ.rows[0];
     const isSystem = existing.is_system === true || SYSTEM_LEAVE_TYPE_NAMES.includes(existing.name);
+    if (isSystem) {
+      const body = req.body || {};
+      if (Object.keys(body).some(key => key !== 'eligible_employment_types')) {
+        return res.status(400).json({ error: 'Built-in leave rules are protected. Only employment-type eligibility can be configured.' });
+      }
+      if (!Object.prototype.hasOwnProperty.call(body, 'eligible_employment_types')) {
+        return res.json(leaveTypeRowToApi(existing));
+      }
+      const eligibility = normalizeEligibleEmploymentTypes(body.eligible_employment_types);
+      const updated = await pool.query(
+        `UPDATE leave_types SET eligible_employment_types = $1::text[], updated_at = now()
+         WHERE id = $2::uuid RETURNING *`, [eligibility, req.params.id]
+      );
+      return res.json(leaveTypeRowToApi(updated.rows[0]));
+    }
     const payload = leaveTypePayloadFromBody(req.body || {}, existing);
     const nextName = isSystem ? existing.name : payload.name;
     const nextActive = isSystem ? true : payload.isActive;
@@ -1581,6 +1604,7 @@ router.put('/types/:id', protect, requireAdminOrHr, requireDtrFeatureIfAdmin('le
            entitlement_basis = $15,
            sex_eligibility = $16,
            employee_detail_schema = $17::jsonb,
+           eligible_employment_types = $19::text[],
            updated_at = now()
        WHERE id = $18::uuid
        RETURNING *`,
@@ -1607,6 +1631,7 @@ router.put('/types/:id', protect, requireAdminOrHr, requireDtrFeatureIfAdmin('le
             : payload.employeeDetailSchema
         ),
         req.params.id,
+        payload.eligibleEmploymentTypes,
       ]
     );
     res.json(leaveTypeRowToApi(q.rows[0]));
@@ -2034,6 +2059,7 @@ router.post('/draft', protect, async (req, res) => {
         return res.status(400).json({ error: 'Invalid leave type' });
       }
       const leaveRule = await getLeaveTypeDefinition(client, leave_type);
+      await assertLeaveEmploymentEligibility(client, leaveRule, userId);
       const customFieldSchema = normalizeEmployeeDetailSchema(
         leaveRule?.employee_detail_schema
       );
@@ -2170,6 +2196,7 @@ router.post('/submit', protect, async (req, res) => {
         return res.status(400).json({ error: 'Invalid leave type' });
       }
       const leaveRule = await getLeaveTypeDefinition(client, leave_type);
+      await assertLeaveEmploymentEligibility(client, leaveRule, userId);
       const customFieldSchema = normalizeEmployeeDetailSchema(
         leaveRule?.employee_detail_schema
       );
@@ -2411,6 +2438,7 @@ router.post('/submit-with-attachment', protect, uploadLeaveAttachmentMemoryMw, a
       }
 
       const leaveRule = await getLeaveTypeDefinition(client, leave_type);
+      await assertLeaveEmploymentEligibility(client, leaveRule, userId);
       const customFieldSchema = normalizeEmployeeDetailSchema(
         leaveRule?.employee_detail_schema
       );
@@ -2640,7 +2668,7 @@ router.put('/:id', protect, async (req, res) => {
   const { id } = req.params;
   try {
     const existing = await pool.query(
-      `SELECT id, status, employee_official_snapshot
+      `SELECT id, status, employee_official_snapshot, leave_type_id
        FROM leave_requests
        WHERE id = $1 AND (user_id = $2 OR employee_id = $2)
          AND discarded_at IS NULL`,
@@ -2682,7 +2710,7 @@ router.put('/:id', protect, async (req, res) => {
       await lockEmployeeLeaveFiling(client, userId);
       // Serialize edits/submissions of this request before any write or reservation.
       const lockedRequest = await client.query(
-        `SELECT id, status, employee_official_snapshot
+        `SELECT id, status, employee_official_snapshot, leave_type_id
          FROM leave_requests
          WHERE id = $1 AND (user_id = $2 OR employee_id = $2)
            AND discarded_at IS NULL
@@ -2720,9 +2748,13 @@ router.put('/:id', protect, async (req, res) => {
         await client.query('ROLLBACK');
         return res.status(400).json({ error: 'Invalid leave type' });
       }
+      const storedTypeRule = !leave_type && lockedRequest.rows[0].leave_type_id
+        ? await client.query('SELECT * FROM leave_types WHERE id = $1::uuid', [lockedRequest.rows[0].leave_type_id])
+        : null;
       const leaveRule = leave_type
         ? await getLeaveTypeDefinition(client, leave_type)
-        : null;
+        : storedTypeRule?.rows[0] ? leaveTypeRowToApi(storedTypeRule.rows[0]) : null;
+      await assertLeaveEmploymentEligibility(client, leaveRule, userId);
       const customFieldSchema = normalizeEmployeeDetailSchema(
         leaveRule?.employee_detail_schema
       );
@@ -5224,7 +5256,8 @@ router.get('/balances/:userId', protect, async (req, res) => {
       `SELECT name,
               COALESCE(display_name, description, name) AS display_name,
               max_days,
-              sex_eligibility
+              sex_eligibility,
+              eligible_employment_types
        FROM leave_types
        WHERE is_active = true
          AND entitlement_basis = $1
@@ -5239,16 +5272,20 @@ router.get('/balances/:userId', protect, async (req, res) => {
       display: row.display_name || systemLeaveTypeDisplayName(row.name),
       quota: parseFloat(row.max_days),
       sex: normalizeSexEligibility(row.sex_eligibility, row.name),
+      employmentTypes: row.eligible_employment_types,
     }));
 
-    // Skip sex-restricted types the employee cannot use
+    // Skip employment- and sex-restricted types the employee cannot use
     let employeeSex = null;
+    let employeeEmploymentType = null;
     try {
-      const sexRow = await pool.query('SELECT sex FROM users WHERE id = $1::uuid LIMIT 1', [targetId]);
+      const sexRow = await pool.query('SELECT sex, employment_type FROM users WHERE id = $1::uuid LIMIT 1', [targetId]);
       employeeSex = sexRow.rows[0]?.sex || null;
+      employeeEmploymentType = sexRow.rows[0]?.employment_type || null;
     } catch (_) {}
 
     const applicableTypes = annualQuotaTypes.filter((t) => {
+      if (t.employmentTypes != null && !t.employmentTypes.includes(employeeEmploymentType)) return false;
       if (!t.sex || t.sex === 'any') return true;
       if (!employeeSex) return true; // unknown sex: show anyway
       return t.sex.toLowerCase() === employeeSex.toLowerCase();

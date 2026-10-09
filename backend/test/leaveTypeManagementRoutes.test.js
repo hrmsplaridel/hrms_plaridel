@@ -33,6 +33,7 @@ function rowFromCreateParams(params) {
     entitlement_basis: params[13],
     sex_eligibility: params[14],
     employee_detail_schema: JSON.parse(params[15]),
+    eligible_employment_types: params[16],
   };
 }
 
@@ -70,6 +71,10 @@ async function withUpdateRoute(existing, run) {
     if (statement.startsWith('SELECT * FROM leave_types WHERE id')) {
       return { rows: existing ? [existing] : [] };
     }
+    if (statement.startsWith('UPDATE leave_types SET eligible_employment_types')) {
+      updates.push({statement,params});
+      return {rows:[{...existing,eligible_employment_types:params[0]}]};
+    }
     if (statement.startsWith('UPDATE leave_types SET name =')) {
       updates.push({ statement, params });
       return {
@@ -93,6 +98,7 @@ async function withUpdateRoute(existing, run) {
           entitlement_basis: params[14],
           sex_eligibility: params[15],
           employee_detail_schema: JSON.parse(params[16]),
+          eligible_employment_types: params[18],
         }],
       };
     }
@@ -158,6 +164,50 @@ const basePayload = {
   name: 'bereavementLeave',
   display_name: 'Bereavement Leave',
 };
+
+test('leave type employment eligibility saves a restriction and rejects malformed selections',async()=>{
+  await withCreateRoute(async(handler,inserts)=>{
+    const res=responseRecorder();
+    await handler({body:{...basePayload,eligible_employment_types:['permanent','contractual']}},res);
+    assert.equal(res.statusCode,201);
+    assert.deepEqual(res.body.eligible_employment_types,['permanent','contractual']);
+    for(const value of [[],['unknown'],'permanent']) {
+      const rejected=responseRecorder();
+      await handler({body:{...basePayload,eligible_employment_types:value}},rejected);
+      assert.equal(rejected.statusCode,400);
+    }
+    assert.equal(inserts.length,1);
+  });
+});
+test('editing preserves omitted eligibility and allows resetting it to unrestricted',async()=>{
+  const existing={id:'11111111-1111-4111-8111-111111111111',...basePayload,
+    eligible_employment_types:['permanent'],is_system:true,name:'vacationLeave'};
+  await withUpdateRoute(existing,async(handler)=>{
+    for(const [body,expected] of [[{},['permanent']],[{eligible_employment_types:null},null]]) {
+      const res=responseRecorder();
+      await handler({params:{id:existing.id},body},res);
+      assert.equal(res.statusCode,200);
+      assert.deepEqual(res.body.eligible_employment_types,expected);
+    }
+  });
+});
+
+test('protected leave types reject built-in rule changes but save only employment eligibility',async()=>{
+  const existing={...basePayload,id:'11111111-1111-4111-8111-111111111111',name:'vacationLeave',is_system:true,max_days:10};
+  await withUpdateRoute(existing,async(handler,updates)=>{
+    const rejected=responseRecorder();
+    await handler({params:{id:existing.id},body:{max_days:99,description:'Changed',eligible_employment_types:['permanent']}},rejected);
+    assert.equal(rejected.statusCode,400);
+    assert.equal(updates.length,0);
+    const res=responseRecorder();
+    await handler({params:{id:existing.id},body:{eligible_employment_types:['permanent']}},res);
+    assert.equal(res.statusCode,200);
+    assert.equal(res.body.max_days,10);
+    assert.deepEqual(res.body.eligible_employment_types,['permanent']);
+    assert.match(updates[0].statement,/SET eligible_employment_types/);
+    assert.doesNotMatch(updates[0].statement,/max_days =|description =/);
+  });
+});
 
 test('leave type creation rejects malformed and unsafe numeric rules', async () => {
   await withCreateRoute(async (handler, inserts) => {

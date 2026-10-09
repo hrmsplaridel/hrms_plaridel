@@ -105,6 +105,21 @@ CREATE UNIQUE INDEX IF NOT EXISTS users_single_super_admin_idx
 CREATE UNIQUE INDEX IF NOT EXISTS users_single_active_mayor_idx
   ON users (role) WHERE role = 'mayor' AND is_active = true;
 
+-- JO/COS start without credit accrual eligibility, including direct SQL imports.
+CREATE OR REPLACE FUNCTION apply_jo_cos_credit_default() RETURNS trigger AS $$
+BEGIN
+  IF NEW.employment_type IN ('job_order','contract_of_service')
+    AND (TG_OP='INSERT' OR NEW.employment_type IS DISTINCT FROM OLD.employment_type) THEN
+    NEW.leave_credit_eligible := false;
+    NEW.leave_credit_eligible_until := NULL;
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+DROP TRIGGER IF EXISTS trg_users_jo_cos_credit_default ON users;
+CREATE TRIGGER trg_users_jo_cos_credit_default BEFORE INSERT OR UPDATE OF employment_type ON users
+  FOR EACH ROW EXECUTE FUNCTION apply_jo_cos_credit_default();
+
 CREATE TABLE IF NOT EXISTS account_creation_access (
   admin_user_id UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
   allowed BOOLEAN NOT NULL,
@@ -646,6 +661,7 @@ CREATE TABLE IF NOT EXISTS leave_types (
   balance_ledger_type TEXT NOT NULL DEFAULT 'none',
   entitlement_basis TEXT NOT NULL DEFAULT 'per_request',
   sex_eligibility TEXT NOT NULL DEFAULT 'any',
+  eligible_employment_types TEXT[],
   accrues_monthly BOOLEAN NOT NULL DEFAULT false,
   accrual_monthly_rate NUMERIC(6,3),
   accrual_annual_cap NUMERIC(10,3),
@@ -661,6 +677,16 @@ CREATE TABLE IF NOT EXISTS leave_types (
   ),
   CONSTRAINT chk_leave_type_sex_eligibility CHECK (
     sex_eligibility IN ('any', 'female', 'male')
+  ),
+  CONSTRAINT chk_leave_type_employment_eligibility CHECK (
+    eligible_employment_types IS NULL OR (
+      cardinality(eligible_employment_types) > 0
+      AND array_position(eligible_employment_types, NULL) IS NULL
+      AND eligible_employment_types <@ ARRAY[
+        'permanent', 'temporary', 'casual', 'contractual', 'coterminous',
+        'job_order', 'contract_of_service', 'regular'
+      ]::text[]
+    )
   ),
   CONSTRAINT chk_leave_type_max_days_positive CHECK (
     max_days IS NULL OR max_days > 0
@@ -775,6 +801,11 @@ SET display_name = COALESCE(NULLIF(display_name, ''), description, name),
     accrues_monthly = CASE WHEN name IN ('vacationLeave', 'sickLeave') THEN true ELSE false END,
     accrual_monthly_rate = CASE WHEN name IN ('vacationLeave', 'sickLeave') THEN 1.25 ELSE NULL END,
     accrual_annual_cap = NULL;
+
+-- Built-in filing defaults exclude JO/COS. Keep existing legacy Regular access.
+UPDATE leave_types SET eligible_employment_types = ARRAY[
+  'permanent','temporary','casual','contractual','coterminous','regular']::text[]
+WHERE is_system = true AND eligible_employment_types IS NULL;
 
 -- =========================================
 -- LEAVE REQUESTS
