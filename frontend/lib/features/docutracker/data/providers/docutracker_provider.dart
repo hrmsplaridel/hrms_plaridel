@@ -1209,13 +1209,14 @@ class DocuTrackerProvider extends ChangeNotifier {
 
   /// Reacts to a live RSP/L&D notification. `form_signature` refreshes the
   /// signature requests in place once they have been loaded this session;
-  /// `recruitment` / `training` mark source-backed documents stale.
+  /// `training` marks source-backed documents stale. Recruitment records are
+  /// not listed in DocuTracker, so `recruitment` changes nothing here.
   void handleSourceModuleNotification(String? category) {
     switch ((category ?? '').trim().toLowerCase()) {
       case 'form_signature':
         if (_sourceSignatureRequestsLoadedAt == null) return;
         unawaited(loadSourceSignatureRequests(forceRefresh: true));
-      case 'recruitment' || 'training':
+      case 'training':
         invalidateDocuments();
     }
   }

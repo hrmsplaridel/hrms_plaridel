@@ -163,28 +163,13 @@ test('sourceActionForRow exposes only the viewer current DTR leave action', () =
   );
 });
 
-test('sourceActionForRow points RSP/L&D admins to the owning module step', () => {
+test('sourceActionForRow points L&D admins to the owning module step', () => {
   const admin = { id: 'admin-1', role: 'admin' };
+  // Hiring steps belong to RSP; DocuTracker never offers them as actions.
   const rsp = { source_module: 'rsp', source_table: 'recruitment_applications' };
-  assert.deepEqual(sourceActionForRow({ ...rsp, source_status: 'submitted' }, admin), {
-    action: 'review_documents_in_rsp',
-    label: 'Review applicant documents in RSP',
-  });
-  assert.equal(
-    sourceActionForRow({ ...rsp, source_status: 'exam_taken' }, admin).action,
-    'grade_exam_in_rsp'
-  );
-  assert.equal(
-    sourceActionForRow({ ...rsp, source_status: 'passed' }, admin).action,
-    'continue_hiring_in_rsp'
-  );
-  for (const status of ['document_declined', 'document_approved', 'failed', 'registered']) {
+  for (const status of ['submitted', 'exam_taken', 'passed', 'registered']) {
     assert.equal(sourceActionForRow({ ...rsp, source_status: status }, admin), null);
   }
-  assert.equal(
-    sourceActionForRow({ ...rsp, source_status: 'submitted' }, { id: 'hr-1', role: 'hr' }),
-    null
-  );
 
   const ld = { source_module: 'ld', source_table: 'training_daily_reports' };
   assert.deepEqual(sourceActionForRow({ ...ld, source_status: 'submitted' }, admin), {
@@ -196,21 +181,6 @@ test('sourceActionForRow points RSP/L&D admins to the owning module step', () =>
     sourceActionForRow({ ...ld, source_status: 'submitted' }, { id: 'emp-1', role: 'employee' }),
     null
   );
-});
-
-test('RSP application statuses map to the hiring pipeline', () => {
-  const expected = {
-    submitted: 'pending',
-    document_approved: 'in_review',
-    document_declined: 'returned',
-    exam_taken: 'in_review',
-    passed: 'in_review',
-    failed: 'rejected',
-    registered: 'approved',
-  };
-  for (const [status, mapped] of Object.entries(expected)) {
-    assert.equal(mapSourceStatusToDocuTracker('rsp', status), mapped, status);
-  }
 });
 
 test('L&D daily report statuses map to the report review lifecycle', () => {
@@ -226,38 +196,57 @@ test('L&D daily report statuses map to the report review lifecycle', () => {
   }
 });
 
-test('RSP source feed excludes Mayor endorsement records', async () => {
-  let rspSql = '';
+test('recruitment records are never listed, counted or paged as DocuTracker documents', async () => {
+  const queries = [];
   const pool = {
     query: async (sql) => {
-      if (sql.includes('FROM recruitment_applications a')) {
-        rspSql = sql;
+      queries.push(sql);
+      if (sql.includes('recruitment_applications')) {
         return {
           rows: [{
             source_record_id: 'app-1',
             source_module: 'rsp',
             source_table: 'recruitment_applications',
             source_title: 'Administrative Aide',
-            created_by: null,
-            creator_name: 'Applicant One',
-            created_at: '2026-09-01T00:00:00.000Z',
+            created_at: '2026-09-09T00:00:00.000Z',
             source_status: 'exam_taken',
+          }],
+        };
+      }
+      if (sql.includes('FROM docutracker_documents d')) {
+        return {
+          rows: [
+            { id: 'memo-new', document_type: 'memo', title: 'Memo', status: 'pending', created_at: '2026-09-03T00:00:00.000Z' },
+            { id: 'memo-old', document_type: 'memo', title: 'Memo', status: 'pending', created_at: '2026-09-01T00:00:00.000Z' },
+          ],
+        };
+      }
+      if (sql.includes('FROM training_daily_reports r')) {
+        return {
+          rows: [{
+            source_record_id: 'report-1',
+            source_module: 'ld',
+            source_table: 'training_daily_reports',
+            source_title: 'Report',
+            created_at: '2026-09-02T00:00:00.000Z',
+            source_status: 'submitted',
           }],
         };
       }
       return { rowCount: 0, rows: [] };
     },
   };
+  const admin = { id: 'admin-1', role: 'admin' };
 
-  const result = await listDocuments(pool, { id: 'admin-1', role: 'admin' }, { type: 'rsp' });
-
-  assert.match(rspSql, /LIKE '%@local\.intake'/);
-  assert.match(rspSql, /a\.status NOT IN \('endorsed', 'rejected'\)/);
-  const [row] = result.documents;
-  assert.equal(row.status, 'in_review');
-  assert.equal(row.source_status, 'exam_taken');
-  assert.equal(row.source_action, 'grade_exam_in_rsp');
-  assert.equal(row.source_only, true);
+  const all = await listDocuments(pool, admin, {});
+  assert.deepEqual(all.documents.map((d) => d.id), ['memo-new', 'source:ld:report-1', 'memo-old']);
+  const secondPage = await listDocuments(pool, admin, { limit: 2, offset: 2 });
+  assert.deepEqual(secondPage.documents.map((d) => d.id), ['memo-old']);
+  for (const filters of [{ type: 'rsp' }, { sourceModule: 'rsp' }, { q: 'Administrative' }]) {
+    const result = await listDocuments(pool, admin, filters);
+    assert.equal(result.documents.some((d) => d.source_module === 'rsp'), false);
+  }
+  assert.equal(queries.some((sql) => sql.includes('recruitment_applications')), false);
 });
 
 test('Approved filter keeps approved documents but not reviewed L&D reports', async () => {
@@ -290,11 +279,6 @@ test('Approved filter keeps approved documents but not reviewed L&D reports', as
           ],
         };
       }
-      if (sql.includes('FROM recruitment_applications a')) {
-        return {
-          rows: [sourceRow('rsp', 'recruitment_applications', 'app-hired', 'registered')],
-        };
-      }
       return { rowCount: 0, rows: [] };
     },
   };
@@ -303,7 +287,7 @@ test('Approved filter keeps approved documents but not reviewed L&D reports', as
   const approved = await listDocuments(pool, admin, { status: 'approved' });
   assert.deepEqual(
     approved.documents.map((d) => d.id).sort(),
-    ['memo-1', 'source:ld:report-approved', 'source:rsp:app-hired']
+    ['memo-1', 'source:ld:report-approved']
   );
 
   const all = await listDocuments(pool, admin, {});

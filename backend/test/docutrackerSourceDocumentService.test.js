@@ -100,55 +100,25 @@ test('L&D source detail rejects a user without module view access', async () => 
   );
 });
 
-test('RSP application detail remains admin-only', async () => {
+test('recruitment applications are not exposed through DocuTracker, even to admins', async () => {
   const pool = {
     async query() {
       throw new Error('database must not be queried');
     },
   };
-  await assert.rejects(
-    getLinkedSourceDocument(
-      pool,
-      { id: '22222222-2222-4222-8222-222222222222', role: 'employee' },
-      'rsp',
-      'recruitment_applications',
-      recordId
-    ),
-    (error) => error.code === 'FORBIDDEN'
-  );
-});
-
-test('admin receives allowlisted RSP fields without source file paths', async () => {
-  const pool = {
-    async query() {
-      return {
-        rows: [{
-          id: recordId,
-          applicant_number: 'PLR-TEST1234',
-          full_name: 'Juan Dela Cruz',
-          position_applied_for: 'Administrative Aide',
-          email: 'juan@example.test',
-          status: 'submitted',
-          final_requirements_approved: false,
-          hr_account_setup_done: false,
-          created_at: new Date('2026-09-14T01:00:00Z'),
-          updated_at: new Date('2026-09-14T02:00:00Z'),
-        }],
-      };
-    },
-  };
-  const result = await getLinkedSourceDocument(
-    pool,
-    { id: '22222222-2222-4222-8222-222222222222', role: 'admin' },
-    'rsp',
-    'recruitment_applications',
-    recordId
-  );
-
-  assert.equal(result.source_module, 'rsp');
-  assert.equal(result.title, 'Administrative Aide');
-  assert.equal(result.attachments.length, 0);
-  assert.equal(Object.hasOwn(result, 'attachment_path'), false);
+  for (const role of ['admin', 'hr', 'employee']) {
+    await assert.rejects(
+      getLinkedSourceDocument(
+        pool,
+        { id: '22222222-2222-4222-8222-222222222222', role },
+        'rsp',
+        'recruitment_applications',
+        recordId
+      ),
+      (error) => error.code === 'NOT_FOUND',
+      role
+    );
+  }
 });
 
 test('unsupported source types are not exposed', async () => {
@@ -162,42 +132,4 @@ test('unsupported source types are not exposed', async () => {
     ),
     (error) => error.code === 'NOT_FOUND'
   );
-});
-
-test('RSP print payload keeps attachment names but hides storage paths', async () => {
-  const previousSecret = process.env.JWT_SECRET;
-  process.env.JWT_SECRET = 'docutracker-source-test-secret';
-  try {
-    const pool = {
-      async query() {
-        return {
-          rows: [{
-            id: recordId,
-            full_name: 'Juan Dela Cruz',
-            email: 'juan@example.test',
-            status: 'submitted',
-            doc_resume_path: `${recordId}/private-resume.pdf`,
-            doc_resume_name: 'Resume.pdf',
-            final_requirements_approved: false,
-            hr_account_setup_done: false,
-          }],
-        };
-      },
-    };
-    const result = await getLinkedSourceDocument(
-      pool,
-      { id: '22222222-2222-4222-8222-222222222222', role: 'admin' },
-      'rsp',
-      'recruitment_applications',
-      recordId
-    );
-
-    assert.equal(result.print_data.doc_resume_path, 'linked');
-    assert.equal(result.print_data.doc_resume_name, 'Resume.pdf');
-    assert.equal(result.attachments[0].name, 'Resume.pdf');
-    assert.equal(JSON.stringify(result).includes('private-resume.pdf'), false);
-  } finally {
-    if (previousSecret == null) delete process.env.JWT_SECRET;
-    else process.env.JWT_SECRET = previousSecret;
-  }
 });

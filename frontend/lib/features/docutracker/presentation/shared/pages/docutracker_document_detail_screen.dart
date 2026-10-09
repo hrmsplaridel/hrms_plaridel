@@ -128,8 +128,7 @@ class _DocuTrackerDocumentDetailScreenState
   bool _isSupportedLinkedSource(DocuTrackerDocument doc) {
     final module = doc.sourceModule;
     final table = doc.sourceTable;
-    return (module == 'ld' && table == 'training_daily_reports') ||
-        (module == 'rsp' && table == 'recruitment_applications');
+    return module == 'ld' && table == 'training_daily_reports';
   }
 
   Future<void> _openPrimaryDocument(DocuTrackerDocument doc) async {

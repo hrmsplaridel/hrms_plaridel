@@ -704,7 +704,6 @@ class _RequiredActionsPanelState
     final module = entry.document?.sourceModule?.toLowerCase();
     if (module == 'dtr') return 'DTR';
     if (module == 'ld') return 'L&D';
-    if (module == 'rsp') return 'RSP';
     return 'DocuTracker';
   }
 
@@ -718,13 +717,9 @@ class _RequiredActionsPanelState
     if (document?.sourceOnly == true && document?.sourceModule == 'dtr') {
       return 'Leave';
     }
-    if (document?.sourceOnly == true) {
-      switch (document?.sourceTable) {
-        case 'recruitment_applications':
-          return 'Recruitment Application';
-        case 'training_daily_reports':
-          return 'Training Daily Report';
-      }
+    if (document?.sourceOnly == true &&
+        document?.sourceTable == 'training_daily_reports') {
+      return 'Training Daily Report';
     }
     final type = (document?.documentType ?? '').trim();
     if (type.isEmpty) return 'Document';

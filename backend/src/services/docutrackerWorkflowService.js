@@ -6,7 +6,6 @@ const {
   GENERAL_PERMISSION_ACTIONS,
   RELEASE_ACTION,
 } = require('./docutrackerSystemAccessActions');
-const { excludeMayorIntakeStubSql } = require('../utils/mayorIntakeStub');
 const {
   getEmployeeDepartmentForDate,
   resolveDepartmentReviewers,
@@ -116,23 +115,14 @@ async function recordInitialDocumentFile(client, { documentId, fileName, filePat
 }
 
 /**
- * Next step owned by the RSP / L&D source module. Only admins act on these
- * records (RSP applications and L&D report review are admin-only routes);
- * DocuTracker links to the module and never transitions the record itself.
+ * Next step owned by the L&D source module. Only admins act on these records
+ * (L&D report review is an admin-only route); DocuTracker links to the module
+ * and never transitions the record itself.
  */
-const RSP_APPLICATION_ADMIN_ACTIONS = Object.freeze({
-  submitted: { action: 'review_documents_in_rsp', label: 'Review applicant documents in RSP' },
-  exam_taken: { action: 'grade_exam_in_rsp', label: 'Complete exam grading in RSP' },
-  passed: { action: 'continue_hiring_in_rsp', label: 'Continue hiring steps in RSP' },
-});
-
 function sourceModuleActionForRow(row, user) {
   const role = String(user?.role || '').trim().toLowerCase();
   if (role !== 'admin') return null;
   const status = String(row.source_status || '').trim().toLowerCase();
-  if (row.source_module === 'rsp' && row.source_table === 'recruitment_applications') {
-    return RSP_APPLICATION_ADMIN_ACTIONS[status] || null;
-  }
   if (
     row.source_module === 'ld' &&
     row.source_table === 'training_daily_reports' &&
@@ -144,7 +134,7 @@ function sourceModuleActionForRow(row, user) {
 }
 
 function sourceActionForRow(row, user) {
-  if (row.source_module === 'rsp' || row.source_module === 'ld') {
+  if (row.source_module === 'ld') {
     return sourceModuleActionForRow(row, user);
   }
   if (row.source_module !== 'dtr' || row.source_table !== 'leave_requests') {
@@ -208,17 +198,6 @@ function mapSourceStatusToDocuTracker(sourceModule, sourceStatus) {
       return 'approved';
     }
     if (status === 'needs_revision') return 'returned';
-    return 'pending';
-  }
-
-  if (sourceModule === 'rsp') {
-    // Applicants may resubmit declined documents; hiring completes at registered.
-    if (status === 'document_declined') return 'returned';
-    if (status === 'failed') return 'rejected';
-    if (status === 'registered') return 'approved';
-    if (status === 'document_approved' || status === 'exam_taken' || status === 'passed') {
-      return 'in_review';
-    }
     return 'pending';
   }
 
@@ -447,27 +426,8 @@ async function listSourceBackedDocuments(pool, user, filters = {}) {
     );
     pieces.push(...leaveRows);
   }
-
-  if (shouldInclude('rsp') && user.role === 'admin' && (await canViewModule('rsp'))) {
-    const rspRows = await safeSourceQuery(
-      'rsp.recruitment_applications',
-      `SELECT
-         a.id::text AS source_record_id,
-         'rsp'::text AS source_module,
-         'recruitment_applications'::text AS source_table,
-         COALESCE(NULLIF(a.position_applied_for, ''), a.full_name, 'Recruitment application') AS source_title,
-         COALESCE(NULLIF(a.resume_notes, ''), 'Applicant: ' || a.full_name) AS description,
-         NULL::text AS created_by,
-         a.full_name AS creator_name,
-         a.created_at AS created_at,
-         a.updated_at AS updated_at,
-         a.status AS source_status
-       FROM recruitment_applications a
-       WHERE ${excludeMayorIntakeStubSql('a')}
-         AND a.status NOT IN ('endorsed', 'rejected')`
-    );
-    pieces.push(...rspRows);
-  }
+  // Recruitment records stay in RSP. RSP forms reach DocuTracker only as
+  // signature requests (docutrackerRspSignatureService), never as list rows.
 
   const q = String(filters.q || '').toLowerCase().trim();
   const statusFilter = normalizeStatus(filters.status);

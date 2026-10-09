@@ -151,19 +151,20 @@ void main() {
     },
   );
 
-  test('recruitment and training notifications mark documents stale', () async {
+  test('only training notifications mark documents stale', () async {
     await loadDocs();
+    // Recruitment records are not DocuTracker documents.
     provider.handleSourceModuleNotification('recruitment');
     await loadDocs();
-    expect(api.count('/api/docutracker/documents'), 2);
+    expect(api.count('/api/docutracker/documents'), 1);
 
     provider.handleSourceModuleNotification('training');
     await loadDocs();
-    expect(api.count('/api/docutracker/documents'), 3);
+    expect(api.count('/api/docutracker/documents'), 2);
 
     provider.handleSourceModuleNotification('leave');
     await loadDocs();
-    expect(api.count('/api/docutracker/documents'), 3);
+    expect(api.count('/api/docutracker/documents'), 2);
   });
 
   test('cached notifications do not notify listeners again', () async {

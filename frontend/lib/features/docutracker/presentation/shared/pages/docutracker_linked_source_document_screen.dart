@@ -12,9 +12,9 @@ import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/d
 import 'package:hrms_plaridel/features/docutracker/theme/docutracker_tokens.dart';
 import 'package:hrms_plaridel/features/docutracker/utils/docutracker_source_status_text.dart';
 import 'package:hrms_plaridel/features/learning_development/models/training_daily_report.dart';
-import 'package:hrms_plaridel/features/recruitment/models/recruitment_application.dart';
-import 'package:hrms_plaridel/features/recruitment/utils/rsp_applications_report_export.dart';
 
+/// Read-only view of an L&D record linked from DocuTracker. Recruitment
+/// records are not shown here; they stay in the RSP module.
 class DocuTrackerLinkedSourceDocumentScreen extends StatefulWidget {
   const DocuTrackerLinkedSourceDocumentScreen({
     super.key,
@@ -107,13 +107,6 @@ class _DocuTrackerLinkedSourceDocumentScreenState
         await FormPdf.printTrainingDailyReport(
           TrainingDailyReport.fromJson(source.printData),
         );
-      } else if (source.sourceModule == 'rsp') {
-        final application = RecruitmentApplication.fromJson(source.printData);
-        await RspApplicationsReportExport.printPdf(
-          context: context,
-          rows: [RspApplicationsReportRow.fromApplication(app: application)],
-          filterSummary: 'Application ${application.applicantNumber ?? ''}',
-        );
       }
     } catch (_) {
       if (!mounted) return;
@@ -125,14 +118,11 @@ class _DocuTrackerLinkedSourceDocumentScreenState
     }
   }
 
-  String get _moduleLabel =>
-      widget.document.sourceModule == 'ld' ? 'L&D document' : 'RSP document';
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: DocuTrackerTokens.canvasOf(context),
-      appBar: AppBar(title: Text(_moduleLabel)),
+      appBar: AppBar(title: const Text('L&D document')),
       body: DocuTrackerResponsiveBody(
         maxWidth: 920,
         padding: const EdgeInsets.all(20),
@@ -165,12 +155,10 @@ class _DocuTrackerLinkedSourceDocumentScreenState
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Text(
-              source.sourceModule == 'ld'
-                  ? 'LEARNING AND DEVELOPMENT'
-                  : 'RECRUITMENT, SELECTION AND PLACEMENT',
+            const Text(
+              'LEARNING AND DEVELOPMENT',
               textAlign: TextAlign.center,
-              style: const TextStyle(
+              style: TextStyle(
                 color: DocuTrackerTokens.brand,
                 fontSize: 13,
                 fontWeight: FontWeight.w800,
@@ -263,9 +251,7 @@ class _DocuTrackerLinkedSourceDocumentScreenState
                 ),
             const SizedBox(height: 20),
             Text(
-              source.sourceModule == 'ld'
-                  ? 'This record remains managed by the L&D module.'
-                  : 'This application remains managed by the RSP module.',
+              'This record remains managed by the L&D module.',
               textAlign: TextAlign.center,
               style: DocuTrackerTokens.subtitleStyle(
                 context,
