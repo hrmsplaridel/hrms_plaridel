@@ -27,6 +27,7 @@ const {
   isDepartmentHead,
 } = require('../services/departmentHeadService');
 const {
+  resolveDepartmentReviewers,
   replaceRequestReviewerSnapshot,
 } = require('../services/departmentReviewerService');
 const {
@@ -3368,11 +3369,24 @@ router.get('/signatories', protect, async (req, res) => {
         )
       : null;
 
+    const departmentId = requestContext?.review_department_id || departmentHeadInfo?.departmentId;
+    const primaryDepartment = departmentId
+      ? (await resolveDepartmentReviewers(pool, {
+          departmentId,
+          effectiveDate: requestContext?.submitted_on || signatoryDate,
+        })).primary
+      : null;
+    const applicantIsHead = String(primaryDepartment?.reviewerId ||
+      departmentHeadInfo?.departmentHeadUserId || '') === employeeId;
+    const applicantIsHr = String(hrCertifier?.id || '') === employeeId;
+    const replacement = applicantIsHead || applicantIsHr
+      ? mapOfficialSignatoryProfile(await resolveActiveMayor(pool, todayInHrmsTimezone()))
+      : null;
     res.json({
-      hr_certification_officer: hrCertifier
+      hr_certification_officer: applicantIsHr ? replacement : hrCertifier
         ? mapOfficialSignatoryProfile({ ...hrCertifier, employee_id: hrCertifier.id })
         : null,
-      recommendation_officer: departmentHeadProfile
+      recommendation_officer: applicantIsHead ? replacement : departmentHeadProfile
         ? mapSignatoryProfile({
             ...departmentHeadProfile,
             department_id: departmentHeadInfo.departmentId || departmentHeadProfile.department_id,
