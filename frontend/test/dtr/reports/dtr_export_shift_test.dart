@@ -6,6 +6,45 @@ import 'package:hrms_plaridel/features/dtr/reports/data/dtr_export.dart';
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
+  for (final minutes in [0, 240]) {
+    test(
+      'locator without biometric punches retains calculated undertime: $minutes',
+      () {
+        final date = DateTime(2026, 10, 9);
+        final record = TimeRecord(
+          userId: 'field-employee',
+          recordDate: date,
+          status: 'on_field',
+          locatorSlipId: 'approved-locator',
+          locatorSlipSegments: const ['AM IN', 'AM OUT', 'PM IN', 'PM OUT'],
+          undertimeMinutes: minutes,
+          lateMinutes: 0,
+        );
+        final totals = DtrExport.calculateOfficialTotals(
+          year: 2026,
+          month: 10,
+          start: date,
+          end: date,
+          recordsByDate: {date: record},
+          reportableThrough: date,
+        );
+        expect(totals.totalUndertimeMinutes, minutes);
+        expect(totals.displayedUndertimeMinutes, minutes);
+        final html = DtrExport.generateWordHtmlSync(
+          employeeName: 'Field Employee',
+          year: 2026,
+          month: 10,
+          start: date,
+          end: date,
+          recordsByDate: {date: record},
+          reportableThrough: date,
+        );
+        expect(html, contains('ON FIELD'));
+        expect(html, isNot(contains('>8</td>')));
+      },
+    );
+  }
+
   test(
     'overnight export keeps the start-date row and marks the next-day departure',
     () {

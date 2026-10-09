@@ -1984,7 +1984,10 @@ class _DtrReportsState extends State<DtrReports> {
         holidaysCount++;
       } else if (rec?.status == 'on_leave') {
         // On leave: not absent for tardiness
-      } else if (rec == null || (rec.timeIn == null && rec.breakIn == null)) {
+      } else if (rec == null ||
+          (rec.timeIn == null &&
+              rec.breakIn == null &&
+              !isCompletedAttendanceRecord(rec))) {
         absentCount++;
       }
     }

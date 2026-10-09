@@ -68,6 +68,22 @@ String compactLocatorRemark(String remark) {
 /// Whether a record represents a completed workday attendance. Late and/or
 /// undertime employees were still present; incomplete and invalid logs were not.
 bool isCompletedAttendanceRecord(TimeRecord record) {
+  if (record.status == 'on_field' || record.locatorSlipId != null) {
+    // Approved locator coverage replaces punches. Uncovered absence and
+    // incomplete/invalid sessions still do not count as a completed workday.
+    final remark = getAttendanceRemark(record);
+    if ((record.reportDeduction?.absenceMinutes ?? 0) > 0 ||
+        remark == 'Absent' ||
+        remark == 'Incomplete' ||
+        remark == 'Invalid Log' ||
+        record.status == 'holiday' ||
+        record.status == 'on_leave' ||
+        record.holidayId != null ||
+        record.leaveRequestId != null) {
+      return false;
+    }
+    return record.status == 'on_field' || record.undertimeMinutes != null;
+  }
   return switch (getAttendanceRemark(record)) {
     'On Time' || 'Late' || 'Undertime' || 'Late + Undertime' => true,
     _ => false,
