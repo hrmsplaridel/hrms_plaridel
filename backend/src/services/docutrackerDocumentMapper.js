@@ -43,6 +43,15 @@ function mapDocumentRow(row) {
     signature_signer_ids: Array.isArray(row.signature_signer_ids)
       ? row.signature_signer_ids.map(String)
       : [],
+    release_required: row.release_required === true,
+    released_at: row.released_at ?? null,
+    released_to_department_id: row.released_to_department_id ?? null,
+    released_to_department_name: row.released_to_department_name ?? null,
+    released_by: row.released_by ?? null,
+    released_by_name: row.released_by_name ?? null,
+    release_remarks: row.release_remarks ?? null,
+    viewer_release_access: row.viewer_release_access === true,
+    viewer_can_release: row.viewer_can_release === true,
     viewer_is_routing_assignee: row.viewer_is_routing_assignee === true,
     viewer_participated_in_source: row.viewer_participated_in_source === true,
     source_only: row.source_only === true,

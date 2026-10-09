@@ -1,4 +1,4 @@
-import 'package:flutter/foundation.dart' show listEquals;
+import 'package:flutter/foundation.dart' show listEquals, visibleForTesting;
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
@@ -19,6 +19,7 @@ import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/d
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_module_header.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_status_badge.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_status_theme.dart';
+import 'package:hrms_plaridel/features/docutracker/utils/docutracker_release_text.dart';
 import 'package:hrms_plaridel/features/docutracker/utils/docutracker_source_status_text.dart';
 import 'package:hrms_plaridel/features/docutracker/utils/docutracker_workflow_phase.dart';
 
@@ -29,6 +30,10 @@ String _statusLabel(
   if (effectiveStatus == DocumentStatus.pending &&
       DocuTrackerDocumentVisibility.isWorkInProgressDraft(document)) {
     return 'Draft';
+  }
+  if (effectiveStatus == DocumentStatus.approved) {
+    final release = docuTrackerReleaseBadgeLabel(document, short: true);
+    if (release != null) return release;
   }
   return docuTrackerSourceBadgeLabel(document) ?? effectiveStatus.displayName;
 }
@@ -254,7 +259,7 @@ class _DocuTrackerDocumentsScreenState
             requiredDocuments.isNotEmpty ||
             pendingSourceRequests.isNotEmpty ||
             provider.sourceSignatureRequestsError != null) ...[
-          _RequiredActionsPanel(
+          DocuTrackerRequiredActionsPanel(
             documents: requiredDocuments,
             sourceRequests: pendingSourceRequests,
             loading: provider.sourceSignatureRequestsLoading,
@@ -578,8 +583,10 @@ class _DocuTrackerDocumentsScreenState
   }
 }
 
-class _RequiredActionsPanel extends StatefulWidget {
-  const _RequiredActionsPanel({
+@visibleForTesting
+class DocuTrackerRequiredActionsPanel extends StatefulWidget {
+  const DocuTrackerRequiredActionsPanel({
+    super.key,
     required this.documents,
     required this.sourceRequests,
     required this.loading,
@@ -596,16 +603,22 @@ class _RequiredActionsPanel extends StatefulWidget {
   final Future<bool> Function(DocuTrackerDocument document) onDocumentTap;
 
   @override
-  State<_RequiredActionsPanel> createState() => _RequiredActionsPanelState();
+  State<DocuTrackerRequiredActionsPanel> createState() =>
+      _RequiredActionsPanelState();
 }
 
-class _RequiredActionsPanelState extends State<_RequiredActionsPanel> {
+class _RequiredActionsPanelState
+    extends State<DocuTrackerRequiredActionsPanel> {
+  static const _pageSize = 10;
+  static const _moduleOrder = ['RSP', 'L&D', 'DTR', 'DocuTracker'];
+
   bool _showSecondary = false;
   bool _collapsed = false;
   final _searchController = TextEditingController();
   String _searchQuery = '';
   String? _moduleFilter; // RSP | L&D | DTR | DocuTracker
   String? _formFilter; // form name / document type label
+  int _page = 1;
 
   static final _isoStamp = RegExp(
     r'\s*\d{4}-\d{2}-\d{2}T[\d:\.\-]+Z?\s*$',
@@ -625,17 +638,32 @@ class _RequiredActionsPanelState extends State<_RequiredActionsPanel> {
     _moduleFilter = _viewState['moduleFilter'] as String?;
     _formFilter = _viewState['formFilter'] as String?;
     _searchQuery = _viewState['search'] as String? ?? '';
+    _page = _viewState['page'] as int? ?? 1;
     _searchController.text = _searchQuery;
   }
 
-  @override
-  void dispose() {
+  void _saveViewState() {
     _viewState
       ..['collapsed'] = _collapsed
       ..['showSecondary'] = _showSecondary
       ..['moduleFilter'] = _moduleFilter
       ..['formFilter'] = _formFilter
-      ..['search'] = _searchQuery;
+      ..['search'] = _searchQuery
+      ..['page'] = _page;
+  }
+
+  /// Saved on every change, not only in [dispose]: when a parent subtree is
+  /// re-keyed, the replacement panel's [initState] runs before this one is
+  /// disposed and would otherwise restore stale (expanded) state.
+  @override
+  void setState(VoidCallback fn) {
+    super.setState(fn);
+    _saveViewState();
+  }
+
+  @override
+  void dispose() {
+    _saveViewState();
     _searchController.dispose();
     super.dispose();
   }
@@ -758,6 +786,26 @@ class _RequiredActionsPanelState extends State<_RequiredActionsPanel> {
     return copy;
   }
 
+  int _compareModules(String a, String b) {
+    int rank(String module) {
+      final index = _moduleOrder.indexOf(module);
+      return index < 0 ? _moduleOrder.length : index;
+    }
+
+    final byRank = rank(a).compareTo(rank(b));
+    return byRank != 0 ? byRank : a.compareTo(b);
+  }
+
+  /// Section entries in the order they render: module groups, then [_sorted].
+  List<_RequiredActionEntry> _displayOrder(List<_RequiredActionEntry> input) {
+    final byModule = <String, List<_RequiredActionEntry>>{};
+    for (final entry in _sorted(input)) {
+      byModule.putIfAbsent(_moduleKey(entry), () => []).add(entry);
+    }
+    final modules = byModule.keys.toList()..sort(_compareModules);
+    return [for (final module in modules) ...byModule[module]!];
+  }
+
   Widget _buildFindBar(
     BuildContext context, {
     required List<_RequiredActionEntry> allEntries,
@@ -780,6 +828,7 @@ class _RequiredActionsPanelState extends State<_RequiredActionsPanel> {
           onChanged: (value) {
             setState(() {
               _searchQuery = value;
+              _page = 1;
               // Searching signed forms should reveal them automatically.
               if (value.trim().isNotEmpty) _showSecondary = true;
             });
@@ -797,6 +846,7 @@ class _RequiredActionsPanelState extends State<_RequiredActionsPanel> {
                         _searchQuery = '';
                         _moduleFilter = null;
                         _formFilter = null;
+                        _page = 1;
                       });
                     },
                     icon: const Icon(Icons.close_rounded, size: 18),
@@ -819,7 +869,10 @@ class _RequiredActionsPanelState extends State<_RequiredActionsPanel> {
               FilterChip(
                 label: const Text('All modules'),
                 selected: _moduleFilter == null,
-                onSelected: (_) => setState(() => _moduleFilter = null),
+                onSelected: (_) => setState(() {
+                  _moduleFilter = null;
+                  _page = 1;
+                }),
               ),
               ...modules.map(
                 (module) => FilterChip(
@@ -828,6 +881,7 @@ class _RequiredActionsPanelState extends State<_RequiredActionsPanel> {
                   onSelected: (selected) {
                     setState(() {
                       _moduleFilter = selected ? module : null;
+                      _page = 1;
                       if (_formFilter != null &&
                           !allEntries.any(
                             (e) =>
@@ -862,6 +916,7 @@ class _RequiredActionsPanelState extends State<_RequiredActionsPanel> {
                     onChanged: (value) {
                       setState(() {
                         _formFilter = value;
+                        _page = 1;
                         if (value != null) _showSecondary = true;
                       });
                     },
@@ -876,6 +931,7 @@ class _RequiredActionsPanelState extends State<_RequiredActionsPanel> {
 
   @override
   Widget build(BuildContext context) {
+    final muted = DocuTrackerTokens.textMutedOf(context);
     final allEntries = <_RequiredActionEntry>[
       ...widget.sourceRequests.map(_RequiredActionEntry.source),
       ...widget.documents.map(_RequiredActionEntry.document),
@@ -897,8 +953,44 @@ class _RequiredActionsPanelState extends State<_RequiredActionsPanel> {
           completed.add(entry);
       }
     }
-    final primary = [..._sorted(needsSignature), ..._sorted(needsSetup)];
-    final secondary = [..._sorted(waiting), ..._sorted(completed)];
+    final signatureEntries = _displayOrder(needsSignature);
+    final setupEntries = _displayOrder(needsSetup);
+    final waitingEntries = _displayOrder(waiting);
+    final completedEntries = _displayOrder(completed);
+    final primary = [...signatureEntries, ...setupEntries];
+    final secondary = [...waitingEntries, ...completedEntries];
+    final secondaryVisible = _showSecondary || primary.isEmpty;
+    // One page window over every visible card, in render order.
+    final visibleCount =
+        primary.length + (secondaryVisible ? secondary.length : 0);
+    final pageCount = visibleCount == 0
+        ? 1
+        : (visibleCount + _pageSize - 1) ~/ _pageSize;
+    final page = _page.clamp(1, pageCount);
+    _page = page;
+    final pageStart = (page - 1) * _pageSize;
+    final pageEnd = (pageStart + _pageSize).clamp(0, visibleCount);
+    List<_RequiredActionEntry> onPage(
+      List<_RequiredActionEntry> section,
+      int offset,
+    ) {
+      final from = (pageStart - offset).clamp(0, section.length);
+      final to = (pageEnd - offset).clamp(0, section.length);
+      return section.sublist(from, to);
+    }
+
+    final pageSignature = onPage(signatureEntries, 0);
+    final pageSetup = onPage(setupEntries, signatureEntries.length);
+    final pageWaiting = secondaryVisible
+        ? onPage(waitingEntries, primary.length)
+        : const <_RequiredActionEntry>[];
+    final pageCompleted = secondaryVisible
+        ? onPage(completedEntries, primary.length + waitingEntries.length)
+        : const <_RequiredActionEntry>[];
+    final pageEndsPrimary =
+        primary.isNotEmpty &&
+        pageStart < primary.length &&
+        pageEnd >= primary.length;
     final actionableCount = allEntries
         .where(
           (e) =>
@@ -929,7 +1021,7 @@ class _RequiredActionsPanelState extends State<_RequiredActionsPanel> {
                         ? Icons.expand_more_rounded
                         : Icons.expand_less_rounded,
                     size: 22,
-                    color: DocuTrackerTokens.textMuted,
+                    color: muted,
                   ),
                   const SizedBox(width: 4),
                   const Icon(Icons.task_alt_rounded, size: 21),
@@ -975,10 +1067,7 @@ class _RequiredActionsPanelState extends State<_RequiredActionsPanel> {
                   entries.isEmpty
                       ? 'No forms match your search or filters.'
                       : 'Showing ${entries.length} matching',
-                  style: const TextStyle(
-                    color: DocuTrackerTokens.textMuted,
-                    fontSize: 12,
-                  ),
+                  style: TextStyle(color: muted, fontSize: 12),
                 ),
               ),
             if (widget.loading) ...[
@@ -989,13 +1078,10 @@ class _RequiredActionsPanelState extends State<_RequiredActionsPanel> {
               const SizedBox(height: 10),
               Row(
                 children: [
-                  const Expanded(
+                  Expanded(
                     child: Text(
                       'Some signature requests could not be loaded.',
-                      style: TextStyle(
-                        color: DocuTrackerTokens.textMuted,
-                        fontSize: 12,
-                      ),
+                      style: TextStyle(color: muted, fontSize: 12),
                     ),
                   ),
                   TextButton(
@@ -1011,33 +1097,31 @@ class _RequiredActionsPanelState extends State<_RequiredActionsPanel> {
                 secondary.isEmpty &&
                 !widget.loading &&
                 allEntries.isEmpty)
-              const Padding(
-                padding: EdgeInsets.only(top: 12),
+              Padding(
+                padding: const EdgeInsets.only(top: 12),
                 child: Text(
                   'Nothing needs your attention right now.',
-                  style: TextStyle(color: DocuTrackerTokens.textMuted),
+                  style: TextStyle(color: muted),
                 ),
               ),
-            if (needsSignature.isNotEmpty)
+            if (pageSignature.isNotEmpty)
               _buildSection(
                 context,
                 title: 'Needs your signature',
-                entries: _sorted(needsSignature),
+                entries: pageSignature,
               ),
-            if (needsSetup.isNotEmpty)
-              _buildSection(
-                context,
-                title: 'Needs setup',
-                entries: _sorted(needsSetup),
-              ),
+            if (pageSetup.isNotEmpty)
+              _buildSection(context, title: 'Needs setup', entries: pageSetup),
             if (secondary.isNotEmpty) ...[
-              if (primary.isNotEmpty) ...[
+              if (pageEndsPrimary) ...[
                 const SizedBox(height: 8),
                 Align(
                   alignment: Alignment.centerLeft,
                   child: TextButton.icon(
-                    onPressed: () =>
-                        setState(() => _showSecondary = !_showSecondary),
+                    onPressed: () => setState(() {
+                      _showSecondary = !_showSecondary;
+                      _page = 1;
+                    }),
                     icon: Icon(
                       _showSecondary
                           ? Icons.expand_less_rounded
@@ -1052,29 +1136,35 @@ class _RequiredActionsPanelState extends State<_RequiredActionsPanel> {
                   ),
                 ),
               ],
-              if (_showSecondary || primary.isEmpty) ...[
-                if (waiting.isNotEmpty)
-                  _buildSection(
-                    context,
-                    title: 'Waiting on other signers',
-                    entries: _sorted(waiting),
-                  ),
-                if (completed.isNotEmpty)
-                  _buildSection(
-                    context,
-                    title: 'Fully signed',
-                    entries: _sorted(completed),
-                  ),
-              ],
+              if (pageWaiting.isNotEmpty)
+                _buildSection(
+                  context,
+                  title: 'Waiting on other signers',
+                  entries: pageWaiting,
+                ),
+              if (pageCompleted.isNotEmpty)
+                _buildSection(
+                  context,
+                  title: 'Fully signed',
+                  entries: pageCompleted,
+                ),
+            ],
+            if (pageCount > 1) ...[
+              const SizedBox(height: 12),
+              _RequiredActionsPager(
+                page: page,
+                pageCount: pageCount,
+                rangeStart: pageStart + 1,
+                rangeEnd: pageEnd,
+                total: visibleCount,
+                onPageChanged: (value) => setState(() => _page = value),
+              ),
             ],
             if (allEntries.isNotEmpty) ...[
               const SizedBox(height: 4),
-              const Text(
+              Text(
                 'DTR, RSP, and L&D records remain managed by their source modules.',
-                style: TextStyle(
-                  color: DocuTrackerTokens.textMuted,
-                  fontSize: 11,
-                ),
+                style: TextStyle(color: muted, fontSize: 11),
               ),
             ],
           ],
@@ -1093,13 +1183,7 @@ class _RequiredActionsPanelState extends State<_RequiredActionsPanel> {
     for (final entry in entries) {
       byModule.putIfAbsent(_moduleKey(entry), () => []).add(entry);
     }
-    final moduleOrder = ['RSP', 'L&D', 'DTR', 'DocuTracker'];
-    final modules = byModule.keys.toList()
-      ..sort((a, b) {
-        final ai = moduleOrder.indexOf(a);
-        final bi = moduleOrder.indexOf(b);
-        return (ai < 0 ? 99 : ai).compareTo(bi < 0 ? 99 : bi);
-      });
+    final modules = byModule.keys.toList()..sort(_compareModules);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1107,10 +1191,10 @@ class _RequiredActionsPanelState extends State<_RequiredActionsPanel> {
         const SizedBox(height: 14),
         Text(
           title,
-          style: const TextStyle(
+          style: TextStyle(
             fontWeight: FontWeight.w800,
             fontSize: 13,
-            color: DocuTrackerTokens.textMuted,
+            color: DocuTrackerTokens.textMutedOf(context),
             letterSpacing: 0.2,
           ),
         ),
@@ -1246,142 +1330,153 @@ class _RequiredActionsPanelState extends State<_RequiredActionsPanel> {
         ? 'Pending'
         : 'Sign';
     final showEsignChip = request != null || documentActionPending;
+    final muted = DocuTrackerTokens.textMutedOf(context);
+    final setupAccent = DocuTrackerTokens.accentTextOf(
+      context,
+      light: const Color(0xFFB45309),
+      dark: const Color(0xFFFCD34D),
+    );
 
-    return InkWell(
-      borderRadius: BorderRadius.circular(12),
-      onTap: () async {
-        if (request != null) {
-          await showDocuTrackerSourceSignatureRequestDialog(
-            context,
-            request: request,
-          );
-          await widget.onRefreshSignatures();
-          return;
-        }
-        if (document != null) await widget.onDocumentTap(document);
-      },
-      child: Container(
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(
-          border: Border.all(
-            color: needsSetup
-                ? const Color(0xFFF59E0B).withValues(alpha: 0.55)
-                : DocuTrackerTokens.borderSubtleOf(context),
-          ),
-          borderRadius: BorderRadius.circular(12),
-          color: needsSetup
-              ? const Color(0xFFFFFBEB).withValues(alpha: 0.65)
-              : null,
-        ),
-        child: Row(
-          children: [
-            Icon(
-              request != null
-                  ? (needsSetup
-                        ? Icons.person_add_alt_1_rounded
-                        : Icons.draw_outlined)
-                  : isDtr
-                  ? Icons.event_note_rounded
-                  : Icons.description_outlined,
+    // Transparent Material + Ink so the hover/pressed overlay paints above
+    // the panel's filled card instead of underneath it.
+    return Material(
+      type: MaterialType.transparency,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        onTap: () async {
+          if (request != null) {
+            await showDocuTrackerSourceSignatureRequestDialog(
+              context,
+              request: request,
+            );
+            await widget.onRefreshSignatures();
+            return;
+          }
+          if (document != null) await widget.onDocumentTap(document);
+        },
+        child: Ink(
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            border: Border.all(
               color: needsSetup
-                  ? const Color(0xFFB45309)
-                  : DocuTrackerTokens.brand,
+                  ? const Color(0xFFF59E0B).withValues(alpha: 0.55)
+                  : DocuTrackerTokens.borderSubtleOf(context),
             ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          sourceLabel,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            color: DocuTrackerTokens.textMuted,
-                            fontSize: 11,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                      ),
-                      if (isNativeDocumentCard) ...[
-                        const SizedBox(width: 6),
-                        DocuTrackerStatusBadge(
-                          status: document.status,
-                          compact: true,
-                          label: _statusLabel(document, document.status),
-                        ),
-                      ] else if (showEsignChip) ...[
-                        const SizedBox(width: 6),
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 7,
-                            vertical: 2,
-                          ),
-                          decoration: BoxDecoration(
-                            color: needsSetup
-                                ? const Color(
-                                    0xFFF59E0B,
-                                  ).withValues(alpha: 0.16)
-                                : DocuTrackerTokens.brand.withValues(
-                                    alpha: 0.12,
-                                  ),
-                            borderRadius: BorderRadius.circular(999),
-                          ),
+            borderRadius: BorderRadius.circular(12),
+            color: needsSetup
+                ? DocuTrackerTokens.tintOf(
+                    context,
+                    light: const Color(0xFFFFFBEB).withValues(alpha: 0.65),
+                    accent: const Color(0xFFF59E0B),
+                    darkAlpha: 0.1,
+                  )
+                : null,
+          ),
+          child: Row(
+            children: [
+              Icon(
+                request != null
+                    ? (needsSetup
+                          ? Icons.person_add_alt_1_rounded
+                          : Icons.draw_outlined)
+                    : isDtr
+                    ? Icons.event_note_rounded
+                    : Icons.description_outlined,
+                color: needsSetup ? setupAccent : DocuTrackerTokens.brand,
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
                           child: Text(
-                            chipLabel,
+                            sourceLabel,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
                             style: TextStyle(
-                              color: needsSetup
-                                  ? const Color(0xFFB45309)
-                                  : DocuTrackerTokens.brand,
-                              fontSize: 10,
-                              fontWeight: FontWeight.w800,
+                              color: muted,
+                              fontSize: 11,
+                              fontWeight: FontWeight.w700,
                             ),
                           ),
                         ),
+                        if (isNativeDocumentCard) ...[
+                          const SizedBox(width: 6),
+                          DocuTrackerStatusBadge(
+                            status: document.status,
+                            compact: true,
+                            label: _statusLabel(document, document.status),
+                          ),
+                        ] else if (showEsignChip) ...[
+                          const SizedBox(width: 6),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 7,
+                              vertical: 2,
+                            ),
+                            decoration: BoxDecoration(
+                              color: needsSetup
+                                  ? const Color(
+                                      0xFFF59E0B,
+                                    ).withValues(alpha: 0.16)
+                                  : DocuTrackerTokens.brand.withValues(
+                                      alpha: 0.12,
+                                    ),
+                              borderRadius: BorderRadius.circular(999),
+                            ),
+                            child: Text(
+                              chipLabel,
+                              style: TextStyle(
+                                color: needsSetup
+                                    ? setupAccent
+                                    : DocuTrackerTokens.brand,
+                                fontSize: 10,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                          ),
+                        ],
                       ],
-                    ],
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    title,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontWeight: FontWeight.w700),
-                  ),
-                  const SizedBox(height: 3),
-                  Text(
-                    actionLabel,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      color: needsSetup
-                          ? const Color(0xFFB45309)
-                          : DocuTrackerTokens.brand,
-                      fontSize: 12,
-                      fontWeight: FontWeight.w700,
                     ),
-                  ),
-                  if (statusHint != null) ...[
                     const SizedBox(height: 2),
                     Text(
-                      statusHint,
-                      maxLines: 2,
+                      title,
+                      maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        color: DocuTrackerTokens.textMuted,
-                        fontSize: 11,
+                      style: const TextStyle(fontWeight: FontWeight.w700),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      actionLabel,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: needsSetup
+                            ? setupAccent
+                            : DocuTrackerTokens.brand,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
                       ),
                     ),
+                    if (statusHint != null) ...[
+                      const SizedBox(height: 2),
+                      Text(
+                        statusHint,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(color: muted, fontSize: 11),
+                      ),
+                    ],
                   ],
-                ],
+                ),
               ),
-            ),
-            const SizedBox(width: 8),
-            const Icon(Icons.chevron_right_rounded, size: 20),
-          ],
+              const SizedBox(width: 8),
+              const Icon(Icons.chevron_right_rounded, size: 20),
+            ],
+          ),
         ),
       ),
     );
@@ -1398,6 +1493,139 @@ class _RequiredActionEntry {
 
 enum _ActionPriority { needsSignature, needsSetup, waiting, completed }
 
+class _RequiredActionsPager extends StatelessWidget {
+  const _RequiredActionsPager({
+    required this.page,
+    required this.pageCount,
+    required this.rangeStart,
+    required this.rangeEnd,
+    required this.total,
+    required this.onPageChanged,
+  });
+
+  final int page;
+  final int pageCount;
+  final int rangeStart;
+  final int rangeEnd;
+  final int total;
+  final ValueChanged<int> onPageChanged;
+
+  /// Page numbers to show; null marks a gap.
+  List<int?> _pageNumbers() {
+    if (pageCount <= 5) {
+      return [for (var i = 1; i <= pageCount; i++) i];
+    }
+    final first = (page - 1).clamp(2, pageCount - 3);
+    final last = (page + 1).clamp(4, pageCount - 1);
+    return [
+      1,
+      if (first > 2) null,
+      for (var i = first; i <= last; i++) i,
+      if (last < pageCount - 1) null,
+      pageCount,
+    ];
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final muted = DocuTrackerTokens.textMutedOf(context);
+    return Wrap(
+      key: const ValueKey('docutracker-required-actions-pager'),
+      alignment: WrapAlignment.spaceBetween,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      spacing: 12,
+      runSpacing: 6,
+      children: [
+        Text(
+          'Showing $rangeStart–$rangeEnd of $total',
+          key: const ValueKey('docutracker-required-actions-page-label'),
+          style: TextStyle(fontSize: 12, color: muted),
+        ),
+        Wrap(
+          crossAxisAlignment: WrapCrossAlignment.center,
+          children: [
+            IconButton(
+              key: const ValueKey('docutracker-required-actions-prev'),
+              tooltip: 'Previous page',
+              visualDensity: VisualDensity.compact,
+              onPressed: page > 1 ? () => onPageChanged(page - 1) : null,
+              icon: const Icon(Icons.chevron_left_rounded),
+            ),
+            for (final number in _pageNumbers())
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 3),
+                child: number == null
+                    ? Text('…', style: TextStyle(color: muted))
+                    : _RequiredActionsPagePill(
+                        number: number,
+                        selected: number == page,
+                        onTap: () => onPageChanged(number),
+                      ),
+              ),
+            IconButton(
+              key: const ValueKey('docutracker-required-actions-next'),
+              tooltip: 'Next page',
+              visualDensity: VisualDensity.compact,
+              onPressed: page < pageCount
+                  ? () => onPageChanged(page + 1)
+                  : null,
+              icon: const Icon(Icons.chevron_right_rounded),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
+class _RequiredActionsPagePill extends StatelessWidget {
+  const _RequiredActionsPagePill({
+    required this.number,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final int number;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      key: ValueKey('docutracker-required-actions-page-$number'),
+      color: selected
+          ? DocuTrackerTokens.brand
+          : DocuTrackerTokens.surfaceOf(context),
+      borderRadius: BorderRadius.circular(8),
+      child: InkWell(
+        onTap: selected ? null : onTap,
+        borderRadius: BorderRadius.circular(8),
+        child: Container(
+          constraints: const BoxConstraints(minWidth: 32),
+          height: 32,
+          alignment: Alignment.center,
+          padding: const EdgeInsets.symmetric(horizontal: 6),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(8),
+            border: selected
+                ? null
+                : Border.all(color: DocuTrackerTokens.borderSubtleOf(context)),
+          ),
+          child: Text(
+            '$number',
+            style: TextStyle(
+              fontWeight: FontWeight.w700,
+              color: selected
+                  ? Colors.white
+                  : DocuTrackerTokens.textMutedOf(context),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _EmptyState extends StatelessWidget {
   const _EmptyState({this.onCreateTap});
 
@@ -1410,7 +1638,7 @@ class _EmptyState extends StatelessWidget {
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.symmetric(vertical: 72, horizontal: 32),
-      decoration: DocuTrackerTokens.cardDecoration(),
+      decoration: DocuTrackerTokens.cardDecoration(context: context),
       child: Center(
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 420),
@@ -1423,8 +1651,10 @@ class _EmptyState extends StatelessWidget {
                 height: 88,
                 decoration: BoxDecoration(
                   color: canCreate
-                      ? DocuTrackerTokens.surfaceCream
-                      : DocuTrackerTokens.borderSubtle.withValues(alpha: 0.4),
+                      ? DocuTrackerTokens.insetOf(context)
+                      : DocuTrackerTokens.borderSubtleOf(
+                          context,
+                        ).withValues(alpha: 0.4),
                   shape: BoxShape.circle,
                 ),
                 child: Icon(
@@ -1432,7 +1662,7 @@ class _EmptyState extends StatelessWidget {
                   size: 40,
                   color: canCreate
                       ? DocuTrackerTokens.terracotta
-                      : DocuTrackerTokens.textMuted,
+                      : DocuTrackerTokens.textMutedOf(context),
                 ),
               ),
               const SizedBox(height: 24),
@@ -1468,9 +1698,11 @@ class _EmptyState extends StatelessWidget {
                     vertical: 12,
                   ),
                   decoration: BoxDecoration(
-                    color: DocuTrackerTokens.surfaceCream,
+                    color: DocuTrackerTokens.insetOf(context),
                     borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: DocuTrackerTokens.borderSubtle),
+                    border: Border.all(
+                      color: DocuTrackerTokens.borderSubtleOf(context),
+                    ),
                   ),
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
@@ -1478,7 +1710,7 @@ class _EmptyState extends StatelessWidget {
                       Icon(
                         Icons.info_outline_rounded,
                         size: 16,
-                        color: DocuTrackerTokens.textMuted,
+                        color: DocuTrackerTokens.textMutedOf(context),
                       ),
                       const SizedBox(width: 8),
                       Flexible(
@@ -1583,7 +1815,7 @@ class _DocumentListState extends State<_DocumentList> {
       return Container(
         width: double.infinity,
         padding: const EdgeInsets.symmetric(vertical: 48, horizontal: 32),
-        decoration: DocuTrackerTokens.cardDecoration(),
+        decoration: DocuTrackerTokens.cardDecoration(context: context),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -1591,13 +1823,13 @@ class _DocumentListState extends State<_DocumentList> {
               width: 64,
               height: 64,
               decoration: BoxDecoration(
-                color: DocuTrackerTokens.surfaceCream,
+                color: DocuTrackerTokens.insetOf(context),
                 shape: BoxShape.circle,
               ),
               child: Icon(
                 Icons.search_off_rounded,
                 size: 32,
-                color: DocuTrackerTokens.textMuted,
+                color: DocuTrackerTokens.textMutedOf(context),
               ),
             ),
             const SizedBox(height: 16),
@@ -1902,14 +2134,30 @@ class _DocumentTableRowState extends State<_DocumentTableRow> {
     final deadline = doc.deadlineTime;
     final textPrimary = DocuTrackerTokens.textPrimaryOf(context);
     final textMuted = DocuTrackerTokens.textMutedOf(context);
+    final overdueText = DocuTrackerTokens.accentTextOf(
+      context,
+      light: const Color(0xFF991B1B),
+      dark: const Color(0xFFFCA5A5),
+    );
 
     Color background = DocuTrackerTokens.surfaceOf(context);
     if (isOverdue) {
-      background = const Color(0xFFFEF2F2);
+      background = DocuTrackerTokens.tintOf(
+        context,
+        light: const Color(0xFFFEF2F2),
+        accent: DocuTrackerTokens.overdueAccent,
+      );
     } else if (isEscalated) {
-      background = const Color(0xFFF5F3FF);
+      background = DocuTrackerTokens.tintOf(
+        context,
+        light: const Color(0xFFF5F3FF),
+        accent: const Color(0xFF8B5CF6),
+      );
     } else if (_hovered) {
-      background = const Color(0xFFF0F5FF);
+      background = DocuTrackerTokens.hoverSurfaceOf(
+        context,
+        light: const Color(0xFFF0F5FF),
+      );
     }
 
     return Padding(
@@ -1928,7 +2176,10 @@ class _DocumentTableRowState extends State<_DocumentTableRow> {
               borderRadius: BorderRadius.circular(12),
               border: Border.all(
                 color: _hovered
-                    ? const Color(0xFFBFD3F5)
+                    ? DocuTrackerTokens.hoverBorderOf(
+                        context,
+                        light: const Color(0xFFBFD3F5),
+                      )
                     : DocuTrackerTokens.borderSubtleOf(context),
               ),
             ),
@@ -1946,9 +2197,7 @@ class _DocumentTableRowState extends State<_DocumentTableRow> {
                         style: TextStyle(
                           fontSize: 14,
                           fontWeight: FontWeight.w700,
-                          color: isOverdue
-                              ? const Color(0xFF991B1B)
-                              : textPrimary,
+                          color: isOverdue ? overdueText : textPrimary,
                         ),
                       ),
                       if (dateRange.isNotEmpty) ...[
@@ -1973,7 +2222,12 @@ class _DocumentTableRowState extends State<_DocumentTableRow> {
                         vertical: 4,
                       ),
                       decoration: BoxDecoration(
-                        color: chipBg,
+                        color: DocuTrackerTokens.tintOf(
+                          context,
+                          light: chipBg,
+                          accent: chipFg,
+                          darkAlpha: 0.28,
+                        ),
                         borderRadius: BorderRadius.circular(6),
                       ),
                       child: Text(
@@ -1984,7 +2238,7 @@ class _DocumentTableRowState extends State<_DocumentTableRow> {
                           fontSize: 11,
                           fontWeight: FontWeight.w700,
                           letterSpacing: 0.4,
-                          color: chipFg,
+                          color: DocuTrackerTokens.toneOf(context, chipFg),
                         ),
                       ),
                     ),
@@ -2009,7 +2263,10 @@ class _DocumentTableRowState extends State<_DocumentTableRow> {
                           height: 3,
                           child: LinearProgressIndicator(
                             value: _progressFor(doc, statusForUi),
-                            backgroundColor: const Color(0xFFE5E7EB),
+                            backgroundColor: DocuTrackerTokens.raisedOf(
+                              context,
+                              light: const Color(0xFFE5E7EB),
+                            ),
                             color: _progressColor(statusForUi),
                           ),
                         ),
@@ -2033,7 +2290,11 @@ class _DocumentTableRowState extends State<_DocumentTableRow> {
                           ? FontWeight.w400
                           : FontWeight.w700,
                       color: isOverdue
-                          ? const Color(0xFFB91C1C)
+                          ? DocuTrackerTokens.accentTextOf(
+                              context,
+                              light: const Color(0xFFB91C1C),
+                              dark: const Color(0xFFFCA5A5),
+                            )
                           : (deadline == null ? textMuted : textPrimary),
                     ),
                   ),
@@ -2154,14 +2415,40 @@ class _DocumentRowCardState extends State<_DocumentRowCard> {
         doc.status == DocumentStatus.rejected;
     final isEscalated = doc.status == DocumentStatus.escalated;
 
+    final dark = DocuTrackerTokens.isDark(context);
+    final overdueText = DocuTrackerTokens.accentTextOf(
+      context,
+      light: const Color(0xFF991B1B),
+      dark: const Color(0xFFFCA5A5),
+    );
+    final urgentText = DocuTrackerTokens.accentTextOf(
+      context,
+      light: const Color(0xFFDC2626),
+      dark: const Color(0xFFFCA5A5),
+    );
+    final secondaryText = dark
+        ? DocuTrackerTokens.textSecondaryDark
+        : const Color(0xFF4B5563);
+    final mutedText = dark
+        ? DocuTrackerTokens.textMutedDark
+        : const Color(0xFF6B7280);
+    final faintText = dark ? const Color(0xFF4B5563) : const Color(0xFFD1D5DB);
+
     // Background logic
-    Color bgColor = DocuTrackerTokens.surface;
+    Color bgColor = DocuTrackerTokens.surfaceOf(context);
     if (isOverdue) {
-      bgColor = DocuTrackerTokens.overduePink;
+      bgColor = DocuTrackerTokens.overduePinkOf(context);
     } else if (isEscalated) {
-      bgColor = const Color(0xFFF5F3FF);
+      bgColor = DocuTrackerTokens.tintOf(
+        context,
+        light: const Color(0xFFF5F3FF),
+        accent: const Color(0xFF8B5CF6),
+      );
     } else if (_isHovered) {
-      bgColor = DocuTrackerTokens.surfaceCream;
+      bgColor = DocuTrackerTokens.hoverSurfaceOf(
+        context,
+        light: DocuTrackerTokens.surfaceCream,
+      );
     }
 
     return Container(
@@ -2174,7 +2461,7 @@ class _DocumentRowCardState extends State<_DocumentRowCard> {
               ? DocuTrackerTokens.terracotta.withValues(alpha: 0.35)
               : (isOverdue
                     ? DocuTrackerTokens.overdueAccent.withValues(alpha: 0.35)
-                    : DocuTrackerTokens.borderSubtle),
+                    : DocuTrackerTokens.borderSubtleOf(context)),
         ),
         boxShadow: _isHovered
             ? [
@@ -2234,7 +2521,7 @@ class _DocumentRowCardState extends State<_DocumentRowCard> {
                                   fontSize: 14.5,
                                   fontWeight: FontWeight.w700,
                                   color: isOverdue
-                                      ? const Color(0xFF991B1B)
+                                      ? overdueText
                                       : DocuTrackerTokens.textPrimaryOf(
                                           context,
                                         ),
@@ -2280,8 +2567,8 @@ class _DocumentRowCardState extends State<_DocumentRowCard> {
                                   fontSize: 12,
                                   fontWeight: FontWeight.w700,
                                   color: _isUrgent || isOverdue
-                                      ? const Color(0xFFDC2626)
-                                      : const Color(0xFF4B5563),
+                                      ? urgentText
+                                      : secondaryText,
                                 ),
                               ),
                           ],
@@ -2330,17 +2617,17 @@ class _DocumentRowCardState extends State<_DocumentRowCard> {
                                 if (doc.documentNumber != null) ...[
                                   Text(
                                     doc.documentNumber!,
-                                    style: const TextStyle(
+                                    style: TextStyle(
                                       fontSize: 12,
                                       fontWeight: FontWeight.w600,
-                                      color: Color(0xFF6B7280),
+                                      color: mutedText,
                                     ),
                                   ),
                                   const SizedBox(width: 8),
-                                  const Text(
+                                  Text(
                                     '•',
                                     style: TextStyle(
-                                      color: Color(0xFFD1D5DB),
+                                      color: faintText,
                                       fontSize: 12,
                                     ),
                                   ),
@@ -2363,7 +2650,7 @@ class _DocumentRowCardState extends State<_DocumentRowCard> {
                                 fontSize: 15,
                                 fontWeight: FontWeight.w600,
                                 color: isOverdue
-                                    ? const Color(0xFF991B1B)
+                                    ? overdueText
                                     : DocuTrackerTokens.textPrimaryOf(context),
                               ),
                               maxLines: 1,
@@ -2407,9 +2694,9 @@ class _DocumentRowCardState extends State<_DocumentRowCard> {
                                 Flexible(
                                   child: Text(
                                     _assigneeLabel(doc),
-                                    style: const TextStyle(
+                                    style: TextStyle(
                                       fontSize: 13,
-                                      color: Color(0xFF4B5563),
+                                      color: secondaryText,
                                     ),
                                     maxLines: 1,
                                     overflow: TextOverflow.ellipsis,
@@ -2431,12 +2718,23 @@ class _DocumentRowCardState extends State<_DocumentRowCard> {
                           ),
                           decoration: BoxDecoration(
                             color: _isUrgent || isOverdue
-                                ? const Color(0xFFFEF2F2)
-                                : const Color(0xFFF3F4F6),
+                                ? DocuTrackerTokens.tintOf(
+                                    context,
+                                    light: const Color(0xFFFEF2F2),
+                                    accent: const Color(0xFFDC2626),
+                                  )
+                                : DocuTrackerTokens.raisedOf(
+                                    context,
+                                    light: const Color(0xFFF3F4F6),
+                                  ),
                             borderRadius: BorderRadius.circular(6),
                             border: Border.all(
                               color: _isUrgent || isOverdue
-                                  ? const Color(0xFFFECACA)
+                                  ? (dark
+                                        ? const Color(
+                                            0xFFDC2626,
+                                          ).withValues(alpha: 0.45)
+                                        : const Color(0xFFFECACA))
                                   : Colors.transparent,
                             ),
                           ),
@@ -2449,8 +2747,8 @@ class _DocumentRowCardState extends State<_DocumentRowCard> {
                                     : Icons.schedule_rounded,
                                 size: 12,
                                 color: _isUrgent || isOverdue
-                                    ? const Color(0xFFDC2626)
-                                    : const Color(0xFF6B7280),
+                                    ? urgentText
+                                    : mutedText,
                               ),
                               const SizedBox(width: 4),
                               Flexible(
@@ -2460,8 +2758,8 @@ class _DocumentRowCardState extends State<_DocumentRowCard> {
                                     fontSize: 11,
                                     fontWeight: FontWeight.w600,
                                     color: _isUrgent || isOverdue
-                                        ? const Color(0xFFDC2626)
-                                        : const Color(0xFF4B5563),
+                                        ? urgentText
+                                        : secondaryText,
                                   ),
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
@@ -2489,9 +2787,7 @@ class _DocumentRowCardState extends State<_DocumentRowCard> {
                             const SizedBox(width: 8),
                             Icon(
                               Icons.chevron_right_rounded,
-                              color: _isHovered
-                                  ? const Color(0xFF6B7280)
-                                  : const Color(0xFFD1D5DB),
+                              color: _isHovered ? mutedText : faintText,
                             ),
                           ],
                         ),
@@ -2530,7 +2826,10 @@ class _StepDots extends StatelessWidget {
                 ? const Color(0xFF3B82F6)
                 : isActive
                 ? const Color(0xFF1D4ED8)
-                : const Color(0xFFE5E7EB),
+                : DocuTrackerTokens.raisedOf(
+                    context,
+                    light: const Color(0xFFE5E7EB),
+                  ),
           ),
         );
       }),

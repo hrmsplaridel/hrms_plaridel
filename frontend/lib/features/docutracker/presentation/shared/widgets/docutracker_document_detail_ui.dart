@@ -14,12 +14,12 @@ class DocuTrackerDetailTag extends StatelessWidget {
       decoration: BoxDecoration(
         color: DocuTrackerTokens.isDark(context)
             ? DocuTrackerTokens.insetOf(context)
-            : DocuTrackerTokens.highlightPeach,
+            : DocuTrackerTokens.highlightPeachOf(context),
         borderRadius: BorderRadius.circular(20),
         border: Border.all(
           color: DocuTrackerTokens.isDark(context)
               ? DocuTrackerTokens.borderStrongOf(context)
-              : DocuTrackerTokens.highlightPeachBorder,
+              : DocuTrackerTokens.highlightPeachBorderOf(context),
         ),
       ),
       child: Text(
@@ -197,12 +197,12 @@ class DocuTrackerPeachDashedBox extends StatelessWidget {
       decoration: BoxDecoration(
         color: DocuTrackerTokens.isDark(context)
             ? DocuTrackerTokens.insetOf(context)
-            : DocuTrackerTokens.highlightPeach,
+            : DocuTrackerTokens.highlightPeachOf(context),
         borderRadius: BorderRadius.circular(DocuTrackerTokens.radiusMd),
         border: Border.all(
           color: DocuTrackerTokens.isDark(context)
               ? DocuTrackerTokens.borderSubtleOf(context)
-              : DocuTrackerTokens.highlightPeachBorder,
+              : DocuTrackerTokens.highlightPeachBorderOf(context),
           style: BorderStyle.solid,
         ),
       ),

@@ -289,7 +289,7 @@ class _SimplifiedWorkflowStepEditorState
         _usesFixedDepartmentHead;
 
     return Material(
-      color: AppTheme.white,
+      color: AppTheme.dashPanelOf(context),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -312,7 +312,7 @@ class _SimplifiedWorkflowStepEditorState
                       Text(
                         'Set who handles this step and what they can do.',
                         style: TextStyle(
-                          color: AppTheme.textSecondary,
+                          color: AppTheme.dashTextSecondaryOf(context),
                           fontSize: 12,
                         ),
                       ),
@@ -452,7 +452,7 @@ class _SimplifiedWorkflowStepEditorState
                         '${_legacyAdditionalBackupIds.length} additional existing backup(s) '
                         'will be preserved for compatibility.',
                         style: TextStyle(
-                          color: AppTheme.textSecondary,
+                          color: AppTheme.dashTextSecondaryOf(context),
                           fontSize: 11,
                         ),
                       ),
@@ -464,7 +464,7 @@ class _SimplifiedWorkflowStepEditorState
                   Text(
                     'These actions apply equally to the primary and backup assignee.',
                     style: TextStyle(
-                      color: AppTheme.textSecondary,
+                      color: AppTheme.dashTextSecondaryOf(context),
                       fontSize: 12,
                     ),
                   ),

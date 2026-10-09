@@ -161,7 +161,7 @@ class _DocuTrackerLinkedSourceDocumentScreenState
       child: Container(
         width: double.infinity,
         padding: const EdgeInsets.all(28),
-        decoration: DocuTrackerTokens.cardDecoration(),
+        decoration: DocuTrackerTokens.cardDecoration(context: context),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [

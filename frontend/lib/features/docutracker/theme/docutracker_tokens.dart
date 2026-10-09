@@ -99,6 +99,37 @@ abstract final class DocuTrackerTokens {
   static Color toneOf(BuildContext context, Color color) =>
       isDark(context) ? Color.lerp(color, Colors.white, 0.3)! : color;
 
+  /// Pastel [light] fill in light mode; in dark mode a low-opacity [accent]
+  /// wash over the dark surface, so tinted rows and chips never turn pale.
+  static Color tintOf(
+    BuildContext context, {
+    required Color light,
+    required Color accent,
+    double darkAlpha = 0.16,
+  }) => isDark(context)
+      ? Color.alphaBlend(accent.withValues(alpha: darkAlpha), surfaceDark)
+      : light;
+
+  /// Neutral pale fill (grey/cream panels, tracks) in light mode; a slightly
+  /// raised dark surface in dark mode.
+  static Color raisedOf(BuildContext context, {required Color light}) =>
+      isDark(context) ? const Color(0xFF283345) : light;
+
+  /// Hovered card/row fill: a subtle lift over the dark surface, never white.
+  static Color hoverSurfaceOf(BuildContext context, {required Color light}) =>
+      isDark(context) ? const Color(0xFF263244) : light;
+
+  /// Hovered card/row border emphasis.
+  static Color hoverBorderOf(BuildContext context, {required Color light}) =>
+      isDark(context) ? const Color(0xFF55657E) : light;
+
+  /// Strong semantic text (red/purple/amber on tinted rows) kept readable.
+  static Color accentTextOf(
+    BuildContext context, {
+    required Color light,
+    required Color dark,
+  }) => isDark(context) ? dark : light;
+
   static TextStyle titleStyle(BuildContext context) => TextStyle(
     fontSize: 15,
     height: 1.25,

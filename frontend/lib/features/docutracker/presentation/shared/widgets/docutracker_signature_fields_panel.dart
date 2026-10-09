@@ -162,15 +162,21 @@ class _SignatureFieldCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final statusColor = field.isSigned
+    final statusAccent = field.isSigned
         ? const Color(0xFF15803D)
         : const Color(0xFFB45309);
-    final statusBackground = field.isSigned
-        ? const Color(0xFFDCFCE7)
-        : const Color(0xFFFFEDD5);
+    final statusColor = DocuTrackerTokens.toneOf(context, statusAccent);
+    final statusBackground = DocuTrackerTokens.tintOf(
+      context,
+      light: field.isSigned
+          ? const Color(0xFFDCFCE7)
+          : const Color(0xFFFFEDD5),
+      accent: statusAccent,
+      darkAlpha: 0.22,
+    );
     return Material(
       color: selected
-          ? DocuTrackerTokens.brandSoft
+          ? DocuTrackerTokens.brandSoftOf(context)
           : DocuTrackerTokens.surfaceOf(context),
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(DocuTrackerTokens.radiusSm),

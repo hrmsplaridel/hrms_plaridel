@@ -24,6 +24,7 @@ import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/d
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_section_header.dart';
 import 'docutracker_escalation_config_screen.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/admin/widgets/workflow_step_editor_panel.dart';
+import 'package:hrms_plaridel/features/docutracker/presentation/admin/widgets/docutracker_release_policy_tile.dart';
 
 class DocuTrackerWorkflowEditorScreen extends StatefulWidget {
   const DocuTrackerWorkflowEditorScreen({
@@ -843,7 +844,7 @@ class _DocuTrackerWorkflowEditorScreenState
                   Text(
                     'Access denied',
                     style: TextStyle(
-                      color: AppTheme.textPrimary,
+                      color: AppTheme.dashTextPrimaryOf(context),
                       fontSize: 20,
                       fontWeight: FontWeight.w800,
                     ),
@@ -853,7 +854,7 @@ class _DocuTrackerWorkflowEditorScreenState
                     'Only admins can edit, publish, or manage workflow rules.',
                     textAlign: TextAlign.center,
                     style: TextStyle(
-                      color: AppTheme.textSecondary,
+                      color: AppTheme.dashTextSecondaryOf(context),
                       fontSize: 13,
                       height: 1.35,
                     ),
@@ -914,6 +915,10 @@ class _DocuTrackerWorkflowEditorScreenState
               );
             },
           ),
+          const SizedBox(height: 12),
+          DocuTrackerReleasePolicyTile(
+            documentType: widget.initialConfig.documentType.value,
+          ),
           const SizedBox(height: 16),
           if (readinessWarnings.isNotEmpty) ...[
             _RoutingReadinessBanner(messages: readinessWarnings),
@@ -960,7 +965,7 @@ class _DocuTrackerWorkflowEditorScreenState
                     ? 'Unsaved changes'
                     : 'Version ${widget.initialConfig.version}',
                 style: TextStyle(
-                  color: AppTheme.textSecondary,
+                  color: AppTheme.dashTextSecondaryOf(context),
                   fontSize: 12,
                   fontWeight: FontWeight.w600,
                 ),
@@ -1122,7 +1127,7 @@ class _RoutingReadinessBanner extends StatelessWidget {
                   'Reviewer setup needed',
                   style: TextStyle(
                     fontWeight: FontWeight.w700,
-                    color: AppTheme.textPrimary,
+                    color: AppTheme.dashTextPrimaryOf(context),
                   ),
                 ),
                 const SizedBox(height: 4),
@@ -1134,7 +1139,7 @@ class _RoutingReadinessBanner extends StatelessWidget {
                       style: TextStyle(
                         fontSize: 12,
                         height: 1.35,
-                        color: AppTheme.textSecondary,
+                        color: AppTheme.dashTextSecondaryOf(context),
                       ),
                     ),
                   ),
@@ -1145,7 +1150,7 @@ class _RoutingReadinessBanner extends StatelessWidget {
                   style: TextStyle(
                     fontSize: 12,
                     fontStyle: FontStyle.italic,
-                    color: AppTheme.textSecondary,
+                    color: AppTheme.dashTextSecondaryOf(context),
                   ),
                 ),
               ],
@@ -1157,14 +1162,22 @@ class _RoutingReadinessBanner extends StatelessWidget {
   }
 }
 
-BoxDecoration _workflowPanelDecoration({Color? fill, Color? border}) {
+BoxDecoration _workflowPanelDecoration(
+  BuildContext context, {
+  Color? fill,
+  Color? border,
+}) {
   return BoxDecoration(
-    color: fill ?? DocuTrackerTokens.surface,
+    color: fill ?? DocuTrackerTokens.surfaceOf(context),
     borderRadius: BorderRadius.circular(14),
-    border: Border.all(color: border ?? DocuTrackerTokens.highlightPeachBorder),
+    border: Border.all(
+      color: border ?? DocuTrackerTokens.highlightPeachBorderOf(context),
+    ),
     boxShadow: [
       BoxShadow(
-        color: Colors.black.withValues(alpha: 0.035),
+        color: Colors.black.withValues(
+          alpha: DocuTrackerTokens.isDark(context) ? 0.25 : 0.035,
+        ),
         blurRadius: 14,
         offset: const Offset(0, 3),
       ),
@@ -1213,8 +1226,8 @@ class _WorkflowEditorHeader extends StatelessWidget {
                 children: [
                   Text(
                     'Workflow Builder',
-                    style: const TextStyle(
-                      color: DocuTrackerTokens.textPrimary,
+                    style: TextStyle(
+                      color: DocuTrackerTokens.textPrimaryOf(context),
                       fontSize: 18,
                       fontWeight: FontWeight.w900,
                     ),
@@ -1229,7 +1242,7 @@ class _WorkflowEditorHeader extends StatelessWidget {
                     label: 'v$version - Draft',
                     tint: hasUnsavedChanges
                         ? DocuTrackerTokens.brand
-                        : DocuTrackerTokens.textMuted,
+                        : DocuTrackerTokens.textMutedOf(context),
                   ),
                 ],
               ),
@@ -1258,7 +1271,10 @@ class _WorkflowToolsPanel extends StatelessWidget {
         ? 'Add the first route step before publishing this workflow.'
         : '$enabledStepCount of $stepCount steps are enabled.';
     return DecoratedBox(
-      decoration: _workflowPanelDecoration(fill: DocuTrackerTokens.canvas),
+      decoration: _workflowPanelDecoration(
+        context,
+        fill: DocuTrackerTokens.canvasOf(context),
+      ),
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
@@ -1317,7 +1333,7 @@ class _WorkflowToolTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Material(
-      color: DocuTrackerTokens.surface,
+      color: DocuTrackerTokens.surfaceOf(context),
       borderRadius: BorderRadius.circular(10),
       child: InkWell(
         onTap: onTap,
@@ -1326,7 +1342,9 @@ class _WorkflowToolTile extends StatelessWidget {
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(10),
-            border: Border.all(color: DocuTrackerTokens.highlightPeachBorder),
+            border: Border.all(
+              color: DocuTrackerTokens.highlightPeachBorderOf(context),
+            ),
           ),
           child: Row(
             children: [
@@ -1335,7 +1353,7 @@ class _WorkflowToolTile extends StatelessWidget {
                 height: 30,
                 alignment: Alignment.center,
                 decoration: BoxDecoration(
-                  color: DocuTrackerTokens.brandSoft,
+                  color: DocuTrackerTokens.brandSoftOf(context),
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: Icon(icon, color: DocuTrackerTokens.brand, size: 16),
@@ -1344,16 +1362,16 @@ class _WorkflowToolTile extends StatelessWidget {
               Expanded(
                 child: Text(
                   label,
-                  style: const TextStyle(
-                    color: DocuTrackerTokens.textPrimary,
+                  style: TextStyle(
+                    color: DocuTrackerTokens.textPrimaryOf(context),
                     fontSize: 12,
                     fontWeight: FontWeight.w800,
                   ),
                 ),
               ),
-              const Icon(
+              Icon(
                 Icons.chevron_right_rounded,
-                color: DocuTrackerTokens.textMuted,
+                color: DocuTrackerTokens.textMutedOf(context),
                 size: 18,
               ),
             ],
@@ -1374,7 +1392,8 @@ class _WorkflowInsightPanel extends StatelessWidget {
   Widget build(BuildContext context) {
     return DecoratedBox(
       decoration: _workflowPanelDecoration(
-        fill: DocuTrackerTokens.highlightPeach,
+        context,
+        fill: DocuTrackerTokens.highlightPeachOf(context),
       ),
       child: Padding(
         padding: const EdgeInsets.all(14),
@@ -1402,7 +1421,7 @@ class _WorkflowInsightPanel extends StatelessWidget {
               child: LinearProgressIndicator(
                 value: progress,
                 minHeight: 7,
-                backgroundColor: DocuTrackerTokens.brandSoft,
+                backgroundColor: DocuTrackerTokens.brandSoftOf(context),
                 valueColor: const AlwaysStoppedAnimation<Color>(
                   DocuTrackerTokens.brand,
                 ),
@@ -1451,7 +1470,7 @@ class _WorkflowEditorBottomActions extends StatelessWidget {
     return SafeArea(
       top: false,
       child: Material(
-        color: DocuTrackerTokens.surface,
+        color: DocuTrackerTokens.surfaceOf(context),
         elevation: 10,
         shadowColor: Colors.black.withValues(alpha: 0.08),
         child: Padding(
@@ -1503,7 +1522,7 @@ class _WorkflowEditorBottomActions extends StatelessWidget {
                 Text(
                   helperText,
                   style: TextStyle(
-                    color: AppTheme.textSecondary,
+                    color: AppTheme.dashTextSecondaryOf(context),
                     fontSize: 11.5,
                   ),
                 ),
@@ -1529,7 +1548,8 @@ class _InfoBanner extends StatelessWidget {
   Widget build(BuildContext context) {
     return DecoratedBox(
       decoration: _workflowPanelDecoration(
-        fill: DocuTrackerTokens.highlightPeach,
+        context,
+        fill: DocuTrackerTokens.highlightPeachOf(context),
       ),
       child: Padding(
         padding: const EdgeInsets.all(18),
@@ -1547,7 +1567,7 @@ class _InfoBanner extends StatelessWidget {
                 'Saving creates a new workflow version (you are editing from v$version). '
                 'Documents already in progress keep the version they started on.',
                 style: TextStyle(
-                  color: AppTheme.textSecondary,
+                  color: AppTheme.dashTextSecondaryOf(context),
                   fontSize: 12,
                   height: 1.3,
                 ),
@@ -1566,7 +1586,10 @@ class _AssigneesReminderBanner extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return DecoratedBox(
-      decoration: _workflowPanelDecoration(fill: DocuTrackerTokens.surface),
+      decoration: _workflowPanelDecoration(
+        context,
+        fill: DocuTrackerTokens.surfaceOf(context),
+      ),
       child: Padding(
         padding: const EdgeInsets.all(18),
         child: Column(
@@ -1587,7 +1610,7 @@ class _AssigneesReminderBanner extends StatelessWidget {
                     'allowed actions. Document visibility follows the active workflow '
                     'automatically; no separate visibility setup is needed.',
                     style: TextStyle(
-                      color: AppTheme.textSecondary,
+                      color: AppTheme.dashTextSecondaryOf(context),
                       fontSize: 12,
                       height: 1.3,
                     ),
@@ -1612,9 +1635,18 @@ class _ValidationPanel extends StatelessWidget {
   Widget build(BuildContext context) {
     return DecoratedBox(
       decoration: BoxDecoration(
-        color: const Color(0xFFFFF8E1),
+        color: DocuTrackerTokens.tintOf(
+          context,
+          light: const Color(0xFFFFF8E1),
+          accent: const Color(0xFFF59E0B),
+          darkAlpha: 0.12,
+        ),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.black.withValues(alpha: 0.08)),
+        border: Border.all(
+          color: DocuTrackerTokens.isDark(context)
+              ? const Color(0xFFF59E0B).withValues(alpha: 0.35)
+              : Colors.black.withValues(alpha: 0.08),
+        ),
       ),
       child: Padding(
         padding: const EdgeInsets.all(12),
@@ -1636,7 +1668,7 @@ class _ValidationPanel extends StatelessWidget {
                 Text(
                   blocking.isNotEmpty ? 'Fix before save' : 'Warnings',
                   style: TextStyle(
-                    color: AppTheme.textPrimary,
+                    color: AppTheme.dashTextPrimaryOf(context),
                     fontWeight: FontWeight.w700,
                     fontSize: 14,
                   ),
@@ -1692,7 +1724,7 @@ class _ValidationLine extends StatelessWidget {
             child: Text(
               '$step$message',
               style: TextStyle(
-                color: AppTheme.textSecondary,
+                color: AppTheme.dashTextSecondaryOf(context),
                 fontSize: 12.5,
                 height: 1.35,
               ),
@@ -1714,7 +1746,11 @@ class _RestrictionPanel extends StatelessWidget {
     if (messages.isEmpty) return const SizedBox.shrink();
     return DecoratedBox(
       decoration: BoxDecoration(
-        color: const Color(0xFFFFEBEE),
+        color: DocuTrackerTokens.tintOf(
+          context,
+          light: const Color(0xFFFFEBEE),
+          accent: DocuTrackerTokens.overdueAccent,
+        ),
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: Colors.red.withValues(alpha: 0.24)),
       ),
@@ -1734,7 +1770,7 @@ class _RestrictionPanel extends StatelessWidget {
                 Text(
                   'Workflow restrictions',
                   style: TextStyle(
-                    color: AppTheme.textPrimary,
+                    color: AppTheme.dashTextPrimaryOf(context),
                     fontWeight: FontWeight.w700,
                     fontSize: 14,
                   ),
@@ -1787,7 +1823,9 @@ class _EmptySteps extends StatelessWidget {
                     Icon(
                       Icons.account_tree_rounded,
                       size: 48,
-                      color: AppTheme.textSecondary.withValues(alpha: 0.4),
+                      color: AppTheme.dashTextSecondaryOf(
+                        context,
+                      ).withValues(alpha: 0.4),
                     ),
                     const SizedBox(height: 12),
                     Text(
@@ -1795,7 +1833,7 @@ class _EmptySteps extends StatelessWidget {
                       style: TextStyle(
                         fontWeight: FontWeight.w700,
                         fontSize: 16,
-                        color: AppTheme.textPrimary,
+                        color: AppTheme.dashTextPrimaryOf(context),
                       ),
                     ),
                     const SizedBox(height: 6),
@@ -1804,7 +1842,7 @@ class _EmptySteps extends StatelessWidget {
                       'Add the first step—you can drag cards into the right order any time before saving.',
                       textAlign: TextAlign.center,
                       style: TextStyle(
-                        color: AppTheme.textSecondary,
+                        color: AppTheme.dashTextSecondaryOf(context),
                         fontSize: 13,
                         height: 1.3,
                       ),
@@ -1928,7 +1966,7 @@ class _WorkflowActiveSummaryCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return DecoratedBox(
-      decoration: _workflowPanelDecoration(),
+      decoration: _workflowPanelDecoration(context),
       child: Padding(
         padding: const EdgeInsets.all(20),
         child: Column(
@@ -2007,8 +2045,8 @@ class _OverviewMiniStat extends StatelessWidget {
           children: [
             Text(
               value,
-              style: const TextStyle(
-                color: DocuTrackerTokens.textPrimary,
+              style: TextStyle(
+                color: DocuTrackerTokens.textPrimaryOf(context),
                 fontSize: 14,
                 fontWeight: FontWeight.w900,
               ),
@@ -2045,10 +2083,10 @@ class _DeadlineMetricCard extends StatelessWidget {
         controller: controller,
         keyboardType: TextInputType.number,
         textAlign: TextAlign.center,
-        style: const TextStyle(
+        style: TextStyle(
           fontSize: 25,
           fontWeight: FontWeight.w900,
-          color: DocuTrackerTokens.textPrimary,
+          color: DocuTrackerTokens.textPrimaryOf(context),
         ),
         decoration: const InputDecoration(
           border: InputBorder.none,
@@ -2080,12 +2118,12 @@ class _OverviewMetricCard extends StatelessWidget {
   Widget build(BuildContext context) {
     return DecoratedBox(
       decoration: BoxDecoration(
-        color: DocuTrackerTokens.surface,
+        color: DocuTrackerTokens.surfaceOf(context),
         borderRadius: BorderRadius.circular(14),
         border: Border.all(
           color: emphasized
               ? DocuTrackerTokens.brand
-              : DocuTrackerTokens.highlightPeachBorder,
+              : DocuTrackerTokens.highlightPeachBorderOf(context),
           width: emphasized ? 2 : 1,
         ),
         boxShadow: [
@@ -2118,8 +2156,8 @@ class _OverviewMetricCard extends StatelessWidget {
                   textAlign: TextAlign.center,
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    color: DocuTrackerTokens.textPrimary,
+                  style: TextStyle(
+                    color: DocuTrackerTokens.textPrimaryOf(context),
                     fontSize: 20,
                     fontWeight: FontWeight.w900,
                   ),
@@ -2151,7 +2189,7 @@ class _WorkflowPathPreviewStrip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return DecoratedBox(
-      decoration: DocuTrackerTokens.cardDecoration(),
+      decoration: DocuTrackerTokens.cardDecoration(context: context),
       child: Padding(
         padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
         child: Column(
@@ -2168,7 +2206,7 @@ class _WorkflowPathPreviewStrip extends StatelessWidget {
                 Text(
                   'Route preview',
                   style: TextStyle(
-                    color: AppTheme.textPrimary,
+                    color: AppTheme.dashTextPrimaryOf(context),
                     fontSize: 13,
                     fontWeight: FontWeight.w800,
                   ),
@@ -2182,7 +2220,9 @@ class _WorkflowPathPreviewStrip extends StatelessWidget {
                   child: Icon(
                     Icons.help_outline_rounded,
                     size: 18,
-                    color: AppTheme.textSecondary.withValues(alpha: 0.75),
+                    color: AppTheme.dashTextSecondaryOf(
+                      context,
+                    ).withValues(alpha: 0.75),
                   ),
                 ),
               ],
@@ -2199,7 +2239,7 @@ class _WorkflowPathPreviewStrip extends StatelessWidget {
               Text(
                 'Add steps below to see how the document will move through your office.',
                 style: TextStyle(
-                  color: AppTheme.textSecondary,
+                  color: AppTheme.dashTextSecondaryOf(context),
                   fontSize: 12.5,
                   height: 1.35,
                 ),
@@ -2230,9 +2270,9 @@ class _WorkflowPathPreviewStrip extends StatelessWidget {
                           child: Icon(
                             Icons.arrow_forward_rounded,
                             size: 18,
-                            color: AppTheme.textSecondary.withValues(
-                              alpha: 0.45,
-                            ),
+                            color: AppTheme.dashTextSecondaryOf(
+                              context,
+                            ).withValues(alpha: 0.45),
                           ),
                         ),
                     ],
@@ -2266,10 +2306,10 @@ class _PathPreviewChip extends StatelessWidget {
     final enabled = step.enabled;
     final borderColor = isSelected
         ? DocuTrackerTokens.brand
-        : DocuTrackerTokens.borderSubtle;
+        : DocuTrackerTokens.borderSubtleOf(context);
     final fill = isSelected
         ? DocuTrackerTokens.brand.withValues(alpha: 0.06)
-        : DocuTrackerTokens.surface;
+        : DocuTrackerTokens.surfaceOf(context);
 
     return Material(
       color: Colors.transparent,
@@ -2322,8 +2362,8 @@ class _PathPreviewChip extends StatelessWidget {
                           fontWeight: FontWeight.w800,
                           fontSize: 12.5,
                           color: enabled
-                              ? AppTheme.textPrimary
-                              : AppTheme.textSecondary,
+                              ? AppTheme.dashTextPrimaryOf(context)
+                              : AppTheme.dashTextSecondaryOf(context),
                         ),
                       ),
                       const SizedBox(height: 2),
@@ -2333,7 +2373,7 @@ class _PathPreviewChip extends StatelessWidget {
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(
                           fontSize: 10.5,
-                          color: AppTheme.textSecondary,
+                          color: AppTheme.dashTextSecondaryOf(context),
                           fontWeight: FontWeight.w600,
                         ),
                       ),
@@ -2344,7 +2384,9 @@ class _PathPreviewChip extends StatelessWidget {
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(
                           fontSize: 10,
-                          color: AppTheme.textSecondary.withValues(alpha: 0.9),
+                          color: AppTheme.dashTextSecondaryOf(
+                            context,
+                          ).withValues(alpha: 0.9),
                         ),
                       ),
                     ],
@@ -2356,7 +2398,7 @@ class _PathPreviewChip extends StatelessWidget {
                     child: Icon(
                       Icons.pause_circle_outline_rounded,
                       size: 16,
-                      color: AppTheme.textSecondary,
+                      color: AppTheme.dashTextSecondaryOf(context),
                     ),
                   ),
               ],
@@ -2405,7 +2447,7 @@ class _WorkflowBuilderToolbar extends StatelessWidget {
                       Text(
                         status,
                         style: TextStyle(
-                          color: AppTheme.textSecondary,
+                          color: AppTheme.dashTextSecondaryOf(context),
                           fontSize: 12,
                         ),
                       ),
@@ -2435,7 +2477,10 @@ class _WorkflowBuilderToolbar extends StatelessWidget {
                 ),
                 Text(
                   status,
-                  style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
+                  style: TextStyle(
+                    color: AppTheme.dashTextSecondaryOf(context),
+                    fontSize: 12,
+                  ),
                 ),
               ],
             ),
@@ -2610,14 +2655,17 @@ class _WorkflowStepFlowCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final accent = _stepAccentColor(step, hasBlockingIssue, hasWarning);
+    final accent = DocuTrackerTokens.toneOf(
+      context,
+      _stepAccentColor(step, hasBlockingIssue, hasWarning),
+    );
     final backupUsers = _backupUserLabels(step, assigneeSnapshot);
     final actionLabels = _allowedActionLabels(step, assigneeSnapshot);
     final borderColor = isSelected
         ? accent
         : hasBlockingIssue
         ? Colors.red.shade300
-        : DocuTrackerTokens.borderSubtle;
+        : DocuTrackerTokens.borderSubtleOf(context);
 
     return Padding(
       padding: const EdgeInsets.only(bottom: 14),
@@ -2640,7 +2688,7 @@ class _WorkflowStepFlowCard extends StatelessWidget {
                 duration: const Duration(milliseconds: 180),
                 curve: Curves.easeOut,
                 decoration: BoxDecoration(
-                  color: DocuTrackerTokens.surface,
+                  color: DocuTrackerTokens.surfaceOf(context),
                   borderRadius: BorderRadius.circular(
                     DocuTrackerTokens.radiusLg,
                   ),
@@ -2697,8 +2745,8 @@ class _WorkflowStepFlowCard extends StatelessWidget {
                                     fontWeight: FontWeight.w800,
                                     fontSize: 16,
                                     color: step.enabled
-                                        ? AppTheme.textPrimary
-                                        : AppTheme.textSecondary,
+                                        ? AppTheme.dashTextPrimaryOf(context)
+                                        : AppTheme.dashTextSecondaryOf(context),
                                   ),
                                 ),
                                 const SizedBox(height: 2),
@@ -2708,7 +2756,9 @@ class _WorkflowStepFlowCard extends StatelessWidget {
                                   overflow: TextOverflow.ellipsis,
                                   style: TextStyle(
                                     fontSize: 12,
-                                    color: AppTheme.textSecondary,
+                                    color: AppTheme.dashTextSecondaryOf(
+                                      context,
+                                    ),
                                   ),
                                 ),
                               ],
@@ -2721,9 +2771,9 @@ class _WorkflowStepFlowCard extends StatelessWidget {
                                   'Drag to reorder: press and hold, then move the card up or down',
                               child: Icon(
                                 Icons.drag_indicator_rounded,
-                                color: AppTheme.textSecondary.withValues(
-                                  alpha: 0.85,
-                                ),
+                                color: AppTheme.dashTextSecondaryOf(
+                                  context,
+                                ).withValues(alpha: 0.85),
                               ),
                             ),
                           ),
@@ -2783,7 +2833,7 @@ class _WorkflowStepFlowCard extends StatelessWidget {
                       Text(
                         'Allowed actions',
                         style: TextStyle(
-                          color: AppTheme.textSecondary,
+                          color: AppTheme.dashTextSecondaryOf(context),
                           fontSize: 11,
                           fontWeight: FontWeight.w800,
                         ),
@@ -2998,7 +3048,7 @@ class _MiniChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final color = tint ?? AppTheme.textSecondary;
+    final color = tint ?? AppTheme.dashTextSecondaryOf(context);
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(

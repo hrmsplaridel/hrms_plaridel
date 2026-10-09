@@ -537,7 +537,7 @@ class _TypeCard extends StatelessWidget {
                 width: 40,
                 height: 40,
                 decoration: BoxDecoration(
-                  color: DocuTrackerTokens.brandSoft,
+                  color: DocuTrackerTokens.brandSoftOf(context),
                   borderRadius: BorderRadius.circular(
                     DocuTrackerTokens.radiusSm,
                   ),
@@ -663,9 +663,9 @@ class _SelectedTypeBanner extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.fromLTRB(14, 10, 8, 10),
       decoration: BoxDecoration(
-        color: DocuTrackerTokens.brandSoft.withValues(alpha: 0.5),
+        color: DocuTrackerTokens.brandSoftOf(context).withValues(alpha: 0.5),
         borderRadius: BorderRadius.circular(DocuTrackerTokens.radiusSm),
-        border: Border.all(color: DocuTrackerTokens.highlightPeachBorder),
+        border: Border.all(color: DocuTrackerTokens.highlightPeachBorderOf(context)),
       ),
       child: Row(
         children: [

@@ -28,7 +28,7 @@ class DocuTrackerEmptyState extends StatelessWidget {
             decoration: BoxDecoration(
               color: dark
                   ? DocuTrackerTokens.surfaceDark
-                  : DocuTrackerTokens.surfaceCream,
+                  : DocuTrackerTokens.insetOf(context),
               shape: BoxShape.circle,
             ),
             child: Icon(

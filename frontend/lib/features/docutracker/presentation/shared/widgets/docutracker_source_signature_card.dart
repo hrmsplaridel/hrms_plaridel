@@ -415,8 +415,8 @@ class _DocuTrackerSourceSignatureCardState
                     .where((value) => value.isNotEmpty)
                     .join(' | '),
                 textAlign: TextAlign.center,
-                style: const TextStyle(
-                  color: DocuTrackerTokens.textMuted,
+                style: TextStyle(
+                  color: DocuTrackerTokens.textMutedOf(context),
                   fontSize: 11,
                 ),
               ),
@@ -430,8 +430,8 @@ class _DocuTrackerSourceSignatureCardState
                     ? 'Automatically assigned to ${signature!.assignedSignerName}'
                     : 'Assigned to ${signature!.assignedSignerName}',
                 textAlign: TextAlign.center,
-                style: const TextStyle(
-                  color: DocuTrackerTokens.textMuted,
+                style: TextStyle(
+                  color: DocuTrackerTokens.textMutedOf(context),
                   fontSize: 12,
                 ),
               ),
@@ -462,18 +462,18 @@ class _DocuTrackerSourceSignatureCardState
                     ? 'The signature is saved on this form.'
                     : waitingMessage,
                 textAlign: TextAlign.center,
-                style: const TextStyle(
-                  color: DocuTrackerTokens.textMuted,
+                style: TextStyle(
+                  color: DocuTrackerTokens.textMutedOf(context),
                   fontSize: 12,
                 ),
               ),
             if (isCreatorAssigned) ...[
               const SizedBox(height: 8),
-              const Text(
+              Text(
                 'This field belongs to the person who created the form.',
                 textAlign: TextAlign.center,
                 style: TextStyle(
-                  color: DocuTrackerTokens.textMuted,
+                  color: DocuTrackerTokens.textMutedOf(context),
                   fontSize: 12,
                 ),
               ),

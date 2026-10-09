@@ -14,6 +14,8 @@ String docuTrackerPermissionReasonLabel(
       'creator' => 'You created this document.',
       'explicit_permission' => 'Allowed by your assigned permissions.',
       'past_participant' => 'You participated earlier in this routing.',
+      'release_recipient' => 'This document was released to your department.',
+      'authorized_releaser' => 'You are authorized to release this document.',
       _ => 'You can perform this action.',
     };
   }

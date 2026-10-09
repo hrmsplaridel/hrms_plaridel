@@ -56,6 +56,10 @@ function workflowServiceMock(overrides = {}) {
     recoverDocumentAssignment: async () => ({}),
     addDocumentRemark: async () => true,
     getEffectivePermissionExplanation: async () => ({}),
+    describeViewerReleaseAccess: async () => ({
+      viewer_release_access: false,
+      viewer_can_release: false,
+    }),
     ...overrides,
   };
 }

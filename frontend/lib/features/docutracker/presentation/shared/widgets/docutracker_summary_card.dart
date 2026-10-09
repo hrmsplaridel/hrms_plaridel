@@ -52,7 +52,7 @@ class DocuTrackerSummaryCard extends StatelessWidget {
             border: Border.all(
               color: dark
                   ? const Color(0xFF374151)
-                  : DocuTrackerTokens.borderSubtle,
+                  : DocuTrackerTokens.borderSubtleOf(context),
             ),
             boxShadow: [
               BoxShadow(
@@ -114,7 +114,9 @@ class DocuTrackerSummaryCard extends StatelessWidget {
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: DocuTrackerStyles.cardLabelStyle(
-                  color: dark ? Colors.white : DocuTrackerTokens.textPrimary,
+                  color: dark
+                      ? Colors.white
+                      : DocuTrackerTokens.textPrimaryOf(context),
                 ).copyWith(fontSize: useCompact ? 10.5 : 11.5),
               ),
               SizedBox(height: useCompact ? 4 : 6),
@@ -126,7 +128,7 @@ class DocuTrackerSummaryCard extends StatelessWidget {
                     style: DocuTrackerStyles.cardValueStyle(
                       color: dark
                           ? Colors.white
-                          : DocuTrackerTokens.textPrimary,
+                          : DocuTrackerTokens.textPrimaryOf(context),
                     ).copyWith(fontSize: useCompact ? 23 : 28),
                   ),
                   if (!useCompact && badge != null) ...[
@@ -164,7 +166,7 @@ class DocuTrackerSummaryCard extends StatelessWidget {
                 style: DocuTrackerStyles.cardMetaStyle(
                   color: dark
                       ? Colors.white.withValues(alpha: 0.7)
-                      : DocuTrackerTokens.textMuted,
+                      : DocuTrackerTokens.textMutedOf(context),
                 ).copyWith(fontSize: useCompact ? 10.5 : 11.5),
               ),
             ],

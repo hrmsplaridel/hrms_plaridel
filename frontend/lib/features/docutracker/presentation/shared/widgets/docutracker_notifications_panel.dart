@@ -29,6 +29,7 @@ class DocuTrackerNotificationPanel extends StatefulWidget {
       DocumentNotification.typeDeadlineNear => 3,
       DocumentNotification.typeRejected => 4,
       DocumentNotification.typeReturned => 5,
+      DocumentNotification.typeReleased => 6,
       _ => 9,
     };
   }
@@ -101,6 +102,7 @@ class _DocuTrackerNotificationPanelState
     final outcomes = DocuTrackerNotificationPanel.inTypes(sorted, {
       DocumentNotification.typeReturned,
       DocumentNotification.typeRejected,
+      DocumentNotification.typeReleased,
     });
 
     final urgentShow = _urgentCap.clamp(0, urgent.length);
@@ -111,7 +113,7 @@ class _DocuTrackerNotificationPanelState
     final outcomesRemain = outcomes.length - outcomesShow;
 
     return Container(
-      decoration: DocuTrackerStyles.listCardDecoration(),
+      decoration: DocuTrackerStyles.listCardDecoration(context),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -143,7 +145,7 @@ class _DocuTrackerNotificationPanelState
                       Text(
                         'Notifications',
                         style: TextStyle(
-                          color: AppTheme.textPrimary,
+                          color: AppTheme.dashTextPrimaryOf(context),
                           fontSize: 16,
                           fontWeight: FontWeight.w700,
                         ),
@@ -153,7 +155,7 @@ class _DocuTrackerNotificationPanelState
                             ? '${widget.unreadCount} unread — tap an item to open the document'
                             : 'All caught up — tap to review a document',
                         style: TextStyle(
-                          color: AppTheme.textSecondary,
+                          color: AppTheme.dashTextSecondaryOf(context),
                           fontSize: 12,
                           height: 1.3,
                         ),
@@ -344,7 +346,7 @@ class _NotificationGroup extends StatelessWidget {
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: TextStyle(
-                              color: AppTheme.textPrimary,
+                              color: AppTheme.dashTextPrimaryOf(context),
                               fontSize: 13,
                               fontWeight: FontWeight.w800,
                             ),
@@ -376,7 +378,7 @@ class _NotificationGroup extends StatelessWidget {
                     Text(
                       subtitle,
                       style: TextStyle(
-                        color: AppTheme.textSecondary,
+                        color: AppTheme.dashTextSecondaryOf(context),
                         fontSize: 11,
                         height: 1.25,
                       ),
@@ -433,21 +435,25 @@ class _NotificationTile extends StatefulWidget {
       DocumentNotification.typeEscalated => Icons.trending_up_rounded,
       DocumentNotification.typeReturned => Icons.reply_rounded,
       DocumentNotification.typeRejected => Icons.cancel_outlined,
+      DocumentNotification.typeReleased => Icons.outbox_rounded,
       _ => Icons.notifications_none_rounded,
     };
   }
 
-  static Color _accent(String type, bool read) {
-    if (read) return AppTheme.textSecondary.withValues(alpha: 0.35);
-    return switch (type) {
+  static Color _accent(BuildContext context, String type, bool read) {
+    if (read) {
+      return AppTheme.dashTextSecondaryOf(context).withValues(alpha: 0.35);
+    }
+    return DocuTrackerTokens.toneOf(context, switch (type) {
       DocumentNotification.typeOverdue => Colors.deepOrange.shade800,
       DocumentNotification.typeEscalated => Colors.red.shade800,
       DocumentNotification.typeRejected => Colors.purple.shade800,
       DocumentNotification.typeReturned => DocuTrackerTokens.brand,
       DocumentNotification.typeDeadlineNear => Colors.amber.shade900,
       DocumentNotification.typeAssigned => DocuTrackerTokens.brand,
+      DocumentNotification.typeReleased => Colors.green.shade800,
       _ => DocuTrackerTokens.brand,
-    };
+    });
   }
 
   static String _relativeTime(DateTime? t) {
@@ -487,7 +493,11 @@ class _NotificationTileState extends State<_NotificationTile> {
   Widget build(BuildContext context) {
     final n = widget.notification;
     final read = n.read;
-    final accent = _NotificationTile._accent(n.type, read);
+    final accent = _NotificationTile._accent(context, n.type, read);
+    final dark = AppTheme.dashIsDark(context);
+    final hairline = dark
+        ? AppTheme.dashHairlineOf(context)
+        : Colors.black.withValues(alpha: 0.06);
     final headline = (n.title != null && n.title!.trim().isNotEmpty)
         ? n.title!
         : n.displayType;
@@ -513,7 +523,7 @@ class _NotificationTileState extends State<_NotificationTile> {
               boxShadow: [
                 if (_hovered || _focused)
                   BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.06),
+                    color: Colors.black.withValues(alpha: dark ? 0.3 : 0.06),
                     blurRadius: 10,
                     offset: const Offset(0, 3),
                   ),
@@ -521,7 +531,7 @@ class _NotificationTileState extends State<_NotificationTile> {
             ),
             child: Material(
               color: read
-                  ? AppTheme.offWhite.withValues(alpha: 0.35)
+                  ? AppTheme.dashMutedSurfaceOf(context).withValues(alpha: 0.35)
                   : DocuTrackerTokens.brand.withValues(alpha: 0.05),
               borderRadius: BorderRadius.circular(10),
               child: InkWell(
@@ -537,7 +547,7 @@ class _NotificationTileState extends State<_NotificationTile> {
                             border: Border.all(
                               color: _focused
                                   ? accent.withValues(alpha: 0.5)
-                                  : Colors.black.withValues(alpha: 0.06),
+                                  : hairline,
                               width: _focused ? 1.3 : 1,
                             ),
                           ),
@@ -560,7 +570,11 @@ class _NotificationTileState extends State<_NotificationTile> {
                               height: 40,
                               decoration: BoxDecoration(
                                 color: read
-                                    ? AppTheme.lightGray.withValues(alpha: 0.5)
+                                    ? (dark
+                                          ? AppTheme.dashMutedSurfaceOf(context)
+                                          : AppTheme.lightGray.withValues(
+                                              alpha: 0.5,
+                                            ))
                                     : accent.withValues(alpha: 0.12),
                                 shape: BoxShape.circle,
                                 border: Border.all(
@@ -573,9 +587,9 @@ class _NotificationTileState extends State<_NotificationTile> {
                                 _NotificationTile._icon(n.type),
                                 size: 20,
                                 color: read
-                                    ? AppTheme.textSecondary.withValues(
-                                        alpha: 0.8,
-                                      )
+                                    ? AppTheme.dashTextSecondaryOf(
+                                        context,
+                                      ).withValues(alpha: 0.8)
                                     : accent,
                               ),
                             ),
@@ -601,8 +615,12 @@ class _NotificationTileState extends State<_NotificationTile> {
                                                     : FontWeight.w700,
                                                 fontSize: 14,
                                                 color: read
-                                                    ? AppTheme.textSecondary
-                                                    : AppTheme.textPrimary,
+                                                    ? AppTheme.dashTextSecondaryOf(
+                                                        context,
+                                                      )
+                                                    : AppTheme.dashTextPrimaryOf(
+                                                        context,
+                                                      ),
                                               ),
                                             ),
                                             const SizedBox(height: 3),
@@ -613,10 +631,9 @@ class _NotificationTileState extends State<_NotificationTile> {
                                               style: TextStyle(
                                                 fontSize: 11,
                                                 color: read
-                                                    ? AppTheme.textSecondary
-                                                          .withValues(
-                                                            alpha: 0.6,
-                                                          )
+                                                    ? AppTheme.dashTextSecondaryOf(
+                                                        context,
+                                                      ).withValues(alpha: 0.6)
                                                     : accent,
                                                 fontWeight: read
                                                     ? FontWeight.normal
@@ -641,8 +658,12 @@ class _NotificationTileState extends State<_NotificationTile> {
                                                     : FontWeight.w700,
                                                 fontSize: 14,
                                                 color: read
-                                                    ? AppTheme.textSecondary
-                                                    : AppTheme.textPrimary,
+                                                    ? AppTheme.dashTextSecondaryOf(
+                                                        context,
+                                                      )
+                                                    : AppTheme.dashTextPrimaryOf(
+                                                        context,
+                                                      ),
                                               ),
                                             ),
                                           ),
@@ -654,8 +675,9 @@ class _NotificationTileState extends State<_NotificationTile> {
                                             style: TextStyle(
                                               fontSize: 11,
                                               color: read
-                                                  ? AppTheme.textSecondary
-                                                        .withValues(alpha: 0.6)
+                                                  ? AppTheme.dashTextSecondaryOf(
+                                                      context,
+                                                    ).withValues(alpha: 0.6)
                                                   : accent,
                                               fontWeight: read
                                                   ? FontWeight.normal
@@ -676,10 +698,12 @@ class _NotificationTileState extends State<_NotificationTile> {
                                         fontSize: 13,
                                         height: 1.3,
                                         color: read
-                                            ? AppTheme.textSecondary.withValues(
-                                                alpha: 0.7,
-                                              )
-                                            : AppTheme.textSecondary,
+                                            ? AppTheme.dashTextSecondaryOf(
+                                                context,
+                                              ).withValues(alpha: 0.7)
+                                            : AppTheme.dashTextSecondaryOf(
+                                                context,
+                                              ),
                                       ),
                                     ),
                                   ],
@@ -692,7 +716,11 @@ class _NotificationTileState extends State<_NotificationTile> {
                                           vertical: 3,
                                         ),
                                         decoration: BoxDecoration(
-                                          color: AppTheme.lightGray,
+                                          color: dark
+                                              ? AppTheme.dashMutedSurfaceOf(
+                                                  context,
+                                                )
+                                              : AppTheme.lightGray,
                                           borderRadius: BorderRadius.circular(
                                             4,
                                           ),
@@ -703,7 +731,9 @@ class _NotificationTileState extends State<_NotificationTile> {
                                             fontSize: 9,
                                             fontWeight: FontWeight.w800,
                                             letterSpacing: 0.5,
-                                            color: AppTheme.textSecondary,
+                                            color: AppTheme.dashTextSecondaryOf(
+                                              context,
+                                            ),
                                           ),
                                         ),
                                       ),
@@ -737,9 +767,9 @@ class _NotificationTileState extends State<_NotificationTile> {
                                     )
                                   : Icon(
                                       Icons.chevron_right_rounded,
-                                      color: AppTheme.textSecondary.withValues(
-                                        alpha: 0.4,
-                                      ),
+                                      color: AppTheme.dashTextSecondaryOf(
+                                        context,
+                                      ).withValues(alpha: 0.4),
                                       size: 22,
                                     ),
                             ),

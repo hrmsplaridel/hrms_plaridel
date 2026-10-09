@@ -436,7 +436,7 @@ class _DocuTrackerStepAssigneesEditorScreenState
                             child: Text(
                               'Step ${step.stepOrder}: ${step.displayLabel}',
                               style: TextStyle(
-                                color: AppTheme.textPrimary,
+                                color: AppTheme.dashTextPrimaryOf(context),
                                 fontWeight: FontWeight.w800,
                                 fontSize: 14,
                               ),
@@ -456,7 +456,7 @@ class _DocuTrackerStepAssigneesEditorScreenState
                         child: Text(
                           'Department-scoped step: only users in this department should be assigned.',
                           style: TextStyle(
-                            color: AppTheme.textSecondary,
+                            color: AppTheme.dashTextSecondaryOf(context),
                             fontSize: 12,
                           ),
                         ),
@@ -599,7 +599,7 @@ class _DocuTrackerStepAssigneesEditorScreenState
                               padding: const EdgeInsets.symmetric(vertical: 12),
                               child: Text(
                                 'No assignees. Save to leave this workflow step unassigned.',
-                                style: TextStyle(color: AppTheme.textSecondary),
+                                style: TextStyle(color: AppTheme.dashTextSecondaryOf(context)),
                               ),
                             )
                           else ...[
@@ -780,7 +780,7 @@ class _DocuTrackerStepAssigneesEditorScreenState
             ),
             const SizedBox(height: 12),
             Material(
-              color: AppTheme.white,
+              color: AppTheme.dashPanelOf(context),
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(14),
                 side: BorderSide(color: Colors.black.withValues(alpha: 0.08)),
@@ -793,7 +793,7 @@ class _DocuTrackerStepAssigneesEditorScreenState
                     Text(
                       'Scope',
                       style: TextStyle(
-                        color: AppTheme.textSecondary,
+                        color: AppTheme.dashTextSecondaryOf(context),
                         fontSize: 11,
                         fontWeight: FontWeight.w800,
                         letterSpacing: 0.3,
@@ -847,7 +847,7 @@ class _DocuTrackerStepAssigneesEditorScreenState
                     Text(
                       'Approve/Forward/Reject/Return are enforced by these assignees (server-side).',
                       style: TextStyle(
-                        color: AppTheme.textSecondary,
+                        color: AppTheme.dashTextSecondaryOf(context),
                         fontSize: 12,
                       ),
                     ),
@@ -947,7 +947,7 @@ class _DocuTrackerStepAssigneesEditorScreenState
                                           style: TextStyle(
                                             fontWeight: FontWeight.w700,
                                             fontSize: 14,
-                                            color: AppTheme.textPrimary,
+                                            color: AppTheme.dashTextPrimaryOf(context),
                                           ),
                                         ),
                                         const SizedBox(height: 6),
@@ -977,7 +977,7 @@ class _DocuTrackerStepAssigneesEditorScreenState
                                                           : 'No primary assignee')
                                                     : primaryLine,
                                                 style: TextStyle(
-                                                  color: AppTheme.textSecondary,
+                                                  color: AppTheme.dashTextSecondaryOf(context),
                                                   fontSize: 12,
                                                 ),
                                                 maxLines: 1,
@@ -1021,14 +1021,14 @@ class _DocuTrackerStepAssigneesEditorScreenState
                                               Icon(
                                                 Icons.business_rounded,
                                                 size: 11,
-                                                color: AppTheme.textSecondary
+                                                color: AppTheme.dashTextSecondaryOf(context)
                                                     .withValues(alpha: 0.6),
                                               ),
                                               const SizedBox(width: 3),
                                               Text(
                                                 stepDeptLabel,
                                                 style: TextStyle(
-                                                  color: AppTheme.textSecondary
+                                                  color: AppTheme.dashTextSecondaryOf(context)
                                                       .withValues(alpha: 0.7),
                                                   fontSize: 11,
                                                 ),
@@ -1081,7 +1081,7 @@ class _AssigneeEditorCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final actions = <String>['approve', 'forward', 'reject', 'return'];
     return Material(
-      color: AppTheme.white,
+      color: AppTheme.dashPanelOf(context),
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(12),
         side: BorderSide(color: Colors.black.withValues(alpha: 0.08)),
@@ -1098,7 +1098,7 @@ class _AssigneeEditorCard extends StatelessWidget {
                     assignee.fullName,
                     style: TextStyle(
                       fontWeight: FontWeight.w800,
-                      color: AppTheme.textPrimary,
+                      color: AppTheme.dashTextPrimaryOf(context),
                     ),
                   ),
                 ),
@@ -1118,7 +1118,7 @@ class _AssigneeEditorCard extends StatelessWidget {
               Text(
                 assignee.departmentName!,
                 style: TextStyle(
-                  color: AppTheme.textSecondary,
+                  color: AppTheme.dashTextSecondaryOf(context),
                   fontSize: 12,
                   fontWeight: FontWeight.w600,
                 ),
@@ -1127,7 +1127,7 @@ class _AssigneeEditorCard extends StatelessWidget {
             const SizedBox(height: 4),
             Text(
               assignee.userId,
-              style: TextStyle(color: AppTheme.textSecondary, fontSize: 11),
+              style: TextStyle(color: AppTheme.dashTextSecondaryOf(context), fontSize: 11),
             ),
             const SizedBox(height: 10),
             Row(
@@ -1166,7 +1166,7 @@ class _AssigneeEditorCard extends StatelessWidget {
             Text(
               'Allowed actions',
               style: TextStyle(
-                color: AppTheme.textSecondary,
+                color: AppTheme.dashTextSecondaryOf(context),
                 fontSize: 12,
                 fontWeight: FontWeight.w700,
               ),

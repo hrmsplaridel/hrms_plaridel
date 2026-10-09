@@ -34,7 +34,10 @@ function permissionRowsClient(rowsByAction) {
 }
 
 test('System Access actions are shared and exclude workflow-step actions', () => {
-  assert.deepEqual([...SYSTEM_ACCESS_ACTIONS].sort(), ['create_draft', 'download', 'submit', 'view']);
+  assert.deepEqual(
+    [...SYSTEM_ACCESS_ACTIONS].sort(),
+    ['create_draft', 'download', 'release', 'submit', 'view']
+  );
   assert.equal(GENERAL_PERMISSION_ACTIONS.has('create'), true);
   for (const action of ['approve', 'forward', 'reject', 'return']) {
     assert.equal(GENERAL_PERMISSION_ACTIONS.has(action), false);

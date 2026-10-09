@@ -15,6 +15,7 @@ import 'package:hrms_plaridel/features/docutracker/data/navigation/docutracker_d
 import 'package:hrms_plaridel/features/docutracker/models/document_routing_record.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document_status.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document_type.dart';
+import 'package:hrms_plaridel/features/docutracker/models/linked_leave_workflow.dart';
 import 'package:hrms_plaridel/features/docutracker/models/workflow_step.dart';
 import 'package:hrms_plaridel/features/docutracker/services/docutracker_document_visibility.dart';
 import 'package:hrms_plaridel/features/docutracker/services/docutracker_permission_service.dart';
@@ -26,6 +27,8 @@ import 'package:hrms_plaridel/features/docutracker/utils/docutracker_workflow_ph
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_document_attachment_panel.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_document_detail_ui.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_error_banner.dart';
+import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_release_section.dart';
+import 'package:hrms_plaridel/features/docutracker/utils/docutracker_release_text.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_responsive_body.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_status_badge.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_source_signature_card.dart';
@@ -86,10 +89,41 @@ class _DocuTrackerDocumentDetailScreenState
   bool _canModifyAttachment = false;
   Map<String, DocuTrackerPermissionExplanation> _permissionExplanations = {};
 
+  LinkedLeaveWorkflow? _linkedLeaveWorkflow;
+  bool _linkedLeaveLoading = false;
+  String? _linkedLeaveError;
+
   bool _isLinkedLeave(DocuTrackerDocument doc) =>
       doc.sourceModule == 'dtr' &&
       doc.sourceTable == 'leave_requests' &&
       (doc.sourceRecordId ?? '').isNotEmpty;
+
+  /// Source-only leave rows have no DocuTracker routing/history of their own;
+  /// their workflow and audit trail come from DTR.
+  bool _usesLinkedLeaveWorkflow(DocuTrackerDocument doc) =>
+      doc.sourceOnly && _isLinkedLeave(doc);
+
+  Future<void> _loadLinkedLeaveWorkflow(DocuTrackerDocument doc) async {
+    setState(() {
+      _linkedLeaveLoading = true;
+      _linkedLeaveError = null;
+    });
+    try {
+      final workflow = await DocuTrackerRepository.instance
+          .getLinkedLeaveWorkflow(doc.sourceRecordId!);
+      if (!mounted) return;
+      setState(() {
+        _linkedLeaveWorkflow = workflow;
+        _linkedLeaveLoading = false;
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _linkedLeaveError = error.toString().replaceFirst('Exception: ', '');
+        _linkedLeaveLoading = false;
+      });
+    }
+  }
 
   bool _isSupportedLinkedSource(DocuTrackerDocument doc) {
     final module = doc.sourceModule;
@@ -338,6 +372,9 @@ class _DocuTrackerDocumentDetailScreenState
             _workflowConfigIssue = null;
           });
         }
+        if (_usesLinkedLeaveWorkflow(widget.document)) {
+          unawaited(_loadLinkedLeaveWorkflow(widget.document));
+        }
         await _refreshEffectivePermissions(
           doc: widget.document,
           auth: auth,
@@ -370,6 +407,11 @@ class _DocuTrackerDocumentDetailScreenState
 
       // Load audit trail eagerly; we'll still hide it if permissions deny access.
       provider.loadDocumentHistory(docId);
+      // List rows do not say whether this viewer may release; the detail
+      // response does.
+      if (widget.document.releaseRequired) {
+        await provider.refreshDocument(docId);
+      }
       await provider.loadRoutingConfigs();
       // Keep shared notification badges in sync while this screen is open.
       await provider.loadNotifications();
@@ -715,6 +757,10 @@ class _DocuTrackerDocumentDetailScreenState
                         actionsCard,
                         const SizedBox(height: 24),
                       ],
+                      if (doc.releaseRequired) ...[
+                        _buildReleaseSection(doc),
+                        const SizedBox(height: 24),
+                      ],
                       if (_isLinkedLeave(doc)) ...[
                         _buildLinkedLeaveSection(doc, userId),
                         const SizedBox(height: 24),
@@ -745,6 +791,10 @@ class _DocuTrackerDocumentDetailScreenState
                       ],
                       _buildWorkflowSection(doc, provider, userId),
                       const SizedBox(height: 24),
+                      if (doc.releaseRequired) ...[
+                        _buildReleaseSection(doc),
+                        const SizedBox(height: 24),
+                      ],
                       if (_isLinkedLeave(doc)) ...[
                         _buildLinkedLeaveSection(doc, userId),
                         const SizedBox(height: 24),
@@ -924,7 +974,8 @@ class _DocuTrackerDocumentDetailScreenState
               dotStyle: true,
               label: doc.status == DocumentStatus.pending && isDraft
                   ? 'Draft'
-                  : docuTrackerSourceBadgeLabel(doc),
+                  : docuTrackerReleaseBadgeLabel(doc) ??
+                        docuTrackerSourceBadgeLabel(doc),
             ),
             if (deadlineLabel.isNotEmpty)
               Container(
@@ -1238,6 +1289,27 @@ class _DocuTrackerDocumentDetailScreenState
     return canApprove || canReject || canReturn || canForward || quickAccess;
   }
 
+  Widget _buildReleaseSection(DocuTrackerDocument doc) {
+    return DocuTrackerReleaseSection(
+      document: doc,
+      onRelease: doc.isAwaitingRelease && doc.viewerCanRelease
+          ? () => _releaseDocument(doc)
+          : null,
+    );
+  }
+
+  Future<void> _releaseDocument(DocuTrackerDocument doc) async {
+    final provider = context.read<DocuTrackerProvider>();
+    final released = await showDocuTrackerReleaseDialog(context, document: doc);
+    if (released == null || !mounted || doc.id == null) return;
+    await provider.refreshDocument(doc.id!, reloadHistory: true);
+    if (!mounted) return;
+    final department = released.releasedToDepartmentName;
+    _onWorkflowActionSuccess(
+      department == null ? 'Document released' : 'Released to $department',
+    );
+  }
+
   Widget _buildAttachmentSection(DocuTrackerDocument doc) {
     if (_permissionsLoading) return const SizedBox.shrink();
     return DocuTrackerDocumentAttachmentPanel(
@@ -1362,6 +1434,9 @@ class _DocuTrackerDocumentDetailScreenState
     DocuTrackerProvider provider,
     String currentUserId,
   ) {
+    if (_usesLinkedLeaveWorkflow(doc)) {
+      return _buildLinkedLeaveWorkflowSection(currentUserId);
+    }
     final cfg = _routingConfigFor(provider, doc);
     final steps =
         (cfg?.steps ?? const <WorkflowStep>[]).where((s) => s.enabled).toList()
@@ -2027,6 +2102,9 @@ class _DocuTrackerDocumentDetailScreenState
     DocuTrackerDocument doc,
     String userId,
   ) {
+    if (_usesLinkedLeaveWorkflow(doc)) {
+      return _buildLinkedLeaveHistorySection();
+    }
     final sorted = _sortedHistory(provider.documentHistory);
     final showCount = !_permissionsLoading && _canViewAuditTrail;
 
@@ -2059,7 +2137,10 @@ class _DocuTrackerDocumentDetailScreenState
               padding: const EdgeInsets.symmetric(vertical: 8),
               child: Text(
                 'You do not have access to view this activity.',
-                style: TextStyle(color: AppTheme.textSecondary, fontSize: 14),
+                style: TextStyle(
+                  color: AppTheme.dashTextSecondaryOf(context),
+                  fontSize: 14,
+                ),
               ),
             )
           else if (sorted.isEmpty)
@@ -2068,7 +2149,10 @@ class _DocuTrackerDocumentDetailScreenState
               child: Center(
                 child: Text(
                   'No history yet.',
-                  style: TextStyle(color: AppTheme.textSecondary, fontSize: 14),
+                  style: TextStyle(
+                    color: AppTheme.dashTextSecondaryOf(context),
+                    fontSize: 14,
+                  ),
                 ),
               ),
             )
@@ -2076,6 +2160,127 @@ class _DocuTrackerDocumentDetailScreenState
             _Timeline(entries: sorted),
         ],
       ),
+    );
+  }
+
+  Widget _linkedLeaveStatusMessage({required bool forHistory}) {
+    if (_linkedLeaveLoading ||
+        (_linkedLeaveWorkflow == null && _linkedLeaveError == null)) {
+      return const Center(
+        child: Padding(
+          padding: EdgeInsets.all(24),
+          child: CircularProgressIndicator(),
+        ),
+      );
+    }
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Text(
+        forHistory
+            ? 'Leave history could not be loaded: $_linkedLeaveError'
+            : 'Leave workflow could not be loaded: $_linkedLeaveError',
+        style: TextStyle(
+          color: AppTheme.dashTextSecondaryOf(context),
+          fontSize: 14,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildLinkedLeaveWorkflowSection(String currentUserId) {
+    final workflow = _linkedLeaveWorkflow;
+    final steps = workflow?.steps ?? const <LinkedLeaveWorkflowStep>[];
+    return DocuTrackerDetailSectionCard(
+      icon: Icons.account_tree_outlined,
+      title: 'Workflow & Routing',
+      subtitle: 'Follows the DTR leave workflow',
+      child: workflow == null
+          ? _linkedLeaveStatusMessage(forHistory: false)
+          : Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      vertical: 8,
+                      horizontal: 4,
+                    ),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        for (var i = 0; i < steps.length; i++) ...[
+                          _WorkflowStepNode(
+                            order: steps[i].stepOrder,
+                            label: steps[i].label,
+                            indicator: steps[i].indicator,
+                          ),
+                          if (i < steps.length - 1)
+                            Container(
+                              margin: const EdgeInsets.only(
+                                top: 14,
+                                left: 4,
+                                right: 4,
+                              ),
+                              width: 40,
+                              height: 2,
+                              color: steps[i].indicator.isCompleted
+                                  ? DocuTrackerTokens.brand
+                                  : DocuTrackerTokens.borderStrongOf(context),
+                            ),
+                        ],
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 20),
+                for (final step in steps) ...[
+                  _LinkedLeaveStepReviewers(
+                    step: step,
+                    isCurrent:
+                        step.stepOrder == workflow.currentStep &&
+                        step.indicator.kind ==
+                            DocuTrackerStepIndicatorKind.current,
+                    currentUserId: currentUserId,
+                  ),
+                  if (step != steps.last) const SizedBox(height: 12),
+                ],
+              ],
+            ),
+    );
+  }
+
+  Widget _buildLinkedLeaveHistorySection() {
+    final workflow = _linkedLeaveWorkflow;
+    final sorted = _sortedHistory(
+      workflow?.history ?? const <DocumentHistoryEntry>[],
+    );
+    return DocuTrackerDetailSectionCard(
+      icon: Icons.history_rounded,
+      title: 'Activity & Audit Trail',
+      subtitle: 'DTR leave history: submissions, signatures, and decisions',
+      trailing: workflow == null
+          ? null
+          : Text(
+              '${sorted.length} ${sorted.length == 1 ? 'event' : 'events'} logged',
+              style: DocuTrackerTokens.metaStyle(context),
+            ),
+      child: workflow == null
+          ? _linkedLeaveStatusMessage(forHistory: true)
+          : sorted.isEmpty
+          ? Padding(
+              padding: const EdgeInsets.symmetric(vertical: 16),
+              child: Center(
+                child: Text(
+                  'No history yet.',
+                  style: TextStyle(
+                    color: AppTheme.dashTextSecondaryOf(context),
+                    fontSize: 14,
+                  ),
+                ),
+              ),
+            )
+          : _Timeline(entries: sorted),
     );
   }
 
@@ -2432,6 +2637,87 @@ class _CurrentAssignmentCard extends StatelessWidget {
   }
 }
 
+class _LinkedLeaveStepReviewers extends StatelessWidget {
+  const _LinkedLeaveStepReviewers({
+    required this.step,
+    required this.isCurrent,
+    required this.currentUserId,
+  });
+
+  final LinkedLeaveWorkflowStep step;
+  final bool isCurrent;
+  final String currentUserId;
+
+  @override
+  Widget build(BuildContext context) {
+    final youAreAssigned =
+        isCurrent &&
+        currentUserId.isNotEmpty &&
+        step.reviewers.any((r) => r.id == currentUserId);
+    final emptyMessage = step.stepOrder == 1
+        ? 'No department reviewer recorded for this request.'
+        : 'No final HR reviewer is configured.';
+    return DocuTrackerPeachDashedBox(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Step ${step.stepOrder} · ${step.label}',
+            style: TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w800,
+              color: DocuTrackerTokens.textPrimaryOf(context),
+            ),
+          ),
+          if (youAreAssigned) ...[
+            const SizedBox(height: 6),
+            Text(
+              'You are assigned to this step',
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+                color: DocuTrackerTokens.toneOf(
+                  context,
+                  DocuTrackerTokens.brand,
+                ),
+              ),
+            ),
+          ],
+          const SizedBox(height: 10),
+          if (step.reviewers.isEmpty)
+            Text(emptyMessage, style: DocuTrackerTokens.subtitleStyle(context))
+          else
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                for (final reviewer in step.reviewers)
+                  Chip(
+                    label: Text(
+                      reviewer.isBackup
+                          ? '${reviewer.name} (backup)'
+                          : reviewer.name,
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: DocuTrackerTokens.textPrimaryOf(context),
+                      ),
+                    ),
+                    backgroundColor: DocuTrackerTokens.surfaceOf(context),
+                    side: BorderSide(
+                      color: DocuTrackerTokens.borderSubtleOf(context),
+                    ),
+                    visualDensity: VisualDensity.compact,
+                  ),
+              ],
+            ),
+        ],
+      ),
+    );
+  }
+}
+
 class _InfoRow extends StatelessWidget {
   const _InfoRow({required this.label, required this.value});
 
@@ -2622,8 +2908,8 @@ class _TimelineItem extends StatelessWidget {
                         Expanded(
                           child: Text(
                             isSystemEvent
-                                ? _actionLabel(entry.action)
-                                : '${_actionLabel(entry.action)} by ${_actorDisplayName(entry)}',
+                                ? _entryLabel(entry)
+                                : '${_entryLabel(entry)} by ${_actorDisplayName(entry)}',
                             style: TextStyle(
                               color: titleColor,
                               fontSize: 14,
@@ -2747,9 +3033,18 @@ class _TimelineItem extends StatelessWidget {
     );
   }
 
+  String _entryLabel(DocumentHistoryEntry entry) {
+    final department = entry.releasedToDepartmentName;
+    if (entry.action == 'released' && department != null) {
+      return 'Released to $department';
+    }
+    return _actionLabel(entry.action);
+  }
+
   String _actionLabel(String? action) {
     return switch (action) {
       'created' => 'Document Created',
+      'released' => 'Released',
       'assigned' => 'Document assigned',
       'approved' => 'Approved',
       'rejected' => 'Rejected',
@@ -2758,6 +3053,14 @@ class _TimelineItem extends StatelessWidget {
       'overdue' => 'Overdue',
       'escalated' => 'Escalated',
       'remark' => 'Remark added',
+      'saved_draft' => 'Draft saved',
+      'submitted' => 'Submitted',
+      'signed' => 'Signed',
+      'signature_replaced' => 'Signature replaced',
+      'cancelled' => 'Cancelled',
+      'department_head_approved' => 'Approved by department',
+      'department_head_rejected' => 'Rejected by department',
+      'department_head_returned' => 'Returned by department',
       _ => action ?? '—',
     };
   }
@@ -2887,7 +3190,7 @@ class _QuickAccessChip extends StatelessWidget {
     return Material(
       color: dark
           ? DocuTrackerTokens.insetOf(context)
-          : DocuTrackerTokens.highlightPeach,
+          : DocuTrackerTokens.highlightPeachOf(context),
       borderRadius: BorderRadius.circular(DocuTrackerTokens.radiusSm),
       child: InkWell(
         onTap: onTap,
@@ -2899,7 +3202,7 @@ class _QuickAccessChip extends StatelessWidget {
             border: Border.all(
               color: dark
                   ? DocuTrackerTokens.borderStrongOf(context)
-                  : DocuTrackerTokens.highlightPeachBorder,
+                  : DocuTrackerTokens.highlightPeachBorderOf(context),
             ),
           ),
           child: Row(

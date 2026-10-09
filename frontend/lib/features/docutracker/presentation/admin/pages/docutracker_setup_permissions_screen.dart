@@ -241,7 +241,7 @@ class _DocuTrackerSetupPermissionsScreenState
           child: DocuTrackerResponsiveBody(
             padding: const EdgeInsets.all(16),
             child: Container(
-              decoration: DocuTrackerStyles.listCardDecoration(),
+              decoration: DocuTrackerStyles.listCardDecoration(context),
               padding: const EdgeInsets.all(20),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -280,7 +280,9 @@ class _DocuTrackerSetupPermissionsScreenState
                   Text(
                     'Employee',
                     style: TextStyle(
-                      color: AppTheme.textSecondary.withValues(alpha: 0.9),
+                      color: AppTheme.dashTextSecondaryOf(
+                        context,
+                      ).withValues(alpha: 0.9),
                       fontSize: 12,
                       fontWeight: FontWeight.w700,
                     ),
@@ -339,7 +341,9 @@ class _DocuTrackerSetupPermissionsScreenState
                   Text(
                     'Document Type',
                     style: TextStyle(
-                      color: AppTheme.textSecondary.withValues(alpha: 0.9),
+                      color: AppTheme.dashTextSecondaryOf(
+                        context,
+                      ).withValues(alpha: 0.9),
                       fontSize: 12,
                       fontWeight: FontWeight.w700,
                     ),
@@ -407,7 +411,9 @@ class _DocuTrackerSetupPermissionsScreenState
                           vertical: 12,
                         ),
                         decoration: BoxDecoration(
-                          color: AppTheme.lightGray.withValues(alpha: 0.25),
+                          color: AppTheme.dashIsDark(context)
+                              ? AppTheme.dashMutedSurfaceOf(context)
+                              : AppTheme.lightGray.withValues(alpha: 0.25),
                           borderRadius: BorderRadius.circular(12),
                           border: Border.all(
                             color: Colors.black.withValues(alpha: 0.06),
@@ -435,7 +441,7 @@ class _DocuTrackerSetupPermissionsScreenState
                               child: Text(
                                 item.title,
                                 style: TextStyle(
-                                  color: AppTheme.textPrimary,
+                                  color: AppTheme.dashTextPrimaryOf(context),
                                   fontSize: 14,
                                   fontWeight: FontWeight.w600,
                                 ),

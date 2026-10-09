@@ -44,6 +44,9 @@ abstract final class DocuTrackerDocumentVisibility {
     if (_sameId(doc.createdBy, uid)) return true;
     if (_sameId(doc.currentHolderId, uid)) return true;
     if (doc.viewerIsRoutingAssignee) return true;
+    // Release access (receiving department or authorized releaser) is
+    // decided by the backend, which also applies System Access denials.
+    if (doc.viewerReleaseAccess) return true;
     if (doc.signatureSignerIds.any((id) => _sameId(id, uid))) return true;
 
     final step = doc.currentStep;

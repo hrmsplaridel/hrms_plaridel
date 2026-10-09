@@ -10,6 +10,7 @@ import 'package:hrms_plaridel/features/docutracker/models/document_builder.dart'
 import 'package:hrms_plaridel/features/docutracker/models/escalation_config.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document_history.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document_notification.dart';
+import 'package:hrms_plaridel/features/docutracker/models/document_release.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document_action.dart';
 import 'package:hrms_plaridel/features/docutracker/models/docutracker_governance_audit_entry.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document_permission.dart';
@@ -18,6 +19,7 @@ import 'package:hrms_plaridel/features/docutracker/models/document_routing_confi
 import 'package:hrms_plaridel/features/docutracker/models/document_routing_record.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document_status.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document_type.dart';
+import 'package:hrms_plaridel/features/docutracker/models/linked_leave_workflow.dart';
 import 'package:hrms_plaridel/features/docutracker/models/linked_source_document.dart';
 import 'package:hrms_plaridel/features/docutracker/models/official_signatory.dart';
 import 'package:hrms_plaridel/features/docutracker/models/hr_workflow_mirror.dart';
@@ -265,6 +267,98 @@ class DocuTrackerRepository implements DocuTrackerPermissionsDataSource {
           .toList();
     } catch (error) {
       _throwRequestError(error);
+    }
+  }
+
+  Future<DocuTrackerReleaseOptions> getReleaseOptions(String documentId) async {
+    try {
+      final response = await ApiClient.instance.get<Map<String, dynamic>>(
+        '$_base/documents/${Uri.encodeComponent(documentId)}/release-options',
+      );
+      return DocuTrackerReleaseOptions.fromJson(response.data ?? const {});
+    } catch (error) {
+      throw Exception(_apiErrorMessage(error));
+    }
+  }
+
+  /// Releases an approved document to one department. A repeat of the same
+  /// release succeeds without side effects; another department is refused.
+  Future<DocuTrackerResult<DocuTrackerDocument>> releaseDocument({
+    required String documentId,
+    required String departmentId,
+    String? remarks,
+    String? idempotencyKey,
+  }) async {
+    try {
+      final response = await ApiClient.instance.post<Map<String, dynamic>>(
+        '$_base/documents/${Uri.encodeComponent(documentId)}/release',
+        data: {
+          'department_id': departmentId,
+          if (remarks != null && remarks.trim().isNotEmpty)
+            'remarks': remarks.trim(),
+          if (idempotencyKey != null) 'idempotency_key': idempotencyKey,
+        },
+      );
+      final document = response.data?['document'];
+      if (document is! Map) {
+        return const DocuTrackerFailure('The released document is unavailable');
+      }
+      return DocuTrackerSuccess(
+        DocuTrackerDocument.fromJson(Map<String, dynamic>.from(document)),
+      );
+    } catch (error) {
+      return DocuTrackerFailure(_apiErrorMessage(error));
+    }
+  }
+
+  Future<List<DocuTrackerReleasePolicy>> getReleasePolicies() async {
+    try {
+      final response = await ApiClient.instance.get<Map<String, dynamic>>(
+        '$_base/release-policies',
+      );
+      final policies = response.data?['policies'];
+      if (policies is! List) return const [];
+      return policies
+          .whereType<Map>()
+          .map(
+            (item) => DocuTrackerReleasePolicy.fromJson(
+              Map<String, dynamic>.from(item),
+            ),
+          )
+          .toList(growable: false);
+    } catch (error) {
+      throw Exception(_apiErrorMessage(error));
+    }
+  }
+
+  Future<DocuTrackerResult<DocuTrackerReleasePolicy>> setReleasePolicy({
+    required String documentType,
+    required bool requiresRelease,
+  }) async {
+    try {
+      final response = await ApiClient.instance.put<Map<String, dynamic>>(
+        '$_base/release-policies/${Uri.encodeComponent(documentType)}',
+        data: {'requires_release': requiresRelease},
+      );
+      return DocuTrackerSuccess(
+        DocuTrackerReleasePolicy.fromJson(response.data ?? const {}),
+      );
+    } catch (error) {
+      return DocuTrackerFailure(_apiErrorMessage(error));
+    }
+  }
+
+  Future<LinkedLeaveWorkflow> getLinkedLeaveWorkflow(
+    String leaveRequestId,
+  ) async {
+    try {
+      final response = await ApiClient.instance.get<Map<String, dynamic>>(
+        '$_base/sources/dtr/leave_requests/'
+        '${Uri.encodeComponent(leaveRequestId)}/workflow',
+      );
+      return LinkedLeaveWorkflow.fromJson(response.data ?? const {});
+    } catch (error) {
+      throw Exception(_apiErrorMessage(error));
     }
   }
 
