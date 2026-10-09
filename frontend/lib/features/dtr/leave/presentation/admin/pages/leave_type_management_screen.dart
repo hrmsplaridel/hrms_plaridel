@@ -1,3 +1,4 @@
+import '../widgets/leave_employment_eligibility_field.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:hrms_plaridel/shared/widgets/workforce_loading_skeleton.dart';
@@ -42,6 +43,7 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
   String _balanceLedgerType = 'none';
   String _entitlementBasis = LeaveEntitlementBasis.perRequest;
   String _sexEligibility = 'any';
+  List<String>? _eligibleEmploymentTypes;
   List<LeaveCustomFieldDefinition> _customFields = const [];
   List<int> _customFieldUiIds = const [];
   Set<int> _autoCustomFieldUiIds = const {};
@@ -163,6 +165,7 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
     _sexEligibility = _sexEligibilityTypes.containsKey(item.sexEligibility)
         ? item.sexEligibility
         : 'any';
+    _eligibleEmploymentTypes = item.eligibleEmploymentTypes == null ? null : [...item.eligibleEmploymentTypes!];
     _customFields = List<LeaveCustomFieldDefinition>.from(
       item.employeeDetailSchema,
     );
@@ -208,6 +211,7 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
       _balanceLedgerType = 'none';
       _entitlementBasis = LeaveEntitlementBasis.perRequest;
       _sexEligibility = 'any';
+      _eligibleEmploymentTypes = null;
       _customFields = const [];
       _customFieldUiIds = const [];
       _autoCustomFieldUiIds = const {};
@@ -237,9 +241,15 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
 
   Future<void> _save() async {
     if (!_formKey.currentState!.validate()) return;
+    if (_eligibleEmploymentTypes?.isEmpty == true) {
+      _showMessage('Select at least one eligible employment type.');
+      return;
+    }
     setState(() => _saving = true);
     final selected = _selected;
-    final data = _payloadFromForm();
+    final data = selected?.isSystem == true
+        ? <String, dynamic>{'eligible_employment_types': _eligibleEmploymentTypes}
+        : _payloadFromForm();
     try {
       LeaveTypeDefinition? saved;
       if (selected?.id == null) {
@@ -350,6 +360,7 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
       'balance_ledger_type': _balanceLedgerType,
       'entitlement_basis': _entitlementBasis,
       'sex_eligibility': _sexEligibility,
+      'eligible_employment_types': _eligibleEmploymentTypes,
       'employee_detail_schema': _customFields
           .map((field) => field.toJson())
           .toList(growable: false),
@@ -524,13 +535,14 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
   }
 
   Widget _buildList() {
-    if (_loading)
+    if (_loading) {
       return const SingleChildScrollView(
         child: WorkforceRowsSkeleton(
           columns: [2, 1],
           label: 'Loading leave types',
         ),
       );
+    }
     final items = _filteredItems;
     _clampPage(items.length);
     final pageStart = items.isEmpty ? 0 : _page * _typesPerPage;
@@ -691,7 +703,7 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
                         const SizedBox(height: 6),
                         Text(
                           systemLocked
-                              ? 'Built-in CSC leave type. View only.'
+                              ? 'Built-in rules are protected. Employment-type eligibility can be configured.'
                               : 'Configure filing, balance, and DTR behavior.',
                           style: TextStyle(
                             color: _mutedColor(context),
@@ -713,7 +725,7 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
                     _InfoPanel(
                       icon: Icons.lock_outline_rounded,
                       text:
-                          'Built-in CSC leave types are protected. Create a custom leave type when you need editable rules.',
+                          'Built-in rules are protected. Only employment-type eligibility can be configured here.',
                     ),
                   _sectionTitle(Icons.badge_outlined, 'Basic Information'),
                   TextFormField(
@@ -826,6 +838,12 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
                         onChanged: _setRequiresAttachment,
                       ),
                     ],
+                  ),
+                  const SizedBox(height: 16),
+                  LeaveEmploymentEligibilityField(
+                    value: _eligibleEmploymentTypes,
+                    enabled: !_saving,
+                    onChanged: (value) => setState(() => _eligibleEmploymentTypes = value),
                   ),
                   const SizedBox(height: 16),
                   if (systemLocked)
@@ -1011,7 +1029,7 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
           Expanded(
             child: Text(
               systemLocked
-                  ? 'Protected CSC leave types cannot be edited.'
+                  ? 'Built-in rules are protected. You can save employment-type eligibility.'
                   : isCreating
                   ? 'Create this leave type to make it available under the configured filing rules.'
                   : isSelectedActive
@@ -1032,7 +1050,7 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
             const SizedBox(width: 10),
           ],
           FilledButton.icon(
-            onPressed: _saving || systemLocked ? null : _save,
+            onPressed: _saving ? null : _save,
             icon: _saving
                 ? const SizedBox(
                     width: 16,
@@ -1047,7 +1065,7 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
             label: Text(
               _saving
                   ? (isCreating ? 'Creating...' : 'Saving...')
-                  : (isCreating ? 'Create Leave Type' : 'Save Changes'),
+                  : (isCreating ? 'Create Leave Type' : systemLocked ? 'Save Eligibility' : 'Save Changes'),
             ),
           ),
         ],

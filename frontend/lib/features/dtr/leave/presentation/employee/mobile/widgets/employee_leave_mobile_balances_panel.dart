@@ -7,6 +7,7 @@ import 'package:hrms_plaridel/features/dtr/leave/presentation/shared/widgets/lea
 class EmployeeLeaveMobileBalancesPanel extends StatelessWidget {
   const EmployeeLeaveMobileBalancesPanel({
     super.key,
+    this.showCredits = true,
     required this.balances,
     required this.loading,
     required this.error,
@@ -14,6 +15,7 @@ class EmployeeLeaveMobileBalancesPanel extends StatelessWidget {
     required this.onBalanceHistory,
   });
 
+  final bool showCredits;
   final List<LeaveBalance> balances;
   final bool loading;
   final String? error;
@@ -34,44 +36,50 @@ class EmployeeLeaveMobileBalancesPanel extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         // ── Credits section (Sick + Vacation) ────────────────────────────
-        Row(
-          children: [
-            Expanded(
-              child: Text(
-                'Leave Credits',
-                style: TextStyle(
-                  color: AppTheme.dashTextPrimaryOf(context),
-                  fontSize: 17,
-                  fontWeight: FontWeight.w800,
-                  height: 1.2,
+        if (showCredits) ...[
+          Row(
+            children: [
+              if (showCredits)
+                Expanded(
+                  child: Text(
+                    'Leave Credits',
+                    style: TextStyle(
+                      color: AppTheme.dashTextPrimaryOf(context),
+                      fontSize: 17,
+                      fontWeight: FontWeight.w800,
+                      height: 1.2,
+                    ),
+                  ),
+                ),
+              TextButton(
+                onPressed: onBalanceHistory,
+                style: TextButton.styleFrom(
+                  foregroundColor: AppTheme.primaryNavyDark,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 4,
+                  ),
+                  minimumSize: Size.zero,
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                ),
+                child: const Text(
+                  'Credit History',
+                  style: TextStyle(fontSize: 11, fontWeight: FontWeight.w800),
                 ),
               ),
-            ),
-            TextButton(
-              onPressed: onBalanceHistory,
-              style: TextButton.styleFrom(
-                foregroundColor: AppTheme.primaryNavyDark,
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                minimumSize: Size.zero,
-                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-              ),
-              child: const Text(
-                'Credit History',
-                style: TextStyle(fontSize: 11, fontWeight: FontWeight.w800),
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 12),
+            ],
+          ),
+          const SizedBox(height: 12),
+        ],
         if (error != null) ...[
           _MobileBalanceLoadError(message: error!, onRetry: onRetry),
           if (balances.isNotEmpty) const SizedBox(height: 12),
         ],
-        if (loading && creditBalances.isEmpty)
+        if (showCredits && loading && creditBalances.isEmpty)
           const _MobileCenteredState(message: 'Loading leave credits...')
-        else if (error == null && creditBalances.isEmpty)
+        else if (showCredits && error == null && creditBalances.isEmpty)
           const _MobileCenteredState(message: 'No leave credits available yet.')
-        else if (creditBalances.isNotEmpty)
+        else if (showCredits && creditBalances.isNotEmpty)
           Column(
             children: List.generate(creditBalances.length, (index) {
               final balance = creditBalances[index];
@@ -86,7 +94,7 @@ class EmployeeLeaveMobileBalancesPanel extends StatelessWidget {
 
         // ── Leave Remaining Days section ──────────────────────────────────
         if (dayBalances.isNotEmpty || loading) ...[
-          const SizedBox(height: 24),
+          if (showCredits) const SizedBox(height: 24),
           Text(
             'Annual Leave Entitlements',
             style: TextStyle(

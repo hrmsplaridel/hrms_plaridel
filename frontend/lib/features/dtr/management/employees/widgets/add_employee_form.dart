@@ -34,6 +34,9 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
   DateTime? _dateHired;
   DateTime? _separationDate;
   bool _leaveCreditEligible = true;
+  bool get _excludesMonthlyCredits =>
+      _employmentType == 'job_order' ||
+      _employmentType == 'contract_of_service';
   Uint8List? _selectedImageBytes;
   bool _saving = false;
   int? _lastAppliedPrefillStamp;
@@ -1043,7 +1046,10 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
             value: _employmentType,
             decoration: _fieldDecoration('Employment Type'),
             hint: const Text('Employment Type'),
-            onChanged: (v) => setState(() => _employmentType = v),
+            onChanged: (v) => setState(() {
+              _employmentType = v;
+              if (_excludesMonthlyCredits) _leaveCreditEligible = false;
+            }),
           ),
           const SizedBox(height: 20),
           TextFormField(
@@ -1199,7 +1205,11 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
                   fontWeight: FontWeight.w600,
                 ),
               ),
-              subtitle: _requiresSeparationDate(_employmentStatus)
+              subtitle: _excludesMonthlyCredits
+                  ? const Text(
+                      'JO and COS accounts do not earn monthly VL/SL credits.',
+                    )
+                  : _requiresSeparationDate(_employmentStatus)
                   ? const Text(
                       'Used to calculate the prorated final-month credit.',
                     )
@@ -1211,8 +1221,9 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
                 color: AppTheme.primaryNavy,
               ),
               onChanged:
-                  _employmentStatus == 'active' ||
-                      _requiresSeparationDate(_employmentStatus)
+                  !_excludesMonthlyCredits &&
+                      (_employmentStatus == 'active' ||
+                          _requiresSeparationDate(_employmentStatus))
                   ? (value) => setState(() => _leaveCreditEligible = value)
                   : null,
             ),

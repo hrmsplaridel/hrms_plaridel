@@ -116,6 +116,7 @@ class LeaveTypeDefinition {
     this.balanceLedgerType = 'none',
     this.entitlementBasis = LeaveEntitlementBasis.perRequest,
     this.sexEligibility = 'any',
+    this.eligibleEmploymentTypes,
     this.employeeDetailSchema = const [],
   });
 
@@ -136,6 +137,10 @@ class LeaveTypeDefinition {
   final String balanceLedgerType;
   final String entitlementBasis;
   final String sexEligibility;
+  final List<String>? eligibleEmploymentTypes;
+  bool isEmploymentTypeEligible(String? employmentType) =>
+      eligibleEmploymentTypes == null ||
+      eligibleEmploymentTypes!.contains(employmentType);
   final List<LeaveCustomFieldDefinition> employeeDetailSchema;
 
   factory LeaveTypeDefinition.fromJson(Map<String, dynamic> json) {
@@ -185,6 +190,11 @@ class LeaveTypeDefinition {
         json['sex_eligibility']?.toString() ??
             json['sexEligibility']?.toString(),
       ),
+      eligibleEmploymentTypes: json['eligible_employment_types'] is List
+          ? (json['eligible_employment_types'] as List)
+                .map((v) => v.toString())
+                .toList()
+          : null,
       employeeDetailSchema: _parseCustomFields(
         json['employee_detail_schema'] ?? json['employeeDetailSchema'],
       ),
@@ -209,6 +219,7 @@ class LeaveTypeDefinition {
       'balance_ledger_type': balanceLedgerType,
       'entitlement_basis': entitlementBasis,
       'sex_eligibility': sexEligibility,
+      'eligible_employment_types': eligibleEmploymentTypes,
       'employee_detail_schema': employeeDetailSchema
           .map((field) => field.toJson())
           .toList(growable: false),
@@ -233,6 +244,7 @@ class LeaveTypeDefinition {
     String? balanceLedgerType,
     String? entitlementBasis,
     String? sexEligibility,
+    List<String>? eligibleEmploymentTypes,
     List<LeaveCustomFieldDefinition>? employeeDetailSchema,
   }) {
     return LeaveTypeDefinition(
@@ -254,6 +266,8 @@ class LeaveTypeDefinition {
       balanceLedgerType: balanceLedgerType ?? this.balanceLedgerType,
       entitlementBasis: entitlementBasis ?? this.entitlementBasis,
       sexEligibility: sexEligibility ?? this.sexEligibility,
+      eligibleEmploymentTypes:
+          eligibleEmploymentTypes ?? this.eligibleEmploymentTypes,
       employeeDetailSchema: employeeDetailSchema ?? this.employeeDetailSchema,
     );
   }

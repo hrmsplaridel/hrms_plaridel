@@ -494,6 +494,9 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
   String? _leaveTypeDefinitionAccountEligibilityMessage(
     LeaveTypeDefinition definition,
   ) {
+    if (!definition.isEmploymentTypeEligible(context.read<AuthProvider>().user?.employmentType)) {
+      return '${definition.displayName} is not available for your employment type.';
+    }
     return _accountEligibilityMessage(
       label: definition.displayName,
       sexEligibility: definition.sexEligibility,

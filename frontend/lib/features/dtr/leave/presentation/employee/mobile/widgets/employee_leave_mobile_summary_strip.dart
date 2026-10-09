@@ -5,6 +5,7 @@ import 'package:hrms_plaridel/features/dtr/leave/models/leave_request.dart';
 class EmployeeLeaveMobileSummaryStrip extends StatelessWidget {
   const EmployeeLeaveMobileSummaryStrip({
     super.key,
+    this.showCredits = true,
     required this.totalAvailable,
     required this.pendingCount,
     required this.totalPendingDays,
@@ -12,6 +13,7 @@ class EmployeeLeaveMobileSummaryStrip extends StatelessWidget {
     required this.nextApprovedAvailable,
   });
 
+  final bool showCredits;
   final double? totalAvailable;
   final int? pendingCount;
   final double? totalPendingDays;
@@ -29,13 +31,15 @@ class EmployeeLeaveMobileSummaryStrip extends StatelessWidget {
       clipBehavior: Clip.none,
       child: Row(
         children: [
-          _MobileSummaryCard(
-            title: 'Available Credits',
-            value: totalAvailable?.toStringAsFixed(1) ?? '--',
-            icon: Icons.account_balance_wallet_outlined,
-            accent: AppTheme.primaryNavy,
-          ),
-          const SizedBox(width: 12),
+          if (showCredits) ...[
+            _MobileSummaryCard(
+              title: 'Available Credits',
+              value: totalAvailable?.toStringAsFixed(1) ?? '--',
+              icon: Icons.account_balance_wallet_outlined,
+              accent: AppTheme.primaryNavy,
+            ),
+            const SizedBox(width: 12),
+          ],
           _MobileSummaryCard(
             title: 'Pending Requests',
             value: pendingCount?.toString() ?? '--',

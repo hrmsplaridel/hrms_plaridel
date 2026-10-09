@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:hrms_plaridel/core/api/client.dart';
 import 'package:hrms_plaridel/features/dtr/leave/data/repositories/leave_type_definition_cache.dart';
 import 'package:hrms_plaridel/features/dtr/leave/presentation/admin/pages/leave_type_management_screen.dart';
+import 'package:hrms_plaridel/features/dtr/leave/presentation/admin/widgets/leave_employment_eligibility_field.dart';
 
 void main() {
   final requests = <RequestOptions>[];
@@ -142,6 +143,33 @@ void main() {
     expect(requests.where((request) => request.method == 'POST'), isEmpty);
   });
 
+  testWidgets('leave type creation sends the configured employment restriction', (tester) async {
+    await mount(tester);
+    await enterRequiredName(tester,'Restricted Leave');
+    tester.widget<LeaveEmploymentEligibilityField>(find.byType(LeaveEmploymentEligibilityField))
+      .onChanged(['permanent','contractual']);
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Create Leave Type'));
+    await tester.tap(find.text('Create Leave Type'));
+    await tester.pumpAndSettle();
+    final write=requests.firstWhere((request)=>request.method=='POST');
+    expect((write.data as Map)['eligible_employment_types'],['permanent','contractual']);
+  });
+
+  testWidgets('protected type saves only employment eligibility', (tester) async {
+    rows=[{'id':'protected','name':'vacationLeave','display_name':'Vacation Leave','is_system':true,'is_active':true,
+      'eligible_employment_types':['permanent'],'sex_eligibility':'any'}];
+    await mount(tester);
+    expect(find.text('Save Eligibility'), findsOneWidget);
+    tester.widget<LeaveEmploymentEligibilityField>(find.byType(LeaveEmploymentEligibilityField))
+      .onChanged(['permanent','casual']);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Save Eligibility'));
+    await tester.pumpAndSettle();
+    final write=requests.firstWhere((request)=>request.method=='PUT');
+    expect(write.data,{'eligible_employment_types':['permanent','casual']});
+  });
+
   testWidgets(
     'valid creation sends eligibility, threshold, and custom fields',
     (tester) async {
@@ -155,8 +183,11 @@ void main() {
             stringDropdown('Employee sex eligibility'),
           )
           .onChanged!('female');
+      await tester.ensureVisible(find.text('Require attachment'));
+      await tester.pumpAndSettle();
       await tester.tap(find.text('Require attachment'));
       await tester.pump();
+      await tester.ensureVisible(textField('Require attachment over days'));
       await tester.enterText(textField('Require attachment over days'), '2');
 
       await tester.scrollUntilVisible(
