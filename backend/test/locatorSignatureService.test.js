@@ -18,6 +18,49 @@ const officials = {
   department_head: { id: head, name: 'Official Head' },
   hr_approver: { id: final, name: 'Official Final Approver', position_title: 'Municipal HR Officer' },
 };
+
+for (const ownSlot of ['department_head', 'hr_approver']) {
+  test(`locator print replaces applicant's own ${ownSlot} block with the Mayor account`, async () => {
+    const mayor='77777777-7777-4777-8777-777777777777';
+    const db=mockDb({...context,employee_id:officials[ownSlot].id,
+      print_signatories:officials});
+    const original=db.query.bind(db);
+    db.query=async(sql,params)=>sql.includes("= 'mayor'")
+      ? {rows:[{employee_id:mayor,name:'Test Mayor',position_title:'Municipal Mayor'}]}
+      : original(sql,params);
+    const result=await getLocatorSourceSignatures(db,{id:officials[ownSlot].id,role:'admin'},'dtr','locator_slips',requestId);
+    assert.equal(result.print_signatories[ownSlot].name,'Test Mayor');
+    assert.equal(result.print_signatories[ownSlot].position_title,'Municipal Mayor');
+    assert.equal(result.print_signatories[ownSlot].signature_image_base64,null);
+    const otherSlot=ownSlot==='department_head'?'hr_approver':'department_head';
+    assert.equal(result.print_signatories[otherSlot].name,officials[otherSlot].name);
+  });
+  test(`new locator snapshots Mayor instead of applicant for ${ownSlot}`, async () => {
+    let captured;
+    const owner=officials[ownSlot].id;
+    const db={async query(sql,params){
+      if (sql.includes('FROM locator_slips ls')) return {rows:[{...context,employee_id:owner,employee_name:'Applicant'}]};
+      if (sql.includes('primary_reviewer_designations head_period')) return {rows:[{reviewer_id:head,reviewer_name:'Official Head'}]};
+      if (sql.includes("scope_key = 'final_hr'")) return {rows:[{id:final,name:'Official Final Approver',position_title:'HR Officer'}]};
+      if (sql.includes("= 'mayor'")) return {rows:[{employee_id:asset,name:'Test Mayor',position_title:'Municipal Mayor'}]};
+      if (sql.includes('SET print_signatories')) captured=JSON.parse(params[1]);
+      return {rows:[]};
+    }};
+    await snapshotLocatorReviewers(db,{requestType:'locator',requestId,departmentId:requestId,reviewers:[]});
+    assert.equal(captured[ownSlot].name,'Test Mayor');
+    assert.equal(captured.applicant.id,owner);
+    assert.equal(captured.applicant.name,'Applicant');
+  });
+}
+
+test('missing Mayor leaves a conflicting printed official blank without borrowing applicant ink',async()=>{
+  const db=mockDb({...context,employee_id:final,status:'pending_hr'},[ink(final,'hr_approver')]);
+  const original=db.query.bind(db);
+  db.query=async(sql,params)=>sql.includes("= 'mayor'")?{rows:[]}:original(sql,params);
+  const result=await getLocatorSourceSignatures(db,{id:final,role:'admin'},'dtr','locator_slips',requestId);
+  assert.equal(result.print_signatories.hr_approver.name,'');
+  assert.equal(result.print_signatories.hr_approver.signature_image_base64,null);
+});
 const context = {
   id: requestId, employee_id: employee, employee_name: 'Applicant',
   slip_date_text: '2026-10-01', department_id: requestId,
