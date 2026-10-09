@@ -210,7 +210,7 @@ test('supervisor cannot read a primary assignment outside their department', asy
           }],
         };
       }
-      if (normalized.includes('JOIN positions p')) {
+      if (normalized.includes('FROM primary_reviewer_designations head_period')) {
         return {
           rows: [{
             employee_id: supervisorId,
@@ -253,7 +253,7 @@ test('supervised assignment access uses effective Head periods instead of the po
   const db = {
     async query(sql, params) {
       const text = String(sql);
-      if (text.includes('JOIN positions p')) {
+      if (text.includes('FROM primary_reviewer_designations head_period')) {
         reviewerSql = text;
         reviewerParams = params;
         return {
@@ -287,13 +287,13 @@ test('supervised assignment access uses effective Head periods instead of the po
   );
 
   assert.equal(visible.length, 1);
-  assert.match(reviewerSql, /JOIN position_department_head_periods head_period/);
+  assert.match(reviewerSql, /FROM primary_reviewer_designations head_period/);
   assert.match(reviewerSql, /head_period\.effective_from/);
   assert.doesNotMatch(reviewerSql, /p\.name|department head%|LOWER\(/i);
   assert.deepEqual(reviewerParams, [supervisorId]);
 });
 
-test('a supervisor has no assignment scope without an official Head position', async () => {
+test('a supervisor has no assignment scope without an explicit primary employee designation', async () => {
   const supervisorId = '11111111-1111-4111-8111-111111111111';
   let reviewerSql = '';
   const db = {
@@ -320,6 +320,6 @@ test('a supervisor has no assignment scope without an official Head position', a
   );
 
   assert.deepEqual(visible, []);
-  assert.match(reviewerSql, /JOIN position_department_head_periods head_period/);
+  assert.match(reviewerSql, /FROM primary_reviewer_designations head_period/);
   assert.doesNotMatch(reviewerSql, /ILIKE|p\.name/i);
 });

@@ -1,7 +1,7 @@
 'use strict';
 
 const { resolveDepartmentReviewers, replaceRequestReviewerSnapshot } = require('./departmentReviewerService');
-const { resolveFinalLeaveReviewerConfiguration, resolveFinalLeaveReviewers } = require('./leaveFinalReviewerService');
+const { resolveFinalLeaveReviewerConfiguration, resolveEligibleFinalReviewers } = require('./leaveFinalReviewerService');
 const { createSignatureAsset } = require('./docutrackerDocumentBuilderService');
 const { recordLocatorWorkflowEvent } = require('./locatorWorkflowHistory');
 
@@ -89,7 +89,7 @@ async function loadContext(db, user, id, lock = false) {
       position_title: position.rows[0]?.position_title || '' };
   }
   const finalReviewers = hr && !owner && PENDING.has(row.status)
-    ? await resolveFinalLeaveReviewers(db) : [];
+    ? await resolveEligibleFinalReviewers(db, row.employee_id, 'locator', id) : [];
   return { ...row, officials, owner, hr, reviewer,
     canFinalReview: finalReviewers.some((r) => r.id === user.id) };
 }

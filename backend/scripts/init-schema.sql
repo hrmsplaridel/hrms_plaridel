@@ -1022,6 +1022,30 @@ CREATE INDEX IF NOT EXISTS idx_leave_balance_ledger_leave_request
   WHERE related_leave_request_id IS NOT NULL;
 
 -- =========================================
+-- PRIMARY EMPLOYEE REVIEWER DESIGNATIONS
+-- =========================================
+CREATE TABLE IF NOT EXISTS primary_reviewer_designations (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  scope_key TEXT NOT NULL,
+  department_id UUID REFERENCES departments(id) ON DELETE RESTRICT,
+  employee_id UUID NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+  position_id UUID REFERENCES positions(id) ON DELETE SET NULL,
+  position_title_snapshot TEXT,
+  effective_from DATE NOT NULL,
+  effective_to DATE,
+  is_active BOOLEAN NOT NULL DEFAULT true,
+  created_by UUID REFERENCES users(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CHECK (effective_to IS NULL OR effective_to >= effective_from),
+  CHECK ((scope_key = 'final_hr' AND department_id IS NULL)
+    OR (department_id IS NOT NULL AND scope_key = 'department:' || department_id::text)),
+  CONSTRAINT primary_reviewer_no_overlap EXCLUDE USING gist (
+    scope_key WITH =, daterange(effective_from, effective_to, '[]') WITH &&
+  ) WHERE (is_active = true)
+);
+
+-- =========================================
 -- MONTHLY LEAVE ACCRUAL POSTINGS
 -- =========================================
 -- One reconcilable earned-credit posting per employee, leave type, and service month.

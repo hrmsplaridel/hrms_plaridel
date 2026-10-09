@@ -1,3 +1,4 @@
+const { finalQueueVisibilitySql } = require('../services/approvalStageSeparation');
 const express = require('express');
 const fs = require('fs');
 const path = require('path');
@@ -874,11 +875,23 @@ router.get('/department-head/check', protect, async (req, res) => {
        LIMIT 1`,
       [userId]
     );
-    const assignedDepartmentId = assigned.rows[0]?.department_id || null;
-    const assignedDepartmentName = assigned.rows[0]?.department_name || null;
+    const activeBackup = await client.query(
+      `SELECT b.department_id, d.name AS department_name
+       FROM department_reviewer_backups b
+       JOIN users u ON u.id = b.employee_id
+       LEFT JOIN departments d ON d.id = b.department_id
+       WHERE b.employee_id = $1::uuid AND b.is_active = true AND u.is_active = true
+         AND b.effective_from <= $2::date
+         AND (b.effective_to IS NULL OR b.effective_to >= $2::date)
+       ORDER BY b.backup_rank, b.id LIMIT 1`,
+      [userId, currentHrmsDate()]
+    );
+    const assignedDepartment = assigned.rows[0] || activeBackup.rows[0];
+    const assignedDepartmentId = assignedDepartment?.department_id || null;
+    const assignedDepartmentName = assignedDepartment?.department_name || null;
     const reviewedDepartmentId = reviewed.rows[0]?.department_id || null;
     const reviewedDepartmentName = reviewed.rows[0]?.department_name || null;
-    const canReviewPending = current.isDeptHead || assigned.rows.length > 0;
+    const canReviewPending = current.isDeptHead || Boolean(assignedDepartment);
     const hasReviewHistory = reviewed.rows.length > 0;
     res.json({
       // Keep the legacy field while clients migrate to the explicit capabilities.
@@ -2461,6 +2474,7 @@ router.get('/admin', protect, requireAdminOrHr, requireDtrFeatureIfAdmin('locato
       LEFT JOIN users revoker ON revoker.id = ls.revoked_by
       WHERE ($1::text[] IS NULL OR ls.status = ANY($1::text[]))
         AND ls.employee_id <> $8::uuid
+        AND ${finalQueueVisibilitySql('locator', 'ls', '$8::uuid')}
         AND (
           ls.status IN ('pending', 'pending_hr')
           OR ls.is_retroactive_correction = true
@@ -2521,7 +2535,7 @@ router.get('/admin', protect, requireAdminOrHr, requireDtrFeatureIfAdmin('locato
         `SELECT DISTINCT d.id, d.name
          FROM locator_slips ls
          JOIN departments d ON d.id = ls.department_id
-         WHERE ls.employee_id <> $1::uuid AND d.name IS NOT NULL AND btrim(d.name) <> ''
+         WHERE ls.employee_id <> $1::uuid AND ${finalQueueVisibilitySql('locator', 'ls', '$1::uuid')} AND d.name IS NOT NULL AND btrim(d.name) <> ''
          ORDER BY d.name`,
         [req.user?.id]
       ),
@@ -2535,7 +2549,7 @@ router.get('/admin', protect, requireAdminOrHr, requireDtrFeatureIfAdmin('locato
                 ) AS department_ids
          FROM locator_slips ls
          JOIN users u ON u.id = ls.employee_id
-         WHERE ls.employee_id <> $1::uuid AND u.full_name IS NOT NULL AND btrim(u.full_name) <> ''
+         WHERE ls.employee_id <> $1::uuid AND ${finalQueueVisibilitySql('locator', 'ls', '$1::uuid')} AND u.full_name IS NOT NULL AND btrim(u.full_name) <> ''
          GROUP BY u.id, u.full_name
          ORDER BY u.full_name`,
         [req.user?.id]
@@ -2603,7 +2617,7 @@ router.patch('/:id/return-for-correction', protect, requireAdminOrHr, requireDtr
         error: `Cannot return locator slip with status '${row.status}'`,
       });
     }
-    await assertFinalLeaveReviewer(client, row.employee_id, reviewerId, 'locator');
+    await assertFinalLeaveReviewer(client, row.employee_id, reviewerId, 'locator', id);
     const returnWindow = evaluateLocatorReturnWindow({
       slipDate: row.slip_date_text,
     });
@@ -2698,7 +2712,7 @@ router.patch('/:id/approve', protect, requireAdminOrHr, requireDtrFeatureIfAdmin
         error: `Cannot approve locator slip with status '${current.rows[0].status}'`,
       });
     }
-    await assertFinalLeaveReviewer(client, current.rows[0].employee_id, reviewerId, 'locator');
+    await assertFinalLeaveReviewer(client, current.rows[0].employee_id, reviewerId, 'locator', id);
     const attachmentError = locatorReviewAttachmentError(current.rows[0]);
     if (attachmentError) {
       await client.query('ROLLBACK');
@@ -2939,7 +2953,7 @@ router.patch('/:id/reject', protect, requireAdminOrHr, requireDtrFeatureIfAdmin(
         error: `Cannot reject locator slip with status '${current.rows[0].status}'`,
       });
     }
-    await assertFinalLeaveReviewer(client, current.rows[0].employee_id, reviewerId, 'locator');
+    await assertFinalLeaveReviewer(client, current.rows[0].employee_id, reviewerId, 'locator', id);
     await client.query(
       `UPDATE locator_slips
        SET status = 'rejected_by_hr',

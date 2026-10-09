@@ -1,6 +1,7 @@
 'use strict';
 
 const { todayInHrmsTimezone } = require('../utils/dateRangeParser');
+const { loadDepartmentApprover } = require('./approvalStageSeparation');
 
 function reviewError(message, statusCode) {
   const error = new Error(message);
@@ -14,18 +15,15 @@ async function resolveFinalLeaveReviewerConfiguration(
   date = todayInHrmsTimezone()
 ) {
   const primary = await db.query(
-    `SELECT u.id, u.full_name AS name, p.name AS position_title
-     FROM positions p
-     JOIN assignments a ON a.position_id = p.id
-     JOIN users u ON u.id = a.employee_id
-     WHERE p.is_leave_final_reviewer = true
-       AND p.is_active = true
-       AND a.is_active = true
-       AND a.effective_from <= $1::date
-       AND (a.effective_to IS NULL OR a.effective_to >= $1::date)
-       AND u.is_active = true
-       AND u.role IN ('admin', 'hr')
-     ORDER BY a.effective_from DESC, a.created_at DESC, a.id DESC
+    `SELECT u.id, u.full_name AS name, designation.position_title_snapshot AS position_title,
+            designation.id AS designation_id, designation.effective_from::text AS effective_from,
+            designation.effective_to::text AS effective_to
+     FROM primary_reviewer_designations designation
+     JOIN users u ON u.id = designation.employee_id
+     WHERE designation.scope_key = 'final_hr' AND designation.is_active = true
+       AND designation.effective_from <= $1::date
+       AND (designation.effective_to IS NULL OR designation.effective_to >= $1::date)
+       AND u.is_active = true AND u.role IN ('admin', 'hr')
      LIMIT 1`,
     [date]
   );
@@ -65,9 +63,20 @@ async function resolveFinalLeaveReviewers(db, date = todayInHrmsTimezone()) {
   return config.reviewers;
 }
 
-async function assertFinalLeaveReviewer(db, applicantId, actorId, requestType = 'leave') {
+async function resolveEligibleFinalReviewers(db, applicantId, requestType, requestId) {
+  const departmentApprover = await loadDepartmentApprover(db, requestType, requestId);
+  const reviewers = await resolveFinalLeaveReviewers(db);
+  return reviewers.filter(r => String(r.id) !== String(applicantId) &&
+    String(r.id) !== String(departmentApprover));
+}
+
+async function assertFinalLeaveReviewer(db, applicantId, actorId, requestType = 'leave', requestId = null) {
   if (String(applicantId) === String(actorId)) {
     throw reviewError(`You cannot review your own ${requestType} request`, 403);
+  }
+  const departmentApprover = await loadDepartmentApprover(db, requestType, requestId);
+  if (departmentApprover && String(departmentApprover) === String(actorId)) {
+    throw reviewError('A different reviewer must perform final HR review after your department approval.', 403);
   }
   const reviewers = await resolveFinalLeaveReviewers(db);
   if (!reviewers.length) {
@@ -86,6 +95,7 @@ async function assertLeaveSubmissionReviewer(db, applicantId, requestType = 'lea
 }
 
 module.exports = {
+  resolveEligibleFinalReviewers,
   assertFinalLeaveReviewer,
   assertLeaveSubmissionReviewer,
   resolveFinalLeaveReviewerConfiguration,

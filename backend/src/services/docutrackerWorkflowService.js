@@ -988,7 +988,7 @@ async function fetchAllPermissionRowsForAction(client, { role, userId, action })
 
 /**
  * Departments the user reviews on [effectiveDate]: as the official Department
- * Head (head period on their position) or as an active backup reviewer.
+ * Head (a dated employee designation) or as an active backup reviewer.
  */
 async function listReviewedDepartments(client, userId, effectiveDate = todayInHrmsTimezone()) {
   if (!userId) return [];
@@ -996,20 +996,10 @@ async function listReviewedDepartments(client, userId, effectiveDate = todayInHr
     `SELECT DISTINCT d.id, d.name
      FROM departments d
      WHERE d.id IN (
-       SELECT a.department_id
-       FROM assignments a
-       JOIN positions p ON p.id = a.position_id AND p.department_id = a.department_id
-       JOIN position_department_head_periods hp
-         ON hp.position_id = p.id
-        AND hp.department_id = a.department_id
-        AND hp.is_active = true
-        AND hp.effective_from <= $2::date
-        AND (hp.effective_to IS NULL OR hp.effective_to >= $2::date)
-       WHERE a.employee_id = $1::uuid
-         AND a.is_active = true
-         AND p.is_active = true
-         AND a.effective_from <= $2::date
-         AND (a.effective_to IS NULL OR a.effective_to >= $2::date)
+       SELECT hp.department_id FROM primary_reviewer_designations hp
+       WHERE hp.employee_id = $1::uuid AND hp.department_id IS NOT NULL
+         AND hp.is_active = true AND hp.effective_from <= $2::date
+         AND (hp.effective_to IS NULL OR hp.effective_to >= $2::date)
        UNION
        SELECT b.department_id
        FROM department_reviewer_backups b

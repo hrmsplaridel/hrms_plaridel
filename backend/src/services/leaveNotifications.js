@@ -2,11 +2,12 @@ const {
   insertNotification,
   insertNotificationForUsers,
 } = require('./notificationService');
-const { resolveFinalLeaveReviewers } = require('./leaveFinalReviewerService');
+const { resolveEligibleFinalReviewers } = require('./leaveFinalReviewerService');
+const { notifyMissingFinalReviewer } = require('./approvalConfigurationNotifications');
 
-async function finalReviewerIds(db, applicantId) {
+async function finalReviewerIds(db, applicantId, requestId) {
   if (!applicantId) return [];
-  const reviewers = await resolveFinalLeaveReviewers(db);
+  const reviewers = await resolveEligibleFinalReviewers(db, applicantId, 'leave', requestId);
   return reviewers.filter(r => String(r.id) !== String(applicantId)).map(r => r.id);
 }
 
@@ -55,7 +56,8 @@ async function notifyAfterSubmit(pool, {
   }
 
   if (status === 'pending_hr' || status === 'pending') {
-    const hrIds = await finalReviewerIds(pool, employeeUserId);
+    const hrIds = await finalReviewerIds(pool, employeeUserId, leaveRequestId);
+    if (!hrIds.length) await notifyMissingFinalReviewer(pool, 'leave', leaveRequestId);
     const targets = hrIds.filter((id) => id !== employeeUserId);
     await insertNotificationForUsers(pool, targets, {
       category: 'leave',
@@ -78,7 +80,8 @@ async function notifyDepartmentHeadApprovedForHr(pool, {
   startDateStr,
   endDateStr,
 }) {
-  const hrIds = await finalReviewerIds(pool, employeeUserId);
+  const hrIds = await finalReviewerIds(pool, employeeUserId, leaveRequestId);
+  if (!hrIds.length) await notifyMissingFinalReviewer(pool, 'leave', leaveRequestId);
   const range = fmtRange(startDateStr, endDateStr);
   const who = employeeName || 'An employee';
   const lt = leaveLabel(leaveTypeName);
@@ -163,7 +166,7 @@ async function notifyStakeholdersLeaveCancelled(pool, {
   const lt = leaveLabel(leaveTypeName);
   const body = `${who} cancelled ${lt} (${range}).${cancelReason ? ` Reason: ${cancelReason}` : ''}`;
 
-  const hrIds = await finalReviewerIds(pool, employeeUserId);
+  const hrIds = await finalReviewerIds(pool, employeeUserId, leaveRequestId);
   const hrTargets = hrIds.filter((id) => id !== employeeUserId);
   await insertNotificationForUsers(pool, hrTargets, {
     category: 'leave',

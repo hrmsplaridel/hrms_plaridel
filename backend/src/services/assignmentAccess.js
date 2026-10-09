@@ -119,28 +119,14 @@ async function loadAssignmentPeriods(db, employeeIds) {
 
 async function loadReviewerDepartmentPeriods(db, reviewerId) {
   const result = await db.query(
-    `SELECT a.employee_id::text AS employee_id,
-            a.department_id::text AS department_id,
-            GREATEST(a.effective_from, head_period.effective_from)::text AS effective_from,
-            (CASE
-               WHEN a.effective_to IS NULL THEN head_period.effective_to
-               WHEN head_period.effective_to IS NULL THEN a.effective_to
-               ELSE LEAST(a.effective_to, head_period.effective_to)
-             END)::text AS effective_to
-       FROM assignments a
-       JOIN positions p ON p.id = a.position_id
-       JOIN position_department_head_periods head_period
-         ON head_period.position_id = p.id
-        AND head_period.department_id = a.department_id
+    `SELECT head_period.employee_id::text AS employee_id,
+            head_period.department_id::text AS department_id,
+            head_period.effective_from::text AS effective_from,
+            head_period.effective_to::text AS effective_to
+       FROM primary_reviewer_designations head_period
+      WHERE head_period.employee_id = $1::uuid AND head_period.department_id IS NOT NULL
         AND head_period.is_active = true
-        AND head_period.effective_from <= COALESCE(a.effective_to, 'infinity'::date)
-        AND COALESCE(head_period.effective_to, 'infinity'::date) >= a.effective_from
-      WHERE a.employee_id = $1::uuid
-        AND a.department_id IS NOT NULL
-        AND a.is_active = true
-        AND (p.is_active IS NULL OR p.is_active = true)
-      ORDER BY GREATEST(a.effective_from, head_period.effective_from),
-               a.created_at, a.id`,
+      ORDER BY head_period.effective_from, head_period.created_at, head_period.id`,
     [reviewerId]
   );
   return result.rows.map(assignmentPeriod);

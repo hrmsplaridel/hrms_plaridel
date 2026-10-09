@@ -68,7 +68,8 @@ for (const firstAction of ['reject', 'return']) {
               await acquire(client);
               return { rows: [{ ...row, days: row.number_of_days }] };
             }
-            if (statement.includes('FROM positions p')) {
+            if (statement.includes('department_approver_id')) return { rows: [{ department_approver_id: null }] };
+            if (statement.includes('FROM primary_reviewer_designations')) {
               return { rows: [{ id: '33333333-3333-4333-8333-333333333333', name: 'Primary' }] };
             }
             if (statement.includes('FROM leave_final_reviewer_backups')) {

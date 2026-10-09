@@ -15,6 +15,10 @@ for(const kind of ['leave','locator']) {
     if(kind==='leave')assert.match(sql,/COALESCE\(lr.user_id, lr.employee_id\) <> \$\d+::uuid/);
     else assert.match(sql,/ls.employee_id <> \$\d+::uuid/);
     assert.ok(params.includes('reviewer'));
+    if (!routePath.includes('department-head')) {
+      assert.match(sql, /IS DISTINCT FROM/);
+      assert.match(sql, kind === 'leave' ? /department_head_approved/ : /dept_head_reviewer_id/);
+    }
    }
   }}finally{clearModule(path);restore()}
  });

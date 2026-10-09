@@ -1,3 +1,4 @@
+const { finalQueueVisibilitySql } = require('../services/approvalStageSeparation');
 const express = require('express');
 const multer = require('multer');
 const path = require('path');
@@ -3664,7 +3665,7 @@ router.get('/filter-options', protect, requireAdminOrHr, requireDtrFeatureIfAdmi
   try {
     const items = await listLeaveReviewFilterOptions(
       pool,
-      `${HR_REVIEW_SCOPE_SQL} AND COALESCE(lr.user_id, lr.employee_id) <> $1::uuid`,
+      `${HR_REVIEW_SCOPE_SQL} AND ${finalQueueVisibilitySql('leave', 'lr', '$1::uuid')} AND COALESCE(lr.user_id, lr.employee_id) <> $1::uuid`,
       [req.user?.id]
     );
     res.json(items);
@@ -3726,6 +3727,7 @@ router.get('/', protect, requireAdminOrHr, requireDtrFeatureIfAdmin('leave_allow
          AND ($7::date IS NULL OR lr.created_at < ($7::date + interval '1 day'))
          AND ($8::text IS NULL OR d.name = $8)
          AND ${HR_REVIEW_SCOPE_SQL}
+         AND ${finalQueueVisibilitySql('leave', 'lr', '$9::uuid')}
          AND COALESCE(lr.user_id, lr.employee_id) <> $9::uuid`;
     const params = [status, leaveType, userId, startDateFrom, startDateTo, createdFrom, createdTo, department, req.user?.id];
     const rows = await pool.query(
@@ -3791,6 +3793,7 @@ router.get('/pending', protect, requireAdminOrHr, requireDtrFeatureIfAdmin('leav
          LIMIT 1
        ) dhh ON true
        WHERE lr.status IN ('pending', 'pending_hr')
+         AND ${finalQueueVisibilitySql('leave', 'lr', '$1::uuid')}
          AND COALESCE(lr.user_id, lr.employee_id) <> $1::uuid
        ORDER BY lr.updated_at DESC NULLS LAST, lr.created_at DESC
        LIMIT 200`,
@@ -3831,7 +3834,18 @@ router.get('/department-head/check', protect, async (req, res) => {
        LIMIT 1`,
       [userId]
     );
-    const assignedDepartment = assigned.rows[0] || null;
+    const activeBackup = await client.query(
+      `SELECT b.department_id, d.name AS department_name
+       FROM department_reviewer_backups b
+       JOIN users u ON u.id = b.employee_id
+       LEFT JOIN departments d ON d.id = b.department_id
+       WHERE b.employee_id = $1::uuid AND b.is_active = true AND u.is_active = true
+         AND b.effective_from <= $2::date
+         AND (b.effective_to IS NULL OR b.effective_to >= $2::date)
+       ORDER BY b.backup_rank, b.id LIMIT 1`,
+      [userId, todayInHrmsTimezone()]
+    );
+    const assignedDepartment = assigned.rows[0] || activeBackup.rows[0] || null;
 
     const hasHistoryResult = await client.query(
       `SELECT EXISTS (
@@ -4340,6 +4354,7 @@ router.patch('/:id/approve', protect, requireAdminOrHr, requireDtrFeatureIfAdmin
         return res.json(mapLeaveRowToApi(out.rows[0]));
       }
       const targetUserId = r.user_id || r.employee_id;
+      await assertFinalLeaveReviewer(client, targetUserId, reviewerId, 'leave', id);
       const startStr = toIsoDateStr(r.start_date);
       const endStr = toIsoDateStr(r.end_date);
       const workingDayResult = await computeEmployeeLeaveWorkingDays(
@@ -4373,7 +4388,6 @@ router.patch('/:id/approve', protect, requireAdminOrHr, requireDtrFeatureIfAdmin
         currentStatus: r.status,
         desiredStatus: 'approved',
       });
-      await assertFinalLeaveReviewer(client, targetUserId, reviewerId);
       await requireHrApprovalSignature(client, id, reviewerId);
       const approvingAuthority = await resolveActiveMayor(
         client,
@@ -4553,7 +4567,7 @@ router.patch('/:id/reject', protect, requireAdminOrHr, requireDtrFeatureIfAdmin(
     }
     const currentRow = current.rows[0];
 
-    await assertFinalLeaveReviewer(client, currentRow.user_id || currentRow.employee_id, reviewerId);
+    await assertFinalLeaveReviewer(client, currentRow.user_id || currentRow.employee_id, reviewerId, 'leave', id);
 
     const { nextStatus: rejectNextStatus, historyAction } = validateAdminTransition({
       currentStatus: currentRow.status,
@@ -4868,7 +4882,7 @@ router.patch('/:id/return', protect, requireAdminOrHr, requireDtrFeatureIfAdmin(
       await client.query('ROLLBACK');
       return res.status(400).json({ error: `Cannot return request with status '${currentRow.status}'` });
     }
-    await assertFinalLeaveReviewer(client, currentRow.user_id || currentRow.employee_id, reviewerId);
+    await assertFinalLeaveReviewer(client, currentRow.user_id || currentRow.employee_id, reviewerId, 'leave', id);
     const historyAction = 'returned';
 
     await client.query(

@@ -1,5 +1,6 @@
 const { broadcastAppEvent } = require('../websockets/appEvents');
 const { sendPushForNotification } = require('./fcmPushService');
+const { departmentApproverSql } = require('./approvalStageSeparation');
 
 /**
  * Global in-app notifications (header bell). DocuTracker uses docutracker_notifications
@@ -85,6 +86,16 @@ const reviewNotificationVisibilitySql = `NOT (
     WHERE lr.id = user_notifications.reference_id
       AND COALESCE(lr.user_id, lr.employee_id) = user_notifications.user_id
   )
+) AND NOT (
+  type IN ('locator_pending_hr', 'locator_forwarded_to_hr')
+  AND EXISTS (SELECT 1 FROM locator_slips ls
+    WHERE ls.id = user_notifications.reference_id
+      AND ls.dept_head_reviewer_id = user_notifications.user_id)
+) AND NOT (
+  type IN ('leave_pending_hr', 'leave_forwarded_to_hr')
+  AND EXISTS (SELECT 1 FROM leave_requests lr
+    WHERE lr.id = user_notifications.reference_id
+      AND ${departmentApproverSql('leave', 'lr')} = user_notifications.user_id)
 )`;
 
 async function listNotifications(db, userId, { limit = 50, unreadOnly = false } = {}) {

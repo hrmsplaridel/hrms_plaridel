@@ -1,7 +1,7 @@
 const {
   createSignatureAsset,
 } = require('./docutrackerDocumentBuilderService');
-const { assertFinalLeaveReviewer, resolveFinalLeaveReviewers } = require('./leaveFinalReviewerService');
+const { assertFinalLeaveReviewer, resolveEligibleFinalReviewers } = require('./leaveFinalReviewerService');
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -184,7 +184,7 @@ async function getLeaveSourceSignatures(
   const context = await loadLeaveContext(pool, leaveRequestId, user);
   const canReview = context.isHrOrAdmin && !context.isOwner &&
     canHrApproverSignStatus(context.status) &&
-    (await resolveFinalLeaveReviewers(pool)).some((reviewer) =>
+    (await resolveEligibleFinalReviewers(pool, context.employee_user_id, 'leave', leaveRequestId)).some((reviewer) =>
       String(reviewer.id) === String(user.id));
   let result;
   try {
@@ -291,7 +291,7 @@ async function signLeaveSourceSlot(
           'The final approver signature can only be added while awaiting HR review'
         );
       }
-      await assertFinalLeaveReviewer(client, context.employee_user_id, user.id);
+      await assertFinalLeaveReviewer(client, context.employee_user_id, user.id, 'leave', leaveRequestId);
     } else {
       throw serviceError('NOT_FOUND', 'Leave signature field not found');
     }

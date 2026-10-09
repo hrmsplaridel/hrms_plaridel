@@ -1,3 +1,4 @@
+const { savePrimaryReviewer } = require('../services/primaryReviewerDesignation');
 const express = require('express');
 const { pool } = require('../config/db');
 const { authMiddleware } = require('../middleware/auth');
@@ -27,7 +28,7 @@ const {
   saveDepartmentHeadPeriod,
 } = require('../services/positionDepartmentHeadPeriods');
 const { todayInHrmsTimezone } = require('../utils/dateRangeParser');
-const { resolveFinalLeaveReviewers } = require('../services/leaveFinalReviewerService');
+const { resolveFinalLeaveReviewers, resolveFinalLeaveReviewerConfiguration } = require('../services/leaveFinalReviewerService');
 const {
   PositionValidationError,
   normalizePositionWrite,
@@ -228,6 +229,23 @@ router.get('/', protect, async (req, res) => {
 });
 
 // Final leave reviewers are a separate office-wide assignment, not department backups.
+router.put('/leave-final-reviewer-primary', protect, requireAdmin, requireDtrFeatureIfAdmin('approvals_allowed'), async (req, res) => {
+  try {
+    const result = await savePrimaryReviewer(pool, {
+      departmentId: null,
+      employeeId: req.body?.employee_id,
+      effectiveFrom: req.body?.effective_from,
+      effectiveTo: req.body?.effective_to,
+      actorId: req.user.id,
+    });
+    return res.json(result);
+  } catch (error) {
+    if (error.statusCode) return res.status(error.statusCode).json({ error: error.message });
+    console.error('[primary reviewer designation]', error);
+    return res.status(500).json({ error: 'Failed to save primary reviewer' });
+  }
+});
+
 router.get('/leave-final-reviewers', protect, requireAdmin, requireDtrFeatureIfAdmin('approvals_allowed'), async (req, res) => {
   try {
     const date = String(req.query?.effective_date || todayInHrmsTimezone());
@@ -237,27 +255,21 @@ router.get('/leave-final-reviewers', protect, requireAdmin, requireDtrFeatureIfA
         parsedDate.toISOString().slice(0, 10) !== date) {
       return res.status(400).json({ error: 'effective_date must be a valid YYYY-MM-DD date' });
     }
-    const [reviewers, roster, primary] = await Promise.all([
-      resolveFinalLeaveReviewers(pool, date),
-      pool.query(`SELECT id, full_name AS name FROM users
-                  WHERE is_active = true AND role IN ('admin', 'hr')
-                  ORDER BY full_name, id`),
-      pool.query(`SELECT u.id, u.full_name AS name
-                  FROM positions p
-                  JOIN assignments a ON a.position_id = p.id
-                  JOIN users u ON u.id = a.employee_id
-                  WHERE p.is_leave_final_reviewer = true AND p.is_active = true
-                    AND a.is_active = true AND u.is_active = true
-                    AND u.role IN ('admin', 'hr')
-                    AND a.effective_from <= $1::date
-                    AND (a.effective_to IS NULL OR a.effective_to >= $1::date)
-                  ORDER BY a.effective_from DESC, a.created_at DESC, a.id DESC
-                  LIMIT 1`, [date]),
+    const [config, roster] = await Promise.all([
+      resolveFinalLeaveReviewerConfiguration(pool, date),
+      pool.query(`SELECT u.id, u.full_name AS name, current_assignment.position_title
+                  FROM users u LEFT JOIN LATERAL (
+                    SELECT p.name AS position_title FROM assignments a JOIN positions p ON p.id = a.position_id
+                    WHERE a.employee_id = u.id AND a.is_active = true AND p.is_active = true
+                      AND a.effective_from <= $1::date AND (a.effective_to IS NULL OR a.effective_to >= $1::date)
+                    ORDER BY a.effective_from DESC, a.created_at DESC, a.id DESC LIMIT 1
+                  ) current_assignment ON true
+                  WHERE u.is_active = true AND u.role IN ('admin', 'hr') ORDER BY u.full_name, u.id`, [date]),
     ]);
     return res.json({
       effective_date: date,
-      primary: primary.rows[0] || null,
-      backups: reviewers.filter((row) => row.id !== primary.rows[0]?.id),
+      primary: config.primary,
+      backups: config.backups,
       eligible_employees: roster.rows,
     });
   } catch (err) {
@@ -282,15 +294,14 @@ router.put('/leave-final-reviewers', protect, requireAdmin, requireDtrFeatureIfA
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    const primary = await client.query(
-      `SELECT a.employee_id AS id FROM positions p
-       JOIN assignments a ON a.position_id = p.id
-       WHERE p.is_leave_final_reviewer = true AND p.is_active = true
-         AND a.is_active = true AND a.effective_from <= $1::date
-         AND (a.effective_to IS NULL OR a.effective_to >= $1::date)
-       LIMIT 1`, [date]
-    );
-    if (ids.includes(String(primary.rows[0]?.id))) {
+    await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', ['primary-reviewer:final_hr']);
+    const config = await resolveFinalLeaveReviewerConfiguration(client, date);
+    const overlappingPrimary = ids.length ? await client.query(
+      `SELECT id FROM primary_reviewer_designations WHERE scope_key = 'final_hr'
+       AND employee_id = ANY($1::uuid[]) AND is_active = true
+       AND (effective_to IS NULL OR effective_to >= $2::date) LIMIT 1`, [ids, date]
+    ) : { rows: [] };
+    if (overlappingPrimary.rows.length || ids.includes(String(config.primary?.id))) {
       throw Object.assign(new Error('The official final reviewer cannot also be a backup'), { statusCode: 409 });
     }
     if (ids.length) {
@@ -347,6 +358,9 @@ router.put('/leave-final-reviewers', protect, requireAdmin, requireDtrFeatureIfA
 
 // POST /api/positions - create (admin only)
 router.post('/', protect, requireAdmin, (req, res, next) => {
+  if (req.body?.is_leave_final_reviewer === true || req.body?.is_department_head === true) {
+    return res.status(409).json({ error: 'Designate a primary employee in Approvals & Signatories; positions no longer grant reviewer authority.' });
+  }
   if (req.body?.is_leave_final_reviewer === true || req.body?.is_department_head === true) {
     return requireDtrFeatureIfAdmin('approvals_allowed')(req, res, next);
   }
@@ -469,6 +483,9 @@ router.post('/', protect, requireAdmin, (req, res, next) => {
 
 // PUT /api/positions/:id - update (admin only)
 router.put('/:id', protect, requireAdmin, (req, res, next) => {
+  if (req.body?.is_leave_final_reviewer === true || req.body?.is_department_head === true) {
+    return res.status(409).json({ error: 'Designate a primary employee in Approvals & Signatories; positions no longer grant reviewer authority.' });
+  }
   if (req.body?.is_leave_final_reviewer !== undefined || req.body?.is_department_head !== undefined) {
     return requireDtrFeatureIfAdmin('approvals_allowed')(req, res, next);
   }
