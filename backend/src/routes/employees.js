@@ -14,6 +14,7 @@ const {
 } = require('../utils/employeeStatus');
 const {
   validateCreateEmployeePayload,
+  validateEmploymentType,
   validateEmployeeSeparationDates,
   SEPARATION_EMPLOYMENT_STATUSES,
 } = require('../utils/employeeAccountValidation');
@@ -818,7 +819,7 @@ router.post('/', protect, requireAdminOrSuperAdmin, requireAccountCreationAccess
           nationality?.trim() || null,
           accountIsActive,
           empNo,
-          (employment_type && ['regular', 'contractual', 'job_order', 'casual'].includes(employment_type)) ? employment_type : null,
+          employment_type?.trim() || null,
           salary_grade?.trim() || null,
           date_hired || null,
           separation_date || null,
@@ -949,7 +950,7 @@ router.put('/:id', protect, requireAdmin, requireDtrFeatureIfAdmin('employees_al
     } = req.body;
 
     const existingRes = await pool.query(
-      `SELECT biometric_user_id, employment_status, date_hired,
+      `SELECT biometric_user_id, employment_type, employment_status, date_hired,
               separation_date::text AS separation_date,
               leave_credit_eligible, leave_credit_eligible_until::text
        FROM users WHERE id = $1::uuid AND role <> 'super_admin'`,
@@ -958,6 +959,8 @@ router.put('/:id', protect, requireAdmin, requireDtrFeatureIfAdmin('employees_al
     if (existingRes.rowCount === 0) {
       return res.status(404).json({ error: 'Employee not found' });
     }
+    const employmentTypeError = validateEmploymentType(employment_type, existingRes.rows[0].employment_type);
+    if (employmentTypeError) return res.status(400).json({ error: employmentTypeError });
     const currentBioRaw = existingRes.rows[0].biometric_user_id;
     const currentBioStr = currentBioRaw != null ? String(currentBioRaw).trim() : '';
 
@@ -1058,7 +1061,7 @@ router.put('/:id', protect, requireAdmin, requireDtrFeatureIfAdmin('employees_al
       ['civil_status', civil_status],
       ['nationality', nationality],
       ['avatar_path', avatar_path],
-      ['employment_type', employment_type],
+      ['employment_type', employment_type === '' ? null : employment_type],
       ['salary_grade', salary_grade],
       ['date_hired', date_hired],
       [
@@ -1079,7 +1082,6 @@ router.put('/:id', protect, requireAdmin, requireDtrFeatureIfAdmin('employees_al
     for (const [col, val] of fields) {
       if (val !== undefined) {
         if (col === 'role' && !['admin', 'employee'].includes(val)) continue;
-        if (col === 'employment_type' && val && !['regular', 'contractual', 'job_order', 'casual'].includes(val)) continue;
         if (col === 'employment_status' && val && !['active', 'inactive', 'resigned', 'retired', 'terminated'].includes(val)) continue;
         if (col === 'leave_credit_eligible') {
           updates.push(`${col} = $${i++}`);

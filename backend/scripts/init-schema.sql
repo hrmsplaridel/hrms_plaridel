@@ -58,7 +58,11 @@ CREATE TABLE IF NOT EXISTS users (
   nationality TEXT,
 
   employment_type TEXT
-    CHECK (employment_type IN ('regular', 'contractual', 'job_order', 'casual')),
+    -- regular is retained for importing legacy accounts; new accounts use the seven types.
+    CONSTRAINT users_employment_type_check CHECK (employment_type IN (
+      'permanent', 'temporary', 'casual', 'contractual', 'coterminous',
+      'job_order', 'contract_of_service', 'regular'
+    )),
   salary_grade TEXT,
   date_hired DATE,
   employment_status TEXT DEFAULT 'active'

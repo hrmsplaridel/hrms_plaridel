@@ -1,5 +1,17 @@
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const DATE_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/;
+const EMPLOYMENT_TYPES = Object.freeze([
+  'permanent', 'temporary', 'casual', 'contractual', 'coterminous',
+  'job_order', 'contract_of_service',
+]);
+
+function validateEmploymentType(value, currentValue = null) {
+  if (value === undefined || value === null || value === '') return null;
+  if (typeof value === 'string' &&
+      (EMPLOYMENT_TYPES.includes(value.trim()) ||
+       (value.trim() === 'regular' && currentValue === 'regular'))) return null;
+  return 'Select a valid employment type';
+}
 const SEPARATION_EMPLOYMENT_STATUSES = new Set([
   'resigned',
   'retired',
@@ -74,6 +86,8 @@ function validateEmployeeSeparationDates({
 }
 
 function validateCreateEmployeePayload(payload = {}) {
+  const employmentTypeError = validateEmploymentType(payload.employment_type);
+  if (employmentTypeError) return employmentTypeError;
   const email = typeof payload.email === 'string' ? payload.email.trim() : '';
   if (!email || email.length > 254 || !EMAIL_PATTERN.test(email)) {
     return 'A valid email is required';
@@ -123,6 +137,8 @@ function validateCreateEmployeePayload(payload = {}) {
 }
 
 module.exports = {
+  EMPLOYMENT_TYPES,
+  validateEmploymentType,
   isValidIsoDate,
   isStrongTemporaryPassword,
   validateEmployeeSeparationDates,
