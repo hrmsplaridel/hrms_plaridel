@@ -142,6 +142,13 @@ class NotificationTapResult {
       return const NotificationTapResult(NotificationTapKind.none);
     }
 
+    if (t.contains('pending_department_head') ||
+        t.contains('cancelled_department_head')) {
+      return const NotificationTapResult(
+        NotificationTapKind.employeeLeaveApprovals,
+      );
+    }
+
     if (isPrivileged) {
       if (t.contains('pending_hr') ||
           t.contains('forwarded_to_hr') ||
@@ -156,14 +163,6 @@ class NotificationTapResult {
         );
       }
       return const NotificationTapResult(NotificationTapKind.none);
-    }
-
-    // Employee, supervisor, or department head (non-admin)
-    if (t.contains('pending_department_head') ||
-        t.contains('cancelled_department_head')) {
-      return const NotificationTapResult(
-        NotificationTapKind.employeeLeaveApprovals,
-      );
     }
 
     return const NotificationTapResult(

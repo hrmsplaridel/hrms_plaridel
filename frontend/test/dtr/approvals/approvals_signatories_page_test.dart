@@ -64,9 +64,21 @@ void main() {
                 },
                 'backups': backups,
                 'eligible_employees': [
-                  {'id': 'backup', 'name': 'Backup Employee'},
+                  {
+                    'id': 'head',
+                    'name': 'Department Primary',
+                    'position_title': 'Shared Title',
+                  },
+                  {
+                    'id': 'backup',
+                    'name': 'Backup Employee',
+                    'position_title': 'Shared Title',
+                  },
                 ],
               };
+            case '/api/departments/department/reviewer-primary':
+            case '/api/positions/leave-final-reviewer-primary':
+              data = {};
             case '/api/departments/department/reviewer-backups':
               backups = [
                 {'reviewerId': 'backup', 'reviewerName': 'Backup Employee'},
@@ -77,7 +89,18 @@ void main() {
                 'effective_date': '2026-09-30',
                 'primary': {'id': 'hr', 'name': 'Final Primary'},
                 'backups': [],
-                'eligible_employees': [],
+                'eligible_employees': [
+                  {
+                    'id': 'hr',
+                    'name': 'Final Primary',
+                    'position_title': 'HR Manager',
+                  },
+                  {
+                    'id': 'second-hr',
+                    'name': 'Second HR',
+                    'position_title': 'HR Manager',
+                  },
+                ],
               };
             case '/api/dtr-corrections/reviewers':
               data = {
@@ -132,6 +155,54 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
+  }
+
+  for (final finalReview in [false, true]) {
+    testWidgets('primary designation chooses an employee: final=$finalReview', (
+      tester,
+    ) async {
+      await mount(tester);
+      if (finalReview) {
+        await tester.tap(
+          find.byKey(const ValueKey('settings-entry-office-wide')),
+        );
+        await tester.pumpAndSettle();
+      }
+      await tester.tap(find.text('Primary designation'));
+      await tester.pumpAndSettle();
+      expect(
+        find.text(
+          finalReview ? 'Final HR Reviewer' : 'Department Head Reviewer',
+        ),
+        findsOneWidget,
+      );
+      final employeeField = find.byWidgetPredicate(
+        (widget) =>
+            widget is DropdownButtonFormField<String> &&
+            widget.decoration.labelText == 'Employee',
+      );
+      await tester.tap(employeeField);
+      await tester.pumpAndSettle();
+      await tester.tap(
+        find.text(finalReview ? 'Second HR' : 'Backup Employee').last,
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Save designation'));
+      await tester.pumpAndSettle();
+      final save = requests.singleWhere((r) => r.method == 'PUT');
+      expect(
+        save.path,
+        finalReview
+            ? '/api/positions/leave-final-reviewer-primary'
+            : '/api/departments/department/reviewer-primary',
+      );
+      expect(save.data, {
+        'employee_id': finalReview ? 'second-hr' : 'backup',
+        'effective_from': '2026-09-30',
+        'effective_to': null,
+      });
+      expect(tester.takeException(), isNull);
+    });
   }
 
   testWidgets(

@@ -1,3 +1,4 @@
+import 'package:hrms_plaridel/features/dtr/leave/presentation/admin/admin_my_leave_entry.dart';
 import 'package:hrms_plaridel/features/dtr/locator/presentation/employee/pages/employee_locator_slip_screen.dart';
 import 'package:flutter/foundation.dart' show mapEquals;
 import 'package:hrms_plaridel/core/services/admin_access_refresh.dart';
@@ -360,6 +361,8 @@ class AdminDashboard extends StatefulWidget {
 class _AdminDashboardState extends State<AdminDashboard>
     with WidgetsBindingObserver {
   AdminMenu _selectedMenu = AdminMenu.dashboard;
+  LeaveSection _myLeaveSection = LeaveSection.requests;
+  int _myLeaveEntryVersion = 0;
   AdminAccessRefresh? _accessRefresh;
   int _accountAccessVersion = 0;
   int _dtrAccessVersion = 0;
@@ -419,7 +422,8 @@ class _AdminDashboardState extends State<AdminDashboard>
       _accessRefresh = AdminAccessRefresh(
         realtime: context.read<AppRealtimeProvider>(),
         onRefresh: () async {
-          await Future.wait([_loadAccountCreationAccess(), _loadDtrAccess()]);
+          await Future.wait([_loadAccountCreationAccess(), _loadDtrAccess(),
+            context.read<LeaveProvider>().checkIsDepartmentHead(forceRefresh: true)]);
         },
       );
       unawaited(_accessRefresh!.refresh());
@@ -592,9 +596,17 @@ class _AdminDashboardState extends State<AdminDashboard>
         setState(() => _selectedMenu = AdminMenu.myLocator);
         DashboardContentNavigator.showHome(_contentNavKey);
         break;
-      case NotificationTapKind.none:
       case NotificationTapKind.employeeLeaveApprovals:
       case NotificationTapKind.employeeLeaveRequests:
+        setState(() {
+          _selectedMenu = AdminMenu.myLeave;
+          _myLeaveEntryVersion++;
+          _myLeaveSection = result.kind == NotificationTapKind.employeeLeaveApprovals
+              ? LeaveSection.approvals : LeaveSection.requests;
+        });
+        DashboardContentNavigator.showHome(_contentNavKey);
+        break;
+      case NotificationTapKind.none:
       case NotificationTapKind.employeeMyAttendance:
         break;
     }
@@ -776,7 +788,8 @@ class _AdminDashboardState extends State<AdminDashboard>
           adminPortal: true,
         );
       case AdminMenu.myLeave:
-        return EmployeeLeaveScreen(onFileLeavePressed: _openMyLeaveRequestForm);
+        return AdminMyLeaveEntry(key: ValueKey(_myLeaveEntryVersion), initialSection: _myLeaveSection,
+          requestsContent: EmployeeLeaveScreen(onFileLeavePressed: _openMyLeaveRequestForm));
       case AdminMenu.myLocator:
         return const EmployeeLocatorSlipScreen();
       case AdminMenu.myProfile:

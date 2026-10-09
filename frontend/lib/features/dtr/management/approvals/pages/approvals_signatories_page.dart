@@ -165,7 +165,9 @@ class _ReviewersPageState extends State<_ReviewersPage> {
       });
       await _refreshSummaries();
     } catch (error) {
-      if (mounted) setState(() => _error = userFacingApiError(error));
+      if (mounted) {
+        setState(() => _error = userFacingApiError(error));
+      }
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -321,7 +323,9 @@ class _ReviewerSectionState extends State<_ReviewerSection> {
       });
       widget.onDirtyChanged(false);
     } catch (error) {
-      if (mounted) setState(() => _error = userFacingApiError(error));
+      if (mounted) {
+        setState(() => _error = userFacingApiError(error));
+      }
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -353,7 +357,9 @@ class _ReviewerSectionState extends State<_ReviewerSection> {
       await _load();
       if (mounted) await widget.onSaved();
     } catch (error) {
-      if (mounted) setState(() => _error = userFacingApiError(error));
+      if (mounted) {
+        setState(() => _error = userFacingApiError(error));
+      }
     } finally {
       if (mounted) setState(() => _saving = false);
     }
@@ -362,7 +368,10 @@ class _ReviewerSectionState extends State<_ReviewerSection> {
   Future<void> _designate() async {
     await showDialog<void>(
       context: context,
-      builder: (_) => _DesignationDialog(departmentId: widget.departmentId),
+      builder: (_) => _DesignationDialog(
+        departmentId: widget.departmentId,
+        effectiveDate: _date!,
+      ),
     );
     if (mounted) {
       await _load();
@@ -415,7 +424,7 @@ class _ReviewerSectionState extends State<_ReviewerSection> {
               OutlinedButton.icon(
                 onPressed: busy || _dirty ? null : _designate,
                 icon: const Icon(Icons.badge_outlined),
-                label: const Text('Position designations'),
+                label: const Text('Primary designation'),
               ),
             ],
           ),
@@ -532,7 +541,8 @@ class _ReviewerSectionState extends State<_ReviewerSection> {
 }
 
 class _DesignationDialog extends StatefulWidget {
-  const _DesignationDialog({this.departmentId});
+  const _DesignationDialog({this.departmentId, required this.effectiveDate});
+  final String effectiveDate;
   final String? departmentId;
   @override
   State<_DesignationDialog> createState() => _DesignationDialogState();
@@ -540,7 +550,7 @@ class _DesignationDialog extends StatefulWidget {
 
 class _DesignationDialogState extends State<_DesignationDialog> {
   final _repository = ApprovalConfigurationRepository();
-  List<Map<String, dynamic>> _positions = [];
+  List<Map<String, dynamic>> _employees = [];
   String? _selectedId;
   bool _enabled = false;
   DateTime _from = DateUtils.dateOnly(DateTime.now());
@@ -549,8 +559,8 @@ class _DesignationDialogState extends State<_DesignationDialog> {
   bool _saving = false;
   String? _error;
   bool get _department => widget.departmentId != null;
-  Map<String, dynamic>? get _position {
-    for (final row in _positions) {
+  Map<String, dynamic>? get _employee {
+    for (final row in _employees) {
       if (row['id'] == _selectedId) return row;
     }
     return null;
@@ -564,41 +574,57 @@ class _DesignationDialogState extends State<_DesignationDialog> {
 
   Future<void> _load() async {
     try {
-      final positions = await _repository.positions(widget.departmentId);
-      if (mounted) setState(() => _positions = positions);
+      final config = await _repository.reviewers(
+        widget.departmentId,
+        widget.effectiveDate,
+      );
+      final primary = config['primary'] as Map?;
+      if (mounted) {
+        setState(() {
+          _employees = ApprovalConfigurationRepository.rows(
+            config['eligible_employees'],
+          );
+          _selectedId = primary?[_department ? 'reviewerId' : 'id']?.toString();
+          _enabled = _selectedId != null;
+          if (primary != null &&
+              _selectedId != null &&
+              !_employees.any((e) => e['id'] == _selectedId)) {
+            _employees.add({
+              'id': _selectedId,
+              'name': primary[_department ? 'reviewerName' : 'name'],
+              'position_title': primary['position_title'],
+            });
+          }
+          _from = DateTime.parse(widget.effectiveDate);
+          _to = DateTime.tryParse(primary?['effective_to']?.toString() ?? '');
+        });
+      }
     } catch (error) {
-      if (mounted) setState(() => _error = userFacingApiError(error));
+      if (mounted) {
+        setState(() => _error = userFacingApiError(error));
+      }
     } finally {
       if (mounted) setState(() => _loading = false);
     }
   }
 
   Future<void> _save() async {
-    if (_position == null) return;
+    if (_enabled && _employee == null) return;
     setState(() {
       _saving = true;
       _error = null;
     });
     try {
-      await _repository.saveDesignation(
-        _selectedId!,
-        _department
-            ? {
-                'is_department_head': _enabled,
-                if (_position!['department_head_period_id'] != null)
-                  'department_head_period_id':
-                      _position!['department_head_period_id'],
-                if (_enabled) 'department_head_effective_from': _isoDate(_from),
-                if (_enabled)
-                  'department_head_effective_to': _to == null
-                      ? null
-                      : _isoDate(_to!),
-              }
-            : {'is_leave_final_reviewer': _enabled},
-      );
+      await _repository.savePrimary(widget.departmentId, {
+        'employee_id': _enabled ? _selectedId : null,
+        'effective_from': _isoDate(_from),
+        'effective_to': _to == null ? null : _isoDate(_to!),
+      });
       if (mounted) Navigator.of(context).pop();
     } catch (error) {
-      if (mounted) setState(() => _error = userFacingApiError(error));
+      if (mounted) {
+        setState(() => _error = userFacingApiError(error));
+      }
     } finally {
       if (mounted) setState(() => _saving = false);
     }
@@ -625,9 +651,7 @@ class _DesignationDialogState extends State<_DesignationDialog> {
 
   @override
   Widget build(BuildContext context) => AlertDialog(
-    title: Text(
-      _department ? 'Department Head Position' : 'Final Reviewer Position',
-    ),
+    title: Text(_department ? 'Department Head Reviewer' : 'Final HR Reviewer'),
     content: SizedBox(
       width: 480,
       child: SingleChildScrollView(
@@ -641,10 +665,13 @@ class _DesignationDialogState extends State<_DesignationDialog> {
                 style: TextStyle(color: Theme.of(context).colorScheme.error),
               ),
             DropdownButtonFormField<String>(
-              initialValue: _selectedId,
+              key: ValueKey('primary-employee-$_loading'),
+              initialValue: _employees.any((e) => e['id'] == _selectedId)
+                  ? _selectedId
+                  : null,
               isExpanded: true,
-              decoration: const InputDecoration(labelText: 'Position'),
-              items: _positions
+              decoration: const InputDecoration(labelText: 'Employee'),
+              items: _employees
                   .map(
                     (p) => DropdownMenuItem(
                       value: p['id'] as String,
@@ -659,41 +686,30 @@ class _DesignationDialogState extends State<_DesignationDialog> {
                   ? null
                   : (value) => setState(() {
                       _selectedId = value;
-                      _enabled =
-                          _position?[_department
-                              ? 'is_department_head'
-                              : 'is_leave_final_reviewer'] ==
-                          true;
-                      _from =
-                          DateTime.tryParse(
-                            _position?['department_head_effective_from']
-                                    ?.toString() ??
-                                '',
-                          ) ??
-                          DateUtils.dateOnly(DateTime.now());
-                      _to = DateTime.tryParse(
-                        _position?['department_head_effective_to']
-                                ?.toString() ??
-                            '',
-                      );
+                      _enabled = value != null;
                     }),
             ),
+            if (_employee != null) ...[
+              const SizedBox(height: 8),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  'Position: ${_employee!['position_title'] ?? 'No assigned position'}',
+                ),
+              ),
+            ],
             Material(
               color: Colors.transparent,
               child: SwitchListTile(
                 contentPadding: EdgeInsets.zero,
-                title: Text(
-                  _department
-                      ? 'Official Department Head'
-                      : 'Official Final Reviewer',
-                ),
+                title: const Text('Designate as primary reviewer'),
                 value: _enabled,
-                onChanged: _saving || _position == null
+                onChanged: _saving || _employee == null
                     ? null
                     : (value) => setState(() => _enabled = value),
               ),
             ),
-            if (_department && _enabled)
+            if (_enabled)
               Wrap(
                 spacing: 8,
                 runSpacing: 8,
@@ -730,7 +746,9 @@ class _DesignationDialogState extends State<_DesignationDialog> {
         child: const Text('Cancel'),
       ),
       FilledButton.icon(
-        onPressed: _saving || _position == null ? null : _save,
+        onPressed: _loading || _saving || (_enabled && _employee == null)
+            ? null
+            : _save,
         icon: const Icon(Icons.save_outlined),
         label: Text(_saving ? 'Saving...' : 'Save designation'),
       ),

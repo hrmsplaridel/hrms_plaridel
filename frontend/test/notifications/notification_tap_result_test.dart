@@ -3,6 +3,13 @@ import 'package:hrms_plaridel/features/notifications/models/app_notification.dar
 import 'package:hrms_plaridel/features/notifications/models/notification_tap_result.dart';
 
 void main() {
+  test('admin department leave review opens personal department approvals', () {
+    final result = NotificationTapResult.fromNotification(AppNotification(
+      id: 'department', category: 'leave', type: 'leave_pending_department_head',
+      title: 'Review', createdAt: DateTime(2026, 10, 9),
+    ), role: 'admin');
+    expect(result.kind, NotificationTapKind.employeeLeaveApprovals);
+  });
   for (final role in ['employee', 'admin', 'hr', 'supervisor']) {
     test(
       '$role opens personal credit history for month-end balance notices',
