@@ -31,6 +31,7 @@ const {
   invalidateAttendancePolicyCache,
 } = require('../services/attendancePolicyCache');
 const { broadcastAppEvent } = require('../websockets/appEvents');
+const { notifyLeaveMonthEnd, notifyLeaveMonthEndFailure } = require('../services/leaveMonthEndNotifications');
 
 /** Stable key for pg_try_advisory_lock (must not collide with other app locks). */
 const ACCRUAL_CRON_ADVISORY_LOCK_KEY = 918273645;
@@ -225,6 +226,8 @@ async function runScheduledCompletedMonthEnd(
     runKind = 'initial',
     now = new Date(),
     accrualRunner = runLeaveMonthlyAccrual,
+    monthEndNotifier = notifyLeaveMonthEnd,
+    failureNotifier = notifyLeaveMonthEndFailure,
     attendanceRunner = runMonthlyAttendanceDeductions,
     resultBroadcaster = broadcastMonthlyAccrualResult,
     queueLoader = listPendingReconciliationMonths,
@@ -268,6 +271,7 @@ async function runScheduledCompletedMonthEnd(
       dryRun: false,
       targetMonth: ym,
     });
+    await monthEndNotifier(pool, { targetYearMonth: ym });
     completedResult = {
       ...accrualResult,
       attendanceDeductions,
@@ -323,6 +327,7 @@ async function runScheduledCompletedMonthEnd(
           attendanceDeductions: queuedAttendance,
           runKind: 'queued_reconciliation',
         };
+        await monthEndNotifier(pool, { targetYearMonth: targetMonth });
         resultBroadcaster(queuedResult);
         queuedReconciliations.push({
           targetYearMonth: targetMonth,
@@ -331,6 +336,7 @@ async function runScheduledCompletedMonthEnd(
           rowsUpdated: queuedAttendance.rowsUpdated || 0,
         });
       } catch (error) {
+        await failureNotifier(pool, { targetYearMonth: targetMonth });
         try {
           await queueFailureRecorder(pool, {
             serviceMonth: queued.serviceMonth,
@@ -356,6 +362,9 @@ async function runScheduledCompletedMonthEnd(
       }
     }
     completedResult.queuedReconciliations = queuedReconciliations;
+  }).catch(async (error) => {
+    await failureNotifier(pool, { targetYearMonth: ym });
+    throw error;
   });
 
   if (lockResult && !lockResult.ran) {

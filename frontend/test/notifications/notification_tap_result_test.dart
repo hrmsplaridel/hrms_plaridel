@@ -3,6 +3,29 @@ import 'package:hrms_plaridel/features/notifications/models/app_notification.dar
 import 'package:hrms_plaridel/features/notifications/models/notification_tap_result.dart';
 
 void main() {
+  for (final role in ['employee', 'admin', 'hr', 'supervisor']) {
+    test(
+      '$role opens personal credit history for month-end balance notices',
+      () {
+        for (final type in [
+          'leave_month_end_balance_updated',
+          'leave_month_end_balance_corrected',
+        ]) {
+          final result = NotificationTapResult.fromNotification(
+            AppNotification(
+              id: 'month-end',
+              category: 'leave',
+              type: type,
+              title: 'Balance updated',
+              createdAt: DateTime(2026, 10, 1),
+            ),
+            role: role,
+          );
+          expect(result.kind, NotificationTapKind.employeeLeaveCreditHistory);
+        }
+      },
+    );
+  }
   AppNotification notification({
     required String category,
     required String type,

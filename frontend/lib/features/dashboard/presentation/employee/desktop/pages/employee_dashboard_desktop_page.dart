@@ -24,6 +24,8 @@ import 'package:hrms_plaridel/features/dtr/leave/presentation/shared/pages/leave
 import 'package:hrms_plaridel/features/dtr/leave/utils/responsive_leave_form_host.dart';
 import 'package:hrms_plaridel/features/notifications/data/notification_provider.dart';
 import 'package:hrms_plaridel/features/notifications/models/notification_tap_result.dart';
+import 'package:hrms_plaridel/core/services/push_notification_service.dart';
+import 'package:hrms_plaridel/features/dtr/leave/presentation/shared/pages/leave_balance_history_screen.dart';
 import 'package:hrms_plaridel/features/notifications/presentation/widgets/open_notifications_panel.dart';
 import 'package:hrms_plaridel/features/dtr/leave/presentation/shared/widgets/my_leave_loading_skeleton.dart';
 import 'package:hrms_plaridel/features/dtr/locator/presentation/employee/pages/employee_locator_slip_screen.dart';
@@ -122,6 +124,21 @@ class _EmployeeDashboardState extends State<EmployeeDashboardDesktopPage>
 
   Widget _settingsPanel() => _settingsPanelWidget;
 
+  StreamSubscription<String>? _monthEndPushTapSub;
+
+  void _openPendingMonthEndCreditHistory() {
+    if (!mounted) return;
+    if (PushNotificationService.instance.consumeMonthEndCreditHistoryTapFor(
+      context.read<AuthProvider>().user?.id,
+    )) {
+      _applyNotificationTapResult(
+        const NotificationTapResult(
+          NotificationTapKind.employeeLeaveCreditHistory,
+        ),
+      );
+    }
+  }
+
   @override
   void initState() {
     super.initState();
@@ -135,6 +152,11 @@ class _EmployeeDashboardState extends State<EmployeeDashboardDesktopPage>
     WidgetsBinding.instance.addObserver(this);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
+      _monthEndPushTapSub = PushNotificationService
+          .instance
+          .monthEndCreditHistoryTaps
+          .listen((_) => _openPendingMonthEndCreditHistory());
+      _openPendingMonthEndCreditHistory();
       context.read<NotificationProvider>().refreshUnreadCount();
       context.read<DocuTrackerProvider>().loadSourceSignatureRequests();
       EmployeeTutorialController.showDashboardCoachIfNeeded(
@@ -334,6 +356,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboardDesktopPage>
 
   @override
   void dispose() {
+    _monthEndPushTapSub?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     _notificationPollTimer?.cancel();
     EmployeeHrmsAssistantController.instance.hideFloating();
@@ -360,6 +383,13 @@ class _EmployeeDashboardState extends State<EmployeeDashboardDesktopPage>
   void _applyNotificationTapResult(NotificationTapResult? result) {
     if (result == null || result.kind == NotificationTapKind.none) return;
     switch (result.kind) {
+      case NotificationTapKind.employeeLeaveCreditHistory:
+        Navigator.of(context).push(
+          MaterialPageRoute<void>(
+            builder: (_) => const LeaveBalanceHistoryScreen(isAdmin: false),
+          ),
+        );
+        break;
       case NotificationTapKind.employeeLeaveApprovals:
       case NotificationTapKind.employeeLeaveRequests:
         final section = result.employeeLeaveSection;

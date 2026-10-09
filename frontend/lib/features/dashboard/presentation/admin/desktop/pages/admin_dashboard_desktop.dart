@@ -61,6 +61,8 @@ import 'package:hrms_plaridel/shared/widgets/feature_card.dart';
 import 'package:hrms_plaridel/features/dashboard/presentation/employee/employee_dashboard.dart';
 import 'package:hrms_plaridel/features/notifications/data/notification_provider.dart';
 import 'package:hrms_plaridel/features/notifications/models/notification_tap_result.dart';
+import 'package:hrms_plaridel/core/services/push_notification_service.dart';
+import 'package:hrms_plaridel/features/dtr/leave/presentation/shared/pages/leave_balance_history_screen.dart';
 import 'package:hrms_plaridel/features/notifications/presentation/widgets/open_notifications_panel.dart';
 import 'package:hrms_plaridel/features/dashboard/presentation/admin/desktop/widgets/recruitment_hub_analytics.dart';
 import 'package:hrms_plaridel/features/dashboard/presentation/admin/desktop/widgets/recruitment_monitoring_stats.dart';
@@ -383,6 +385,21 @@ class _AdminDashboardState extends State<AdminDashboard>
   String? _pendingSourceRecordId;
   int _docuTrackerDeepLinkKey = 0;
 
+  StreamSubscription<String>? _monthEndPushTapSub;
+
+  void _openPendingMonthEndCreditHistory() {
+    if (!mounted) return;
+    if (PushNotificationService.instance.consumeMonthEndCreditHistoryTapFor(
+      context.read<AuthProvider>().user?.id,
+    )) {
+      _applyNotificationTapResult(
+        const NotificationTapResult(
+          NotificationTapKind.employeeLeaveCreditHistory,
+        ),
+      );
+    }
+  }
+
   @override
   void initState() {
     super.initState();
@@ -394,6 +411,11 @@ class _AdminDashboardState extends State<AdminDashboard>
     FormPdf.warmupThenPrefetchBackgrounds();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
+      _monthEndPushTapSub = PushNotificationService
+          .instance
+          .monthEndCreditHistoryTaps
+          .listen((_) => _openPendingMonthEndCreditHistory());
+      _openPendingMonthEndCreditHistory();
       _accessRefresh = AdminAccessRefresh(
         realtime: context.read<AppRealtimeProvider>(),
         onRefresh: () async {
@@ -427,6 +449,7 @@ class _AdminDashboardState extends State<AdminDashboard>
 
   @override
   void dispose() {
+    _monthEndPushTapSub?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     _notificationPollTimer?.cancel();
     _accessRefresh?.dispose();
@@ -510,6 +533,13 @@ class _AdminDashboardState extends State<AdminDashboard>
   void _applyNotificationTapResult(NotificationTapResult? result) {
     if (result == null || result.kind == NotificationTapKind.none) return;
     switch (result.kind) {
+      case NotificationTapKind.employeeLeaveCreditHistory:
+        Navigator.of(context).push(
+          MaterialPageRoute<void>(
+            builder: (_) => const LeaveBalanceHistoryScreen(isAdmin: false),
+          ),
+        );
+        break;
       case NotificationTapKind.adminDtrLeaveManagement:
         setState(() => _selectedMenu = AdminMenu.dtr);
         DashboardContentNavigator.showHome(_contentNavKey);

@@ -61,6 +61,7 @@ class _AppRealtimeBridgeState extends State<AppRealtimeBridge> {
           id: notification['id']?.toString() ?? '',
           title: notification['title']?.toString() ?? 'HRMS Plaridel',
           body: notification['body']?.toString(),
+          data: notification,
         ),
       );
     }

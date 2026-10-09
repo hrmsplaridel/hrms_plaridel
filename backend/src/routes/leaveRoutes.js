@@ -45,6 +45,7 @@ const {
 } = require('../services/holidayRangeUtils');
 const leaveNotifications = require('../services/leaveNotifications');
 const { runLeaveMonthlyAccrual } = require('../services/leaveMonthlyAccrual');
+const { notifyLeaveMonthEnd, notifyLeaveMonthEndFailure, notificationMonthForTarget } = require('../services/leaveMonthEndNotifications');
 const {
   runMonthlyAttendanceDeductions,
 } = require('../services/leaveAttendanceDeduction');
@@ -3522,6 +3523,8 @@ router.post('/admin/forced-leave-deduction', protect, requireAdminOrHr, requireD
 // equivalent-day charge to Vacation Leave.
 // Body/query (optional): dry_run, target_month (YYYY-MM), max_catch_up_months (default 1)
 router.post('/admin/monthly-accrual', protect, requireAdminOrHr, requireDtrFeatureIfAdmin('leave_allowed'), async (req, res) => {
+  let notificationMonth = null;
+  let notificationDryRun = true;
   try {
     const dryRun =
       req.body?.dry_run === true ||
@@ -3537,6 +3540,8 @@ router.post('/admin/monthly-accrual', protect, requireAdminOrHr, requireDtrFeatu
       req.query?.target_month ??
       req.query?.year_month;
 
+    notificationDryRun = dryRun;
+    notificationMonth = notificationMonthForTarget(targetMonth);
     const accrualResult = await runLeaveMonthlyAccrual(pool, {
       dryRun,
       maxCatchUpMonths: Number.isFinite(maxCatchUpMonths) ? maxCatchUpMonths : undefined,
@@ -3571,6 +3576,7 @@ router.post('/admin/monthly-accrual', protect, requireAdminOrHr, requireDtrFeatu
       balanceEarnedAdjustmentsByUser: previewEarnedByUser,
     });
     const result = { ...accrualResult, attendanceDeductions };
+    await notifyLeaveMonthEnd(pool, { targetYearMonth: result.targetYearMonth, dryRun });
 
     const attendanceBalanceDetails = (attendanceDeductions.details || []).filter(
       (item) => Number(item.balance_delta || 0) !== 0
@@ -3619,6 +3625,9 @@ router.post('/admin/monthly-accrual', protect, requireAdminOrHr, requireDtrFeatu
     }
     res.status(200).json(result);
   } catch (err) {
+    if (!notificationDryRun && notificationMonth) {
+      await notifyLeaveMonthEndFailure(pool, { targetYearMonth: notificationMonth, actorId: req.user.id });
+    }
     console.error('[leave POST /admin/monthly-accrual]', err);
     res.status(400).json({ error: err.message || 'Monthly accrual failed' });
   }

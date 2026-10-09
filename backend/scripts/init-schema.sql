@@ -1127,6 +1127,17 @@ CREATE INDEX IF NOT EXISTS idx_user_notifications_user_id ON user_notifications(
 CREATE INDEX IF NOT EXISTS idx_user_notifications_read_at ON user_notifications(user_id, read_at);
 CREATE INDEX IF NOT EXISTS idx_user_notifications_created_at ON user_notifications(user_id, created_at DESC);
 
+CREATE TABLE IF NOT EXISTS leave_month_end_notification_state (
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  service_month DATE NOT NULL CHECK (EXTRACT(DAY FROM service_month) = 1),
+  totals JSONB NOT NULL DEFAULT '{}'::jsonb,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (user_id, service_month)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS user_notifications_month_end_failure_idx
+  ON user_notifications(user_id, (metadata->>'service_month'))
+  WHERE type = 'leave_month_end_failed';
+
 CREATE TABLE IF NOT EXISTS user_push_tokens (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,

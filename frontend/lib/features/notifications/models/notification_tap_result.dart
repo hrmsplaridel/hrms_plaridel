@@ -15,6 +15,7 @@ enum NotificationTapKind {
 
   /// Employee: My Leave → My Requests.
   employeeLeaveRequests,
+  employeeLeaveCreditHistory,
   employeeLocatorApprovals,
   employeeLocatorRequests,
 
@@ -67,6 +68,14 @@ class NotificationTapResult {
     final t = n.type.toLowerCase();
     final isPrivileged = role == 'admin' || role == 'hr';
 
+    if (cat == 'leave' &&
+        (t == 'leave_month_end_balance_updated' ||
+            t == 'leave_month_end_balance_corrected')) {
+      return const NotificationTapResult(
+        NotificationTapKind.employeeLeaveCreditHistory,
+      );
+    }
+
     if (cat == 'dtr') {
       if (t.startsWith('dtr_correction_')) {
         return const NotificationTapResult(NotificationTapKind.none);
@@ -113,8 +122,10 @@ class NotificationTapResult {
 
     if (cat != 'leave') {
       if (cat == 'locator') {
-        if (isPrivileged && (t.contains('pending_hr') ||
-            t.contains('forwarded_to_hr') || t.contains('cancelled_hr'))) {
+        if (isPrivileged &&
+            (t.contains('pending_hr') ||
+                t.contains('forwarded_to_hr') ||
+                t.contains('cancelled_hr'))) {
           return const NotificationTapResult(
             NotificationTapKind.adminDtrLocatorManagement,
           );

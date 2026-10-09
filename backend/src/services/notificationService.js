@@ -26,6 +26,7 @@ async function insertNotification(db, opts) {
     referenceType = null,
     referenceId = null,
     metadata = null,
+    deferDelivery = false,
   } = opts;
   const r = await db.query(
     `INSERT INTO user_notifications (user_id, category, type, title, body, reference_type, reference_id, metadata)
@@ -34,6 +35,12 @@ async function insertNotification(db, opts) {
     [userId, category, type, title, body, referenceType, referenceId, metadata ? JSON.stringify(metadata) : null]
   );
   const row = r.rows[0];
+  if (!deferDelivery) publishNotification(db, row);
+  return row;
+}
+
+/** Deliver only after the caller has committed a transactional notification. */
+function publishNotification(db, row) {
   broadcastAppEvent(
     'notification_created',
     { notification: mapRowToApi(row) },
@@ -42,7 +49,6 @@ async function insertNotification(db, opts) {
   sendPushForNotification(db, row).catch((err) => {
     console.error('[notificationService] sendPushForNotification', err);
   });
-  return row;
 }
 
 /**
@@ -143,6 +149,7 @@ function mapRowToApi(row) {
 }
 
 module.exports = {
+  publishNotification,
   insertNotification,
   insertNotificationForUsers,
   listNotifications,
