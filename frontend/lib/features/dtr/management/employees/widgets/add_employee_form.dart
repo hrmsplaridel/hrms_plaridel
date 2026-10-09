@@ -1039,22 +1039,10 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
             ),
           ),
           const SizedBox(height: 20),
-          DropdownButtonFormField<String>(
-            initialValue: _employmentType,
+          EmploymentTypeField(
+            value: _employmentType,
             decoration: _fieldDecoration('Employment Type'),
-            hint: Text(
-              'Employment Type',
-              style: TextStyle(
-                color: AppTheme.textSecondary.withValues(alpha: 0.85),
-                fontSize: 14,
-              ),
-            ),
-            items: [
-              'regular',
-              'contractual',
-              'job_order',
-              'casual',
-            ].map((o) => DropdownMenuItem(value: o, child: Text(o))).toList(),
+            hint: const Text('Employment Type'),
             onChanged: (v) => setState(() => _employmentType = v),
           ),
           const SizedBox(height: 20),

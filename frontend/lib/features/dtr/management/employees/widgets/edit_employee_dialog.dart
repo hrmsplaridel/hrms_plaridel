@@ -778,25 +778,11 @@ class _EditEmployeeDialogState extends State<_EditEmployeeDialog> {
             ),
           ),
           const SizedBox(height: 16),
-          DropdownButtonFormField<String>(
-            initialValue: _employmentType ?? '',
+          EmploymentTypeField(
+            value: _employmentType,
             decoration: _inputDecoration('Employment Type'),
             hint: const Text('Employment Type'),
-            items: [
-              const DropdownMenuItem<String>(
-                value: '',
-                child: Text('Not specified'),
-              ),
-              ...[
-                'regular',
-                'contractual',
-                'job_order',
-                'casual',
-              ].map((o) => DropdownMenuItem(value: o, child: Text(o))),
-            ],
-            onChanged: (v) => setState(
-              () => _employmentType = v == null || v.isEmpty ? null : v,
-            ),
+            onChanged: (v) => setState(() => _employmentType = v),
           ),
           const SizedBox(height: 16),
           TextFormField(
