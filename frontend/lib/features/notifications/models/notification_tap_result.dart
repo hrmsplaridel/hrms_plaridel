@@ -68,6 +68,10 @@ class NotificationTapResult {
     final t = n.type.toLowerCase();
     final isPrivileged = role == 'admin' || role == 'hr';
 
+
+    if (cat == 'leave' && role == 'mayor') {
+      return const NotificationTapResult(NotificationTapKind.none);
+    }
     if (cat == 'leave' &&
         (t == 'leave_month_end_balance_updated' ||
             t == 'leave_month_end_balance_corrected')) {

@@ -14,6 +14,7 @@ class AdminLeaveFilterBar extends StatelessWidget {
   const AdminLeaveFilterBar({
     super.key,
     required this.isDepartmentHead,
+    this.isMayor = false,
     required this.status,
     required this.leaveType,
     required this.leaveTypeOptions,
@@ -33,6 +34,7 @@ class AdminLeaveFilterBar extends StatelessWidget {
   });
 
   final bool isDepartmentHead;
+  final bool isMayor;
   final LeaveRequestStatus? status;
   final String? leaveType;
   final List<AdminLeaveLeaveTypeFilterOption> leaveTypeOptions;
@@ -58,10 +60,20 @@ class AdminLeaveFilterBar extends StatelessWidget {
           null,
           LeaveRequestStatus.pendingDepartmentHead,
           LeaveRequestStatus.pendingHr,
+          LeaveRequestStatus.pendingMayor,
           LeaveRequestStatus.approved,
           LeaveRequestStatus.returned,
           LeaveRequestStatus.rejectedByDepartmentHead,
           LeaveRequestStatus.rejectedByHr,
+          LeaveRequestStatus.cancelled,
+        ]
+      : isMayor
+      ? const <LeaveRequestStatus?>[
+          null,
+          LeaveRequestStatus.pendingMayor,
+          LeaveRequestStatus.returned,
+          LeaveRequestStatus.approved,
+          LeaveRequestStatus.rejected,
           LeaveRequestStatus.cancelled,
         ]
       : const <LeaveRequestStatus?>[
@@ -622,6 +634,8 @@ class _AdminLeaveRequestQueuePanelState
                                 widget.selectedRequest?.id,
                             statusLabel: adminLeaveStatusLabel(
                               pageRequests[index].status,
+                              finalReviewRoute:
+                                  pageRequests[index].finalReviewRoute,
                               isDepartmentHead: widget.isDepartmentHead,
                             ),
                             onTap: () => widget.onSelect(pageRequests[index]),
@@ -669,6 +683,8 @@ class _AdminLeaveRequestQueuePanelState
                                       request: request,
                                       statusLabel: adminLeaveStatusLabel(
                                         request.status,
+                                        finalReviewRoute:
+                                            request.finalReviewRoute,
                                         isDepartmentHead:
                                             widget.isDepartmentHead,
                                       ),

@@ -1,3 +1,5 @@
+import '../widgets/leave_routing_settings.dart';
+import '../widgets/leave_print_settings.dart';
 import '../widgets/leave_employment_eligibility_field.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
@@ -34,6 +36,10 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
   int _page = 0;
   bool _loading = true;
   bool _saving = false;
+  Map<String, dynamic> _creationRouting = {
+    'approval_route': 'hr',
+    'mayor_employment_types': null,
+  };
   bool _isActive = true;
   bool _employeeCanFile = true;
   bool _adminOnly = false;
@@ -165,7 +171,9 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
     _sexEligibility = _sexEligibilityTypes.containsKey(item.sexEligibility)
         ? item.sexEligibility
         : 'any';
-    _eligibleEmploymentTypes = item.eligibleEmploymentTypes == null ? null : [...item.eligibleEmploymentTypes!];
+    _eligibleEmploymentTypes = item.eligibleEmploymentTypes == null
+        ? null
+        : [...item.eligibleEmploymentTypes!];
     _customFields = List<LeaveCustomFieldDefinition>.from(
       item.employeeDetailSchema,
     );
@@ -196,6 +204,10 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
   void _newCustom() {
     setState(() {
       _selected = null;
+      _creationRouting = {
+        'approval_route': 'hr',
+        'mayor_employment_types': null,
+      };
       _nameController.clear();
       _displayNameController.clear();
       _descriptionController.clear();
@@ -248,8 +260,11 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
     setState(() => _saving = true);
     final selected = _selected;
     final data = selected?.isSystem == true
-        ? <String, dynamic>{'eligible_employment_types': _eligibleEmploymentTypes}
+        ? <String, dynamic>{
+            'eligible_employment_types': _eligibleEmploymentTypes,
+          }
         : _payloadFromForm();
+    if (selected?.id == null) data.addAll(_creationRouting);
     try {
       LeaveTypeDefinition? saved;
       if (selected?.id == null) {
@@ -703,7 +718,7 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
                         const SizedBox(height: 6),
                         Text(
                           systemLocked
-                              ? 'Built-in rules are protected. Employment-type eligibility can be configured.'
+                              ? 'Built-in rules are protected. Employment-type eligibility and printed forms can be configured.'
                               : 'Configure filing, balance, and DTR behavior.',
                           style: TextStyle(
                             color: _mutedColor(context),
@@ -725,7 +740,7 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
                     _InfoPanel(
                       icon: Icons.lock_outline_rounded,
                       text:
-                          'Built-in rules are protected. Only employment-type eligibility can be configured here.',
+                          'Built-in rules are protected. Employment-type eligibility and printed forms can be configured here.',
                     ),
                   _sectionTitle(Icons.badge_outlined, 'Basic Information'),
                   TextFormField(
@@ -843,7 +858,8 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
                   LeaveEmploymentEligibilityField(
                     value: _eligibleEmploymentTypes,
                     enabled: !_saving,
-                    onChanged: (value) => setState(() => _eligibleEmploymentTypes = value),
+                    onChanged: (value) =>
+                        setState(() => _eligibleEmploymentTypes = value),
                   ),
                   const SizedBox(height: 16),
                   if (systemLocked)
@@ -992,6 +1008,24 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
                               () => _balanceLedgerType = v ?? 'none',
                             ),
                     ),
+                  const SizedBox(height: 24),
+                  LeaveRoutingSettings(
+                    key: ValueKey('routing-${selected?.id ?? 'new'}'),
+                    leaveTypeId: selected?.id,
+                    onChanged: (value) => _creationRouting = value,
+                  ),
+                  if (selected?.id != null) ...[
+                    LeavePrintSettings(
+                      key: ValueKey('print-${selected!.id}'),
+                      leaveTypeId: selected.id!,
+                    ),
+                    const SizedBox(height: 24),
+                  ] else ...[
+                    const Text(
+                      'Save the leave type first to configure its printed form.',
+                    ),
+                    const SizedBox(height: 16),
+                  ],
                 ],
               ),
             ),
@@ -1065,7 +1099,11 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
             label: Text(
               _saving
                   ? (isCreating ? 'Creating...' : 'Saving...')
-                  : (isCreating ? 'Create Leave Type' : systemLocked ? 'Save Eligibility' : 'Save Changes'),
+                  : (isCreating
+                        ? 'Create Leave Type'
+                        : systemLocked
+                        ? 'Save Eligibility'
+                        : 'Save Changes'),
             ),
           ),
         ],

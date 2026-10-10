@@ -1382,6 +1382,7 @@ bool _canEmployeeCancel(LeaveRequest request) {
   return switch (request.status) {
     LeaveRequestStatus.pending ||
     LeaveRequestStatus.pendingDepartmentHead ||
+    LeaveRequestStatus.pendingMayor ||
     LeaveRequestStatus.pendingHr ||
     LeaveRequestStatus.returned => true,
     LeaveRequestStatus.draft ||

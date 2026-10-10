@@ -3,6 +3,13 @@ import 'package:hrms_plaridel/features/notifications/models/app_notification.dar
 import 'package:hrms_plaridel/features/notifications/models/notification_tap_result.dart';
 
 void main() {
+  test('obsolete Mayor approval notifications have no approval destination', () {
+    for (final type in ['leave_pending_mayor','leave_forwarded_to_mayor']) {
+      final result=NotificationTapResult.fromNotification(AppNotification(id:'notice',category:'leave',type:type,
+        title:'Mayor approval',createdAt:DateTime(2026,10,10)),role:'mayor');
+      expect(result.kind,NotificationTapKind.none);
+    }
+  });
   test('admin department leave review opens personal department approvals', () {
     final result = NotificationTapResult.fromNotification(AppNotification(
       id: 'department', category: 'leave', type: 'leave_pending_department_head',

@@ -6,6 +6,7 @@ enum LeaveRequestStatus {
   draft,
   pending, // legacy alias for pendingHr
   pendingDepartmentHead, // awaiting department head
+  pendingMayor,
   pendingHr, // awaiting HR/admin
   rejectedByDepartmentHead, // department head rejected
   rejectedByHr, // HR/admin rejected
@@ -28,6 +29,7 @@ extension LeaveRequestStatusExtension on LeaveRequestStatus {
     LeaveRequestStatus.draft => 'draft',
     LeaveRequestStatus.pending => 'pending',
     LeaveRequestStatus.pendingDepartmentHead => 'pending_department_head',
+    LeaveRequestStatus.pendingMayor => 'pending_mayor',
     LeaveRequestStatus.pendingHr => 'pending_hr',
     LeaveRequestStatus.rejectedByDepartmentHead =>
       'rejected_by_department_head',
@@ -42,6 +44,7 @@ extension LeaveRequestStatusExtension on LeaveRequestStatus {
     LeaveRequestStatus.draft => 'Draft',
     LeaveRequestStatus.pending => 'Pending',
     LeaveRequestStatus.pendingDepartmentHead => 'Pending Department Head',
+    LeaveRequestStatus.pendingMayor => 'Pending Mayor',
     LeaveRequestStatus.pendingHr => 'Pending HR',
     LeaveRequestStatus.rejectedByDepartmentHead =>
       'Rejected by Department Head',
@@ -56,6 +59,7 @@ extension LeaveRequestStatusExtension on LeaveRequestStatus {
   bool get isPending =>
       this == LeaveRequestStatus.pending ||
       this == LeaveRequestStatus.pendingDepartmentHead ||
+      this == LeaveRequestStatus.pendingMayor ||
       this == LeaveRequestStatus.pendingHr;
 
   /// Whether this status is any kind of rejection.
@@ -155,6 +159,7 @@ class LeaveRequest {
     this.reviewerId,
     this.reviewerName,
     this.reviewerRole,
+    this.finalReviewRoute = 'hr',
     this.reviewerTitle,
     this.reviewedAt,
     this.departmentHeadReviewerId,
@@ -226,6 +231,7 @@ class LeaveRequest {
   final String? reviewerId;
   final String? reviewerName;
   final String? reviewerRole;
+  final String finalReviewRoute;
   final String? reviewerTitle;
   final DateTime? reviewedAt;
   final String? departmentHeadReviewerId;
@@ -353,6 +359,7 @@ class LeaveRequest {
       reviewerId: json['reviewer_id']?.toString(),
       reviewerName: json['reviewer_name']?.toString(),
       reviewerRole: json['reviewer_role']?.toString(),
+      finalReviewRoute: json['final_review_route']?.toString() ?? 'hr',
       reviewerTitle: json['reviewer_title']?.toString(),
       reviewedAt: _parseDateTime(json['reviewed_at']),
       departmentHeadReviewerId: json['department_head_reviewer_id']?.toString(),
@@ -419,6 +426,7 @@ class LeaveRequest {
       'reviewer_id': reviewerId,
       'reviewer_name': _trimOrNull(reviewerName),
       'reviewer_role': _trimOrNull(reviewerRole),
+      'final_review_route': finalReviewRoute,
       'reviewer_title': _trimOrNull(reviewerTitle),
       'reviewed_at': reviewedAt?.toIso8601String(),
       'department_head_reviewer_id': departmentHeadReviewerId,
@@ -483,6 +491,7 @@ class LeaveRequest {
     String? reviewerId,
     String? reviewerName,
     String? reviewerRole,
+    String? finalReviewRoute,
     String? reviewerTitle,
     DateTime? reviewedAt,
     String? departmentHeadReviewerId,
@@ -552,6 +561,7 @@ class LeaveRequest {
       reviewerId: reviewerId ?? this.reviewerId,
       reviewerName: reviewerName ?? this.reviewerName,
       reviewerRole: reviewerRole ?? this.reviewerRole,
+      finalReviewRoute: finalReviewRoute ?? this.finalReviewRoute,
       reviewerTitle: reviewerTitle ?? this.reviewerTitle,
       reviewedAt: reviewedAt ?? this.reviewedAt,
       departmentHeadReviewerId:

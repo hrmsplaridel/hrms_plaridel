@@ -9,6 +9,7 @@ void main() {
     LeaveRequestStatus.pending,
     LeaveRequestStatus.pendingDepartmentHead,
     LeaveRequestStatus.pendingHr,
+    LeaveRequestStatus.pendingMayor,
     LeaveRequestStatus.returned,
   };
 

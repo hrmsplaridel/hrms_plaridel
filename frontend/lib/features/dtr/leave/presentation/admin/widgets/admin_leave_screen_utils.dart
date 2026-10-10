@@ -67,12 +67,15 @@ String? adminLeaveRevokeDisabledReason(LeaveRequest request, {DateTime? now}) {
 String adminLeaveStatusLabel(
   LeaveRequestStatus status, {
   required bool isDepartmentHead,
+  String finalReviewRoute = 'hr',
 }) {
   if (!isDepartmentHead) return status.displayName;
   return switch (status) {
     LeaveRequestStatus.pendingDepartmentHead => 'Pending',
+    LeaveRequestStatus.pendingMayor => 'Forwarded to Mayor',
     LeaveRequestStatus.pendingHr => 'Forwarded to HR',
-    LeaveRequestStatus.approved => 'Approved by HR',
+    LeaveRequestStatus.approved =>
+      finalReviewRoute == 'mayor' ? 'Approved by department reviewer' : 'Approved by HR',
     LeaveRequestStatus.rejectedByDepartmentHead => 'Rejected',
     LeaveRequestStatus.rejectedByHr => 'Rejected by HR',
     LeaveRequestStatus.returned => 'Returned',

@@ -1,3 +1,4 @@
+import 'configured_leave_pdf.dart';
 // ignore_for_file: unused_element
 
 import 'dart:typed_data';
@@ -321,10 +322,9 @@ class LeaveRequestPdf {
     Uint8List? hrApproverSignatureBytes,
     Uint8List? certificationOfficerSignatureBytes,
   }) async {
-    return _LeaveRequestPdfFixedEngine.printLeaveRequest(
+    final document = await buildPdf(
       request: request,
       balances: balances,
-      name: name,
       certificationOfficerName: certificationOfficerName,
       certificationOfficerTitle: certificationOfficerTitle,
       recommendationOfficerName: recommendationOfficerName,
@@ -335,6 +335,18 @@ class LeaveRequestPdf {
       departmentHeadSignatureBytes: departmentHeadSignatureBytes,
       hrApproverSignatureBytes: hrApproverSignatureBytes,
       certificationOfficerSignatureBytes: certificationOfficerSignatureBytes,
+    );
+    final bytes = await saveConfiguredLeavePdf(
+      request: request,
+      document: document,
+      departmentReviewer: recommendationOfficerName,
+      applicantSignature: applicantSignatureBytes,
+      departmentSignature: departmentHeadSignatureBytes,
+      finalSignature: hrApproverSignatureBytes,
+    );
+    await Printing.layoutPdf(
+      onLayout: (_) async => bytes,
+      name: name ?? 'Leave_Application.pdf',
     );
   }
 

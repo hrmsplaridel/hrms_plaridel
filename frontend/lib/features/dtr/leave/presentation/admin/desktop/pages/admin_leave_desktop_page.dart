@@ -1,3 +1,4 @@
+import 'package:hrms_plaridel/features/dtr/leave/utils/configured_leave_pdf.dart';
 import 'dart:async';
 
 import 'package:hrms_plaridel/shared/widgets/reviewer_access_notice.dart';
@@ -48,6 +49,7 @@ class AdminLeaveScreen extends StatefulWidget {
   const AdminLeaveScreen({
     super.key,
     this.isDepartmentHead = false,
+    this.isMayor = false,
     this.canReviewPending = true,
     this.onApprove,
     this.onReturnRequest,
@@ -55,6 +57,7 @@ class AdminLeaveScreen extends StatefulWidget {
   });
 
   final bool isDepartmentHead;
+  final bool isMayor;
   final bool canReviewPending;
   final LeaveApproveAction? onApprove;
   final LeaveDecisionAction? onReturnRequest;
@@ -606,21 +609,25 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
             ]);
           },
           onManageSignatures: _openSignatureLibrary,
-          onForcedLeaveDeduction: widget.isDepartmentHead
+          onForcedLeaveDeduction: widget.isDepartmentHead || widget.isMayor
               ? null
               : _applyForcedLeaveDeduction,
-          onYearEndForcedLeave: widget.isDepartmentHead
+          onYearEndForcedLeave: widget.isDepartmentHead || widget.isMayor
               ? null
               : _yearEndForcedLeaveDeduction,
-          onMonthlyAccrual: widget.isDepartmentHead ? null : _runMonthlyAccrual,
-          onManualBalanceAdjustment: widget.isDepartmentHead
+          onMonthlyAccrual: widget.isDepartmentHead || widget.isMayor
+              ? null
+              : _runMonthlyAccrual,
+          onManualBalanceAdjustment: widget.isDepartmentHead || widget.isMayor
               ? null
               : _manualBalanceAdjustment,
-          onEmployeeLeaveCard: widget.isDepartmentHead
+          onEmployeeLeaveCard: widget.isDepartmentHead || widget.isMayor
               ? null
               : _openEmployeeLeaveCard,
-          onLeaveLedger: widget.isDepartmentHead ? null : _openLeaveLedger,
-          onLeaveTypeRules: widget.isDepartmentHead
+          onLeaveLedger: widget.isDepartmentHead || widget.isMayor
+              ? null
+              : _openLeaveLedger,
+          onLeaveTypeRules: widget.isDepartmentHead || widget.isMayor
               ? null
               : _openLeaveTypeRules,
         ),
@@ -693,6 +700,7 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
             ),
             selectedRequest: selected,
             filterBar: AdminLeaveFilterBar(
+              isMayor: widget.isMayor,
               isDepartmentHead: widget.isDepartmentHead,
               status: _statusFilter,
               leaveType: _leaveTypeFilter,
@@ -941,9 +949,19 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
         hrApproverSignatureBytes:
             formSignatories.hrApproverSignature?.signatureImageBytes,
       );
+      final bytes = await saveConfiguredLeavePdf(
+        request: target,
+        document: document,
+        departmentReviewer: formSignatories.recommendationOfficer?.name,
+        applicantSignature:
+            formSignatories.applicantSignature?.signatureImageBytes,
+        departmentSignature:
+            formSignatories.departmentHeadSignature?.signatureImageBytes,
+        finalSignature:
+            formSignatories.hrApproverSignature?.signatureImageBytes,
+      );
       final filename = 'Leave_Application_${target.id ?? target.userId}.pdf';
       if (preview) {
-        final bytes = await document.save();
         if (!mounted) return;
         await showFormPdfPreview(
           context: context,
@@ -952,10 +970,7 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
           filename: filename,
         );
       } else {
-        await Printing.layoutPdf(
-          onLayout: (_) => document.save(),
-          name: filename,
-        );
+        await Printing.layoutPdf(onLayout: (_) async => bytes, name: filename);
       }
     } catch (e) {
       if (!mounted) return;
@@ -1022,9 +1037,11 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
         request: request,
         slotKey: 'hr_approver',
         title: 'Confirm Final Approval Signature',
-        signatureTitle: 'HR/Admin E-Signature',
+        signatureTitle: widget.isMayor
+            ? 'Mayor E-Signature'
+            : 'HR/Admin E-Signature',
         unsignedMessage: 'No final approver signature selected',
-        waitingMessage: 'Only an authorized HR reviewer can sign here.',
+        waitingMessage: 'Only the assigned final reviewer can sign here.',
         confirmLabel: 'Sign and Approve',
       ),
     );
@@ -1346,7 +1363,9 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
         signatureTitle: 'Department Head E-Signature',
         unsignedMessage: 'No department reviewer signature selected',
         waitingMessage: 'Only the assigned department reviewer can sign here.',
-        confirmLabel: 'Sign and Forward to HR',
+        confirmLabel: request.finalReviewRoute == 'mayor'
+            ? 'Sign and Approve'
+            : 'Sign and Forward to HR',
       ),
     );
     if (!mounted || signed != true) return;
@@ -1361,7 +1380,9 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
     if (!mounted) return;
     _showMessage(
       ok
-          ? 'Forwarded to HR for final approval.'
+          ? request.finalReviewRoute == 'mayor'
+                ? 'Approved. The Mayor signs the printed form manually.'
+                : 'Forwarded to HR for final approval.'
           : (leaveProvider.error ?? 'Department head approval failed.'),
     );
     if (ok) await _loadRequests();
