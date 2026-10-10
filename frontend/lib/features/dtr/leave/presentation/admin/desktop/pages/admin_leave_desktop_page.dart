@@ -101,9 +101,9 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
     if (widget.isDepartmentHead) return;
     final version = ++_reviewerCheckVersion;
     setState(() {
+      // Keep confirmed access visible until the recheck denies access or fails.
       _checkingReviewer = true;
       _reviewerCheckFailed = false;
-      _canReviewFinal = false;
     });
     try {
       final response = await ApiClient.instance.get<Map<String, dynamic>>(

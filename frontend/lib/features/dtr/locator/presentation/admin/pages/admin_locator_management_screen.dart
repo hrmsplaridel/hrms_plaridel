@@ -108,9 +108,9 @@ class _AdminLocatorManagementScreenState
   Future<void> _loadFinalReviewerAccess() async {
     final version = ++_reviewerCheckVersion;
     setState(() {
+      // Keep confirmed access visible until the recheck denies access or fails.
       _checkingReviewer = true;
       _reviewerCheckFailed = false;
-      _canFinalReview = false;
     });
     try {
       final response = await ApiClient.instance.get<Map<String, dynamic>>(
