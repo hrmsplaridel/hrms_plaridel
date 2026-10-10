@@ -21,6 +21,7 @@ import 'package:hrms_plaridel/features/dtr/leave/models/leave_request.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_type.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_type_definition.dart';
 import 'package:hrms_plaridel/features/dtr/leave/utils/employee_leave_card_view_screen.dart';
+import 'package:hrms_plaridel/features/dtr/leave/utils/leave_card_employee_loader.dart';
 import 'package:hrms_plaridel/features/dtr/leave/utils/leave_form_signatories.dart';
 import 'package:hrms_plaridel/features/dtr/leave/presentation/shared/pages/leave_balance_history_screen.dart';
 import 'package:hrms_plaridel/features/dtr/leave/presentation/admin/pages/leave_type_management_screen.dart';
@@ -1803,14 +1804,7 @@ class _EmployeeLeaveCardPickerDialogState
         }
       }
 
-      final res = await ApiClient.instance.get<dynamic>(
-        '/api/employees',
-        queryParameters: const {'status': 'Active', 'limit': 1000, 'offset': 0},
-      );
-      final payload = res.data;
-      final employeeRows = payload is Map
-          ? (payload['employees'] as List<dynamic>? ?? const <dynamic>[])
-          : (payload is List ? payload : const <dynamic>[]);
+      final employeeRows = await loadLeaveCardEmployees();
       final rows =
           employeeRows
               .whereType<Map>()
@@ -2018,7 +2012,7 @@ class _EmployeeLeaveCardPickerDialogState
                           .copyWith(
                             isDense: true,
                             helperText: _employees.isEmpty
-                                ? 'No employees found for this department.'
+                                ? 'No currently assigned employees with VL/SL credit eligibility or history found.'
                                 : '${_employees.length} employee(s) found',
                           ),
                       items: _employees

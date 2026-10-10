@@ -266,10 +266,9 @@ class _LeavePrintSettingsState extends State<LeavePrintSettings> {
           spacing: 12,
           runSpacing: 8,
           children: [
-            TextButton.icon(
+            TextButton(
               onPressed: _disabled ? null : _pick,
-              icon: const Icon(Icons.upload_file),
-              label: const Text('Upload background'),
+              child: const Text('Upload background'),
             ),
             if (_background != null || _file != null)
               TextButton(

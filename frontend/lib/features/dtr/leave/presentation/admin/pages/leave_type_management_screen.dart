@@ -545,10 +545,9 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
                     ),
                   ),
                 ),
-                TextButton.icon(
+                TextButton(
                   onPressed: _saving ? null : _newCustom,
-                  icon: const Icon(Icons.add_rounded),
-                  label: const Text('New custom leave type'),
+                  child: const Text('New custom leave type'),
                 ),
                 const SizedBox(width: 8),
                 IconButton(
@@ -720,9 +719,6 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
                               label: systemLocked
                                   ? 'Protected'
                                   : (isDraft ? 'Draft' : 'Custom'),
-                              icon: systemLocked
-                                  ? Icons.lock_rounded
-                                  : Icons.tune_rounded,
                               color: systemLocked
                                   ? AppTheme.primaryNavy
                                   : AppTheme.primaryNavy,
@@ -730,13 +726,11 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
                             if (selected?.isActive == true)
                               _statusPill(
                                 label: 'Active',
-                                icon: Icons.check_circle_rounded,
                                 color: const Color(0xFF2E7D32),
                               )
                             else if (selected?.id != null)
                               _statusPill(
                                 label: 'Inactive',
-                                icon: Icons.pause_circle_outline_rounded,
                                 color: _mutedColor(context),
                               ),
                           ],
@@ -768,7 +762,7 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
                       text:
                           'Built-in rules are protected. Employment-type eligibility and printed forms can be configured here.',
                     ),
-                  _sectionTitle(Icons.badge_outlined, 'Basic Information'),
+                  _sectionTitle('Basic Information'),
                   TextFormField(
                     controller: _displayNameController,
                     readOnly: _saving || systemLocked,
@@ -843,7 +837,7 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
                     maxLines: 2,
                   ),
                   const SizedBox(height: 24),
-                  _sectionTitle(Icons.rule_rounded, 'Filing Requirements'),
+                  _sectionTitle('Filing Requirements'),
                   Wrap(
                     spacing: 10,
                     runSpacing: 10,
@@ -988,7 +982,7 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
                     _buildCustomFieldsSection(),
                   ],
                   const SizedBox(height: 24),
-                  _sectionTitle(Icons.sync_alt_rounded, 'Balance and DTR'),
+                  _sectionTitle('Balance and DTR'),
                   _ruleChip(
                     label: 'Show on DTR',
                     value: _affectsDtrNormally,
@@ -1088,16 +1082,6 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
       ),
       child: Row(
         children: [
-          Icon(
-            systemLocked ? Icons.lock_rounded : Icons.info_outline_rounded,
-            color: systemLocked
-                ? (_isDark(context)
-                      ? AppTheme.primaryNavyLight
-                      : AppTheme.primaryNavy)
-                : _mutedColor(context),
-            size: 18,
-          ),
-          const SizedBox(width: 8),
           Expanded(
             child: Text(
               systemLocked
@@ -1112,29 +1096,15 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
           ),
           const SizedBox(width: 12),
           if (selected?.id != null && !systemLocked) ...[
-            OutlinedButton.icon(
+            OutlinedButton(
               onPressed: canToggleActive ? _toggleSelectedActive : null,
-              icon: Icon(
-                isSelectedActive ? Icons.block_rounded : Icons.restore_rounded,
-              ),
-              label: Text(isSelectedActive ? 'Deactivate' : 'Reactivate'),
+              child: Text(isSelectedActive ? 'Deactivate' : 'Reactivate'),
             ),
             const SizedBox(width: 10),
           ],
-          FilledButton.icon(
+          FilledButton(
             onPressed: _saving ? null : _save,
-            icon: _saving
-                ? const SizedBox(
-                    width: 16,
-                    height: 16,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : Icon(
-                    isCreating
-                        ? Icons.add_circle_outline_rounded
-                        : Icons.save_rounded,
-                  ),
-            label: Text(
+            child: Text(
               _saving
                   ? (isCreating ? 'Creating...' : 'Saving...')
                   : (isCreating
@@ -1156,17 +1126,13 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
         Row(
           children: [
             Expanded(
-              child: _sectionTitle(
-                Icons.dynamic_form_outlined,
-                'Custom Form Fields',
-              ),
+              child: _sectionTitle('Custom Form Fields'),
             ),
-            OutlinedButton.icon(
+            OutlinedButton(
               onPressed: _saving || _customFields.length >= 20
                   ? null
                   : _addCustomField,
-              icon: const Icon(Icons.add_rounded, size: 18),
-              label: const Text('Add field'),
+              child: const Text('Add field'),
             ),
           ],
         ),
@@ -1404,18 +1370,11 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
     );
   }
 
-  Widget _sectionTitle(IconData icon, String label) {
-    final dark = _isDark(context);
+  Widget _sectionTitle(String label) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
       child: Row(
         children: [
-          Icon(
-            icon,
-            size: 18,
-            color: dark ? AppTheme.primaryNavyLight : AppTheme.primaryNavy,
-          ),
-          const SizedBox(width: 8),
           Text(
             label,
             style: TextStyle(
@@ -1457,12 +1416,6 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(
-              value ? Icons.check_circle_rounded : Icons.cancel_outlined,
-              size: 18,
-              color: color,
-            ),
-            const SizedBox(width: 8),
             Text(
               label,
               style: TextStyle(
@@ -1480,7 +1433,6 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
 
   Widget _statusPill({
     required String label,
-    required IconData icon,
     required Color color,
   }) {
     return Container(
@@ -1493,8 +1445,6 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, size: 14, color: color),
-          const SizedBox(width: 5),
           Text(
             label,
             style: TextStyle(
@@ -1575,9 +1525,6 @@ class _LeaveTypeListTile extends StatelessWidget {
     final accent = selected
         ? (dark ? AppTheme.primaryNavyLight : AppTheme.primaryNavy)
         : Colors.transparent;
-    final iconColor = selected
-        ? (dark ? AppTheme.primaryNavyLight : AppTheme.primaryNavy)
-        : AppTheme.dashTextSecondaryOf(context);
     return Material(
       color: selected
           ? (dark
@@ -1593,21 +1540,6 @@ class _LeaveTypeListTile extends StatelessWidget {
           padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
           child: Row(
             children: [
-              Container(
-                width: 34,
-                height: 34,
-                alignment: Alignment.center,
-                decoration: BoxDecoration(
-                  color: iconColor.withValues(alpha: 0.1),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Icon(
-                  item.isSystem ? Icons.verified_outlined : Icons.tune_rounded,
-                  color: iconColor,
-                  size: 19,
-                ),
-              ),
-              const SizedBox(width: 12),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,

@@ -2,6 +2,7 @@ const express = require('express');
 const bcrypt = require('bcrypt');
 const crypto = require('crypto');
 const { pool } = require('../config/db');
+const { leaveCardEligibilitySql } = require('../services/leaveCardEligibility');
 const { authMiddleware } = require('../middleware/auth');
 const { requireAdmin, requireAdminOrSuperAdmin } = require('../middleware/rbac');
 const { requireAccountCreationAccess } = require('../middleware/accountCreationAccess');
@@ -229,6 +230,7 @@ function resolveEmployeeListDateRange(query = {}) {
 function buildEmployeeListFromSql(req, options = {}) {
   const { deviceBiometricIds = null, historicalRange = null } = options;
   const conditions = ["u.role <> 'super_admin'"];
+  if (String(req.query.leave_card) === 'true') conditions.push(leaveCardEligibilitySql);
   const params = [];
   let i = 1;
   const status = req.query.status || 'Active';
@@ -397,6 +399,7 @@ function employeeRowsForRequester(rows, requester) {
 // Optional: ?biometric_filter=set|has|missing|none — filter by whether biometric_user_id is set (set/has = non-empty; missing/none = empty)
 // Optional: ?q= search; ?sort= & ?order=asc|desc (sort whitelist: full_name, employee_number, role, email, department, position, employment_status, is_active)
 // Optional: ?limit=&offset= — when limit is set, response is { employees, total } instead of a raw array.
+// Optional: ?leave_card=true — only credit-eligible employees or those with VL/SL history.
 router.get('/', protect, async (req, res) => {
   try {
     const biometricUserIdsRaw = req.query.biometric_user_ids;
@@ -417,6 +420,7 @@ router.get('/', protect, async (req, res) => {
            FROM users u
            ${employeeListLateralCurSql()}
            WHERE u.role <> 'super_admin' AND u.biometric_user_id = ANY($1::text[])
+             ${String(req.query.leave_card) === 'true' ? `AND ${leaveCardEligibilitySql}` : ''}
            ORDER BY u.full_name`,
           [ids]
         );
