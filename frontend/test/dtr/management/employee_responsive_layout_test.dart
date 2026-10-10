@@ -24,6 +24,8 @@ void main() {
                       'is_active': true,
                     },
                   ]
+                : options.path == '/api/employees/employee/details'
+                ? {'id': 'employee', 'full_name': 'Test Employee', 'assignment_history': []}
                 : <dynamic>[],
           ),
         ),
@@ -31,6 +33,24 @@ void main() {
     );
   });
   tearDown(() => ApiClient.instance.dio.interceptors.clear());
+
+  testWidgets('selected employee opens full details from the existing panel', (tester) async {
+    tester.view.physicalSize = const Size(1366, 1000);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    await tester.pumpWidget(const MaterialApp(home:Scaffold(body:SingleChildScrollView(
+      child: ManageEmployee(canCreateAccount:true)))));
+    await tester.pumpAndSettle();
+    expect(find.text('View full details'),findsNothing);
+    await tester.tap(find.text('Test Employee'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('View full details'));
+    await tester.pumpAndSettle();
+    expect(find.text('Employee full details'),findsOneWidget);
+    expect(find.text('No assignments recorded.'),findsOneWidget);
+    expect(tester.takeException(),isNull);
+  });
 
   for (final width in [1020.0, 860.0, 600.0, 360.0]) {
     testWidgets('employee content fits $width pixels within a desktop window', (

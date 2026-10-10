@@ -675,6 +675,55 @@ router.post('/bulk-status', protect, requireAdmin, requireDtrFeatureIfAdmin('emp
 });
 
 // GET /api/employees/:id - get one employee (matches profiles + list row department/position)
+router.get('/:id/details', protect, requireAdminOrSuperAdmin,
+  requireDtrFeatureIfAdmin('employees_allowed'), async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT u.id, u.employee_number, u.full_name, u.role, u.email, u.is_active,
+              u.avatar_path, u.biometric_user_id,
+              u.first_name, u.middle_name, u.last_name, u.suffix, u.sex,
+              u.date_of_birth, u.contact_number, u.address, u.civil_status, u.nationality,
+              u.employment_type, u.salary_grade, u.date_hired, u.separation_date,
+              u.leave_credit_eligible_until, u.employment_status, u.leave_credit_eligible,
+              cur.current_department_id, cur.current_department_name,
+              cur.current_position_id, cur.current_position_name, cur.current_shift_punch_mode
+       FROM users u ${employeeListLateralCurSql()}
+       WHERE u.id = $1 AND u.role <> 'super_admin'`, [req.params.id]);
+    if (!result.rows[0]) return res.status(404).json({error: 'Employee not found'});
+    const history = await pool.query(
+      `SELECT a.id, a.effective_from::text, a.effective_to::text, a.is_active, a.remarks,
+              d.name AS department_name, p.name AS position_name, s.name AS shift_name,
+              s.start_time::text AS shift_start_time, s.end_time::text AS shift_end_time,
+              CASE
+                WHEN a.effective_from > (now() AT TIME ZONE 'Asia/Manila')::date THEN 'Upcoming'
+                WHEN a.effective_to < (now() AT TIME ZONE 'Asia/Manila')::date THEN 'Ended'
+                WHEN a.is_active = false THEN 'Inactive'
+                ELSE 'Current'
+              END AS status
+       FROM assignments a
+       LEFT JOIN departments d ON d.id = a.department_id
+       LEFT JOIN positions p ON p.id = a.position_id
+       LEFT JOIN shifts s ON s.id = a.shift_id
+       WHERE a.employee_id = $1
+       ORDER BY a.effective_from DESC, a.created_at DESC, a.id DESC`, [req.params.id]);
+    const balances = await pool.query(
+      `SELECT lb.user_id, lb.leave_type, lb.earned_days, lb.used_days,
+              lb.pending_days, lb.adjusted_days, lb.as_of_date, lb.last_accrual_date,
+              COALESCE(lt.display_name, lt.description, lb.leave_type) AS leave_type_display_name,
+              'credit_balance' AS record_kind
+       FROM leave_balances lb
+       LEFT JOIN leave_types lt ON lt.name = lb.leave_type
+       WHERE lb.user_id = $1::uuid
+         AND (lb.leave_type IN ('vacationLeave', 'sickLeave') OR lt.balance_ledger_type = 'ownBalance')
+       ORDER BY lb.leave_type`, [req.params.id]);
+    res.json({...mapEmployeeListRow(result.rows[0]), assignment_history: history.rows,
+      credit_balances: balances.rows});
+  } catch (err) {
+    console.error('[employees GET :id/details]', err);
+    res.status(500).json({error: 'Failed to fetch employee details'});
+  }
+});
+
 router.get('/:id', protect, async (req, res) => {
   try {
     const result = await pool.query(

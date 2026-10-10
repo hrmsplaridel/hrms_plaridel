@@ -1,4 +1,5 @@
 import '../widgets/employment_type_field.dart';
+import '../widgets/employee_details_view.dart';
 import 'dart:async';
 
 import 'package:dio/dio.dart';
@@ -2276,6 +2277,19 @@ class _ManageEmployeeState extends State<ManageEmployee> {
                   ],
                 ),
               ),
+            ),
+          ],
+          if (hasSelection) ...[
+            const SizedBox(height: 12),
+            TextButton(
+              onPressed: () => openResponsiveRightSidePanel<void>(
+                context: context,
+                barrierLabel: 'Close employee details',
+                breakpoint: 900,
+                initialWidthFraction: 0.52,
+                builder: (_) => EmployeeDetailsView(employeeId: sel.id),
+              ),
+              child: const Text('View full details'),
             ),
           ],
           if (hasSelection && widget.onOpenAssignmentForEmployee != null) ...[
