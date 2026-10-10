@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:hrms_plaridel/shared/widgets/workforce_loading_skeleton.dart';
+import 'package:hrms_plaridel/shared/widgets/form_settings_section.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
@@ -677,14 +678,19 @@ class _LocatorTypeManagementScreenState
                       ),
                       const SizedBox(height: 16),
                       _rulesSection(),
-                      const SizedBox(height: 20),
-                      LocatorPrintSettings(
-                        key: ValueKey('${_selected?.id ?? 'new'}-$_printEpoch'),
-                        typeId: _selected?.id,
-                        enabled: !_saving,
-                        initialDraft: _printDraft,
-                        onChanged: (draft) => _printDraft = draft,
-                        onSaved: () => _printDraft = const LocatorPrintDraft(),
+                      const SizedBox(height: 16),
+                      FormSettingsSection(
+                        child: LocatorPrintSettings(
+                          key: ValueKey(
+                            '${_selected?.id ?? 'new'}-$_printEpoch',
+                          ),
+                          typeId: _selected?.id,
+                          enabled: !_saving,
+                          initialDraft: _printDraft,
+                          onChanged: (draft) => _printDraft = draft,
+                          onSaved: () =>
+                              _printDraft = const LocatorPrintDraft(),
+                        ),
                       ),
                     ],
                   ),
@@ -829,13 +835,7 @@ class _LocatorTypeManagementScreenState
     required IconData icon,
     required List<Widget> children,
   }) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: AppTheme.dashMutedSurfaceOf(context),
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: AppTheme.dashHairlineOf(context)),
-      ),
+    return FormSettingsSection(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [

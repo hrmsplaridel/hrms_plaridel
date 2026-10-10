@@ -163,7 +163,6 @@ class _State extends State<LeaveRoutingSettings> {
         ),
       if (error != null)
         TextButton(onPressed: _load, child: const Text('Retry')),
-      const SizedBox(height: 20),
     ],
   );
   VoidCallback? get _disabled => null;

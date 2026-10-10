@@ -178,6 +178,42 @@ void main() {
     await tester.pump();
   }
 
+  testWidgets('leave type settings use consistent bordered sections', (
+    tester,
+  ) async {
+    await mount(tester);
+    for (final title in [
+      'Basic Information',
+      'Filing Requirements',
+      'Custom Form Fields',
+      'Balance and DTR',
+      'Approval routing',
+      'Printed Form',
+    ]) {
+      await tester.scrollUntilVisible(
+        find.text(title),
+        250,
+        scrollable: formScrollable(),
+      );
+      final box = find.ancestor(
+        of: find.text(title),
+        matching: find.byWidgetPredicate(
+          (w) =>
+              w is Container &&
+              w.padding == const EdgeInsets.all(16) &&
+              w.decoration is BoxDecoration &&
+              (w.decoration as BoxDecoration).borderRadius ==
+                  BorderRadius.circular(10),
+        ),
+      );
+      expect(
+        box,
+        findsOneWidget,
+        reason: '$title should have its own settings box',
+      );
+    }
+  });
+
   for (final failUpload in [false, true]) {
     testWidgets(
       'new type selects a background before creation; upload failure=$failUpload',

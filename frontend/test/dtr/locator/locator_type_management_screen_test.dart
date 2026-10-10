@@ -175,6 +175,25 @@ void main() {
             .last,
       );
       expect(find.text('Upload background'), findsOneWidget);
+      Container sectionBox(String title) => tester.widget<Container>(
+        find
+            .ancestor(
+              of: find.text(title),
+              matching: find.byWidgetPredicate(
+                (w) =>
+                    w is Container &&
+                    w.padding == const EdgeInsets.all(16) &&
+                    w.decoration is BoxDecoration &&
+                    (w.decoration as BoxDecoration).borderRadius ==
+                        BorderRadius.circular(10),
+              ),
+            )
+            .first,
+      );
+      final filingBox = sectionBox('Filing Requirements');
+      final printBox = sectionBox('Printed Form');
+      expect(printBox.decoration, filingBox.decoration);
+      expect(printBox.padding, filingBox.padding);
     },
   );
 
