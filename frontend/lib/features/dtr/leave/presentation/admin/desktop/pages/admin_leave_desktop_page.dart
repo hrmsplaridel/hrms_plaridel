@@ -22,6 +22,7 @@ import 'package:hrms_plaridel/features/dtr/leave/models/leave_type.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_type_definition.dart';
 import 'package:hrms_plaridel/features/dtr/leave/utils/employee_leave_card_view_screen.dart';
 import 'package:hrms_plaridel/features/dtr/leave/utils/leave_card_employee_loader.dart';
+import 'package:hrms_plaridel/features/dtr/leave/utils/leave_adjustment_employee_loader.dart';
 import 'package:hrms_plaridel/features/dtr/leave/utils/leave_form_signatories.dart';
 import 'package:hrms_plaridel/features/dtr/leave/presentation/shared/pages/leave_balance_history_screen.dart';
 import 'package:hrms_plaridel/features/dtr/leave/presentation/admin/pages/leave_type_management_screen.dart';
@@ -2426,14 +2427,7 @@ class _ManualBalanceAdjustmentDialogState
               .toList()
             ..sort();
 
-      final res = await ApiClient.instance.get<dynamic>(
-        '/api/employees',
-        queryParameters: const {'status': 'Active', 'limit': 1000, 'offset': 0},
-      );
-      final payload = res.data;
-      final employeeRows = payload is Map
-          ? (payload['employees'] as List<dynamic>? ?? const <dynamic>[])
-          : (payload is List ? payload : const <dynamic>[]);
+      final employeeRows = await loadLeaveAdjustmentEmployees();
       final rows =
           employeeRows
               .whereType<Map>()
@@ -2800,7 +2794,7 @@ class _ManualBalanceAdjustmentDialogState
                   ? 'Select department first'
                   : (hasEmployees
                         ? 'Select employee'
-                        : 'No employees in this department'),
+                        : 'No eligible employees in this department'),
             ),
             items: _filteredEmployees
                 .map(
@@ -2822,7 +2816,7 @@ class _ManualBalanceAdjustmentDialogState
             const SizedBox(height: 12),
             _statusPanel(
               icon: Icons.person_off_outlined,
-              message: 'No active employees found for this department.',
+              message: 'No employees eligible for credit adjustments found for this department.',
             ),
           ],
           const SizedBox(height: 12),

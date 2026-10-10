@@ -7,6 +7,7 @@ const path = require('path');
 const fs = require('fs');
 const { v4: uuidv4 } = require('uuid');
 const { pool } = require('../config/db');
+const { canAdjustLeaveCredits } = require('../services/leaveCreditAdjustmentEligibility');
 const { lockEmployeeLeaveFiling } = require('../services/leaveFilingLock');
 const { authMiddleware } = require('../middleware/auth');
 const { requireDtrFeatureIfAdmin } = require('../middleware/dtrAccess');
@@ -5461,6 +5462,18 @@ router.post('/balances/:userId/adjustments', protect, requireAdminOrHr, requireD
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+    const employee = await client.query(
+      'SELECT employment_type, leave_credit_eligible FROM users WHERE id = $1::uuid FOR SHARE',
+      [targetId]
+    );
+    if (!employee.rows[0]) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({error:'Employee not found'});
+    }
+    if (!canAdjustLeaveCredits(employee.rows[0])) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({error:'This employee is not eligible for manual leave credit adjustments. JO/COS and employees with credits disabled are excluded.'});
+    }
     const balanceBucket = await resolveBalanceLedgerLeaveType(client, leaveType);
     if (!balanceBucket) {
       await client.query('ROLLBACK');

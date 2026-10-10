@@ -3,6 +3,7 @@ const bcrypt = require('bcrypt');
 const crypto = require('crypto');
 const { pool } = require('../config/db');
 const { leaveCardEligibilitySql } = require('../services/leaveCardEligibility');
+const { leaveCreditAdjustmentEligibilitySql } = require('../services/leaveCreditAdjustmentEligibility');
 const { authMiddleware } = require('../middleware/auth');
 const { requireAdmin, requireAdminOrSuperAdmin } = require('../middleware/rbac');
 const { requireAccountCreationAccess } = require('../middleware/accountCreationAccess');
@@ -231,6 +232,7 @@ function buildEmployeeListFromSql(req, options = {}) {
   const { deviceBiometricIds = null, historicalRange = null } = options;
   const conditions = ["u.role <> 'super_admin'"];
   if (String(req.query.leave_card) === 'true') conditions.push(leaveCardEligibilitySql);
+  if (String(req.query.credit_adjustment) === 'true') conditions.push(leaveCreditAdjustmentEligibilitySql);
   const params = [];
   let i = 1;
   const status = req.query.status || 'Active';
@@ -421,6 +423,7 @@ router.get('/', protect, async (req, res) => {
            ${employeeListLateralCurSql()}
            WHERE u.role <> 'super_admin' AND u.biometric_user_id = ANY($1::text[])
              ${String(req.query.leave_card) === 'true' ? `AND ${leaveCardEligibilitySql}` : ''}
+             ${String(req.query.credit_adjustment) === 'true' ? `AND ${leaveCreditAdjustmentEligibilitySql}` : ''}
            ORDER BY u.full_name`,
           [ids]
         );
