@@ -36,6 +36,9 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
   int _page = 0;
   bool _loading = true;
   bool _saving = false;
+  LeavePrintDraft _creationPrint = const LeavePrintDraft();
+  String? _pendingPrintTypeId;
+  int _printDraftEpoch = 0;
   Map<String, dynamic> _creationRouting = {
     'approval_route': 'hr',
     'mayor_employment_types': null,
@@ -204,6 +207,9 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
   void _newCustom() {
     setState(() {
       _selected = null;
+      _creationPrint = const LeavePrintDraft();
+      _pendingPrintTypeId = null;
+      _printDraftEpoch++;
       _creationRouting = {
         'approval_route': 'hr',
         'mayor_employment_types': null,
@@ -274,6 +280,26 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
         );
         final body = res.data;
         if (body != null) saved = LeaveTypeDefinition.fromJson(body);
+        if (saved?.id != null && _creationPrint.hasChanges) {
+          try {
+            await _creationPrint.save(saved!.id!);
+            _creationPrint = const LeavePrintDraft();
+            _pendingPrintTypeId = null;
+          } catch (e) {
+            // Creation succeeded; retain its ID and file for an upload-only retry.
+            _pendingPrintTypeId = saved!.id;
+            LeaveTypeDefinitionCache.instance.invalidate();
+            if (!mounted) return;
+            _applySavedType(saved);
+            final message = e is DioException
+                ? _messageFromDio(e)
+                : 'Upload failed.';
+            _showMessage(
+              'Leave type created, but print settings could not be saved. $message Retry using Save print settings.',
+            );
+            return;
+          }
+        }
         _showMessage('Leave type added.');
       } else {
         final res = await ApiClient.instance.put<Map<String, dynamic>>(
@@ -1014,18 +1040,30 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
                     leaveTypeId: selected?.id,
                     onChanged: (value) => _creationRouting = value,
                   ),
-                  if (selected?.id != null) ...[
-                    LeavePrintSettings(
-                      key: ValueKey('print-${selected!.id}'),
-                      leaveTypeId: selected.id!,
+                  LeavePrintSettings(
+                    key: ValueKey(
+                      'print-${selected?.id ?? 'new-$_printDraftEpoch'}',
                     ),
-                    const SizedBox(height: 24),
-                  ] else ...[
-                    const Text(
-                      'Save the leave type first to configure its printed form.',
-                    ),
-                    const SizedBox(height: 16),
-                  ],
+                    leaveTypeId: selected?.id,
+                    enabled: !_saving,
+                    onSaved: () {
+                      if (_pendingPrintTypeId == selected?.id) {
+                        setState(() {
+                          _pendingPrintTypeId = null;
+                          _creationPrint = const LeavePrintDraft();
+                        });
+                      }
+                    },
+                    initialDraft:
+                        selected?.id != null &&
+                            selected?.id == _pendingPrintTypeId
+                        ? _creationPrint
+                        : null,
+                    onChanged: selected?.id == null
+                        ? (value) => _creationPrint = value
+                        : null,
+                  ),
+                  const SizedBox(height: 24),
                 ],
               ),
             ),

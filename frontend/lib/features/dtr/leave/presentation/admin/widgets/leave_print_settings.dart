@@ -9,9 +9,49 @@ import 'package:hrms_plaridel/features/dtr/leave/utils/configured_leave_pdf.dart
 import 'package:hrms_plaridel/features/dtr/leave/utils/leave_request_pdf.dart';
 import 'package:hrms_plaridel/core/widgets/form_pdf_preview.dart';
 
+class LeavePrintDraft {
+  const LeavePrintDraft({this.layout = 'csc', this.file});
+  final String layout;
+  final PlatformFile? file;
+  bool get hasChanges => layout != 'csc' || file != null;
+
+  Future<void> save(String leaveTypeId, {bool removeBackground = false}) async {
+    await ApiClient.instance.post(
+      '/api/leave/print/types/$leaveTypeId',
+      data: FormData.fromMap({
+        'layout': layout,
+        'remove_background': removeBackground.toString(),
+        if (file != null)
+          'file': MultipartFile.fromBytes(
+            file!.bytes!,
+            filename: file!.name,
+            contentType: DioMediaType.parse(
+              file!.extension?.toLowerCase() == 'pdf'
+                  ? 'application/pdf'
+                  : file!.extension?.toLowerCase() == 'png'
+                  ? 'image/png'
+                  : 'image/jpeg',
+            ),
+          ),
+      }),
+    );
+  }
+}
+
 class LeavePrintSettings extends StatefulWidget {
-  const LeavePrintSettings({super.key, required this.leaveTypeId});
-  final String leaveTypeId;
+  const LeavePrintSettings({
+    super.key,
+    this.leaveTypeId,
+    this.onChanged,
+    this.onSaved,
+    this.initialDraft,
+    this.enabled = true,
+  });
+  final String? leaveTypeId;
+  final ValueChanged<LeavePrintDraft>? onChanged;
+  final VoidCallback? onSaved;
+  final LeavePrintDraft? initialDraft;
+  final bool enabled;
   @override
   State<LeavePrintSettings> createState() => _LeavePrintSettingsState();
 }
@@ -21,10 +61,21 @@ class _LeavePrintSettingsState extends State<LeavePrintSettings> {
   String? _background, _error;
   PlatformFile? _file;
   bool _loading = true, _busy = false, _remove = false;
+  LeavePrintDraft? _restoreDraft;
+  bool get _disabled => _busy || !widget.enabled;
+  void _changed() =>
+      widget.onChanged?.call(LeavePrintDraft(layout: _layout, file: _file));
   @override
   void initState() {
     super.initState();
-    _load();
+    _restoreDraft = widget.initialDraft;
+    _layout = _restoreDraft?.layout ?? 'csc';
+    _file = _restoreDraft?.file;
+    if (widget.leaveTypeId != null) {
+      _load();
+    } else {
+      _loading = false;
+    }
   }
 
   Future<void> _load() async {
@@ -34,7 +85,10 @@ class _LeavePrintSettingsState extends State<LeavePrintSettings> {
       );
       if (!mounted) return;
       setState(() {
-        _layout = _savedLayout = r.data!['layout'].toString();
+        _savedLayout = r.data!['layout'].toString();
+        _layout = _restoreDraft?.layout ?? _savedLayout;
+        if (_restoreDraft != null) _file = _restoreDraft!.file;
+        _restoreDraft = null;
         _background = r.data!['background_name']?.toString();
         _loading = false;
         _error = null;
@@ -60,11 +114,19 @@ class _LeavePrintSettingsState extends State<LeavePrintSettings> {
       setState(() => _error = 'Use a file up to 5 MB.');
       return;
     }
+    if (r.files.single.bytes == null) {
+      setState(
+        () => _error =
+            'Could not read the selected file. Please select it again.',
+      );
+      return;
+    }
     setState(() {
       _file = r.files.single;
       _remove = false;
       _error = null;
     });
+    _changed();
   }
 
   Future<void> _save() async {
@@ -73,30 +135,17 @@ class _LeavePrintSettingsState extends State<LeavePrintSettings> {
       _error = null;
     });
     try {
-      await ApiClient.instance.post(
-        '/api/leave/print/types/${widget.leaveTypeId}',
-        data: FormData.fromMap({
-          'layout': _layout,
-          'remove_background': _remove.toString(),
-          if (_file != null)
-            'file': MultipartFile.fromBytes(
-              _file!.bytes!,
-              filename: _file!.name,
-              contentType: DioMediaType.parse(
-                _file!.extension?.toLowerCase() == 'pdf'
-                    ? 'application/pdf'
-                    : _file!.extension?.toLowerCase() == 'png'
-                    ? 'image/png'
-                    : 'image/jpeg',
-              ),
-            ),
-        }),
-      );
+      await LeavePrintDraft(
+        layout: _layout,
+        file: _file,
+      ).save(widget.leaveTypeId!, removeBackground: _remove);
       if (!mounted) return;
       setState(() {
         _file = null;
         _remove = false;
+        _restoreDraft = null;
       });
+      widget.onSaved?.call();
       await _load();
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -194,7 +243,12 @@ class _LeavePrintSettingsState extends State<LeavePrintSettings> {
               child: Text('Wellness Leave form'),
             ),
           ],
-          onChanged: _busy ? null : (v) => setState(() => _layout = v!),
+          onChanged: _disabled
+              ? null
+              : (v) {
+                  setState(() => _layout = v!);
+                  _changed();
+                },
         ),
         const SizedBox(height: 10),
         Text(
@@ -213,35 +267,44 @@ class _LeavePrintSettingsState extends State<LeavePrintSettings> {
           runSpacing: 8,
           children: [
             TextButton.icon(
-              onPressed: _busy ? null : _pick,
+              onPressed: _disabled ? null : _pick,
               icon: const Icon(Icons.upload_file),
               label: const Text('Upload background'),
             ),
             if (_background != null || _file != null)
               TextButton(
-                onPressed: _busy
+                onPressed: _disabled
                     ? null
-                    : () => setState(() {
-                        _remove = true;
-                        _file = null;
-                      }),
+                    : () {
+                        setState(() {
+                          _remove = widget.leaveTypeId != null;
+                          _file = null;
+                        });
+                        _changed();
+                      },
                 child: const Text('Remove background'),
               ),
-            FilledButton(
-              onPressed: _busy ? null : _save,
-              child: const Text('Save print settings'),
-            ),
-            TextButton(
-              onPressed: _busy ? null : _preview,
-              child: const Text('Preview saved form'),
-            ),
-            if (_error != null)
+            if (widget.leaveTypeId != null)
+              FilledButton(
+                onPressed: _disabled ? null : _save,
+                child: const Text('Save print settings'),
+              ),
+            if (widget.leaveTypeId != null)
               TextButton(
-                onPressed: _busy ? null : _load,
+                onPressed: _disabled ? null : _preview,
+                child: const Text('Preview saved form'),
+              ),
+            if (_error != null && widget.leaveTypeId != null)
+              TextButton(
+                onPressed: _disabled ? null : _load,
                 child: const Text('Retry'),
               ),
           ],
         ),
+        if (widget.leaveTypeId == null)
+          const Text(
+            'The selected layout and background will be saved when you create the leave type.',
+          ),
       ],
     );
   }
