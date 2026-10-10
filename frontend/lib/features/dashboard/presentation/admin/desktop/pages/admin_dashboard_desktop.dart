@@ -427,8 +427,13 @@ class _AdminDashboardState extends State<AdminDashboard>
       _accessRefresh = AdminAccessRefresh(
         realtime: context.read<AppRealtimeProvider>(),
         onRefresh: () async {
-          await Future.wait([_loadAccountCreationAccess(), _loadDtrAccess(),
-            context.read<LeaveProvider>().checkIsDepartmentHead(forceRefresh: true)]);
+          await Future.wait([
+            _loadAccountCreationAccess(),
+            _loadDtrAccess(),
+            context.read<LeaveProvider>().checkIsDepartmentHead(
+              forceRefresh: true,
+            ),
+          ]);
         },
       );
       unawaited(_accessRefresh!.refresh());
@@ -622,8 +627,10 @@ class _AdminDashboardState extends State<AdminDashboard>
         setState(() {
           _selectedMenu = AdminMenu.myLeave;
           _myLeaveEntryVersion++;
-          _myLeaveSection = result.kind == NotificationTapKind.employeeLeaveApprovals
-              ? LeaveSection.approvals : LeaveSection.requests;
+          _myLeaveSection =
+              result.kind == NotificationTapKind.employeeLeaveApprovals
+              ? LeaveSection.approvals
+              : LeaveSection.requests;
         });
         DashboardContentNavigator.showHome(_contentNavKey);
         break;
@@ -806,7 +813,8 @@ class _AdminDashboardState extends State<AdminDashboard>
 
   Widget _buildContent(String displayName) {
     switch (_selectedMenu == AdminMenu.dtr && !_canAccessDtr
-        ? AdminMenu.dashboard : _selectedMenu) {
+        ? AdminMenu.dashboard
+        : _selectedMenu) {
       case AdminMenu.dashboard:
         return _DashboardContent();
       case AdminMenu.myAttendance:
@@ -815,8 +823,13 @@ class _AdminDashboardState extends State<AdminDashboard>
           adminPortal: true,
         );
       case AdminMenu.myLeave:
-        return AdminMyLeaveEntry(key: ValueKey(_myLeaveEntryVersion), initialSection: _myLeaveSection,
-          requestsContent: EmployeeLeaveScreen(onFileLeavePressed: _openMyLeaveRequestForm));
+        return AdminMyLeaveEntry(
+          key: ValueKey(_myLeaveEntryVersion),
+          initialSection: _myLeaveSection,
+          requestsContent: EmployeeLeaveScreen(
+            onFileLeavePressed: _openMyLeaveRequestForm,
+          ),
+        );
       case AdminMenu.myLocator:
         return const EmployeeLocatorSlipScreen();
       case AdminMenu.myProfile:
@@ -1096,13 +1109,23 @@ bool hasAdminDtrAccess({
   required bool canViewReports,
   required bool canManage,
   required Map<String, bool> featureAccess,
-}) => canViewReports || canManage || const [
-  'employees_allowed', 'leave_allowed', 'approvals_allowed', 'locator_allowed',
-].any((field) => featureAccess[field] == true);
+}) =>
+    canViewReports ||
+    canManage ||
+    const [
+      'employees_allowed',
+      'leave_allowed',
+      'approvals_allowed',
+      'locator_allowed',
+    ].any((field) => featureAccess[field] == true);
 
 class AdminDtrNavigationTile extends StatelessWidget {
-  const AdminDtrNavigationTile({super.key, required this.canAccessDtr,
-    required this.selectedMenu, required this.onTap});
+  const AdminDtrNavigationTile({
+    super.key,
+    required this.canAccessDtr,
+    required this.selectedMenu,
+    required this.onTap,
+  });
   final bool canAccessDtr;
   final AdminMenu selectedMenu;
   final ValueChanged<AdminMenu> onTap;
@@ -1236,7 +1259,10 @@ class _Sidebar extends StatelessWidget {
           ),
           child: DashboardSidebarProfileCard(
             displayName: displayName,
-            subtitle: email.isNotEmpty ? email : 'System Administrator',
+            subtitle: context.select<AuthProvider, String>((auth) {
+              final position = auth.user?.positionName?.trim() ?? '';
+              return position.isNotEmpty ? position : "No position assigned";
+            }),
             avatarPath: avatarPath,
           ),
         ),
