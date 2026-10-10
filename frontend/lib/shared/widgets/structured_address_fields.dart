@@ -220,7 +220,6 @@ class StructuredAddressFormState extends State<StructuredAddressForm> {
         : null;
 
     final fieldStyle = AppTheme.dashFieldTextStyle(context);
-    final hintStyle = AppTheme.dashFieldHintStyle(context);
     final sectionTitleColor = AppTheme.dashTextPrimaryOf(context);
     final tipColor = AppTheme.dashTextSecondaryOf(context);
 
@@ -266,69 +265,89 @@ class StructuredAddressFormState extends State<StructuredAddressForm> {
       );
     }
 
+    Widget searchableDropdown({
+      required String fieldKey,
+      required String? value,
+      required List<String> items,
+      required InputDecoration decoration,
+      required ValueChanged<String?> onSelected,
+      bool enabled = true,
+    }) => DropdownMenu<String>(
+      key: ValueKey(fieldKey),
+      initialSelection: value,
+      expandedInsets: EdgeInsets.zero,
+      menuHeight: 320,
+      enabled: enabled,
+      enableFilter: true,
+      enableSearch: true,
+      requestFocusOnTap: true,
+      hintText: decoration.hintText,
+      helperText: decoration.helperText,
+      textStyle: fieldStyle,
+      inputDecorationTheme: InputDecorationTheme(
+        filled: decoration.filled,
+        fillColor: decoration.fillColor,
+        isDense: decoration.isDense,
+        contentPadding: decoration.contentPadding,
+        border: decoration.border,
+        enabledBorder: decoration.enabledBorder,
+        focusedBorder: decoration.focusedBorder,
+        disabledBorder: decoration.disabledBorder,
+        hintStyle: decoration.hintStyle,
+        helperStyle: decoration.helperStyle,
+      ),
+      menuStyle: MenuStyle(
+        backgroundColor: WidgetStatePropertyAll(AppTheme.dashPanelOf(context)),
+      ),
+      dropdownMenuEntries: items
+          .map((item) => DropdownMenuEntry<String>(value: item, label: item))
+          .toList(),
+      onSelected: onSelected,
+    );
+
     final provinceField = provinceItems.isEmpty
         ? Text(
             'Province list is still loading.',
             style: TextStyle(fontSize: 12, color: tipColor),
           )
-        : DropdownButtonFormField<String>(
-            key: ValueKey('province-$provinceInitial-${provinceItems.length}'),
-            initialValue: provinceInitial,
-            style: fieldStyle,
-            dropdownColor: AppTheme.dashPanelOf(context),
+        : searchableDropdown(
+            fieldKey: 'province-$provinceInitial-${provinceItems.length}',
+            value: provinceInitial,
+            items: provinceItems,
             decoration: fieldDec(hint: 'Select province'),
-            hint: Text('Select province', style: hintStyle),
-            isExpanded: true,
-            items: provinceItems
-                .map(
-                  (o) => DropdownMenuItem(
-                    value: o,
-                    child: Text(o, style: fieldStyle),
-                  ),
-                )
-                .toList(),
-            onChanged: _onProvinceChanged,
+            onSelected: _onProvinceChanged,
           );
 
-    final cityField = DropdownButtonFormField<String>(
-      key: ValueKey('city-$cityInitial-${cityItems.length}'),
-      initialValue: cityInitial,
-      style: fieldStyle,
-      dropdownColor: AppTheme.dashPanelOf(context),
+    final cityField = searchableDropdown(
+      fieldKey: 'city-$_province-$cityInitial-${cityItems.length}',
+      value: cityInitial,
+      items: cityItems,
+      enabled: cityEnabled && cityItems.isNotEmpty,
       decoration: fieldDec(
         hint: !provinceSelected
-            ? 'Select province first'
-            : 'Select city / municipality',
-        helper: !provinceSelected ? 'Select province first' : null,
-        enabled: cityEnabled,
-      ),
-      hint: Text(
-        !provinceSelected
             ? 'Select province first'
             : cityItems.isEmpty
             ? 'Loading cities…'
             : 'Select city / municipality',
-        style: hintStyle,
+        helper: !provinceSelected ? 'Select province first' : null,
+        enabled: cityEnabled,
       ),
-      isExpanded: true,
-      items: cityItems
-          .map(
-            (o) => DropdownMenuItem(value: o, child: Text(o, style: fieldStyle)),
-          )
-          .toList(),
-      onChanged: cityEnabled && cityItems.isNotEmpty ? _onCityChanged : null,
+      onSelected: _onCityChanged,
     );
 
-    final barangayField = DropdownButtonFormField<String>(
-      key: ValueKey('brgy-$barangayInitial-${barangayItems.length}'),
-      initialValue: barangayInitial,
-      style: fieldStyle,
-      dropdownColor: AppTheme.dashPanelOf(context),
+    final barangayField = searchableDropdown(
+      fieldKey:
+          'brgy-$_province-$_city-$barangayInitial-${barangayItems.length}',
+      value: barangayInitial,
+      items: barangayItems,
+      enabled: barangayEnabled,
       decoration: fieldDec(
         hint: !provinceSelected
             ? 'Select province first'
             : (_city ?? '').isEmpty
             ? 'Select city first'
+            : barangayItems.isEmpty
+            ? 'Loading barangays…'
             : 'Select barangay',
         helper: !provinceSelected
             ? 'Select province first'
@@ -337,28 +356,10 @@ class StructuredAddressFormState extends State<StructuredAddressForm> {
             : null,
         enabled: barangayEnabled,
       ),
-      hint: Text(
-        !provinceSelected
-            ? 'Select province first'
-            : (_city ?? '').isEmpty
-            ? 'Select city / municipality first'
-            : barangayItems.isEmpty
-            ? 'Loading barangays…'
-            : 'Select barangay',
-        style: hintStyle,
-      ),
-      isExpanded: true,
-      items: barangayItems
-          .map(
-            (o) => DropdownMenuItem(value: o, child: Text(o, style: fieldStyle)),
-          )
-          .toList(),
-      onChanged: barangayEnabled
-          ? (v) {
-              setState(() => _barangayDropdown = v);
-              _notifyChanged();
-            }
-          : null,
+      onSelected: (v) {
+        setState(() => _barangayDropdown = v);
+        _notifyChanged();
+      },
     );
 
     final streetField = TextFormField(
@@ -370,9 +371,7 @@ class StructuredAddressFormState extends State<StructuredAddressForm> {
 
     Widget pair(Widget a, Widget b) {
       if (!widget.twoColumn) {
-        return Column(
-          children: [a, const SizedBox(height: 12), b],
-        );
+        return Column(children: [a, const SizedBox(height: 12), b]);
       }
       return Row(
         crossAxisAlignment: CrossAxisAlignment.start,
