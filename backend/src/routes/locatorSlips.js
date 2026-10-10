@@ -802,6 +802,8 @@ const locatorSubmissionService = createLocatorSubmissionService({
   assertSubmissionReviewer: (db, applicantId) => assertLeaveSubmissionReviewer(db, applicantId, 'locator'),
 });
 
+router.use('/print', protect, require('./locatorPrintTemplates'));
+
 router.get('/final-reviewer/me', protect, requireAdminOrHr, async (req, res) => {
   try {
     const reviewers = await resolveFinalLeaveReviewers(pool);

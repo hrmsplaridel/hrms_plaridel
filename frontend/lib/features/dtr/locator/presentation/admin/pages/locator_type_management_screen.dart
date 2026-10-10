@@ -11,6 +11,7 @@ import 'package:hrms_plaridel/core/services/app_realtime_provider.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/features/dtr/locator/data/repositories/locator_slip_data_cache.dart';
 import 'package:hrms_plaridel/features/dtr/locator/models/locator_request_type.dart';
+import '../widgets/locator_print_settings.dart';
 
 class LocatorTypeManagementScreen extends StatefulWidget {
   const LocatorTypeManagementScreen({super.key});
@@ -49,6 +50,8 @@ class _LocatorTypeManagementScreenState
   bool _requiresAttachment = false;
   bool _isActive = true;
   String _coverageMode = 'manual';
+  LocatorPrintDraft _printDraft = const LocatorPrintDraft();
+  int _printEpoch = 0;
   StreamSubscription<AppRealtimeEvent>? _locatorTypeRealtimeSub;
 
   @override
@@ -129,6 +132,8 @@ class _LocatorTypeManagementScreenState
 
   void _newType() {
     setState(() {
+      _printDraft = const LocatorPrintDraft();
+      _printEpoch++;
       _selected = null;
       _codeController.clear();
       _labelController.clear();
@@ -152,6 +157,8 @@ class _LocatorTypeManagementScreenState
 
   void _select(LocatorRequestType item) {
     setState(() {
+      _printDraft = const LocatorPrintDraft();
+      _printEpoch++;
       _selected = item;
       _codeController.text = item.code;
       _labelController.text = item.label;
@@ -186,7 +193,31 @@ class _LocatorTypeManagementScreenState
       };
       final selected = _selected;
       if (selected?.id == null || selected!.id!.isEmpty) {
-        await ApiClient.instance.post('/api/locator-slips/types', data: data);
+        final draft = _printDraft;
+        final result = await ApiClient.instance.post<Map<String, dynamic>>(
+          '/api/locator-slips/types',
+          data: data,
+        );
+        if (!mounted) return;
+        _select(LocatorRequestType.fromJson(result.data!));
+        if (draft.file != null) {
+          setState(() => _printDraft = draft);
+          try {
+            await draft.save(_selected!.id!);
+            if (!mounted) return;
+            setState(() {
+              _printDraft = const LocatorPrintDraft();
+              _printEpoch++;
+            });
+          } catch (_) {
+            LocatorSlipDataCache.instance.invalidateTypes();
+            await _load(forceRefresh: true);
+            _showMessage(
+              'Locator type created, but its background could not be saved. Retry using Save print settings.',
+            );
+            return;
+          }
+        }
         _showMessage('Locator type added.');
       } else {
         await ApiClient.instance.put(
@@ -335,13 +366,14 @@ class _LocatorTypeManagementScreenState
   }
 
   Widget _buildList() {
-    if (_loading)
+    if (_loading) {
       return const SingleChildScrollView(
         child: WorkforceRowsSkeleton(
           columns: [2, 1],
           label: 'Loading locator types',
         ),
       );
+    }
     if (_loadError != null) return _buildLoadError();
     _clampPage(_items.length);
     final pageStart = _items.isEmpty ? 0 : _page * _typesPerPage;
@@ -568,7 +600,7 @@ class _LocatorTypeManagementScreenState
     final isNew = _selected == null;
     final catalogReady = !_loading && _loadError == null;
     return IgnorePointer(
-      ignoring: !catalogReady,
+      ignoring: !catalogReady || _saving,
       child: Opacity(
         opacity: catalogReady ? 1 : 0.55,
         child: Container(
@@ -645,6 +677,15 @@ class _LocatorTypeManagementScreenState
                       ),
                       const SizedBox(height: 16),
                       _rulesSection(),
+                      const SizedBox(height: 20),
+                      LocatorPrintSettings(
+                        key: ValueKey('${_selected?.id ?? 'new'}-$_printEpoch'),
+                        typeId: _selected?.id,
+                        enabled: !_saving,
+                        initialDraft: _printDraft,
+                        onChanged: (draft) => _printDraft = draft,
+                        onSaved: () => _printDraft = const LocatorPrintDraft(),
+                      ),
                     ],
                   ),
                 ),

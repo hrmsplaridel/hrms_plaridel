@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'dart:typed_data';
+import 'package:file_picker/file_picker.dart';
 
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
@@ -11,14 +13,19 @@ import 'package:provider/provider.dart';
 
 void main() {
   final requests = <RequestOptions>[];
+  var rejectBackground = false;
+  var created = <Map<String, dynamic>>[];
 
   setUpAll(() {
     TestWidgetsFlutterBinding.ensureInitialized();
     ApiClient.instance.init();
+    FilePicker.platform = _LocatorBackgroundPicker();
   });
 
   setUp(() {
     requests.clear();
+    rejectBackground = false;
+    created = [];
     LocatorSlipDataCache.instance.invalidateTypes();
     ApiClient.instance.dio.interceptors.clear();
     ApiClient.instance.dio.interceptors.add(
@@ -32,7 +39,7 @@ void main() {
               Response<List<dynamic>>(
                 requestOptions: options,
                 statusCode: 200,
-                data: const [],
+                data: created,
               ),
             );
             return;
@@ -40,6 +47,13 @@ void main() {
           if (options.method == 'POST' &&
               options.path == '/api/locator-slips/types') {
             final data = Map<String, dynamic>.from(options.data as Map);
+            created = [
+              {
+                ...data,
+                'id': '11111111-1111-4111-8111-111111111111',
+                'is_system': false,
+              },
+            ];
             handler.resolve(
               Response<Map<String, dynamic>>(
                 requestOptions: options,
@@ -51,6 +65,33 @@ void main() {
                 },
               ),
             );
+            return;
+          }
+          if (options.path.startsWith('/api/locator-slips/print/types/')) {
+            if (options.method == 'POST' && rejectBackground) {
+              handler.reject(
+                DioException(
+                  requestOptions: options,
+                  response: Response(
+                    requestOptions: options,
+                    statusCode: 400,
+                    data: {'error': 'Invalid background'},
+                  ),
+                ),
+              );
+            } else {
+              handler.resolve(
+                Response(
+                  requestOptions: options,
+                  statusCode: 200,
+                  data: {
+                    'id': 'version',
+                    'background_name': null,
+                    'has_background': false,
+                  },
+                ),
+              );
+            }
             return;
           }
           handler.reject(
@@ -123,6 +164,17 @@ void main() {
       expect(find.text('Locator / Official Business'), findsNothing);
       expect(find.text('Pass Slip'), findsNothing);
       expect(find.text('Create Type'), findsOneWidget);
+      await tester.scrollUntilVisible(
+        find.text('Printed Form'),
+        250,
+        scrollable: find
+            .descendant(
+              of: find.byType(ListView),
+              matching: find.byType(Scrollable),
+            )
+            .last,
+      );
+      expect(find.text('Upload background'), findsOneWidget);
     },
   );
 
@@ -191,6 +243,86 @@ void main() {
     );
     expect(requests.where((request) => request.method == 'POST'), isEmpty);
   });
+
+  for (final fails in [false, true]) {
+    testWidgets(
+      'new locator background saves with creation; upload failure=$fails',
+      (tester) async {
+        final original = FilePicker.platform;
+        FilePicker.platform = _LocatorBackgroundPicker();
+        addTearDown(() => FilePicker.platform = original);
+        rejectBackground = fails;
+        await mount(tester);
+        await enterRequiredFields(tester);
+        await tester.scrollUntilVisible(
+          find.text('Upload background'),
+          250,
+          scrollable: find
+              .descendant(
+                of: find.byType(ListView),
+                matching: find.byType(Scrollable),
+              )
+              .last,
+        );
+        await Scrollable.ensureVisible(
+          tester.element(find.text('Upload background')),
+          alignment: .5,
+        );
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Upload background'));
+        await tester.pumpAndSettle();
+        expect(find.text('locator-letterhead.pdf'), findsOneWidget);
+        await tester.tap(find.text('Create Type'));
+        await tester.pumpAndSettle();
+        final uploads = requests.where(
+          (r) => r.method == 'POST' && r.path.contains('/print/types/'),
+        );
+        expect(uploads, hasLength(1));
+        expect(
+          (uploads.single.data as FormData).files.single.value.filename,
+          'locator-letterhead.pdf',
+        );
+        if (fails) {
+          expect(
+            find.textContaining('Locator type created, but its background'),
+            findsOneWidget,
+          );
+          rejectBackground = false;
+          await tester.scrollUntilVisible(
+            find.text('Save print settings'),
+            250,
+            scrollable: find
+                .descendant(
+                  of: find.byType(ListView),
+                  matching: find.byType(Scrollable),
+                )
+                .last,
+          );
+          expect(find.text('locator-letterhead.pdf'), findsOneWidget);
+          await Scrollable.ensureVisible(
+            tester.element(find.text('Save print settings')),
+            alignment: .5,
+          );
+          await tester.pumpAndSettle();
+          await tester.tap(find.text('Save print settings'));
+          await tester.pumpAndSettle();
+          expect(
+            requests.where(
+              (r) => r.method == 'POST' && r.path.contains('/print/types/'),
+            ),
+            hasLength(2),
+          );
+        }
+        expect(
+          requests.where(
+            (r) => r.method == 'POST' && r.path == '/api/locator-slips/types',
+          ),
+          hasLength(1),
+        );
+        expect(tester.takeException(), isNull);
+      },
+    );
+  }
 
   testWidgets('valid rules are sent without normalization', (tester) async {
     await mount(tester);
@@ -278,4 +410,28 @@ class _FakeRealtimeProvider extends AppRealtimeProvider {
     _events.close();
     super.dispose();
   }
+}
+
+class _LocatorBackgroundPicker extends FilePicker {
+  @override
+  Future<FilePickerResult?> pickFiles({
+    String? dialogTitle,
+    String? initialDirectory,
+    FileType type = FileType.any,
+    List<String>? allowedExtensions,
+    Function(FilePickerStatus)? onFileLoading,
+    bool allowCompression = true,
+    int compressionQuality = 30,
+    bool allowMultiple = false,
+    bool withData = false,
+    bool withReadStream = false,
+    bool lockParentWindow = false,
+    bool readSequential = false,
+  }) async => FilePickerResult([
+    PlatformFile(
+      name: 'locator-letterhead.pdf',
+      size: 4,
+      bytes: Uint8List.fromList([37, 80, 68, 70]),
+    ),
+  ]);
 }

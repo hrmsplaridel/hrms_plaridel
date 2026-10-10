@@ -62,10 +62,12 @@ async function loadContext(db, user, id, lock = false) {
     `SELECT ls.*, ls.slip_date::text AS slip_date_text, u.full_name AS employee_name,
        COALESCE(ls.request_type_label_snapshot, t.label) AS print_type_label,
        COALESCE(ls.request_type_location_label_snapshot, t.location_label) AS print_location_label,
+       (v.background_pdf IS NOT NULL) AS has_print_background,
        EXISTS (SELECT 1 FROM locator_slip_department_reviewers r
          WHERE r.locator_slip_id = ls.id AND r.reviewer_id = $2::uuid) AS is_reviewer
      FROM locator_slips ls JOIN users u ON u.id = ls.employee_id
      LEFT JOIN locator_request_types t ON t.code = ls.request_type
+     LEFT JOIN locator_print_template_versions v ON v.id = ls.print_template_version_id
      WHERE ls.id = $1::uuid ${lock ? 'FOR UPDATE OF ls' : ''}`,
     [id, user.id]
   );
@@ -168,6 +170,8 @@ async function getLocatorSourceSignatures(db, user, module, table, id) {
       source_module: module, source_table: table, source_record_id: id,
       source_status: context.status, signatures,
       print_form: {
+        print_template_version_id: context.print_template_version_id || null,
+        has_print_background: context.has_print_background === true,
         employee_name: context.officials.applicant?.name || context.employee_name,
         slip_date: context.slip_date_text, office: context.office, reason: context.reason,
         request_type_label: context.print_type_label, location_label: context.print_location_label,

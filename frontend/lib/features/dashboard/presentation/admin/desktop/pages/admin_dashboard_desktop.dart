@@ -38,6 +38,7 @@ import 'package:hrms_plaridel/features/dtr/attendance/presentation/pages/dtr_das
 import 'package:hrms_plaridel/features/dtr/dtr_routes.dart';
 import 'package:hrms_plaridel/features/dtr/management/employees/pages/manage_employee.dart';
 import 'package:hrms_plaridel/features/dtr/management/assignments/pages/manage_assignment.dart';
+import 'package:hrms_plaridel/features/dtr/management/widgets/workforce_setup_navigation.dart';
 import 'package:hrms_plaridel/features/dtr/management/departments/pages/manage_department.dart';
 import 'package:hrms_plaridel/features/dtr/management/positions/pages/manage_position.dart';
 import 'package:hrms_plaridel/features/dtr/management/shifts/pages/manage_shift.dart';
@@ -1987,104 +1988,10 @@ class _DtrContentState extends State<_DtrContent> {
   bool get _isInWorkforceSetup =>
       _workforceSetupSections.contains(_dtrSectionIndex);
 
-  String _workforceSetupLabel(int index) => switch (index) {
-    4 => 'Assignments',
-    5 => 'Departments',
-    6 => 'Positions',
-    7 => 'Shifts',
-    13 => 'Weekly Schedule',
-    9 => 'Holidays',
-    10 => 'Attendance Policies',
-    _ => 'Workforce Setup',
-  };
-
-  IconData _workforceSetupIcon(int index) => switch (index) {
-    4 => Icons.assignment_rounded,
-    5 => Icons.business_rounded,
-    6 => Icons.work_rounded,
-    7 => Icons.access_time_rounded,
-    13 => Icons.calendar_view_week_rounded,
-    9 => Icons.calendar_today_rounded,
-    10 => Icons.policy_rounded,
-    _ => Icons.settings_rounded,
-  };
-
-  Widget _buildWorkforceSetupNavigation() {
-    final borderColor = AppTheme.dashHairlineOf(context);
-    final panelColor = AppTheme.dashPanelOf(context);
-    final textColor = AppTheme.dashTextPrimaryOf(context);
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          'Workforce Setup',
-          style: TextStyle(
-            color: textColor,
-            fontSize: 20,
-            fontWeight: FontWeight.w700,
-          ),
-        ),
-        const SizedBox(height: 12),
-        DecoratedBox(
-          decoration: BoxDecoration(
-            color: panelColor,
-            border: Border.all(color: borderColor),
-            borderRadius: BorderRadius.circular(8),
-          ),
-          child: SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: Row(
-              children: [
-                for (final index in _workforceSetupSections)
-                  _buildWorkforceSetupTab(index),
-              ],
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildWorkforceSetupTab(int index) {
-    final selected = _dtrSectionIndex == index;
-    final foreground = selected
-        ? Colors.white
-        : AppTheme.dashTextSecondaryOf(context);
-
-    return Semantics(
-      button: true,
-      selected: selected,
-      child: Material(
-        color: selected ? AppTheme.primaryNavy : Colors.transparent,
-        child: InkWell(
-          onTap: () => _openDtrSection(index),
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(minWidth: 148, minHeight: 46),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(_workforceSetupIcon(index), size: 18, color: foreground),
-                  const SizedBox(width: 8),
-                  Text(
-                    _workforceSetupLabel(index),
-                    style: TextStyle(
-                      color: foreground,
-                      fontSize: 14,
-                      fontWeight: selected ? FontWeight.w700 : FontWeight.w600,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
+  Widget _buildWorkforceSetupNavigation() => WorkforceSetupNavigation(
+    selectedIndex: _dtrSectionIndex,
+    onSelected: _openDtrSection,
+  );
 
   Widget _buildDtrFeature(int index) {
     if (index == 1) return DtrMain(section: DtrSection.timeLogs);

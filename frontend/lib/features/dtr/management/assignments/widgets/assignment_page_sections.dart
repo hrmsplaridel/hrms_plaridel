@@ -363,55 +363,78 @@ extension _ManageAssignmentPageSections on _ManageAssignmentState {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Row(
-              children: [
-                CircleAvatar(
-                  radius: 24,
-                  backgroundColor: AppTheme.dashMutedSurfaceOf(context),
-                  child: Icon(
-                    Icons.person_rounded,
-                    size: 28,
-                    color: _mutedColor(context).withValues(alpha: 0.5),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Text(
-                    hasSelection
-                        ? 'Assignments for $employeeLabel'
-                        : 'Select an employee to view assignments',
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      color: _headingColor(context),
-                      fontSize: 16,
-                      fontWeight: hasSelection
-                          ? FontWeight.w700
-                          : FontWeight.w500,
-                    ),
-                  ),
-                ),
-                if (hasSelection) ...[
-                  FilledButton.icon(
-                    onPressed:
-                        _loadingLookups || !_selectedEmployeeCanAddAssignments
-                        ? null
-                        : () => _openAssignmentDrawer(),
-                    icon: const Icon(Icons.add_rounded, size: 18),
-                    label: const Text('Add Primary'),
-                    style: FilledButton.styleFrom(
-                      backgroundColor: const Color(0xFFE85D04),
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 16,
-                        vertical: 12,
+            LayoutBuilder(
+              builder: (context, constraints) {
+                final identity = Row(
+                  children: [
+                    CircleAvatar(
+                      radius: 24,
+                      backgroundColor: AppTheme.dashMutedSurfaceOf(context),
+                      child: Icon(
+                        Icons.person_rounded,
+                        size: 28,
+                        color: _mutedColor(context).withValues(alpha: 0.5),
                       ),
                     ),
-                  ),
-                  const SizedBox(width: 12),
-                ],
-                _buildStatusDropdown(),
-              ],
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
+                        hasSelection
+                            ? 'Assignments for $employeeLabel'
+                            : 'Select an employee to view assignments',
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: _headingColor(context),
+                          fontSize: 16,
+                          fontWeight: hasSelection
+                              ? FontWeight.w700
+                              : FontWeight.w500,
+                        ),
+                      ),
+                    ),
+                  ],
+                );
+                final actions = Wrap(
+                  spacing: 12,
+                  runSpacing: 8,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    if (hasSelection)
+                      FilledButton.icon(
+                        onPressed:
+                            _loadingLookups ||
+                                !_selectedEmployeeCanAddAssignments
+                            ? null
+                            : () => _openAssignmentDrawer(),
+                        icon: const Icon(Icons.add_rounded, size: 18),
+                        label: const Text('Add Primary'),
+                        style: FilledButton.styleFrom(
+                          backgroundColor: const Color(0xFFE85D04),
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 12,
+                          ),
+                        ),
+                      ),
+                    _buildStatusDropdown(),
+                  ],
+                );
+                if (constraints.maxWidth < 620) {
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [identity, const SizedBox(height: 12), actions],
+                  );
+                }
+                return Row(
+                  children: [
+                    Expanded(child: identity),
+                    const SizedBox(width: 12),
+                    actions,
+                  ],
+                );
+              },
             ),
             const SizedBox(height: 24),
             if (hasSelection && !_selectedEmployeeCanAddAssignments) ...[
@@ -458,6 +481,18 @@ extension _ManageAssignmentPageSections on _ManageAssignmentState {
 
   Widget _buildAssignmentsTable(bool hasSelection) {
     if (!hasSelection) return const SizedBox.shrink();
+    return LayoutBuilder(
+      builder: (context, constraints) => SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: SizedBox(
+          width: constraints.maxWidth < 850 ? 850 : constraints.maxWidth,
+          child: _buildAssignmentsTableContent(),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildAssignmentsTableContent() {
     final dark = _isDark(context);
 
     return Container(

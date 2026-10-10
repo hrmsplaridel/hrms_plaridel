@@ -67,6 +67,12 @@ const context = {
   signature_revision: 2, status: 'approved', print_signatories: officials, officials,
   dept_head_reviewer_id: head, hr_reviewer_id: final,
 };
+test('locator print metadata travels with the same request content and signature response',async()=>{
+  const db=mockDb({...context,print_template_version_id:asset,has_print_background:true});
+  const result=await getLocatorSourceSignatures(db,{id:employee,role:'employee'},'dtr','locator_slips',requestId);
+  assert.equal(result.print_form.print_template_version_id,asset);
+  assert.equal(result.print_form.has_print_background,true);
+});
 function ink(signedBy, slot = 'department_head') {
   return { slot_key: slot, signed_by: signedBy, revision: 2,
     signature_asset_id: asset, signature_image_base64: 'aW5r', signed_at: new Date().toISOString() };

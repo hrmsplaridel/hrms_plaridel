@@ -4,7 +4,7 @@ function validateLayout(layout) {
  if(!['csc','wellness'].includes(layout)) throw invalid('Unsupported printed form layout');
  return layout;
 }
-async function validateBackground(bytes,mime) {
+async function validateBackground(bytes,mime,{allowLandscape=false}={}) {
  if(!bytes?.length || bytes.length>5242880) throw invalid('Background must be at most 5 MB');
  try {
   let doc;
@@ -12,17 +12,21 @@ async function validateBackground(bytes,mime) {
   else if(['image/png','image/jpeg'].includes(mime)) {
    doc=await PDFDocument.create();
    const img=mime==='image/png'?await doc.embedPng(bytes):await doc.embedJpg(bytes);
-   if(Math.abs(img.width/img.height-595.28/841.89)>0.025) throw invalid('Use a portrait A4 background');
-   doc.addPage([595.28,841.89]).drawImage(img,{x:0,y:0,width:595.28,height:841.89});
+   const landscape=allowLandscape && img.width>img.height;
+   const width=landscape?841.89:595.28,height=landscape?595.28:841.89;
+   if(Math.abs(img.width/img.height-width/height)>0.025) throw invalid(allowLandscape?'Use an A4 background':'Use a portrait A4 background');
+   doc.addPage([width,height]).drawImage(img,{x:0,y:0,width,height});
   } else throw invalid('Use PDF, PNG or JPEG');
   if(doc.getPageCount()!==1) throw invalid('Use a single-page background');
   const page=doc.getPage(0), {width,height}=page.getSize();
-  if(Math.abs(width-595.28)>3 || Math.abs(height-841.89)>3 || page.getRotation().angle!==0)
-   throw invalid('Use a portrait A4 background');
+  const portrait=Math.abs(width-595.28)<=3 && Math.abs(height-841.89)<=3;
+  const landscape=allowLandscape && Math.abs(width-841.89)<=3 && Math.abs(height-595.28)<=3;
+  if((!portrait&&!landscape) || page.getRotation().angle!==0)
+   throw invalid(allowLandscape?'Use an A4 background':'Use a portrait A4 background');
   // Rebuild using embedded artwork; interactive content is not copied.
   if(!page.node.Contents()) page.drawRectangle({x:0,y:0,width:1,height:1,opacity:0});
   const clean=await PDFDocument.create(); const artwork=await clean.embedPage(page);
-  clean.addPage([595.28,841.89]).drawPage(artwork);
+  clean.addPage(landscape?[841.89,595.28]:[595.28,841.89]).drawPage(artwork);
   return Buffer.from(await clean.save());
  } catch(e) {if(e.status) throw e; throw invalid('Could not read background PDF or image');}
 }
