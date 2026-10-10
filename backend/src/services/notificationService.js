@@ -73,6 +73,8 @@ async function insertNotificationForUsers(db, userIds, payload) {
 
 // Obsolete self-review alerts may exist from older notification routing.
 const reviewNotificationVisibilitySql = `NOT (
+  type IN ('leave_pending_mayor', 'leave_forwarded_to_mayor')
+) AND NOT (
   type IN ('locator_pending_hr', 'locator_forwarded_to_hr', 'locator_pending_department_head')
   AND EXISTS (
     SELECT 1 FROM locator_slips ls
@@ -80,7 +82,7 @@ const reviewNotificationVisibilitySql = `NOT (
       AND ls.employee_id = user_notifications.user_id
   )
 ) AND NOT (
-  type IN ('leave_pending_hr', 'leave_forwarded_to_hr', 'leave_pending_department_head')
+  type IN ('leave_pending_hr', 'leave_forwarded_to_hr', 'leave_pending_mayor', 'leave_forwarded_to_mayor', 'leave_pending_department_head')
   AND EXISTS (
     SELECT 1 FROM leave_requests lr
     WHERE lr.id = user_notifications.reference_id
@@ -92,7 +94,7 @@ const reviewNotificationVisibilitySql = `NOT (
     WHERE ls.id = user_notifications.reference_id
       AND ls.dept_head_reviewer_id = user_notifications.user_id)
 ) AND NOT (
-  type IN ('leave_pending_hr', 'leave_forwarded_to_hr')
+  type IN ('leave_pending_hr', 'leave_forwarded_to_hr', 'leave_pending_mayor', 'leave_forwarded_to_mayor')
   AND EXISTS (SELECT 1 FROM leave_requests lr
     WHERE lr.id = user_notifications.reference_id
       AND ${departmentApproverSql('leave', 'lr')} = user_notifications.user_id)

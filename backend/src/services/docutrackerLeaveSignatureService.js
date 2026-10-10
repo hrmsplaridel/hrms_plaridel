@@ -14,6 +14,7 @@ const APPLICANT_SIGNABLE_STATUSES = new Set([
   'pending',
   'pending_department_head',
   'pending_hr',
+  'pending_mayor',
 ]);
 
 function serviceError(code, message) {
@@ -38,7 +39,7 @@ function canDepartmentHeadSignStatus(status) {
 
 function canHrApproverSignStatus(status) {
   const normalized = String(status || '').trim().toLowerCase();
-  return normalized === 'pending_hr' || normalized === 'pending';
+  return normalized === 'pending_hr' || normalized === 'pending_mayor' || normalized === 'pending';
 }
 
 function assertSupportedLeaveSource(sourceModule, sourceTable) {
@@ -53,7 +54,7 @@ async function loadLeaveContext(db, leaveRequestId, user, { forUpdate = false } 
   }
   const result = await db.query(
     `SELECT lr.id,
-            lr.status,
+            lr.status,lr.final_review_route,lr.final_reviewer_user_id,
             COALESCE(lr.user_id, lr.employee_id) AS employee_user_id,
             employee.full_name AS employee_name,
             lr.assigned_department_head_id,
@@ -93,7 +94,7 @@ async function loadLeaveContext(db, leaveRequestId, user, { forUpdate = false } 
   const userId = String(user.id || '');
   const role = String(user.role || '').toLowerCase();
   const isOwner = String(row.employee_user_id || '') === userId;
-  const isHrOrAdmin = role === 'admin' || role === 'hr';
+  const isHrOrAdmin = role === 'admin' || role === 'hr' || (role==='mayor' && String(row.final_reviewer_user_id)===userId);
   const isReviewer =
     String(row.assigned_department_head_id || '') === userId ||
     row.is_snapshotted_reviewer === true ||
@@ -156,7 +157,7 @@ function mapHrApproverSignature(context, row, user, canReview) {
   return {
     id: row?.id || null,
     slot_key: HR_APPROVER_SLOT,
-    label: 'Final Approver Signature',
+    label: context.final_review_route==='mayor'?'Mayor Signature':'Final Approver Signature',
     assigned_signer_id:
       row?.assigned_signer_id || (canReview ? user.id : null),
     assigned_signer_name:

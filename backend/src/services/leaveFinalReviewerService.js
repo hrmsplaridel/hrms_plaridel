@@ -1,3 +1,5 @@
+const {requestFinalReviewers,chooseLeaveRoute}=require('./leaveRouting');
+const {resolveActiveMayor}=require('./officialSignatoryService');
 'use strict';
 
 const { todayInHrmsTimezone } = require('../utils/dateRangeParser');
@@ -65,7 +67,7 @@ async function resolveFinalLeaveReviewers(db, date = todayInHrmsTimezone()) {
 
 async function resolveEligibleFinalReviewers(db, applicantId, requestType, requestId) {
   const departmentApprover = await loadDepartmentApprover(db, requestType, requestId);
-  const reviewers = await resolveFinalLeaveReviewers(db);
+  const reviewers = requestType === 'leave' ? await requestFinalReviewers(db, requestId, () => resolveFinalLeaveReviewers(db)) : await resolveFinalLeaveReviewers(db);
   return reviewers.filter(r => String(r.id) !== String(applicantId) &&
     String(r.id) !== String(departmentApprover));
 }
@@ -78,7 +80,7 @@ async function assertFinalLeaveReviewer(db, applicantId, actorId, requestType = 
   if (departmentApprover && String(departmentApprover) === String(actorId)) {
     throw reviewError('A different reviewer must perform final HR review after your department approval.', 403);
   }
-  const reviewers = await resolveFinalLeaveReviewers(db);
+  const reviewers = requestType === 'leave' ? await requestFinalReviewers(db, requestId, () => resolveFinalLeaveReviewers(db)) : await resolveFinalLeaveReviewers(db);
   if (!reviewers.length) {
     throw reviewError(`No final ${requestType} reviewer is configured or available`, 409);
   }
@@ -87,7 +89,15 @@ async function assertFinalLeaveReviewer(db, applicantId, actorId, requestType = 
   }
 }
 
-async function assertLeaveSubmissionReviewer(db, applicantId, requestType = 'leave') {
+async function assertLeaveSubmissionReviewer(db, applicantId, requestType = 'leave', rule = null) {
+  if(requestType==='leave' && rule?.approval_route==='mayor') {
+    const profile=(await db.query('SELECT employment_type FROM users WHERE id=$1::uuid',[applicantId])).rows[0];
+    if(chooseLeaveRoute(rule,profile?.employment_type)==='mayor') {
+      const mayor=await resolveActiveMayor(db,todayInHrmsTimezone());
+      if(!mayor || String(mayor.employee_id)===String(applicantId))throw reviewError('No eligible active Mayor is configured for this request. Contact HR before submitting.',409);
+      return;
+    }
+  }
   const reviewers = await resolveFinalLeaveReviewers(db);
   if (!reviewers.some((reviewer) => String(reviewer.id) !== String(applicantId))) {
     throw reviewError(`No eligible final ${requestType} reviewer is configured or available for this request. Contact HR before submitting.`, 409);

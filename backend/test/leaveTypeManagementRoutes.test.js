@@ -377,3 +377,11 @@ test('inactive leave types are returned only for management requests', async () 
     assert.deepEqual(includeInactiveValues, [false, true]);
   });
 });
+
+test('new leave type creation saves conditional Mayor routing in its insert',async()=>{
+ await withCreateRoute(async(handler,inserts)=>{
+ const res=responseRecorder();await handler({body:{...basePayload,approval_route:'mayor',mayor_employment_types:['job_order','contract_of_service']}},res);
+ assert.equal(res.statusCode,201);assert.equal(inserts[0].params[17],'mayor');
+ assert.deepEqual(inserts[0].params[18],['job_order','contract_of_service']);
+ });
+});

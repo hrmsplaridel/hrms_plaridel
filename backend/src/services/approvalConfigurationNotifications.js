@@ -20,8 +20,8 @@ async function notifyMissingFinalReviewer(pool, kind, requestId) {
     for (const user of recipients.rows) {
       created.push(await insertNotification(client, {
         userId: user.id, category: 'general', type: 'approval_configuration_required',
-        title: 'Different final HR reviewer needed',
-        body: `A ${kind} request remains pending. Assign an eligible final HR reviewer other than the applicant and department approver.`,
+        title: 'Final approval reviewer unavailable',
+        body: `A ${kind} request remains pending. Configure the required eligible final reviewer other than the applicant and department approver.`,
         referenceType: kind === 'locator' ? 'locator_slip' : 'leave_request', referenceId: requestId,
         metadata: { request_type: kind }, deferDelivery: true,
       }));

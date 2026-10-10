@@ -55,14 +55,15 @@ async function notifyAfterSubmit(pool, {
     return;
   }
 
+  if (status === 'pending_mayor') return;
   if (status === 'pending_hr' || status === 'pending') {
     const hrIds = await finalReviewerIds(pool, employeeUserId, leaveRequestId);
     if (!hrIds.length) await notifyMissingFinalReviewer(pool, 'leave', leaveRequestId);
     const targets = hrIds.filter((id) => id !== employeeUserId);
     await insertNotificationForUsers(pool, targets, {
       category: 'leave',
-      type: 'leave_pending_hr',
-      title: 'New leave request for HR',
+      type: status==='pending_mayor'?'leave_pending_mayor':'leave_pending_hr',
+      title: status==='pending_mayor'?'New leave request for Mayor':'New leave request for HR',
       body: `${who} submitted ${lt} (${range}).`,
       referenceType: 'leave_request',
       referenceId: leaveRequestId,
@@ -80,6 +81,8 @@ async function notifyDepartmentHeadApprovedForHr(pool, {
   startDateStr,
   endDateStr,
 }) {
+  const route=(await pool.query('SELECT final_review_route FROM leave_requests WHERE id=$1',[leaveRequestId])).rows[0]?.final_review_route;
+  if (route === 'mayor') return;
   const hrIds = await finalReviewerIds(pool, employeeUserId, leaveRequestId);
   if (!hrIds.length) await notifyMissingFinalReviewer(pool, 'leave', leaveRequestId);
   const range = fmtRange(startDateStr, endDateStr);
@@ -87,8 +90,8 @@ async function notifyDepartmentHeadApprovedForHr(pool, {
   const lt = leaveLabel(leaveTypeName);
   await insertNotificationForUsers(pool, hrIds, {
     category: 'leave',
-    type: 'leave_forwarded_to_hr',
-    title: 'Leave request ready for HR approval',
+    type: route==='mayor'?'leave_forwarded_to_mayor':'leave_forwarded_to_hr',
+    title: route==='mayor'?'Leave request ready for Mayor approval':'Leave request ready for HR approval',
     body: `${who} — ${lt} (${range}) was endorsed by the department head.`,
     referenceType: 'leave_request',
     referenceId: leaveRequestId,
