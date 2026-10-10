@@ -38,6 +38,7 @@ const {
   validateLocatorAttachmentForReview,
   validateLocatorRequiredFields,
   validateLocatorWorkingDayForEmployee,
+  resolveLocatorShiftCoverage,
 } = require('../services/locatorFilingRules');
 const {
   findLocatorRequestConflicts,
@@ -844,6 +845,17 @@ router.get('/context', protect, (_req, res) => {
   res.json({ official_date: currentHrmsDate() });
 });
 
+router.get('/shift-coverage', protect, async (req, res) => {
+  const date = parseLocatorDateOnly(req.query.slip_date);
+  if (!date) return res.status(400).json({error:'Invalid slip_date'});
+  try {
+    res.json(await resolveLocatorShiftCoverage(pool, req.user.id, date));
+  } catch (err) {
+    console.error('[locator shift coverage]', err);
+    res.status(500).json({error:'Could not load the shift for the selected date.'});
+  }
+});
+
 // GET /api/locator-slips/department-head/check
 router.get('/department-head/check', protect, async (req, res) => {
   const userId = req.user?.id;
@@ -1309,7 +1321,8 @@ router.post(
       const workingDay = await validateLocatorWorkingDayForEmployee(
         client,
         employeeId,
-        parseLocatorDateOnly(slipDate)
+        parseLocatorDateOnly(slipDate),
+        {amIn,amOut,pmIn,pmOut}
       );
       if (!workingDay.ok) {
         await client.query('ROLLBACK');
@@ -1630,7 +1643,8 @@ router.patch('/:id/resubmit', protect, async (req, res) => {
     const workingDayCheck = await validateLocatorWorkingDayForEmployee(
       client,
       userId,
-      parseLocatorDateOnly(correction.slipDate)
+      parseLocatorDateOnly(correction.slipDate),
+      correction
     );
     if (!workingDayCheck.ok) {
       await client.query('ROLLBACK');

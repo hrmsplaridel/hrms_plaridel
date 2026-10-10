@@ -75,7 +75,7 @@ function evaluateLocatorWorkingDay({ dateInfo, assignment }) {
   return { ok: true };
 }
 
-async function validateLocatorWorkingDayForEmployee(
+async function loadLocatorAssignment(
   client,
   employeeId,
   dateInfo
@@ -86,6 +86,7 @@ async function validateLocatorWorkingDayForEmployee(
             a.shift_id,
             s.name AS shift_name,
             s.working_days,
+            s.punch_mode, s.start_time, s.end_time, s.break_end,
             eso.is_working_day AS override_is_working_day
      FROM assignments a
      LEFT JOIN shifts s ON s.id = a.shift_id
@@ -99,10 +100,33 @@ async function validateLocatorWorkingDayForEmployee(
      LIMIT 1`,
     [employeeId, dateInfo.dateStr]
   );
-  return evaluateLocatorWorkingDay({
+  return result.rows[0];
+}
+
+async function resolveLocatorShiftCoverage(client, employeeId, dateInfo) {
+  const assignment = await loadLocatorAssignment(client, employeeId, dateInfo);
+  const {getShiftType} = require('./shiftAttendance');
+  const {normalizeShiftInfo} = require('./locatorCoverage');
+  const single = getShiftType(normalizeShiftInfo(assignment)) === 'single_session';
+  const workingDay = evaluateLocatorWorkingDay({dateInfo, assignment});
+  return {single_session: single, allowed_slots: single ? ['am_in','pm_out'] : ['am_in','am_out','pm_in','pm_out'],
+    can_file: workingDay.ok, error: workingDay.error || null};
+}
+
+async function validateLocatorWorkingDayForEmployee(client, employeeId, dateInfo, slots = null) {
+  if (!dateInfo) return {ok:false, error:'Invalid slip_date'};
+  const assignment = await loadLocatorAssignment(client, employeeId, dateInfo);
+  const result = evaluateLocatorWorkingDay({
     dateInfo,
-    assignment: result.rows[0],
+    assignment,
   });
+  if (!result.ok || !slots) return result;
+  const {getShiftType} = require('./shiftAttendance');
+  const {normalizeShiftInfo} = require('./locatorCoverage');
+  if (getShiftType(normalizeShiftInfo(assignment)) === 'single_session' && (slots.amOut || slots.pmIn)) {
+    return {ok:false,error:'Single-session shifts use IN and OUT only. Select the start or end of the shift.'};
+  }
+  return result;
 }
 
 function validateLocatorRequiredFields({
@@ -168,6 +192,7 @@ module.exports = {
   LOCATOR_REQUIRED_FIELDS,
   evaluateLocatorWorkingDay,
   validateLocatorWorkingDayForEmployee,
+  resolveLocatorShiftCoverage,
   locatorAttachmentRequiredError,
   normalizeLocatorWorkingDays,
   parseLocatorDateOnly,

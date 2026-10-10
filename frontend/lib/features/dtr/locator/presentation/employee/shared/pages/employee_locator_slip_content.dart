@@ -3020,6 +3020,53 @@ class _LocatorSlipFormDialogState extends State<_LocatorSlipFormDialog> {
   bool _savedPmOutBeforeWfh = false;
   bool _hasSavedSegmentsBeforeWfh = false;
   bool _showAttachmentError = false;
+  bool _singleSession = false;
+  bool _loadingShiftCoverage = true;
+  String? _shiftCoverageError;
+  int _shiftCoverageGeneration = 0;
+
+  void _clearHiddenSegments() {
+    if (_singleSession) {
+      _amOut = false;
+      _pmIn = false;
+      _savedAmOutBeforeWfh = false;
+      _savedPmInBeforeWfh = false;
+    }
+  }
+
+  Future<void> _loadShiftCoverage() async {
+    final generation = ++_shiftCoverageGeneration;
+    setState(() {
+      _loadingShiftCoverage = true;
+      _shiftCoverageError = null;
+    });
+    try {
+      final date = _date.toIso8601String().substring(0, 10);
+      final response = await ApiClient.instance.get<Map<String, dynamic>>(
+        '/api/locator-slips/shift-coverage',
+        queryParameters: {'slip_date': date},
+      );
+      if (!mounted || generation != _shiftCoverageGeneration) return;
+      final data = response.data!;
+      setState(() {
+        _singleSession = data['single_session'] == true;
+        _shiftCoverageError = data['can_file'] == true
+            ? null
+            : data['error']?.toString() ??
+                  'No shift is available for this date.';
+        if (_isWfhRequest) _applyWfhCoverage(_wfhCoverage);
+        _clearHiddenSegments();
+        _loadingShiftCoverage = false;
+      });
+    } catch (_) {
+      if (!mounted || generation != _shiftCoverageGeneration) return;
+      setState(() {
+        _loadingShiftCoverage = false;
+        _shiftCoverageError =
+            'Could not load your shift for this date. Please retry.';
+      });
+    }
+  }
 
   bool get _isWfhRequest => _requestType.usesWfhCoverage;
   bool get _requiresAttachment => _requestType.requiresAttachment;
@@ -3042,6 +3089,7 @@ class _LocatorSlipFormDialogState extends State<_LocatorSlipFormDialog> {
         coverage == _WfhCoverage.wholeDay || coverage == _WfhCoverage.pmOnly;
     _pmOut =
         coverage == _WfhCoverage.wholeDay || coverage == _WfhCoverage.pmOnly;
+    _clearHiddenSegments();
   }
 
   void _setRequestType(LocatorRequestType type) {
@@ -3066,6 +3114,7 @@ class _LocatorSlipFormDialogState extends State<_LocatorSlipFormDialog> {
       }
 
       _requestType = type;
+      _clearHiddenSegments();
       _showAttachmentError = false;
       if (!type.requiresAttachment) {
         _pendingAttachmentBytes = null;
@@ -3134,6 +3183,7 @@ class _LocatorSlipFormDialogState extends State<_LocatorSlipFormDialog> {
       _pmIn = initial.pmIn ?? false;
       _pmOut = initial.pmOut ?? false;
     }
+    _loadShiftCoverage();
   }
 
   _WfhCoverage _coverageFromSlots(
@@ -3297,6 +3347,7 @@ class _LocatorSlipFormDialogState extends State<_LocatorSlipFormDialog> {
         );
         if (picked != null) {
           setState(() => _date = picked);
+          _loadShiftCoverage();
         }
       },
     );
@@ -3461,7 +3512,8 @@ class _LocatorSlipFormDialogState extends State<_LocatorSlipFormDialog> {
 
   Widget _segmentSelector() {
     const accent = Color(0xFFF57C00);
-    final locked = _isWfhRequest;
+    final locked =
+        _isWfhRequest || _loadingShiftCoverage || _shiftCoverageError != null;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -3470,7 +3522,19 @@ class _LocatorSlipFormDialogState extends State<_LocatorSlipFormDialog> {
           color: AppTheme.dashTextSecondaryOf(context),
         ),
         const SizedBox(height: 8),
+        if (_loadingShiftCoverage) const LinearProgressIndicator(),
+        if (_shiftCoverageError != null) ...[
+          Text(
+            _shiftCoverageError!,
+            style: TextStyle(color: Theme.of(context).colorScheme.error),
+          ),
+          TextButton(
+            onPressed: _loadShiftCoverage,
+            child: const Text('Retry shift lookup'),
+          ),
+        ],
         EmployeeLocatorMobileSegmentSelector(
+          singleSession: _singleSession,
           accent: accent,
           locked: locked,
           amIn: _amIn,
@@ -3514,12 +3578,21 @@ class _LocatorSlipFormDialogState extends State<_LocatorSlipFormDialog> {
   }
 
   void _save() {
+    if (_loadingShiftCoverage || _shiftCoverageError != null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Check your shift for the selected date before submitting.',
+          ),
+        ),
+      );
+      return;
+    }
+    _clearHiddenSegments();
     final hasTimeSegment = _amIn || _amOut || _pmIn || _pmOut;
     if (!hasTimeSegment) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Select at least one AM/PM IN/OUT marker'),
-        ),
+        const SnackBar(content: Text('Select at least one IN/OUT marker')),
       );
       return;
     }
