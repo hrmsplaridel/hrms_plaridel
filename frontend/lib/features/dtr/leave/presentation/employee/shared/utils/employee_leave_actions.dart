@@ -114,6 +114,10 @@ class EmployeeLeaveActions {
         approvingAuthorityTitle: formSignatories.approvingAuthority?.title,
         applicantSignatureBytes:
             formSignatories.applicantSignature?.signatureImageBytes,
+        departmentHeadSignatureBytes:
+            formSignatories.departmentHeadSignature?.signatureImageBytes,
+        hrApproverSignatureBytes:
+            formSignatories.hrApproverSignature?.signatureImageBytes,
       );
       final bytes = await saveConfiguredLeavePdf(
         request: target,
