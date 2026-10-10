@@ -146,10 +146,13 @@ Future<pw.Document> buildWellnessLeavePdf({
           pw.Container(
             height: 95,
             width: double.infinity,
-            decoration: const pw.BoxDecoration(
-              border: pw.Border(bottom: pw.BorderSide()),
+            child: pw.Text(
+              shown,
+              style: const pw.TextStyle(
+                fontSize: 9,
+                decoration: pw.TextDecoration.underline,
+              ),
             ),
-            child: text(shown, size: 9),
           ),
           pw.SizedBox(height: 20),
           field(
@@ -186,7 +189,10 @@ Future<pw.Document> buildWellnessLeavePdf({
               width: 330,
               child: pw.Column(
                 children: [
-                  text('APPROVED BY:', strong: true),
+                  pw.Align(
+                    alignment: pw.Alignment.centerLeft,
+                    child: text('APPROVED BY:', strong: true),
+                  ),
                   pw.SizedBox(
                     height: 22,
                     child: mayorSignature == null
