@@ -3274,18 +3274,6 @@ class _LocatorSlipFormDialogState extends State<_LocatorSlipFormDialog> {
         _segmentSelector(),
         const SizedBox(height: 14),
         EmployeeLocatorMobileLabeledField(
-          label: 'Name',
-          labelColor: AppTheme.dashTextSecondaryOf(context),
-          child: TextFormField(
-            initialValue: widget.employeeName,
-            enabled: false,
-            decoration: _inputDecoration().copyWith(
-              hintText: widget.employeeName,
-            ),
-          ),
-        ),
-        const SizedBox(height: 12),
-        EmployeeLocatorMobileLabeledField(
           label: _requestType.locationLabel,
           labelColor: AppTheme.dashTextSecondaryOf(context),
           child: TextFormField(

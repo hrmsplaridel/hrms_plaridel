@@ -112,6 +112,7 @@ void main() {
       }
       await tester.pump(const Duration(milliseconds: 300));
       expect(dates, ['2026-10-12']);
+      expect(find.text('Name'), findsNothing);
       if (single) {
         expect(find.text('IN'), findsOneWidget);
         expect(find.text('OUT'), findsOneWidget);
