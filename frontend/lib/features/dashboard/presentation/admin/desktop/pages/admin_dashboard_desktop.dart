@@ -370,6 +370,11 @@ class _AdminDashboardState extends State<AdminDashboard>
   bool _canViewDtrReports = false;
   bool _canManageDtr = false;
   Map<String, bool> _dtrFeatureAccess = {};
+  bool get _canAccessDtr => hasAdminDtrAccess(
+    canViewReports: _canViewDtrReports,
+    canManage: _canManageDtr,
+    featureAccess: _dtrFeatureAccess,
+  );
   bool _sidebarCollapsed = false;
   final GlobalKey<_DtrContentState> _dtrContentKey =
       GlobalKey<_DtrContentState>();
@@ -515,6 +520,7 @@ class _AdminDashboardState extends State<AdminDashboard>
         _canManageDtr = manage;
         _dtrFeatureAccess = features;
       });
+      _closeUnavailableDtr();
     } catch (_) {
       if (mounted && version == _dtrAccessVersion) {
         setState(() {
@@ -522,8 +528,15 @@ class _AdminDashboardState extends State<AdminDashboard>
           _canManageDtr = false;
           _dtrFeatureAccess = {};
         });
+        _closeUnavailableDtr();
       }
     }
+  }
+
+  void _closeUnavailableDtr() {
+    if (_selectedMenu != AdminMenu.dtr || _canAccessDtr) return;
+    setState(() => _selectedMenu = AdminMenu.dashboard);
+    DashboardContentNavigator.showHome(_contentNavKey);
   }
 
   Future<void> _handleOpenNotifications() async {
@@ -545,6 +558,10 @@ class _AdminDashboardState extends State<AdminDashboard>
         );
         break;
       case NotificationTapKind.adminDtrLeaveManagement:
+        if (_dtrFeatureAccess['leave_allowed'] != true) {
+          _onMenuSelected(AdminMenu.myLeave);
+          break;
+        }
         setState(() => _selectedMenu = AdminMenu.dtr);
         DashboardContentNavigator.showHome(_contentNavKey);
         // DTR mounts on the next frame(s) after the nested navigator rebuilds home.
@@ -555,6 +572,10 @@ class _AdminDashboardState extends State<AdminDashboard>
         });
         break;
       case NotificationTapKind.adminDtrLocatorManagement:
+        if (_dtrFeatureAccess['locator_allowed'] != true) {
+          _onMenuSelected(AdminMenu.myLocator);
+          break;
+        }
         setState(() => _selectedMenu = AdminMenu.dtr);
         DashboardContentNavigator.showHome(_contentNavKey);
         WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -663,6 +684,11 @@ class _AdminDashboardState extends State<AdminDashboard>
   }
 
   void _onMenuSelected(AdminMenu menu) {
+    if (menu == AdminMenu.dtr && !_canAccessDtr) {
+      _loadDtrAccess();
+      _closeUnavailableDtr();
+      return;
+    }
     if (menu == AdminMenu.createAccount && _canCreateAccount != true) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -779,7 +805,8 @@ class _AdminDashboardState extends State<AdminDashboard>
   }
 
   Widget _buildContent(String displayName) {
-    switch (_selectedMenu) {
+    switch (_selectedMenu == AdminMenu.dtr && !_canAccessDtr
+        ? AdminMenu.dashboard : _selectedMenu) {
       case AdminMenu.dashboard:
         return _DashboardContent();
       case AdminMenu.myAttendance:
@@ -878,6 +905,7 @@ class _AdminDashboardState extends State<AdminDashboard>
                 child: _Sidebar(
                   selectedMenu: _selectedMenu,
                   canCreateAccount: _canCreateAccount == true,
+                  canAccessDtr: _canAccessDtr,
                   avatarPath: avatarPath,
                   email: email,
                   displayName: displayName,
@@ -900,6 +928,7 @@ class _AdminDashboardState extends State<AdminDashboard>
                     showBrand: false,
                     selectedMenu: _selectedMenu,
                     canCreateAccount: _canCreateAccount == true,
+                    canAccessDtr: _canAccessDtr,
                     avatarPath: avatarPath,
                     email: email,
                     displayName: displayName,
@@ -1063,10 +1092,37 @@ class AdminSystemAdministrationSection extends StatelessWidget {
   }
 }
 
+bool hasAdminDtrAccess({
+  required bool canViewReports,
+  required bool canManage,
+  required Map<String, bool> featureAccess,
+}) => canViewReports || canManage || const [
+  'employees_allowed', 'leave_allowed', 'approvals_allowed', 'locator_allowed',
+].any((field) => featureAccess[field] == true);
+
+class AdminDtrNavigationTile extends StatelessWidget {
+  const AdminDtrNavigationTile({super.key, required this.canAccessDtr,
+    required this.selectedMenu, required this.onTap});
+  final bool canAccessDtr;
+  final AdminMenu selectedMenu;
+  final ValueChanged<AdminMenu> onTap;
+
+  @override
+  Widget build(BuildContext context) => canAccessDtr
+      ? DashboardSidebarNavTile(
+          icon: Icons.access_time_outlined,
+          label: 'DTR',
+          selected: selectedMenu == AdminMenu.dtr,
+          onTap: () => onTap(AdminMenu.dtr),
+        )
+      : const SizedBox.shrink();
+}
+
 class _Sidebar extends StatelessWidget {
   const _Sidebar({
     required this.selectedMenu,
     required this.canCreateAccount,
+    required this.canAccessDtr,
     this.avatarPath,
     required this.email,
     required this.displayName,
@@ -1078,6 +1134,7 @@ class _Sidebar extends StatelessWidget {
 
   final AdminMenu selectedMenu;
   final bool canCreateAccount;
+  final bool canAccessDtr;
   final String? avatarPath;
   final String email;
   final String displayName;
@@ -1125,11 +1182,10 @@ class _Sidebar extends StatelessWidget {
           selected: selectedMenu == AdminMenu.ld,
           onTap: () => onTap(AdminMenu.ld),
         ),
-        DashboardSidebarNavTile(
-          icon: Icons.access_time_outlined,
-          label: 'DTR',
-          selected: selectedMenu == AdminMenu.dtr,
-          onTap: () => onTap(AdminMenu.dtr),
+        AdminDtrNavigationTile(
+          canAccessDtr: canAccessDtr,
+          selectedMenu: selectedMenu,
+          onTap: onTap,
         ),
         DashboardSidebarNavTile(
           icon: Icons.folder_outlined,
