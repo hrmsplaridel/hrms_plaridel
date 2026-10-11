@@ -1,4 +1,5 @@
 import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart';
 
 import 'client_device_header.dart';
 import 'config.dart';
@@ -7,31 +8,42 @@ import 'token_storage.dart';
 /// HTTP client for the HRMS backend API.
 /// Attaches access JWT from [TokenStorage] and refreshes via [POST /auth/refresh] on 401.
 class ApiClient {
-  ApiClient._();
+  ApiClient._() : _providedDio = null, _providedRefreshDio = null;
+  @visibleForTesting
+  ApiClient.forTesting({required Dio dio, required Dio refreshDio})
+    : _providedDio = dio,
+      _providedRefreshDio = refreshDio;
+  final Dio? _providedDio;
+  final Dio? _providedRefreshDio;
   static final ApiClient instance = ApiClient._();
 
   late final Dio _dio;
   bool _initialized = false;
 
   /// Single in-flight refresh so concurrent 401s share one refresh call.
-  static Future<bool>? _refreshInFlight;
+  Future<bool>? _refreshInFlight;
+  DateTime? _refreshRetryAt;
+  String? _refreshRetryToken;
+  DioException? _refreshRetryError;
 
   Dio get dio => _dio;
 
   void init() {
     if (_initialized) return;
-    _dio = Dio(
-      BaseOptions(
-        baseUrl: ApiConfig.baseUrl,
-        connectTimeout: const Duration(seconds: 20),
-        sendTimeout: const Duration(seconds: 20),
-        receiveTimeout: const Duration(seconds: 45),
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json',
-        },
-      ),
-    );
+    _dio =
+        _providedDio ??
+        Dio(
+          BaseOptions(
+            baseUrl: ApiConfig.baseUrl,
+            connectTimeout: const Duration(seconds: 20),
+            sendTimeout: const Duration(seconds: 20),
+            receiveTimeout: const Duration(seconds: 45),
+            headers: {
+              'Content-Type': 'application/json',
+              'Accept': 'application/json',
+            },
+          ),
+        );
 
     _dio.interceptors.add(
       InterceptorsWrapper(
@@ -79,7 +91,22 @@ class ApiClient {
             return handler.next(error);
           }
 
-          final refreshed = await _refreshSessionShared();
+          bool refreshed;
+          try {
+            refreshed = await _refreshSessionShared();
+          } on DioException catch (refreshError) {
+            // Propagate the temporary failure, not the expired-access 401.
+            // Session restoration must not mistake an outage for a revoked login.
+            return handler.next(
+              DioException(
+                requestOptions: opts,
+                response: refreshError.response,
+                type: refreshError.type,
+                error: refreshError.error,
+                message: refreshError.message,
+              ),
+            );
+          }
           if (!refreshed) {
             await TokenStorage.instance.clearAllTokens();
             return handler.next(error);
@@ -122,32 +149,39 @@ class ApiClient {
     _initialized = true;
   }
 
-  static Future<bool> _refreshSessionShared() {
+  Future<bool> _refreshSessionShared() {
     _refreshInFlight ??= _performRefresh().whenComplete(
       () => _refreshInFlight = null,
     );
     return _refreshInFlight!;
   }
 
-  static Future<bool> _performRefresh() async {
+  Future<bool> _performRefresh() async {
     final refresh = await TokenStorage.instance.getRefreshToken();
     if (refresh == null || refresh.isEmpty) return false;
+    if (_refreshRetryToken == refresh &&
+        _refreshRetryAt?.isAfter(DateTime.now()) == true &&
+        _refreshRetryError != null) {
+      throw _refreshRetryError!;
+    }
 
     try {
       final deviceHeader = await ClientDeviceHeader.build();
-      final plain = Dio(
-        BaseOptions(
-          baseUrl: ApiConfig.baseUrl,
-          connectTimeout: const Duration(seconds: 20),
-          sendTimeout: const Duration(seconds: 20),
-          receiveTimeout: const Duration(seconds: 45),
-          headers: {
-            'Content-Type': 'application/json',
-            'Accept': 'application/json',
-            'X-HRMS-Device': deviceHeader,
-          },
-        ),
-      );
+      final plain =
+          _providedRefreshDio ??
+          Dio(
+            BaseOptions(
+              baseUrl: ApiConfig.baseUrl,
+              connectTimeout: const Duration(seconds: 20),
+              sendTimeout: const Duration(seconds: 20),
+              receiveTimeout: const Duration(seconds: 45),
+              headers: {
+                'Content-Type': 'application/json',
+                'Accept': 'application/json',
+                'X-HRMS-Device': deviceHeader,
+              },
+            ),
+          );
 
       final res = await plain.post<Map<String, dynamic>>(
         '/auth/refresh',
@@ -155,18 +189,66 @@ class ApiClient {
       );
 
       final data = res.data;
-      if (data == null) return false;
-      final access = data['token'] as String?;
-      final newRefresh = data['refreshToken'] as String?;
-      if (access == null || access.isEmpty) return false;
+      final access = data?['token'];
+      final newRefresh = data?['refreshToken'];
+      if (access is! String ||
+          access.isEmpty ||
+          newRefresh is! String ||
+          newRefresh.isEmpty) {
+        throw DioException(
+          requestOptions: res.requestOptions,
+          response: Response(
+            requestOptions: res.requestOptions,
+            statusCode: 502,
+            data: {'error': 'Invalid token refresh response. Please retry.'},
+          ),
+          type: DioExceptionType.badResponse,
+        );
+      }
+
+      // Do not resurrect a signed-out session or overwrite a different login.
+      if (await TokenStorage.instance.getRefreshToken() != refresh) {
+        throw DioException(
+          requestOptions: res.requestOptions,
+          type: DioExceptionType.cancel,
+          message: 'Session changed during refresh.',
+        );
+      }
 
       await TokenStorage.instance.setTokens(
         access: access,
         refresh: newRefresh,
       );
+      _refreshRetryAt = null;
+      _refreshRetryToken = null;
+      _refreshRetryError = null;
       return true;
-    } catch (_) {
-      return false;
+    } catch (e) {
+      final error = e is DioException
+          ? e
+          : DioException(
+              requestOptions: RequestOptions(path: '/auth/refresh'),
+              error: e,
+              type: DioExceptionType.unknown,
+            );
+      if (error.response?.statusCode == 401 ||
+          error.response?.statusCode == 403) {
+        _refreshRetryAt = null;
+        _refreshRetryToken = null;
+        _refreshRetryError = null;
+        return false;
+      }
+      final retrySeconds = int.tryParse(
+        error.response?.headers.value('retry-after') ?? '',
+      );
+      _refreshRetryToken = refresh;
+      _refreshRetryError = error;
+      _refreshRetryAt = DateTime.now().add(
+        Duration(
+          seconds: retrySeconds != null && retrySeconds > 0 ? retrySeconds : 5,
+        ),
+      );
+      throw error;
     }
   }
 

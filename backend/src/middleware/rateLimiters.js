@@ -193,14 +193,36 @@ const authPasswordResetVerifyLimiter = createJsonLimiter({
   message: 'Too many password reset verification attempts. Please wait and try again.',
 });
 
-const authTokenLimiter = createJsonLimiter({
-  windowMs: parsePositiveInt(
-    process.env.AUTH_TOKEN_RATE_LIMIT_WINDOW_MS,
-    FIFTEEN_MINUTES_MS,
-  ),
-  limit: parsePositiveInt(process.env.AUTH_TOKEN_RATE_LIMIT_MAX, 60),
-  message: 'Too many authentication requests. Please wait and try again.',
-});
+function createAuthTokenLimiters({
+  windowMs = parsePositiveInt(process.env.AUTH_TOKEN_RATE_LIMIT_WINDOW_MS, FIFTEEN_MINUTES_MS),
+  refreshMax = parsePositiveInt(process.env.AUTH_REFRESH_RATE_LIMIT_MAX,
+    parsePositiveInt(process.env.AUTH_TOKEN_RATE_LIMIT_MAX, 60)),
+  logoutMax = parsePositiveInt(process.env.AUTH_LOGOUT_RATE_LIMIT_MAX,
+    parsePositiveInt(process.env.AUTH_TOKEN_RATE_LIMIT_MAX, 60)),
+  ipMax = parsePositiveInt(process.env.AUTH_TOKEN_IP_RATE_LIMIT_MAX, 6000),
+} = {}) {
+  const keyGenerator = req => {
+    const {getVerifiedUser} = require('./auth');
+    const user = getVerifiedUser(req);
+    if (user) return `employee:${user.id}`;
+    try {
+      const payload = require('jsonwebtoken').verify(req.body?.refreshToken, process.env.JWT_REFRESH_SECRET);
+      if (payload.typ === 'refresh' && typeof payload.id === 'string' && payload.id) {
+        return `employee:${payload.id}`;
+      }
+    } catch (_) { /* Invalid credentials stay in the IP bucket; routes reject them. */ }
+    return `ip:${ipKeyGenerator(req.ip)}`;
+  };
+  const limits = limit => [
+    createJsonLimiter({windowMs, limit: ipMax,
+      message: 'Too many authentication requests from this network. Please wait and try again.'}),
+    createJsonLimiter({windowMs, limit, keyGenerator,
+      message: 'Too many authentication requests. Please wait and try again.'}),
+  ];
+  return {refresh: limits(refreshMax), logout: limits(logoutMax)};
+}
+
+const {refresh: authRefreshLimiters, logout: authLogoutLimiters} = createAuthTokenLimiters();
 
 const authPasswordChangeLimiter = createJsonLimiter({
   windowMs: parsePositiveInt(
@@ -304,7 +326,9 @@ module.exports = {
   authRegisterLimiter,
   authPasswordResetLimiter,
   authPasswordResetVerifyLimiter,
-  authTokenLimiter,
+  createAuthTokenLimiters,
+  authRefreshLimiters,
+  authLogoutLimiters,
   authPasswordChangeLimiter,
   publicApplicationCreateLimiter,
   publicApplicationUploadLimiter,

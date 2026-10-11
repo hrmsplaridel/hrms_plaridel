@@ -141,6 +141,7 @@ function isLocalBrowserOrigin(origin) {
 // Allow those in development, plus CORS_ORIGINS. Native / curl have no Origin.
 app.use(
   cors({
+    exposedHeaders: ['Retry-After', 'RateLimit', 'RateLimit-Policy'],
     origin(origin, callback) {
       if (
         !origin ||
