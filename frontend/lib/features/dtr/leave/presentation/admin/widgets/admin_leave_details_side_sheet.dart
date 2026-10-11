@@ -7,8 +7,6 @@ import 'package:provider/provider.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/features/dtr/leave/data/providers/leave_provider.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_request.dart';
-import 'package:hrms_plaridel/features/dtr/leave/models/leave_type.dart';
-import 'package:hrms_plaridel/features/dtr/leave/models/leave_type_definition.dart';
 import 'package:hrms_plaridel/features/dtr/leave/utils/open_attachment_io.dart'
     if (dart.library.html) 'package:hrms_plaridel/features/dtr/leave/utils/open_attachment_web.dart'
     as open_attachment;
@@ -16,6 +14,8 @@ import 'package:hrms_plaridel/features/dtr/leave/presentation/shared/widgets/his
 import 'package:hrms_plaridel/features/dtr/leave/presentation/shared/widgets/leave_status_chip.dart';
 import 'package:hrms_plaridel/features/dtr/leave/presentation/admin/widgets/admin_leave_screen_utils.dart';
 import 'package:hrms_plaridel/features/dtr/leave/presentation/admin/widgets/admin_leave_shared_widgets.dart';
+
+import 'package:hrms_plaridel/features/dtr/leave/presentation/shared/widgets/leave_request_information.dart';
 
 /// Leave review details shown over the queue (matches [openResponsiveLeaveFormHost] behavior).
 class AdminLeaveDetailsSideSheet extends StatelessWidget {
@@ -187,19 +187,8 @@ class _AdminLeaveRequestDetailsPanel extends StatelessWidget {
                     request!.employeeName ?? 'Unknown employee',
                     style: TextStyle(
                       color: AppTheme.dashTextPrimaryOf(context),
-                      fontSize: 20,
+                      fontSize: 26,
                       fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    request!.leaveTypeLabel,
-                    style: TextStyle(
-                      color: AppTheme.dashIsDark(context)
-                          ? AppTheme.primaryNavyLight
-                          : AppTheme.primaryNavyDark,
-                      fontSize: 14,
-                      fontWeight: FontWeight.w600,
                     ),
                   ),
                 ],
@@ -216,36 +205,15 @@ class _AdminLeaveRequestDetailsPanel extends StatelessWidget {
           ],
         ),
         const SizedBox(height: 18),
-        Wrap(
-          spacing: 12,
-          runSpacing: 12,
-          children: [
-            AdminLeaveDetailPill(
-              label: 'Date Filed',
-              value: request!.dateFiled != null
-                  ? formatAdminLeaveDate(request!.dateFiled!)
-                  : '—',
-            ),
-            AdminLeaveDetailPill(
-              label: 'Inclusive Dates',
-              value: _formatRange(request!),
-            ),
-            AdminLeaveDetailPill(
-              label: 'Working Days',
-              value: request!.workingDaysApplied?.toStringAsFixed(1) ?? '—',
-            ),
-            AdminLeaveDetailPill(
-              label: 'Commutation',
-              value: request!.commutation.displayName,
-            ),
-          ],
-        ),
+        Divider(height: 1, color: AppTheme.dashHairlineOf(context)),
         const SizedBox(height: 20),
-        _AdminLeaveDetailGrid(request: request!),
-        const SizedBox(height: 20),
-        if ((request!.reason ?? '').trim().isNotEmpty) ...[
-          AdminLeaveSubsectionTitle(title: 'Reason / Details'),
-          AdminLeaveBodyCard(content: request!.reason!.trim()),
+        LeaveRequestInformation(request: request!),
+        if ((request!.attachmentName ?? '').trim().isNotEmpty) ...[
+          _AdminLeaveAttachmentTile(
+            requestId: request!.id,
+            attachmentName: request!.attachmentName,
+            hasAttachment: true,
+          ),
           const SizedBox(height: 16),
         ],
         AdminLeaveSubsectionTitle(title: 'Approval History'),
@@ -306,11 +274,6 @@ class _AdminLeaveRequestDetailsPanel extends StatelessWidget {
         ),
       ],
     );
-  }
-
-  String _formatRange(LeaveRequest request) {
-    if (request.startDate == null || request.endDate == null) return '—';
-    return '${formatAdminLeaveDate(request.startDate!)} to ${formatAdminLeaveDate(request.endDate!)}';
   }
 
   List<LeaveHistoryEvent> _buildHistoryEvents(LeaveRequest request) {
@@ -435,233 +398,6 @@ class _AdminLeaveRequestDetailsPanel extends StatelessWidget {
           completed: true,
         ),
     ];
-  }
-}
-
-class _AdminLeaveDetailGrid extends StatelessWidget {
-  const _AdminLeaveDetailGrid({required this.request});
-
-  final LeaveRequest request;
-
-  @override
-  Widget build(BuildContext context) {
-    final rows = _buildDetailRows(request);
-
-    final attachmentName = request.attachmentName?.trim();
-    final hasAttachment = attachmentName != null && attachmentName.isNotEmpty;
-    final requestId = request.id;
-
-    return Wrap(
-      spacing: 12,
-      runSpacing: 12,
-      children: [
-        ...rows
-            .where((r) => r.label != 'Attachment')
-            .map(
-              (item) => SizedBox(
-                width: 260,
-                child: AdminLeaveInfoTile(label: item.label, value: item.value),
-              ),
-            ),
-        if (hasAttachment)
-          SizedBox(
-            width: 260,
-            child: _AdminLeaveAttachmentTile(
-              requestId: requestId,
-              attachmentName: attachmentName,
-              hasAttachment: true,
-            ),
-          ),
-      ],
-    );
-  }
-
-  List<({String label, String value})> _buildDetailRows(LeaveRequest request) {
-    final rows = <({String label, String value})>[
-      (
-        label: 'Office/Department',
-        value: _displayValue(request.officeDepartment),
-      ),
-      (label: 'Position Title', value: _displayValue(request.positionTitle)),
-      (
-        label: 'Salary',
-        value: request.salary != null
-            ? request.salary!.toStringAsFixed(2)
-            : '—',
-      ),
-    ];
-
-    void addRelevant({
-      required String label,
-      required String? value,
-      required bool applies,
-    }) {
-      if (!applies && !_hasValue(value)) return;
-      rows.add((label: label, value: _displayValue(value)));
-    }
-
-    void addRelevantEnum({
-      required String label,
-      required String? value,
-      required bool applies,
-    }) {
-      if (!applies && !_hasValue(value)) return;
-      rows.add((label: label, value: value ?? '—'));
-    }
-
-    void addRelevantDate({
-      required String label,
-      required DateTime? value,
-      required bool applies,
-    }) {
-      if (!applies && value == null) return;
-      rows.add((
-        label: label,
-        value: value != null ? formatAdminLeaveDate(value) : '—',
-      ));
-    }
-
-    final leaveType = request.leaveType;
-
-    addRelevant(
-      label: 'Custom Leave Type',
-      value: request.customLeaveTypeText,
-      applies: leaveType == LeaveType.others,
-    );
-    addRelevantEnum(
-      label: 'Maternity Classification',
-      value: request.maternityDeliveryType?.displayName,
-      applies: leaveType == LeaveType.maternityLeave,
-    );
-    addRelevantDate(
-      label: 'Expected Delivery Date',
-      value: request.expectedDeliveryDate,
-      applies: leaveType == LeaveType.maternityLeave,
-    );
-    addRelevantDate(
-      label: 'Child Delivery Date',
-      value: request.childDeliveryDate,
-      applies: leaveType == LeaveType.paternityLeave,
-    );
-    addRelevantDate(
-      label: 'Accident Date',
-      value: request.accidentDate,
-      applies: leaveType == LeaveType.rehabilitationPrivilege,
-    );
-    addRelevantDate(
-      label: 'Calamity Occurrence Date',
-      value: request.calamityDate,
-      applies: leaveType == LeaveType.specialEmergencyCalamityLeave,
-    );
-    addRelevantEnum(
-      label: 'Adoption Eligibility',
-      value: request.adoptionParentRole?.displayName,
-      applies: leaveType == LeaveType.adoptionLeave,
-    );
-    addRelevantDate(
-      label: 'PAPA / Adoption Placement Date',
-      value: request.adoptionPlacementDate,
-      applies: leaveType == LeaveType.adoptionLeave,
-    );
-    addRelevantEnum(
-      label: 'VAWC Supporting Document',
-      value: request.vawcSupportDocumentType?.displayName,
-      applies: leaveType == LeaveType.tenDayVawcLeave,
-    );
-    addRelevant(
-      label: 'VAWC Case Details',
-      value: request.vawcCaseDetails,
-      applies: leaveType == LeaveType.tenDayVawcLeave,
-    );
-    addRelevant(
-      label: 'Solo Parent ID Number',
-      value: request.soloParentIdNumber,
-      applies: leaveType == LeaveType.soloParentLeave,
-    );
-    addRelevantDate(
-      label: 'Solo Parent ID Expiry Date',
-      value: request.soloParentIdExpiryDate,
-      applies: leaveType == LeaveType.soloParentLeave,
-    );
-    addRelevantEnum(
-      label: 'Location',
-      value: request.locationOption?.displayName,
-      applies:
-          leaveType == LeaveType.vacationLeave ||
-          leaveType == LeaveType.specialPrivilegeLeave,
-    );
-    addRelevant(
-      label: 'Location Details',
-      value: request.locationDetails,
-      applies:
-          leaveType == LeaveType.vacationLeave ||
-          leaveType == LeaveType.specialPrivilegeLeave,
-    );
-    addRelevantEnum(
-      label: 'Sick Leave Nature',
-      value: request.sickLeaveNature?.displayName,
-      applies: leaveType == LeaveType.sickLeave,
-    );
-    addRelevant(
-      label: 'Sick Illness Details',
-      value: request.sickIllnessDetails,
-      applies: leaveType == LeaveType.sickLeave,
-    );
-    addRelevant(
-      label: 'Women Illness Details',
-      value: request.womenIllnessDetails,
-      applies: leaveType == LeaveType.specialLeaveBenefitsForWomen,
-    );
-    addRelevantEnum(
-      label: 'Study Purpose',
-      value: request.studyPurpose?.displayName,
-      applies: leaveType == LeaveType.studyLeave,
-    );
-    addRelevant(
-      label: 'Study Purpose Details',
-      value: request.studyPurposeDetails,
-      applies: leaveType == LeaveType.studyLeave,
-    );
-    addRelevantEnum(
-      label: 'Other Purpose',
-      value: request.otherPurpose?.displayName,
-      applies: leaveType == LeaveType.others,
-    );
-    addRelevant(
-      label: 'Other Purpose Details',
-      value: request.otherPurposeDetails,
-      applies: leaveType == LeaveType.others,
-    );
-
-    for (final field in request.employeeDetailSchemaSnapshot) {
-      final value = request.customDetails[field.key];
-      if (value == null || value.toString().trim().isEmpty) continue;
-      rows.add((label: field.label, value: _displayCustomValue(field, value)));
-    }
-
-    return rows;
-  }
-
-  static String _displayCustomValue(
-    LeaveCustomFieldDefinition field,
-    dynamic value,
-  ) {
-    if (field.type == LeaveCustomFieldType.boolean) {
-      return value == true ? 'Yes' : 'No';
-    }
-    if (field.type == LeaveCustomFieldType.date) {
-      final date = DateTime.tryParse(value.toString());
-      if (date != null) return formatAdminLeaveDate(date);
-    }
-    return value.toString();
-  }
-
-  static bool _hasValue(String? value) =>
-      value != null && value.trim().isNotEmpty;
-
-  static String _displayValue(String? value) {
-    final trimmed = value?.trim();
-    return trimmed == null || trimmed.isEmpty ? '—' : trimmed;
   }
 }
 

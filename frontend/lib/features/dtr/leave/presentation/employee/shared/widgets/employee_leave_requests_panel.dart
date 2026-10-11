@@ -7,8 +7,6 @@ import 'package:hrms_plaridel/core/utils/responsive_right_side_panel.dart';
 import 'package:hrms_plaridel/features/dtr/leave/data/providers/leave_provider.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_request.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_request_history.dart';
-import 'package:hrms_plaridel/features/dtr/leave/models/leave_type.dart';
-import 'package:hrms_plaridel/features/dtr/leave/models/leave_type_definition.dart';
 import 'package:hrms_plaridel/features/dtr/leave/presentation/employee/desktop/widgets/employee_leave_desktop_requests_content.dart';
 import 'package:hrms_plaridel/features/dtr/leave/presentation/employee/mobile/widgets/employee_leave_mobile_requests_content.dart';
 import 'package:hrms_plaridel/features/dtr/leave/presentation/employee/shared/utils/leave_request_date_filter.dart';
@@ -18,6 +16,7 @@ import 'package:hrms_plaridel/features/dtr/leave/utils/open_attachment_io.dart'
 import 'package:hrms_plaridel/features/dtr/leave/presentation/shared/widgets/history_timeline.dart';
 import 'package:hrms_plaridel/features/dtr/leave/presentation/shared/widgets/leave_status_chip.dart';
 import 'package:hrms_plaridel/shared/widgets/request_filters_bar.dart';
+import 'package:hrms_plaridel/features/dtr/leave/presentation/shared/widgets/leave_request_information.dart';
 import 'package:provider/provider.dart';
 
 const _leaveRequestFilterOptions = <RequestFilterOption<LeaveRequestStatus>>[
@@ -619,10 +618,6 @@ class _EmployeeLeaveDetailsPanel extends StatelessWidget {
       (request.attachmentName ?? '').trim().isNotEmpty ||
       (request.attachmentPath ?? '').trim().isNotEmpty;
 
-  String get _leaveTypeText {
-    return request.leaveTypeLabel;
-  }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -636,19 +631,6 @@ class _EmployeeLeaveDetailsPanel extends StatelessWidget {
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Container(
-                    padding: const EdgeInsets.all(10),
-                    decoration: BoxDecoration(
-                      color: AppTheme.primaryNavy.withValues(alpha: 0.08),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Icon(
-                      Icons.event_available_rounded,
-                      color: AppTheme.primaryNavy,
-                      size: 22,
-                    ),
-                  ),
-                  const SizedBox(width: 12),
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -661,6 +643,17 @@ class _EmployeeLeaveDetailsPanel extends StatelessWidget {
                             fontWeight: FontWeight.w800,
                           ),
                         ),
+                        if ((request.employeeName ?? '').trim().isNotEmpty) ...[
+                          const SizedBox(height: 6),
+                          Text(
+                            request.employeeName!.trim(),
+                            style: TextStyle(
+                              color: AppTheme.dashTextPrimaryOf(context),
+                              fontSize: 26,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ],
                         const SizedBox(height: 8),
                         LeaveStatusChip(status: request.status),
                       ],
@@ -681,135 +674,7 @@ class _EmployeeLeaveDetailsPanel extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    _LeaveDetailTile(
-                      icon: Icons.category_outlined,
-                      label: 'Leave type',
-                      value: _leaveTypeText,
-                    ),
-                    if (request.leaveType == LeaveType.maternityLeave &&
-                        request.maternityDeliveryType != null)
-                      _LeaveDetailTile(
-                        icon: Icons.medical_information_outlined,
-                        label: 'Classification',
-                        value: request.maternityDeliveryType!.displayName,
-                      ),
-                    if (request.leaveType == LeaveType.maternityLeave &&
-                        request.expectedDeliveryDate != null)
-                      _LeaveDetailTile(
-                        icon: Icons.child_friendly_rounded,
-                        label: 'Expected delivery date',
-                        value: _formatDate(request.expectedDeliveryDate!),
-                      ),
-                    if (request.leaveType == LeaveType.paternityLeave &&
-                        request.childDeliveryDate != null)
-                      _LeaveDetailTile(
-                        icon: Icons.child_care_rounded,
-                        label: 'Child delivery date',
-                        value: _formatDate(request.childDeliveryDate!),
-                      ),
-                    if (request.leaveType ==
-                            LeaveType.rehabilitationPrivilege &&
-                        request.accidentDate != null)
-                      _LeaveDetailTile(
-                        icon: Icons.healing_rounded,
-                        label: 'Accident date',
-                        value: _formatDate(request.accidentDate!),
-                      ),
-                    if (request.leaveType ==
-                            LeaveType.specialEmergencyCalamityLeave &&
-                        request.calamityDate != null)
-                      _LeaveDetailTile(
-                        icon: Icons.warning_amber_rounded,
-                        label: 'Calamity occurrence date',
-                        value: _formatDate(request.calamityDate!),
-                      ),
-                    if (request.leaveType == LeaveType.adoptionLeave &&
-                        request.adoptionParentRole != null)
-                      _LeaveDetailTile(
-                        icon: Icons.family_restroom_rounded,
-                        label: 'Adoption eligibility',
-                        value: request.adoptionParentRole!.displayName,
-                      ),
-                    if (request.leaveType == LeaveType.adoptionLeave &&
-                        request.adoptionPlacementDate != null)
-                      _LeaveDetailTile(
-                        icon: Icons.event_available_rounded,
-                        label: 'PAPA / adoption placement date',
-                        value: _formatDate(request.adoptionPlacementDate!),
-                      ),
-                    if (request.leaveType == LeaveType.tenDayVawcLeave &&
-                        request.vawcSupportDocumentType != null)
-                      _LeaveDetailTile(
-                        icon: Icons.verified_user_outlined,
-                        label: 'VAWC supporting document',
-                        value: request.vawcSupportDocumentType!.displayName,
-                      ),
-                    if (request.leaveType == LeaveType.tenDayVawcLeave &&
-                        (request.vawcCaseDetails ?? '').trim().isNotEmpty)
-                      _LeaveDetailTile(
-                        icon: Icons.description_outlined,
-                        label: 'VAWC case details',
-                        value: request.vawcCaseDetails!.trim(),
-                      ),
-                    if (request.leaveType == LeaveType.soloParentLeave &&
-                        (request.soloParentIdNumber ?? '').trim().isNotEmpty)
-                      _LeaveDetailTile(
-                        icon: Icons.badge_outlined,
-                        label: 'Solo Parent ID number',
-                        value: request.soloParentIdNumber!.trim(),
-                      ),
-                    if (request.leaveType == LeaveType.soloParentLeave &&
-                        request.soloParentIdExpiryDate != null)
-                      _LeaveDetailTile(
-                        icon: Icons.event_busy_outlined,
-                        label: 'Solo Parent ID expiry',
-                        value: _formatDate(request.soloParentIdExpiryDate!),
-                      ),
-                    for (final field in request.employeeDetailSchemaSnapshot)
-                      if (request.customDetails[field.key] != null &&
-                          request.customDetails[field.key]
-                              .toString()
-                              .trim()
-                              .isNotEmpty)
-                        _LeaveDetailTile(
-                          icon: Icons.dynamic_form_outlined,
-                          label: field.label,
-                          value: _customLeaveDetailDisplayValue(
-                            field,
-                            request.customDetails[field.key],
-                          ),
-                        ),
-                    _LeaveDetailTile(
-                      icon: Icons.date_range_rounded,
-                      label: 'Date range',
-                      value: _formatLeaveRequestRange(request),
-                    ),
-                    _LeaveDetailTile(
-                      icon: Icons.timelapse_rounded,
-                      label: 'Working days',
-                      value:
-                          request.workingDaysApplied?.toStringAsFixed(1) ?? '—',
-                    ),
-                    _LeaveDetailTile(
-                      icon: Icons.send_rounded,
-                      label: 'Submitted',
-                      value: request.dateFiled != null
-                          ? _formatDate(request.dateFiled!)
-                          : '—',
-                    ),
-                    if ((request.officeDepartment ?? '').trim().isNotEmpty)
-                      _LeaveDetailTile(
-                        icon: Icons.apartment_rounded,
-                        label: 'Office / department',
-                        value: request.officeDepartment!.trim(),
-                      ),
-                    _LeaveDetailTile(
-                      icon: Icons.swap_horiz_rounded,
-                      label: 'Commutation',
-                      value: request.commutation.displayName,
-                    ),
-                    if ((request.reason ?? '').trim().isNotEmpty)
-                      _LeaveDetailReasonCard(text: request.reason!.trim()),
+                    LeaveRequestInformation(request: request),
                     if (_hasAttachment)
                       _EmployeeAttachmentCard(
                         filename: _attachmentFilename(request),
@@ -1079,124 +944,6 @@ class _EmployeeAttachmentPreviewDialog extends StatelessWidget {
   }
 }
 
-class _LeaveDetailTile extends StatelessWidget {
-  const _LeaveDetailTile({
-    required this.icon,
-    required this.label,
-    required this.value,
-  });
-
-  final IconData icon;
-  final String label;
-  final String value;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 10),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-        decoration: BoxDecoration(
-          color: AppTheme.dashMutedSurfaceOf(context),
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: AppTheme.dashHairlineOf(context)),
-        ),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Icon(
-              icon,
-              size: 20,
-              color: AppTheme.primaryNavy.withValues(alpha: 0.85),
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    label,
-                    style: TextStyle(
-                      color: AppTheme.dashTextSecondaryOf(context),
-                      fontSize: 11,
-                      fontWeight: FontWeight.w600,
-                      letterSpacing: 0.2,
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    value,
-                    style: TextStyle(
-                      color: AppTheme.dashTextPrimaryOf(context),
-                      fontSize: 14,
-                      fontWeight: FontWeight.w600,
-                      height: 1.35,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _LeaveDetailReasonCard extends StatelessWidget {
-  const _LeaveDetailReasonCard({required this.text});
-
-  final String text;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 10),
-      child: Container(
-        width: double.infinity,
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(
-          color: AppTheme.dashMutedSurfaceOf(context),
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: AppTheme.dashHairlineOf(context)),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Icon(
-                  Icons.notes_rounded,
-                  size: 18,
-                  color: AppTheme.dashTextSecondaryOf(context),
-                ),
-                const SizedBox(width: 6),
-                Text(
-                  'Reason',
-                  style: TextStyle(
-                    color: AppTheme.dashTextSecondaryOf(context),
-                    fontSize: 11,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 8),
-            Text(
-              text,
-              style: TextStyle(
-                color: AppTheme.dashTextPrimaryOf(context),
-                fontSize: 14,
-                height: 1.45,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
 enum _LeaveNoticeTone { neutral, warning }
 
 class _LeaveDetailNotice extends StatelessWidget {
@@ -1346,38 +1093,6 @@ class _EmployeeRequestsSectionCard extends StatelessWidget {
   }
 }
 
-String _formatDate(DateTime value) {
-  const months = [
-    'Jan',
-    'Feb',
-    'Mar',
-    'Apr',
-    'May',
-    'Jun',
-    'Jul',
-    'Aug',
-    'Sep',
-    'Oct',
-    'Nov',
-    'Dec',
-  ];
-  return '${months[value.month - 1]} ${value.day}, ${value.year}';
-}
-
-String _customLeaveDetailDisplayValue(
-  LeaveCustomFieldDefinition field,
-  dynamic value,
-) {
-  if (field.type == LeaveCustomFieldType.boolean) {
-    return value == true ? 'Yes' : 'No';
-  }
-  if (field.type == LeaveCustomFieldType.date) {
-    final date = DateTime.tryParse(value.toString());
-    if (date != null) return _formatDate(date);
-  }
-  return value.toString();
-}
-
 bool _canEmployeeCancel(LeaveRequest request) {
   return switch (request.status) {
     LeaveRequestStatus.pending ||
@@ -1392,9 +1107,4 @@ bool _canEmployeeCancel(LeaveRequest request) {
     LeaveRequestStatus.rejectedByHr ||
     LeaveRequestStatus.cancelled => false,
   };
-}
-
-String _formatLeaveRequestRange(LeaveRequest request) {
-  if (request.startDate == null || request.endDate == null) return '—';
-  return '${_formatDate(request.startDate!)} – ${_formatDate(request.endDate!)}';
 }
