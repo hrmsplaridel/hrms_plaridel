@@ -36,6 +36,50 @@ function isReadRequest(req) {
   return req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS';
 }
 
+function isHeavyApiRequest(req) {
+  if (req.method !== 'POST') return false;
+  const path = req.path.replace(/\/+$/, '').toLowerCase();
+  return path === '/dtr-daily-summary/bulk-report' ||
+    /^\/(leave|locator-slips)\/print\/(requests\/[^/]+\/render|types\/[^/]+\/preview)$/.test(path);
+}
+
+function createApiRateLimits({
+  db,
+  windowMs = parsePositiveInt(process.env.RATE_LIMIT_WINDOW_MS, FIFTEEN_MINUTES_MS),
+  readMax = parsePositiveInt(process.env.RATE_LIMIT_READ_MAX, 3000),
+  writeMax = parsePositiveInt(process.env.RATE_LIMIT_MAX, 300),
+  ipReadMax = parsePositiveInt(process.env.RATE_LIMIT_IP_READ_MAX, 60000),
+  ipWriteMax = parsePositiveInt(process.env.RATE_LIMIT_IP_WRITE_MAX, 6000),
+  heavyMax = parsePositiveInt(process.env.RATE_LIMIT_HEAVY_MAX, 30),
+} = {}) {
+  const { createAuthMiddleware, getVerifiedUser } = require('./auth');
+  const authenticate = createAuthMiddleware(db);
+  const keyGenerator = req => {
+    const user = getVerifiedUser(req);
+    return user ? `employee:${user.id}` : `ip:${ipKeyGenerator(req.ip)}`;
+  };
+  return [
+    // Coarse flood protection runs before account checks; routine quotas follow authentication.
+    createJsonLimiter({windowMs, limit: ipReadMax, skip: req => !isReadRequest(req),
+      message: 'Too many requests from this network. Please wait and try again.'}),
+    createJsonLimiter({windowMs, limit: ipWriteMax, skip: isReadRequest,
+      message: 'Too many requests from this network. Please wait and try again.'}),
+    (req, res, next) => {
+      if (!req.headers.authorization) return next();
+      return authenticate(req, res, next);
+    },
+    createJsonLimiter({windowMs, limit: readMax, keyGenerator,
+      skip: req => !isReadRequest(req),
+      message: 'Too many API read requests. Please wait and try again.'}),
+    createJsonLimiter({windowMs, limit: writeMax, keyGenerator,
+      skip: req => isReadRequest(req) || isHeavyApiRequest(req),
+      message: 'Too many API requests. Please wait and try again.'}),
+    createJsonLimiter({windowMs, limit: heavyMax, keyGenerator,
+      skip: req => !isHeavyApiRequest(req),
+      message: 'Too many report or PDF requests. Please wait and try again.'}),
+  ];
+}
+
 function authenticatedEmployeeKey(req) {
   const userId = String(req.user?.id || '').trim();
   if (userId) return `employee:${userId}`;
@@ -111,20 +155,6 @@ function createEmployeeAssistantLimiter({
     },
   });
 }
-
-const generalApiReadLimiter = createJsonLimiter({
-  windowMs: parsePositiveInt(process.env.RATE_LIMIT_WINDOW_MS, FIFTEEN_MINUTES_MS),
-  limit: parsePositiveInt(process.env.RATE_LIMIT_READ_MAX, 3000),
-  message: 'Too many API read requests. Please wait and try again.',
-  skip: (req) => !isReadRequest(req),
-});
-
-const generalApiLimiter = createJsonLimiter({
-  windowMs: parsePositiveInt(process.env.RATE_LIMIT_WINDOW_MS, FIFTEEN_MINUTES_MS),
-  limit: parsePositiveInt(process.env.RATE_LIMIT_MAX, 300),
-  message: 'Too many API requests. Please wait and try again.',
-  skip: isReadRequest,
-});
 
 const authLoginLimiter = createJsonLimiter({
   windowMs: parsePositiveInt(
@@ -266,11 +296,10 @@ const dtrAssistantExportLimiter = createEmployeeAssistantLimiter({
 });
 
 module.exports = {
+  createApiRateLimits,
   createEmployeeAssistantLimiter,
   createPublicIpLimiter,
   createApplicantWorkflowLimiter,
-  generalApiReadLimiter,
-  generalApiLimiter,
   authLoginLimiter,
   authRegisterLimiter,
   authPasswordResetLimiter,

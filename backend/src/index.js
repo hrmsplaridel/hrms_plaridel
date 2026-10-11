@@ -20,8 +20,7 @@ const {
   scheduleAuthRefreshTokenCleanupCron,
 } = require('./jobs/authRefreshTokenCleanupScheduler');
 const {
-  generalApiReadLimiter,
-  generalApiLimiter,
+  createApiRateLimits,
 } = require('./middleware/rateLimiters');
 const { registerLongBondPaperForm } = require('./utils/registerLongBondPaper');
 
@@ -190,7 +189,7 @@ app.get('/health/db', async (_req, res) => {
 });
 
 // API routes
-app.use('/api', generalApiReadLimiter, generalApiLimiter);
+app.use('/api', ...createApiRateLimits());
 app.use('/auth', authRoutes);
 app.use('/auth/password-reset-assistance', require('./routes/passwordResetAssistance').publicRouter);
 app.use('/api/password-reset-requests', require('./routes/passwordResetAssistance').adminRouter);
