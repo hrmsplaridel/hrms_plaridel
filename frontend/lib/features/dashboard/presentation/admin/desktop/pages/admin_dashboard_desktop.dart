@@ -2,6 +2,7 @@ import 'package:hrms_plaridel/features/dtr/leave/presentation/admin/admin_my_lea
 import 'package:hrms_plaridel/features/dtr/locator/presentation/employee/pages/employee_locator_slip_screen.dart';
 import 'package:flutter/foundation.dart' show mapEquals;
 import 'package:hrms_plaridel/core/services/admin_access_refresh.dart';
+import 'package:hrms_plaridel/core/services/foreground_poller.dart';
 import 'package:hrms_plaridel/core/services/app_realtime_provider.dart';
 import 'dart:async';
 import 'dart:ui' show lerpDouble;
@@ -388,7 +389,7 @@ class _AdminDashboardState extends State<AdminDashboard>
   late final Widget _settingsPanelWidget;
 
   Widget _settingsPanel() => _settingsPanelWidget;
-  Timer? _notificationPollTimer;
+  ForegroundPoller? _notificationPollTimer;
   String? _pendingSourceModule;
   String? _pendingSourceTable;
   String? _pendingSourceRecordId;
@@ -442,13 +443,16 @@ class _AdminDashboardState extends State<AdminDashboard>
       context.read<DocuTrackerProvider>().loadNotifications();
       context.read<DocuTrackerProvider>().loadSourceSignatureRequests();
       _notificationPollTimer?.cancel();
-      _notificationPollTimer = Timer.periodic(const Duration(seconds: 30), (_) {
-        if (!mounted) return;
-        unawaited(_accessRefresh?.refresh());
-        context.read<NotificationProvider>().refreshUnreadCount();
-        context.read<DocuTrackerProvider>().loadNotifications();
-        context.read<DocuTrackerProvider>().loadSourceSignatureRequests();
-      });
+      _notificationPollTimer = ForegroundPoller(
+        interval: const Duration(seconds: 30),
+        onTick: () {
+          if (!mounted) return;
+          unawaited(_accessRefresh?.refresh());
+          context.read<NotificationProvider>().refreshUnreadCount();
+          context.read<DocuTrackerProvider>().loadNotifications();
+          context.read<DocuTrackerProvider>().loadSourceSignatureRequests();
+        },
+      );
     });
   }
 

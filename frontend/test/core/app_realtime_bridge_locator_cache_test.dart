@@ -59,7 +59,7 @@ void main() {
       );
       realtime.emit(AppRealtimeEvent(name: eventName));
       await tester.pump();
-      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 250));
       expect(repository.loads, 1);
       expect(notifications.unreadCount, 0);
       expect(notifications.items.single.readAt, isNotNull);

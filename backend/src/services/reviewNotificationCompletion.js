@@ -42,4 +42,57 @@ async function reconcileReviewNotifications(db, userId) {
   return db.query(`UPDATE user_notifications n SET read_at = now()
     WHERE n.user_id = $1::uuid AND n.read_at IS NULL AND (${terms.join(' OR ')}) RETURNING n.id`, [userId]);
 }
-module.exports = {completeReviewNotifications, reconcileReviewNotifications};
+function createReviewNotificationReconciler({
+  reconcile = reconcileReviewNotifications,
+  now = Date.now,
+  cooldownMs = 15000,
+  maxUsers = 1000,
+} = {}) {
+  const databases = new WeakMap();
+  async function repair(db, userId) {
+    let users = databases.get(db);
+    if (!users) { users = new Map(); databases.set(db, users); }
+    let entry = users.get(userId);
+    if (entry?.pending) {
+      const pending = entry.pending;
+      await pending;
+      if (entry.invalidated || (entry.pending && entry.pending !== pending)) {
+        return repair(db, userId);
+      }
+      return;
+    }
+    if (entry && !entry.invalidated && entry.until > now()) return;
+    if (!entry) {
+      if (users.size >= maxUsers) {
+        for (const [id, item] of users) {
+          if (!item.pending) { users.delete(id); break; }
+        }
+        // Bound retained state even if every cached user currently has an active repair.
+        if (users.size >= maxUsers) return reconcile(db, userId);
+      }
+      entry = {until: 0};
+      users.set(userId, entry);
+    }
+    entry.invalidated = false;
+    entry.pending = reconcile(db, userId);
+    try {
+      await entry.pending;
+      entry.until = now() + cooldownMs;
+    } catch (error) {
+      users.delete(userId);
+      throw error;
+    } finally {
+      entry.pending = null;
+    }
+    if (entry.invalidated) return repair(db, userId);
+  }
+  repair.invalidate = (db, userId) => {
+    const entry = databases.get(db)?.get(userId);
+    if (entry) entry.invalidated = true;
+  };
+  return repair;
+}
+
+const reconcileReviewNotificationsIfNeeded = createReviewNotificationReconciler();
+module.exports = {completeReviewNotifications, reconcileReviewNotifications,
+  createReviewNotificationReconciler, reconcileReviewNotificationsIfNeeded};

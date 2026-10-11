@@ -81,11 +81,7 @@ class _AppRealtimeBridgeState extends State<AppRealtimeBridge> {
     } catch (_) {
       return;
     }
-    if (notifications.items.isEmpty) {
-      unawaited(notifications.refreshUnreadCount());
-    } else {
-      unawaited(notifications.loadNotifications());
-    }
+    notifications.scheduleRefresh();
   }
 
   @override

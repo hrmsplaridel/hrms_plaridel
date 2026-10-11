@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:hrms_plaridel/core/services/foreground_poller.dart';
 import 'dart:ui' show lerpDouble;
 
 import 'package:flutter/material.dart';
@@ -75,7 +76,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboardDesktopPage>
   LeaveSection? _leaveInitialSection;
   bool _showMobileLeaveFab = true;
   int _leaveNavKey = 0;
-  Timer? _notificationPollTimer;
+  ForegroundPoller? _notificationPollTimer;
   bool? _isDepartmentHead;
   String? _pendingSourceModule;
   String? _pendingSourceTable;
@@ -165,11 +166,14 @@ class _EmployeeDashboardState extends State<EmployeeDashboardDesktopPage>
         targets: _dashboardTutorialTargets,
       );
       _notificationPollTimer?.cancel();
-      _notificationPollTimer = Timer.periodic(const Duration(seconds: 30), (_) {
-        if (!mounted) return;
-        context.read<NotificationProvider>().refreshUnreadCount();
-        context.read<DocuTrackerProvider>().loadSourceSignatureRequests();
-      });
+      _notificationPollTimer = ForegroundPoller(
+        interval: const Duration(seconds: 30),
+        onTick: () {
+          if (!mounted) return;
+          context.read<NotificationProvider>().refreshUnreadCount();
+          context.read<DocuTrackerProvider>().loadSourceSignatureRequests();
+        },
+      );
     });
   }
 
