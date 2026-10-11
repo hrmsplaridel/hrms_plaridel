@@ -22,6 +22,93 @@ void main() {
     );
   });
   test(
+    'PDF 429 bytes share heavy cooldown while ordinary writes and other users remain available',
+    () async {
+      var calls = 0;
+      final dio = Dio()
+        ..httpClientAdapter = _Adapter((o) {
+          calls++;
+          return calls == 1
+              ? _json(429, {
+                  'code': 'RATE_LIMITED',
+                  'error': 'PDF limit reached',
+                  'rateLimitScope': 'api_heavy',
+                  'retryAfterSeconds': 60,
+                })
+              : _json(200, {});
+        });
+      final client = ApiClient.forTesting(dio: dio, refreshDio: Dio())..init();
+      final error = await _failure(
+        () => client.post<List<int>>(
+          '/api/leave/print/requests/a/render',
+          options: Options(responseType: ResponseType.bytes),
+        ),
+      );
+      expect(error.response?.data['rateLimitScope'], 'api_heavy');
+      expect(
+        error.response?.data['retryAfterSeconds'],
+        inInclusiveRange(60, 61),
+      );
+      expect(error.response?.data['error'], contains('PDF limit reached'));
+      await _failure(
+        () => client.post('/api/locator-slips/print/types/b/preview'),
+      );
+      await _failure(() => client.post('/api/dtr-daily-summary/bulk-report'));
+      expect(calls, 1);
+      expect((await client.post('/api/leave/a/approve')).statusCode, 200);
+      expect(await TokenStorage.instance.getToken(), 'employee-a');
+      await TokenStorage.instance.setTokens(
+        access: 'employee-b',
+        refresh: 'refresh-b',
+      );
+      expect(
+        (await client.post('/api/dtr-daily-summary/bulk-report')).statusCode,
+        200,
+      );
+      expect(calls, 3);
+    },
+  );
+  test(
+    'byte errors retain network scope and safely fall back for invalid bodies',
+    () {
+      final request = RequestOptions(
+        path: '/api/leave/print/requests/a/render',
+        method: 'POST',
+      );
+      for (final body in <List<int>>[
+        utf8.encode(jsonEncode({'rateLimitScope': 'network_write'})),
+        [255],
+        utf8.encode('not json'),
+        utf8.encode('[]'),
+        utf8.encode('${' ' * 4096}{"rateLimitScope":"network_write"}'),
+      ]) {
+        final cooldown = RateLimitCooldown(jitterMilliseconds: () => 0);
+        cooldown.record(
+          DioException(
+            requestOptions: request,
+            response: Response(
+              requestOptions: request,
+              statusCode: 429,
+              data: body,
+              headers: Headers.fromMap({
+                'retry-after': ['60'],
+              }),
+            ),
+          ),
+        );
+        expect(cooldown.blocked(request), isNotNull);
+        final otherWrite = cooldown.blocked(
+          RequestOptions(path: '/api/leave/a/approve', method: 'POST'),
+        );
+        expect(otherWrite != null, body.first == 123);
+        expect(
+          cooldown.blocked(RequestOptions(path: '/api/notifications')),
+          isNull,
+        );
+      }
+    },
+  );
+  test(
     'PDF busy responses expose a readable message without replay or sign-out',
     () async {
       var calls = 0;

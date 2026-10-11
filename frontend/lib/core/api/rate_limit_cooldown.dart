@@ -78,7 +78,14 @@ class RateLimitCooldown {
 
   RateLimitCooldownException record(DioException error) {
     final options = error.requestOptions;
-    final data = error.response?.data;
+    dynamic data = error.response?.data;
+    // PDF callers receive JSON error bodies as bytes too. Decode only small
+    // bodies; malformed or oversized responses keep the endpoint fallback.
+    if (data is List<int> && data.length <= 4096) {
+      try {
+        data = jsonDecode(utf8.decode(data));
+      } catch (_) {}
+    }
     final declared = data is Map ? data['rateLimitScope']?.toString() : null;
     final code = data is Map ? data['code']?.toString() ?? '' : '';
     final scope = _knownScopes.contains(declared)
