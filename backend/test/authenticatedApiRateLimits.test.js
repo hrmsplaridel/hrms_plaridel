@@ -41,6 +41,9 @@ test('same-IP employees have independent reads and writes', async t => {
   const limited = await f.request(A);
   assert.equal(limited.status, 429);
   assert.ok(limited.headers.get('retry-after'));
+  const limitedBody = await limited.json();
+  assert.equal(limitedBody.rateLimitScope, 'api_read');
+  assert.ok(limitedBody.retryAfterSeconds >= 1);
   assert.equal((await f.request(B)).status, 200);
   assert.equal((await f.request(A, 'POST')).status, 200);
   assert.equal((await f.request(A, 'POST')).status, 429);

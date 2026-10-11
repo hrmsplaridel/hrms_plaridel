@@ -3503,7 +3503,6 @@ class _EmployeeAttendanceContentState extends State<EmployeeAttendanceContent>
             ),
           ),
         if (!dtr.employeeAttendanceLoading &&
-            dtr.employeeAttendanceError == null &&
             dtr.employeeAttendanceHasResult &&
             visibleRecords.isNotEmpty)
           LayoutBuilder(

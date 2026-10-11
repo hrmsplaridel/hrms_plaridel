@@ -232,6 +232,47 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
     provider.dispose();
   });
+  testWidgets('rate-limit warning keeps matching cached attendance visible', (
+    tester,
+  ) async {
+    final adapter = _AttendancePageAdapter(
+      officialDate: '2026-09-14',
+      attendanceResponses: [
+        Future.value(_attendanceResponse(['2026-09-14'])),
+        Future.value(
+          ResponseBody.fromString(
+            jsonEncode({
+              'error': 'Too many requests',
+              'rateLimitScope': 'api_read',
+            }),
+            429,
+            headers: {
+              Headers.contentTypeHeader: [Headers.jsonContentType],
+              'retry-after': ['60'],
+            },
+          ),
+        ),
+      ],
+    );
+    final provider = await _pumpAttendance(
+      tester,
+      adapter: adapter,
+      size: const Size(1000, 800),
+    );
+    await _pumpUntil(tester, () => find.text('14 Mon').evaluate().isNotEmpty);
+    unawaited(
+      provider.loadTimeRecordsForUser(
+        startDate: provider.filterStart,
+        endDate: provider.filterEnd,
+        forceRefresh: true,
+      ),
+    );
+    await _pumpUntil(tester, () => provider.employeeAttendanceError != null);
+    expect(find.text('Could not load attendance'), findsOneWidget);
+    expect(find.text('14 Mon'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox.shrink());
+    provider.dispose();
+  });
 }
 
 Future<DtrProvider> _pumpAttendance(

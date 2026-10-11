@@ -19,6 +19,7 @@ function createJsonLimiter({
   skipSuccessfulRequests = false,
   skip,
   keyGenerator,
+  scope,
 }) {
   return rateLimit({
     windowMs,
@@ -29,6 +30,12 @@ function createJsonLimiter({
     skip,
     keyGenerator,
     message: { error: message },
+    ...(scope ? {handler: (req, res) => {
+      const reset = req.rateLimit?.resetTime?.getTime?.() || Date.now() + windowMs;
+      const retryAfterSeconds = Math.max(1, Math.ceil((reset - Date.now()) / 1000));
+      res.setHeader('Retry-After', retryAfterSeconds);
+      res.status(429).json({error: message, code: 'RATE_LIMITED', rateLimitScope: scope, retryAfterSeconds});
+    }} : {}),
   });
 }
 
@@ -60,21 +67,21 @@ function createApiRateLimits({
   };
   return [
     // Coarse flood protection runs before account checks; routine quotas follow authentication.
-    createJsonLimiter({windowMs, limit: ipReadMax, skip: req => !isReadRequest(req),
+    createJsonLimiter({windowMs, limit: ipReadMax, scope: 'network_read', skip: req => !isReadRequest(req),
       message: 'Too many requests from this network. Please wait and try again.'}),
-    createJsonLimiter({windowMs, limit: ipWriteMax, skip: isReadRequest,
+    createJsonLimiter({windowMs, limit: ipWriteMax, scope: 'network_write', skip: isReadRequest,
       message: 'Too many requests from this network. Please wait and try again.'}),
     (req, res, next) => {
       if (!req.headers.authorization) return next();
       return authenticate(req, res, next);
     },
-    createJsonLimiter({windowMs, limit: readMax, keyGenerator,
+    createJsonLimiter({windowMs, limit: readMax, keyGenerator, scope: 'api_read',
       skip: req => !isReadRequest(req),
       message: 'Too many API read requests. Please wait and try again.'}),
-    createJsonLimiter({windowMs, limit: writeMax, keyGenerator,
+    createJsonLimiter({windowMs, limit: writeMax, keyGenerator, scope: 'api_write',
       skip: req => isReadRequest(req) || isHeavyApiRequest(req),
       message: 'Too many API requests. Please wait and try again.'}),
-    createJsonLimiter({windowMs, limit: heavyMax, keyGenerator,
+    createJsonLimiter({windowMs, limit: heavyMax, keyGenerator, scope: 'api_heavy',
       skip: req => !isHeavyApiRequest(req),
       message: 'Too many report or PDF requests. Please wait and try again.'}),
   ];
@@ -157,6 +164,7 @@ function createEmployeeAssistantLimiter({
 }
 
 const authLoginLimiter = createJsonLimiter({
+  scope: 'auth_login',
   windowMs: parsePositiveInt(
     process.env.AUTH_LOGIN_RATE_LIMIT_WINDOW_MS,
     FIFTEEN_MINUTES_MS,
@@ -167,6 +175,7 @@ const authLoginLimiter = createJsonLimiter({
 });
 
 const authRegisterLimiter = createJsonLimiter({
+  scope: 'auth_register',
   windowMs: parsePositiveInt(
     process.env.AUTH_REGISTER_RATE_LIMIT_WINDOW_MS,
     ONE_HOUR_MS,
@@ -176,6 +185,7 @@ const authRegisterLimiter = createJsonLimiter({
 });
 
 const authPasswordResetLimiter = createJsonLimiter({
+  scope: 'auth_password_reset',
   windowMs: parsePositiveInt(
     process.env.AUTH_PASSWORD_RESET_RATE_LIMIT_WINDOW_MS,
     FIFTEEN_MINUTES_MS,
@@ -185,6 +195,7 @@ const authPasswordResetLimiter = createJsonLimiter({
 });
 
 const authPasswordResetVerifyLimiter = createJsonLimiter({
+  scope: 'auth_password_reset_verify',
   windowMs: parsePositiveInt(
     process.env.AUTH_PASSWORD_RESET_VERIFY_RATE_LIMIT_WINDOW_MS,
     FIFTEEN_MINUTES_MS,
@@ -213,18 +224,19 @@ function createAuthTokenLimiters({
     } catch (_) { /* Invalid credentials stay in the IP bucket; routes reject them. */ }
     return `ip:${ipKeyGenerator(req.ip)}`;
   };
-  const limits = limit => [
-    createJsonLimiter({windowMs, limit: ipMax,
+  const limits = (limit, scope) => [
+    createJsonLimiter({windowMs, limit: ipMax, scope: `network_${scope}`,
       message: 'Too many authentication requests from this network. Please wait and try again.'}),
-    createJsonLimiter({windowMs, limit, keyGenerator,
+    createJsonLimiter({windowMs, limit, keyGenerator, scope,
       message: 'Too many authentication requests. Please wait and try again.'}),
   ];
-  return {refresh: limits(refreshMax), logout: limits(logoutMax)};
+  return {refresh: limits(refreshMax, 'auth_refresh'), logout: limits(logoutMax, 'auth_logout')};
 }
 
 const {refresh: authRefreshLimiters, logout: authLogoutLimiters} = createAuthTokenLimiters();
 
 const authPasswordChangeLimiter = createJsonLimiter({
+  scope: 'auth_password_change',
   windowMs: parsePositiveInt(
     process.env.AUTH_PASSWORD_CHANGE_RATE_LIMIT_WINDOW_MS,
     FIFTEEN_MINUTES_MS,

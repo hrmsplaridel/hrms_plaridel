@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'client_device_header.dart';
 import 'config.dart';
 import 'token_storage.dart';
+import 'rate_limit_cooldown.dart';
 
 /// HTTP client for the HRMS backend API.
 /// Attaches access JWT from [TokenStorage] and refreshes via [POST /auth/refresh] on 401.
@@ -19,6 +20,7 @@ class ApiClient {
 
   late final Dio _dio;
   bool _initialized = false;
+  final RateLimitCooldown _rateLimitCooldown = RateLimitCooldown();
 
   /// Single in-flight refresh so concurrent 401s share one refresh call.
   Future<bool>? _refreshInFlight;
@@ -52,6 +54,8 @@ class ApiClient {
           if (token != null && token.isNotEmpty) {
             options.headers['Authorization'] = 'Bearer $token';
           }
+          final blocked = _rateLimitCooldown.blocked(options);
+          if (blocked != null) return handler.reject(blocked);
           try {
             options.headers['X-HRMS-Device'] = await ClientDeviceHeader.build();
           } catch (_) {}
@@ -71,6 +75,10 @@ class ApiClient {
         onError: (error, handler) async {
           final status = error.response?.statusCode;
           final opts = error.requestOptions;
+
+          if (status == 429 && error is! RateLimitCooldownException) {
+            return handler.next(_rateLimitCooldown.record(error));
+          }
 
           if (status != 401) {
             return handler.next(error);
