@@ -5105,6 +5105,7 @@ router.get('/ledger', protect, async (req, res) => {
   const leaveType = (req.query?.leave_type || '').toString().trim() || null;
   const action = (req.query?.action || '').toString().trim() || null;
   const affectedBucket = (req.query?.affected_bucket || '').toString().trim().toLowerCase() || null;
+  const hideZeroPending = ['1', 'true'].includes(String(req.query?.hide_zero_pending || '').toLowerCase());
   const from = (req.query?.from || req.query?.created_from || '').toString().trim() || null;
   const to = (req.query?.to || req.query?.created_to || '').toString().trim() || null;
   const includeAllUsers = ['1', 'true', 'yes'].includes(
@@ -5143,6 +5144,7 @@ router.get('/ledger', protect, async (req, res) => {
     from,
     to,
     affectedBucket,
+    hideZeroPending,
   });
 
   try {
