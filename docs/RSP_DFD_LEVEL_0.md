@@ -20,7 +20,7 @@ Based on: `RspAdminContent`, `ApplicationFlowPage`, `TrackApplicationPage`, `/ap
 |--------|-------------|
 | **E1 — Applicant** | Public user applying or tracking via landing page / application flow (no HRMS login). |
 | **E2 — HR Administrator** | Authenticated admin (`role: admin`) using RSP hub in Admin Dashboard. |
-| **E3 — Email Service** | External EmailJS and/or SMTP used for OTP, HR alerts, and hire credentials. |
+| **E3 — Email Service** | External EmailJS and/or SMTP used for applicant OTP and hire credentials. |
 
 > **Boundary note:** Employee account creation (`POST /api/employees`) is invoked by HR through HRMS but is treated here as an **admin-initiated** flow into the RSP process (hire linkage), not a separate entity.
 

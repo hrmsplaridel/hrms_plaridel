@@ -1355,7 +1355,7 @@ class _TnaEmployeeEditorDialogState extends State<_TnaEmployeeEditorDialog> {
                       },
                       decoration: _decoration(
                         context,
-                        label: 'Employee / Name',
+                        label: 'Full name',
                         hint: widget.employees.isNotEmpty
                             ? 'Search or type a name'
                             : 'Full name',
@@ -1379,22 +1379,27 @@ class _TnaEmployeeEditorDialogState extends State<_TnaEmployeeEditorDialog> {
                           padding: const EdgeInsets.symmetric(vertical: 4),
                           children: [
                             for (final m in matches)
-                              ListTile(
-                                dense: true,
-                                title: Text(
-                                  m.fullName,
-                                  style: const TextStyle(
-                                    fontWeight: FontWeight.w600,
-                                    fontSize: 13.5,
+                              Listener(
+                                behavior: HitTestBehavior.opaque,
+                                onPointerDown: (_) => _selectEmployee(m),
+                                child: ListTile(
+                                  dense: true,
+                                  title: Text(
+                                    m.fullName,
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.w600,
+                                      fontSize: 13.5,
+                                    ),
+                                  ),
+                                  subtitle: Text(
+                                    [m.positionName, m.departmentName]
+                                        .where(
+                                          (s) => (s ?? '').trim().isNotEmpty,
+                                        )
+                                        .join(' · '),
+                                    style: const TextStyle(fontSize: 11.5),
                                   ),
                                 ),
-                                subtitle: Text(
-                                  [m.positionName, m.departmentName]
-                                      .where((s) => (s ?? '').trim().isNotEmpty)
-                                      .join(' · '),
-                                  style: const TextStyle(fontSize: 11.5),
-                                ),
-                                onTap: () => _selectEmployee(m),
                               ),
                           ],
                           ),

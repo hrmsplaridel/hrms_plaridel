@@ -727,10 +727,7 @@ class _ProfileContentState extends State<ProfileContent> {
                 children: [
                   const Text(
                     'Preview photo',
-                    style: TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.w800,
-                    ),
+                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
                   ),
                   const SizedBox(height: 6),
                   Text(
@@ -1135,9 +1132,7 @@ class _ProfileContentState extends State<ProfileContent> {
     );
   }
 
-  Widget _twoColFields({
-    required List<Widget> fields,
-  }) {
+  Widget _twoColFields({required List<Widget> fields}) {
     return LayoutBuilder(
       builder: (context, c) {
         final useTwo = c.maxWidth >= 420;
@@ -1335,10 +1330,9 @@ class _ProfileContentState extends State<ProfileContent> {
               enabled: false,
               initialValue: email.isEmpty ? '—' : email,
               style: fieldStyle,
-              decoration: profileFieldDecoration(context).copyWith(
-                filled: true,
-                fillColor: mutedFill,
-              ),
+              decoration: profileFieldDecoration(
+                context,
+              ).copyWith(filled: true, fillColor: mutedFill),
             ),
           ),
         ],
@@ -1346,11 +1340,7 @@ class _ProfileContentState extends State<ProfileContent> {
     );
   }
 
-  Widget _buildAddressCard(
-    BuildContext context,
-    bool isWide,
-    AppUser? user,
-  ) {
+  Widget _buildAddressCard(BuildContext context, bool isWide, AppUser? user) {
     return ModernProfileCard(
       title: 'Address',
       child: DeferredProfileMount(
@@ -1363,7 +1353,8 @@ class _ProfileContentState extends State<ProfileContent> {
           sectionLabel: '',
           twoColumn: isWide,
           onChanged: _onProfileFieldsChanged,
-          inputDecoration: (hint) => profileFieldDecoration(context, hint: hint),
+          inputDecoration: (hint) =>
+              profileFieldDecoration(context, hint: hint),
         ),
       ),
     );
@@ -1406,7 +1397,6 @@ class _ProfileContentState extends State<ProfileContent> {
       ],
     );
   }
-
 
   Widget _buildPasswordSection(BuildContext context, bool isWide) {
     final fieldStyle = AppTheme.dashFieldTextStyle(context);
@@ -1796,79 +1786,79 @@ class _ProfileContentState extends State<ProfileContent> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-          if (showA || showP)
-            KeyedSubtree(
-              key: widget.tutorialHeroKey,
-              child: ProfileHeroHeader(
-                displayName: _profileDisplayNameFromAuth(user, displayName),
-                email: email,
-                roleLabel: _roleLabel(user),
-                idLabel: idLabel,
-                wideLayout: isWide,
-                onBack: widget.onBack,
-                avatar: SizedBox(
-                  width: 96,
-                  height: 96,
-                  child: Stack(
-                    alignment: Alignment.center,
-                    children: [
-                      _buildAvatarCircle(48, user: user),
-                      if (_imageLoading)
-                        Container(
-                          width: 96,
-                          height: 96,
-                          decoration: const BoxDecoration(
-                            color: Colors.black38,
-                            shape: BoxShape.circle,
-                          ),
-                          child: const Center(
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                              color: Colors.white,
+            if (showA || showP)
+              KeyedSubtree(
+                key: widget.tutorialHeroKey,
+                child: ProfileHeroHeader(
+                  displayName: _profileDisplayNameFromAuth(user, displayName),
+                  email: email,
+                  roleLabel: _roleLabel(user),
+                  idLabel: idLabel,
+                  wideLayout: isWide,
+                  onBack: widget.onBack,
+                  avatar: SizedBox(
+                    width: 96,
+                    height: 96,
+                    child: Stack(
+                      alignment: Alignment.center,
+                      children: [
+                        _buildAvatarCircle(48, user: user),
+                        if (_imageLoading)
+                          Container(
+                            width: 96,
+                            height: 96,
+                            decoration: const BoxDecoration(
+                              color: Colors.black38,
+                              shape: BoxShape.circle,
+                            ),
+                            child: const Center(
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: Colors.white,
+                              ),
                             ),
                           ),
-                        ),
-                    ],
-                  ),
-                ),
-                onChangePhoto: _imageLoading ? null : _pickAndUploadAvatar,
-                onViewPhoto: _imageLoading
-                    ? null
-                    : () => _previewCurrentAvatar(user),
-                isUploading: _imageLoading,
-              ),
-            ),
-          ProfileShellBodyPadding(
-            isWide: isWide,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                if (_showTabBar) ...[
-                  KeyedSubtree(
-                    key: widget.tutorialTabsKey,
-                    child: ProfileTabBar(
-                      tab: _profileTab,
-                      onChanged: _onProfileTabSelected,
-                      showAccount: showA,
-                      showSecurity: showP,
-                      showAppSettings: showSettings,
+                      ],
                     ),
                   ),
-                  const SizedBox(height: 16),
-                ],
-                KeyedSubtree(
-                  key: widget.tutorialContentKey,
-                  child: _buildActiveTabBody(
-                    context,
-                    email: email,
-                    user: user,
-                    isWide: isWide,
-                  ),
+                  onChangePhoto: _imageLoading ? null : _pickAndUploadAvatar,
+                  onViewPhoto: _imageLoading
+                      ? null
+                      : () => _previewCurrentAvatar(user),
+                  isUploading: _imageLoading,
                 ),
-              ],
+              ),
+            ProfileShellBodyPadding(
+              isWide: isWide,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  if (_showTabBar) ...[
+                    KeyedSubtree(
+                      key: widget.tutorialTabsKey,
+                      child: ProfileTabBar(
+                        tab: _profileTab,
+                        onChanged: _onProfileTabSelected,
+                        showAccount: showA,
+                        showSecurity: showP,
+                        showAppSettings: showSettings,
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                  ],
+                  KeyedSubtree(
+                    key: widget.tutorialContentKey,
+                    child: _buildActiveTabBody(
+                      context,
+                      email: email,
+                      user: user,
+                      isWide: isWide,
+                    ),
+                  ),
+                ],
+              ),
             ),
-          ),
-        ],
+          ],
         ),
       ),
     );

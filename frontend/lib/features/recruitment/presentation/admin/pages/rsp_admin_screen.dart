@@ -7,10 +7,14 @@ import 'package:provider/provider.dart';
 // ignore: avoid_web_libraries_in_flutter
 import 'package:url_launcher/url_launcher.dart';
 import 'package:hrms_plaridel/features/learning_development/models/bi_form.dart';
+import 'package:hrms_plaridel/features/learning_development/models/ojt_work_immersion_evaluation.dart';
 import 'package:hrms_plaridel/features/learning_development/models/applicants_profile.dart';
+import 'package:hrms_plaridel/features/learning_development/models/work_experience_sheet.dart';
+import 'package:hrms_plaridel/features/learning_development/data/repositories/rsp_ld_saved_entries_api.dart';
 import 'package:hrms_plaridel/features/learning_development/models/selection_lineup.dart';
 import 'package:hrms_plaridel/features/recruitment/data/exam_image_support.dart';
 import 'package:hrms_plaridel/features/recruitment/models/job_vacancy_announcement.dart';
+import 'package:hrms_plaridel/features/dashboard/presentation/admin/desktop/widgets/recruitment_monitoring_stats.dart';
 import 'package:hrms_plaridel/features/recruitment/models/recruitment_application.dart';
 import 'package:hrms_plaridel/features/recruitment/models/rsp_screening_scores.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
@@ -32,6 +36,7 @@ import 'package:hrms_plaridel/features/recruitment/utils/rsp_applications_report
 import 'package:hrms_plaridel/features/recruitment/presentation/admin/widgets/rsp_generate_report_dialog.dart';
 import 'package:hrms_plaridel/features/recruitment/presentation/admin/widgets/rsp_applications_report_preview_screen.dart';
 import 'package:hrms_plaridel/core/api/user_facing_api_error.dart';
+import 'package:hrms_plaridel/providers/auth_provider.dart';
 import 'package:hrms_plaridel/features/recruitment/presentation/shared/widgets/rsp_attachment_actions.dart';
 import 'package:hrms_plaridel/shared/widgets/rsp_ld_form_header.dart';
 import 'package:hrms_plaridel/shared/widgets/rsp_ld_record_actions.dart';
@@ -39,11 +44,12 @@ import 'package:hrms_plaridel/features/recruitment/presentation/admin/widgets/rs
 import 'package:hrms_plaridel/features/forms/presentation/admin/pages/form_background_upload_page.dart';
 import 'package:hrms_plaridel/features/forms/presentation/admin/pages/rsp_print_background_page.dart';
 import 'package:hrms_plaridel/features/docutracker/data/providers/docutracker_provider.dart';
+import 'package:hrms_plaridel/features/docutracker/models/document_builder.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_rsp_signature_section.dart';
 import 'package:hrms_plaridel/shared/models/philippine_address_data.dart';
 import 'package:hrms_plaridel/shared/widgets/structured_address_fields.dart';
 
-/// RSP module: hub with buttons for each RSP feature (Job Vacancies, Applications, Exam Results).
+/// RSP module: Job Vacancies, Recruitment Management, Exams, and Forms.
 class RspAdminContent extends StatefulWidget {
   const RspAdminContent({
     super.key,
@@ -70,8 +76,11 @@ class RspAdminContent extends StatefulWidget {
 }
 
 class _RspAdminContentState extends State<RspAdminContent> {
-  /// 0 = menu, 1 = Job Vacancies, 2 = Applications, 16 = Exam Results, 15 = Scheduling.
+  /// 0 = menu, 1 = Job Vacancies, 20 = Exams, 21 = Forms,
+  /// [RspAdminHub.recruitmentManagementSection] = Applications, Exam Results,
+  /// Scheduling, and Final Requirements.
   int _rspSectionIndex = 0;
+  int _recruitmentTab = 0;
   String? _openApplicationId;
   String? _openFinalRequirementsApplicationId;
 
@@ -80,13 +89,13 @@ class _RspAdminContentState extends State<RspAdminContent> {
     super.initState();
     final finalReqId = widget.initialFinalRequirementsApplicationId?.trim();
     if (finalReqId != null && finalReqId.isNotEmpty) {
-      _rspSectionIndex = 19;
+      _openRecruitment(tab: 3);
       _openFinalRequirementsApplicationId = finalReqId;
       return;
     }
     final id = widget.initialApplicationId?.trim();
     if (id != null && id.isNotEmpty) {
-      _rspSectionIndex = 2;
+      _openRecruitment(tab: 0);
       _openApplicationId = id;
     }
   }
@@ -98,7 +107,7 @@ class _RspAdminContentState extends State<RspAdminContent> {
     final prevFinal = oldWidget.initialFinalRequirementsApplicationId?.trim();
     if (nextFinal != null && nextFinal.isNotEmpty && nextFinal != prevFinal) {
       setState(() {
-        _rspSectionIndex = 19;
+        _openRecruitment(tab: 3);
         _openFinalRequirementsApplicationId = nextFinal;
         _openApplicationId = null;
       });
@@ -108,9 +117,43 @@ class _RspAdminContentState extends State<RspAdminContent> {
     final prev = oldWidget.initialApplicationId?.trim();
     if (next != null && next.isNotEmpty && next != prev) {
       setState(() {
-        _rspSectionIndex = 2;
+        _openRecruitment(tab: 0);
         _openApplicationId = next;
       });
+    }
+  }
+
+  void _openRecruitment({required int tab}) {
+    _rspSectionIndex = RspAdminHub.recruitmentManagementSection;
+    _recruitmentTab = tab;
+  }
+
+  bool get _isRecruitmentManagement {
+    switch (_rspSectionIndex) {
+      case RspAdminHub.recruitmentManagementSection:
+      case 2:
+      case 15:
+      case 16:
+      case 19:
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  /// Older section indexes still open the matching Recruitment Management tab.
+  int get _shownRecruitmentTab {
+    switch (_rspSectionIndex) {
+      case 16:
+        return 1;
+      case 15:
+        return 2;
+      case 19:
+        return 3;
+      case 2:
+        return 0;
+      default:
+        return _recruitmentTab;
     }
   }
 
@@ -168,14 +211,6 @@ class _RspAdminContentState extends State<RspAdminContent> {
                 )
               else if (_rspSectionIndex == 1)
                 const RspJobVacanciesSection()
-              else if (_rspSectionIndex == 2)
-                _RspApplicationsMonitor(
-                  view: _RspMonitorView.applications,
-                  openApplicationId: _openApplicationId,
-                  onOpenApplicationConsumed: _onOpenApplicationConsumed,
-                )
-              else if (_rspSectionIndex == 16)
-                const _RspApplicationsMonitor(view: _RspMonitorView.examResults)
               else if (_rspSectionIndex == 20)
                 _RspExamsSection(
                   onBackToRsp: () => setState(() => _rspSectionIndex = 0),
@@ -184,14 +219,26 @@ class _RspAdminContentState extends State<RspAdminContent> {
                 _RspFormsSection(
                   onBackToRsp: () => setState(() => _rspSectionIndex = 0),
                 )
-              else if (_rspSectionIndex == 15)
-                const RspSchedulingSection()
-              else if (_rspSectionIndex == 19)
-                RspFinalRequirementsSection(
-                  onGoToCreateAccount: widget.onOpenCreateAccount,
-                  expandApplicationId: _openFinalRequirementsApplicationId,
-                  onExpandApplicationConsumed:
-                      _onFinalRequirementsExpandConsumed,
+              else if (_isRecruitmentManagement)
+                RspRecruitmentManagement(
+                  tabIndex: _shownRecruitmentTab,
+                  onTabChanged: (tab) =>
+                      setState(() => _openRecruitment(tab: tab)),
+                  applications: _RspApplicationsMonitor(
+                    view: _RspMonitorView.applications,
+                    openApplicationId: _openApplicationId,
+                    onOpenApplicationConsumed: _onOpenApplicationConsumed,
+                  ),
+                  examResults: const _RspApplicationsMonitor(
+                    view: _RspMonitorView.examResults,
+                  ),
+                  scheduling: const RspSchedulingSection(),
+                  finalRequirements: RspFinalRequirementsSection(
+                    onGoToCreateAccount: widget.onOpenCreateAccount,
+                    expandApplicationId: _openFinalRequirementsApplicationId,
+                    onExpandApplicationConsumed:
+                        _onFinalRequirementsExpandConsumed,
+                  ),
                 )
               else
                 const SizedBox.shrink(),
@@ -820,9 +867,9 @@ class _RspFormsSectionState extends State<_RspFormsSection> {
             children: [
               for (final item in _builtInFormPickerItems)
                 Padding(
-                  padding: const EdgeInsets.only(bottom: 12),
-                  child: row(item),
-                ),
+                    padding: const EdgeInsets.only(bottom: 12),
+                    child: row(item),
+                  ),
             ],
           );
         }
@@ -901,63 +948,13 @@ class _RspFormsSectionState extends State<_RspFormsSection> {
               ),
             ],
           ),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    colors: [
-                      AppTheme.primaryNavy.withValues(alpha: 0.16),
-                      AppTheme.letterheadNavy.withValues(alpha: 0.08),
-                    ],
-                  ),
-                  borderRadius: BorderRadius.circular(14),
-                  border: Border.all(
-                    color: AppTheme.primaryNavy.withValues(alpha: 0.14),
-                  ),
-                ),
-                child: const Icon(
-                  Icons.description_rounded,
-                  color: AppTheme.primaryNavy,
-                  size: 26,
-                ),
-              ),
-              const SizedBox(width: 16),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Forms',
-                      style: TextStyle(
-                        color: AppTheme.dashTextPrimaryOf(context),
-                        fontSize: 20,
-                        fontWeight: FontWeight.w800,
-                        letterSpacing: -0.2,
-                      ),
-                    ),
-                    const SizedBox(height: 6),
-                    Text(
-                      'Select a form or set a print background.',
-                      style: TextStyle(
-                        color: AppTheme.dashTextSecondaryOf(context),
-                        fontSize: 13.5,
-                        height: 1.4,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
+          child: FormsHubHeader(
+            isNarrow: isNarrow,
+            onPrintBackground: () =>
+                setState(() => _showPrintBackground = true),
           ),
         ),
         const SizedBox(height: 20),
-        FormsPrintBackgroundEntry(
-          onOpen: () => setState(() => _showPrintBackground = true),
-        ),
-        const SizedBox(height: 16),
         _formGrid(),
       ],
     );
@@ -1759,7 +1756,9 @@ class _GeneralExamItem {
     captionController.text = q['question_image_caption']?.toString() ?? '';
     _optionImagePaths
       ..clear()
-      ..addAll(examOptionImagesFrom(q['option_images'], optionControllers.length));
+      ..addAll(
+        examOptionImagesFrom(q['option_images'], optionControllers.length),
+      );
     collapsed = isComplete;
   }
 
@@ -1998,7 +1997,8 @@ Widget _rspMcqQuestionsPanel({
               item.collapsed = !item.collapsed;
               onRefresh();
             },
-            questionPreview: item.questionController.text.trim().isEmpty &&
+            questionPreview:
+                item.questionController.text.trim().isEmpty &&
                     item.questionImagePath != null
                 ? 'Image question'
                 : item.questionController.text,
@@ -2140,9 +2140,8 @@ Widget _rspMcqQuestionsPanel({
                                                 children: List.generate(
                                                   optCount,
                                                   (idx) {
-                                                    final txt = item.optionLabel(
-                                                      idx,
-                                                    );
+                                                    final txt = item
+                                                        .optionLabel(idx);
                                                     return RadioListTile<int>(
                                                       value: idx,
                                                       title: Text(
@@ -2958,13 +2957,21 @@ class _BiFormEditor extends StatefulWidget {
     required this.onCancel,
     required this.onPrint,
     required this.onDownloadPdf,
+    this.applicantWorkflow = false,
+    this.onPersist,
+    this.onSubmitToHr,
   });
 
   final BiFormEntry entry;
 
   /// When true, same layout as edit mode but fields are not editable and save/cancel are hidden.
   final bool readOnly;
+
+  /// Applicant recruitment mode: three pages, no admin print or save controls.
+  final bool applicantWorkflow;
   final void Function(BiFormEntry) onSave;
+  final Future<void> Function(BiFormEntry)? onPersist;
+  final Future<void> Function(BiFormEntry)? onSubmitToHr;
   final VoidCallback onCancel;
   final Future<void> Function(BiFormEntry) onPrint;
   final Future<void> Function(BiFormEntry) onDownloadPdf;
@@ -3199,9 +3206,74 @@ class _BiFormEditorState extends State<_BiFormEditor> {
     );
   }
 
-  void _continue() {
+  bool _validateApplicantPage(int page) {
+    if (page == 0) {
+      if (!_validateStep1()) return false;
+      if (_ratings.any((rating) => rating == null)) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Score every competency from 1 to 5.')),
+        );
+        return false;
+      }
+      return true;
+    }
+    if (page == 1) {
+      final hasArea =
+          _functionalChecks.any((checked) => checked) ||
+          _otherArea.text.trim().isNotEmpty;
+      final hasPerformance =
+          _perf3Years.text.trim().isNotEmpty ||
+          _challenges.text.trim().isNotEmpty ||
+          _compliance.text.trim().isNotEmpty;
+      if (!hasArea || !hasPerformance) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Select a functional area and enter the performance information.',
+            ),
+          ),
+        );
+        return false;
+      }
+      return true;
+    }
+    if (_otherRelevant.text.trim().isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Other information is required.')),
+      );
+      return false;
+    }
+    return true;
+  }
+
+  Future<void> _continue() async {
+    if (widget.applicantWorkflow) {
+      if (!_validateApplicantPage(_step)) return;
+      final persist = widget.onPersist;
+      if (persist != null) {
+        try {
+          await persist(_buildCurrentEntry());
+        } catch (_) {
+          return;
+        }
+      }
+      if (!mounted) return;
+      setState(() => _step = (_step + 1).clamp(0, 2));
+      return;
+    }
     if (_step == 0 && !_validateStep1()) return;
     setState(() => _step = (_step + 1).clamp(0, 2));
+  }
+
+  Future<void> _submitToHr() async {
+    for (var page = 0; page < 3; page++) {
+      if (!_validateApplicantPage(page)) {
+        setState(() => _step = page);
+        return;
+      }
+    }
+    final submit = widget.onSubmitToHr;
+    if (submit != null) await submit(_buildCurrentEntry());
   }
 
   @override
@@ -3325,23 +3397,24 @@ class _BiFormEditorState extends State<_BiFormEditor> {
               ],
             ),
           ),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            crossAxisAlignment: WrapCrossAlignment.center,
-            children: [
-              FormPreviewPrintButtons(
-                onPreview: _previewCurrent,
-                onPrint: () => widget.onPrint(_buildCurrentEntry()),
-              ),
-              IconButton(
-                tooltip: 'Export PDF',
-                style: rspLdRecordIconButtonStyle(),
-                onPressed: () => widget.onDownloadPdf(_buildCurrentEntry()),
-                icon: const Icon(Icons.picture_as_pdf_rounded, size: 20),
-              ),
-            ],
-          ),
+          if (!widget.applicantWorkflow)
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: [
+                FormPreviewPrintButtons(
+                  onPreview: _previewCurrent,
+                  onPrint: () => widget.onPrint(_buildCurrentEntry()),
+                ),
+                IconButton(
+                  tooltip: 'Export PDF',
+                  style: rspLdRecordIconButtonStyle(),
+                  onPressed: () => widget.onDownloadPdf(_buildCurrentEntry()),
+                  icon: const Icon(Icons.picture_as_pdf_rounded, size: 20),
+                ),
+              ],
+            ),
         ],
       ),
     );
@@ -4245,63 +4318,134 @@ class _BiFormEditorState extends State<_BiFormEditor> {
   }
 
   Widget _actionBar(bool ro) {
+    if (widget.applicantWorkflow) {
+      return Wrap(
+        spacing: 10,
+        runSpacing: 10,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: [
+          if (_step > 0)
+            OutlinedButton.icon(
+              onPressed: ro ? null : () => setState(() => _step -= 1),
+              icon: const Icon(Icons.arrow_back_rounded, size: 18),
+              label: const Text('Previous'),
+            ),
+          if (_step < 2)
+            FilledButton.icon(
+              onPressed: ro ? null : _continue,
+              icon: const Icon(Icons.arrow_forward_rounded, size: 18),
+              label: const Text('Next Page'),
+              style: FilledButton.styleFrom(
+                backgroundColor: AppTheme.primaryNavy,
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 22,
+                  vertical: 14,
+                ),
+              ),
+            )
+          else if (!ro)
+            FilledButton.icon(
+              onPressed: _submitToHr,
+              icon: const Icon(Icons.send_rounded, size: 18),
+              label: const Text('Submit to HR'),
+              style: FilledButton.styleFrom(
+                backgroundColor: const Color(0xFFE85D04),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 22,
+                  vertical: 14,
+                ),
+              ),
+            ),
+        ],
+      );
+    }
     final editing = widget.entry.id != null;
     final primaryLabel = _step < 2
         ? 'Save & Continue'
         : (editing ? 'Update' : 'Save');
+    final continueButton = !ro
+        ? FilledButton.icon(
+            onPressed: _step < 2 ? _continue : _save,
+            icon: Icon(
+              _step < 2 ? Icons.arrow_forward_rounded : Icons.save_rounded,
+              size: 18,
+            ),
+            label: Text(primaryLabel),
+            style: FilledButton.styleFrom(
+              backgroundColor: AppTheme.primaryNavy,
+              padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 14),
+            ),
+          )
+        : (_step < 2
+              ? FilledButton.icon(
+                  onPressed: _continue,
+                  icon: const Icon(Icons.arrow_forward_rounded, size: 18),
+                  label: const Text('Continue'),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: AppTheme.primaryNavy,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 22,
+                      vertical: 14,
+                    ),
+                  ),
+                )
+              : null);
     return Wrap(
       spacing: 10,
       runSpacing: 10,
       crossAxisAlignment: WrapCrossAlignment.center,
       children: [
-        if (!ro)
-          FilledButton.icon(
-                onPressed: _step < 2 ? _continue : _save,
-                icon: Icon(
-                  _step < 2 ? Icons.arrow_forward_rounded : Icons.save_rounded,
-                  size: 18,
-                ),
-                label: Text(primaryLabel),
-                style: FilledButton.styleFrom(
-                  backgroundColor: AppTheme.primaryNavy,
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 22,
-                    vertical: 14,
-                  ),
-                ),
-              )
-            else if (_step < 2)
-              FilledButton.icon(
-                onPressed: _continue,
-                icon: const Icon(Icons.arrow_forward_rounded, size: 18),
-                label: const Text('Continue'),
-                style: FilledButton.styleFrom(
-                  backgroundColor: AppTheme.primaryNavy,
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 22,
-                    vertical: 14,
-                  ),
-                ),
-              ),
-            if (_step > 0)
-              OutlinedButton.icon(
-                onPressed: () => setState(() => _step -= 1),
-                icon: const Icon(Icons.arrow_back_rounded, size: 18),
-                label: const Text('Previous'),
-              ),
-            if (!ro && _step < 2)
-              OutlinedButton.icon(
-                onPressed: _save,
-                icon: const Icon(Icons.save_outlined, size: 18),
-                label: const Text('Save'),
-              ),
+        if (_step > 0)
+          OutlinedButton.icon(
+            onPressed: () => setState(() => _step -= 1),
+            icon: const Icon(Icons.arrow_back_rounded, size: 18),
+            label: const Text('Previous'),
+          ),
+        if (!ro && _step < 2)
+          OutlinedButton.icon(
+            onPressed: _save,
+            icon: const Icon(Icons.save_outlined, size: 18),
+            label: const Text('Save'),
+          ),
         if (!ro)
           OutlinedButton.icon(
             onPressed: _cancel,
             icon: const Icon(Icons.close_rounded, size: 18),
             label: const Text('Cancel'),
           ),
+        if (continueButton != null) continueButton,
       ],
+    );
+  }
+}
+
+/// Applicant-facing Background Investigation. Reuses the admin form pages.
+class ApplicantBiFormHost extends StatelessWidget {
+  const ApplicantBiFormHost({
+    super.key,
+    required this.entry,
+    required this.readOnly,
+    required this.onPersist,
+    required this.onSubmitToHr,
+  });
+
+  final BiFormEntry entry;
+  final bool readOnly;
+  final Future<void> Function(BiFormEntry) onPersist;
+  final Future<void> Function(BiFormEntry) onSubmitToHr;
+
+  @override
+  Widget build(BuildContext context) {
+    return _BiFormEditor(
+      entry: entry,
+      readOnly: readOnly,
+      applicantWorkflow: true,
+      onSave: (_) {},
+      onCancel: () {},
+      onPrint: (_) async {},
+      onDownloadPdf: (_) async {},
+      onPersist: onPersist,
+      onSubmitToHr: onSubmitToHr,
     );
   }
 }
@@ -4314,11 +4458,25 @@ class _RspApplicantsProfileSection extends StatefulWidget {
       _RspApplicantsProfileSectionState();
 }
 
+const _kApplicantsProfileLockedMessage =
+    'Applicants Profile is locked because all required signatures have been completed.';
+
 class _RspApplicantsProfileSectionState
     extends State<_RspApplicantsProfileSection> {
   List<ApplicantsProfileEntry> _entries = [];
   bool _loading = true;
   ApplicantsProfileEntry? _editing;
+  bool _recordReadOnly = false;
+  bool _requirementCompleted = false;
+  String? _signatureStatus;
+
+  bool _isProfileLocked(ApplicantsProfileEntry? entry) {
+    return entry?.signaturesLocked == true ||
+        (entry != null &&
+            entry.id != null &&
+            entry.id == _editing?.id &&
+            _signatureStatus == 'completed');
+  }
 
   @override
   void initState() {
@@ -4442,6 +4600,7 @@ class _RspApplicantsProfileSectionState
       applicants: matchedApps
           .map(
             (a) => ApplicantsProfileApplicant(
+              applicationId: a.id,
               name: a.fullName.trim().isEmpty ? null : a.fullName.trim(),
               course: a.course?.trim().isEmpty == true
                   ? null
@@ -4820,24 +4979,114 @@ class _RspApplicantsProfileSectionState
         return;
       }
       if (selectedPosition == _blankFormChoice) {
-        setState(() => _editing = const ApplicantsProfileEntry());
+        setState(() {
+          _editing = const ApplicantsProfileEntry();
+          _recordReadOnly = false;
+          _requirementCompleted = false;
+          _signatureStatus = null;
+        });
         return;
       }
-      setState(
-        () => _editing = _buildAutoPrefilledProfile(
+      setState(() {
+        _recordReadOnly = false;
+        _requirementCompleted = false;
+        _signatureStatus = null;
+        _editing = _buildAutoPrefilledProfile(
           announcement,
           applications,
           preferredPosition: selectedPosition,
-        ),
-      );
+        );
+      });
     } catch (_) {
       if (!mounted) return;
-      setState(() => _editing = const ApplicantsProfileEntry());
+      setState(() {
+        _editing = const ApplicantsProfileEntry();
+        _recordReadOnly = false;
+        _requirementCompleted = false;
+        _signatureStatus = null;
+      });
     }
   }
 
-  void _edit(ApplicantsProfileEntry e) => setState(() => _editing = e);
-  void _cancelEdit() => setState(() => _editing = null);
+  void _openRecord(ApplicantsProfileEntry e, {required bool readOnly}) {
+    final locked = e.signaturesLocked;
+    setState(() {
+      _editing = e;
+      _signatureStatus = e.signatureStatus;
+      _recordReadOnly = readOnly || locked;
+      _requirementCompleted = false;
+    });
+    final id = e.id;
+    if (id != null) {
+      RecruitmentRepo.instance.applicantsProfileCompletion(id).then((payload) {
+        if (!mounted || _editing?.id != id) return;
+        setState(() => _requirementCompleted = payload['allCompleted'] == true);
+      }, onError: (_) {});
+    }
+  }
+
+  void _view(ApplicantsProfileEntry e) => _openRecord(e, readOnly: true);
+
+  void _edit(ApplicantsProfileEntry e) =>
+      _openRecord(e, readOnly: e.signaturesLocked);
+
+  void _onSignaturesChanged(DocuTrackerSourceSignatureBundle bundle) {
+    final id = _editing?.id;
+    if (id == null || bundle.sourceRecordId != id) return;
+    final locked = bundle.sourceStatus == 'completed';
+    setState(() {
+      _signatureStatus = bundle.sourceStatus;
+      if (locked) _recordReadOnly = true;
+      _entries = [
+        for (final entry in _entries)
+          if (entry.id == id)
+            entry.copyWithSignature(
+              signatureStatus: bundle.sourceStatus,
+              signaturesLocked: locked,
+            )
+          else
+            entry,
+      ];
+      if (_editing?.id == id) {
+        _editing = _editing!.copyWithSignature(
+          signatureStatus: bundle.sourceStatus,
+          signaturesLocked: locked,
+        );
+      }
+    });
+  }
+
+  Future<void> _markProfileCompleted() async {
+    final id = _editing?.id;
+    if (id == null || _requirementCompleted) return;
+    try {
+      final payload = await RecruitmentRepo.instance
+          .completeApplicantsProfileEntry(id);
+      if (!mounted) return;
+      setState(() => _requirementCompleted = payload['allCompleted'] == true);
+      final count = payload['matched'];
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            payload['duplicate'] == true
+                ? 'Applicants Profile is already completed.'
+                : 'Applicants Profile marked completed for $count applicant${count == 1 ? '' : 's'}.',
+          ),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(userFacingApiError(e))));
+    }
+  }
+
+  void _cancelEdit() => setState(() {
+    _editing = null;
+    _recordReadOnly = false;
+    _signatureStatus = null;
+  });
 
   Future<void> _onSave(ApplicantsProfileEntry entry) async {
     try {
@@ -4850,7 +5099,11 @@ class _RspApplicantsProfileSectionState
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Applicants profile saved.')),
         );
-        setState(() => _editing = null);
+        setState(() {
+          _editing = null;
+          _recordReadOnly = false;
+          _signatureStatus = null;
+        });
         _load();
       }
     } catch (e) {
@@ -4863,6 +5116,15 @@ class _RspApplicantsProfileSectionState
   }
 
   Future<void> _onDelete(String id) async {
+    final locked = _entries.any((entry) => entry.id == id && entry.signaturesLocked);
+    if (locked) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text(_kApplicantsProfileLockedMessage)),
+        );
+      }
+      return;
+    }
     try {
       await ApplicantsProfileRepo.instance.delete(id);
       if (mounted) {
@@ -4996,6 +5258,9 @@ class _RspApplicantsProfileSectionState
           previewBuilder: () => _ApplicantsProfileFormEditor(
             readOnly: true,
             entry: e,
+            signatureLockNotice: e.signaturesLocked
+                ? _kApplicantsProfileLockedMessage
+                : null,
             onSave: (_) {},
             onCancel: () {},
             onPrint: _printProfile,
@@ -5004,8 +5269,10 @@ class _RspApplicantsProfileSectionState
           ),
           onPrint: () => _printProfile(e),
           onDocumentPreview: () => _previewProfile(e),
-          onEdit: () => _edit(e),
-          onDelete: e.id == null ? null : () => _onDelete(e.id!),
+          onEdit: e.signaturesLocked ? null : () => _edit(e),
+          onDelete: e.id == null || e.signaturesLocked
+              ? null
+              : () => _onDelete(e.id!),
         );
       }).toList(),
     );
@@ -5057,17 +5324,35 @@ class _RspApplicantsProfileSectionState
           _ApplicantsProfileFormEditor(
             key: ValueKey(_editing?.id ?? 'new'),
             entry: _editing!,
+            readOnly: _recordReadOnly || _isProfileLocked(_editing),
+            signatureLockNotice: _isProfileLocked(_editing)
+                ? _kApplicantsProfileLockedMessage
+                : null,
+            showRecordActions: true,
+            onEditRecord:
+                _recordReadOnly &&
+                    _editing?.id != null &&
+                    !_isProfileLocked(_editing)
+                ? () => _edit(_editing!)
+                : null,
             onSave: _onSave,
             onCancel: _cancelEdit,
             onPrint: _printProfile,
             onPreview: _previewProfile,
             onDownloadPdf: _downloadProfile,
+            onMarkCompleted: _editing?.id == null
+                ? null
+                : _markProfileCompleted,
+            requirementCompleted: _requirementCompleted,
           ),
           if (_editing?.id != null) ...[
             const SizedBox(height: 16),
             DocuTrackerRspSignatureSection(
               sourceTable: ApplicantsProfileEntry.tableName,
               sourceRecordId: _editing!.id!,
+              signatureStatus: _signatureStatus ?? _editing?.signatureStatus,
+              showLockedIndicator: true,
+              onChanged: _onSignaturesChanged,
               slots: const [
                 DocuTrackerRspSignatureSlot('prepared_by', 'Prepared by'),
                 DocuTrackerRspSignatureSlot('checked_by', 'Checked by'),
@@ -5090,6 +5375,7 @@ class _RspApplicantsProfileSectionState
           else
             _ApplicantsProfileList(
               entries: _entries,
+              onView: _view,
               onEdit: _edit,
               onDelete: _onDelete,
               onPrint: _printProfile,
@@ -5111,6 +5397,11 @@ class _ApplicantsProfileFormEditor extends StatefulWidget {
     required this.onPrint,
     this.onPreview,
     required this.onDownloadPdf,
+    this.onMarkCompleted,
+    this.requirementCompleted = false,
+    this.showRecordActions,
+    this.onEditRecord,
+    this.signatureLockNotice,
   });
 
   final ApplicantsProfileEntry entry;
@@ -5120,6 +5411,17 @@ class _ApplicantsProfileFormEditor extends StatefulWidget {
   final Future<void> Function(ApplicantsProfileEntry) onPrint;
   final Future<void> Function(ApplicantsProfileEntry)? onPreview;
   final Future<void> Function(ApplicantsProfileEntry) onDownloadPdf;
+  final Future<void> Function()? onMarkCompleted;
+  final bool requirementCompleted;
+
+  /// When null, document actions stay on editable forms only.
+  final bool? showRecordActions;
+
+  /// Opens this saved record for editing. Used from the read-only record page.
+  final VoidCallback? onEditRecord;
+
+  /// Shown when both required DocuTracker signatures are already complete.
+  final String? signatureLockNotice;
 
   @override
   State<_ApplicantsProfileFormEditor> createState() =>
@@ -5165,6 +5467,7 @@ class _ApplicantsProfileFormEditorState
                   a.age ?? '',
                   a.civilStatus ?? '',
                   a.remarkDisability ?? '',
+                  applicationId: a.applicationId ?? '',
                 ),
               )
               .toList();
@@ -5180,9 +5483,11 @@ class _ApplicantsProfileFormEditorState
     String sex,
     String age,
     String civil,
-    String remark,
-  ) {
+    String remark, {
+    String applicationId = '',
+  }) {
     return {
+      'application_id': TextEditingController(text: applicationId),
       'name': TextEditingController(text: name),
       'course': TextEditingController(text: course),
       'address': TextEditingController(text: address),
@@ -5301,6 +5606,9 @@ class _ApplicantsProfileFormEditorState
     final applicants = _applicantRows
         .map(
           (r) => ApplicantsProfileApplicant(
+            applicationId: r['application_id']!.text.trim().isEmpty
+                ? null
+                : r['application_id']!.text.trim(),
             name: r['name']!.text.trim().isEmpty
                 ? null
                 : r['name']!.text.trim(),
@@ -5393,9 +5701,9 @@ class _ApplicantsProfileFormEditorState
     final secondary = AppTheme.dashTextSecondaryOf(context);
     final position = _positionApplied.text.trim();
     final title = position.isEmpty ? 'New Applicants Profile' : position;
-    final statusLabel = ro
-        ? 'Read-only preview'
-        : (widget.entry.id == null ? 'Draft' : 'Saved');
+    final statusLabel = widget.entry.id == null
+        ? (ro ? 'Read-only preview' : 'Draft')
+        : 'Saved';
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(20, 16, 16, 16),
@@ -5427,6 +5735,10 @@ class _ApplicantsProfileFormEditorState
                     ),
                     const SizedBox(width: 10),
                     _statusChip(statusLabel),
+                    if (widget.requirementCompleted) ...[
+                      const SizedBox(width: 8),
+                      _statusChip('Completed'),
+                    ],
                   ],
                 ),
                 const SizedBox(height: 4),
@@ -5434,10 +5746,21 @@ class _ApplicantsProfileFormEditorState
                   'Vacancy details and applicant list for this posting.',
                   style: TextStyle(fontSize: 12.5, color: secondary),
                 ),
+                if (widget.signatureLockNotice != null) ...[
+                  const SizedBox(height: 8),
+                  Text(
+                    widget.signatureLockNotice!,
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w700,
+                      color: primary,
+                    ),
+                  ),
+                ],
               ],
             ),
           ),
-          if (!ro)
+          if (widget.showRecordActions ?? !ro)
             Wrap(
               spacing: 8,
               runSpacing: 8,
@@ -5463,16 +5786,36 @@ class _ApplicantsProfileFormEditorState
                 ),
                 TextButton(
                   onPressed: widget.onCancel,
-                  child: const Text('Cancel'),
+                  child: Text(ro ? 'Back' : 'Cancel'),
                 ),
-                FilledButton.icon(
-                  onPressed: _save,
-                  icon: const Icon(Icons.save_rounded, size: 18),
-                  label: const Text('Save'),
-                  style: FilledButton.styleFrom(
-                    backgroundColor: AppTheme.primaryNavy,
+                if (ro && widget.onEditRecord != null)
+                  FilledButton.icon(
+                    onPressed: widget.onEditRecord,
+                    icon: const Icon(Icons.edit_rounded, size: 18),
+                    label: const Text('Edit'),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: AppTheme.primaryNavy,
+                    ),
+                  )
+                else if (!ro)
+                  FilledButton.icon(
+                    onPressed: _save,
+                    icon: const Icon(Icons.save_rounded, size: 18),
+                    label: const Text('Save'),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: AppTheme.primaryNavy,
+                    ),
                   ),
-                ),
+                if (widget.entry.id != null &&
+                    widget.onMarkCompleted != null &&
+                    !widget.requirementCompleted)
+                  FilledButton(
+                    onPressed: widget.onMarkCompleted,
+                    style: FilledButton.styleFrom(
+                      backgroundColor: const Color(0xFFE85D04),
+                    ),
+                    child: const Text('Mark Completed'),
+                  ),
               ],
             ),
         ],
@@ -6508,6 +6851,9 @@ class _RspSelectionLineupSectionState
   List<SelectionLineupEntry> _entries = [];
   bool _loading = true;
   SelectionLineupEntry? _editing;
+  bool _recordReadOnly = false;
+  bool _requirementCompleted = false;
+  String? _signatureStatus;
 
   @override
   void initState() {
@@ -6535,9 +6881,463 @@ class _RspSelectionLineupSectionState
     }
   }
 
-  void _startNew() => setState(() => _editing = const SelectionLineupEntry());
-  void _edit(SelectionLineupEntry e) => setState(() => _editing = e);
-  void _cancelEdit() => setState(() => _editing = null);
+  static const String _cancelledLineupChoice =
+      '__cancelled_selection_lineup_pick__';
+  static const String _blankLineupChoice = '__blank_selection_lineup_form__';
+
+  static String _norm(String? value) => (value ?? '').trim().toLowerCase();
+
+  static bool _samePosition(String? a, String? b) {
+    final left = _norm(a);
+    final right = _norm(b);
+    return left.isNotEmpty && left == right;
+  }
+
+  static String? _optionalText(String? value) {
+    final text = value?.trim();
+    return (text == null || text.isEmpty) ? null : text;
+  }
+
+  /// Passed, gated applications are the ones Step 4 can mark completed.
+  static bool _eligibleForLineup(RecruitmentApplication application) {
+    return application.step4GateRequired &&
+        application.status.trim().toLowerCase() == 'passed';
+  }
+
+  Future<void> _startNew() async {
+    try {
+      final announcement = await JobVacancyAnnouncementRepo.instance.fetch();
+      final applications = await RecruitmentRepo.instance.listApplications();
+      List<Map<String, dynamic>> workSheets = const [];
+      try {
+        workSheets = await RspLdSavedEntriesApi.listRows(
+          WorkExperienceSheetEntry.tableName,
+        );
+      } catch (_) {
+        workSheets = const [];
+      }
+      if (!mounted) return;
+      final positions = _lineupPositions(announcement, applications);
+      if (positions.isEmpty) {
+        setState(() {
+          _editing = const SelectionLineupEntry();
+          _recordReadOnly = false;
+          _requirementCompleted = false;
+          _signatureStatus = null;
+        });
+        return;
+      }
+      final selected = await _pickLineupPosition(positions, applications);
+      if (!mounted || selected == null || selected == _cancelledLineupChoice) {
+        return;
+      }
+      if (selected == _blankLineupChoice) {
+        setState(() {
+          _editing = const SelectionLineupEntry();
+          _recordReadOnly = false;
+          _requirementCompleted = false;
+          _signatureStatus = null;
+        });
+        return;
+      }
+      setState(() {
+        _recordReadOnly = false;
+        _requirementCompleted = false;
+        _signatureStatus = null;
+        _editing = _buildAutoPrefilledLineup(
+          announcement,
+          applications,
+          workSheets,
+          selected,
+        );
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _editing = const SelectionLineupEntry();
+        _recordReadOnly = false;
+        _requirementCompleted = false;
+        _signatureStatus = null;
+      });
+    }
+  }
+
+  List<String> _lineupPositions(
+    JobVacancyAnnouncement announcement,
+    List<RecruitmentApplication> applications,
+  ) {
+    final ordered = <String>[];
+    void addPosition(String? raw) {
+      final position = raw?.trim();
+      if (position == null || position.isEmpty) return;
+      if (!ordered.any((existing) => _samePosition(existing, position))) {
+        ordered.add(position);
+      }
+    }
+
+    for (final vacancy in announcement.listedVacancies) {
+      addPosition(vacancy.positionKey);
+    }
+    for (final application in applications.where(_eligibleForLineup)) {
+      addPosition(application.positionAppliedFor);
+    }
+    return ordered;
+  }
+
+  int _eligibleCount(
+    String position,
+    List<RecruitmentApplication> applications,
+  ) {
+    return applications
+        .where(_eligibleForLineup)
+        .where(
+          (application) =>
+              _samePosition(application.positionAppliedFor, position),
+        )
+        .length;
+  }
+
+  SelectionLineupEntry _buildAutoPrefilledLineup(
+    JobVacancyAnnouncement announcement,
+    List<RecruitmentApplication> applications,
+    List<Map<String, dynamic>> workSheets,
+    String position,
+  ) {
+    final eligible =
+        applications
+            .where(_eligibleForLineup)
+            .where(
+              (application) =>
+                  _samePosition(application.positionAppliedFor, position),
+            )
+            .toList()
+          ..sort((a, b) => _norm(a.fullName).compareTo(_norm(b.fullName)));
+    final sheetsByApplication = <String, Map<String, dynamic>>{};
+    for (final sheet in workSheets) {
+      final applicationId = _optionalText(sheet['application_id']?.toString());
+      if (applicationId != null) sheetsByApplication[applicationId] = sheet;
+    }
+    final departments = <String>{};
+    final applicants = eligible.map((application) {
+      final sheet = sheetsByApplication[application.id];
+      final department = _optionalText(sheet?['department']?.toString());
+      if (department != null) departments.add(department);
+      return SelectionLineupApplicant(
+        applicationId: application.id,
+        name: _optionalText(application.fullName),
+        education: _optionalText(sheet?['min_education']?.toString()),
+        experience: _optionalText(sheet?['min_experience']?.toString()),
+        training: _optionalText(sheet?['min_training']?.toString()),
+        eligibility: _optionalText(sheet?['min_eligibility']?.toString()),
+      );
+    }).toList();
+    return SelectionLineupEntry(
+      vacantPosition: position,
+      nameOfAgencyOffice: departments.length == 1 ? departments.single : null,
+      applicants: applicants,
+    );
+  }
+
+  Future<String?> _pickLineupPosition(
+    List<String> positions,
+    List<RecruitmentApplication> applications,
+  ) {
+    return showDialog<String>(
+      context: context,
+      builder: (ctx) {
+        final primary = AppTheme.dashTextPrimaryOf(ctx);
+        final secondary = AppTheme.dashTextSecondaryOf(ctx);
+        final panel = AppTheme.dashPanelOf(ctx);
+        final hairline = AppTheme.dashHairlineOf(ctx);
+        return Dialog(
+          backgroundColor: Colors.transparent,
+          insetPadding: const EdgeInsets.symmetric(
+            horizontal: 24,
+            vertical: 28,
+          ),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 480, maxHeight: 560),
+            child: Material(
+              color: panel,
+              borderRadius: BorderRadius.circular(18),
+              clipBehavior: Clip.antiAlias,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 16, 8, 8),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Select position',
+                                style: TextStyle(
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.w800,
+                                  color: primary,
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                'Choose the vacancy to autofill into this Selection Line-Up.',
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  height: 1.35,
+                                  color: secondary,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        IconButton(
+                          tooltip: 'Close',
+                          onPressed: () =>
+                              Navigator.of(ctx).pop(_cancelledLineupChoice),
+                          icon: Icon(Icons.close_rounded, color: secondary),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Flexible(
+                    child: ListView.separated(
+                      shrinkWrap: true,
+                      padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
+                      itemCount: positions.length,
+                      separatorBuilder: (_, __) => const SizedBox(height: 10),
+                      itemBuilder: (_, index) {
+                        final position = positions[index];
+                        final count = _eligibleCount(position, applications);
+                        final countLabel = count == 1
+                            ? '1 eligible applicant'
+                            : '$count eligible applicants';
+                        return Material(
+                          color: Colors.transparent,
+                          child: InkWell(
+                            onTap: () => Navigator.of(ctx).pop(position),
+                            borderRadius: BorderRadius.circular(14),
+                            child: Ink(
+                              decoration: BoxDecoration(
+                                borderRadius: BorderRadius.circular(14),
+                                border: Border.all(color: hairline),
+                              ),
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 14,
+                                  vertical: 12,
+                                ),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      position,
+                                      style: TextStyle(
+                                        fontSize: 15,
+                                        fontWeight: FontWeight.w800,
+                                        color: primary,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 4),
+                                    Text(
+                                      countLabel,
+                                      style: TextStyle(
+                                        fontSize: 12.5,
+                                        color: secondary,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                    child: OutlinedButton.icon(
+                      onPressed: () =>
+                          Navigator.of(ctx).pop(_blankLineupChoice),
+                      icon: const Icon(
+                        Icons.insert_drive_file_outlined,
+                        size: 18,
+                      ),
+                      label: const Text('Start with a blank form'),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  void _openRecord(SelectionLineupEntry entry, {required bool readOnly}) {
+    setState(() {
+      _editing = entry;
+      _recordReadOnly = readOnly;
+      _requirementCompleted = false;
+      _signatureStatus = null;
+    });
+    final id = entry.id;
+    if (id != null) {
+      RecruitmentRepo.instance.selectionLineupCompletion(id).then((payload) {
+        if (!mounted || _editing?.id != id) return;
+        setState(() => _requirementCompleted = payload['allCompleted'] == true);
+      }, onError: (_) {});
+    }
+  }
+
+  void _view(SelectionLineupEntry entry) => _openRecord(entry, readOnly: true);
+
+  void _edit(SelectionLineupEntry entry) => _openRecord(entry, readOnly: false);
+
+  Future<void> _markLineupCompleted() async {
+    final id = _editing?.id;
+    if (id == null || _requirementCompleted) return;
+    try {
+      final payload = await RecruitmentRepo.instance
+          .completeSelectionLineupEntry(id);
+      if (!mounted) return;
+      setState(() => _requirementCompleted = payload['allCompleted'] == true);
+      final count = payload['matched'];
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            payload['duplicate'] == true
+                ? 'Selection Line-Up is already completed.'
+                : 'Selection Line-Up marked completed for $count applicant${count == 1 ? '' : 's'}.',
+          ),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(userFacingApiError(e))));
+    }
+  }
+
+  void _cancelEdit() => setState(() {
+    _editing = null;
+    _recordReadOnly = false;
+    _signatureStatus = null;
+  });
+
+  void _onSignaturesChanged(DocuTrackerSourceSignatureBundle bundle) {
+    if (_editing?.id == null || bundle.sourceRecordId != _editing!.id) return;
+    setState(() => _signatureStatus = bundle.sourceStatus);
+  }
+
+  String _historyText(dynamic value) {
+    if (value == null) return '—';
+    if (value is List) {
+      final names = value
+          .map((item) {
+            if (item is Map && item['name'] != null) {
+              return item['name'].toString().trim();
+            }
+            return '';
+          })
+          .where((name) => name.isNotEmpty)
+          .join(', ');
+      return names.isEmpty ? '${value.length} applicant row(s)' : names;
+    }
+    final text = value.toString().trim();
+    return text.isEmpty ? '—' : text;
+  }
+
+  Future<void> _showEditHistory(String id) async {
+    try {
+      final edits = await RspLdSavedEntriesApi.editHistory(
+        SelectionLineupEntry.tableName,
+        id,
+      );
+      if (!mounted) return;
+      await showDialog<void>(
+        context: context,
+        builder: (dialogContext) {
+          return AlertDialog(
+            title: const Text('Edit history'),
+            content: SizedBox(
+              width: 560,
+              child: edits.isEmpty
+                  ? const Text('No content changes have been recorded yet.')
+                  : ListView.separated(
+                      shrinkWrap: true,
+                      itemCount: edits.length,
+                      separatorBuilder: (_, __) => const Divider(height: 20),
+                      itemBuilder: (_, index) {
+                        final edit = edits[index];
+                        final parsed = DateTime.tryParse(
+                          edit['edited_at']?.toString() ?? '',
+                        );
+                        final when = parsed == null
+                            ? (edit['edited_at']?.toString() ?? '')
+                            : parsed.toLocal().toString();
+                        final who =
+                            edit['edited_by_name']?.toString().trim().isNotEmpty ==
+                                true
+                            ? edit['edited_by_name'].toString()
+                            : 'Unknown user';
+                        final afterSigning = edit['signed_when_edited'] == true;
+                        final changes = edit['changes'];
+                        return Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              '$who · $when',
+                              style: const TextStyle(fontWeight: FontWeight.w700),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              afterSigning
+                                  ? 'Edited after signature. The signature was kept and does not approve this revision.'
+                                  : 'Edited before signature.',
+                            ),
+                            if (changes is List)
+                              ...changes.map((change) {
+                                final row = change is Map
+                                    ? Map<String, dynamic>.from(change)
+                                    : <String, dynamic>{};
+                                final label =
+                                    row['label']?.toString() ??
+                                    row['field']?.toString() ??
+                                    'Field';
+                                return Padding(
+                                  padding: const EdgeInsets.only(top: 8),
+                                  child: Text(
+                                    '$label: ${_historyText(row['previous'])} → ${_historyText(row['next'])}',
+                                  ),
+                                );
+                              }),
+                          ],
+                        );
+                      },
+                    ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(dialogContext).pop(),
+                child: const Text('Close'),
+              ),
+            ],
+          );
+        },
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(userFacingApiError(e))));
+    }
+  }
 
   Future<void> _onSave(SelectionLineupEntry entry) async {
     try {
@@ -6550,7 +7350,11 @@ class _RspSelectionLineupSectionState
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Selection line-up saved.')),
         );
-        setState(() => _editing = null);
+        setState(() {
+          _editing = null;
+          _recordReadOnly = false;
+          _signatureStatus = null;
+        });
         _load();
       }
     } catch (e) {
@@ -6759,20 +7563,37 @@ class _RspSelectionLineupSectionState
           _SelectionLineupEditor(
             key: ValueKey(_editing?.id ?? 'new'),
             entry: _editing!,
+            readOnly: _recordReadOnly,
+            showRecordActions: true,
+            onEditRecord: _recordReadOnly && _editing?.id != null
+                ? () => _edit(_editing!)
+                : null,
             onSave: _onSave,
             onCancel: _cancelEdit,
             onPrint: _printSl,
             onPreview: _previewSl,
             onDownloadPdf: _downloadSl,
+            onMarkCompleted: _editing?.id == null ? null : _markLineupCompleted,
+            requirementCompleted: _requirementCompleted,
           ),
           if (_editing?.id != null) ...[
             const SizedBox(height: 16),
             DocuTrackerRspSignatureSection(
               sourceTable: SelectionLineupEntry.tableName,
               sourceRecordId: _editing!.id!,
+              signatureStatus: _signatureStatus,
+              onChanged: _onSignaturesChanged,
               slots: const [
                 DocuTrackerRspSignatureSlot('prepared_by', 'Prepared by'),
               ],
+            ),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton.icon(
+                onPressed: () => _showEditHistory(_editing!.id!),
+                icon: const Icon(Icons.history_rounded, size: 18),
+                label: const Text('View edit history'),
+              ),
             ),
           ],
           const SizedBox(height: 24),
@@ -6791,6 +7612,7 @@ class _RspSelectionLineupSectionState
           else
             _SelectionLineupList(
               entries: _entries,
+              onView: _view,
               onEdit: _edit,
               onDelete: _onDelete,
               onPrint: _printSl,
@@ -6812,6 +7634,10 @@ class _SelectionLineupEditor extends StatefulWidget {
     required this.onPrint,
     this.onPreview,
     required this.onDownloadPdf,
+    this.onMarkCompleted,
+    this.requirementCompleted = false,
+    this.showRecordActions,
+    this.onEditRecord,
   });
 
   final SelectionLineupEntry entry;
@@ -6821,6 +7647,10 @@ class _SelectionLineupEditor extends StatefulWidget {
   final Future<void> Function(SelectionLineupEntry) onPrint;
   final Future<void> Function(SelectionLineupEntry)? onPreview;
   final Future<void> Function(SelectionLineupEntry) onDownloadPdf;
+  final Future<void> Function()? onMarkCompleted;
+  final bool requirementCompleted;
+  final bool? showRecordActions;
+  final VoidCallback? onEditRecord;
 
   @override
   State<_SelectionLineupEditor> createState() => _SelectionLineupEditorState();
@@ -6858,6 +7688,7 @@ class _SelectionLineupEditorState extends State<_SelectionLineupEditor> {
                   a.experience ?? '',
                   a.training ?? '',
                   a.eligibility ?? '',
+                  applicationId: a.applicationId ?? '',
                 ),
               )
               .toList();
@@ -6871,9 +7702,11 @@ class _SelectionLineupEditorState extends State<_SelectionLineupEditor> {
     String edu,
     String exp,
     String train,
-    String elig,
-  ) {
+    String elig, {
+    String applicationId = '',
+  }) {
     return {
+      'application_id': TextEditingController(text: applicationId),
       'name': TextEditingController(text: name),
       'education': TextEditingController(text: edu),
       'experience': TextEditingController(text: exp),
@@ -7115,6 +7948,9 @@ class _SelectionLineupEditorState extends State<_SelectionLineupEditor> {
     final applicants = _rows
         .map(
           (r) => SelectionLineupApplicant(
+            applicationId: r['application_id']!.text.trim().isEmpty
+                ? null
+                : r['application_id']!.text.trim(),
             name: r['name']!.text.trim().isEmpty
                 ? null
                 : r['name']!.text.trim(),
@@ -7220,9 +8056,9 @@ class _SelectionLineupEditorState extends State<_SelectionLineupEditor> {
     final position = _position.text.trim();
     final itemNo = _itemNo.text.trim();
     final title = position.isEmpty ? 'New Selection Line-Up' : position;
-    final statusLabel = ro
-        ? 'Read-only preview'
-        : (widget.entry.id == null ? 'Draft' : 'Saved');
+    final statusLabel = widget.entry.id == null
+        ? (ro ? 'Read-only preview' : 'Draft')
+        : 'Saved';
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(20, 16, 16, 16),
@@ -7254,6 +8090,10 @@ class _SelectionLineupEditorState extends State<_SelectionLineupEditor> {
                     ),
                     const SizedBox(width: 10),
                     _statusChip(statusLabel),
+                    if (widget.requirementCompleted) ...[
+                      const SizedBox(width: 8),
+                      _statusChip('Completed'),
+                    ],
                   ],
                 ),
                 const SizedBox(height: 4),
@@ -7302,7 +8142,32 @@ class _SelectionLineupEditorState extends State<_SelectionLineupEditor> {
                     backgroundColor: AppTheme.primaryNavy,
                   ),
                 ),
+              ] else if (widget.showRecordActions == true) ...[
+                TextButton(
+                  onPressed: widget.onCancel,
+                  child: const Text('Back'),
+                ),
+                if (widget.onEditRecord != null)
+                  FilledButton.icon(
+                    onPressed: widget.onEditRecord,
+                    icon: const Icon(Icons.edit_rounded, size: 18),
+                    label: const Text('Edit'),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: AppTheme.primaryNavy,
+                    ),
+                  ),
               ],
+              if ((widget.showRecordActions == true || !ro) &&
+                  widget.entry.id != null &&
+                  widget.onMarkCompleted != null &&
+                  !widget.requirementCompleted)
+                FilledButton(
+                  onPressed: widget.onMarkCompleted,
+                  style: FilledButton.styleFrom(
+                    backgroundColor: const Color(0xFFE85D04),
+                  ),
+                  child: const Text('Mark Completed'),
+                ),
             ],
           ),
         ],
@@ -9001,31 +9866,7 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
   }
 
   String _applicationDisplayStatus(RecruitmentApplication app) {
-    if (app.hiredUserId != null || app.status == 'registered') return 'Hired';
-    if (app.hrAccountSetupDone) return 'Account setup done';
-    if (app.orientationAttended == true) return 'Orientation attended';
-    if (app.orientationAttended == false) return 'Orientation missed';
-    if (app.orientationAt != null) return 'Orientation scheduled';
-    if (app.finalRequirementsApproved) return 'Final requirements approved';
-    if (app.finalInterviewPassed == true) return 'Final interview passed';
-    if (app.finalInterviewPassed == false) return 'Final interview failed';
-
-    switch (app.status) {
-      case 'submitted':
-        return 'Pending review';
-      case 'document_approved':
-        return 'Docs approved';
-      case 'document_declined':
-        return 'Docs declined';
-      case 'exam_taken':
-        return 'Exam taken';
-      case 'passed':
-        return 'Passed exam';
-      case 'failed':
-        return 'Failed exam';
-      default:
-        return app.status;
-    }
+    return RecruitmentMonitoringStats.detailedStageLabel(app);
   }
 
   /// Readable status pill with color by outcome (tooltip shows raw value).
@@ -9052,7 +9893,16 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
     } else if (s.contains('pending') ||
         s.contains('submitted') ||
         s.contains('review') ||
-        s.contains('exam')) {
+        s.contains('exam') ||
+        s.contains('form') ||
+        s.contains('waiting') ||
+        s.contains('assessment') ||
+        s.contains('experience') ||
+        s.contains('profile') ||
+        s.contains('line-up') ||
+        s.contains('turn-around') ||
+        s.contains('csc') ||
+        s.contains('deliberation')) {
       bg = AppTheme.primaryNavy.withValues(alpha: dark ? 0.22 : 0.12);
       fg = dark ? AppTheme.primaryNavyLight : AppTheme.primaryNavyDark;
       icon = Icons.schedule_rounded;
@@ -9234,6 +10084,15 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
     if (ok == true && mounted) await _syncAttachmentsFromStorage();
   }
 
+  bool _signedInRoleCanManageRequiredForm() {
+    final role = context.read<AuthProvider>().user?.role;
+    return role == 'admin' || role == 'hr';
+  }
+
+  bool _signedInRoleCanScheduleDeliberation() {
+    return context.read<AuthProvider>().user?.role == 'admin';
+  }
+
   Future<void> _openApplicantDetails(
     RecruitmentApplication app, {
     int initialTab = 0,
@@ -9261,6 +10120,8 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
               height: MediaQuery.sizeOf(ctx).height,
               child: _ApplicantDetailsDrawer(
                 app: app,
+                canManageRequiredForm: _signedInRoleCanManageRequiredForm(),
+                canScheduleDeliberation: _signedInRoleCanScheduleDeliberation(),
                 exam: _examResults[app.id.toLowerCase()],
                 initialTab: initialTab,
                 statusBadge: _applicationStatusBadge(
@@ -10200,6 +11061,8 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
 class _ApplicantDetailsDrawer extends StatelessWidget {
   const _ApplicantDetailsDrawer({
     required this.app,
+    required this.canManageRequiredForm,
+    required this.canScheduleDeliberation,
     required this.exam,
     required this.initialTab,
     required this.statusBadge,
@@ -10215,6 +11078,8 @@ class _ApplicantDetailsDrawer extends StatelessWidget {
   });
 
   final RecruitmentApplication app;
+  final bool canManageRequiredForm;
+  final bool canScheduleDeliberation;
   final RecruitmentExamResult? exam;
   final int initialTab;
   final Widget statusBadge;
@@ -10390,6 +11255,34 @@ class _ApplicantDetailsDrawer extends StatelessWidget {
                   ),
                 ),
               ),
+              if (canManageRequiredForm &&
+                  app.status == 'document_approved' &&
+                  app.step2GateRequired)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                  child: _RequiredFormAssignmentCard(
+                    app: app,
+                    onUpdated: onUpdated,
+                  ),
+                ),
+              if (canManageRequiredForm &&
+                  app.status == 'passed' &&
+                  app.step4GateRequired)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                  child: _PreDeliberationCard(
+                    app: app,
+                    canSchedule: canScheduleDeliberation,
+                    onUpdated: onUpdated,
+                  ),
+                ),
+              if (canManageRequiredForm &&
+                  app.finalInterviewPassed == true &&
+                  app.step5GateRequired)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                  child: _FinalHiringPrepCard(app: app, onUpdated: onUpdated),
+                ),
               Material(
                 color: AppTheme.dashPanelOf(context),
                 child: const TabBar(
@@ -10558,6 +11451,7 @@ class _ApplicantDetailsDrawer extends StatelessWidget {
               ('Complete name', displayOrNa(app.fullName)),
               ('Gender', displayOrNa(app.sex)),
               ('Age', displayOrNa(app.age)),
+              ('Date of birth', displayOrNa(app.dateOfBirth)),
               ('Civil status', displayOrNa(app.civilStatus)),
               ('Course', displayOrNa(app.course)),
             ]),
@@ -11956,6 +12850,919 @@ class _AttachmentRow extends StatelessWidget {
   }
 }
 
+class _IssuedFormReviewDialog extends StatefulWidget {
+  const _IssuedFormReviewDialog({
+    required this.applicationId,
+    required this.payload,
+  });
+
+  final String applicationId;
+  final Map<String, dynamic> payload;
+
+  @override
+  State<_IssuedFormReviewDialog> createState() =>
+      _IssuedFormReviewDialogState();
+}
+
+class _IssuedFormReviewDialogState extends State<_IssuedFormReviewDialog> {
+  late Map<String, dynamic> _entry;
+  late String? _formType;
+  late String? _status;
+  final _comment = TextEditingController();
+  bool _busy = false;
+
+  @override
+  void initState() {
+    super.initState();
+    final assignment = widget.payload['assignment'];
+    final entry = widget.payload['entry'];
+    _formType = assignment is Map ? assignment['formType']?.toString() : null;
+    _status = assignment is Map ? assignment['status']?.toString() : null;
+    _entry = entry is Map
+        ? Map<String, dynamic>.from(entry)
+        : <String, dynamic>{};
+  }
+
+  @override
+  void dispose() {
+    _comment.dispose();
+    super.dispose();
+  }
+
+  bool get _canDecide =>
+      _status == 'submitted_for_review' || _status == 'resubmitted_for_review';
+
+  Future<void> _approve() async {
+    setState(() => _busy = true);
+    try {
+      await RecruitmentRepo.instance.approveRequiredForm(widget.applicationId);
+      if (!mounted) return;
+      Navigator.of(context).pop(true);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _busy = false);
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(userFacingApiError(e))));
+    }
+  }
+
+  Future<void> _revise() async {
+    final reason = _comment.text.trim();
+    if (reason.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Enter the reason for the revision.')),
+      );
+      return;
+    }
+    setState(() => _busy = true);
+    try {
+      await RecruitmentRepo.instance.requestRequiredFormRevision(
+        widget.applicationId,
+        reason,
+      );
+      if (!mounted) return;
+      Navigator.of(context).pop(true);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _busy = false);
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(userFacingApiError(e))));
+    }
+  }
+
+  Future<void> _printBi(BiFormEntry entry) {
+    return FormPdf.printForm(
+      context: context,
+      buildDocument: () => FormPdf.buildBiFormPdf(entry),
+      filename: 'BI_Form.pdf',
+      format: FormPdf.biPrintPageFormat,
+      dynamicLayout: false,
+      printModule: 'rsp',
+      printFormKey: 'bi',
+    );
+  }
+
+  Future<void> _downloadBi(BiFormEntry entry) async {
+    final doc = await FormPdf.buildBiFormPdf(entry);
+    await FormPdf.sharePdf(doc, name: 'BI_Form.pdf');
+  }
+
+  Future<void> _printOjt(OjtWorkImmersionEvaluation entry) {
+    return FormPdf.printForm(
+      context: context,
+      buildDocument: () => FormPdf.buildOjtWorkImmersionEvaluationPdf(entry),
+      filename: 'OJT_Work_Immersion_Evaluation.pdf',
+      format: FormPdf.pageLetter,
+      printModule: 'rsp',
+      printFormKey: 'ojt_work_immersion',
+    );
+  }
+
+  Future<void> _downloadOjt(OjtWorkImmersionEvaluation entry) async {
+    final doc = await FormPdf.buildOjtWorkImmersionEvaluationPdf(entry);
+    await FormPdf.sharePdf(doc, name: 'OJT_Work_Immersion_Evaluation.pdf');
+  }
+
+  Future<void> _saveOjt(OjtWorkImmersionEvaluation entry) async {
+    await OjtWorkImmersionEvaluationRepo.instance.update(entry);
+    if (!mounted) return;
+    setState(() => _entry = entry.toJson());
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('Evaluation saved.')));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final bi = _formType != 'ojt';
+    return Dialog(
+      insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
+      child: SizedBox(
+        width: 980,
+        height: MediaQuery.sizeOf(context).height * 0.88,
+        child: Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 16, 12, 8),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      bi
+                          ? 'Background Investigation'
+                          : 'OJT / Work Immersion Evaluation',
+                      style: const TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ),
+                  IconButton(
+                    tooltip: 'Close',
+                    onPressed: _busy ? null : () => Navigator.of(context).pop(),
+                    icon: const Icon(Icons.close_rounded),
+                  ),
+                ],
+              ),
+            ),
+            const Divider(height: 1),
+            Expanded(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.all(16),
+                child: bi
+                    ? _BiFormEditor(
+                        entry: BiFormEntry.fromJson(_entry),
+                        readOnly: true,
+                        onSave: (_) {},
+                        onCancel: () {},
+                        onPrint: _printBi,
+                        onDownloadPdf: _downloadBi,
+                      )
+                    : OjtWorkImmersionEvaluationEditor(
+                        entry: OjtWorkImmersionEvaluation.fromJson(_entry),
+                        onSave: _saveOjt,
+                        onCancel: () => Navigator.of(context).pop(),
+                        onPrint: _printOjt,
+                        onPreview: (entry) => openFormDocumentPreview(
+                          context: context,
+                          title: 'OJT / Work Immersion Evaluation',
+                          filename: 'OJT_Work_Immersion_Evaluation.pdf',
+                          format: FormPdf.pageLetter,
+                          printModule: 'rsp',
+                          printFormKey: 'ojt_work_immersion',
+                          buildDocument: () =>
+                              FormPdf.buildOjtWorkImmersionEvaluationPdf(entry),
+                        ),
+                        onDownloadPdf: _downloadOjt,
+                      ),
+              ),
+            ),
+            if (_canDecide)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    TextField(
+                      controller: _comment,
+                      minLines: 2,
+                      maxLines: 4,
+                      decoration: const InputDecoration(
+                        labelText: 'Revision reason',
+                        hintText: 'Tell the applicant what to change',
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      alignment: WrapAlignment.end,
+                      children: [
+                        OutlinedButton(
+                          onPressed: _busy ? null : _revise,
+                          child: const Text('Request Revision'),
+                        ),
+                        FilledButton(
+                          style: FilledButton.styleFrom(
+                            backgroundColor: const Color(0xFFE85D04),
+                            foregroundColor: Colors.white,
+                          ),
+                          onPressed: _busy ? null : _approve,
+                          child: const Text('Approve'),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _FinalHiringPrepCard extends StatefulWidget {
+  const _FinalHiringPrepCard({required this.app, required this.onUpdated});
+
+  final RecruitmentApplication app;
+  final VoidCallback onUpdated;
+
+  @override
+  State<_FinalHiringPrepCard> createState() => _FinalHiringPrepCardState();
+}
+
+class _FinalHiringPrepCardState extends State<_FinalHiringPrepCard> {
+  late String? _tatStatus;
+  late String? _cscStatus;
+  bool _busy = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _tatStatus = widget.app.tatStatus;
+    _cscStatus = widget.app.cscApprovalStatus;
+  }
+
+  String _tatLabel() => _tatStatus == 'completed' ? 'Completed' : 'In Progress';
+
+  String _cscLabel() =>
+      _cscStatus == 'approved' ? 'Approved' : 'Waiting for CSC Approval';
+
+  bool get _canApprove => _tatStatus == 'completed' && _cscStatus != 'approved';
+
+  Future<void> _approve() async {
+    setState(() => _busy = true);
+    try {
+      await RecruitmentRepo.instance.markCscApproved(widget.app.id);
+      if (!mounted) return;
+      setState(() => _cscStatus = 'approved');
+      widget.onUpdated();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(userFacingApiError(e))));
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final locked = !widget.app.finalHiringUnlocked && _cscStatus != 'approved';
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: AppTheme.dashPanelOf(context),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppTheme.dashHairlineOf(context)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Final Hiring Preparation',
+            style: TextStyle(
+              fontWeight: FontWeight.w800,
+              color: AppTheme.dashTextPrimaryOf(context),
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text('Turn-Around Time: ${_tatLabel()}'),
+          Text('CSC Approval: ${_cscLabel()}'),
+          Text('Final Requirements: ${locked ? 'Locked' : 'Available'}'),
+          if (_canApprove) ...[
+            const SizedBox(height: 10),
+            FilledButton(
+              onPressed: _busy ? null : _approve,
+              child: const Text('Mark CSC Approved'),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _PreDeliberationCard extends StatefulWidget {
+  const _PreDeliberationCard({
+    required this.app,
+    required this.canSchedule,
+    required this.onUpdated,
+  });
+
+  final RecruitmentApplication app;
+  final bool canSchedule;
+  final VoidCallback onUpdated;
+
+  @override
+  State<_PreDeliberationCard> createState() => _PreDeliberationCardState();
+}
+
+class _PreDeliberationCardState extends State<_PreDeliberationCard> {
+  late String? _wesStatus;
+  late String? _profileStatus;
+  late String? _lineupStatus;
+  bool _busy = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _wesStatus = widget.app.wesStatus;
+    _profileStatus = widget.app.applicantsProfileStatus;
+    _lineupStatus = widget.app.selectionLineupStatus;
+  }
+
+  bool get _unlocked =>
+      _wesStatus == 'approved' &&
+      _profileStatus == 'completed' &&
+      _lineupStatus == 'completed';
+
+  String _wesLabel() {
+    switch (_wesStatus) {
+      case 'assigned':
+      case 'in_progress':
+        return 'Assigned';
+      case 'submitted_for_review':
+      case 'resubmitted_for_review':
+        return 'Under Review';
+      case 'needs_revision':
+        return 'Needs revision';
+      case 'approved':
+        return 'Approved';
+      default:
+        return 'Waiting';
+    }
+  }
+
+  String _hrLabel(String? status) {
+    switch (status) {
+      case 'in_progress':
+        return 'In Progress';
+      case 'completed':
+        return 'Completed';
+      default:
+        return 'Waiting for HR';
+    }
+  }
+
+  Future<void> _run(Future<void> Function() action) async {
+    setState(() => _busy = true);
+    try {
+      await action();
+      widget.onUpdated();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(userFacingApiError(e))));
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _reviewWes() async {
+    final payload = await RecruitmentRepo.instance.getPreDeliberation(
+      widget.app.id,
+    );
+    if (!mounted) return;
+    final wes = payload['wes'];
+    if (wes is! Map) return;
+    final result = await showDialog<String>(
+      context: context,
+      builder: (ctx) => _WesReviewDialog(
+        applicationId: widget.app.id,
+        entry: Map<String, dynamic>.from(wes),
+        status: _wesStatus,
+      ),
+    );
+    if (!mounted || result == null) return;
+    setState(() {
+      _wesStatus = result == 'approved' ? 'approved' : 'needs_revision';
+    });
+  }
+
+  Future<void> _schedule() async {
+    final now = DateTime.now();
+    final day = await showDatePicker(
+      context: context,
+      initialDate: now.add(const Duration(days: 7)),
+      firstDate: DateTime(now.year - 1),
+      lastDate: DateTime(now.year + 3),
+      helpText: 'Deliberation date',
+    );
+    if (day == null || !mounted) return;
+    final time = await showTimePicker(
+      context: context,
+      initialTime: TimeOfDay.now(),
+      helpText: 'Deliberation time',
+    );
+    if (time == null || !mounted) return;
+    final dt = DateTime(day.year, day.month, day.day, time.hour, time.minute);
+    await RecruitmentRepo.instance.updateFinalInterviewAt(widget.app.id, dt);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Deliberation schedule saved.')),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final canReviewWes =
+        _wesStatus == 'submitted_for_review' ||
+        _wesStatus == 'resubmitted_for_review' ||
+        _wesStatus == 'needs_revision';
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+      decoration: BoxDecoration(
+        color: AppTheme.dashPanelOf(context),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppTheme.dashHairlineOf(context)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Pre-Deliberation Requirements',
+            style: TextStyle(fontWeight: FontWeight.w800),
+          ),
+          const SizedBox(height: 8),
+          Text('Work Experience Sheet: ${_wesLabel()}'),
+          Wrap(
+            spacing: 8,
+            children: [
+              if (_wesStatus == null ||
+                  _wesStatus == 'waiting_for_work_experience_sheet')
+                OutlinedButton(
+                  onPressed: _busy
+                      ? null
+                      : () => _run(() async {
+                          await RecruitmentRepo.instance.assignWorkExperience(
+                            widget.app.id,
+                          );
+                          setState(() => _wesStatus = 'assigned');
+                        }),
+                  child: const Text('Assign'),
+                ),
+              if (canReviewWes)
+                OutlinedButton(
+                  onPressed: _busy ? null : () => _run(_reviewWes),
+                  child: const Text('Review'),
+                ),
+            ],
+          ),
+          Text('Applicants Profile: ${_hrLabel(_profileStatus)}'),
+          Text('Selection Line-Up: ${_hrLabel(_lineupStatus)}'),
+          const SizedBox(height: 8),
+          Text(
+            _unlocked
+                ? 'Deliberation: Ready to schedule'
+                : 'Deliberation: Locked until all requirements are complete',
+          ),
+          if (widget.canSchedule && widget.app.finalInterviewAt == null)
+            FilledButton(
+              onPressed: _busy || !_unlocked ? null : () => _run(_schedule),
+              child: const Text('Schedule Deliberation'),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _WesReviewDialog extends StatefulWidget {
+  const _WesReviewDialog({
+    required this.applicationId,
+    required this.entry,
+    required this.status,
+  });
+
+  final String applicationId;
+  final Map<String, dynamic> entry;
+  final String? status;
+
+  @override
+  State<_WesReviewDialog> createState() => _WesReviewDialogState();
+}
+
+class _WesReviewDialogState extends State<_WesReviewDialog> {
+  final _comment = TextEditingController();
+  bool _busy = false;
+
+  @override
+  void dispose() {
+    _comment.dispose();
+    super.dispose();
+  }
+
+  bool get _canDecide =>
+      widget.status == 'submitted_for_review' ||
+      widget.status == 'resubmitted_for_review';
+
+  Future<void> _approve() async {
+    setState(() => _busy = true);
+    try {
+      await RecruitmentRepo.instance.approveWorkExperience(
+        widget.applicationId,
+      );
+      if (!mounted) return;
+      Navigator.of(context).pop('approved');
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _busy = false);
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(userFacingApiError(e))));
+    }
+  }
+
+  Future<void> _revise() async {
+    final reason = _comment.text.trim();
+    if (reason.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Enter the reason for the revision.')),
+      );
+      return;
+    }
+    setState(() => _busy = true);
+    try {
+      await RecruitmentRepo.instance.requestWorkExperienceRevision(
+        widget.applicationId,
+        reason,
+      );
+      if (!mounted) return;
+      Navigator.of(context).pop('revised');
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _busy = false);
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(userFacingApiError(e))));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final entry = WorkExperienceSheetEntry.fromJson(widget.entry);
+    return Dialog(
+      child: SizedBox(
+        width: 980,
+        height: MediaQuery.sizeOf(context).height * 0.88,
+        child: Column(
+          children: [
+            Expanded(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.all(16),
+                child: WorkExperienceSheetEditor(
+                  entry: entry,
+                  readOnly: true,
+                  showDocumentActions: true,
+                  onSave: (_) {},
+                  onCancel: () => Navigator.of(context).pop(),
+                  onPrint: (saved) => FormPdf.printForm(
+                    context: context,
+                    buildDocument: () =>
+                        FormPdf.buildWorkExperienceSheetPdf(saved),
+                    filename: 'Work_Experience_Sheet.pdf',
+                    format: FormPdf.pageLetterLandscape,
+                    printModule: 'rsp',
+                    printFormKey: 'work_experience',
+                  ),
+                  onPreview: (saved) => openFormDocumentPreview(
+                    context: context,
+                    title: 'Work Experience Sheet',
+                    filename: 'Work_Experience_Sheet.pdf',
+                    format: FormPdf.pageLetterLandscape,
+                    printModule: 'rsp',
+                    printFormKey: 'work_experience',
+                    buildDocument: () =>
+                        FormPdf.buildWorkExperienceSheetPdf(saved),
+                  ),
+                  onDownloadPdf: (saved) async {
+                    final doc = await FormPdf.buildWorkExperienceSheetPdf(
+                      saved,
+                    );
+                    await FormPdf.sharePdf(
+                      doc,
+                      name: 'Work_Experience_Sheet.pdf',
+                    );
+                  },
+                ),
+              ),
+            ),
+            if (_canDecide)
+              Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  children: [
+                    TextField(
+                      controller: _comment,
+                      minLines: 2,
+                      maxLines: 4,
+                      decoration: const InputDecoration(
+                        labelText: 'Revision reason',
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 8,
+                      children: [
+                        OutlinedButton(
+                          onPressed: _busy ? null : _revise,
+                          child: const Text('Request Revision'),
+                        ),
+                        FilledButton(
+                          onPressed: _busy ? null : _approve,
+                          child: const Text('Approve'),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _RequiredFormAssignmentCard extends StatefulWidget {
+  const _RequiredFormAssignmentCard({
+    required this.app,
+    required this.onUpdated,
+  });
+
+  final RecruitmentApplication app;
+  final VoidCallback onUpdated;
+
+  @override
+  State<_RequiredFormAssignmentCard> createState() =>
+      _RequiredFormAssignmentCardState();
+}
+
+class _RequiredFormAssignmentCardState
+    extends State<_RequiredFormAssignmentCard> {
+  late String? _formType;
+  late String? _formStatus;
+
+  @override
+  void initState() {
+    super.initState();
+    _formType = widget.app.requiredFormType;
+    _formStatus = widget.app.requiredFormStatus;
+  }
+
+  bool get _waitingForAssignment {
+    return _formType == null ||
+        _formStatus == null ||
+        _formStatus!.isEmpty ||
+        _formStatus == 'waiting_for_hr_form';
+  }
+
+  bool get _canReview {
+    switch (_formStatus) {
+      case 'submitted_for_review':
+      case 'resubmitted_for_review':
+      case 'needs_revision':
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  String get _formName {
+    switch (_formType) {
+      case 'ojt':
+        return 'OJT / Work Immersion Evaluation';
+      case 'bi':
+        return 'Background Investigation';
+      default:
+        return '';
+    }
+  }
+
+  String get _statusLabel {
+    switch (_formStatus) {
+      case 'assigned':
+      case 'in_progress':
+        return 'Assigned';
+      case 'submitted_for_review':
+      case 'resubmitted_for_review':
+        return 'Submitted for review';
+      case 'needs_revision':
+        return 'Needs revision';
+      case 'approved':
+        return 'Approved';
+      default:
+        return 'Waiting for HR Assignment';
+    }
+  }
+
+  Future<void> _assign(BuildContext context) async {
+    final type = await showDialog<String>(
+      context: context,
+      builder: (ctx) => const _AssignRequiredFormDialog(),
+    );
+    if (type == null || !context.mounted) return;
+    try {
+      await RecruitmentRepo.instance.assignRequiredForm(widget.app.id, type);
+      if (!mounted) return;
+      setState(() {
+        _formType = type;
+        _formStatus = 'assigned';
+      });
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            type == 'ojt'
+                ? 'OJT / Work Immersion Evaluation assigned.'
+                : 'Background Investigation assigned.',
+          ),
+        ),
+      );
+      widget.onUpdated();
+    } catch (e) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(userFacingApiError(e))));
+    }
+  }
+
+  Future<void> _review(BuildContext context) async {
+    try {
+      final payload = await RecruitmentRepo.instance.getRequiredForm(
+        widget.app.id,
+      );
+      if (!context.mounted) return;
+      final changed = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => _IssuedFormReviewDialog(
+          applicationId: widget.app.id,
+          payload: payload,
+        ),
+      );
+      if (changed == true) widget.onUpdated();
+    } catch (e) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(userFacingApiError(e))));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final primary = AppTheme.dashTextPrimaryOf(context);
+    final secondary = AppTheme.dashTextSecondaryOf(context);
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+      decoration: BoxDecoration(
+        color: AppTheme.dashPanelOf(context),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppTheme.dashHairlineOf(context)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(
+                Icons.assignment_outlined,
+                size: 16,
+                color: AppTheme.primaryNavy,
+              ),
+              const SizedBox(width: 8),
+              Text(
+                'Required Form',
+                style: TextStyle(
+                  fontWeight: FontWeight.w800,
+                  fontSize: 13,
+                  color: primary,
+                ),
+              ),
+            ],
+          ),
+          if (_formName.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Text(
+              _formName,
+              style: TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w700,
+                color: primary,
+              ),
+            ),
+          ],
+          const SizedBox(height: 4),
+          Text(
+            'Status: $_statusLabel',
+            style: TextStyle(fontSize: 13, color: secondary),
+          ),
+          if (_waitingForAssignment) ...[
+            const SizedBox(height: 10),
+            FilledButton.icon(
+              onPressed: () => _assign(context),
+              icon: const Icon(Icons.assignment_outlined, size: 18),
+              label: const Text('Assign Required Form'),
+              style: FilledButton.styleFrom(
+                backgroundColor: const Color(0xFFE85D04),
+                foregroundColor: Colors.white,
+              ),
+            ),
+          ] else if (_canReview) ...[
+            const SizedBox(height: 10),
+            FilledButton.icon(
+              onPressed: () => _review(context),
+              icon: const Icon(Icons.fact_check_outlined, size: 18),
+              label: const Text('Review form'),
+              style: FilledButton.styleFrom(
+                backgroundColor: const Color(0xFFE85D04),
+                foregroundColor: Colors.white,
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _AssignRequiredFormDialog extends StatefulWidget {
+  const _AssignRequiredFormDialog();
+
+  @override
+  State<_AssignRequiredFormDialog> createState() =>
+      _AssignRequiredFormDialogState();
+}
+
+class _AssignRequiredFormDialogState extends State<_AssignRequiredFormDialog> {
+  String _type = 'bi';
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Assign Required Form'),
+      content: DropdownButtonFormField<String>(
+        initialValue: _type,
+        decoration: const InputDecoration(labelText: 'Form'),
+        items: const [
+          DropdownMenuItem(
+            value: 'bi',
+            child: Text('Background Investigation'),
+          ),
+          DropdownMenuItem(
+            value: 'ojt',
+            child: Text('OJT / Work Immersion Evaluation'),
+          ),
+        ],
+        onChanged: (value) => setState(() => _type = value ?? 'bi'),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          style: FilledButton.styleFrom(
+            backgroundColor: const Color(0xFFE85D04),
+            foregroundColor: Colors.white,
+          ),
+          onPressed: () => Navigator.of(context).pop(_type),
+          child: const Text('Assign Form'),
+        ),
+      ],
+    );
+  }
+}
+
 class _DocumentReviewCell extends StatelessWidget {
   const _DocumentReviewCell({
     required this.app,
@@ -11977,7 +13784,7 @@ class _DocumentReviewCell extends StatelessWidget {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text(
-              'Document approved. Applicant can now take the exam.',
+              'Document approved. Assign the required form before Assessment.',
             ),
           ),
         );
@@ -12346,11 +14153,27 @@ class _BiFormList extends StatelessWidget {
   }
 }
 
-/// RSP: Applicants Profile ├â╞Æ├é┬ó├â┬ó├óΓé¼┼í├é┬¼├â┬ó├óΓÇÜ┬¼├é┬¥ job vacancy details + list of applicants.
+/// Opens the saved Applicants Profile when the row is clicked, without taking action-button taps.
+Widget _profileRecordCell({
+  required VoidCallback onOpen,
+  required Widget child,
+}) {
+  return MouseRegion(
+    cursor: SystemMouseCursors.click,
+    child: GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: onOpen,
+      child: SizedBox(width: double.infinity, child: child),
+    ),
+  );
+}
+
+/// RSP: Applicants Profile — job vacancy details + list of applicants.
 
 class _ApplicantsProfileList extends StatelessWidget {
   const _ApplicantsProfileList({
     required this.entries,
+    required this.onView,
     required this.onEdit,
     required this.onDelete,
     required this.onPrint,
@@ -12358,6 +14181,7 @@ class _ApplicantsProfileList extends StatelessWidget {
   });
 
   final List<ApplicantsProfileEntry> entries;
+  final void Function(ApplicantsProfileEntry) onView;
   final void Function(ApplicantsProfileEntry) onEdit;
   final void Function(String id) onDelete;
   final Future<void> Function(ApplicantsProfileEntry) onPrint;
@@ -12376,34 +14200,31 @@ class _ApplicantsProfileList extends StatelessWidget {
       rows: entries
           .map(
             (e) => [
-              rspRecordsTextCell(
-                context,
-                e.positionAppliedFor ?? '',
-                bold: true,
+              _profileRecordCell(
+                onOpen: () => onView(e),
+                child: rspRecordsTextCell(
+                  context,
+                  e.positionAppliedFor ?? '',
+                  bold: true,
+                ),
               ),
-              rspRecordsTextCell(context, e.dateOfPosting ?? ''),
-              rspRecordsTextCell(
-                context,
-                '${e.applicants.length}',
-                align: TextAlign.center,
-                bold: true,
+              _profileRecordCell(
+                onOpen: () => onView(e),
+                child: rspRecordsTextCell(context, e.dateOfPosting ?? ''),
+              ),
+              _profileRecordCell(
+                onOpen: () => onView(e),
+                child: rspRecordsTextCell(
+                  context,
+                  '${e.applicants.length}',
+                  align: TextAlign.center,
+                  bold: true,
+                ),
               ),
               RspRecordsCrudActions(
-                onView: () => showReadOnlySavedEntryDialog(
-                  context,
-                  title: 'Applicants profile',
-                  subtitle: e.positionAppliedFor ?? '',
-                  previewBuilder: () => _ApplicantsProfileFormEditor(
-                    readOnly: true,
-                    entry: e,
-                    onSave: (_) {},
-                    onCancel: () {},
-                    onPrint: (_) async {},
-                    onDownloadPdf: (_) async {},
-                  ),
-                  contentWidth: 1000,
-                  onPrint: () => onPrint(e),
-                ),
+                onView: () => onView(e),
+                showEdit: !e.signaturesLocked,
+                showDelete: !e.signaturesLocked,
                 onEdit: () => onEdit(e),
                 onPrint: () => onPrint(e),
                 onDownloadPdf: () => onDownloadPdf(e),
@@ -12422,6 +14243,7 @@ class _ApplicantsProfileList extends StatelessWidget {
 class _SelectionLineupList extends StatelessWidget {
   const _SelectionLineupList({
     required this.entries,
+    required this.onView,
     required this.onEdit,
     required this.onDelete,
     required this.onPrint,
@@ -12429,6 +14251,7 @@ class _SelectionLineupList extends StatelessWidget {
   });
 
   final List<SelectionLineupEntry> entries;
+  final void Function(SelectionLineupEntry) onView;
   final void Function(SelectionLineupEntry) onEdit;
   final void Function(String id) onDelete;
   final Future<void> Function(SelectionLineupEntry) onPrint;
@@ -12447,30 +14270,29 @@ class _SelectionLineupList extends StatelessWidget {
       rows: entries
           .map(
             (e) => [
-              rspRecordsTextCell(context, e.vacantPosition ?? '', bold: true),
-              rspRecordsTextCell(context, e.date ?? ''),
-              rspRecordsTextCell(
-                context,
-                '${e.applicants.length}',
-                align: TextAlign.center,
-                bold: true,
+              _profileRecordCell(
+                onOpen: () => onView(e),
+                child: rspRecordsTextCell(
+                  context,
+                  e.vacantPosition ?? '',
+                  bold: true,
+                ),
+              ),
+              _profileRecordCell(
+                onOpen: () => onView(e),
+                child: rspRecordsTextCell(context, e.date ?? ''),
+              ),
+              _profileRecordCell(
+                onOpen: () => onView(e),
+                child: rspRecordsTextCell(
+                  context,
+                  '${e.applicants.length}',
+                  align: TextAlign.center,
+                  bold: true,
+                ),
               ),
               RspRecordsCrudActions(
-                onView: () => showReadOnlySavedEntryDialog(
-                  context,
-                  title: 'Selection line-up',
-                  subtitle: e.vacantPosition ?? '',
-                  previewBuilder: () => _SelectionLineupEditor(
-                    readOnly: true,
-                    entry: e,
-                    onSave: (_) {},
-                    onCancel: () {},
-                    onPrint: (_) async {},
-                    onDownloadPdf: (_) async {},
-                  ),
-                  contentWidth: 1000,
-                  onPrint: () => onPrint(e),
-                ),
+                onView: () => onView(e),
                 onEdit: () => onEdit(e),
                 onPrint: () => onPrint(e),
                 onDownloadPdf: () => onDownloadPdf(e),

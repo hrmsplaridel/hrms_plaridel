@@ -6,6 +6,7 @@ import 'package:flutter/scheduler.dart';
 import 'package:hrms_plaridel/shared/models/philippine_address_data.dart';
 import 'package:hrms_plaridel/shared/models/philippine_psgc_loader.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
+import 'package:hrms_plaridel/shared/widgets/searchable_dropdown_field.dart';
 
 /// Province → City/Municipality → Barangay (dropdowns nationwide) + Street (text).
 /// Persists as [encodeStructuredAddress] in a single `address` column.
@@ -220,7 +221,6 @@ class StructuredAddressFormState extends State<StructuredAddressForm> {
         : null;
 
     final fieldStyle = AppTheme.dashFieldTextStyle(context);
-    final hintStyle = AppTheme.dashFieldHintStyle(context);
     final sectionTitleColor = AppTheme.dashTextPrimaryOf(context);
     final tipColor = AppTheme.dashTextSecondaryOf(context);
 
@@ -271,64 +271,46 @@ class StructuredAddressFormState extends State<StructuredAddressForm> {
             'Province list is still loading.',
             style: TextStyle(fontSize: 12, color: tipColor),
           )
-        : DropdownButtonFormField<String>(
-            key: ValueKey('province-$provinceInitial-${provinceItems.length}'),
-            initialValue: provinceInitial,
+        : SearchableDropdownField(
+            key: ValueKey('province-${provinceItems.length}'),
+            options: provinceItems,
+            value: provinceInitial,
             style: fieldStyle,
-            dropdownColor: AppTheme.dashPanelOf(context),
             decoration: fieldDec(hint: 'Select province'),
-            hint: Text('Select province', style: hintStyle),
-            isExpanded: true,
-            items: provinceItems
-                .map(
-                  (o) => DropdownMenuItem(
-                    value: o,
-                    child: Text(o, style: fieldStyle),
-                  ),
-                )
-                .toList(),
             onChanged: _onProvinceChanged,
           );
 
-    final cityField = DropdownButtonFormField<String>(
-      key: ValueKey('city-$cityInitial-${cityItems.length}'),
-      initialValue: cityInitial,
+    final cityField = SearchableDropdownField(
+      key: ValueKey('city-${cityItems.length}-$provinceSelected'),
+      options: cityItems,
+      value: cityInitial,
+      enabled: cityEnabled && cityItems.isNotEmpty,
       style: fieldStyle,
-      dropdownColor: AppTheme.dashPanelOf(context),
       decoration: fieldDec(
         hint: !provinceSelected
-            ? 'Select province first'
-            : 'Select city / municipality',
-        helper: !provinceSelected ? 'Select province first' : null,
-        enabled: cityEnabled,
-      ),
-      hint: Text(
-        !provinceSelected
             ? 'Select province first'
             : cityItems.isEmpty
             ? 'Loading cities…'
             : 'Select city / municipality',
-        style: hintStyle,
+        helper: !provinceSelected ? 'Select province first' : null,
+        enabled: cityEnabled,
       ),
-      isExpanded: true,
-      items: cityItems
-          .map(
-            (o) => DropdownMenuItem(value: o, child: Text(o, style: fieldStyle)),
-          )
-          .toList(),
-      onChanged: cityEnabled && cityItems.isNotEmpty ? _onCityChanged : null,
+      onChanged: _onCityChanged,
     );
 
-    final barangayField = DropdownButtonFormField<String>(
-      key: ValueKey('brgy-$barangayInitial-${barangayItems.length}'),
-      initialValue: barangayInitial,
+    final barangayField = SearchableDropdownField(
+      key: ValueKey('brgy-${barangayItems.length}-${_city ?? ''}'),
+      options: barangayItems,
+      value: barangayInitial,
+      enabled: barangayEnabled,
       style: fieldStyle,
-      dropdownColor: AppTheme.dashPanelOf(context),
       decoration: fieldDec(
         hint: !provinceSelected
             ? 'Select province first'
             : (_city ?? '').isEmpty
-            ? 'Select city first'
+            ? 'Select city / municipality first'
+            : barangayItems.isEmpty
+            ? 'Loading barangays…'
             : 'Select barangay',
         helper: !provinceSelected
             ? 'Select province first'
@@ -337,28 +319,10 @@ class StructuredAddressFormState extends State<StructuredAddressForm> {
             : null,
         enabled: barangayEnabled,
       ),
-      hint: Text(
-        !provinceSelected
-            ? 'Select province first'
-            : (_city ?? '').isEmpty
-            ? 'Select city / municipality first'
-            : barangayItems.isEmpty
-            ? 'Loading barangays…'
-            : 'Select barangay',
-        style: hintStyle,
-      ),
-      isExpanded: true,
-      items: barangayItems
-          .map(
-            (o) => DropdownMenuItem(value: o, child: Text(o, style: fieldStyle)),
-          )
-          .toList(),
-      onChanged: barangayEnabled
-          ? (v) {
-              setState(() => _barangayDropdown = v);
-              _notifyChanged();
-            }
-          : null,
+      onChanged: (v) {
+        setState(() => _barangayDropdown = v);
+        _notifyChanged();
+      },
     );
 
     final streetField = TextFormField(

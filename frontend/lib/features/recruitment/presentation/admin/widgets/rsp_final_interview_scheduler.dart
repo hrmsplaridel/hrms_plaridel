@@ -372,7 +372,7 @@ class _RspFinalInterviewSchedulerState
       if (mounted) {
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(SnackBar(content: Text('Failed: $e')));
+        ).showSnackBar(SnackBar(content: Text(userFacingApiError(e))));
       }
     } finally {
       if (mounted) setState(() => _savingIds.remove(applicationId));
@@ -606,8 +606,7 @@ class _RspFinalInterviewSchedulerState
             child: TextButton.icon(
               onPressed: _loading
                   ? null
-                  : () =>
-                      setState(() => _selectedAppliedDate = DateTime.now()),
+                  : () => setState(() => _selectedAppliedDate = DateTime.now()),
               icon: const Icon(Icons.today_outlined, size: 18),
               label: const Text('Today'),
             ),
@@ -942,10 +941,16 @@ class _RspFinalInterviewSchedulerState
             runSpacing: 8,
             children: [
               FilledButton.icon(
-                onPressed: busy ? null : () => _pickDateTime(app),
+                onPressed: busy || !app.deliberationSchedulingUnlocked
+                    ? null
+                    : () => _pickDateTime(app),
                 icon: const Icon(Icons.edit_calendar_rounded, size: 17),
                 label: Text(
-                  scheduled == null ? 'Set date & time' : 'Change date & time',
+                  !app.deliberationSchedulingUnlocked
+                      ? 'Schedule locked'
+                      : scheduled == null
+                      ? 'Set date & time'
+                      : 'Change date & time',
                 ),
                 style: FilledButton.styleFrom(
                   backgroundColor: accent,
@@ -1194,8 +1199,7 @@ class _RspFinalInterviewSchedulerState
                   ),
                 ),
                 TextButton.icon(
-                  onPressed: () =>
-                      setState(() => _expandedIds.remove(app.id)),
+                  onPressed: () => setState(() => _expandedIds.remove(app.id)),
                   icon: const Icon(Icons.unfold_less_rounded, size: 18),
                   label: const Text('Collapse'),
                   style: TextButton.styleFrom(foregroundColor: accent),
@@ -1211,9 +1215,7 @@ class _RspFinalInterviewSchedulerState
                   return Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Expanded(
-                        child: _appointmentPanel(context, app, busy),
-                      ),
+                      Expanded(child: _appointmentPanel(context, app, busy)),
                       const SizedBox(width: 14),
                       Expanded(
                         child: _resultPanel(

@@ -3,6 +3,7 @@ import 'package:hrms_plaridel/features/learning_development/data/repositories/rs
 /// One applicant row in an Applicants Profile (name, course, address, sex, age, civil status, remark).
 class ApplicantsProfileApplicant {
   const ApplicantsProfileApplicant({
+    this.applicationId,
     this.name,
     this.course,
     this.address,
@@ -12,6 +13,8 @@ class ApplicantsProfileApplicant {
     this.remarkDisability,
   });
 
+  /// Recruitment application this row belongs to. Not shown on the form.
+  final String? applicationId;
   final String? name;
   final String? course;
   final String? address;
@@ -22,6 +25,7 @@ class ApplicantsProfileApplicant {
 
   factory ApplicantsProfileApplicant.fromJson(Map<String, dynamic> json) {
     return ApplicantsProfileApplicant(
+      applicationId: json['application_id']?.toString(),
       name: json['name']?.toString(),
       course: json['course']?.toString(),
       address: json['address']?.toString(),
@@ -33,6 +37,8 @@ class ApplicantsProfileApplicant {
   }
 
   Map<String, dynamic> toJson() => {
+    if (applicationId != null && applicationId!.trim().isNotEmpty)
+      'application_id': applicationId,
     'name': name,
     'course': course,
     'address': address,
@@ -56,6 +62,8 @@ class ApplicantsProfileEntry {
     this.checkedBy,
     this.createdAt,
     this.updatedAt,
+    this.signatureStatus,
+    this.signaturesLocked = false,
   });
 
   final String? id;
@@ -68,6 +76,12 @@ class ApplicantsProfileEntry {
   final String? checkedBy;
   final DateTime? createdAt;
   final DateTime? updatedAt;
+
+  /// DocuTracker status: needs_setup, awaiting_signatures, or completed.
+  final String? signatureStatus;
+
+  /// True only when both required DocuTracker signatures are complete.
+  final bool signaturesLocked;
 
   static const String tableName = 'applicants_profile_entries';
 
@@ -95,6 +109,8 @@ class ApplicantsProfileEntry {
       applicants: list,
       preparedBy: json['prepared_by']?.toString(),
       checkedBy: json['checked_by']?.toString(),
+      signatureStatus: json['signature_status']?.toString(),
+      signaturesLocked: json['signatures_locked'] == true,
       createdAt: json['created_at'] != null
           ? DateTime.tryParse(json['created_at'] as String)
           : null,
@@ -116,6 +132,26 @@ class ApplicantsProfileEntry {
       'checked_by': checkedBy,
       'updated_at': DateTime.now().toIso8601String(),
     };
+  }
+
+  ApplicantsProfileEntry copyWithSignature({
+    String? signatureStatus,
+    bool? signaturesLocked,
+  }) {
+    return ApplicantsProfileEntry(
+      id: id,
+      positionAppliedFor: positionAppliedFor,
+      minimumRequirements: minimumRequirements,
+      dateOfPosting: dateOfPosting,
+      closingDate: closingDate,
+      applicants: applicants,
+      preparedBy: preparedBy,
+      checkedBy: checkedBy,
+      createdAt: createdAt,
+      updatedAt: updatedAt,
+      signatureStatus: signatureStatus ?? this.signatureStatus,
+      signaturesLocked: signaturesLocked ?? this.signaturesLocked,
+    );
   }
 }
 

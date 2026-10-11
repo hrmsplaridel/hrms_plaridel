@@ -376,7 +376,7 @@ class _PipelineTracker extends StatelessWidget {
 
     return LayoutBuilder(
       builder: (context, constraints) {
-        final compact = constraints.maxWidth < 760;
+        final compact = constraints.maxWidth < 1280;
         if (compact) {
           return SingleChildScrollView(
             scrollDirection: Axis.horizontal,

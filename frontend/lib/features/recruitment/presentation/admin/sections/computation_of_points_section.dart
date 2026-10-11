@@ -4,6 +4,8 @@ import 'package:flutter/services.dart';
 import 'package:hrms_plaridel/core/api/user_facing_api_error.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/core/utils/form_pdf.dart';
+import 'package:hrms_plaridel/features/docutracker/models/document_builder.dart';
+import 'package:hrms_plaridel/features/learning_development/data/repositories/rsp_ld_saved_entries_api.dart';
 import 'package:hrms_plaridel/features/learning_development/models/computation_of_points.dart';
 import 'package:hrms_plaridel/features/recruitment/presentation/admin/widgets/rsp_records_list_table.dart';
 import 'package:hrms_plaridel/shared/widgets/form_document_preview.dart';
@@ -92,6 +94,7 @@ class _RspComputationOfPointsSectionState
   List<ComputationOfPointsEntry> _entries = [];
   bool _loading = true;
   ComputationOfPointsEntry? _editing;
+  String? _signatureStatus;
 
   @override
   void initState() {
@@ -117,10 +120,56 @@ class _RspComputationOfPointsSectionState
     }
   }
 
-  void _startNew() =>
-      setState(() => _editing = const ComputationOfPointsEntry());
-  void _edit(ComputationOfPointsEntry e) => setState(() => _editing = e);
-  void _cancelEdit() => setState(() => _editing = null);
+  void _startNew() => setState(() {
+    _editing = const ComputationOfPointsEntry();
+    _signatureStatus = null;
+  });
+  void _edit(ComputationOfPointsEntry e) => setState(() {
+    _editing = e;
+    _signatureStatus = null;
+  });
+  void _cancelEdit() => setState(() {
+    _editing = null;
+    _signatureStatus = null;
+  });
+
+  void _onSignaturesChanged(DocuTrackerSourceSignatureBundle bundle) {
+    if (_editing?.id == null || bundle.sourceRecordId != _editing!.id) return;
+    setState(() => _signatureStatus = bundle.sourceStatus);
+  }
+
+  Future<void> _showEditHistory(String id) async {
+    try {
+      final edits = await RspLdSavedEntriesApi.editHistory(
+        ComputationOfPointsEntry.tableName,
+        id,
+      );
+      if (!mounted) return;
+      await showDialog<void>(
+        context: context,
+        builder: (dialogContext) {
+          return AlertDialog(
+            title: const Text('Edit history'),
+            content: SizedBox(
+              width: 560,
+              child: ComputationOfPointsEditHistoryView(edits: edits),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(dialogContext).pop(),
+                child: const Text('Close'),
+              ),
+            ],
+          );
+        },
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(userFacingApiError(e))));
+    }
+  }
 
   Future<void> _onSave(ComputationOfPointsEntry entry) async {
     try {
@@ -133,7 +182,10 @@ class _RspComputationOfPointsSectionState
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Computation of points saved.')),
       );
-      setState(() => _editing = null);
+      setState(() {
+        _editing = null;
+        _signatureStatus = null;
+      });
       _load();
     } catch (e) {
       if (!mounted) return;
@@ -355,9 +407,21 @@ class _RspComputationOfPointsSectionState
             DocuTrackerRspSignatureSection(
               sourceTable: ComputationOfPointsEntry.tableName,
               sourceRecordId: _editing!.id!,
+              signatureStatus: _signatureStatus,
+              onChanged: _onSignaturesChanged,
+              helperText:
+                  'Prepared by is assigned to the form creator. Only that person can add the signature. The form stays editable after signing.',
               slots: const [
                 DocuTrackerRspSignatureSlot('prepared_by', 'Prepared by'),
               ],
+            ),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton.icon(
+                onPressed: () => _showEditHistory(_editing!.id!),
+                icon: const Icon(Icons.history_rounded, size: 18),
+                label: const Text('View edit history'),
+              ),
             ),
           ],
           const SizedBox(height: 24),
@@ -1948,4 +2012,110 @@ class _ComputationOfPointsList extends StatelessWidget {
           .toList(),
     );
   }
+}
+
+/// Read-only list of Computation of Points content edits.
+class ComputationOfPointsEditHistoryView extends StatelessWidget {
+  const ComputationOfPointsEditHistoryView({super.key, required this.edits});
+
+  final List<Map<String, dynamic>> edits;
+
+  @override
+  Widget build(BuildContext context) {
+    if (edits.isEmpty) {
+      return const Text('No content changes have been recorded yet.');
+    }
+    return ListView.separated(
+      shrinkWrap: true,
+      itemCount: edits.length,
+      separatorBuilder: (_, __) => const Divider(height: 20),
+      itemBuilder: (_, index) {
+        final edit = edits[index];
+        final parsed = DateTime.tryParse(edit['edited_at']?.toString() ?? '');
+        final when = parsed == null
+            ? (edit['edited_at']?.toString() ?? '')
+            : parsed.toLocal().toString();
+        final who = edit['edited_by_name']?.toString().trim().isNotEmpty == true
+            ? edit['edited_by_name'].toString()
+            : 'Unknown user';
+        final afterSigning = edit['signed_when_edited'] == true;
+        final changes = edit['changes'];
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              '$who · $when',
+              style: const TextStyle(fontWeight: FontWeight.w700),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              afterSigning
+                  ? 'Edited after signature. The signature was kept and does not approve this revision.'
+                  : 'Edited before signature.',
+            ),
+            if (changes is List)
+              ...changes.map((change) {
+                final row = change is Map
+                    ? Map<String, dynamic>.from(change)
+                    : <String, dynamic>{};
+                return Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: Text(computationEditHistoryLine(row)),
+                );
+              }),
+          ],
+        );
+      },
+    );
+  }
+}
+
+/// One history line: candidate, criterion, previous value, and new value.
+String computationEditHistoryLine(Map<String, dynamic> change) {
+  final candidate = change['candidate']?.toString().trim() ?? '';
+  final label = change['label']?.toString().trim().isNotEmpty == true
+      ? change['label'].toString()
+      : (change['field']?.toString() ?? 'Field');
+  final kind = change['value_kind']?.toString();
+  final kindNote = kind == 'calculated'
+      ? ' (calculated)'
+      : kind == 'stored'
+      ? ' (stored value does not match the screen formula)'
+      : '';
+  final prefix = candidate.isEmpty ? label : '$candidate · $label';
+  return '$prefix$kindNote: ${computationHistoryValue(change['previous'])} → ${computationHistoryValue(change['next'])}';
+}
+
+String computationHistoryValue(dynamic value) {
+  if (value == null) return '—';
+  if (value is List) {
+    final text = value.map((item) => item.toString()).join(', ');
+    return text.isEmpty ? '—' : text;
+  }
+  if (value is Map) {
+    const keys = [
+      'name',
+      'position',
+      'salary_grade',
+      'rate',
+      'education',
+      'eligibility',
+      'experience',
+      'training',
+      'performance',
+      'potential',
+      'work_attitude',
+      'total',
+      'rank',
+    ];
+    final parts = <String>[];
+    for (final key in keys) {
+      final item = value[key];
+      if (item == null || item.toString().trim().isEmpty) continue;
+      parts.add('$key $item');
+    }
+    return parts.isEmpty ? '—' : parts.join(', ');
+  }
+  final text = value.toString().trim();
+  return text.isEmpty ? '—' : text;
 }

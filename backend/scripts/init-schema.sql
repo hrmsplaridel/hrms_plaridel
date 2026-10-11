@@ -1955,6 +1955,7 @@ CREATE TABLE IF NOT EXISTS recruitment_applications (
   course TEXT,
   address TEXT,
   age TEXT,
+  date_of_birth DATE,
   civil_status TEXT,
   full_name TEXT NOT NULL,
   email TEXT NOT NULL,
@@ -2007,6 +2008,10 @@ CREATE TABLE IF NOT EXISTS recruitment_applications (
   created_at TIMESTAMPTZ DEFAULT now(),
   updated_at TIMESTAMPTZ DEFAULT now()
 );
+
+-- Existing databases apply this file directly. Fresh installs include it here.
+\ir migrations/20261006_rsp_issued_form_gate.sql
+\ir migrations/20261008_rsp_final_hiring_gate.sql
 
 CREATE TABLE IF NOT EXISTS recruitment_exam_results (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -2064,6 +2069,9 @@ CREATE TABLE IF NOT EXISTS job_vacancy_announcement (
 INSERT INTO job_vacancy_announcement (id, has_vacancies, headline, body)
 VALUES ('default', true, NULL, NULL)
 ON CONFLICT (id) DO NOTHING;
+
+-- Existing databases apply this file directly. Fresh installs include it here.
+\ir migrations/20261010_vacancy_age_requirements.sql
 
 CREATE TABLE IF NOT EXISTS selection_lineup_entries (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -2125,6 +2133,9 @@ CREATE TABLE IF NOT EXISTS applicants_profile_entries (
   created_at TIMESTAMPTZ DEFAULT now(),
   updated_at TIMESTAMPTZ DEFAULT now()
 );
+
+-- Existing databases apply this file directly. Fresh installs include it here.
+\ir migrations/20261007_rsp_pre_deliberation_gate.sql
 
 CREATE TABLE IF NOT EXISTS comparative_assessment_entries (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),

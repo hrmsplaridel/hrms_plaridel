@@ -7,10 +7,13 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:hrms_plaridel/core/api/user_facing_api_error.dart';
 import 'package:hrms_plaridel/features/recruitment/data/exam_image_support.dart';
+import 'package:hrms_plaridel/features/recruitment/models/job_vacancy_announcement.dart';
 import 'package:hrms_plaridel/features/recruitment/models/recruitment_application.dart';
 import 'package:hrms_plaridel/features/recruitment/models/rsp_screening_scores.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/shared/widgets/rsp_form_header_footer.dart';
+import 'package:hrms_plaridel/features/recruitment/presentation/applicant/pages/applicant_required_form_page.dart';
+import 'package:hrms_plaridel/features/recruitment/presentation/applicant/pages/applicant_work_experience_page.dart';
 import 'package:hrms_plaridel/features/recruitment/presentation/applicant/widgets/applicant_journey.dart';
 import 'package:hrms_plaridel/features/recruitment/presentation/applicant/widgets/rsp_applicant_app_bar.dart';
 import 'package:hrms_plaridel/features/recruitment/presentation/applicant/widgets/rsp_applicant_assessment_hub.dart';
@@ -22,7 +25,9 @@ import 'package:hrms_plaridel/features/recruitment/presentation/applicant/widget
 import 'package:hrms_plaridel/features/recruitment/presentation/applicant/widgets/rsp_applicant_waiting_state.dart';
 import 'package:hrms_plaridel/features/recruitment/presentation/applicant/widgets/rsp_application_status_timeline.dart';
 import 'package:hrms_plaridel/features/recruitment/presentation/applicant/widgets/rsp_applicant_exam_ui.dart';
+import 'package:hrms_plaridel/shared/data/philippine_courses.dart';
 import 'package:hrms_plaridel/shared/models/philippine_address_data.dart';
+import 'package:hrms_plaridel/shared/widgets/searchable_dropdown_field.dart';
 import 'package:hrms_plaridel/shared/widgets/structured_address_fields.dart';
 import 'package:hrms_plaridel/shared/widgets/login_style_grid_backdrop.dart';
 
@@ -133,6 +138,7 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
   final _phoneController = TextEditingController();
   final _courseController = TextEditingController();
   final _ageController = TextEditingController();
+  DateTime? _dateOfBirth;
   final _streetController = TextEditingController();
   final _continueEmailController = TextEditingController();
   final GlobalKey<StructuredAddressFormState> _addressFormKey =
@@ -159,6 +165,18 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
   List<TextEditingController> _beiControllers = [];
   bool _submitting = false;
   bool _continueLoading = false;
+  bool _step2GateRequired = false;
+  String? _requiredFormType;
+  String? _requiredFormStatus;
+  String? _requiredFormReviewComment;
+  bool _step4GateRequired = false;
+  String? _wesStatus;
+  String? _wesReviewComment;
+  String? _applicantsProfileStatus;
+  String? _selectionLineupStatus;
+  bool _step5GateRequired = false;
+  String? _tatStatus;
+  String? _cscApprovalStatus;
   bool _beiLoading = false;
 
   /// Step 1: same “track status” preview as [TrackApplicationPage], before Continue.
@@ -634,9 +652,8 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
       return;
     }
     try {
-      final lookup = await RecruitmentRepo.instance.getApplicationByEmail(
-        email,
-      );
+      final lookup = await RecruitmentRepo.instance
+          .getApplicationByEmailOrApplicantNumber(email);
       if (!mounted || lookup == null) return;
       setState(() {
         _step1StatusApp = lookup.application;
@@ -649,7 +666,9 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
     final email = _continueEmailController.text.trim();
     if (email.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Enter your email to check status.')),
+        const SnackBar(
+          content: Text('Enter your email or Application ID to check status.'),
+        ),
       );
       return;
     }
@@ -660,17 +679,16 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
       _step1StatusExam = null;
     });
     try {
-      final lookup = await RecruitmentRepo.instance.getApplicationByEmail(
-        email,
-      );
+      final lookup = await RecruitmentRepo.instance
+          .getApplicationByEmailOrApplicantNumber(email);
       if (!mounted) return;
       _stopStep1StatusTimer();
       if (lookup == null) {
         setState(() {
           _step1StatusLoading = false;
           _step1StatusError = !_isVacancyApplication
-              ? 'No application found for this email. To apply, go to the home page, open Job Vacancies, and tap Apply now on a position.'
-              : 'No application found for this email.';
+              ? 'No application found for this email or Application ID. To apply, go to the home page, open Job Vacancies, and tap Apply now on a position.'
+              : 'No application found for this email or Application ID.';
           _statusPreviewEmail = email;
         });
         return;
@@ -730,6 +748,9 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
           'suffix': _suffixValue,
           'sex': _sexValue,
           'course': _courseController.text,
+          'dateOfBirth': _dateOfBirth == null
+              ? null
+              : _formatDateOfBirth(_dateOfBirth!),
           'age': _ageController.text,
           'civilStatus': _civilStatusValue,
           'address': _addressFormKey.currentState?.composeEncoded() ?? '',
@@ -759,6 +780,7 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
         m['phone']?.toString().trim(),
         m['continueEmail']?.toString().trim(),
         m['course']?.toString().trim(),
+        m['dateOfBirth']?.toString().trim(),
         m['age']?.toString().trim(),
         m['civilStatus']?.toString().trim(),
         m['address']?.toString().trim(),
@@ -787,7 +809,10 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
             ? null
             : m['civilStatus']?.toString();
         _courseController.text = m['course']?.toString() ?? '';
-        _ageController.text = m['age']?.toString() ?? '';
+        _dateOfBirth = _parseDateOfBirth(m['dateOfBirth']?.toString());
+        _ageController.text = _dateOfBirth == null
+            ? (m['age']?.toString() ?? '')
+            : _ageInYears(_dateOfBirth!).toString();
         _streetController.text = m['street']?.toString() ?? '';
         _emailController.text = m['email']?.toString() ?? '';
         _phoneController.text = m['phone']?.toString() ?? '';
@@ -956,6 +981,18 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
     _finalInterviewAt = app.finalInterviewAt;
     _finalInterviewPassed = app.finalInterviewPassed;
     _applicationStatus = app.status;
+    _step2GateRequired = app.step2GateRequired;
+    _requiredFormType = app.requiredFormType;
+    _requiredFormStatus = app.requiredFormStatus;
+    _requiredFormReviewComment = app.requiredFormReviewComment;
+    _step4GateRequired = app.step4GateRequired;
+    _wesStatus = app.wesStatus;
+    _wesReviewComment = app.wesReviewComment;
+    _applicantsProfileStatus = app.applicantsProfileStatus;
+    _selectionLineupStatus = app.selectionLineupStatus;
+    _step5GateRequired = app.step5GateRequired;
+    _tatStatus = app.tatStatus;
+    _cscApprovalStatus = app.cscApprovalStatus;
     _hiredUserId = app.hiredUserId;
     _hrAccountSetupDone = app.hrAccountSetupDone;
     _hireCredentialsEmailSentAt = app.hireCredentialsEmailSentAt;
@@ -1219,10 +1256,104 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
     return digits.length >= 10 && digits.length <= 15;
   }
 
-  static bool _isValidApplicantAge(String raw) {
-    final n = int.tryParse(raw.trim());
-    if (n == null) return false;
-    return n >= 18 && n <= 100;
+  static String _formatDateOfBirth(DateTime date) {
+    final month = date.month.toString().padLeft(2, '0');
+    final day = date.day.toString().padLeft(2, '0');
+    return '${date.year}-$month-$day';
+  }
+
+  static DateTime? _parseDateOfBirth(String? raw) {
+    final match = RegExp(
+      r'^(\d{4})-(\d{2})-(\d{2})',
+    ).firstMatch(raw?.trim() ?? '');
+    if (match == null) return null;
+    final year = int.parse(match.group(1)!);
+    final month = int.parse(match.group(2)!);
+    final day = int.parse(match.group(3)!);
+    final date = DateTime(year, month, day);
+    if (date.year != year || date.month != month || date.day != day)
+      return null;
+    return date;
+  }
+
+  static int _ageInYears(DateTime birthDate) {
+    final today = DateTime.now();
+    var age = today.year - birthDate.year;
+    final hadBirthday =
+        today.month > birthDate.month ||
+        (today.month == birthDate.month && today.day >= birthDate.day);
+    if (!hadBirthday) age--;
+    return age;
+  }
+
+  static DateTime _calendarYearsAgo(DateTime today, int years) {
+    final year = today.year - years;
+    final lastDay = DateTime(year, today.month + 1, 0).day;
+    final day = today.day > lastDay ? lastDay : today.day;
+    return DateTime(year, today.month, day);
+  }
+
+  static String _positionMatchKey(String raw) {
+    var text = raw.trim().toLowerCase();
+    text = text.replaceFirst(RegExp(r'^now hiring:\s*'), '');
+    return text.replaceAll(RegExp(r'\s+'), ' ');
+  }
+
+  /// Vacancy age rule for the selected headline, or null when the listing
+  /// cannot be loaded. The server remains the source of truth.
+  Future<JobVacancyItem?> _selectedVacancyAgeRule() async {
+    final headline = widget.selectedPositionHeadline?.trim() ?? '';
+    if (headline.isEmpty) return null;
+    final announcement = await JobVacancyAnnouncementRepo.instance.fetch();
+    final key = _positionMatchKey(headline);
+    for (final vacancy in announcement.vacancies) {
+      final listed = (vacancy.headline ?? '').trim();
+      if (listed.isEmpty) continue;
+      if (_positionMatchKey(listed) == key) return vacancy;
+    }
+    return null;
+  }
+
+  String? _ageRequirementMessage(DateTime birthDate, JobVacancyItem vacancy) {
+    final today = DateTime.now();
+    final todayDate = DateTime(today.year, today.month, today.day);
+    if (birthDate.isAfter(todayDate)) {
+      return 'Date of birth cannot be in the future.';
+    }
+    final age = JobVacancyItem.ageOnDate(birthDate, todayDate);
+    if (age < vacancy.minimumAge) {
+      return 'This vacancy requires applicants to be at least ${vacancy.minimumAge} years old.';
+    }
+    final maximum = vacancy.maximumAge;
+    if (maximum != null && age > maximum) {
+      return 'This vacancy accepts applicants up to $maximum years old.';
+    }
+    return null;
+  }
+
+  Future<void> _pickDateOfBirth() async {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final firstDate = DateTime(1900, 1, 1);
+    var initial = _dateOfBirth ?? _calendarYearsAgo(today, 18);
+    if (initial.isBefore(firstDate)) initial = firstDate;
+    if (initial.isAfter(today)) initial = today;
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: initial,
+      firstDate: firstDate,
+      lastDate: today,
+      helpText: 'Date of birth',
+    );
+    if (picked == null || !mounted) return;
+    final date = DateTime(picked.year, picked.month, picked.day);
+    final age = _ageInYears(date).toString();
+    setState(() => _dateOfBirth = date);
+    if (_ageController.text != age) {
+      _ageController.text = age;
+    } else {
+      _scheduleDraftSave();
+    }
   }
 
   bool _isStep1AddressComplete() {
@@ -1265,9 +1396,8 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
 
     if (mounted) setState(() => _checkingDuplicateApplicant = true);
     try {
-      final lookup = await RecruitmentRepo.instance.getApplicationByEmail(
-        email,
-      );
+      final lookup = await RecruitmentRepo.instance
+          .getApplicationByEmailOrApplicantNumber(email);
       if (!mounted) return;
       if (lookup == null) {
         setState(() {
@@ -1335,12 +1465,15 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
     final email = _emailController.text.trim();
     final phone = _phoneController.text.trim();
     final course = _courseController.text.trim();
-    final age = _ageController.text.trim();
+    final age = _dateOfBirth == null
+        ? _ageController.text.trim()
+        : _ageInYears(_dateOfBirth!).toString();
     final encodedAddress = _addressFormKey.currentState?.composeEncoded() ?? '';
     if (first.isEmpty ||
         last.isEmpty ||
         _sexValue == null ||
         course.isEmpty ||
+        _dateOfBirth == null ||
         age.isEmpty ||
         _civilStatusValue == null ||
         !_isStep1AddressComplete() ||
@@ -1349,18 +1482,28 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text(
-            'Please complete personal information (including course, age, civil status, and address), email, and phone number.',
+            'Please complete personal information (including course / strand, date of birth, age, civil status, and address), email, and phone number.',
           ),
         ),
       );
       return;
     }
-    if (!_isValidApplicantAge(age)) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please enter a valid age (18–100).')),
-      );
-      return;
+    try {
+      final vacancy = await _selectedVacancyAgeRule();
+      if (vacancy != null) {
+        final ageMessage = _ageRequirementMessage(_dateOfBirth!, vacancy);
+        if (ageMessage != null) {
+          if (!mounted) return;
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(ageMessage)),
+          );
+          return;
+        }
+      }
+    } catch (_) {
+      // The application endpoint enforces the stored vacancy age rule.
     }
+    if (!mounted) return;
     if (!_isValidEmailFormat(email)) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Please enter a valid email address.')),
@@ -1488,6 +1631,7 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
           course: course,
           address: encodedAddress,
           age: age,
+          dateOfBirth: _formatDateOfBirth(_dateOfBirth!),
           civilStatus: _civilStatusValue,
           email: email,
           phone: phone,
@@ -2308,9 +2452,8 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
         : _continueEmailController.text.trim().toLowerCase();
     if (email.isEmpty || _applicationId == null) return;
     try {
-      final lookup = await RecruitmentRepo.instance.getApplicationByEmail(
-        email,
-      );
+      final lookup = await RecruitmentRepo.instance
+          .getApplicationByEmailOrApplicantNumber(email);
       if (!mounted || lookup == null) return;
       final app = lookup.application;
       if (app.id == _applicationId) {
@@ -2341,9 +2484,8 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
     final email = _emailForExamStatusLookup();
     if (email.isEmpty) return;
     try {
-      final lookup = await RecruitmentRepo.instance.getApplicationByEmail(
-        email,
-      );
+      final lookup = await RecruitmentRepo.instance
+          .getApplicationByEmailOrApplicantNumber(email);
       if (!mounted || lookup == null) return;
       final exam = lookup.examResult;
       if (exam == null || !exam.beiGradingComplete) return;
@@ -2374,7 +2516,9 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
       return 7;
     }
 
-    if (app.status == 'document_approved') return 3;
+    if (app.status == 'document_approved') {
+      return app.assessmentUnlocked ? 3 : 2;
+    }
     if (app.status == 'failed') return 7;
     if (app.status == 'passed') {
       if (app.finalInterviewPassed == true) return 8;
@@ -2404,6 +2548,7 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
       return 7;
     }
     if (app.status == 'document_declined') return 2;
+    if (app.status == 'document_approved' && !app.assessmentUnlocked) return 2;
     if (app.status == 'document_approved' || app.status == 'exam_taken') {
       return 3;
     }
@@ -2442,6 +2587,9 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
     if (app.status == 'document_declined') {
       return 'Your documents were not approved. Continue to replace them and resubmit for HR review.';
     }
+    if (app.status == 'document_approved' && !app.assessmentUnlocked) {
+      return 'Assessment opens after HR approves the assigned form.';
+    }
     return 'You cannot proceed at this time. Check your status above.';
   }
 
@@ -2464,7 +2612,9 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
     final email = _continueEmailController.text.trim();
     if (email.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Enter your email to continue.')),
+        const SnackBar(
+          content: Text('Enter your email or Application ID to continue.'),
+        ),
       );
       return;
     }
@@ -2484,17 +2634,16 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
     }
     setState(() => _continueLoading = true);
     try {
-      final lookup = await RecruitmentRepo.instance.getApplicationByEmail(
-        email,
-      );
+      final lookup = await RecruitmentRepo.instance
+          .getApplicationByEmailOrApplicantNumber(email);
       if (!mounted) return;
       if (lookup == null) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
               !_isVacancyApplication
-                  ? 'No application for this email. To apply, use Job Vacancies on the home page and tap Apply on a position.'
-                  : 'No application found for this email.',
+                  ? 'No application for this email or Application ID. To apply, use Job Vacancies on the home page and tap Apply on a position.'
+                  : 'No application found for this email or Application ID.',
             ),
           ),
         );
@@ -2591,7 +2740,7 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
 
   String? _appBarSubtitle() {
     if (!_isVacancyApplication && _step == 1) {
-      return 'Look up your application by email';
+      return 'Look up by email or Application ID';
     }
     if (_showJourneyTracker) {
       return 'Current stage: ${_journeyStage.label}';
@@ -2661,6 +2810,7 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
     if (_step == 1) return _buildStep1BasicInfo();
     if (_step == 2) return _buildStep2PendingReview();
     if (_step >= 3 && _step <= 6) {
+      if (_issuedFormBlocksAssessment) return _buildStep2PendingReview();
       if (_activeAssessment == null) return _buildAssessmentHub();
       switch (_activeAssessment) {
         case 'bei':
@@ -2740,7 +2890,7 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
               tooltip: 'Refresh status preview',
               onPressed: _step1StatusLoading ? null : _silentRefreshStep1Status,
             ),
-          if (_step == 7)
+          if (_step == 7 && !_step7WaitingCardHasRefresh)
             Padding(
               padding: const EdgeInsets.only(right: 4),
               child: _hiringStatusRefreshing
@@ -3023,7 +3173,7 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
                 ),
                 const SizedBox(height: 6),
                 Text(
-                  'Look up your record with the email you used when you applied.',
+                  'Look up your record with the email you used, or the Application ID on your application.',
                   style: TextStyle(
                     color: Colors.white.withValues(alpha: 0.88),
                     fontSize: 14,
@@ -3040,7 +3190,7 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
                   ),
                   child: Row(
                     children: [
-                      stepChip('1', 'Enter email'),
+                      stepChip('1', 'Enter email or ID'),
                       stepChip('2', 'Check status'),
                       stepChip('3', 'Continue'),
                     ],
@@ -3077,7 +3227,7 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
                           icon: Icons.mail_outline_rounded,
                           title: 'Already applied?',
                           body:
-                              'Use the same email, tap Check status, then Continue when eligible.',
+                              'Use the same email or your Application ID, tap Check status, then Continue when eligible.',
                         ),
                       ),
                     ],
@@ -3094,7 +3244,7 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
                     icon: Icons.mail_outline_rounded,
                     title: 'Already applied?',
                     body:
-                        'Use the same email, tap Check status, then Continue when eligible.',
+                        'Use the same email or your Application ID, tap Check status, then Continue when eligible.',
                   ),
                 ],
                 const SizedBox(height: 18),
@@ -3179,8 +3329,9 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
   static final _trackEmailReady = RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$');
 
   bool get _isCheckStatusEmailReady {
-    final email = _continueEmailController.text.trim();
-    return _trackEmailReady.hasMatch(email);
+    final query = _continueEmailController.text.trim();
+    if (query.contains('@')) return _trackEmailReady.hasMatch(query);
+    return query.replaceAll(RegExp(r'\s'), '').length >= 6;
   }
 
   bool get _isCheckStatusActionEnabled {
@@ -3256,8 +3407,9 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
     );
     final emailField = TextField(
       controller: _continueEmailController,
-      decoration: _trackEmailDecoration('Email to continue'),
-      keyboardType: TextInputType.emailAddress,
+      decoration: _trackEmailDecoration('Email or Application ID'),
+      keyboardType: TextInputType.text,
+      autocorrect: false,
       textInputAction: TextInputAction.done,
       onSubmitted: (_) {
         if (_isCheckStatusActionEnabled) _checkStep1StatusOnly();
@@ -3325,7 +3477,7 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           const Text(
-            'Application email',
+            'Email or Application ID',
             style: TextStyle(
               fontWeight: FontWeight.w800,
               fontSize: 13.5,
@@ -3496,10 +3648,7 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
     );
   }
 
-  Widget _step1GuidelineNote({
-    required IconData icon,
-    required String text,
-  }) {
+  Widget _step1GuidelineNote({required IconData icon, required String text}) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 10),
       child: Container(
@@ -4314,27 +4463,68 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
             isExpanded: true,
           ),
         ),
-        _step1ResponsivePair(
-          TextField(
-            controller: _courseController,
+        Padding(
+          padding: const EdgeInsets.only(bottom: 14),
+          child: SearchableDropdownField(
+            options: kCourseOrStrandLabels,
+            value: _courseController.text,
+            allowCustom: true,
+            searchText: courseOrStrandSearchText,
+            groupLabel: courseOrStrandGroup,
+            textCapitalization: TextCapitalization.words,
             decoration: _step1FieldDecoration(
-              'Course',
+              'Course / Strand',
               requiredMark: true,
-              hintText: 'e.g. BS Public Administration',
+              hintText: 'Search or select course / strand',
               prefixIcon: Icons.school_outlined,
             ),
-            textCapitalization: TextCapitalization.words,
+            onChanged: (value) {
+              final next = value ?? '';
+              if (_courseController.text == next) return;
+              _courseController.text = next;
+            },
+          ),
+        ),
+        _step1ResponsivePair(
+          InkWell(
+            onTap: _pickDateOfBirth,
+            borderRadius: BorderRadius.circular(14),
+            child: InputDecorator(
+              decoration:
+                  _step1FieldDecoration(
+                    'Date of birth',
+                    requiredMark: true,
+                    hintText: 'Select date of birth',
+                    prefixIcon: Icons.calendar_month_outlined,
+                  ).copyWith(
+                    suffixIcon: Icon(
+                      Icons.keyboard_arrow_down_rounded,
+                      color: AppTheme.primaryNavy.withValues(alpha: 0.55),
+                    ),
+                  ),
+              child: Text(
+                _dateOfBirth == null
+                    ? 'Select date of birth'
+                    : _formatDateOfBirth(_dateOfBirth!),
+                style: TextStyle(
+                  fontSize: 15,
+                  color: _dateOfBirth == null
+                      ? AppTheme.textSecondary.withValues(alpha: 0.45)
+                      : AppTheme.textPrimary,
+                ),
+              ),
+            ),
           ),
           TextField(
             controller: _ageController,
+            readOnly: true,
+            enableInteractiveSelection: false,
             decoration: _step1FieldDecoration(
               'Age',
               requiredMark: true,
-              hintText: 'Your age in years',
+              hintText: 'Filled from date of birth',
               prefixIcon: Icons.cake_outlined,
             ),
-            keyboardType: TextInputType.number,
-            inputFormatters: [FilteringTextInputFormatter.digitsOnly],
           ),
         ),
         _step1FormSectionHeader('Address'),
@@ -4508,14 +4698,96 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
 
   bool get _hasSessionEmail => _sessionEmail().isNotEmpty;
 
+  bool get _issuedFormBlocksAssessment =>
+      _step2GateRequired &&
+      _requiredFormStatus != 'approved' &&
+      _applicationStatus == 'document_approved';
+
+  String get _issuedFormTitle => _requiredFormType == 'ojt'
+      ? 'OJT / Work Immersion Evaluation'
+      : 'Background Investigation Form';
+
+  bool get _preDeliberationComplete =>
+      _wesStatus == 'approved' &&
+      _applicantsProfileStatus == 'completed' &&
+      _selectionLineupStatus == 'completed';
+
+  bool get _showPreDeliberationPrep =>
+      _step4GateRequired &&
+      _examPassed &&
+      _finalInterviewAt == null &&
+      _finalInterviewPassed == null;
+
+  /// The deliberation waiting card already has Refresh status.
+  bool get _step7WaitingCardHasRefresh =>
+      _examPassed && _finalInterviewPassed != true;
+
+  String _wesApplicantLabel() {
+    switch (_wesStatus) {
+      case 'assigned':
+        return 'Assigned';
+      case 'in_progress':
+        return 'In Progress';
+      case 'submitted_for_review':
+      case 'resubmitted_for_review':
+        return 'Under Review';
+      case 'needs_revision':
+        return 'Needs Revision';
+      case 'approved':
+        return 'Approved';
+      default:
+        return 'Waiting for HR';
+    }
+  }
+
+  String _hrFormApplicantLabel(String? status) {
+    switch (status) {
+      case 'in_progress':
+        return 'In Progress';
+      case 'completed':
+        return 'Completed';
+      default:
+        return 'Waiting for HR';
+    }
+  }
+
+  Future<void> _openWorkExperienceSheet() async {
+    final id = _applicationId;
+    if (id == null || id.isEmpty) return;
+    final submitted = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(
+        builder: (_) => ApplicantWorkExperiencePage(applicationId: id),
+      ),
+    );
+    if (submitted == true) await _refreshHiringStatus();
+  }
+
+  Future<void> _openAssignedForm() async {
+    final id = _applicationId;
+    if (id == null || id.isEmpty || _continueLoading) return;
+    final submitted = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(
+        builder: (_) => ApplicantRequiredFormPage(applicationId: id),
+      ),
+    );
+    if (submitted == true && mounted) {
+      await _refreshDocumentReview();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Form submitted. HR is reviewing it.')),
+        );
+      }
+    }
+  }
+
   Future<void> _refreshDocumentReview() async {
+    if (_continueLoading) return;
     final email = _sessionEmail();
     if (email.isEmpty) return;
     setState(() => _continueLoading = true);
     try {
-      final lookup = await RecruitmentRepo.instance.getApplicationByEmail(
-        email,
-      );
+      final lookup = await RecruitmentRepo.instance
+          .getApplicationByEmailOrApplicantNumber(email);
       if (!mounted || lookup == null) return;
       setState(() {
         _applicationStatus = lookup.application.status;
@@ -4543,7 +4815,7 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text(
-            'Could not find this application. Check status with your email, then try again.',
+            'Could not find this application. Check status with your email or Application ID, then try again.',
           ),
         ),
       );
@@ -4588,9 +4860,7 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
       });
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text(
-            'Documents resubmitted. HR will review them again.',
-          ),
+          content: Text('Documents resubmitted. HR will review them again.'),
         ),
       );
     } catch (e) {
@@ -4601,6 +4871,63 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
         ).showSnackBar(SnackBar(content: Text(userFacingApiError(e))));
       }
     }
+  }
+
+  List<Widget> _issuedFormStatusCards() {
+    final status = _requiredFormStatus;
+    final waitingForAssignment =
+        status == null || status == 'waiting_for_hr_form';
+    final underReview =
+        status == 'submitted_for_review' || status == 'resubmitted_for_review';
+    if (waitingForAssignment) {
+      return [
+        RspApplicantWaitingState(
+          title: 'Waiting for HR',
+          body:
+              'Your initial requirements have been approved. HR will assign the appropriate form for the next step.\n\nNo action is required right now.',
+          onRefresh: _refreshDocumentReview,
+          refreshBusy: _continueLoading,
+        ),
+      ];
+    }
+    if (underReview) {
+      return [
+        RspApplicantWaitingState(
+          title: 'Waiting for HR Review',
+          body:
+              'Your completed form has been submitted. HR is currently reviewing your submission.',
+          onRefresh: _refreshDocumentReview,
+          refreshBusy: _continueLoading,
+        ),
+      ];
+    }
+    if (status == 'needs_revision') {
+      final reason = (_requiredFormReviewComment ?? '').trim();
+      return [
+        RspApplicantWaitingState(
+          title: 'Form Needs Revision',
+          body:
+              'HR requested changes to your submitted form.${reason.isEmpty ? '' : '\n\nReason:\n$reason'}',
+          icon: Icons.edit_note_rounded,
+        ),
+        const SizedBox(height: 12),
+        RspApplicantNextActionCard(
+          title: _issuedFormTitle,
+          body: 'Your previous answers are still on the form.',
+          actionLabel: 'Review Form',
+          onPressed: _openAssignedForm,
+        ),
+      ];
+    }
+    return [
+      RspApplicantNextActionCard(
+        title: _issuedFormTitle,
+        body: 'Assigned by HR. Please complete the required form.',
+        actionLabel: 'Open Form',
+        onPressed: _openAssignedForm,
+        busy: _continueLoading,
+      ),
+    ];
   }
 
   Widget _buildStep2PendingReview() {
@@ -4678,7 +5005,9 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
           ),
           const SizedBox(height: 16),
         ],
-        if (approved) ...[
+        if (approved && _issuedFormBlocksAssessment) ...[
+          ..._issuedFormStatusCards(),
+        ] else if (approved) ...[
           RspApplicantStatusBadge(kind: RspApplicantBadgeKind.approved),
           const SizedBox(height: 12),
           const Text(
@@ -4727,34 +5056,67 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
             color: AppTheme.dashTextPrimaryOf(context),
           ),
         ),
-        const SizedBox(height: 10),
-        ...RspApplicationDocKind.values.map((kind) {
-          final picked = _pickedDocs[kind];
-          final fileName = picked?.name ?? _step1DocNames[kind];
-          final replaced = picked != null;
-          return Padding(
-            padding: const EdgeInsets.only(bottom: 8),
-            child: RspApplicantDocumentUploadCard(
-              title: _docKindLabel(kind),
-              fileName: fileName,
-              status: isDeclined
-                  ? (replaced
-                        ? RspApplicantDocCardStatus.uploaded
-                        : RspApplicantDocCardStatus.rejected)
-                  : (approved
-                        ? RspApplicantDocCardStatus.approved
-                        : RspApplicantDocCardStatus.submitted),
-              rejectReason: isDeclined && !replaced
-                  ? 'Replace this PDF with a new file.'
-                  : null,
-              readOnly: !isDeclined,
-              busy: _resubmittingDocs,
-              onChoose: isDeclined && !_resubmittingDocs
-                  ? () => _pickDoc(kind)
-                  : null,
-            ),
-          );
-        }),
+        const SizedBox(height: 8),
+        LayoutBuilder(
+          builder: (context, constraints) {
+            final cards = RspApplicationDocKind.values.map((kind) {
+              final picked = _pickedDocs[kind];
+              final fileName = picked?.name ?? _step1DocNames[kind];
+              final replaced = picked != null;
+              return RspApplicantDocumentUploadCard(
+                title: _docKindLabel(kind),
+                fileName: fileName,
+                compact: true,
+                status: isDeclined
+                    ? (replaced
+                          ? RspApplicantDocCardStatus.uploaded
+                          : RspApplicantDocCardStatus.rejected)
+                    : (approved
+                          ? RspApplicantDocCardStatus.approved
+                          : RspApplicantDocCardStatus.submitted),
+                rejectReason: isDeclined && !replaced
+                    ? 'Replace this PDF with a new file.'
+                    : null,
+                readOnly: !isDeclined,
+                busy: _resubmittingDocs,
+                onChoose: isDeclined && !_resubmittingDocs
+                    ? () => _pickDoc(kind)
+                    : null,
+              );
+            }).toList();
+            if (constraints.maxWidth < 600) {
+              return Column(
+                children: [
+                  for (var i = 0; i < cards.length; i++) ...[
+                    if (i > 0) const SizedBox(height: 8),
+                    cards[i],
+                  ],
+                ],
+              );
+            }
+            return Column(
+              children: [
+                for (var i = 0; i < cards.length; i += 2) ...[
+                  if (i > 0) const SizedBox(height: 8),
+                  IntrinsicHeight(
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Expanded(child: cards[i]),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: i + 1 < cards.length
+                              ? cards[i + 1]
+                              : const SizedBox.shrink(),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ],
+            );
+          },
+        ),
         if (isDeclined) ...[
           const SizedBox(height: 8),
           RspApplicantNextActionCard(
@@ -5316,6 +5678,38 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
             ),
           ),
         ],
+        if (_showPreDeliberationPrep) ...[
+          const SizedBox(height: 16),
+          Text(
+            'Step 4 — Deliberation Preparation',
+            style: TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.w800,
+              color: AppTheme.dashTextPrimaryOf(context),
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text('Work Experience Sheet: ${_wesApplicantLabel()}'),
+          if (_wesStatus == 'needs_revision' &&
+              (_wesReviewComment ?? '').trim().isNotEmpty)
+            Text('Revision: ${_wesReviewComment!.trim()}'),
+          Text(
+            'Applicants Profile: ${_hrFormApplicantLabel(_applicantsProfileStatus)}',
+          ),
+          Text(
+            'Selection Line-Up: ${_hrFormApplicantLabel(_selectionLineupStatus)}',
+          ),
+          if (_wesStatus == 'assigned' ||
+              _wesStatus == 'in_progress' ||
+              _wesStatus == 'needs_revision')
+            Padding(
+              padding: const EdgeInsets.only(top: 12),
+              child: FilledButton(
+                onPressed: _openWorkExperienceSheet,
+                child: const Text('Open Work Experience Sheet'),
+              ),
+            ),
+        ],
         const SizedBox(height: 24),
         if (_examPassed && _finalInterviewPassed == true)
           SizedBox(
@@ -5358,9 +5752,16 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
           )
         else if (_examPassed)
           RspApplicantWaitingState(
-            title: 'Waiting for deliberation result',
-            body:
-                'You can continue to Final Hiring only after HR records that you passed deliberation.',
+            title: _showPreDeliberationPrep
+                ? (_preDeliberationComplete
+                      ? 'Pre-Deliberation Requirements Complete'
+                      : 'Deliberation Preparation')
+                : 'Waiting for deliberation result',
+            body: _showPreDeliberationPrep
+                ? (_preDeliberationComplete
+                      ? 'Waiting for deliberation schedule.'
+                      : 'Waiting for HR to complete the remaining preparation.')
+                : 'You can continue to Final Hiring only after HR records that you passed deliberation.',
             icon: Icons.hourglass_top_rounded,
             onRefresh: _refreshHiringStatus,
             refreshBusy: _hiringStatusRefreshing,
@@ -6120,6 +6521,45 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
     );
   }
 
+  bool get _finalHiringLocked =>
+      _step5GateRequired &&
+      !(_tatStatus == 'completed' && _cscApprovalStatus == 'approved');
+
+  String _tatApplicantLabel() =>
+      _tatStatus == 'completed' ? 'Completed' : 'In Progress';
+
+  String _cscApplicantLabel() => _cscApprovalStatus == 'approved'
+      ? 'Approved'
+      : 'Waiting for CSC Approval';
+
+  Widget _buildFinalHiringPreparation() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Text(
+          'Step 5 — Final Hiring Preparation',
+          style: TextStyle(
+            fontSize: 16,
+            fontWeight: FontWeight.w800,
+            color: AppTheme.dashTextPrimaryOf(context),
+          ),
+        ),
+        const SizedBox(height: 8),
+        Text('Turn-Around Time: ${_tatApplicantLabel()}'),
+        Text('CSC Approval: ${_cscApplicantLabel()}'),
+        const Text('Final Requirements: Locked'),
+        const SizedBox(height: 12),
+        RspApplicantWaitingState(
+          title: 'Final Hiring Preparation',
+          body: 'No action is required right now.',
+          icon: Icons.hourglass_top_rounded,
+          onRefresh: _refreshHiringStatus,
+          refreshBusy: _hiringStatusRefreshing,
+        ),
+      ],
+    );
+  }
+
   Widget _buildStep8FinalHiring() {
     final linked = _employeeAccountLinked;
     final accountReady = _employeeAccountReady;
@@ -6130,7 +6570,8 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
     if (failedFinal) {
       headerSubtitle = 'Current hiring status from HR.';
     } else if (accountReady) {
-      headerSubtitle = 'Your application is successful. You can now start work.';
+      headerSubtitle =
+          'Your application is successful. You can now start work.';
     } else if (passedFinal &&
         finalReqApproved &&
         _orientationAttended == true) {
@@ -6143,6 +6584,8 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
       headerSubtitle = 'Attend orientation, then wait for account setup.';
     } else if (passedFinal && finalReqApproved) {
       headerSubtitle = 'Waiting for orientation schedule and account setup.';
+    } else if (passedFinal && _finalHiringLocked) {
+      headerSubtitle = 'No action is required right now.';
     } else if (passedFinal) {
       headerSubtitle = 'Upload final documents, then wait for HR review.';
     } else {
@@ -6241,7 +6684,20 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
             onRefresh: _refreshHiringStatus,
             refreshBusy: false,
           )
+        else if (_finalHiringLocked)
+          _buildFinalHiringPreparation()
         else if (!finalReqApproved) ...[
+          if (_step5GateRequired) ...[
+            Text(
+              'CSC approval has been confirmed. You may now submit your final requirements.',
+              style: TextStyle(
+                fontSize: 14,
+                height: 1.4,
+                color: AppTheme.dashTextSecondaryOf(context),
+              ),
+            ),
+            const SizedBox(height: 12),
+          ],
           _buildFinalRequirementsSection(),
         ] else if (_orientationAttended != true) ...[
           if (_orientationAt != null)
@@ -6325,7 +6781,7 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
       filled: true,
       fillColor: AppTheme.white,
       prefixIcon: Icon(
-        Icons.alternate_email_rounded,
+        Icons.badge_outlined,
         color: AppTheme.primaryNavy.withValues(alpha: 0.55),
         size: 22,
       ),

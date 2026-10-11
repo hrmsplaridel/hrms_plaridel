@@ -2470,63 +2470,13 @@ class _LdFormsSectionState extends State<_LdFormsSection> {
               ),
             ],
           ),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    colors: [
-                      AppTheme.primaryNavy.withValues(alpha: 0.16),
-                      AppTheme.letterheadNavy.withValues(alpha: 0.08),
-                    ],
-                  ),
-                  borderRadius: BorderRadius.circular(14),
-                  border: Border.all(
-                    color: AppTheme.primaryNavy.withValues(alpha: 0.14),
-                  ),
-                ),
-                child: const Icon(
-                  Icons.description_rounded,
-                  color: AppTheme.primaryNavy,
-                  size: 26,
-                ),
-              ),
-              const SizedBox(width: 16),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Forms',
-                      style: TextStyle(
-                        color: AppTheme.dashTextPrimaryOf(context),
-                        fontSize: 20,
-                        fontWeight: FontWeight.w800,
-                        letterSpacing: -0.2,
-                      ),
-                    ),
-                    const SizedBox(height: 6),
-                    Text(
-                      'Select a form or set a print background.',
-                      style: TextStyle(
-                        color: AppTheme.dashTextSecondaryOf(context),
-                        fontSize: 13.5,
-                        height: 1.4,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
+          child: FormsHubHeader(
+            isNarrow: isNarrow,
+            onPrintBackground: () =>
+                setState(() => _showPrintBackground = true),
           ),
         ),
         const SizedBox(height: 20),
-        FormsPrintBackgroundEntry(
-          onOpen: () => setState(() => _showPrintBackground = true),
-        ),
-        const SizedBox(height: 16),
         _formGrid(),
       ],
     );

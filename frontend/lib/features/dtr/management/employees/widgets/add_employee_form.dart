@@ -60,6 +60,20 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
     return null;
   }
 
+  static DateTime? _parseHireDateOfBirth(String? raw) {
+    final match = RegExp(
+      r'^(\d{4})-(\d{2})-(\d{2})',
+    ).firstMatch(raw?.trim() ?? '');
+    if (match == null) return null;
+    final year = int.parse(match.group(1)!);
+    final month = int.parse(match.group(2)!);
+    final day = int.parse(match.group(3)!);
+    final date = DateTime(year, month, day);
+    if (date.year != year || date.month != month || date.day != day)
+      return null;
+    return date;
+  }
+
   void _ensureTemporaryPassword() {
     if (_passwordController.text.trim().isEmpty) {
       _passwordController.text = generateTemporaryAccountPassword();
@@ -135,10 +149,12 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
     final sex = _normalizeHireSex(hire.applicantSex);
     final suffix = _normalizeHireSuffix(hire.applicantSuffix);
     final address = hire.applicantAddress?.trim();
+    final dateOfBirth = _parseHireDateOfBirth(hire.applicantDateOfBirth);
 
     setState(() {
       if (sex != null) _sex = sex;
       if (suffix != null) _suffix = suffix;
+      if (dateOfBirth != null) _dateOfBirth = dateOfBirth;
       if (address != null && address.isNotEmpty) {
         _prefillRawAddress = address;
         _addressFormKey = GlobalKey<StructuredAddressFormState>();
@@ -415,9 +431,7 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
       _clearForm();
       if (widget.onAccountCreated != null) {
         if (postCommitWarnings.isNotEmpty) {
-          _showSnackBar(
-            'Account was saved. ${postCommitWarnings.join(' ')}',
-          );
+          _showSnackBar('Account was saved. ${postCommitWarnings.join(' ')}');
         }
         widget.onAccountCreated!();
       } else {

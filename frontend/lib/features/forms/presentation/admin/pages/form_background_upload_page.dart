@@ -738,7 +738,98 @@ class _FormBackgroundUploadPageState extends State<FormBackgroundUploadPage> {
   }
 }
 
-/// Opens print-background settings from the Forms list.
+/// Forms page header: title on the left, Print Background on the right.
+class FormsHubHeader extends StatelessWidget {
+  const FormsHubHeader({
+    super.key,
+    required this.isNarrow,
+    required this.onPrintBackground,
+  });
+
+  final bool isNarrow;
+  final VoidCallback onPrintBackground;
+
+  @override
+  Widget build(BuildContext context) {
+    final copy = Expanded(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Forms',
+            style: TextStyle(
+              color: AppTheme.dashTextPrimaryOf(context),
+              fontSize: 20,
+              fontWeight: FontWeight.w800,
+              letterSpacing: -0.2,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            'Select a form or set a print background.',
+            style: TextStyle(
+              color: AppTheme.dashTextSecondaryOf(context),
+              fontSize: 13.5,
+              height: 1.4,
+            ),
+          ),
+        ],
+      ),
+    );
+    final action = FormsPrintBackgroundEntry(onOpen: onPrintBackground);
+    final icon = Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [
+            AppTheme.primaryNavy.withValues(alpha: 0.16),
+            AppTheme.letterheadNavy.withValues(alpha: 0.08),
+          ],
+        ),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: AppTheme.primaryNavy.withValues(alpha: 0.14),
+        ),
+      ),
+      child: const Icon(
+        Icons.description_rounded,
+        color: AppTheme.primaryNavy,
+        size: 26,
+      ),
+    );
+
+    if (isNarrow) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              icon,
+              const SizedBox(width: 16),
+              copy,
+            ],
+          ),
+          const SizedBox(height: 14),
+          Align(alignment: Alignment.centerRight, child: action),
+        ],
+      );
+    }
+
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        icon,
+        const SizedBox(width: 16),
+        copy,
+        const SizedBox(width: 12),
+        action,
+      ],
+    );
+  }
+}
+
+/// Compact header action that opens the existing print-background manager.
 class FormsPrintBackgroundEntry extends StatelessWidget {
   const FormsPrintBackgroundEntry({super.key, required this.onOpen});
 
@@ -746,68 +837,19 @@ class FormsPrintBackgroundEntry extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final navy = AppTheme.primaryNavy;
-    final dark = AppTheme.dashIsDark(context);
-    return Material(
-      color: AppTheme.dashPanelOf(context),
-      borderRadius: BorderRadius.circular(14),
-      child: InkWell(
-        onTap: onOpen,
-        borderRadius: BorderRadius.circular(14),
-        child: Container(
-          width: double.infinity,
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(
-              color: navy.withValues(alpha: dark ? 0.4 : 0.28),
-            ),
-          ),
-          child: Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(
-                  color: navy.withValues(alpha: 0.12),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: const Icon(
-                  Icons.image_outlined,
-                  color: AppTheme.primaryNavy,
-                ),
-              ),
-              const SizedBox(width: 14),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Print background',
-                      style: TextStyle(
-                        color: AppTheme.dashTextPrimaryOf(context),
-                        fontWeight: FontWeight.w800,
-                        fontSize: 15,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      'Upload, preview, or remove a letterhead.',
-                      style: TextStyle(
-                        color: AppTheme.dashTextSecondaryOf(context),
-                        fontSize: 13,
-                        height: 1.35,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              Icon(
-                Icons.chevron_right_rounded,
-                color: navy.withValues(alpha: 0.8),
-              ),
-            ],
-          ),
-        ),
+    final accent = AppTheme.primaryNavy;
+    return OutlinedButton.icon(
+      onPressed: onOpen,
+      icon: const Icon(Icons.image_outlined, size: 18),
+      label: const Text('Print Background'),
+      style: OutlinedButton.styleFrom(
+        foregroundColor: accent,
+        backgroundColor: accent.withValues(alpha: 0.08),
+        minimumSize: const Size(44, 44),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        side: BorderSide(color: accent.withValues(alpha: 0.55)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        textStyle: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13.5),
       ),
     );
   }

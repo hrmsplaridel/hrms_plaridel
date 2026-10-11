@@ -13,6 +13,8 @@ class JobVacancyItem {
     this.maxApplicants,
     this.applicationCount,
     this.totalApplicationCount,
+    this.minimumAge = 18,
+    this.maximumAge,
   });
 
   final String? headline;
@@ -37,6 +39,18 @@ class JobVacancyItem {
 
   /// All applications for this position, including hired / declined / failed (from GET only).
   final int? totalApplicationCount;
+
+  /// Youngest age this vacancy accepts. Existing vacancies default to 18.
+  final int minimumAge;
+
+  /// Oldest age this vacancy accepts. Null means no maximum.
+  final int? maximumAge;
+
+  /// Public qualification line generated from the stored age rule.
+  String get ageRequirementLabel {
+    if (maximumAge == null) return '$minimumAge years old and above';
+    return '$minimumAge–$maximumAge years old';
+  }
 
   /// True when HR actually listed a job title. Requirements-only rows are not applyable.
   bool get hasListedPosition {
@@ -77,6 +91,33 @@ class JobVacancyItem {
     final n = int.tryParse(v.toString().trim());
     if (n == null || n < 1) return null;
     return n;
+  }
+
+  static int parseMinimumAge(dynamic v) {
+    if (v is int && v >= 0) return v;
+    final n = int.tryParse('${v ?? ''}'.trim());
+    if (n == null || n < 0) return 18;
+    return n;
+  }
+
+  static int? parseMaximumAge(dynamic v) {
+    if (v == null) return null;
+    final s = v.toString().trim();
+    if (s.isEmpty || s == 'null') return null;
+    if (v is int && v >= 0) return v;
+    final n = int.tryParse(s);
+    if (n == null || n < 0) return null;
+    return n;
+  }
+
+  /// Completed years on [today], using calendar dates only.
+  static int ageOnDate(DateTime birthDate, DateTime today) {
+    var age = today.year - birthDate.year;
+    final hadBirthday =
+        today.month > birthDate.month ||
+        (today.month == birthDate.month && today.day >= birthDate.day);
+    if (!hadBirthday) age--;
+    return age;
   }
 
   static DateTime? _parseDateOnly(dynamic v) {
@@ -149,6 +190,8 @@ class JobVacancyAnnouncement {
             v.closingDate?.toIso8601String() ?? '',
             v.isClosed == true ? '1' : '0',
             '${v.maxApplicants ?? ''}',
+            '${v.minimumAge}',
+            '${v.maximumAge ?? ''}',
             '${v.applicationCount ?? ''}',
             '${v.totalApplicationCount ?? ''}',
           ].join('\u001f'),
@@ -176,6 +219,8 @@ class JobVacancyAnnouncement {
               maxApplicants: JobVacancyItem._parsePositiveInt(
                 m['max_applicants'],
               ),
+              minimumAge: JobVacancyItem.parseMinimumAge(m['minimum_age']),
+              maximumAge: JobVacancyItem.parseMaximumAge(m['maximum_age']),
               applicationCount: m['application_count'] is int
                   ? m['application_count'] as int
                   : int.tryParse(m['application_count']?.toString() ?? ''),
@@ -198,6 +243,8 @@ class JobVacancyAnnouncement {
           maxApplicants: JobVacancyItem._parsePositiveInt(
             json['max_applicants'],
           ),
+          minimumAge: JobVacancyItem.parseMinimumAge(json['minimum_age']),
+          maximumAge: JobVacancyItem.parseMaximumAge(json['maximum_age']),
           applicationCount: json['application_count'] is int
               ? json['application_count'] as int
               : int.tryParse(json['application_count']?.toString() ?? ''),
@@ -238,6 +285,8 @@ class JobVacancyAnnouncement {
         if (closingDate != null) 'closing_date': closingDate,
         if (v.maxApplicants != null && v.maxApplicants! >= 1)
           'max_applicants': v.maxApplicants,
+        'minimum_age': v.minimumAge,
+        'maximum_age': v.maximumAge,
       };
     }).toList();
     final first = vacancies.isNotEmpty ? vacancies.first : null;

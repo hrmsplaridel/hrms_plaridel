@@ -7,14 +7,15 @@ const bcrypt = require('bcrypt');
 const { pool } = require('../config/db');
 const {
   assertPositionAcceptingApplications,
+  assertApplicantMeetsVacancyAge,
 } = require('../utils/jobVacancySlots');
+const { todayInHrmsTimezone, isValidIsoCalendarDate } = require('../utils/dateRangeParser');
 const { authMiddleware } = require('../middleware/auth');
-const { requireAdmin } = require('../middleware/rbac');
+const { requireAdmin, requireAdminOrHr } = require('../middleware/rbac');
 const { isAttachmentPathAllowedInDb } = require('../utils/rspAttachmentPolicy');
 const { resolveLocalRspAttachment, findLocalRspAttachment, RSP_SUBDIR } = require('../utils/rspLocalAttachment');
 const { sendSmtpMail, isSmtpConfigured } = require('../utils/smtpMail');
 const {
-  notifyNewRecruitmentApplication,
   isEmailJsConfiguredForHireEmail,
   sendHireCredentialsEmailJs,
   HIRE_CREDENTIALS_EMAIL_SUBJECT,
@@ -37,9 +38,35 @@ const {
   publicApplicationExamLimiter,
   publicLookupLimiter,
 } = require('../middleware/rateLimiters');
-
+const issuedForm = require('../services/rspIssuedForm');
+const preDeliberation = require('../services/rspPreDeliberation');
+const finalHiring = require('../services/rspFinalHiring');
+const applicantNotices = require('../services/rspApplicantNotices');
 const router = express.Router();
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+async function withRspTransaction(work) {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const outcome = await work(client);
+    if (outcome && outcome.rollback) {
+      await client.query('ROLLBACK');
+    } else {
+      await client.query('COMMIT');
+    }
+    return outcome;
+  } catch (err) {
+    try {
+      await client.query('ROLLBACK');
+    } catch (_) {
+      /* ignore */
+    }
+    throw err;
+  } finally {
+    client.release();
+  }
+}
 
 function rspStep1RequiresEmailOtp() {
   return rspEmailVerificationPublicRoutes.rspEmailOtpEnrollmentActive?.() === true;
@@ -97,6 +124,9 @@ async function requireApplicantProof(req, res, next) {
   }
 }
 const protect = [authMiddleware, requireAdmin];
+// Required-form review follows the same Admin or HR operators who use the
+// recruitment screen. It does not open the rest of the admin recruitment API.
+const recruitmentStaff = [authMiddleware, requireAdminOrHr];
 
 /** BEI needs HR scores for every narrative answer before final pass/fail. */
 function beiGradingComplete(answersJson) {
@@ -160,7 +190,7 @@ function parseRspDocKind(value) {
 
 const RSP_APPLICATION_ROW_SELECT = `
   id, applicant_number, full_name, first_name, middle_name, last_name, suffix, sex,
-  course, address, age, civil_status,
+  course, address, age, to_char(date_of_birth, 'YYYY-MM-DD') AS date_of_birth, civil_status,
   email, phone, resume_notes, position_applied_for,
   attachment_path, attachment_name,
   doc_application_letter_path, doc_application_letter_name,
@@ -179,11 +209,40 @@ const RSP_APPLICATION_ROW_SELECT = `
   status, final_interview_at, final_interview_passed, hired_user_id,
   hr_account_setup_done, hire_credentials_email_sent_at,
   hire_login_username, hire_login_password,
+  step2_gate_required, required_form_type, required_form_status,
+  required_form_entry_id, required_form_assigned_at, required_form_submitted_at,
+  required_form_reviewed_at, required_form_review_comment,
+  step4_gate_required, wes_status, wes_review_comment,
+  applicants_profile_status, selection_lineup_status,
+  step5_gate_required, tat_entry_id, tat_status,
+  csc_approval_status,
   created_at, updated_at
 `.replace(/\s+/g, ' ');
 
 /** Unambiguous alphabet (no 0/O/1/I) for human-readable applicant IDs. */
 const APPLICANT_NUMBER_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+
+/** YYYY-MM-DD birth date, or an error. Vacancy rules decide the allowed age. */
+function normalizeDateOfBirth(raw) {
+  if (raw == null || raw === '') {
+    const err = new Error('Date of birth is required.');
+    err.statusCode = 400;
+    throw err;
+  }
+  const s = String(raw).trim();
+  if (!isValidIsoCalendarDate(s)) {
+    const err = new Error('dateOfBirth must be a valid YYYY-MM-DD date');
+    err.statusCode = 400;
+    throw err;
+  }
+  const today = todayInHrmsTimezone();
+  if (s > today) {
+    const err = new Error('dateOfBirth cannot be in the future');
+    err.statusCode = 400;
+    throw err;
+  }
+  return s;
+}
 
 function generateApplicantNumberCandidate() {
   let body = '';
@@ -370,6 +429,7 @@ async function ensureRspApplicationsTables() {
       ADD COLUMN IF NOT EXISTS course TEXT,
       ADD COLUMN IF NOT EXISTS address TEXT,
       ADD COLUMN IF NOT EXISTS age TEXT,
+      ADD COLUMN IF NOT EXISTS date_of_birth DATE,
       ADD COLUMN IF NOT EXISTS civil_status TEXT,
       ADD COLUMN IF NOT EXISTS applicant_number TEXT;
   `);
@@ -418,6 +478,10 @@ async function ensureRspApplicationsTables() {
       WHEN undefined_table THEN NULL;
     END $$;
   `);
+
+  await issuedForm.assertIssuedFormSchema();
+  await preDeliberation.assertPreDeliberationSchema();
+  await finalHiring.assertFinalHiringSchema();
 }
 
 // POST /api/rsp/applications
@@ -433,7 +497,7 @@ router.post('/', publicApplicationCreateLimiter, async (req, res) => {
       sex,
       course,
       address,
-      age,
+      dateOfBirth,
       civilStatus,
       fullName, // legacy
       email,
@@ -500,18 +564,33 @@ router.post('/', publicApplicationCreateLimiter, async (req, res) => {
       });
     }
 
+    let birthDate;
+    try {
+      birthDate = normalizeDateOfBirth(dateOfBirth);
+    } catch (err) {
+      return res.status(err.statusCode || 400).json({ error: err.message });
+    }
+
+    const ageCheck = await assertApplicantMeetsVacancyAge(position, birthDate);
+    if (!ageCheck.ok) {
+      return res.status(ageCheck.status).json({
+        error: ageCheck.error,
+        code: ageCheck.code,
+      });
+    }
+
     const applicantNumber = await allocateUniqueApplicantNumber();
 
     const result = await pool.query(
       `
       INSERT INTO public.recruitment_applications
         (applicant_number, full_name, first_name, middle_name, last_name, suffix, sex,
-         course, address, age, civil_status,
+         course, address, age, date_of_birth, civil_status,
          email, phone, resume_notes, position_applied_for, status, created_at, updated_at)
       VALUES
         ($1, $2, $3, $4, $5, $6, $7,
-         $8, $9, $10, $11,
-         $12, $13, $14, $15, $16, now(), now())
+         $8, $9, $10, $11::date, $12,
+         $13, $14, $15, $16, $17, now(), now())
       RETURNING ${RSP_APPLICATION_ROW_SELECT}
       `,
       [
@@ -524,7 +603,8 @@ router.post('/', publicApplicationCreateLimiter, async (req, res) => {
         sx,
         optStr(course),
         optStr(address),
-        optStr(age),
+        String(ageCheck.age),
+        birthDate,
         optStr(civilStatus),
         normalizedEmail,
         phone ?? null,
@@ -536,11 +616,6 @@ router.post('/', publicApplicationCreateLimiter, async (req, res) => {
 
     const application = result.rows[0];
     void (async () => {
-      try {
-        await notifyNewRecruitmentApplication(application);
-      } catch (e) {
-        console.error('[rspApplications EmailJS]', e?.message || e);
-      }
       try {
         await recruitmentNotifications.notifyNewApplication(pool, application);
       } catch (e) {
@@ -559,6 +634,81 @@ router.post('/', publicApplicationCreateLimiter, async (req, res) => {
   }
 });
 
+const PUBLIC_TRACKING_APPLICATION_SELECT = `
+  id, applicant_number, full_name, email, position_applied_for, status,
+  orientation_at, orientation_attended, final_interview_at,
+  final_interview_passed, final_requirements_approved,
+  hr_account_setup_done, hired_user_id,
+  hire_credentials_email_sent_at,
+  step2_gate_required, required_form_type, required_form_status,
+  required_form_entry_id, required_form_assigned_at,
+  required_form_submitted_at, required_form_reviewed_at,
+  required_form_review_comment,
+  step4_gate_required, wes_status, wes_review_comment,
+  applicants_profile_status, selection_lineup_status,
+  step5_gate_required, tat_status, csc_approval_status,
+  doc_application_letter_path, doc_application_letter_name,
+  doc_resume_path, doc_resume_name,
+  doc_tor_path, doc_tor_name,
+  doc_eligibility_trainings_path, doc_eligibility_trainings_name,
+  doc_medical_certificate_path, doc_medical_certificate_name,
+  doc_drug_test_path, doc_drug_test_name,
+  doc_nbi_clearance_path, doc_nbi_clearance_name,
+  doc_medical_certificate_reject_reason,
+  doc_drug_test_reject_reason,
+  doc_nbi_clearance_reject_reason,
+  created_at, updated_at
+`.replace(/\s+/g, ' ');
+
+/** Status, exam summary, and continue token for email or Application ID lookup. */
+async function publicTrackingPayload(row, logLabel) {
+  const examRes = await pool.query(
+    `
+    SELECT id, application_id, score_percent, passed, submitted_at, answers_json
+    FROM public.recruitment_exam_results
+    WHERE application_id = $1
+    LIMIT 1
+    `,
+    [row.id],
+  );
+  const raw = examRes.rows[0] ?? null;
+  let examResult = raw;
+  if (raw) {
+    const complete = beiGradingComplete(raw.answers_json);
+    // Legacy rows may be marked passed before BEI scoring was enforced.
+    const beiCompleteForUi = complete || raw.passed === true;
+    examResult = {
+      id: raw.id,
+      application_id: raw.application_id,
+      score_percent: raw.score_percent,
+      passed: raw.passed,
+      submitted_at: raw.submitted_at,
+      bei_grading_complete: beiCompleteForUi,
+    };
+  }
+
+  let applicantAccessToken = null;
+  try {
+    applicantAccessToken = signRspApplicantAccessToken(
+      row.id,
+      String(row.email || '').trim().toLowerCase(),
+    );
+  } catch (tokenErr) {
+    console.error(logLabel, tokenErr);
+  }
+
+  const application = { ...row };
+  delete application.hire_login_username;
+  delete application.hire_login_password;
+
+  return {
+    ok: true,
+    application,
+    examResult,
+    ...(applicantAccessToken ? { applicantAccessToken } : {}),
+  };
+}
+
 // GET /api/rsp/applications/by-email?email=...
 // Public lookup for applicants to continue their flow.
 router.get('/by-email', publicLookupLimiter, async (req, res) => {
@@ -570,22 +720,7 @@ router.get('/by-email', publicLookupLimiter, async (req, res) => {
     }
     const result = await pool.query(
       `
-      SELECT id, applicant_number, full_name, email, position_applied_for, status,
-             orientation_at, orientation_attended, final_interview_at,
-             final_interview_passed, final_requirements_approved,
-             hr_account_setup_done, hired_user_id,
-             hire_credentials_email_sent_at,
-             doc_application_letter_path, doc_application_letter_name,
-             doc_resume_path, doc_resume_name,
-             doc_tor_path, doc_tor_name,
-             doc_eligibility_trainings_path, doc_eligibility_trainings_name,
-             doc_medical_certificate_path, doc_medical_certificate_name,
-             doc_drug_test_path, doc_drug_test_name,
-             doc_nbi_clearance_path, doc_nbi_clearance_name,
-             doc_medical_certificate_reject_reason,
-             doc_drug_test_reject_reason,
-             doc_nbi_clearance_reject_reason,
-             created_at, updated_at
+      SELECT ${PUBLIC_TRACKING_APPLICATION_SELECT}
       FROM public.recruitment_applications
       WHERE email = $1
       ORDER BY created_at DESC
@@ -597,53 +732,9 @@ router.get('/by-email', publicLookupLimiter, async (req, res) => {
     const row = result.rows[0];
     if (!row) return res.status(404).json({ error: 'Application not found' });
 
-    const examRes = await pool.query(
-      `
-      SELECT id, application_id, score_percent, passed, submitted_at, answers_json
-      FROM public.recruitment_exam_results
-      WHERE application_id = $1
-      LIMIT 1
-      `,
-      [row.id]
+    return res.json(
+      await publicTrackingPayload(row, '[rspApplications GET /by-email] applicant token'),
     );
-    const raw = examRes.rows[0] ?? null;
-    let examResult = raw;
-    if (raw) {
-      const complete = beiGradingComplete(raw.answers_json);
-      // Legacy rows may be marked passed before BEI scoring was enforced.
-      const beiCompleteForUi = complete || raw.passed === true;
-      examResult = {
-        id: raw.id,
-        application_id: raw.application_id,
-        score_percent: raw.score_percent,
-        passed: raw.passed,
-        submitted_at: raw.submitted_at,
-        bei_grading_complete: beiCompleteForUi,
-      };
-    }
-
-    // Same identity as Continue application: email lookup is already the
-    // resume key, and Step 8 uploads require this token.
-    let applicantAccessToken = null;
-    try {
-      applicantAccessToken = signRspApplicantAccessToken(
-        row.id,
-        String(row.email || '').trim().toLowerCase(),
-      );
-    } catch (tokenErr) {
-      console.error('[rspApplications GET /by-email] applicant token', tokenErr);
-    }
-
-    const application = { ...row };
-    delete application.hire_login_username;
-    delete application.hire_login_password;
-
-    return res.json({
-      ok: true,
-      application,
-      examResult,
-      ...(applicantAccessToken ? { applicantAccessToken } : {}),
-    });
   } catch (err) {
     console.error('[rspApplications GET /by-email]', err);
     return res.status(500).json({
@@ -654,8 +745,8 @@ router.get('/by-email', publicLookupLimiter, async (req, res) => {
 });
 
 // GET /api/rsp/applications/by-applicant-number?number=PLR-XXXXXXXX
-// Lookup to verify applicant personal details by randomized ID number.
-router.get('/by-applicant-number', async (req, res) => {
+// Same tracking payload as by-email, keyed by the Application ID on the form.
+router.get('/by-applicant-number', publicLookupLimiter, async (req, res) => {
   try {
     await ensureRspApplicationsTables();
     const number = normalizeApplicantNumber(req.query.number ?? req.query.id);
@@ -667,7 +758,7 @@ router.get('/by-applicant-number', async (req, res) => {
 
     const result = await pool.query(
       `
-      SELECT ${RSP_APPLICATION_ROW_SELECT}
+      SELECT ${PUBLIC_TRACKING_APPLICATION_SELECT}
       FROM public.recruitment_applications
       WHERE upper(applicant_number) = $1
       LIMIT 1
@@ -678,11 +769,12 @@ router.get('/by-applicant-number', async (req, res) => {
     const row = result.rows[0];
     if (!row) return res.status(404).json({ error: 'Applicant ID not found' });
 
-    const application = { ...row };
-    delete application.hire_login_username;
-    delete application.hire_login_password;
-
-    return res.json({ ok: true, application });
+    return res.json(
+      await publicTrackingPayload(
+        row,
+        '[rspApplications GET /by-applicant-number] applicant token',
+      ),
+    );
   } catch (err) {
     console.error('[rspApplications GET /by-applicant-number]', err);
     return res.status(500).json({
@@ -715,6 +807,40 @@ router.get('/', protect, async (_req, res) => {
   }
 });
 
+// Active recruitment rows HR may attach to a Turn-Around Time form.
+// Declined, failed, and rejected applications stay out. Selection does not
+// change status or CSC approval; those rules remain on their own endpoints.
+const TAT_SELECTABLE_STATUSES = [
+  'submitted',
+  'document_approved',
+  'exam_taken',
+  'passed',
+  'registered',
+];
+
+router.get('/tat-applicant-choices', protect, async (_req, res) => {
+  try {
+    await ensureRspApplicationsTables();
+    const result = await pool.query(
+      `
+      SELECT id, applicant_number, full_name, position_applied_for, status
+      FROM public.recruitment_applications
+      WHERE ${excludeMayorIntakeStubSql()}
+        AND status = ANY($1::text[])
+      ORDER BY full_name ASC, applicant_number ASC
+      `,
+      [TAT_SELECTABLE_STATUSES],
+    );
+    return res.json({ ok: true, applications: result.rows });
+  } catch (err) {
+    console.error('[rspApplications GET /tat-applicant-choices]', err);
+    return res.status(500).json({
+      error: 'Failed to list applicants',
+      details: err?.message ? String(err.message) : String(err),
+    });
+  }
+});
+
 // Statuses owned by the RSP pipeline; `endorsed` / `rejected` belong to the Mayor module.
 const RSP_ADMIN_STATUSES = new Set([
   'submitted',
@@ -739,24 +865,439 @@ router.put('/:applicationId/status', protect, async (req, res) => {
     if (!RSP_ADMIN_STATUSES.has(status)) {
       return res.status(400).json({ error: 'Unsupported application status' });
     }
-    const result = await pool.query(
-      `
-      UPDATE public.recruitment_applications
-      SET status = $1, updated_at = now()
-      WHERE id = $2
-      `,
-      [status, applicationId]
-    );
-    if ((result.rowCount ?? 0) === 0) {
-      return res.status(404).json({ error: 'Application not found' });
+    const outcome = await withRspTransaction(async (client) => {
+      const current = await client.query(
+        `SELECT status, email, full_name, applicant_number, position_applied_for
+         FROM public.recruitment_applications
+         WHERE id = $1
+         FOR UPDATE`,
+        [applicationId],
+      );
+      if ((current.rowCount ?? 0) === 0) {
+        return { rollback: true, status: 404, body: { error: 'Application not found' } };
+      }
+      const previousStatus = current.rows[0].status;
+      const enableGate =
+        status === 'document_approved' &&
+        issuedForm.shouldEnableIssuedFormGate(previousStatus);
+      const result = await client.query(
+        `
+        UPDATE public.recruitment_applications
+        SET status = $1,
+            updated_at = now(),
+            step2_gate_required = CASE WHEN $3::boolean THEN TRUE ELSE step2_gate_required END,
+            required_form_status = CASE
+              WHEN $3::boolean THEN COALESCE(required_form_status, 'waiting_for_hr_form')
+              ELSE required_form_status
+            END
+        WHERE id = $2
+        `,
+        [status, applicationId, enableGate],
+      );
+      if ((result.rowCount ?? 0) === 0) {
+        return { rollback: true, status: 404, body: { error: 'Application not found' } };
+      }
+      return {
+        status: 200,
+        body: { ok: true },
+        notice: {
+          applicationId,
+          previousStatus,
+          nextStatus: status,
+          applicant: current.rows[0],
+        },
+      };
+    });
+    if (outcome.notice) {
+      await applicantNotices.safeNotify(() =>
+        applicantNotices.notifyDocumentDecision(outcome.notice),
+      );
     }
-    return res.json({ ok: true });
+    return res.status(outcome.status).json(outcome.body);
   } catch (err) {
     console.error('[rspApplications PUT status]', err);
     return res.status(500).json({
       error: 'Failed to update application status',
       details: err?.message ? String(err.message) : String(err),
     });
+  }
+});
+
+function issuedFormPayload(result) {
+  return {
+    ok: true,
+    assignment: result.assignment,
+    entry: result.entry || null,
+    created: result.created === true,
+    duplicate: result.duplicate === true,
+  };
+}
+
+router.get('/:applicationId/required-form', recruitmentStaff, async (req, res) => {
+  try {
+    await ensureRspApplicationsTables();
+    const result = await issuedForm.getRequiredForm(req.params.applicationId);
+    return res.json(issuedFormPayload(result));
+  } catch (err) {
+    return issuedForm.sendIssuedFormError(res, err, '[rspApplications GET required-form]');
+  }
+});
+
+router.post('/:applicationId/required-form/assign', recruitmentStaff, async (req, res) => {
+  try {
+    await ensureRspApplicationsTables();
+    const result = await issuedForm.assignRequiredForm({
+      applicationId: req.params.applicationId,
+      formType: req.body?.formType,
+      actorId: req.user?.id,
+    });
+    if (result.applicantNotice === true) {
+      await applicantNotices.safeNotify(() =>
+        applicantNotices.notifyActionRequired({
+          applicationId: req.params.applicationId,
+          formKey: result.assignment?.formType,
+          mode: 'assign',
+        }),
+      );
+    }
+    return res.json(issuedFormPayload(result));
+  } catch (err) {
+    return issuedForm.sendIssuedFormError(res, err, '[rspApplications POST required-form/assign]');
+  }
+});
+
+router.post('/:applicationId/required-form/approve', recruitmentStaff, async (req, res) => {
+  try {
+    await ensureRspApplicationsTables();
+    const result = await issuedForm.approveRequiredForm({
+      applicationId: req.params.applicationId,
+      actorId: req.user?.id,
+    });
+    return res.json(issuedFormPayload(result));
+  } catch (err) {
+    return issuedForm.sendIssuedFormError(res, err, '[rspApplications POST required-form/approve]');
+  }
+});
+
+router.post('/:applicationId/required-form/revision', recruitmentStaff, async (req, res) => {
+  try {
+    await ensureRspApplicationsTables();
+    const result = await issuedForm.requestFormRevision({
+      applicationId: req.params.applicationId,
+      actorId: req.user?.id,
+      comment: req.body?.comment,
+    });
+    if (result.applicantNotice === true) {
+      await applicantNotices.safeNotify(() =>
+        applicantNotices.notifyActionRequired({
+          applicationId: req.params.applicationId,
+          formKey: result.assignment?.formType,
+          mode: 'revision',
+          comment: result.assignment?.reviewComment,
+        }),
+      );
+    }
+    return res.json(issuedFormPayload(result));
+  } catch (err) {
+    return issuedForm.sendIssuedFormError(res, err, '[rspApplications POST required-form/revision]');
+  }
+});
+
+router.get('/:applicationId/required-form/mine', requireApplicantProof, async (req, res) => {
+  try {
+    await ensureRspApplicationsTables();
+    const result = await issuedForm.getRequiredForm(req.params.applicationId);
+    return res.json(issuedFormPayload(result));
+  } catch (err) {
+    return issuedForm.sendIssuedFormError(res, err, '[rspApplications GET required-form/mine]');
+  }
+});
+
+router.put('/:applicationId/required-form/draft', requireApplicantProof, async (req, res) => {
+  try {
+    await ensureRspApplicationsTables();
+    const result = await issuedForm.saveApplicantDraft({
+      applicationId: req.params.applicationId,
+      body: req.body || {},
+    });
+    return res.json(issuedFormPayload(result));
+  } catch (err) {
+    return issuedForm.sendIssuedFormError(res, err, '[rspApplications PUT required-form/draft]');
+  }
+});
+
+router.post('/:applicationId/required-form/submit', requireApplicantProof, async (req, res) => {
+  try {
+    await ensureRspApplicationsTables();
+    const result = await issuedForm.submitApplicantForm({
+      applicationId: req.params.applicationId,
+      body: req.body || {},
+    });
+    return res.json(issuedFormPayload(result));
+  } catch (err) {
+    return issuedForm.sendIssuedFormError(res, err, '[rspApplications POST required-form/submit]');
+  }
+});
+
+function preDeliberationPayload(result, { includeHrForms }) {
+  return {
+    ok: true,
+    tracking: result.tracking,
+    wes: result.wes || null,
+    ...(includeHrForms
+      ? { profile: result.profile || null, lineup: result.lineup || null }
+      : {}),
+    created: result.created === true,
+    duplicate: result.duplicate === true,
+  };
+}
+
+router.get('/:applicationId/pre-deliberation', recruitmentStaff, async (req, res) => {
+  try {
+    await ensureRspApplicationsTables();
+    const result = await preDeliberation.getPreDeliberation(req.params.applicationId, {
+      includeHrForms: true,
+    });
+    return res.json(preDeliberationPayload(result, { includeHrForms: true }));
+  } catch (err) {
+    return preDeliberation.sendPreDeliberationError(res, err, '[rspApplications GET pre-deliberation]');
+  }
+});
+
+router.post('/:applicationId/work-experience/assign', recruitmentStaff, async (req, res) => {
+  try {
+    await ensureRspApplicationsTables();
+    const result = await preDeliberation.assignWorkExperience({
+      applicationId: req.params.applicationId,
+      actorId: req.user?.id,
+    });
+    if (result.applicantNotice === true) {
+      await applicantNotices.safeNotify(() =>
+        applicantNotices.notifyActionRequired({
+          applicationId: req.params.applicationId,
+          formKey: 'wes',
+          mode: 'assign',
+        }),
+      );
+    }
+    return res.json(preDeliberationPayload(result, { includeHrForms: false }));
+  } catch (err) {
+    return preDeliberation.sendPreDeliberationError(res, err, '[rspApplications POST work-experience/assign]');
+  }
+});
+
+router.post('/:applicationId/work-experience/approve', recruitmentStaff, async (req, res) => {
+  try {
+    await ensureRspApplicationsTables();
+    const result = await preDeliberation.reviewWes({
+      applicationId: req.params.applicationId,
+      actorId: req.user?.id,
+      approve: true,
+    });
+    return res.json(preDeliberationPayload(result, { includeHrForms: false }));
+  } catch (err) {
+    return preDeliberation.sendPreDeliberationError(res, err, '[rspApplications POST work-experience/approve]');
+  }
+});
+
+router.post('/:applicationId/work-experience/revision', recruitmentStaff, async (req, res) => {
+  try {
+    await ensureRspApplicationsTables();
+    const result = await preDeliberation.reviewWes({
+      applicationId: req.params.applicationId,
+      actorId: req.user?.id,
+      approve: false,
+      comment: req.body?.comment,
+    });
+    if (result.applicantNotice === true) {
+      await applicantNotices.safeNotify(() =>
+        applicantNotices.notifyActionRequired({
+          applicationId: req.params.applicationId,
+          formKey: 'wes',
+          mode: 'revision',
+          comment: result.tracking?.wesReviewComment,
+        }),
+      );
+    }
+    return res.json(preDeliberationPayload(result, { includeHrForms: false }));
+  } catch (err) {
+    return preDeliberation.sendPreDeliberationError(res, err, '[rspApplications POST work-experience/revision]');
+  }
+});
+
+router.post('/:applicationId/applicants-profile/open', recruitmentStaff, async (req, res) => {
+  try {
+    await ensureRspApplicationsTables();
+    const result = await preDeliberation.openHrForm({
+      applicationId: req.params.applicationId,
+      kind: 'profile',
+      actorId: req.user?.id,
+    });
+    return res.json({ ok: true, tracking: result.tracking, entry: result.entry, created: result.created === true });
+  } catch (err) {
+    return preDeliberation.sendPreDeliberationError(res, err, '[rspApplications POST applicants-profile/open]');
+  }
+});
+
+router.post('/:applicationId/applicants-profile/complete', recruitmentStaff, async (req, res) => {
+  try {
+    await ensureRspApplicationsTables();
+    const result = await preDeliberation.completeHrForm({
+      applicationId: req.params.applicationId,
+      kind: 'profile',
+      actorId: req.user?.id,
+    });
+    return res.json({ ok: true, tracking: result.tracking, duplicate: result.duplicate === true });
+  } catch (err) {
+    return preDeliberation.sendPreDeliberationError(res, err, '[rspApplications POST applicants-profile/complete]');
+  }
+});
+
+router.post('/:applicationId/selection-lineup/open', recruitmentStaff, async (req, res) => {
+  try {
+    await ensureRspApplicationsTables();
+    const result = await preDeliberation.openHrForm({
+      applicationId: req.params.applicationId,
+      kind: 'lineup',
+      actorId: req.user?.id,
+    });
+    return res.json({ ok: true, tracking: result.tracking, entry: result.entry, created: result.created === true });
+  } catch (err) {
+    return preDeliberation.sendPreDeliberationError(res, err, '[rspApplications POST selection-lineup/open]');
+  }
+});
+
+router.post('/:applicationId/selection-lineup/complete', recruitmentStaff, async (req, res) => {
+  try {
+    await ensureRspApplicationsTables();
+    const result = await preDeliberation.completeHrForm({
+      applicationId: req.params.applicationId,
+      kind: 'lineup',
+      actorId: req.user?.id,
+    });
+    return res.json({ ok: true, tracking: result.tracking, duplicate: result.duplicate === true });
+  } catch (err) {
+    return preDeliberation.sendPreDeliberationError(res, err, '[rspApplications POST selection-lineup/complete]');
+  }
+});
+
+function rejectInvalidEntryId(req, res, next) {
+  if (!UUID_RE.test(String(req.params.entryId || ''))) {
+    return res.status(400).json({ error: 'Invalid form id' });
+  }
+  next();
+}
+
+async function completeSharedForm(req, res, kind) {
+  try {
+    await ensureRspApplicationsTables();
+    const result = await preDeliberation.completeSharedHrForm({
+      kind,
+      entryId: req.params.entryId,
+      actorId: req.user?.id,
+    });
+    return res.json({ ok: true, ...result });
+  } catch (err) {
+    return preDeliberation.sendPreDeliberationError(res, err, `[rspApplications POST hr-forms ${kind} complete]`);
+  }
+}
+
+async function readSharedFormCompletion(req, res, kind) {
+  try {
+    await ensureRspApplicationsTables();
+    const result = await preDeliberation.sharedHrFormCompletion({
+      kind,
+      entryId: req.params.entryId,
+    });
+    return res.json({ ok: true, ...result });
+  } catch (err) {
+    return preDeliberation.sendPreDeliberationError(res, err, `[rspApplications GET hr-forms ${kind} completion]`);
+  }
+}
+
+router.get('/hr-forms/applicants-profile/:entryId/completion', recruitmentStaff, rejectInvalidEntryId, (req, res) => readSharedFormCompletion(req, res, 'profile'));
+router.post('/hr-forms/applicants-profile/:entryId/complete', recruitmentStaff, rejectInvalidEntryId, (req, res) => completeSharedForm(req, res, 'profile'));
+router.get('/hr-forms/selection-lineup/:entryId/completion', recruitmentStaff, rejectInvalidEntryId, (req, res) => readSharedFormCompletion(req, res, 'lineup'));
+router.post('/hr-forms/selection-lineup/:entryId/complete', recruitmentStaff, rejectInvalidEntryId, (req, res) => completeSharedForm(req, res, 'lineup'));
+
+router.get('/final-hiring/sources', recruitmentStaff, async (req, res) => {
+  try {
+    await ensureRspApplicationsTables();
+    const result = await pool.query(
+      `SELECT a.id, a.full_name, a.position_applied_for, a.final_interview_at,
+              e.submitted_at AS exam_submitted_at, e.passed AS exam_passed
+       FROM public.recruitment_applications a
+       LEFT JOIN public.recruitment_exam_results e ON e.application_id = a.id
+       WHERE a.step5_gate_required = TRUE
+         AND a.final_interview_passed = TRUE
+       ORDER BY a.full_name`,
+    );
+    return res.json({ ok: true, applications: result.rows });
+  } catch (err) {
+    return finalHiring.sendFinalHiringError(res, err, '[rspApplications GET final-hiring/sources]');
+  }
+});
+
+router.get('/hr-forms/turn-around-time/:entryId/completion', recruitmentStaff, rejectInvalidEntryId, async (req, res) => {
+  try {
+    await ensureRspApplicationsTables();
+    const result = await finalHiring.tatCompletion({ entryId: req.params.entryId });
+    return res.json({ ok: true, ...result });
+  } catch (err) {
+    return finalHiring.sendFinalHiringError(res, err, '[rspApplications GET turn-around-time completion]');
+  }
+});
+
+router.post('/hr-forms/turn-around-time/:entryId/complete', recruitmentStaff, rejectInvalidEntryId, async (req, res) => {
+  try {
+    await ensureRspApplicationsTables();
+    const result = await finalHiring.completeTurnAroundTime({
+      entryId: req.params.entryId,
+      actorId: req.user?.id,
+    });
+    return res.json({ ok: true, ...result });
+  } catch (err) {
+    return finalHiring.sendFinalHiringError(res, err, '[rspApplications POST turn-around-time complete]');
+  }
+});
+
+router.get('/:applicationId/work-experience/mine', requireApplicantProof, async (req, res) => {
+  try {
+    await ensureRspApplicationsTables();
+    const result = await preDeliberation.getPreDeliberation(req.params.applicationId, {
+      includeHrForms: false,
+    });
+    return res.json(preDeliberationPayload(result, { includeHrForms: false }));
+  } catch (err) {
+    return preDeliberation.sendPreDeliberationError(res, err, '[rspApplications GET work-experience/mine]');
+  }
+});
+
+router.put('/:applicationId/work-experience/draft', requireApplicantProof, async (req, res) => {
+  try {
+    await ensureRspApplicationsTables();
+    const result = await preDeliberation.saveApplicantWes({
+      applicationId: req.params.applicationId,
+      body: req.body || {},
+      submit: false,
+    });
+    return res.json(preDeliberationPayload(result, { includeHrForms: false }));
+  } catch (err) {
+    return preDeliberation.sendPreDeliberationError(res, err, '[rspApplications PUT work-experience/draft]');
+  }
+});
+
+router.post('/:applicationId/work-experience/submit', requireApplicantProof, async (req, res) => {
+  try {
+    await ensureRspApplicationsTables();
+    const result = await preDeliberation.saveApplicantWes({
+      applicationId: req.params.applicationId,
+      body: req.body || {},
+      submit: true,
+    });
+    return res.json(preDeliberationPayload(result, { includeHrForms: false }));
+  } catch (err) {
+    return preDeliberation.sendPreDeliberationError(res, err, '[rspApplications POST work-experience/submit]');
   }
 });
 
@@ -892,19 +1433,62 @@ router.put('/:applicationId/final-interview', protect, async (req, res) => {
       return res.status(400).json({ error: 'finalInterviewAt must be an ISO string or null' });
     }
 
-    const result = await pool.query(
-      `
-      UPDATE public.recruitment_applications
-      SET final_interview_at = $1::timestamptz, updated_at = now()
-      WHERE id = $2
-      RETURNING ${RSP_APPLICATION_ROW_SELECT}
-      `,
-      [param, applicationId],
-    );
-    if ((result.rowCount ?? 0) === 0) {
-      return res.status(404).json({ error: 'Application not found' });
+    const outcome = await withRspTransaction(async (client) => {
+      const current = await client.query(
+        `SELECT final_interview_at, email, full_name, applicant_number, position_applied_for,
+                step4_gate_required, wes_status, applicants_profile_status, selection_lineup_status
+         FROM public.recruitment_applications
+         WHERE id = $1
+         FOR UPDATE`,
+        [applicationId],
+      );
+      if ((current.rowCount ?? 0) === 0) {
+        return { rollback: true, status: 404, body: { error: 'Application not found' } };
+      }
+      if (param != null) {
+        const missing = preDeliberation.missingPrerequisites(current.rows[0]);
+        if (missing.length > 0) {
+          return {
+            rollback: true,
+            status: 409,
+            body: {
+              error: 'Pre-deliberation requirements are incomplete.',
+              code: 'PRE_DELIBERATION_REQUIREMENTS_INCOMPLETE',
+              missing,
+            },
+          };
+        }
+      }
+      const result = await client.query(
+        `
+        UPDATE public.recruitment_applications
+        SET final_interview_at = $1::timestamptz, updated_at = now()
+        WHERE id = $2
+        RETURNING ${RSP_APPLICATION_ROW_SELECT}
+        `,
+        [param, applicationId],
+      );
+      if ((result.rowCount ?? 0) === 0) {
+        return { rollback: true, status: 404, body: { error: 'Application not found' } };
+      }
+      return {
+        status: 200,
+        body: { ok: true, application: result.rows[0] },
+        notice: {
+          applicationId,
+          eventName: 'Deliberation',
+          previousAt: current.rows[0].final_interview_at,
+          nextAt: param,
+          applicant: current.rows[0],
+        },
+      };
+    });
+    if (outcome.notice) {
+      await applicantNotices.safeNotify(() =>
+        applicantNotices.notifyScheduleNotice(outcome.notice),
+      );
     }
-    return res.json({ ok: true, application: result.rows[0] });
+    return res.status(outcome.status).json(outcome.body);
   } catch (err) {
     console.error('[rspApplications PUT final-interview]', err);
     return res.status(500).json({
@@ -922,23 +1506,6 @@ router.put('/:applicationId/orientation', protect, async (req, res) => {
     const { applicationId } = req.params;
     const { orientationAt } = req.body || {};
 
-    const check = await pool.query(
-      `
-      SELECT final_requirements_approved
-      FROM public.recruitment_applications
-      WHERE id = $1
-      `,
-      [applicationId],
-    );
-    if (!check.rows[0]) {
-      return res.status(404).json({ error: 'Application not found' });
-    }
-    if (check.rows[0].final_requirements_approved !== true) {
-      return res.status(400).json({
-        error: 'Final requirements must be approved before scheduling orientation',
-      });
-    }
-
     let param = null;
     if (orientationAt === null || orientationAt === undefined || orientationAt === '') {
       param = null;
@@ -954,19 +1521,59 @@ router.put('/:applicationId/orientation', protect, async (req, res) => {
       return res.status(400).json({ error: 'orientationAt must be an ISO string or null' });
     }
 
-    const result = await pool.query(
-      `
-      UPDATE public.recruitment_applications
-      SET orientation_at = $1::timestamptz, updated_at = now()
-      WHERE id = $2
-      RETURNING ${RSP_APPLICATION_ROW_SELECT}
-      `,
-      [param, applicationId],
-    );
-    if ((result.rowCount ?? 0) === 0) {
-      return res.status(404).json({ error: 'Application not found' });
+    const outcome = await withRspTransaction(async (client) => {
+      const check = await client.query(
+        `
+        SELECT final_requirements_approved, orientation_at, email, full_name,
+               applicant_number, position_applied_for
+        FROM public.recruitment_applications
+        WHERE id = $1
+        FOR UPDATE
+        `,
+        [applicationId],
+      );
+      if (!check.rows[0]) {
+        return { rollback: true, status: 404, body: { error: 'Application not found' } };
+      }
+      if (check.rows[0].final_requirements_approved !== true) {
+        return {
+          rollback: true,
+          status: 400,
+          body: {
+            error: 'Final requirements must be approved before scheduling orientation',
+          },
+        };
+      }
+      const result = await client.query(
+        `
+        UPDATE public.recruitment_applications
+        SET orientation_at = $1::timestamptz, updated_at = now()
+        WHERE id = $2
+        RETURNING ${RSP_APPLICATION_ROW_SELECT}
+        `,
+        [param, applicationId],
+      );
+      if ((result.rowCount ?? 0) === 0) {
+        return { rollback: true, status: 404, body: { error: 'Application not found' } };
+      }
+      return {
+        status: 200,
+        body: { ok: true, application: result.rows[0] },
+        notice: {
+          applicationId,
+          eventName: 'Orientation',
+          previousAt: check.rows[0].orientation_at,
+          nextAt: param,
+          applicant: check.rows[0],
+        },
+      };
+    });
+    if (outcome.notice) {
+      await applicantNotices.safeNotify(() =>
+        applicantNotices.notifyScheduleNotice(outcome.notice),
+      );
     }
-    return res.json({ ok: true, application: result.rows[0] });
+    return res.status(outcome.status).json(outcome.body);
   } catch (err) {
     console.error('[rspApplications PUT orientation]', err);
     return res.status(500).json({
@@ -1039,6 +1646,19 @@ router.put('/:applicationId/orientation-attendance', protect, async (req, res) =
   }
 });
 
+router.post('/:applicationId/csc-approval', recruitmentStaff, async (req, res) => {
+  try {
+    await ensureRspApplicationsTables();
+    const result = await finalHiring.markCscApproved({
+      applicationId: req.params.applicationId,
+      actorId: req.user?.id,
+    });
+    return res.json({ ok: true, ...result });
+  } catch (err) {
+    return finalHiring.sendFinalHiringError(res, err, '[rspApplications POST csc-approval]');
+  }
+});
+
 // PUT /api/rsp/applications/:applicationId/final-interview-outcome
 // Admin: record whether the applicant passed the in-person final interview (null = not recorded yet).
 router.put('/:applicationId/final-interview-outcome', protect, async (req, res) => {
@@ -1059,14 +1679,32 @@ router.put('/:applicationId/final-interview-outcome', protect, async (req, res) 
       return res.status(400).json({ error: 'passed must be true, false, or null' });
     }
 
+    const current = await pool.query(
+      `SELECT step5_gate_required, final_interview_passed, final_requirements_approved,
+              hired_user_id, hr_account_setup_done, orientation_at, status,
+              doc_medical_certificate_path, doc_drug_test_path, doc_nbi_clearance_path
+       FROM public.recruitment_applications
+       WHERE id = $1`,
+      [applicationId],
+    );
+    if ((current.rowCount ?? 0) === 0) {
+      return res.status(404).json({ error: 'Application not found' });
+    }
+    const enableGate = finalHiring.shouldEnableStep5Gate(current.rows[0], value === true);
     const result = await pool.query(
       `
       UPDATE public.recruitment_applications
-      SET final_interview_passed = $1, updated_at = now()
+      SET final_interview_passed = $1,
+          updated_at = now(),
+          step5_gate_required = CASE WHEN $3::boolean THEN TRUE ELSE step5_gate_required END,
+          tat_status = CASE
+            WHEN $3::boolean THEN COALESCE(tat_status, 'waiting')
+            ELSE tat_status
+          END
       WHERE id = $2
       RETURNING ${RSP_APPLICATION_ROW_SELECT}
       `,
-      [value, applicationId],
+      [value, applicationId, enableGate],
     );
     if ((result.rowCount ?? 0) === 0) {
       return res.status(404).json({ error: 'Application not found' });
@@ -1107,66 +1745,93 @@ router.post(
       const { pathCol, nameCol, rejectReasonCol } =
         RSP_DOC_KIND_COLUMNS[docKind];
 
-      const check = await pool.query(
-        `
-        SELECT
-          id,
-          hired_user_id,
-          status,
-          "${pathCol}" AS file_path,
-          "${nameCol}" AS file_name
-        FROM public.recruitment_applications
-        WHERE id = $1
-        `,
-        [applicationId],
-      );
-      if (!check.rows[0]) {
-        return res.status(404).json({ error: 'Application not found' });
-      }
-      const row = check.rows[0];
-      const hired =
-        (row.hired_user_id && String(row.hired_user_id).trim() !== '') ||
-        String(row.status || '').toLowerCase() === 'registered';
-      if (hired) {
-        return res.status(400).json({
-          error:
-            'Cannot reject final requirements after the applicant is already hired.',
-        });
-      }
-      if (!row.file_path || String(row.file_path).trim() === '') {
-        return res.status(400).json({
-          error: 'No uploaded file to reject for this requirement.',
-        });
-      }
-
-      const objectPath = String(row.file_path).trim();
-      const displayName = row.file_name || path.basename(objectPath);
-      const abs =
-        findLocalRspAttachment(UPLOAD_DIR, objectPath, displayName) ||
-        resolveLocalRspAttachment(UPLOAD_DIR, objectPath);
-      if (abs && fs.existsSync(abs)) {
-        try {
-          fs.unlinkSync(abs);
-        } catch (e) {
-          console.warn('[rspApplications reject final-req] unlink', e?.message);
+      const outcome = await withRspTransaction(async (client) => {
+        const check = await client.query(
+          `
+          SELECT
+            id,
+            hired_user_id,
+            status,
+            email,
+            full_name,
+            applicant_number,
+            position_applied_for,
+            "${pathCol}" AS file_path,
+            "${nameCol}" AS file_name
+          FROM public.recruitment_applications
+          WHERE id = $1
+          FOR UPDATE
+          `,
+          [applicationId],
+        );
+        if (!check.rows[0]) {
+          return { rollback: true, status: 404, body: { error: 'Application not found' } };
         }
+        const row = check.rows[0];
+        const hired =
+          (row.hired_user_id && String(row.hired_user_id).trim() !== '') ||
+          String(row.status || '').toLowerCase() === 'registered';
+        if (hired) {
+          return {
+            rollback: true,
+            status: 400,
+            body: {
+              error:
+                'Cannot reject final requirements after the applicant is already hired.',
+            },
+          };
+        }
+        if (!row.file_path || String(row.file_path).trim() === '') {
+          return {
+            rollback: true,
+            status: 400,
+            body: { error: 'No uploaded file to reject for this requirement.' },
+          };
+        }
+
+        const objectPath = String(row.file_path).trim();
+        const displayName = row.file_name || path.basename(objectPath);
+        const abs =
+          findLocalRspAttachment(UPLOAD_DIR, objectPath, displayName) ||
+          resolveLocalRspAttachment(UPLOAD_DIR, objectPath);
+        if (abs && fs.existsSync(abs)) {
+          try {
+            fs.unlinkSync(abs);
+          } catch (e) {
+            console.warn('[rspApplications reject final-req] unlink', e?.message);
+          }
+        }
+
+        const result = await client.query(
+          `
+          UPDATE public.recruitment_applications
+          SET "${pathCol}" = NULL,
+              "${nameCol}" = NULL,
+              "${rejectReasonCol}" = $1,
+              final_requirements_approved = FALSE,
+              updated_at = now()
+          WHERE id = $2
+          RETURNING ${RSP_APPLICATION_ROW_SELECT}
+          `,
+          [reason, applicationId],
+        );
+        return {
+          status: 200,
+          body: { ok: true, application: result.rows[0] },
+          notice: {
+            applicationId,
+            documentKind: docKind,
+            reason,
+            applicant: row,
+          },
+        };
+      });
+      if (outcome.notice) {
+        await applicantNotices.safeNotify(() =>
+          applicantNotices.notifyFinalRequirementReturned(outcome.notice),
+        );
       }
-
-      const result = await pool.query(
-        `
-        UPDATE public.recruitment_applications
-        SET "${pathCol}" = NULL,
-            "${nameCol}" = NULL,
-            "${rejectReasonCol}" = $1,
-            final_requirements_approved = FALSE,
-            updated_at = now()
-        WHERE id = $2
-        RETURNING ${RSP_APPLICATION_ROW_SELECT}
-        `,
-        [reason, applicationId],
-      );
-
-      return res.json({ ok: true, application: result.rows[0] });
+      return res.status(outcome.status).json(outcome.body);
     } catch (err) {
       console.error('[rspApplications POST final-requirements reject]', err);
       return res.status(500).json({
@@ -1204,6 +1869,22 @@ router.put('/:applicationId/final-requirements-approval', protect, async (req, r
       return res.status(404).json({ error: 'Application not found' });
     }
     const row = check.rows[0];
+    if (approved === true) {
+      const hiringGate = await pool.query(
+        `SELECT step5_gate_required, tat_status, csc_approval_status
+         FROM public.recruitment_applications
+         WHERE id = $1`,
+        [applicationId],
+      );
+      const missing = finalHiring.missingFinalHiringPrerequisites(hiringGate.rows[0]);
+      if (missing.length > 0) {
+        return res.status(409).json({
+          error: 'Final Hiring preparation is incomplete.',
+          code: 'FINAL_HIRING_GATE_INCOMPLETE',
+          missing,
+        });
+      }
+    }
     if (row.final_interview_passed !== true) {
       return res.status(400).json({
         error: 'Applicant must pass deliberation before final requirements can be approved.',
@@ -1515,6 +2196,27 @@ router.post(
       const docKind = parseRspDocKind(req.query?.kind);
 
       if (updateDb) {
+        if (docKind && FINAL_REQUIREMENT_KINDS.has(docKind)) {
+          const hiringGate = await pool.query(
+            `SELECT step5_gate_required, tat_status, csc_approval_status
+             FROM public.recruitment_applications
+             WHERE id = $1`,
+            [applicationId],
+          );
+          const missing = finalHiring.missingFinalHiringPrerequisites(hiringGate.rows[0]);
+          if (missing.length > 0) {
+            try {
+              fs.unlinkSync(req.file.path);
+            } catch (_) {
+              /* ignore */
+            }
+            return res.status(409).json({
+              error: 'CSC approval is required before final requirements can be submitted.',
+              code: 'FINAL_HIRING_GATE_INCOMPLETE',
+              missing,
+            });
+          }
+        }
         if (docKind) {
           const { pathCol, nameCol, rejectReasonCol } =
             RSP_DOC_KIND_COLUMNS[docKind];
@@ -1747,6 +2449,22 @@ router.post('/exam-results', requireApplicantProof, publicApplicationExamLimiter
     const score = Number(scorePercent);
     if (Number.isNaN(score)) return res.status(400).json({ error: 'scorePercent must be numeric' });
 
+    const gate = await pool.query(
+      `SELECT step2_gate_required, required_form_status
+       FROM public.recruitment_applications
+       WHERE id = $1`,
+      [applicationId],
+    );
+    if ((gate.rowCount ?? 0) === 0) {
+      return res.status(404).json({ error: 'Application not found' });
+    }
+    if (issuedForm.assessmentBlocked(gate.rows[0])) {
+      return res.status(409).json({
+        error: 'HR must approve the assigned form before Assessment.',
+        code: 'FORM_APPROVAL_REQUIRED',
+      });
+    }
+
     const beiComplete = beiGradingComplete(answersJson);
     const effectivePassed = beiComplete ? !!passed : false;
     const appStatus = beiComplete ? (effectivePassed ? 'passed' : 'failed') : 'exam_taken';
@@ -1766,14 +2484,7 @@ router.post('/exam-results', requireApplicantProof, publicApplicationExamLimiter
       [applicationId, score, effectivePassed, answersJson ?? null]
     );
 
-    await pool.query(
-      `
-      UPDATE public.recruitment_applications
-      SET status = $1, updated_at = now()
-      WHERE id = $2
-      `,
-      [appStatus, applicationId]
-    );
+    await preDeliberation.recordAssessmentOutcome(applicationId, appStatus);
 
     return res.json({ ok: true });
   } catch (err) {
@@ -1848,13 +2559,9 @@ router.put('/exam-results/:applicationId', protect, async (req, res) => {
       return res.status(404).json({ error: 'Exam result not found for this application' });
     }
     if (sync_application_status && passed !== undefined) {
-      await pool.query(
-        `
-        UPDATE public.recruitment_applications
-        SET status = $1, updated_at = now()
-        WHERE id = $2
-        `,
-        [passed ? 'passed' : 'failed', applicationId]
+      await preDeliberation.recordAssessmentOutcome(
+        applicationId,
+        passed ? 'passed' : 'failed',
       );
     }
     return res.json({ ok: true });

@@ -803,25 +803,28 @@ class _LearningApplicationPlanFormEditorState
               padding: const EdgeInsets.symmetric(vertical: 4),
               children: [
                 for (final m in matches)
-                  ListTile(
-                    dense: true,
-                    title: Text(
-                      m.fullName,
-                      style: const TextStyle(
-                        fontWeight: FontWeight.w600,
-                        fontSize: 13.5,
-                      ),
-                    ),
-                    subtitle: Text(
-                      [m.positionName, m.departmentName]
-                          .where((s) => (s ?? '').trim().isNotEmpty)
-                          .join(' · '),
-                      style: const TextStyle(fontSize: 11.5),
-                    ),
-                    onTap: () {
+                  Listener(
+                    behavior: HitTestBehavior.opaque,
+                    onPointerDown: (_) {
                       setState(() => controller.text = m.fullName);
                       focus.unfocus();
                     },
+                    child: ListTile(
+                      dense: true,
+                      title: Text(
+                        m.fullName,
+                        style: const TextStyle(
+                          fontWeight: FontWeight.w600,
+                          fontSize: 13.5,
+                        ),
+                      ),
+                      subtitle: Text(
+                        [m.positionName, m.departmentName]
+                            .where((s) => (s ?? '').trim().isNotEmpty)
+                            .join(' · '),
+                        style: const TextStyle(fontSize: 11.5),
+                      ),
+                    ),
                   ),
               ],
             ),
@@ -1088,7 +1091,7 @@ class _LearningApplicationPlanFormEditorState
           _employeeSearchField(
             controller: _reportedBy,
             focus: _reportedFocus,
-            label: 'Employee / Name',
+            label: 'Full name',
             error: _reportedError,
             hint: 'Printed name / over signature',
           ),

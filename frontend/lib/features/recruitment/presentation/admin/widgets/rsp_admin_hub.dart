@@ -24,30 +24,11 @@ const _rspHubFeatures = <RspHubFeature>[
     sectionIndex: 1,
   ),
   RspHubFeature(
-    title: 'Applications',
-    subtitle: 'View applicants, attachments, and document review status.',
-    icon: Icons.assignment_rounded,
-    sectionIndex: 2,
-  ),
-  RspHubFeature(
-    title: 'Exam Results',
-    subtitle: 'View screening exam scores, grade BEI, and pass/fail results.',
-    icon: Icons.fact_check_rounded,
-    sectionIndex: 16,
-  ),
-  RspHubFeature(
-    title: 'Scheduling',
+    title: 'Recruitment Management',
     subtitle:
-        'Deliberation for exam passers and orientation after final requirements are approved.',
-    icon: Icons.calendar_month_rounded,
-    sectionIndex: 15,
-  ),
-  RspHubFeature(
-    title: 'Final Requirements',
-    subtitle:
-        'Review medical certificate, drug test, and NBI clearance — then create account and email credentials.',
-    icon: Icons.health_and_safety_rounded,
-    sectionIndex: 19,
+        'Applications, exam results, scheduling, and final requirements.',
+    icon: Icons.groups_rounded,
+    sectionIndex: RspAdminHub.recruitmentManagementSection,
   ),
   RspHubFeature(
     title: 'Exams',
@@ -58,8 +39,7 @@ const _rspHubFeatures = <RspHubFeature>[
   ),
   RspHubFeature(
     title: 'Forms',
-    subtitle:
-        'Encode forms and print backgrounds.',
+    subtitle: 'Encode forms and print backgrounds.',
     icon: Icons.description_rounded,
     sectionIndex: 21,
   ),
@@ -68,6 +48,16 @@ const _rspHubFeatures = <RspHubFeature>[
 /// RSP hub: title, subtitle, and feature cards (same layout as DTR).
 class RspAdminHub extends StatelessWidget {
   const RspAdminHub({super.key, required this.onOpenSection});
+
+  /// Opens Recruitment Management. Internal tabs keep the original section tools.
+  static const int recruitmentManagementSection = 22;
+
+  static const recruitmentTabs = <({String label, IconData icon})>[
+    (label: 'Applications', icon: Icons.assignment_rounded),
+    (label: 'Exam Results', icon: Icons.fact_check_rounded),
+    (label: 'Scheduling', icon: Icons.calendar_month_rounded),
+    (label: 'Final Requirements', icon: Icons.health_and_safety_rounded),
+  ];
 
   final ValueChanged<int> onOpenSection;
 
@@ -118,6 +108,135 @@ class RspAdminHub extends StatelessWidget {
           ],
         ),
       ],
+    );
+  }
+}
+
+/// Applications, exam results, scheduling, and final requirements in one page.
+///
+/// [IndexedStack] keeps each existing section mounted so switching tabs does
+/// not drop its state.
+class RspRecruitmentManagement extends StatelessWidget {
+  const RspRecruitmentManagement({
+    super.key,
+    required this.tabIndex,
+    required this.onTabChanged,
+    required this.applications,
+    required this.examResults,
+    required this.scheduling,
+    required this.finalRequirements,
+  });
+
+  final int tabIndex;
+  final ValueChanged<int> onTabChanged;
+  final Widget applications;
+  final Widget examResults;
+  final Widget scheduling;
+  final Widget finalRequirements;
+
+  @override
+  Widget build(BuildContext context) {
+    final selected = tabIndex.clamp(0, RspAdminHub.recruitmentTabs.length - 1);
+    final muted = AppTheme.dashMutedSurfaceOf(context);
+    final hairline = AppTheme.dashHairlineOf(context);
+    final accent = AppTheme.primaryNavy;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: Container(
+            padding: const EdgeInsets.all(4),
+            decoration: BoxDecoration(
+              color: muted,
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: hairline),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                for (var i = 0; i < RspAdminHub.recruitmentTabs.length; i++)
+                  _RecruitmentTab(
+                    label: RspAdminHub.recruitmentTabs[i].label,
+                    icon: RspAdminHub.recruitmentTabs[i].icon,
+                    selected: i == selected,
+                    accent: accent,
+                    onTap: () => onTabChanged(i),
+                  ),
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(height: 16),
+        IndexedStack(
+          index: selected,
+          sizing: StackFit.loose,
+          children: [
+            applications,
+            examResults,
+            scheduling,
+            finalRequirements,
+          ],
+        ),
+      ],
+    );
+  }
+}
+
+class _RecruitmentTab extends StatelessWidget {
+  const _RecruitmentTab({
+    required this.label,
+    required this.icon,
+    required this.selected,
+    required this.accent,
+    required this.onTap,
+  });
+
+  final String label;
+  final IconData icon;
+  final bool selected;
+  final Color accent;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 2),
+      child: Material(
+        color: selected ? accent : Colors.transparent,
+        borderRadius: BorderRadius.circular(11),
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(11),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  icon,
+                  size: 17,
+                  color: selected
+                      ? Colors.white
+                      : AppTheme.dashTextSecondaryOf(context),
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  label,
+                  style: TextStyle(
+                    fontWeight: FontWeight.w700,
+                    fontSize: 13.5,
+                    color: selected
+                        ? Colors.white
+                        : AppTheme.dashTextPrimaryOf(context),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
     );
   }
 }

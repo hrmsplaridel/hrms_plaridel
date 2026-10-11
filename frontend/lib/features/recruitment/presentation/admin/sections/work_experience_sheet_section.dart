@@ -327,20 +327,30 @@ class WorkExperienceSheetEditor extends StatefulWidget {
     super.key,
     required this.entry,
     this.readOnly = false,
+    this.applicantWorkflow = false,
+    this.showDocumentActions = false,
     required this.onSave,
     required this.onCancel,
     required this.onPrint,
     this.onPreview,
     required this.onDownloadPdf,
+    this.onSubmitToHr,
   });
 
   final WorkExperienceSheetEntry entry;
   final bool readOnly;
+
+  /// Applicant fill mode: the same sheet, without admin print or record actions.
+  final bool applicantWorkflow;
+
+  /// Keeps Preview, Print, and Download available while the sheet is read-only.
+  final bool showDocumentActions;
   final void Function(WorkExperienceSheetEntry) onSave;
   final VoidCallback onCancel;
   final Future<void> Function(WorkExperienceSheetEntry) onPrint;
   final Future<void> Function(WorkExperienceSheetEntry)? onPreview;
   final Future<void> Function(WorkExperienceSheetEntry) onDownloadPdf;
+  final Future<void> Function(WorkExperienceSheetEntry)? onSubmitToHr;
 
   @override
   State<WorkExperienceSheetEditor> createState() =>
@@ -643,6 +653,29 @@ class _WorkExperienceSheetEditorState extends State<WorkExperienceSheetEditor> {
   }
 
   Widget _actionBar(WorkExperienceSheetEntry entry, bool narrow) {
+    if (widget.applicantWorkflow) {
+      return Wrap(
+        spacing: 8,
+        runSpacing: 8,
+        children: [
+          OutlinedButton(
+            onPressed: widget.readOnly ? null : () => widget.onSave(_buildEntry()),
+            child: const Text('Save draft'),
+          ),
+          FilledButton.icon(
+            onPressed: widget.readOnly
+                ? null
+                : () => widget.onSubmitToHr?.call(_buildEntry()),
+            icon: const Icon(Icons.send_rounded, size: 18),
+            label: const Text('Submit to HR'),
+            style: FilledButton.styleFrom(
+              backgroundColor: const Color(0xFFE85D04),
+              foregroundColor: Colors.white,
+            ),
+          ),
+        ],
+      );
+    }
     final save = FilledButton(
       onPressed: () => widget.onSave(_buildEntry()),
       style: FilledButton.styleFrom(
@@ -691,11 +724,11 @@ class _WorkExperienceSheetEditorState extends State<WorkExperienceSheetEditor> {
       crossAxisAlignment: WrapCrossAlignment.center,
       alignment: narrow ? WrapAlignment.start : WrapAlignment.end,
       children: [
-        cancel,
+        if (!widget.readOnly) cancel,
         if (preview != null) preview,
         print,
         download,
-        save,
+        if (!widget.readOnly) save,
       ],
     );
   }
@@ -777,7 +810,9 @@ class _WorkExperienceSheetEditorState extends State<WorkExperienceSheetEditor> {
                       ],
                     ],
                   ),
-                  if (!widget.readOnly) _actionBar(entry, narrow),
+                  if (!widget.readOnly ||
+                      (!widget.applicantWorkflow && widget.showDocumentActions))
+                    _actionBar(entry, narrow),
                 ],
               ),
               const SizedBox(height: 14),

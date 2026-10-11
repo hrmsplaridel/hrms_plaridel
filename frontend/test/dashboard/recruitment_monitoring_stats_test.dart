@@ -72,13 +72,94 @@ void main() {
     expect(counts(), {
       'applied': 1,
       'review': 1,
+      'required_form': 0,
+      'assessment': 0,
       'exam': 1,
+      'pre_deliberation': 0,
       'interview': 2,
+      'final_hiring': 0,
       'requirements': 1,
       'orientation': 1,
       'account': 1,
       'hired': 1,
     });
+  });
+
+  test('stage labels follow the issued form, pre-deliberation, and final hiring flow', () {
+    final form = RecruitmentApplication(
+      id: 'form',
+      fullName: 'Form Applicant',
+      email: 'form@example.com',
+      status: 'document_approved',
+      step2GateRequired: true,
+      requiredFormType: 'bi',
+      requiredFormStatus: 'in_progress',
+    );
+    final assessment = RecruitmentApplication(
+      id: 'assessment',
+      fullName: 'Assessment Applicant',
+      email: 'assessment@example.com',
+      status: 'document_approved',
+      step2GateRequired: true,
+      requiredFormStatus: 'approved',
+    );
+    final lineup = RecruitmentApplication(
+      id: 'lineup',
+      fullName: 'Lineup Applicant',
+      email: 'lineup@example.com',
+      status: 'passed',
+      step4GateRequired: true,
+      wesStatus: 'approved',
+      applicantsProfileStatus: 'completed',
+      selectionLineupStatus: 'in_progress',
+    );
+    final hiring = RecruitmentApplication(
+      id: 'hiring',
+      fullName: 'Hiring Applicant',
+      email: 'hiring@example.com',
+      status: 'passed',
+      finalInterviewPassed: true,
+      step5GateRequired: true,
+      tatStatus: 'completed',
+      cscApprovalStatus: 'waiting',
+    );
+
+    expect(RecruitmentMonitoringStats.detailedStageLabel(form), 'BI form');
+    expect(
+      RecruitmentMonitoringStats.detailedStageLabel(assessment),
+      'Assessment',
+    );
+    expect(
+      RecruitmentMonitoringStats.detailedStageLabel(lineup),
+      'Selection line-up',
+    );
+    expect(
+      RecruitmentMonitoringStats.detailedStageLabel(hiring),
+      'CSC approval',
+    );
+
+    final stats = RecruitmentMonitoringStats.fromApps([
+      form,
+      assessment,
+      lineup,
+      hiring,
+    ]);
+    final counts = {for (final stage in stats.pipeline) stage.key: stage.count};
+    expect(counts['required_form'], 1);
+    expect(counts['assessment'], 1);
+    expect(counts['pre_deliberation'], 1);
+    expect(counts['final_hiring'], 1);
+    expect(stats.statusBreakdown.map((item) => item.label).toSet(), {
+      'BI form',
+      'Assessment',
+      'Selection line-up',
+      'CSC approval',
+    });
+    expect(stats.attention.map((item) => item.label).toList(), [
+      'Required form pending',
+      'Pre-deliberation incomplete',
+      'Final hiring incomplete',
+    ]);
   });
 
   test('attention items use existing statuses only', () {

@@ -23,6 +23,7 @@ class RspApplicantDocumentUploadCard extends StatelessWidget {
     this.onRemove,
     this.busy = false,
     this.readOnly = false,
+    this.compact = false,
   });
 
   final String title;
@@ -33,13 +34,16 @@ class RspApplicantDocumentUploadCard extends StatelessWidget {
   final VoidCallback? onRemove;
   final bool busy;
   final bool readOnly;
+  final bool compact;
 
   @override
   Widget build(BuildContext context) {
     final badge = _badge();
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+      padding: compact
+          ? const EdgeInsets.fromLTRB(12, 8, 12, 8)
+          : const EdgeInsets.fromLTRB(14, 12, 14, 12),
       decoration: BoxDecoration(
         color: AppTheme.dashMutedSurfaceOf(context),
         borderRadius: BorderRadius.circular(14),
@@ -53,6 +57,9 @@ class RspApplicantDocumentUploadCard extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Row(
+            crossAxisAlignment: compact
+                ? CrossAxisAlignment.start
+                : CrossAxisAlignment.center,
             children: [
               Expanded(
                 child: Text(
@@ -63,10 +70,11 @@ class RspApplicantDocumentUploadCard extends StatelessWidget {
                   ),
                 ),
               ),
+              if (compact) const SizedBox(width: 8),
               RspApplicantStatusBadge(kind: badge),
             ],
           ),
-          const SizedBox(height: 6),
+          SizedBox(height: compact ? 2 : 6),
           Text(
             'PDF only',
             style: TextStyle(
@@ -75,7 +83,7 @@ class RspApplicantDocumentUploadCard extends StatelessWidget {
             ),
           ),
           if (fileName != null && fileName!.trim().isNotEmpty) ...[
-            const SizedBox(height: 8),
+            SizedBox(height: compact ? 4 : 8),
             Row(
               children: [
                 Icon(

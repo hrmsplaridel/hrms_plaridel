@@ -3,6 +3,7 @@ import 'package:hrms_plaridel/features/learning_development/data/repositories/rs
 /// One applicant row in the Turn-Around Time table (no pre-filled values).
 class TurnAroundTimeApplicant {
   const TurnAroundTimeApplicant({
+    this.applicationId,
     this.name,
     this.dateInitialAssessment,
     this.dateContractExam,
@@ -15,6 +16,8 @@ class TurnAroundTimeApplicant {
     this.overallCostPerHire,
   });
 
+  /// Recruitment application this row belongs to. Not shown on the form.
+  final String? applicationId;
   final String? name;
   final String? dateInitialAssessment;
   final String? dateContractExam;
@@ -28,6 +31,7 @@ class TurnAroundTimeApplicant {
 
   factory TurnAroundTimeApplicant.fromJson(Map<String, dynamic> json) {
     return TurnAroundTimeApplicant(
+      applicationId: json['application_id']?.toString(),
       name: json['name']?.toString(),
       dateInitialAssessment: json['date_initial_assessment']?.toString(),
       dateContractExam: json['date_contract_exam']?.toString(),
@@ -42,6 +46,8 @@ class TurnAroundTimeApplicant {
   }
 
   Map<String, dynamic> toJson() => {
+    if (applicationId != null && applicationId!.trim().isNotEmpty)
+      'application_id': applicationId,
     'name': name,
     'date_initial_assessment': dateInitialAssessment,
     'date_contract_exam': dateContractExam,
@@ -90,11 +96,6 @@ class TurnAroundTimeEntry {
   final DateTime? updatedAt;
 
   static const String tableName = 'turn_around_time_entries';
-
-  /// Default signatory captions on the printed Turn-Around Time form.
-  static const String defaultPreparedByTitle = 'HRMO Staff';
-  static const String defaultNotedByName = 'MARCELO B. CAÑARES';
-  static const String defaultNotedByTitle = 'HRMO III';
 
   factory TurnAroundTimeEntry.fromJson(Map<String, dynamic> json) {
     List<TurnAroundTimeApplicant> list = [];

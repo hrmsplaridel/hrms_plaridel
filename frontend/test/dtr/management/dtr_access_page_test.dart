@@ -222,7 +222,7 @@ void main() {
     expect(writes.single['employees_allowed'], isTrue);
     expect(writes.single['leave_allowed'], isTrue);
     expect(find.text('Unsaved'), findsNothing);
-    expect(find.text('DTR permissions saved.'), findsOneWidget);
+    expect(find.text('Permissions saved.'), findsOneWidget);
     await tester.tap(find.text('Employee profiles'));
     await tester.pump();
     await tester.tap(find.text('Save permissions'));

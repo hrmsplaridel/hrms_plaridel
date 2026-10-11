@@ -56,6 +56,7 @@ class RecruitmentApplication {
     this.course,
     this.address,
     this.age,
+    this.dateOfBirth,
     this.civilStatus,
     required this.email,
     this.phone,
@@ -91,6 +92,18 @@ class RecruitmentApplication {
     this.hireCredentialsEmailSentAt,
     this.hireLoginUsername,
     this.hireLoginPassword,
+    this.step2GateRequired = false,
+    this.requiredFormType,
+    this.requiredFormStatus,
+    this.requiredFormReviewComment,
+    this.step4GateRequired = false,
+    this.wesStatus,
+    this.wesReviewComment,
+    this.applicantsProfileStatus,
+    this.selectionLineupStatus,
+    this.step5GateRequired = false,
+    this.tatStatus,
+    this.cscApprovalStatus,
     this.createdAt,
     this.updatedAt,
   });
@@ -108,6 +121,9 @@ class RecruitmentApplication {
   final String? course;
   final String? address;
   final String? age;
+
+  /// `YYYY-MM-DD` from the application form. Prefills Create Account.
+  final String? dateOfBirth;
   final String? civilStatus;
   final String email;
   final String? phone;
@@ -167,6 +183,43 @@ class RecruitmentApplication {
 
   /// Login password that HR emailed (public lookup only after account is ready).
   final String? hireLoginPassword;
+
+  /// True only for document approvals recorded after the HR-issued form gate shipped.
+  final bool step2GateRequired;
+
+  /// `bi` or `ojt` once HR assigns the one required form.
+  final String? requiredFormType;
+
+  final String? requiredFormStatus;
+  final String? requiredFormReviewComment;
+
+  /// Assessment stays locked until the assigned form is approved.
+  bool get assessmentUnlocked =>
+      !step2GateRequired || requiredFormStatus == 'approved';
+
+  /// True only for assessment passes recorded after the pre-deliberation gate shipped.
+  final bool step4GateRequired;
+  final String? wesStatus;
+  final String? wesReviewComment;
+  final String? applicantsProfileStatus;
+  final String? selectionLineupStatus;
+
+  /// Existing deliberation scheduling stays available for ungated applications.
+  bool get deliberationSchedulingUnlocked =>
+      !step4GateRequired ||
+      (wesStatus == 'approved' &&
+          applicantsProfileStatus == 'completed' &&
+          selectionLineupStatus == 'completed');
+
+  /// True only for deliberation passes recorded after the Final Hiring gate shipped.
+  final bool step5GateRequired;
+  final String? tatStatus;
+  final String? cscApprovalStatus;
+
+  /// Existing Final Requirements stays available for ungated applications.
+  bool get finalHiringUnlocked =>
+      !step5GateRequired ||
+      (tatStatus == 'completed' && cscApprovalStatus == 'approved');
 
   bool get hireCredentialsEmailSent => hireCredentialsEmailSentAt != null;
 
@@ -291,6 +344,14 @@ class RecruitmentApplication {
     return null;
   }
 
+  static String? _dateOnly(dynamic v) {
+    if (v == null) return null;
+    final match = RegExp(
+      r'^(\d{4}-\d{2}-\d{2})',
+    ).firstMatch(v.toString().trim());
+    return match?.group(1);
+  }
+
   static String? _parseUuidString(dynamic v) {
     if (v == null) return null;
     final s = v.toString().trim();
@@ -316,6 +377,7 @@ class RecruitmentApplication {
       course: json['course'] as String?,
       address: json['address'] as String?,
       age: json['age'] as String?,
+      dateOfBirth: _dateOnly(json['date_of_birth']),
       civilStatus: json['civil_status'] as String?,
       email: json['email'] as String? ?? '',
       phone: json['phone'] as String?,
@@ -363,6 +425,22 @@ class RecruitmentApplication {
           : null,
       hireLoginUsername: _optionalTrimmed(json['hire_login_username']),
       hireLoginPassword: _optionalTrimmed(json['hire_login_password']),
+      step2GateRequired: json['step2_gate_required'] == true,
+      requiredFormType: _optionalTrimmed(json['required_form_type']),
+      requiredFormStatus: _optionalTrimmed(json['required_form_status']),
+      requiredFormReviewComment: _optionalTrimmed(
+        json['required_form_review_comment'],
+      ),
+      step4GateRequired: json['step4_gate_required'] == true,
+      wesStatus: _optionalTrimmed(json['wes_status']),
+      wesReviewComment: _optionalTrimmed(json['wes_review_comment']),
+      applicantsProfileStatus: _optionalTrimmed(
+        json['applicants_profile_status'],
+      ),
+      selectionLineupStatus: _optionalTrimmed(json['selection_lineup_status']),
+      step5GateRequired: json['step5_gate_required'] == true,
+      tatStatus: _optionalTrimmed(json['tat_status']),
+      cscApprovalStatus: _optionalTrimmed(json['csc_approval_status']),
       createdAt: json['created_at'] != null
           ? DateTime.tryParse(json['created_at'] as String)
           : null,
@@ -383,6 +461,7 @@ class RecruitmentApplication {
       'course': course,
       'address': address,
       'age': age,
+      'dateOfBirth': dateOfBirth,
       'civilStatus': civilStatus,
       'fullName': fullName,
       'email': email,
@@ -646,6 +725,7 @@ class RecruitmentRepo {
         'course': app.course,
         'address': app.address,
         'age': app.age,
+        'dateOfBirth': app.dateOfBirth,
         'civilStatus': app.civilStatus,
         'fullName': app.fullName, // legacy fallback
         'email': email.isEmpty ? '' : email.toLowerCase(),
@@ -706,6 +786,244 @@ class RecruitmentRepo {
       if (e.response?.statusCode == 404) return null;
       rethrow;
     }
+  }
+
+  Future<Map<String, dynamic>> getMyRequiredForm(String applicationId) async {
+    final res = await ApiClient.instance.get<Map<String, dynamic>>(
+      '/api/rsp/applications/$applicationId/required-form/mine',
+      options: _applicantOptions(applicationId),
+    );
+    return res.data ?? <String, dynamic>{};
+  }
+
+  Future<void> saveRequiredFormDraft(
+    String applicationId,
+    Map<String, dynamic> entry,
+  ) async {
+    await ApiClient.instance.put<Map<String, dynamic>>(
+      '/api/rsp/applications/$applicationId/required-form/draft',
+      data: entry,
+      options: _applicantOptions(applicationId),
+    );
+  }
+
+  Future<void> submitRequiredForm(
+    String applicationId,
+    Map<String, dynamic> entry,
+  ) async {
+    await ApiClient.instance.post<Map<String, dynamic>>(
+      '/api/rsp/applications/$applicationId/required-form/submit',
+      data: entry,
+      options: _applicantOptions(applicationId),
+    );
+  }
+
+  Future<Map<String, dynamic>> getRequiredForm(String applicationId) async {
+    final res = await ApiClient.instance.get<Map<String, dynamic>>(
+      '/api/rsp/applications/$applicationId/required-form',
+    );
+    return res.data ?? <String, dynamic>{};
+  }
+
+  Future<void> assignRequiredForm(String applicationId, String formType) async {
+    await ApiClient.instance.post<Map<String, dynamic>>(
+      '/api/rsp/applications/$applicationId/required-form/assign',
+      data: <String, dynamic>{'formType': formType},
+    );
+  }
+
+  Future<void> approveRequiredForm(String applicationId) async {
+    await ApiClient.instance.post<Map<String, dynamic>>(
+      '/api/rsp/applications/$applicationId/required-form/approve',
+      data: const <String, dynamic>{},
+    );
+  }
+
+  Future<void> requestRequiredFormRevision(
+    String applicationId,
+    String comment,
+  ) async {
+    await ApiClient.instance.post<Map<String, dynamic>>(
+      '/api/rsp/applications/$applicationId/required-form/revision',
+      data: <String, dynamic>{'comment': comment},
+    );
+  }
+
+  Future<Map<String, dynamic>> getPreDeliberation(String applicationId) async {
+    final res = await ApiClient.instance.get<Map<String, dynamic>>(
+      '/api/rsp/applications/$applicationId/pre-deliberation',
+    );
+    return res.data ?? <String, dynamic>{};
+  }
+
+  Future<void> assignWorkExperience(String applicationId) async {
+    await ApiClient.instance.post<Map<String, dynamic>>(
+      '/api/rsp/applications/$applicationId/work-experience/assign',
+      data: const <String, dynamic>{},
+    );
+  }
+
+  Future<void> approveWorkExperience(String applicationId) async {
+    await ApiClient.instance.post<Map<String, dynamic>>(
+      '/api/rsp/applications/$applicationId/work-experience/approve',
+      data: const <String, dynamic>{},
+    );
+  }
+
+  Future<void> requestWorkExperienceRevision(
+    String applicationId,
+    String comment,
+  ) async {
+    await ApiClient.instance.post<Map<String, dynamic>>(
+      '/api/rsp/applications/$applicationId/work-experience/revision',
+      data: <String, dynamic>{'comment': comment},
+    );
+  }
+
+  Future<Map<String, dynamic>> openApplicantsProfile(
+    String applicationId,
+  ) async {
+    final res = await ApiClient.instance.post<Map<String, dynamic>>(
+      '/api/rsp/applications/$applicationId/applicants-profile/open',
+      data: const <String, dynamic>{},
+    );
+    return res.data ?? <String, dynamic>{};
+  }
+
+  Future<Map<String, dynamic>> applicantsProfileCompletion(
+    String entryId,
+  ) async {
+    final res = await ApiClient.instance.get<Map<String, dynamic>>(
+      '/api/rsp/applications/hr-forms/applicants-profile/$entryId/completion',
+    );
+    return res.data ?? <String, dynamic>{};
+  }
+
+  Future<Map<String, dynamic>> completeApplicantsProfileEntry(
+    String entryId,
+  ) async {
+    final res = await ApiClient.instance.post<Map<String, dynamic>>(
+      '/api/rsp/applications/hr-forms/applicants-profile/$entryId/complete',
+      data: const <String, dynamic>{},
+    );
+    return res.data ?? <String, dynamic>{};
+  }
+
+  Future<Map<String, dynamic>> selectionLineupCompletion(String entryId) async {
+    final res = await ApiClient.instance.get<Map<String, dynamic>>(
+      '/api/rsp/applications/hr-forms/selection-lineup/$entryId/completion',
+    );
+    return res.data ?? <String, dynamic>{};
+  }
+
+  Future<Map<String, dynamic>> completeSelectionLineupEntry(
+    String entryId,
+  ) async {
+    final res = await ApiClient.instance.post<Map<String, dynamic>>(
+      '/api/rsp/applications/hr-forms/selection-lineup/$entryId/complete',
+      data: const <String, dynamic>{},
+    );
+    return res.data ?? <String, dynamic>{};
+  }
+
+  Future<void> completeApplicantsProfile(String applicationId) async {
+    await ApiClient.instance.post<Map<String, dynamic>>(
+      '/api/rsp/applications/$applicationId/applicants-profile/complete',
+      data: const <String, dynamic>{},
+    );
+  }
+
+  Future<Map<String, dynamic>> openSelectionLineup(String applicationId) async {
+    final res = await ApiClient.instance.post<Map<String, dynamic>>(
+      '/api/rsp/applications/$applicationId/selection-lineup/open',
+      data: const <String, dynamic>{},
+    );
+    return res.data ?? <String, dynamic>{};
+  }
+
+  Future<List<Map<String, dynamic>>> tatApplicantChoices() async {
+    final res = await ApiClient.instance.get<Map<String, dynamic>>(
+      '/api/rsp/applications/tat-applicant-choices',
+    );
+    final rows = res.data?['applications'];
+    if (rows is! List) return const [];
+    return [
+      for (final row in rows)
+        if (row is Map) Map<String, dynamic>.from(row),
+    ];
+  }
+
+  Future<List<Map<String, dynamic>>> finalHiringSources() async {
+    final res = await ApiClient.instance.get<Map<String, dynamic>>(
+      '/api/rsp/applications/final-hiring/sources',
+    );
+    final rows = res.data?['applications'];
+    if (rows is! List) return const [];
+    return [
+      for (final row in rows)
+        if (row is Map) Map<String, dynamic>.from(row),
+    ];
+  }
+
+  Future<Map<String, dynamic>> turnAroundTimeCompletion(String entryId) async {
+    final res = await ApiClient.instance.get<Map<String, dynamic>>(
+      '/api/rsp/applications/hr-forms/turn-around-time/$entryId/completion',
+    );
+    return res.data ?? <String, dynamic>{};
+  }
+
+  Future<Map<String, dynamic>> completeTurnAroundTimeEntry(
+    String entryId,
+  ) async {
+    final res = await ApiClient.instance.post<Map<String, dynamic>>(
+      '/api/rsp/applications/hr-forms/turn-around-time/$entryId/complete',
+      data: const <String, dynamic>{},
+    );
+    return res.data ?? <String, dynamic>{};
+  }
+
+  Future<void> markCscApproved(String applicationId) async {
+    await ApiClient.instance.post<Map<String, dynamic>>(
+      '/api/rsp/applications/$applicationId/csc-approval',
+      data: const <String, dynamic>{},
+    );
+  }
+
+  Future<void> completeSelectionLineup(String applicationId) async {
+    await ApiClient.instance.post<Map<String, dynamic>>(
+      '/api/rsp/applications/$applicationId/selection-lineup/complete',
+      data: const <String, dynamic>{},
+    );
+  }
+
+  Future<Map<String, dynamic>> getMyWorkExperience(String applicationId) async {
+    final res = await ApiClient.instance.get<Map<String, dynamic>>(
+      '/api/rsp/applications/$applicationId/work-experience/mine',
+      options: _applicantOptions(applicationId),
+    );
+    return res.data ?? <String, dynamic>{};
+  }
+
+  Future<void> saveWorkExperienceDraft(
+    String applicationId,
+    Map<String, dynamic> entry,
+  ) async {
+    await ApiClient.instance.put<Map<String, dynamic>>(
+      '/api/rsp/applications/$applicationId/work-experience/draft',
+      data: entry,
+      options: _applicantOptions(applicationId),
+    );
+  }
+
+  Future<void> submitWorkExperience(
+    String applicationId,
+    Map<String, dynamic> entry,
+  ) async {
+    await ApiClient.instance.post<Map<String, dynamic>>(
+      '/api/rsp/applications/$applicationId/work-experience/submit',
+      data: entry,
+      options: _applicantOptions(applicationId),
+    );
   }
 
   /// Update application status (e.g. after exam).
@@ -893,17 +1211,12 @@ class RecruitmentRepo {
     }
   }
 
-  /// Admin: send congratulations + HRMS username/password via server SMTP to the
-  /// applicant email stored on the application (not the admin’s address).
-  Future<void> sendHireCredentialEmail(
-    String applicationId,
-    String username,
-    String password,
-  ) async {
+  /// Emails a new randomized password. The request does not include the password.
+  Future<void> sendAccountCredentials(String applicationId) async {
     try {
       await ApiClient.instance.post<void>(
-        '/api/rsp/applications/$applicationId/send-hire-email',
-        data: <String, dynamic>{'username': username, 'password': password},
+        '/api/rsp/applications/$applicationId/send-credentials',
+        data: const <String, dynamic>{},
         options: Options(
           sendTimeout: const Duration(seconds: 45),
           receiveTimeout: const Duration(seconds: 45),
@@ -1180,6 +1493,24 @@ class RecruitmentRepo {
         .toList();
   }
 
+  RspApplicantLookup? _lookupFromPublicPayload(Map<String, dynamic>? data) {
+    final row = data?['application'] as Map<String, dynamic>?;
+    if (row == null) return null;
+    final app = RecruitmentApplication.fromJson(row);
+    rememberApplicantAccessToken(
+      app.id,
+      data?['applicantAccessToken']?.toString(),
+    );
+    RecruitmentExamResult? exam;
+    final er = data?['examResult'];
+    if (er is Map) {
+      exam = RecruitmentExamResult.fromByEmailJson(
+        Map<String, dynamic>.from(er),
+      );
+    }
+    return RspApplicantLookup(application: app, examResult: exam);
+  }
+
   /// Get the latest application by email (for applicant "Continue application").
   /// Includes [RspApplicantLookup.examResult] when a screening exam row exists (public API).
   Future<RspApplicantLookup?> getApplicationByEmail(String email) async {
@@ -1188,22 +1519,29 @@ class RecruitmentRepo {
         '/api/rsp/applications/by-email',
         queryParameters: {'email': email.trim().toLowerCase()},
       );
-      final data = res.data;
-      final row = data?['application'] as Map<String, dynamic>?;
-      if (row == null) return null;
-      final app = RecruitmentApplication.fromJson(row);
-      rememberApplicantAccessToken(
-        app.id,
-        data?['applicantAccessToken']?.toString(),
+      return _lookupFromPublicPayload(res.data);
+    } on DioException catch (e) {
+      if (e.response?.statusCode == 404) return null;
+      return null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Track or continue with either the application email or the Application ID
+  /// printed on the form (for example PLR-AB12CD34).
+  Future<RspApplicantLookup?> getApplicationByEmailOrApplicantNumber(
+    String query,
+  ) async {
+    final q = query.trim();
+    if (q.isEmpty) return null;
+    if (q.contains('@')) return getApplicationByEmail(q);
+    try {
+      final res = await ApiClient.instance.get<Map<String, dynamic>>(
+        '/api/rsp/applications/by-applicant-number',
+        queryParameters: {'number': q},
       );
-      RecruitmentExamResult? exam;
-      final er = data?['examResult'];
-      if (er is Map) {
-        exam = RecruitmentExamResult.fromByEmailJson(
-          Map<String, dynamic>.from(er),
-        );
-      }
-      return RspApplicantLookup(application: app, examResult: exam);
+      return _lookupFromPublicPayload(res.data);
     } on DioException catch (e) {
       if (e.response?.statusCode == 404) return null;
       return null;

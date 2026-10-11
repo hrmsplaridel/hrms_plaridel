@@ -8,7 +8,7 @@ import 'package:hrms_plaridel/features/recruitment/presentation/applicant/widget
 import 'package:hrms_plaridel/features/recruitment/presentation/applicant/widgets/rsp_application_status_timeline.dart';
 import 'package:hrms_plaridel/shared/widgets/login_style_grid_backdrop.dart';
 
-/// Screen for applicants to track their application status by email.
+/// Screen for applicants to track their application status by email or Application ID.
 /// Auto-detects and displays the current step in the process (document review, exams, result, etc.).
 /// Refreshes status periodically so changes (e.g. admin approval) are detected automatically.
 class TrackApplicationPage extends StatefulWidget {
@@ -72,7 +72,8 @@ class _TrackApplicationPageState extends State<TrackApplicationPage>
     _emailFocusNode.unfocus();
     if (email.isEmpty) {
       setState(() {
-        _errorMessage = 'Please enter the email you used when applying.';
+        _errorMessage =
+            'Enter the email you used when applying, or your Application ID.';
         _application = null;
         _examResult = null;
       });
@@ -86,9 +87,8 @@ class _TrackApplicationPageState extends State<TrackApplicationPage>
     });
     _resultAnimController.reset();
     try {
-      final lookup = await RecruitmentRepo.instance.getApplicationByEmail(
-        email,
-      );
+      final lookup = await RecruitmentRepo.instance
+          .getApplicationByEmailOrApplicantNumber(email);
       final app = lookup?.application;
       final exam = lookup?.examResult;
       if (mounted) {
@@ -97,7 +97,7 @@ class _TrackApplicationPageState extends State<TrackApplicationPage>
           _examResult = exam;
           _loading = false;
           _errorMessage = app == null
-              ? 'No application found for this email.'
+              ? 'No application found for this email or Application ID.'
               : null;
         });
         if (app != null) {
@@ -146,7 +146,7 @@ class _TrackApplicationPageState extends State<TrackApplicationPage>
       backgroundColor: const Color(0xFFFAFBFC),
       appBar: RspApplicantAppBar(
         title: 'Track Application Status',
-        subtitle: 'Look up your application by email',
+        subtitle: 'Look up by email or Application ID',
         icon: Icons.manage_search_rounded,
         actions: [
           if (_application != null)
@@ -164,7 +164,10 @@ class _TrackApplicationPageState extends State<TrackApplicationPage>
                       ),
                     )
                   : IconButton(
-                      icon: const Icon(Icons.refresh_rounded, color: Colors.white),
+                      icon: const Icon(
+                        Icons.refresh_rounded,
+                        color: Colors.white,
+                      ),
                       onPressed: _refresh,
                       tooltip: 'Refresh status',
                     ),
@@ -308,7 +311,7 @@ class _LookupCard extends StatelessWidget {
                         ),
                       ),
                       child: Icon(
-                        Icons.mail_outline_rounded,
+                        Icons.badge_outlined,
                         color: AppTheme.primaryNavy,
                         size: 22,
                       ),
@@ -319,7 +322,7 @@ class _LookupCard extends StatelessWidget {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            'Enter your email address',
+                            'Email or Application ID',
                             style: TextStyle(
                               fontSize: 15,
                               fontWeight: FontWeight.w700,
@@ -329,7 +332,7 @@ class _LookupCard extends StatelessWidget {
                           ),
                           SizedBox(height: 3),
                           Text(
-                            'Use the same email you submitted your application with.',
+                            'Use the email you applied with, or the Application ID on your application (PLR-…).',
                             style: TextStyle(
                               fontSize: 13,
                               color: AppTheme.textSecondary,
@@ -347,13 +350,13 @@ class _LookupCard extends StatelessWidget {
                   controller: emailController,
                   focusNode: emailFocusNode,
                   decoration: InputDecoration(
-                    hintText: 'e.g. juan.delacruz@email.com',
+                    hintText: 'Email or Application ID (PLR-…)',
                     hintStyle: TextStyle(
                       color: AppTheme.textSecondary.withValues(alpha: 0.55),
                       fontSize: 14.5,
                     ),
                     prefixIcon: Icon(
-                      Icons.alternate_email_rounded,
+                      Icons.badge_outlined,
                       color: AppTheme.primaryNavy.withValues(alpha: 0.6),
                       size: 20,
                     ),
@@ -398,7 +401,8 @@ class _LookupCard extends StatelessWidget {
                       vertical: 17,
                     ),
                   ),
-                  keyboardType: TextInputType.emailAddress,
+                  keyboardType: TextInputType.text,
+                  autocorrect: false,
                   textInputAction: TextInputAction.done,
                   onSubmitted: (_) => onCheck(),
                 ),

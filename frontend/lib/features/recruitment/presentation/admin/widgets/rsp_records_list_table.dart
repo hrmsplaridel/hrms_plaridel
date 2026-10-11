@@ -182,6 +182,7 @@ class RspRecordsCrudActions extends StatelessWidget {
     this.deleteDialogMessage = 'This cannot be undone.',
     this.showView = true,
     this.showEdit = true,
+    this.showDelete = true,
   });
 
   final VoidCallback? onView;
@@ -194,6 +195,7 @@ class RspRecordsCrudActions extends StatelessWidget {
   final String deleteDialogMessage;
   final bool showView;
   final bool showEdit;
+  final bool showDelete;
 
   Future<void> _confirmDelete(BuildContext context) async {
     final ok = await showDialog<bool>(
@@ -271,18 +273,19 @@ class RspRecordsCrudActions extends StatelessWidget {
           tooltip: 'Download PDF',
           style: iconStyle,
         ),
-        TextButton(
-          onPressed: () => _confirmDelete(context),
-          style: TextButton.styleFrom(
-            foregroundColor: Colors.red.shade700,
-            padding: const EdgeInsets.symmetric(horizontal: 10),
-            minimumSize: const Size(0, 36),
+        if (showDelete)
+          TextButton(
+            onPressed: () => _confirmDelete(context),
+            style: TextButton.styleFrom(
+              foregroundColor: Colors.red.shade700,
+              padding: const EdgeInsets.symmetric(horizontal: 10),
+              minimumSize: const Size(0, 36),
+            ),
+            child: const Text(
+              'Delete',
+              style: TextStyle(fontWeight: FontWeight.w700),
+            ),
           ),
-          child: const Text(
-            'Delete',
-            style: TextStyle(fontWeight: FontWeight.w700),
-          ),
-        ),
       ],
     );
   }

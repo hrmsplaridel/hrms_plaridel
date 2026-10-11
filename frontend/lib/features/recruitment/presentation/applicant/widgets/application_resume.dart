@@ -10,13 +10,13 @@ int resumeStepForTrackingOnlyEntry(
     return 1;
   }
   if (exam != null) {
-    final hired =
-        app.hiredUserId != null && app.hiredUserId!.trim().isNotEmpty;
+    final hired = app.hiredUserId != null && app.hiredUserId!.trim().isNotEmpty;
     if (app.status == 'registered' || hired) return 8;
     if (app.finalInterviewPassed == true) return 8;
     return 7;
   }
   if (app.status == 'document_declined') return 2;
+  if (app.status == 'document_approved' && !app.assessmentUnlocked) return 2;
   if (app.status == 'document_approved' || app.status == 'exam_taken') {
     return 3;
   }
@@ -53,6 +53,9 @@ String trackingContinueBlockedHint(
   }
   if (app.status == 'document_declined') {
     return 'Your documents were not approved. Continue to replace them and resubmit for HR review.';
+  }
+  if (app.status == 'document_approved' && !app.assessmentUnlocked) {
+    return 'Assessment opens after HR approves the assigned form.';
   }
   return 'You cannot proceed at this time. Check your status above.';
 }

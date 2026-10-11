@@ -21,6 +21,35 @@ function withMockedModule(modulePath, exportsValue) {
 
 function statusHandler(pool) {
   const restoreDb = withMockedModule('../src/config/db', { pool });
+  const restoreIssued = withMockedModule('../src/services/rspIssuedForm', {
+    assertIssuedFormSchema: async () => {},
+    shouldEnableIssuedFormGate: (previous) =>
+      previous === 'submitted' || previous === 'document_declined',
+    assessmentBlocked: () => false,
+    sendIssuedFormError: (res, err) => {
+      res.status(err.status || 500).json({ error: err.message });
+    },
+  });
+  const restorePre = withMockedModule('../src/services/rspPreDeliberation', {
+    assertPreDeliberationSchema: async () => {},
+    missingPrerequisites: () => [],
+    sendPreDeliberationError: (res, err) => {
+      res.status(err.status || 500).json({ error: err.message });
+    },
+  });
+  const restoreFinal = withMockedModule('../src/services/rspFinalHiring', {
+    assertFinalHiringSchema: async () => {},
+    sendFinalHiringError: (res, err) => {
+      res.status(err.status || 500).json({ error: err.message });
+    },
+  });
+  const restoreNotices = withMockedModule('../src/services/rspApplicantNotices', {
+    safeNotify: async (work) => work(),
+    notifyDocumentDecision: async () => ({ sent: false }),
+    notifyScheduleNotice: async () => ({ sent: false }),
+    notifyActionRequired: async () => ({ sent: false }),
+    notifyFinalRequirementReturned: async () => ({ sent: false }),
+  });
   const routePath = require.resolve('../src/routes/rspApplications');
   delete require.cache[routePath];
   try {
@@ -33,6 +62,10 @@ function statusHandler(pool) {
     return layer.route.stack[layer.route.stack.length - 1].handle;
   } finally {
     delete require.cache[routePath];
+    restoreNotices();
+    restoreFinal();
+    restorePre();
+    restoreIssued();
     restoreDb();
   }
 }
@@ -56,15 +89,35 @@ const applicationId = '11111111-1111-4111-8111-111111111111';
 
 test('RSP status route rejects statuses owned by other modules', async () => {
   const updates = [];
-  const handler = statusHandler({
+  const pool = {
+    async connect() {
+      return {
+        query: (...args) => pool.query(...args),
+        release() {},
+      };
+    },
     async query(sql, params) {
-      if (sql.includes('UPDATE public.recruitment_applications')) {
+      const text = String(sql);
+      if (text.includes('UPDATE public.recruitment_applications')) {
         updates.push(params);
         return { rowCount: 1, rows: [] };
       }
+      if (text.includes('FOR UPDATE')) {
+        return {
+          rowCount: 1,
+          rows: [{
+            status: 'submitted',
+            email: null,
+            full_name: 'Ana Cruz',
+            applicant_number: 'PLR-TEST',
+            position_applied_for: 'Clerk',
+          }],
+        };
+      }
       return { rowCount: 0, rows: [] };
     },
-  });
+  };
+  const handler = statusHandler(pool);
 
   for (const status of ['endorsed', 'rejected', 'approved']) {
     const res = response();
@@ -76,5 +129,9 @@ test('RSP status route rejects statuses owned by other modules', async () => {
   const res = response();
   await handler({ params: { applicationId }, body: { status: 'document_approved' } }, res);
   assert.equal(res.statusCode, 200);
-  assert.deepEqual(updates, [['document_approved', applicationId]]);
+  assert.deepEqual(updates, [[
+    'document_approved',
+    applicationId,
+    true,
+  ]]);
 });

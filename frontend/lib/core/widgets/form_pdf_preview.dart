@@ -292,11 +292,12 @@ class _FormPdfPreviewPanelState extends State<_FormPdfPreviewPanel> {
                             value: true,
                             label: Text('Fit to Printable Area'),
                           ),
-                          ButtonSegment(value: false, label: Text('Actual Size')),
+                          ButtonSegment(
+                            value: false,
+                            label: Text('Actual Size'),
+                          ),
                         ],
-                        selected: {
-                          widget.paperChoice!.readFit?.call() ?? true,
-                        },
+                        selected: {widget.paperChoice!.readFit?.call() ?? true},
                         onSelectionChanged: _busy
                             ? null
                             : (selected) async {
