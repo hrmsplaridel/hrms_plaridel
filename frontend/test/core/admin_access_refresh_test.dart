@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter/widgets.dart';
 import 'package:hrms_plaridel/core/services/app_realtime_provider.dart';
 import 'package:hrms_plaridel/core/services/admin_access_refresh.dart';
 
@@ -28,6 +29,34 @@ class _Realtime extends AppRealtimeProvider {
 }
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+  testWidgets(
+    'access events pause while hidden and resume with one authoritative refresh',
+    (tester) async {
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      final realtime = _Realtime();
+      var calls = 0;
+      final binding = AdminAccessRefresh(
+        realtime: realtime,
+        onRefresh: () async {
+          calls++;
+        },
+      );
+      await binding.refresh();
+      expect(calls, 1);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
+      realtime.stream.add(const AppRealtimeEvent(name: 'admin_access_changed'));
+      realtime.connect();
+      await binding.refresh();
+      await tester.pump();
+      expect(calls, 1);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await tester.pump();
+      expect(calls, 2);
+      binding.dispose();
+      realtime.dispose();
+    },
+  );
   test(
     'access event and reconnect refresh; unrelated events and disposed listeners do not',
     () async {

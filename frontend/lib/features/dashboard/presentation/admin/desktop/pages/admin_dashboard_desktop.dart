@@ -459,7 +459,6 @@ class _AdminDashboardState extends State<AdminDashboard>
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed && mounted) {
-      unawaited(_accessRefresh?.refresh());
       context.read<NotificationProvider>().refreshUnreadCount();
       context.read<DocuTrackerProvider>().loadNotifications();
       context.read<DocuTrackerProvider>().loadSourceSignatureRequests();

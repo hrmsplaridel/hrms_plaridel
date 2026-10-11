@@ -15,10 +15,12 @@ void main() {
         ApiClient.instance.init();
         ApiClient.instance.dio.interceptors.clear();
         var starts = 0;
+        var reads = 0;
         var running = false;
         ApiClient.instance.dio.interceptors.add(
           InterceptorsWrapper(
             onRequest: (options, handler) {
+              if (options.method == 'GET') reads++;
               if (options.method == 'POST') {
                 starts++;
                 running = true;
@@ -57,10 +59,12 @@ void main() {
         );
         await tester.pumpAndSettle();
         expect(find.textContaining('No backups yet'), findsOneWidget);
+        expect(reads, 1);
         await tester.ensureVisible(find.byType(TextField));
         await tester.enterText(find.byType(TextField), '14');
         await tester.pump(const Duration(seconds: 10));
         await tester.pumpAndSettle();
+        expect(reads, 1, reason: 'Idle backup status polls every minute');
         expect(
           tester.widget<TextField>(find.byType(TextField)).controller!.text,
           '14',
@@ -70,6 +74,24 @@ void main() {
         await tester.pumpAndSettle();
         expect(starts, 1);
         expect(find.text('Backup in progress'), findsOneWidget);
+        final afterStart = reads;
+        await tester.pump(const Duration(seconds: 10));
+        await tester.pumpAndSettle();
+        expect(reads, afterStart + 1);
+        tester.binding.handleAppLifecycleStateChanged(
+          AppLifecycleState.inactive,
+        );
+        tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
+        await tester.pump(const Duration(minutes: 2));
+        expect(reads, afterStart + 1);
+        tester.binding.handleAppLifecycleStateChanged(
+          AppLifecycleState.inactive,
+        );
+        tester.binding.handleAppLifecycleStateChanged(
+          AppLifecycleState.resumed,
+        );
+        await tester.pumpAndSettle();
+        expect(reads, afterStart + 2);
         expect(tester.takeException(), isNull);
         await tester.pumpWidget(const SizedBox());
       },

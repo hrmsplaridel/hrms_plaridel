@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:hrms_plaridel/core/services/foreground_poller.dart';
+import 'package:hrms_plaridel/core/services/foreground_refresh.dart';
 import 'dart:ui' show lerpDouble;
 
 import 'package:flutter/material.dart';
@@ -1303,15 +1304,24 @@ class _EmployeeDashboardContent extends StatefulWidget {
 }
 
 class _EmployeeDashboardContentState extends State<_EmployeeDashboardContent> {
-  Timer? _pollingTimer;
+  late final ForegroundRefresh _attendanceRefresh;
   StreamSubscription<DtrUpdateEvent>? _dtrUpdateSub;
 
   @override
   void initState() {
     super.initState();
+    _attendanceRefresh = ForegroundRefresh(
+      interval: () => const Duration(seconds: 30),
+      onRefresh: () async {
+        if (!mounted) return;
+        final dtr = context.read<DtrProvider>();
+        if (!dtr.loading) await dtr.loadTodayRecord();
+      },
+    );
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
       final dtr = context.read<DtrProvider>();
-      dtr.loadTodayRecord();
+      unawaited(_attendanceRefresh.refresh());
       dtr.loadMyShiftToday();
       final uid = context.read<AuthProvider>().user?.id;
       if (uid != null && uid.isNotEmpty) {
@@ -1325,25 +1335,15 @@ class _EmployeeDashboardContentState extends State<_EmployeeDashboardContent> {
         if (!mounted) return;
         final userId = context.read<AuthProvider>().user?.id;
         if (!event.affectsUser(userId)) return;
-        final currentDtr = context.read<DtrProvider>();
-        if (currentDtr.loading) return;
-        currentDtr.loadTodayRecord();
+        unawaited(_attendanceRefresh.refresh(trailing: true));
       });
-    });
-    _pollingTimer = Timer.periodic(const Duration(seconds: 30), (_) {
-      if (!mounted) return;
-      final dtr = context.read<DtrProvider>();
-      if (dtr.loading) return;
-      dtr.loadTodayRecord();
-      // Month list is loaded by [EmployeeAttendanceOverviewCard] / My Attendance;
-      // avoid overwriting the provider with a fixed "current month" every tick.
     });
   }
 
   @override
   void dispose() {
     _dtrUpdateSub?.cancel();
-    _pollingTimer?.cancel();
+    _attendanceRefresh.dispose();
     super.dispose();
   }
 
@@ -2601,6 +2601,8 @@ class _EmployeeAttendanceContentState extends State<EmployeeAttendanceContent>
           forceAttendanceRefresh: true,
         ),
       );
+    } else {
+      _dtrRefreshDebounce?.cancel();
     }
   }
 
@@ -2700,6 +2702,8 @@ class _EmployeeAttendanceContentState extends State<EmployeeAttendanceContent>
 
   void _handleDtrUpdateEvent(DtrUpdateEvent event) {
     if (!mounted) return;
+    final lifecycle = WidgetsBinding.instance.lifecycleState;
+    if (lifecycle != null && lifecycle != AppLifecycleState.resumed) return;
     final range = _selectedAttendanceRange();
     if (range == null) return;
     final dtr = context.read<DtrProvider>();
@@ -2713,6 +2717,8 @@ class _EmployeeAttendanceContentState extends State<EmployeeAttendanceContent>
     _dtrRefreshDebounce?.cancel();
     _dtrRefreshDebounce = Timer(_dtrRefreshDebounceDuration, () {
       if (!mounted) return;
+      final lifecycle = WidgetsBinding.instance.lifecycleState;
+      if (lifecycle != null && lifecycle != AppLifecycleState.resumed) return;
       unawaited(_load(forceRefresh: true));
     });
   }
