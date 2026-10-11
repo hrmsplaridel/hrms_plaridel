@@ -28,11 +28,13 @@ void main() {
       var includeInactive = false;
       var addedType = false;
       var failTypes = false;
+      var catalogReads = 0;
       ApiClient.instance.dio.interceptors.add(
         InterceptorsWrapper(
           onRequest: (o, h) {
             dynamic data = <dynamic>[];
             if (o.uri.path == '/api/leave/types') {
+              catalogReads++;
               if (failTypes) {
                 h.reject(DioException(requestOptions: o));
                 return;
@@ -106,9 +108,14 @@ void main() {
       await tester.tap(find.text('Wellness Leave').last);
       await tester.pumpAndSettle();
       expect(queries.last['leave_type'], 'Wellness');
+      expect(catalogReads, 1, reason: 'Filtering reuses the catalog');
+      await tester.tap(find.byTooltip('Next'));
+      await tester.pumpAndSettle();
+      expect(catalogReads, 1, reason: 'Pagination reuses the catalog');
       addedType = true;
       await tester.tap(find.byTooltip('Refresh'));
       await tester.pumpAndSettle();
+      expect(catalogReads, 2);
       await tester.tap(dropdown);
       await tester.pumpAndSettle();
       expect(find.text('New Custom Leave'), findsOneWidget);

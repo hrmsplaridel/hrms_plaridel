@@ -1,4 +1,5 @@
 import 'package:hrms_plaridel/core/api/client.dart';
+import 'package:hrms_plaridel/core/api/reference_data_cache.dart';
 import 'package:hrms_plaridel/features/dtr/locator/models/locator_request_type.dart';
 
 class LocatorReviewerAccess {
@@ -42,32 +43,30 @@ class LocatorSlipDataCache {
   final Map<String, _LocatorCacheEntry<LocatorRequestPage>> _requestCache = {};
   final Map<String, _LocatorCacheEntry<LocatorAdminRequestPage>>
   _adminRequestCache = {};
-  final Map<bool, _LocatorCacheEntry<List<LocatorRequestType>>> _typeCache = {};
-  final Map<String, _LocatorCacheEntry<LocatorReviewerAccess>>
-  _departmentHeadCache = {};
+  final _typeCache = ReferenceDataCache<bool, List<LocatorRequestType>>(
+    ttl: _typeCacheTtl,
+  );
+  final _departmentHeadCache =
+      ReferenceDataCache<String, LocatorReviewerAccess>(
+        ttl: _referenceCacheTtl,
+      );
 
   Future<List<LocatorRequestType>> listTypes({
     bool includeInactive = false,
     bool forceRefresh = false,
   }) async {
-    final cached = _typeCache[includeInactive];
-    if (!forceRefresh && cached != null && cached.isFresh(_typeCacheTtl)) {
-      return List<LocatorRequestType>.from(cached.value);
-    }
-
-    final path = includeInactive
-        ? '/api/locator-slips/types?include_inactive=true'
-        : '/api/locator-slips/types';
-    final res = await ApiClient.instance.get<List<dynamic>>(path);
-    final items = (res.data ?? const [])
-        .whereType<Map>()
-        .map((e) => LocatorRequestType.fromJson(Map<String, dynamic>.from(e)))
-        .toList();
-    _typeCache[includeInactive] = _LocatorCacheEntry<List<LocatorRequestType>>(
-      List<LocatorRequestType>.from(items),
-      DateTime.now(),
-    );
-    return items;
+    final items = await _typeCache.get(includeInactive, () async {
+      final path = includeInactive
+          ? '/api/locator-slips/types?include_inactive=true'
+          : '/api/locator-slips/types';
+      final res = await ApiClient.instance.get<List<dynamic>>(path);
+      final items = (res.data ?? const [])
+          .whereType<Map>()
+          .map((e) => LocatorRequestType.fromJson(Map<String, dynamic>.from(e)))
+          .toList();
+      return items;
+    }, forceRefresh: forceRefresh);
+    return List<LocatorRequestType>.from(items);
   }
 
   Future<LocatorReviewerAccess> checkDepartmentHeadAccess({
@@ -80,20 +79,12 @@ class LocatorSlipDataCache {
       userId: userId,
       role: role,
     );
-    final cached = _departmentHeadCache[cacheKey];
-    if (!forceRefresh && cached != null && cached.isFresh(_referenceCacheTtl)) {
-      return cached.value;
-    }
-
-    final res = await ApiClient.instance.get<Map<String, dynamic>>(
-      '/api/locator-slips/department-head/check',
-    );
-    final value = LocatorReviewerAccess.fromJson(res.data);
-    _departmentHeadCache[cacheKey] = _LocatorCacheEntry<LocatorReviewerAccess>(
-      value,
-      DateTime.now(),
-    );
-    return value;
+    return _departmentHeadCache.get(cacheKey, () async {
+      final res = await ApiClient.instance.get<Map<String, dynamic>>(
+        '/api/locator-slips/department-head/check',
+      );
+      return LocatorReviewerAccess.fromJson(res.data);
+    }, forceRefresh: forceRefresh);
   }
 
   Future<LocatorRequestPage> listMyRequests({
@@ -163,9 +154,9 @@ class LocatorSlipDataCache {
     _adminRequestCache.clear();
   }
 
-  void invalidateTypes() => _typeCache.clear();
+  void invalidateTypes() => _typeCache.invalidate();
 
-  void invalidateReferenceData() => _departmentHeadCache.clear();
+  void invalidateReferenceData() => _departmentHeadCache.invalidate();
 
   void invalidateAll() {
     invalidateRequests();

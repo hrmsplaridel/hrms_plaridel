@@ -81,7 +81,7 @@ class _LeaveBalanceHistoryScreenState extends State<LeaveBalanceHistoryScreen> {
         _loadEmployees();
         _loadDepartments();
       }
-      _load(resetPage: true);
+      _load(resetPage: true, refreshTypes: true);
     });
   }
 
@@ -192,6 +192,7 @@ class _LeaveBalanceHistoryScreenState extends State<LeaveBalanceHistoryScreen> {
   Future<void> _load({
     required bool resetPage,
     bool forceRefresh = false,
+    bool refreshTypes = false,
   }) async {
     if (resetPage) _currentPage = 0;
     setState(() {
@@ -203,7 +204,7 @@ class _LeaveBalanceHistoryScreenState extends State<LeaveBalanceHistoryScreen> {
         try {
           final types = await LeaveTypeDefinitionCache.instance.listAll(
             includeInactive: true,
-            forceRefresh: true,
+            forceRefresh: refreshTypes,
           );
           if (!mounted) return;
           setState(() {
@@ -291,7 +292,11 @@ class _LeaveBalanceHistoryScreenState extends State<LeaveBalanceHistoryScreen> {
             tooltip: 'Refresh',
             onPressed: _loading
                 ? null
-                : () => _load(resetPage: true, forceRefresh: true),
+                : () => _load(
+                    resetPage: true,
+                    forceRefresh: true,
+                    refreshTypes: true,
+                  ),
             icon: const Icon(Icons.refresh_rounded),
           ),
         ],
@@ -407,7 +412,11 @@ class _LeaveBalanceHistoryScreenState extends State<LeaveBalanceHistoryScreen> {
                       tooltip: 'Refresh',
                       onPressed: _loading
                           ? null
-                          : () => _load(resetPage: true, forceRefresh: true),
+                          : () => _load(
+                              resetPage: true,
+                              forceRefresh: true,
+                              refreshTypes: true,
+                            ),
                       icon: const Icon(Icons.refresh_rounded),
                     ),
                     IconButton(
@@ -439,7 +448,11 @@ class _LeaveBalanceHistoryScreenState extends State<LeaveBalanceHistoryScreen> {
             tooltip: 'Refresh',
             onPressed: _loading
                 ? null
-                : () => _load(resetPage: true, forceRefresh: true),
+                : () => _load(
+                    resetPage: true,
+                    forceRefresh: true,
+                    refreshTypes: true,
+                  ),
             icon: const Icon(Icons.refresh_rounded),
           ),
         ],
