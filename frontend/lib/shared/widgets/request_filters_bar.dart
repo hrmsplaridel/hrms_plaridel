@@ -2,6 +2,59 @@ import 'package:flutter/material.dart';
 
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
 
+/// Keeps the editing state while the parent updates its search results.
+class _RequestSearchField extends StatefulWidget {
+  const _RequestSearchField({
+    required this.query,
+    required this.onChanged,
+    required this.style,
+    required this.decoration,
+  });
+
+  final String query;
+  final ValueChanged<String>? onChanged;
+  final TextStyle style;
+  final InputDecoration decoration;
+
+  @override
+  State<_RequestSearchField> createState() => _RequestSearchFieldState();
+}
+
+class _RequestSearchFieldState extends State<_RequestSearchField> {
+  late final TextEditingController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = TextEditingController(text: widget.query);
+  }
+
+  @override
+  void didUpdateWidget(covariant _RequestSearchField oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (_controller.text != widget.query) {
+      _controller.value = TextEditingValue(
+        text: widget.query,
+        selection: TextSelection.collapsed(offset: widget.query.length),
+      );
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => TextFormField(
+    controller: _controller,
+    onChanged: widget.onChanged,
+    style: widget.style,
+    decoration: widget.decoration,
+  );
+}
+
 /// One status tab in [RequestFiltersBar] (`value: null` = All).
 class RequestFilterOption<T> {
   const RequestFilterOption({required this.label, this.value});
@@ -146,9 +199,8 @@ class RequestFiltersBar<T> extends StatelessWidget {
             flex: showDateRange ? 3 : 1,
             child: SizedBox(
               height: 40,
-              child: TextFormField(
-                key: ValueKey(searchQuery),
-                initialValue: searchQuery,
+              child: _RequestSearchField(
+                query: searchQuery,
                 onChanged: onSearchChanged,
                 style: AppTheme.dashFieldTextStyle(
                   context,
@@ -210,9 +262,8 @@ class RequestFiltersBar<T> extends StatelessWidget {
           SizedBox(
             width: 240,
             height: 36,
-            child: TextFormField(
-              key: ValueKey(searchQuery),
-              initialValue: searchQuery,
+            child: _RequestSearchField(
+              query: searchQuery,
               onChanged: onSearchChanged,
               style: AppTheme.dashFieldTextStyle(
                 context,
