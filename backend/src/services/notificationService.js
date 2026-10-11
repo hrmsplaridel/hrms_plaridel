@@ -1,6 +1,7 @@
 const { broadcastAppEvent } = require('../websockets/appEvents');
 const { sendPushForNotification } = require('./fcmPushService');
 const { departmentApproverSql } = require('./approvalStageSeparation');
+const {reconcileReviewNotifications} = require('./reviewNotificationCompletion');
 
 /**
  * Global in-app notifications (header bell). DocuTracker uses docutracker_notifications
@@ -101,6 +102,7 @@ const reviewNotificationVisibilitySql = `NOT (
 )`;
 
 async function listNotifications(db, userId, { limit = 50, unreadOnly = false } = {}) {
+  await reconcileReviewNotifications(db, userId);
   const safeLimit = Math.min(Math.max(parseInt(String(limit), 10) || 50, 1), 200);
   const r = await db.query(
     `SELECT id, user_id, category, type, title, body, read_at, reference_type, reference_id, metadata, created_at
@@ -116,6 +118,7 @@ async function listNotifications(db, userId, { limit = 50, unreadOnly = false } 
 }
 
 async function countUnread(db, userId) {
+  await reconcileReviewNotifications(db, userId);
   const r = await db.query(
     `SELECT count(*)::int AS c FROM user_notifications WHERE user_id = $1::uuid AND read_at IS NULL
        AND ${reviewNotificationVisibilitySql}`,

@@ -8,6 +8,9 @@ import 'package:hrms_plaridel/core/services/app_realtime_bridge.dart';
 import 'package:hrms_plaridel/core/services/app_realtime_provider.dart';
 import 'package:hrms_plaridel/features/dtr/locator/data/repositories/locator_slip_data_cache.dart';
 import 'package:provider/provider.dart';
+import 'package:hrms_plaridel/features/notifications/data/notification_provider.dart';
+import 'package:hrms_plaridel/features/notifications/data/notification_repository.dart';
+import 'package:hrms_plaridel/features/notifications/models/app_notification.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -23,6 +26,46 @@ void main() {
     LocatorSlipDataCache.instance.invalidateAll();
     ApiClient.instance.dio.interceptors.clear();
   });
+
+  for (final eventName in ['leave_updated', 'locator_updated']) {
+    testWidgets('$eventName refreshes read status and unread badge', (
+      tester,
+    ) async {
+      final realtime = _FakeRealtimeProvider();
+      final repository = _NotificationRepository();
+      final notifications = NotificationProvider(repository: repository)
+        ..unreadCount = 1
+        ..items = [
+          AppNotification(
+            id: 'review',
+            category: 'leave',
+            type: 'leave_pending_department_head',
+            title: 'Review',
+            createdAt: DateTime(2026),
+          ),
+        ];
+      addTearDown(realtime.dispose);
+      addTearDown(notifications.dispose);
+      await tester.pumpWidget(
+        MultiProvider(
+          providers: [
+            ChangeNotifierProvider<AppRealtimeProvider>.value(value: realtime),
+            ChangeNotifierProvider<NotificationProvider>.value(
+              value: notifications,
+            ),
+          ],
+          child: const AppRealtimeBridge(child: SizedBox()),
+        ),
+      );
+      realtime.emit(AppRealtimeEvent(name: eventName));
+      await tester.pump();
+      await tester.pump();
+      expect(repository.loads, 1);
+      expect(notifications.unreadCount, 0);
+      expect(notifications.items.single.readAt, isNotNull);
+      await tester.pumpWidget(const SizedBox());
+    });
+  }
 
   testWidgets('locator type event invalidates the global type cache', (
     tester,
@@ -92,5 +135,25 @@ class _FakeRealtimeProvider extends AppRealtimeProvider {
   void dispose() {
     _events.close();
     super.dispose();
+  }
+}
+
+class _NotificationRepository extends NotificationRepository {
+  int loads = 0;
+  @override
+  Future<int> fetchUnreadCount() async => 0;
+  @override
+  Future<List<AppNotification>> fetchNotifications({int limit = 100}) async {
+    loads++;
+    return [
+      AppNotification(
+        id: 'review',
+        category: 'leave',
+        type: 'leave_pending_department_head',
+        title: 'Review',
+        createdAt: DateTime(2026),
+        readAt: DateTime(2026, 10, 11),
+      ),
+    ];
   }
 }

@@ -89,6 +89,10 @@ for (const firstAction of ['reject', 'return']) {
               history.push(params[1]);
               return { rows: [] };
             }
+            if (statement.startsWith('UPDATE user_notifications')) {
+              assert.equal(lockOwner, client);
+              return {rows:[]};
+            }
             if (statement.startsWith('SELECT balance_ledger_type')) {
               return { rows: [{ balance_ledger_type: 'vacationLeave' }] };
             }

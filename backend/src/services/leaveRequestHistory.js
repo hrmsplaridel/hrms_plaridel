@@ -1,5 +1,6 @@
 // Leave request history (audit trail) helper.
 // Table is created idempotently (IF NOT EXISTS).
+const {completeReviewNotifications} = require('./reviewNotificationCompletion');
 
 let _ensurePromise = null;
 
@@ -54,7 +55,7 @@ async function insertLeaveRequestHistory(
 ) {
   if (_ensurePromise) await _ensurePromise;
 
-  return dbOrClient.query(
+  const result = await dbOrClient.query(
     `
       INSERT INTO leave_request_history (
         leave_request_id,
@@ -78,6 +79,8 @@ async function insertLeaveRequestHistory(
       metadataJson,
     ]
   );
+  await completeReviewNotifications(dbOrClient, 'leave_request', leaveRequestId, fromStatus, toStatus);
+  return result;
 }
 
 module.exports = {

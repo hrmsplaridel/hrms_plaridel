@@ -49,7 +49,8 @@ test('recordLocatorWorkflowEvent writes a complete append-only event payload', a
     metadata: { source: 'review' },
   });
 
-  assert.equal(calls.length, 1);
+  assert.equal(calls.length, 2);
+  assert.match(calls[1].sql, /UPDATE user_notifications/);
   assert.match(calls[0].sql, /INSERT INTO locator_slip_history/);
   assert.deepEqual(calls[0].params, [
     SLIP_ID,

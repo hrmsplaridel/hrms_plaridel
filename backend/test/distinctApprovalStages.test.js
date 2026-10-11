@@ -59,6 +59,7 @@ for (const kind of ['leave','locator']) {
 test('old final review alerts exclude the department approver in list and unread count', async () => {
   const service = require('../src/services/notificationService');
   const db = { query: async sql => {
+    if (sql.startsWith('UPDATE user_notifications')) return {rows:[]};
     assert.match(sql, /dept_head_reviewer_id/);
     assert.match(sql, /department_head_approved/);
     assert.match(sql, /submitted/);

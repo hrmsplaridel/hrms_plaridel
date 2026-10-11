@@ -25,6 +25,7 @@ for(const kind of ['leave','locator']) {
 }
 test('old leave self-review alerts are filtered from list and unread count',async()=>{
  const service=require('../src/services/notificationService');const db={query:async(sql)=>{
+ if(sql.startsWith('UPDATE user_notifications'))return{rows:[]};
  assert.match(sql,/leave_pending_hr/);assert.match(sql,/leave_forwarded_to_hr/);assert.match(sql,/leave_pending_department_head/);
  assert.match(sql,/COALESCE\(lr.user_id, lr.employee_id\) = user_notifications.user_id/);return{rows:[]};
  }};await service.listNotifications(db,'reviewer');await service.countUnread(db,'reviewer');

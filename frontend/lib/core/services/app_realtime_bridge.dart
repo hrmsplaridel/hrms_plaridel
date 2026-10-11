@@ -40,6 +40,11 @@ class _AppRealtimeBridgeState extends State<AppRealtimeBridge> {
       try {
         context.read<LeaveProvider>().invalidateCachedLeaveData();
       } catch (_) {}
+      _refreshNotifications();
+      return;
+    }
+    if (event.name == 'locator_updated') {
+      _refreshNotifications();
       return;
     }
     if (event.name == 'locator_type_updated') {
@@ -66,7 +71,16 @@ class _AppRealtimeBridgeState extends State<AppRealtimeBridge> {
       );
     }
 
-    final notifications = context.read<NotificationProvider>();
+    _refreshNotifications();
+  }
+
+  void _refreshNotifications() {
+    NotificationProvider notifications;
+    try {
+      notifications = context.read<NotificationProvider>();
+    } catch (_) {
+      return;
+    }
     if (notifications.items.isEmpty) {
       unawaited(notifications.refreshUnreadCount());
     } else {
