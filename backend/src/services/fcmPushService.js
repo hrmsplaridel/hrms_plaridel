@@ -129,6 +129,7 @@ async function revokeTokens(db, tokens) {
 function notificationData(row) {
   return {
     notification_id: String(row.id || ''),
+    user_id: String(row.user_id || ''),
     category: String(row.category || ''),
     type: String(row.type || ''),
     reference_type: String(row.reference_type || ''),

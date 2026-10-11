@@ -328,32 +328,6 @@ async function listSourceBackedDocuments(pool, user, filters = {}) {
   }
 
   if (shouldInclude('dtr') && (await canViewModule('dtr'))) {
-    const dtrParams = [];
-    const dtrWhere = ['1=1'];
-    if (user.role !== 'admin') {
-      dtrWhere.push(`c.employee_id = $${dtrParams.length + 1}`);
-      dtrParams.push(user.id);
-    }
-    const dtrRows = await safeSourceQuery(
-      'dtr.dtr_corrections',
-      `SELECT
-         c.id::text AS source_record_id,
-         'dtr'::text AS source_module,
-         'dtr_corrections'::text AS source_table,
-         ('Correction ' || to_char(c.attendance_date, 'YYYY-MM-DD')) AS source_title,
-         c.reason AS description,
-         c.employee_id::text AS created_by,
-         u.full_name AS creator_name,
-         c.created_at AS created_at,
-         c.updated_at AS updated_at,
-         c.status AS source_status
-       FROM dtr_corrections c
-       JOIN users u ON u.id = c.employee_id
-       WHERE ${dtrWhere.join(' AND ')}`,
-      dtrParams
-    );
-    pieces.push(...dtrRows);
-
     const otParams = [];
     const otWhere = ['1=1'];
     if (user.role !== 'admin') {
@@ -1014,7 +988,7 @@ async function fetchAllPermissionRowsForAction(client, { role, userId, action })
 
 /**
  * Departments the user reviews on [effectiveDate]: as the official Department
- * Head (head period on their position) or as an active backup reviewer.
+ * Head (a dated employee designation) or as an active backup reviewer.
  */
 async function listReviewedDepartments(client, userId, effectiveDate = todayInHrmsTimezone()) {
   if (!userId) return [];
@@ -1022,20 +996,10 @@ async function listReviewedDepartments(client, userId, effectiveDate = todayInHr
     `SELECT DISTINCT d.id, d.name
      FROM departments d
      WHERE d.id IN (
-       SELECT a.department_id
-       FROM assignments a
-       JOIN positions p ON p.id = a.position_id AND p.department_id = a.department_id
-       JOIN position_department_head_periods hp
-         ON hp.position_id = p.id
-        AND hp.department_id = a.department_id
-        AND hp.is_active = true
-        AND hp.effective_from <= $2::date
-        AND (hp.effective_to IS NULL OR hp.effective_to >= $2::date)
-       WHERE a.employee_id = $1::uuid
-         AND a.is_active = true
-         AND p.is_active = true
-         AND a.effective_from <= $2::date
-         AND (a.effective_to IS NULL OR a.effective_to >= $2::date)
+       SELECT hp.department_id FROM primary_reviewer_designations hp
+       WHERE hp.employee_id = $1::uuid AND hp.department_id IS NOT NULL
+         AND hp.is_active = true AND hp.effective_from <= $2::date
+         AND (hp.effective_to IS NULL OR hp.effective_to >= $2::date)
        UNION
        SELECT b.department_id
        FROM department_reviewer_backups b

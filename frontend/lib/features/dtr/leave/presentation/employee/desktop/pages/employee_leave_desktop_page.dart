@@ -144,6 +144,17 @@ class _EmployeeLeaveScreenState extends State<EmployeeLeaveScreen>
 
     // Only count accrual-based leaves (Sick + Vacation) for the credits summary.
     const creditTypes = {'vacationLeave', 'sickLeave'};
+    final showCredits =
+        auth.user?.leaveCreditEligible != false ||
+        provider.balances.any(
+          (b) =>
+              creditTypes.contains(b.effectiveLeaveTypeName) &&
+              (b.earnedDays != 0 ||
+                  b.usedDays != 0 ||
+                  b.pendingDays != 0 ||
+                  b.adjustedDays != 0 ||
+                  b.lastAccrualDate != null),
+        );
     final totalAvailable = provider.myBalancesLoaded
         ? provider.balances
               .where((b) => creditTypes.contains(b.effectiveLeaveTypeName))
@@ -163,6 +174,7 @@ class _EmployeeLeaveScreenState extends State<EmployeeLeaveScreen>
       return _buildMobileLayout(
         provider: provider,
         showLeaveSkeleton: showLeaveSkeleton,
+        showCredits: showCredits,
         totalAvailable: totalAvailable,
         totalPendingDays: totalPendingDays,
         nextApproved: nextApproved,
@@ -193,13 +205,15 @@ class _EmployeeLeaveScreenState extends State<EmployeeLeaveScreen>
           compact
               ? Column(
                   children: [
-                    _SummaryCard(
-                      title: 'Available Credits',
-                      value: totalAvailable?.toStringAsFixed(1) ?? '--',
-                      subtitle: 'Across tracked leave balances',
-                      icon: Icons.account_balance_wallet_rounded,
-                    ),
-                    const SizedBox(height: 16),
+                    if (showCredits) ...[
+                      _SummaryCard(
+                        title: 'Available Credits',
+                        value: totalAvailable?.toStringAsFixed(1) ?? '--',
+                        subtitle: 'Across tracked leave balances',
+                        icon: Icons.account_balance_wallet_rounded,
+                      ),
+                      const SizedBox(height: 16),
+                    ],
                     _SummaryCard(
                       title: 'Pending Requests',
                       value: provider.myRequestsLoaded
@@ -229,15 +243,17 @@ class _EmployeeLeaveScreenState extends State<EmployeeLeaveScreen>
                 )
               : Row(
                   children: [
-                    Expanded(
-                      child: _SummaryCard(
-                        title: 'Available Credits',
-                        value: totalAvailable?.toStringAsFixed(1) ?? '--',
-                        subtitle: 'Across tracked leave balances',
-                        icon: Icons.account_balance_wallet_rounded,
+                    if (showCredits) ...[
+                      Expanded(
+                        child: _SummaryCard(
+                          title: 'Available Credits',
+                          value: totalAvailable?.toStringAsFixed(1) ?? '--',
+                          subtitle: 'Across tracked leave balances',
+                          icon: Icons.account_balance_wallet_rounded,
+                        ),
                       ),
-                    ),
-                    const SizedBox(width: 16),
+                      const SizedBox(width: 16),
+                    ],
                     Expanded(
                       child: _SummaryCard(
                         title: 'Pending Requests',
@@ -297,7 +313,9 @@ class _EmployeeLeaveScreenState extends State<EmployeeLeaveScreen>
                   final entitlements = _LeaveDaysPanel(
                     balances: provider.balances,
                     loading: provider.myBalancesLoading,
+                    fullWidth: !showCredits,
                   );
+                  if (!showCredits) return entitlements;
                   if (constraints.maxWidth < 1100) {
                     return Column(
                       children: [
@@ -344,6 +362,7 @@ class _EmployeeLeaveScreenState extends State<EmployeeLeaveScreen>
   Widget _buildMobileLayout({
     required LeaveProvider provider,
     required bool showLeaveSkeleton,
+    required bool showCredits,
     required double? totalAvailable,
     required double? totalPendingDays,
     required LeaveRequest? nextApproved,
@@ -358,6 +377,7 @@ class _EmployeeLeaveScreenState extends State<EmployeeLeaveScreen>
       showLoading: showLeaveSkeleton,
       loadingSkeleton: const MyLeaveLoadingSkeleton(compact: true),
       summaryStrip: EmployeeLeaveMobileSummaryStrip(
+        showCredits: showCredits,
         totalAvailable: totalAvailable,
         pendingCount: provider.myRequestsLoaded ? provider.pendingCount : null,
         totalPendingDays: totalPendingDays,
@@ -366,6 +386,7 @@ class _EmployeeLeaveScreenState extends State<EmployeeLeaveScreen>
             provider.myRequestsLoaded && provider.officialDate != null,
       ),
       balancesPanel: EmployeeLeaveMobileBalancesPanel(
+        showCredits: showCredits,
         balances: provider.balances,
         loading: provider.myBalancesLoading,
         error: provider.myBalancesError,
@@ -584,7 +605,13 @@ class _BalancesPanel extends StatelessWidget {
 }
 
 class _LeaveDaysPanel extends StatelessWidget {
-  const _LeaveDaysPanel({required this.balances, required this.loading});
+  const _LeaveDaysPanel({
+    required this.balances,
+    required this.loading,
+    this.fullWidth = false,
+  });
+
+  final bool fullWidth;
 
   final List<LeaveBalance> balances;
   final bool loading;
@@ -604,8 +631,11 @@ class _LeaveDaysPanel extends StatelessWidget {
           : Column(
               children: entitlementBalances
                   .map(
-                    (balance) =>
-                        _CompactBalanceRow(balance: balance, annual: true),
+                    (balance) => _CompactBalanceRow(
+                      balance: balance,
+                      annual: true,
+                      fullWidth: fullWidth,
+                    ),
                   )
                   .toList(),
             ),
@@ -614,7 +644,13 @@ class _LeaveDaysPanel extends StatelessWidget {
 }
 
 class _CompactBalanceRow extends StatelessWidget {
-  const _CompactBalanceRow({required this.balance, this.annual = false});
+  const _CompactBalanceRow({
+    required this.balance,
+    this.annual = false,
+    this.fullWidth = false,
+  });
+
+  final bool fullWidth;
 
   final LeaveBalance balance;
   final bool annual;
@@ -629,7 +665,9 @@ class _CompactBalanceRow extends StatelessWidget {
       alignment: Alignment.centerLeft,
       child: ConstrainedBox(
         key: ValueKey('leave-balance-row-${balance.effectiveLeaveTypeName}'),
-        constraints: const BoxConstraints(maxWidth: 560),
+        constraints: BoxConstraints(
+          maxWidth: fullWidth ? double.infinity : 560,
+        ),
         child: Container(
           padding: const EdgeInsets.symmetric(vertical: 12),
           decoration: BoxDecoration(

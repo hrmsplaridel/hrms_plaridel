@@ -1,4 +1,4 @@
-// Compatibility facade for the shared, assignment-based reviewer service.
+// Compatibility facade for shared employee-based reviewer designations.
 
 const { todayInHrmsTimezone } = require('../utils/dateRangeParser');
 const {
@@ -28,7 +28,7 @@ async function getEmployeeDepartment(client, employeeUserId) {
 /**
  * Find the department head for a given department.
  *
- * Authority comes from the position catalog's explicit official Head flag.
+ * Authority comes from an explicit employee designation effective on the date.
  *
  * @param {import('pg').PoolClient} client
  * @param {string} departmentId
@@ -50,7 +50,7 @@ async function findDepartmentHeadUserId(
  * High-level: given an employee user ID, find their department head.
  * Returns null if:
  *  - employee has no assignment effective today / no department
- *  - no department head position found in that department
+ *  - no primary employee designated for that department
  *  - employee IS the department head (self-approval prevention)
  *
  * @param {import('pg').PoolClient} client
@@ -102,25 +102,15 @@ async function getDepartmentReviewSnapshotForDate(
  */
 async function isDepartmentHead(client, userId) {
   const q = await client.query(
-    `SELECT a.department_id, d.name AS department_name
-     FROM assignments a
-     JOIN positions p ON a.position_id = p.id
-     JOIN position_department_head_periods head_period
-       ON head_period.position_id = p.id
-      AND head_period.department_id = a.department_id
-      AND head_period.is_active = true
-      AND head_period.effective_from <= $2::date
-      AND (head_period.effective_to IS NULL OR head_period.effective_to >= $2::date)
-     LEFT JOIN departments d ON d.id = a.department_id
-     WHERE a.employee_id = $1::uuid
-       AND a.is_active = true
-       AND p.is_active = true
-       AND a.effective_from <= $2::date
-       AND (a.effective_to IS NULL OR a.effective_to >= $2::date)
-     ORDER BY a.effective_from DESC NULLS LAST,
-              a.created_at DESC NULLS LAST,
-              a.id DESC
-     LIMIT 1`,
+    `SELECT head_period.department_id, d.name AS department_name
+     FROM primary_reviewer_designations head_period
+     JOIN users u ON u.id = head_period.employee_id
+     JOIN departments d ON d.id = head_period.department_id
+     WHERE head_period.employee_id = $1::uuid AND u.is_active = true
+       AND head_period.department_id IS NOT NULL AND head_period.is_active = true
+       AND head_period.effective_from <= $2::date
+       AND (head_period.effective_to IS NULL OR head_period.effective_to >= $2::date)
+     ORDER BY head_period.effective_from DESC, head_period.id DESC LIMIT 1`,
     [userId, todayInHrmsTimezone()]
   );
   if (q.rows.length > 0) {

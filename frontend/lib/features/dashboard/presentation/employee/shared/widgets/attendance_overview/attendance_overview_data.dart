@@ -107,6 +107,15 @@ MonthlyAttendanceBucket? _bucketForDay(TimeRecord? rec) {
 
   final remark = getAttendanceRemark(rec);
 
+  if ((rec.status == 'on_field' || rec.locatorSlipId != null) &&
+      isCompletedAttendanceRecord(rec)) {
+    if ((rec.lateMinutes ?? 0) > 0) return MonthlyAttendanceBucket.late;
+    if ((rec.undertimeMinutes ?? 0) > 0) {
+      return MonthlyAttendanceBucket.undertime;
+    }
+    return MonthlyAttendanceBucket.present;
+  }
+
   if (remark == 'Holiday' ||
       (rec.holidayName != null && remark.contains('Holiday'))) {
     return null;

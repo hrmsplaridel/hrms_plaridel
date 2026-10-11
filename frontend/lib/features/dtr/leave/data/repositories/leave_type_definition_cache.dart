@@ -1,36 +1,27 @@
 import 'package:hrms_plaridel/core/api/client.dart';
+import 'package:hrms_plaridel/core/api/reference_data_cache.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_type_definition.dart';
 
 class LeaveTypeDefinitionCache {
   LeaveTypeDefinitionCache._();
 
   static final LeaveTypeDefinitionCache instance = LeaveTypeDefinitionCache._();
-  static const Duration _ttl = Duration(minutes: 5);
-
-  List<LeaveTypeDefinition>? _activeEmployeeTypes;
-  DateTime? _activeEmployeeTypesAt;
-  List<LeaveTypeDefinition>? _allTypes;
-  DateTime? _allTypesAt;
-
-  bool _isFresh(DateTime? cachedAt) =>
-      cachedAt != null && DateTime.now().difference(cachedAt) < _ttl;
+  final _types = ReferenceDataCache<bool, List<LeaveTypeDefinition>>(
+    ttl: const Duration(minutes: 5),
+  );
 
   Future<List<LeaveTypeDefinition>> listActiveEmployeeTypes({
     bool forceRefresh = false,
   }) async {
-    if (!forceRefresh &&
-        _activeEmployeeTypes != null &&
-        _isFresh(_activeEmployeeTypesAt)) {
-      return List<LeaveTypeDefinition>.from(_activeEmployeeTypes!);
-    }
-    final rows = await _fetch(includeInactive: false);
+    final rows = await listAll(
+      includeInactive: false,
+      forceRefresh: forceRefresh,
+    );
     final filtered = rows
         .where(
           (item) => item.isActive && item.employeeCanFile && !item.adminOnly,
         )
         .toList();
-    _activeEmployeeTypes = List<LeaveTypeDefinition>.unmodifiable(filtered);
-    _activeEmployeeTypesAt = DateTime.now();
     return List<LeaveTypeDefinition>.from(filtered);
   }
 
@@ -38,25 +29,16 @@ class LeaveTypeDefinitionCache {
     bool includeInactive = true,
     bool forceRefresh = false,
   }) async {
-    if (includeInactive &&
-        !forceRefresh &&
-        _allTypes != null &&
-        _isFresh(_allTypesAt)) {
-      return List<LeaveTypeDefinition>.from(_allTypes!);
-    }
-    final rows = await _fetch(includeInactive: includeInactive);
-    if (includeInactive) {
-      _allTypes = List<LeaveTypeDefinition>.unmodifiable(rows);
-      _allTypesAt = DateTime.now();
-    }
+    final rows = await _types.get(
+      includeInactive,
+      () => _fetch(includeInactive: includeInactive),
+      forceRefresh: forceRefresh,
+    );
     return List<LeaveTypeDefinition>.from(rows);
   }
 
   void invalidate() {
-    _activeEmployeeTypes = null;
-    _activeEmployeeTypesAt = null;
-    _allTypes = null;
-    _allTypesAt = null;
+    _types.invalidate();
   }
 
   Future<List<LeaveTypeDefinition>> _fetch({

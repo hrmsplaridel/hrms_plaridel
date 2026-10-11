@@ -145,6 +145,7 @@ class LeaveLedgerQuery {
     this.leaveType,
     this.action,
     this.affectedBucket,
+    this.hideZeroPending = false,
     this.from,
     this.to,
     this.limit = 50,
@@ -160,6 +161,7 @@ class LeaveLedgerQuery {
   final String? leaveType;
   final String? action;
   final String? affectedBucket;
+  final bool hideZeroPending;
   final String? from;
   final String? to;
   final int limit;
@@ -174,6 +176,7 @@ class LeaveLedgerQuery {
     if (action != null && action!.trim().isNotEmpty) 'action': action!.trim(),
     if (affectedBucket != null && affectedBucket!.trim().isNotEmpty)
       'affected_bucket': affectedBucket!.trim(),
+    if (hideZeroPending) 'hide_zero_pending': 'true',
     if (from != null && from!.trim().isNotEmpty) 'from': from!.trim(),
     if (to != null && to!.trim().isNotEmpty) 'to': to!.trim(),
     'limit': limit,

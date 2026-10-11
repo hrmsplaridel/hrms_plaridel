@@ -16,6 +16,7 @@ flutter_analyze.txt
 migrate_working_dir/
 
 # Local environment files and runtime secrets
+.backups/
 **/.env
 **/.env.*
 !**/.env.example

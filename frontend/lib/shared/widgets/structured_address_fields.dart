@@ -6,7 +6,6 @@ import 'package:flutter/scheduler.dart';
 import 'package:hrms_plaridel/shared/models/philippine_address_data.dart';
 import 'package:hrms_plaridel/shared/models/philippine_psgc_loader.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
-import 'package:hrms_plaridel/shared/widgets/searchable_dropdown_field.dart';
 
 /// Province → City/Municipality → Barangay (dropdowns nationwide) + Street (text).
 /// Persists as [encodeStructuredAddress] in a single `address` column.
@@ -266,26 +265,64 @@ class StructuredAddressFormState extends State<StructuredAddressForm> {
       );
     }
 
+    Widget searchableDropdown({
+      required String fieldKey,
+      required String? value,
+      required List<String> items,
+      required InputDecoration decoration,
+      required ValueChanged<String?> onSelected,
+      bool enabled = true,
+    }) => DropdownMenu<String>(
+      key: ValueKey(fieldKey),
+      initialSelection: value,
+      expandedInsets: EdgeInsets.zero,
+      menuHeight: 320,
+      enabled: enabled,
+      enableFilter: true,
+      enableSearch: true,
+      requestFocusOnTap: true,
+      hintText: decoration.hintText,
+      helperText: decoration.helperText,
+      textStyle: fieldStyle,
+      inputDecorationTheme: InputDecorationTheme(
+        filled: decoration.filled,
+        fillColor: decoration.fillColor,
+        isDense: decoration.isDense,
+        contentPadding: decoration.contentPadding,
+        border: decoration.border,
+        enabledBorder: decoration.enabledBorder,
+        focusedBorder: decoration.focusedBorder,
+        disabledBorder: decoration.disabledBorder,
+        hintStyle: decoration.hintStyle,
+        helperStyle: decoration.helperStyle,
+      ),
+      menuStyle: MenuStyle(
+        backgroundColor: WidgetStatePropertyAll(AppTheme.dashPanelOf(context)),
+      ),
+      dropdownMenuEntries: items
+          .map((item) => DropdownMenuEntry<String>(value: item, label: item))
+          .toList(),
+      onSelected: onSelected,
+    );
+
     final provinceField = provinceItems.isEmpty
         ? Text(
             'Province list is still loading.',
             style: TextStyle(fontSize: 12, color: tipColor),
           )
-        : SearchableDropdownField(
-            key: ValueKey('province-${provinceItems.length}'),
-            options: provinceItems,
+        : searchableDropdown(
+            fieldKey: 'province-$provinceInitial-${provinceItems.length}',
             value: provinceInitial,
-            style: fieldStyle,
+            items: provinceItems,
             decoration: fieldDec(hint: 'Select province'),
-            onChanged: _onProvinceChanged,
+            onSelected: _onProvinceChanged,
           );
 
-    final cityField = SearchableDropdownField(
-      key: ValueKey('city-${cityItems.length}-$provinceSelected'),
-      options: cityItems,
+    final cityField = searchableDropdown(
+      fieldKey: 'city-$_province-$cityInitial-${cityItems.length}',
       value: cityInitial,
+      items: cityItems,
       enabled: cityEnabled && cityItems.isNotEmpty,
-      style: fieldStyle,
       decoration: fieldDec(
         hint: !provinceSelected
             ? 'Select province first'
@@ -295,20 +332,20 @@ class StructuredAddressFormState extends State<StructuredAddressForm> {
         helper: !provinceSelected ? 'Select province first' : null,
         enabled: cityEnabled,
       ),
-      onChanged: _onCityChanged,
+      onSelected: _onCityChanged,
     );
 
-    final barangayField = SearchableDropdownField(
-      key: ValueKey('brgy-${barangayItems.length}-${_city ?? ''}'),
-      options: barangayItems,
+    final barangayField = searchableDropdown(
+      fieldKey:
+          'brgy-$_province-$_city-$barangayInitial-${barangayItems.length}',
       value: barangayInitial,
+      items: barangayItems,
       enabled: barangayEnabled,
-      style: fieldStyle,
       decoration: fieldDec(
         hint: !provinceSelected
             ? 'Select province first'
             : (_city ?? '').isEmpty
-            ? 'Select city / municipality first'
+            ? 'Select city first'
             : barangayItems.isEmpty
             ? 'Loading barangays…'
             : 'Select barangay',
@@ -319,7 +356,7 @@ class StructuredAddressFormState extends State<StructuredAddressForm> {
             : null,
         enabled: barangayEnabled,
       ),
-      onChanged: (v) {
+      onSelected: (v) {
         setState(() => _barangayDropdown = v);
         _notifyChanged();
       },
@@ -334,9 +371,7 @@ class StructuredAddressFormState extends State<StructuredAddressForm> {
 
     Widget pair(Widget a, Widget b) {
       if (!widget.twoColumn) {
-        return Column(
-          children: [a, const SizedBox(height: 12), b],
-        );
+        return Column(children: [a, const SizedBox(height: 12), b]);
       }
       return Row(
         crossAxisAlignment: CrossAxisAlignment.start,

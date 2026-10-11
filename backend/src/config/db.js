@@ -1,14 +1,7 @@
 const { Pool } = require('pg');
+const {buildPoolOptions} = require('./databasePoolOptions');
 
-// Optional: raise when API runs on Kamatera/VPS and PostgreSQL is over VPN (Tailscale, etc.)
-const connectionTimeoutMillis = parseInt(process.env.PG_CONNECTION_TIMEOUT_MS || '10000', 10);
-
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  max: parseInt(process.env.PG_POOL_MAX || '20', 10),
-  idleTimeoutMillis: 30000,
-  connectionTimeoutMillis: Number.isFinite(connectionTimeoutMillis) ? connectionTimeoutMillis : 10000,
-});
+const pool = new Pool(buildPoolOptions());
 
 // Test connection on first use
 pool.on('connect', () => {

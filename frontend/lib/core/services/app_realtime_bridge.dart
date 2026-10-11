@@ -40,6 +40,11 @@ class _AppRealtimeBridgeState extends State<AppRealtimeBridge> {
       try {
         context.read<LeaveProvider>().invalidateCachedLeaveData();
       } catch (_) {}
+      _refreshNotifications();
+      return;
+    }
+    if (event.name == 'locator_updated') {
+      _refreshNotifications();
       return;
     }
     if (event.name == 'locator_type_updated') {
@@ -61,16 +66,22 @@ class _AppRealtimeBridgeState extends State<AppRealtimeBridge> {
           id: notification['id']?.toString() ?? '',
           title: notification['title']?.toString() ?? 'HRMS Plaridel',
           body: notification['body']?.toString(),
+          data: notification,
         ),
       );
     }
 
-    final notifications = context.read<NotificationProvider>();
-    if (notifications.items.isEmpty) {
-      unawaited(notifications.refreshUnreadCount());
-    } else {
-      unawaited(notifications.loadNotifications());
+    _refreshNotifications();
+  }
+
+  void _refreshNotifications() {
+    NotificationProvider notifications;
+    try {
+      notifications = context.read<NotificationProvider>();
+    } catch (_) {
+      return;
     }
+    notifications.scheduleRefresh();
   }
 
   @override

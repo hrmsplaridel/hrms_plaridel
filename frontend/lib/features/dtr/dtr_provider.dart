@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
 import 'package:hrms_plaridel/core/api/client.dart';
+import 'package:hrms_plaridel/core/api/rate_limit_cooldown.dart';
 import 'package:hrms_plaridel/core/api/config.dart';
 import 'package:hrms_plaridel/core/api/token_storage.dart';
 import 'package:hrms_plaridel/core/api/user_facing_api_error.dart';
@@ -839,10 +840,12 @@ class DtrProvider extends ChangeNotifier {
         _timeRecords = [];
         _timeRecordTotal = 0;
       } else {
-        _error = e.toString();
-        _timeRecords =
-            []; // Show sample data on any load failure for flexible UI
-        _timeRecordTotal = 0;
+        _error = isRateLimitError(e) ? userFacingApiError(e) : e.toString();
+        final previous = isRateLimitError(e) ? _recordsCache[cacheKey] : null;
+        _timeRecords = previous == null
+            ? [] : List<TimeRecord>.from(previous.value);
+        _timeRecordTotal = previous == null
+            ? 0 : (_recordTotalCache[cacheKey] ?? previous.value.length);
       }
       if (!silent) _loading = false;
       notifyListeners();
@@ -1115,8 +1118,10 @@ class DtrProvider extends ChangeNotifier {
       _employeeAttendanceError = message;
       _loading = false;
       _employeeAttendanceLoading = false;
-      _employeeAttendanceHasResult = false;
-      _timeRecords = [];
+      final previous = isRateLimitError(e) ? _recordsCache[cacheKey] : null;
+      _employeeAttendanceHasResult = previous != null;
+      _timeRecords = previous == null
+          ? [] : List<TimeRecord>.from(previous.value);
       notifyListeners();
     }
   }

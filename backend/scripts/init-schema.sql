@@ -58,7 +58,11 @@ CREATE TABLE IF NOT EXISTS users (
   nationality TEXT,
 
   employment_type TEXT
-    CHECK (employment_type IN ('regular', 'contractual', 'job_order', 'casual')),
+    -- regular is retained for importing legacy accounts; new accounts use the seven types.
+    CONSTRAINT users_employment_type_check CHECK (employment_type IN (
+      'permanent', 'temporary', 'casual', 'contractual', 'coterminous',
+      'job_order', 'contract_of_service', 'regular'
+    )),
   salary_grade TEXT,
   date_hired DATE,
   employment_status TEXT DEFAULT 'active'
@@ -98,6 +102,24 @@ CREATE TABLE IF NOT EXISTS users (
 CREATE UNIQUE INDEX IF NOT EXISTS users_single_super_admin_idx
   ON users (role) WHERE role = 'super_admin';
 
+CREATE UNIQUE INDEX IF NOT EXISTS users_single_active_mayor_idx
+  ON users (role) WHERE role = 'mayor' AND is_active = true;
+
+-- JO/COS start without credit accrual eligibility, including direct SQL imports.
+CREATE OR REPLACE FUNCTION apply_jo_cos_credit_default() RETURNS trigger AS $$
+BEGIN
+  IF NEW.employment_type IN ('job_order','contract_of_service')
+    AND (TG_OP='INSERT' OR NEW.employment_type IS DISTINCT FROM OLD.employment_type) THEN
+    NEW.leave_credit_eligible := false;
+    NEW.leave_credit_eligible_until := NULL;
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+DROP TRIGGER IF EXISTS trg_users_jo_cos_credit_default ON users;
+CREATE TRIGGER trg_users_jo_cos_credit_default BEFORE INSERT OR UPDATE OF employment_type ON users
+  FOR EACH ROW EXECUTE FUNCTION apply_jo_cos_credit_default();
+
 CREATE TABLE IF NOT EXISTS account_creation_access (
   admin_user_id UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
   allowed BOOLEAN NOT NULL,
@@ -109,7 +131,6 @@ CREATE TABLE IF NOT EXISTS dtr_admin_access (
   admin_user_id UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
   reports_allowed BOOLEAN NOT NULL DEFAULT false,
   manage_allowed BOOLEAN NOT NULL DEFAULT false,
-  corrections_allowed BOOLEAN NOT NULL DEFAULT false,
   employees_allowed BOOLEAN NOT NULL DEFAULT false,
   leave_allowed BOOLEAN NOT NULL DEFAULT false,
   approvals_allowed BOOLEAN NOT NULL DEFAULT false,
@@ -640,6 +661,7 @@ CREATE TABLE IF NOT EXISTS leave_types (
   balance_ledger_type TEXT NOT NULL DEFAULT 'none',
   entitlement_basis TEXT NOT NULL DEFAULT 'per_request',
   sex_eligibility TEXT NOT NULL DEFAULT 'any',
+  eligible_employment_types TEXT[],
   accrues_monthly BOOLEAN NOT NULL DEFAULT false,
   accrual_monthly_rate NUMERIC(6,3),
   accrual_annual_cap NUMERIC(10,3),
@@ -655,6 +677,16 @@ CREATE TABLE IF NOT EXISTS leave_types (
   ),
   CONSTRAINT chk_leave_type_sex_eligibility CHECK (
     sex_eligibility IN ('any', 'female', 'male')
+  ),
+  CONSTRAINT chk_leave_type_employment_eligibility CHECK (
+    eligible_employment_types IS NULL OR (
+      cardinality(eligible_employment_types) > 0
+      AND array_position(eligible_employment_types, NULL) IS NULL
+      AND eligible_employment_types <@ ARRAY[
+        'permanent', 'temporary', 'casual', 'contractual', 'coterminous',
+        'job_order', 'contract_of_service', 'regular'
+      ]::text[]
+    )
   ),
   CONSTRAINT chk_leave_type_max_days_positive CHECK (
     max_days IS NULL OR max_days > 0
@@ -769,6 +801,11 @@ SET display_name = COALESCE(NULLIF(display_name, ''), description, name),
     accrues_monthly = CASE WHEN name IN ('vacationLeave', 'sickLeave') THEN true ELSE false END,
     accrual_monthly_rate = CASE WHEN name IN ('vacationLeave', 'sickLeave') THEN 1.25 ELSE NULL END,
     accrual_annual_cap = NULL;
+
+-- Built-in filing defaults exclude JO/COS. Keep existing legacy Regular access.
+UPDATE leave_types SET eligible_employment_types = ARRAY[
+  'permanent','temporary','casual','contractual','coterminous','regular']::text[]
+WHERE is_system = true AND eligible_employment_types IS NULL;
 
 -- =========================================
 -- LEAVE REQUESTS
@@ -1020,6 +1057,30 @@ CREATE INDEX IF NOT EXISTS idx_leave_balance_ledger_leave_request
   WHERE related_leave_request_id IS NOT NULL;
 
 -- =========================================
+-- PRIMARY EMPLOYEE REVIEWER DESIGNATIONS
+-- =========================================
+CREATE TABLE IF NOT EXISTS primary_reviewer_designations (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  scope_key TEXT NOT NULL,
+  department_id UUID REFERENCES departments(id) ON DELETE RESTRICT,
+  employee_id UUID NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+  position_id UUID REFERENCES positions(id) ON DELETE SET NULL,
+  position_title_snapshot TEXT,
+  effective_from DATE NOT NULL,
+  effective_to DATE,
+  is_active BOOLEAN NOT NULL DEFAULT true,
+  created_by UUID REFERENCES users(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CHECK (effective_to IS NULL OR effective_to >= effective_from),
+  CHECK ((scope_key = 'final_hr' AND department_id IS NULL)
+    OR (department_id IS NOT NULL AND scope_key = 'department:' || department_id::text)),
+  CONSTRAINT primary_reviewer_no_overlap EXCLUDE USING gist (
+    scope_key WITH =, daterange(effective_from, effective_to, '[]') WITH &&
+  ) WHERE (is_active = true)
+);
+
+-- =========================================
 -- MONTHLY LEAVE ACCRUAL POSTINGS
 -- =========================================
 -- One reconcilable earned-credit posting per employee, leave type, and service month.
@@ -1124,6 +1185,17 @@ CREATE TABLE IF NOT EXISTS user_notifications (
 CREATE INDEX IF NOT EXISTS idx_user_notifications_user_id ON user_notifications(user_id);
 CREATE INDEX IF NOT EXISTS idx_user_notifications_read_at ON user_notifications(user_id, read_at);
 CREATE INDEX IF NOT EXISTS idx_user_notifications_created_at ON user_notifications(user_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS leave_month_end_notification_state (
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  service_month DATE NOT NULL CHECK (EXTRACT(DAY FROM service_month) = 1),
+  totals JSONB NOT NULL DEFAULT '{}'::jsonb,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (user_id, service_month)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS user_notifications_month_end_failure_idx
+  ON user_notifications(user_id, (metadata->>'service_month'))
+  WHERE type = 'leave_month_end_failed';
 
 CREATE TABLE IF NOT EXISTS user_push_tokens (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -1629,55 +1701,7 @@ CREATE TABLE IF NOT EXISTS dtr_leave_coverage (
 );
 
 -- =========================================
--- DTR CORRECTION REQUESTS
--- =========================================
-CREATE TABLE IF NOT EXISTS dtr_correction_reviewer_configs (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  effective_from DATE NOT NULL,
-  reviewer_ids UUID[] NOT NULL,
-  created_by UUID REFERENCES users(id) ON DELETE SET NULL,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  CHECK (cardinality(reviewer_ids) BETWEEN 1 AND 6)
-);
-
-CREATE INDEX IF NOT EXISTS idx_dtr_correction_reviewer_configs_date
-  ON dtr_correction_reviewer_configs(effective_from DESC, created_at DESC, id DESC);
-
-CREATE TABLE IF NOT EXISTS dtr_corrections (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  employee_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  attendance_date DATE NOT NULL,
-
-  requested_time_in TIMESTAMPTZ,
-  requested_time_out TIMESTAMPTZ,
-  requested_break_in TIMESTAMPTZ,
-  requested_break_out TIMESTAMPTZ,
-
-  reason TEXT NOT NULL,
-  original_record JSONB,
-  applied_record JSONB,
-
-  status TEXT NOT NULL DEFAULT 'pending'
-    CHECK (status IN ('pending', 'approved', 'rejected')),
-
-  reviewed_by UUID REFERENCES users(id) ON DELETE SET NULL,
-  reviewed_at TIMESTAMPTZ,
-  review_notes TEXT,
-
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-
--- =========================================
 -- OVERTIME REQUESTS
--- Private correction evidence, served only through authenticated API routes.
-CREATE TABLE IF NOT EXISTS dtr_correction_attachments (
-  correction_id UUID PRIMARY KEY REFERENCES dtr_corrections(id) ON DELETE CASCADE,
-  file_name TEXT NOT NULL,
-  mime_type TEXT NOT NULL CHECK (mime_type IN ('application/pdf', 'image/jpeg', 'image/png')),
-  content BYTEA NOT NULL CHECK (octet_length(content) BETWEEN 1 AND 5242880),
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-);
 -- =========================================
 CREATE TABLE IF NOT EXISTS overtime_requests (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -3341,9 +3365,6 @@ ON dtr_leave_coverage(leave_request_id);
 CREATE INDEX IF NOT EXISTS idx_locator_slips_status_employee_date
 ON locator_slips(status, employee_id, slip_date);
 
-CREATE INDEX IF NOT EXISTS idx_dtr_corrections_employee_id ON dtr_corrections(employee_id);
-CREATE INDEX IF NOT EXISTS idx_dtr_corrections_status ON dtr_corrections(status);
-CREATE INDEX IF NOT EXISTS idx_dtr_corrections_attendance_date ON dtr_corrections(attendance_date);
 
 CREATE INDEX IF NOT EXISTS idx_attendance_policies_is_active ON attendance_policies(is_active);
 
@@ -3505,12 +3526,6 @@ BEFORE UPDATE ON dtr_daily_summary
 FOR EACH ROW
 EXECUTE PROCEDURE set_updated_at();
 
-DROP TRIGGER IF EXISTS trg_dtr_corrections_updated_at ON dtr_corrections;
-CREATE TRIGGER trg_dtr_corrections_updated_at
-BEFORE UPDATE ON dtr_corrections
-FOR EACH ROW
-EXECUTE PROCEDURE set_updated_at();
-
 DROP TRIGGER IF EXISTS trg_overtime_requests_updated_at ON overtime_requests;
 CREATE TRIGGER trg_overtime_requests_updated_at
 BEFORE UPDATE ON overtime_requests
@@ -3630,3 +3645,157 @@ DROP TRIGGER IF EXISTS trg_docutracker_step_assignments_updated_at ON docutracke
 CREATE TRIGGER trg_docutracker_step_assignments_updated_at
 BEFORE UPDATE ON docutracker_workflow_step_assignments
 FOR EACH ROW EXECUTE FUNCTION docutracker_set_updated_at();
+
+-- Versioned printed leave forms
+BEGIN;
+CREATE TABLE IF NOT EXISTS leave_print_template_versions (
+ id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+ leave_type_id UUID NOT NULL REFERENCES leave_types(id) ON DELETE RESTRICT,
+ layout TEXT NOT NULL DEFAULT 'csc' CHECK(layout IN ('csc','wellness')),
+ background_pdf BYTEA,
+ background_name TEXT,
+ created_by UUID REFERENCES users(id),
+ created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+ CHECK(background_pdf IS NULL OR octet_length(background_pdf) <= 5242880)
+);
+ALTER TABLE leave_types ADD COLUMN IF NOT EXISTS print_template_version_id UUID REFERENCES leave_print_template_versions(id);
+ALTER TABLE leave_requests ADD COLUMN IF NOT EXISTS print_template_version_id UUID REFERENCES leave_print_template_versions(id);
+INSERT INTO leave_print_template_versions(leave_type_id)
+ SELECT id FROM leave_types WHERE print_template_version_id IS NULL;
+UPDATE leave_types lt SET print_template_version_id=v.id
+ FROM leave_print_template_versions v WHERE v.leave_type_id=lt.id AND lt.print_template_version_id IS NULL;
+UPDATE leave_requests lr SET print_template_version_id=lt.print_template_version_id
+ FROM leave_types lt WHERE lr.leave_type_id=lt.id AND lr.print_template_version_id IS NULL;
+CREATE OR REPLACE FUNCTION initialize_leave_print_template() RETURNS trigger AS $$
+DECLARE version_id UUID;
+BEGIN
+ INSERT INTO leave_print_template_versions(leave_type_id) VALUES(NEW.id) RETURNING id INTO version_id;
+ UPDATE leave_types SET print_template_version_id=version_id WHERE id=NEW.id;
+ RETURN NEW;
+END; $$ LANGUAGE plpgsql;
+DROP TRIGGER IF EXISTS trg_initialize_leave_print_template ON leave_types;
+CREATE TRIGGER trg_initialize_leave_print_template AFTER INSERT ON leave_types
+ FOR EACH ROW EXECUTE FUNCTION initialize_leave_print_template();
+CREATE OR REPLACE FUNCTION snapshot_leave_print_template() RETURNS trigger AS $$
+BEGIN
+ IF TG_OP='INSERT' THEN
+  SELECT print_template_version_id INTO NEW.print_template_version_id FROM leave_types WHERE id=NEW.leave_type_id;
+ ELSIF OLD.status='draft' OR (NEW.status IN ('pending','pending_department_head','pending_hr') AND
+  OLD.status IN ('returned','returned_by_department_head')) THEN
+  SELECT print_template_version_id INTO NEW.print_template_version_id FROM leave_types WHERE id=NEW.leave_type_id;
+ END IF;
+ RETURN NEW;
+END; $$ LANGUAGE plpgsql;
+DROP TRIGGER IF EXISTS trg_snapshot_leave_print_template ON leave_requests;
+CREATE TRIGGER trg_snapshot_leave_print_template BEFORE INSERT OR UPDATE OF status,leave_type_id ON leave_requests
+ FOR EACH ROW EXECUTE FUNCTION snapshot_leave_print_template();
+COMMIT;
+
+-- Per-leave-type approval routing and request snapshots
+BEGIN;
+ALTER TABLE leave_types ADD COLUMN IF NOT EXISTS approval_route TEXT NOT NULL DEFAULT 'hr' CHECK(approval_route IN ('hr','mayor'));
+ALTER TABLE leave_types ADD COLUMN IF NOT EXISTS mayor_employment_types TEXT[];
+ALTER TABLE leave_types DROP CONSTRAINT IF EXISTS chk_leave_mayor_employment_types;
+ALTER TABLE leave_types ADD CONSTRAINT chk_leave_mayor_employment_types CHECK(mayor_employment_types IS NULL OR
+ (cardinality(mayor_employment_types)>0 AND array_position(mayor_employment_types,NULL) IS NULL AND
+ mayor_employment_types <@ ARRAY['permanent','temporary','casual','contractual','coterminous','job_order','contract_of_service','regular']::text[]));
+ALTER TABLE leave_requests ADD COLUMN IF NOT EXISTS final_review_route TEXT NOT NULL DEFAULT 'hr' CHECK(final_review_route IN ('hr','mayor'));
+ALTER TABLE leave_requests ADD COLUMN IF NOT EXISTS final_reviewer_user_id UUID REFERENCES users(id);
+ALTER TABLE leave_requests ADD COLUMN IF NOT EXISTS routing_employment_type TEXT;
+ALTER TABLE leave_requests DROP CONSTRAINT IF EXISTS leave_requests_status_check;
+ALTER TABLE leave_requests DROP CONSTRAINT IF EXISTS chk_leave_requests_status;
+ALTER TABLE leave_requests ADD CONSTRAINT leave_requests_status_check CHECK(status IN
+ ('draft','pending','pending_department_head','pending_hr','pending_mayor','rejected_by_department_head','rejected_by_hr','returned','approved','rejected','cancelled'));
+CREATE OR REPLACE FUNCTION snapshot_leave_approval_route() RETURNS trigger AS $$
+DECLARE rule leave_types%ROWTYPE; emp_type TEXT; mayor_id UUID; recapture BOOLEAN;
+BEGIN
+ recapture:=TG_OP='INSERT';
+ IF TG_OP='UPDATE' THEN recapture:=OLD.status IN ('draft','returned','rejected_by_department_head','rejected_by_hr') AND NEW.status IN ('pending','pending_department_head','pending_hr'); END IF;
+ IF recapture THEN
+  SELECT * INTO rule FROM leave_types WHERE id=NEW.leave_type_id;
+  SELECT employment_type INTO emp_type FROM users WHERE id=COALESCE(NEW.employee_id,NEW.user_id);
+  NEW.routing_employment_type:=emp_type;
+  NEW.final_review_route:='hr'; NEW.final_reviewer_user_id:=NULL;
+  IF rule.approval_route='mayor' AND (rule.mayor_employment_types IS NULL OR emp_type=ANY(rule.mayor_employment_types)) THEN
+   SELECT id INTO mayor_id FROM users WHERE role='mayor' AND is_active=true AND COALESCE(employment_status,'active')='active'
+    AND (date_hired IS NULL OR date_hired<=(now() AT TIME ZONE 'Asia/Manila')::date)
+    AND (separation_date IS NULL OR separation_date>=(now() AT TIME ZONE 'Asia/Manila')::date) ORDER BY created_at DESC LIMIT 1;
+   NEW.final_review_route:='mayor'; NEW.final_reviewer_user_id:=mayor_id;
+  END IF;
+ END IF;
+ IF NEW.final_review_route='mayor' AND NEW.status IN ('pending_department_head','pending_hr','pending_mayor') THEN
+  IF NEW.final_reviewer_user_id IS NULL OR NEW.final_reviewer_user_id=COALESCE(NEW.employee_id,NEW.user_id) THEN
+   RAISE EXCEPTION 'Approval routing: an eligible active Mayor is required.';
+  END IF;
+  IF NEW.assigned_department_head_id IS NULL OR NEW.assigned_department_head_id=COALESCE(NEW.employee_id,NEW.user_id) THEN
+   RAISE EXCEPTION 'Approval routing: a different department reviewer is required.';
+  END IF;
+ END IF;
+ IF NEW.final_review_route='mayor' AND NEW.status IN ('pending_hr','pending_mayor') THEN
+  RAISE EXCEPTION 'Approval routing: manual Mayor signing requires department approval, without a final electronic reviewer.';
+ END IF;
+ IF NEW.final_review_route='mayor' AND NEW.status='rejected_by_hr' THEN NEW.status:='rejected'; END IF;
+ RETURN NEW;
+END; $$ LANGUAGE plpgsql;
+DROP TRIGGER IF EXISTS trg_snapshot_leave_approval_route ON leave_requests;
+CREATE TRIGGER trg_snapshot_leave_approval_route BEFORE INSERT OR UPDATE OF status,leave_type_id ON leave_requests
+ FOR EACH ROW EXECUTE FUNCTION snapshot_leave_approval_route();
+CREATE OR REPLACE FUNCTION snapshot_leave_print_template() RETURNS trigger AS $$
+BEGIN
+ IF TG_OP='INSERT' THEN
+  SELECT print_template_version_id INTO NEW.print_template_version_id FROM leave_types WHERE id=NEW.leave_type_id;
+ ELSIF OLD.status='draft' OR (NEW.status IN ('pending','pending_department_head','pending_hr','pending_mayor') AND
+  OLD.status IN ('returned','returned_by_department_head')) THEN
+  SELECT print_template_version_id INTO NEW.print_template_version_id FROM leave_types WHERE id=NEW.leave_type_id;
+ END IF;
+ RETURN NEW;
+END;$$ LANGUAGE plpgsql;
+-- Compatibility with local databases that installed the unreleased electronic
+-- Mayor workflow. Complete accounting through the department approval API.
+UPDATE leave_requests SET status='pending_department_head'
+WHERE final_review_route='mayor' AND status='pending_mayor';
+COMMIT;
+
+-- Versioned locator letterheads. Existing slips retain the empty/default template.
+BEGIN;
+CREATE TABLE IF NOT EXISTS locator_print_template_versions (
+ id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+ locator_type_id UUID NOT NULL REFERENCES locator_request_types(id) ON DELETE CASCADE,
+ background_pdf BYTEA,
+ background_name TEXT,
+ created_by UUID REFERENCES users(id),
+ created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+ CHECK(background_pdf IS NULL OR octet_length(background_pdf) <= 5242880)
+);
+ALTER TABLE locator_request_types ADD COLUMN IF NOT EXISTS print_template_version_id UUID REFERENCES locator_print_template_versions(id);
+ALTER TABLE locator_slips ADD COLUMN IF NOT EXISTS print_template_version_id UUID REFERENCES locator_print_template_versions(id);
+INSERT INTO locator_print_template_versions(locator_type_id)
+ SELECT id FROM locator_request_types WHERE print_template_version_id IS NULL;
+UPDATE locator_request_types t SET print_template_version_id=v.id
+ FROM locator_print_template_versions v WHERE v.locator_type_id=t.id AND t.print_template_version_id IS NULL;
+-- Leave existing requests NULL: this means the original/default form and avoids
+-- touching their updated_at/signature/audit triggers during installation.
+CREATE OR REPLACE FUNCTION initialize_locator_print_template() RETURNS trigger AS $$
+DECLARE version_id UUID;
+BEGIN
+ INSERT INTO locator_print_template_versions(locator_type_id) VALUES(NEW.id) RETURNING id INTO version_id;
+ UPDATE locator_request_types SET print_template_version_id=version_id WHERE id=NEW.id;
+ RETURN NEW;
+END; $$ LANGUAGE plpgsql;
+DROP TRIGGER IF EXISTS trg_initialize_locator_print_template ON locator_request_types;
+CREATE TRIGGER trg_initialize_locator_print_template AFTER INSERT ON locator_request_types
+ FOR EACH ROW EXECUTE FUNCTION initialize_locator_print_template();
+CREATE OR REPLACE FUNCTION snapshot_locator_print_template() RETURNS trigger AS $$
+BEGIN
+ IF TG_OP='INSERT' THEN
+  SELECT print_template_version_id INTO NEW.print_template_version_id FROM locator_request_types WHERE code=NEW.request_type;
+ ELSE
+  -- Approval, correction and resubmission must keep the original filed form.
+  NEW.print_template_version_id:=OLD.print_template_version_id;
+ END IF;
+ RETURN NEW;
+END; $$ LANGUAGE plpgsql;
+DROP TRIGGER IF EXISTS trg_snapshot_locator_print_template ON locator_slips;
+CREATE TRIGGER trg_snapshot_locator_print_template BEFORE INSERT OR UPDATE ON locator_slips
+ FOR EACH ROW EXECUTE FUNCTION snapshot_locator_print_template();
+COMMIT;

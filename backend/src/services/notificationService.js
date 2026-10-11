@@ -1,5 +1,7 @@
 const { broadcastAppEvent } = require('../websockets/appEvents');
 const { sendPushForNotification } = require('./fcmPushService');
+const { departmentApproverSql } = require('./approvalStageSeparation');
+const {reconcileReviewNotificationsIfNeeded} = require('./reviewNotificationCompletion');
 
 /**
  * Global in-app notifications (header bell). DocuTracker uses docutracker_notifications
@@ -26,6 +28,7 @@ async function insertNotification(db, opts) {
     referenceType = null,
     referenceId = null,
     metadata = null,
+    deferDelivery = false,
   } = opts;
   const r = await db.query(
     `INSERT INTO user_notifications (user_id, category, type, title, body, reference_type, reference_id, metadata)
@@ -34,6 +37,14 @@ async function insertNotification(db, opts) {
     [userId, category, type, title, body, referenceType, referenceId, metadata ? JSON.stringify(metadata) : null]
   );
   const row = r.rows[0];
+  if (!deferDelivery) publishNotification(db, row);
+  return row;
+}
+
+/** Deliver only after the caller has committed a transactional notification. */
+function publishNotification(db, row) {
+  // Delivery occurs after commit: newly inserted/delayed alerts must bypass the repair cooldown.
+  reconcileReviewNotificationsIfNeeded.invalidate(db, row.user_id);
   broadcastAppEvent(
     'notification_created',
     { notification: mapRowToApi(row) },
@@ -42,7 +53,6 @@ async function insertNotification(db, opts) {
   sendPushForNotification(db, row).catch((err) => {
     console.error('[notificationService] sendPushForNotification', err);
   });
-  return row;
 }
 
 /**
@@ -64,12 +74,43 @@ async function insertNotificationForUsers(db, userIds, payload) {
   }
 }
 
+// Obsolete self-review alerts may exist from older notification routing.
+const reviewNotificationVisibilitySql = `NOT (
+  type IN ('leave_pending_mayor', 'leave_forwarded_to_mayor')
+) AND NOT (
+  type IN ('locator_pending_hr', 'locator_forwarded_to_hr', 'locator_pending_department_head')
+  AND EXISTS (
+    SELECT 1 FROM locator_slips ls
+    WHERE ls.id = user_notifications.reference_id
+      AND ls.employee_id = user_notifications.user_id
+  )
+) AND NOT (
+  type IN ('leave_pending_hr', 'leave_forwarded_to_hr', 'leave_pending_mayor', 'leave_forwarded_to_mayor', 'leave_pending_department_head')
+  AND EXISTS (
+    SELECT 1 FROM leave_requests lr
+    WHERE lr.id = user_notifications.reference_id
+      AND COALESCE(lr.user_id, lr.employee_id) = user_notifications.user_id
+  )
+) AND NOT (
+  type IN ('locator_pending_hr', 'locator_forwarded_to_hr')
+  AND EXISTS (SELECT 1 FROM locator_slips ls
+    WHERE ls.id = user_notifications.reference_id
+      AND ls.dept_head_reviewer_id = user_notifications.user_id)
+) AND NOT (
+  type IN ('leave_pending_hr', 'leave_forwarded_to_hr', 'leave_pending_mayor', 'leave_forwarded_to_mayor')
+  AND EXISTS (SELECT 1 FROM leave_requests lr
+    WHERE lr.id = user_notifications.reference_id
+      AND ${departmentApproverSql('leave', 'lr')} = user_notifications.user_id)
+)`;
+
 async function listNotifications(db, userId, { limit = 50, unreadOnly = false } = {}) {
+  await reconcileReviewNotificationsIfNeeded(db, userId);
   const safeLimit = Math.min(Math.max(parseInt(String(limit), 10) || 50, 1), 200);
   const r = await db.query(
     `SELECT id, user_id, category, type, title, body, read_at, reference_type, reference_id, metadata, created_at
      FROM user_notifications
      WHERE user_id = $1::uuid
+       AND ${reviewNotificationVisibilitySql}
        AND ($2::boolean = false OR read_at IS NULL)
      ORDER BY created_at DESC
      LIMIT $3`,
@@ -79,8 +120,10 @@ async function listNotifications(db, userId, { limit = 50, unreadOnly = false } 
 }
 
 async function countUnread(db, userId) {
+  await reconcileReviewNotificationsIfNeeded(db, userId);
   const r = await db.query(
-    `SELECT count(*)::int AS c FROM user_notifications WHERE user_id = $1::uuid AND read_at IS NULL`,
+    `SELECT count(*)::int AS c FROM user_notifications WHERE user_id = $1::uuid AND read_at IS NULL
+       AND ${reviewNotificationVisibilitySql}`,
     [userId]
   );
   return r.rows[0]?.c ?? 0;
@@ -124,6 +167,7 @@ function mapRowToApi(row) {
 }
 
 module.exports = {
+  publishNotification,
   insertNotification,
   insertNotificationForUsers,
   listNotifications,

@@ -15,13 +15,12 @@ enum NotificationTapKind {
 
   /// Employee: My Leave → My Requests.
   employeeLeaveRequests,
+  employeeLeaveCreditHistory,
   employeeLocatorApprovals,
   employeeLocatorRequests,
 
-  /// Employee: My Attendance (e.g. DTR correction approved/rejected).
+  /// Employee: My Attendance.
   employeeMyAttendance,
-  dtrCorrectionReview,
-  dtrCorrectionRequests,
 
   /// Admin: Recruitment (RSP) applications.
   adminRecruitment,
@@ -69,14 +68,21 @@ class NotificationTapResult {
     final t = n.type.toLowerCase();
     final isPrivileged = role == 'admin' || role == 'hr';
 
+
+    if (cat == 'leave' && role == 'mayor') {
+      return const NotificationTapResult(NotificationTapKind.none);
+    }
+    if (cat == 'leave' &&
+        (t == 'leave_month_end_balance_updated' ||
+            t == 'leave_month_end_balance_corrected')) {
+      return const NotificationTapResult(
+        NotificationTapKind.employeeLeaveCreditHistory,
+      );
+    }
+
     if (cat == 'dtr') {
       if (t.startsWith('dtr_correction_')) {
-        return NotificationTapResult(
-          t == 'dtr_correction_pending_review' && isPrivileged
-              ? NotificationTapKind.dtrCorrectionReview
-              : NotificationTapKind.dtrCorrectionRequests,
-          referenceId: _trimmedOrNull(n.referenceId),
-        );
+        return const NotificationTapResult(NotificationTapKind.none);
       }
       if (!isPrivileged && (t.contains('approved') || t.contains('rejected'))) {
         return const NotificationTapResult(
@@ -120,7 +126,10 @@ class NotificationTapResult {
 
     if (cat != 'leave') {
       if (cat == 'locator') {
-        if (isPrivileged) {
+        if (isPrivileged &&
+            (t.contains('pending_hr') ||
+                t.contains('forwarded_to_hr') ||
+                t.contains('cancelled_hr'))) {
           return const NotificationTapResult(
             NotificationTapKind.adminDtrLocatorManagement,
           );
@@ -137,6 +146,13 @@ class NotificationTapResult {
       return const NotificationTapResult(NotificationTapKind.none);
     }
 
+    if (t.contains('pending_department_head') ||
+        t.contains('cancelled_department_head')) {
+      return const NotificationTapResult(
+        NotificationTapKind.employeeLeaveApprovals,
+      );
+    }
+
     if (isPrivileged) {
       if (t.contains('pending_hr') ||
           t.contains('forwarded_to_hr') ||
@@ -151,14 +167,6 @@ class NotificationTapResult {
         );
       }
       return const NotificationTapResult(NotificationTapKind.none);
-    }
-
-    // Employee, supervisor, or department head (non-admin)
-    if (t.contains('pending_department_head') ||
-        t.contains('cancelled_department_head')) {
-      return const NotificationTapResult(
-        NotificationTapKind.employeeLeaveApprovals,
-      );
     }
 
     return const NotificationTapResult(

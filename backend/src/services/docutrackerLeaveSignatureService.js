@@ -1,7 +1,7 @@
 const {
   createSignatureAsset,
 } = require('./docutrackerDocumentBuilderService');
-const { assertFinalLeaveReviewer, resolveFinalLeaveReviewers } = require('./leaveFinalReviewerService');
+const { assertFinalLeaveReviewer, resolveEligibleFinalReviewers } = require('./leaveFinalReviewerService');
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -14,6 +14,7 @@ const APPLICANT_SIGNABLE_STATUSES = new Set([
   'pending',
   'pending_department_head',
   'pending_hr',
+  'pending_mayor',
 ]);
 
 function serviceError(code, message) {
@@ -38,7 +39,7 @@ function canDepartmentHeadSignStatus(status) {
 
 function canHrApproverSignStatus(status) {
   const normalized = String(status || '').trim().toLowerCase();
-  return normalized === 'pending_hr' || normalized === 'pending';
+  return normalized === 'pending_hr' || normalized === 'pending_mayor' || normalized === 'pending';
 }
 
 function assertSupportedLeaveSource(sourceModule, sourceTable) {
@@ -53,7 +54,7 @@ async function loadLeaveContext(db, leaveRequestId, user, { forUpdate = false } 
   }
   const result = await db.query(
     `SELECT lr.id,
-            lr.status,
+            lr.status,lr.final_review_route,lr.final_reviewer_user_id,
             COALESCE(lr.user_id, lr.employee_id) AS employee_user_id,
             employee.full_name AS employee_name,
             lr.assigned_department_head_id,
@@ -93,7 +94,7 @@ async function loadLeaveContext(db, leaveRequestId, user, { forUpdate = false } 
   const userId = String(user.id || '');
   const role = String(user.role || '').toLowerCase();
   const isOwner = String(row.employee_user_id || '') === userId;
-  const isHrOrAdmin = role === 'admin' || role === 'hr';
+  const isHrOrAdmin = role === 'admin' || role === 'hr' || (role==='mayor' && String(row.final_reviewer_user_id)===userId);
   const isReviewer =
     String(row.assigned_department_head_id || '') === userId ||
     row.is_snapshotted_reviewer === true ||
@@ -156,7 +157,7 @@ function mapHrApproverSignature(context, row, user, canReview) {
   return {
     id: row?.id || null,
     slot_key: HR_APPROVER_SLOT,
-    label: 'Final Approver Signature',
+    label: context.final_review_route==='mayor'?'Mayor Signature':'Final Approver Signature',
     assigned_signer_id:
       row?.assigned_signer_id || (canReview ? user.id : null),
     assigned_signer_name:
@@ -184,7 +185,7 @@ async function getLeaveSourceSignatures(
   const context = await loadLeaveContext(pool, leaveRequestId, user);
   const canReview = context.isHrOrAdmin && !context.isOwner &&
     canHrApproverSignStatus(context.status) &&
-    (await resolveFinalLeaveReviewers(pool)).some((reviewer) =>
+    (await resolveEligibleFinalReviewers(pool, context.employee_user_id, 'leave', leaveRequestId)).some((reviewer) =>
       String(reviewer.id) === String(user.id));
   let result;
   try {
@@ -291,7 +292,7 @@ async function signLeaveSourceSlot(
           'The final approver signature can only be added while awaiting HR review'
         );
       }
-      await assertFinalLeaveReviewer(client, context.employee_user_id, user.id);
+      await assertFinalLeaveReviewer(client, context.employee_user_id, user.id, 'leave', leaveRequestId);
     } else {
       throw serviceError('NOT_FOUND', 'Leave signature field not found');
     }

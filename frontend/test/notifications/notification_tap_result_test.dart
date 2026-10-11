@@ -3,6 +3,43 @@ import 'package:hrms_plaridel/features/notifications/models/app_notification.dar
 import 'package:hrms_plaridel/features/notifications/models/notification_tap_result.dart';
 
 void main() {
+  test('obsolete Mayor approval notifications have no approval destination', () {
+    for (final type in ['leave_pending_mayor','leave_forwarded_to_mayor']) {
+      final result=NotificationTapResult.fromNotification(AppNotification(id:'notice',category:'leave',type:type,
+        title:'Mayor approval',createdAt:DateTime(2026,10,10)),role:'mayor');
+      expect(result.kind,NotificationTapKind.none);
+    }
+  });
+  test('admin department leave review opens personal department approvals', () {
+    final result = NotificationTapResult.fromNotification(AppNotification(
+      id: 'department', category: 'leave', type: 'leave_pending_department_head',
+      title: 'Review', createdAt: DateTime(2026, 10, 9),
+    ), role: 'admin');
+    expect(result.kind, NotificationTapKind.employeeLeaveApprovals);
+  });
+  for (final role in ['employee', 'admin', 'hr', 'supervisor']) {
+    test(
+      '$role opens personal credit history for month-end balance notices',
+      () {
+        for (final type in [
+          'leave_month_end_balance_updated',
+          'leave_month_end_balance_corrected',
+        ]) {
+          final result = NotificationTapResult.fromNotification(
+            AppNotification(
+              id: 'month-end',
+              category: 'leave',
+              type: type,
+              title: 'Balance updated',
+              createdAt: DateTime(2026, 10, 1),
+            ),
+            role: role,
+          );
+          expect(result.kind, NotificationTapKind.employeeLeaveCreditHistory);
+        }
+      },
+    );
+  }
   AppNotification notification({
     required String category,
     required String type,
@@ -35,7 +72,7 @@ void main() {
 
   for (final role in ['admin', 'hr', 'employee']) {
     for (final decision in ['approved', 'rejected']) {
-      test('$role opens own DTR $decision request, not the review queue', () {
+      test('$role ignores retired DTR $decision notification links', () {
         final result = NotificationTapResult.fromNotification(
           notification(
             category: 'dtr',
@@ -44,12 +81,12 @@ void main() {
           ),
           role: role,
         );
-        expect(result.kind, NotificationTapKind.dtrCorrectionRequests);
-        expect(result.referenceId, 'request-1');
+        expect(result.kind, NotificationTapKind.none);
+        expect(result.referenceId, isNull);
       });
     }
   }
-  test('HR pending DTR notification opens the specific review', () {
+  test('HR pending DTR notification does not open retired workflow', () {
     final result = NotificationTapResult.fromNotification(
       notification(
         category: 'dtr',
@@ -58,8 +95,8 @@ void main() {
       ),
       role: 'hr',
     );
-    expect(result.kind, NotificationTapKind.dtrCorrectionReview);
-    expect(result.referenceId, 'request-2');
+    expect(result.kind, NotificationTapKind.none);
+    expect(result.referenceId, isNull);
   });
 
   test('hr recruitment tap also deep-links to the application', () {

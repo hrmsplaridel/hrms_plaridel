@@ -12,7 +12,8 @@ const {
   authRegisterLimiter,
   authPasswordResetLimiter,
   authPasswordResetVerifyLimiter,
-  authTokenLimiter,
+  authRefreshLimiters,
+  authLogoutLimiters,
   authPasswordChangeLimiter,
 } = require('../middleware/rateLimiters');
 const {
@@ -253,7 +254,7 @@ router.post('/login', authLoginLimiter, async (req, res) => {
  * Body: { refreshToken: string }
  * Returns new { token, refreshToken } (rotates refresh token).
  */
-router.post('/refresh', authTokenLimiter, async (req, res) => {
+router.post('/refresh', ...authRefreshLimiters, async (req, res) => {
   const raw = req.body?.refreshToken;
   if (!raw || typeof raw !== 'string') {
     return res.status(400).json({ error: 'refreshToken is required' });
@@ -356,7 +357,7 @@ router.post('/refresh', authTokenLimiter, async (req, res) => {
  * Body: { refreshToken: string }
  * Revokes the refresh token row (optional client cleanup).
  */
-router.post('/logout', authTokenLimiter, async (req, res) => {
+router.post('/logout', ...authLogoutLimiters, async (req, res) => {
   const raw = req.body?.refreshToken;
   if (!raw || typeof raw !== 'string') {
     return res.status(400).json({ error: 'refreshToken is required' });
@@ -472,7 +473,7 @@ router.get('/sessions', authMiddleware, async (req, res) => {
 /**
  * DELETE /auth/sessions/:id — revoke one refresh session owned by this user.
  */
-router.delete('/sessions/:id', authMiddleware, authTokenLimiter, async (req, res) => {
+router.delete('/sessions/:id', authMiddleware, ...authLogoutLimiters, async (req, res) => {
   try {
     const sessionId = req.params.id;
     if (!isUuid(sessionId)) {

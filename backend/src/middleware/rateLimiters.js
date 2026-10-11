@@ -19,6 +19,7 @@ function createJsonLimiter({
   skipSuccessfulRequests = false,
   skip,
   keyGenerator,
+  scope,
 }) {
   return rateLimit({
     windowMs,
@@ -29,11 +30,61 @@ function createJsonLimiter({
     skip,
     keyGenerator,
     message: { error: message },
+    ...(scope ? {handler: (req, res) => {
+      const reset = req.rateLimit?.resetTime?.getTime?.() || Date.now() + windowMs;
+      const retryAfterSeconds = Math.max(1, Math.ceil((reset - Date.now()) / 1000));
+      res.setHeader('Retry-After', retryAfterSeconds);
+      res.status(429).json({error: message, code: 'RATE_LIMITED', rateLimitScope: scope, retryAfterSeconds});
+    }} : {}),
   });
 }
 
 function isReadRequest(req) {
   return req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS';
+}
+
+function isHeavyApiRequest(req) {
+  if (req.method !== 'POST') return false;
+  const path = req.path.replace(/\/+$/, '').toLowerCase();
+  return path === '/dtr-daily-summary/bulk-report' ||
+    /^\/(leave|locator-slips)\/print\/(requests\/[^/]+\/render|types\/[^/]+\/preview)$/.test(path);
+}
+
+function createApiRateLimits({
+  db,
+  windowMs = parsePositiveInt(process.env.RATE_LIMIT_WINDOW_MS, FIFTEEN_MINUTES_MS),
+  readMax = parsePositiveInt(process.env.RATE_LIMIT_READ_MAX, 3000),
+  writeMax = parsePositiveInt(process.env.RATE_LIMIT_MAX, 300),
+  ipReadMax = parsePositiveInt(process.env.RATE_LIMIT_IP_READ_MAX, 60000),
+  ipWriteMax = parsePositiveInt(process.env.RATE_LIMIT_IP_WRITE_MAX, 6000),
+  heavyMax = parsePositiveInt(process.env.RATE_LIMIT_HEAVY_MAX, 30),
+} = {}) {
+  const { createAuthMiddleware, getVerifiedUser } = require('./auth');
+  const authenticate = createAuthMiddleware(db);
+  const keyGenerator = req => {
+    const user = getVerifiedUser(req);
+    return user ? `employee:${user.id}` : `ip:${ipKeyGenerator(req.ip)}`;
+  };
+  return [
+    // Coarse flood protection runs before account checks; routine quotas follow authentication.
+    createJsonLimiter({windowMs, limit: ipReadMax, scope: 'network_read', skip: req => !isReadRequest(req),
+      message: 'Too many requests from this network. Please wait and try again.'}),
+    createJsonLimiter({windowMs, limit: ipWriteMax, scope: 'network_write', skip: isReadRequest,
+      message: 'Too many requests from this network. Please wait and try again.'}),
+    (req, res, next) => {
+      if (!req.headers.authorization) return next();
+      return authenticate(req, res, next);
+    },
+    createJsonLimiter({windowMs, limit: readMax, keyGenerator, scope: 'api_read',
+      skip: req => !isReadRequest(req),
+      message: 'Too many API read requests. Please wait and try again.'}),
+    createJsonLimiter({windowMs, limit: writeMax, keyGenerator, scope: 'api_write',
+      skip: req => isReadRequest(req) || isHeavyApiRequest(req),
+      message: 'Too many API requests. Please wait and try again.'}),
+    createJsonLimiter({windowMs, limit: heavyMax, keyGenerator, scope: 'api_heavy',
+      skip: req => !isHeavyApiRequest(req),
+      message: 'Too many report or PDF requests. Please wait and try again.'}),
+  ];
 }
 
 function authenticatedEmployeeKey(req) {
@@ -112,21 +163,8 @@ function createEmployeeAssistantLimiter({
   });
 }
 
-const generalApiReadLimiter = createJsonLimiter({
-  windowMs: parsePositiveInt(process.env.RATE_LIMIT_WINDOW_MS, FIFTEEN_MINUTES_MS),
-  limit: parsePositiveInt(process.env.RATE_LIMIT_READ_MAX, 3000),
-  message: 'Too many API read requests. Please wait and try again.',
-  skip: (req) => !isReadRequest(req),
-});
-
-const generalApiLimiter = createJsonLimiter({
-  windowMs: parsePositiveInt(process.env.RATE_LIMIT_WINDOW_MS, FIFTEEN_MINUTES_MS),
-  limit: parsePositiveInt(process.env.RATE_LIMIT_MAX, 300),
-  message: 'Too many API requests. Please wait and try again.',
-  skip: isReadRequest,
-});
-
 const authLoginLimiter = createJsonLimiter({
+  scope: 'auth_login',
   windowMs: parsePositiveInt(
     process.env.AUTH_LOGIN_RATE_LIMIT_WINDOW_MS,
     FIFTEEN_MINUTES_MS,
@@ -137,6 +175,7 @@ const authLoginLimiter = createJsonLimiter({
 });
 
 const authRegisterLimiter = createJsonLimiter({
+  scope: 'auth_register',
   windowMs: parsePositiveInt(
     process.env.AUTH_REGISTER_RATE_LIMIT_WINDOW_MS,
     ONE_HOUR_MS,
@@ -146,6 +185,7 @@ const authRegisterLimiter = createJsonLimiter({
 });
 
 const authPasswordResetLimiter = createJsonLimiter({
+  scope: 'auth_password_reset',
   windowMs: parsePositiveInt(
     process.env.AUTH_PASSWORD_RESET_RATE_LIMIT_WINDOW_MS,
     FIFTEEN_MINUTES_MS,
@@ -155,6 +195,7 @@ const authPasswordResetLimiter = createJsonLimiter({
 });
 
 const authPasswordResetVerifyLimiter = createJsonLimiter({
+  scope: 'auth_password_reset_verify',
   windowMs: parsePositiveInt(
     process.env.AUTH_PASSWORD_RESET_VERIFY_RATE_LIMIT_WINDOW_MS,
     FIFTEEN_MINUTES_MS,
@@ -163,16 +204,39 @@ const authPasswordResetVerifyLimiter = createJsonLimiter({
   message: 'Too many password reset verification attempts. Please wait and try again.',
 });
 
-const authTokenLimiter = createJsonLimiter({
-  windowMs: parsePositiveInt(
-    process.env.AUTH_TOKEN_RATE_LIMIT_WINDOW_MS,
-    FIFTEEN_MINUTES_MS,
-  ),
-  limit: parsePositiveInt(process.env.AUTH_TOKEN_RATE_LIMIT_MAX, 60),
-  message: 'Too many authentication requests. Please wait and try again.',
-});
+function createAuthTokenLimiters({
+  windowMs = parsePositiveInt(process.env.AUTH_TOKEN_RATE_LIMIT_WINDOW_MS, FIFTEEN_MINUTES_MS),
+  refreshMax = parsePositiveInt(process.env.AUTH_REFRESH_RATE_LIMIT_MAX,
+    parsePositiveInt(process.env.AUTH_TOKEN_RATE_LIMIT_MAX, 60)),
+  logoutMax = parsePositiveInt(process.env.AUTH_LOGOUT_RATE_LIMIT_MAX,
+    parsePositiveInt(process.env.AUTH_TOKEN_RATE_LIMIT_MAX, 60)),
+  ipMax = parsePositiveInt(process.env.AUTH_TOKEN_IP_RATE_LIMIT_MAX, 6000),
+} = {}) {
+  const keyGenerator = req => {
+    const {getVerifiedUser} = require('./auth');
+    const user = getVerifiedUser(req);
+    if (user) return `employee:${user.id}`;
+    try {
+      const payload = require('jsonwebtoken').verify(req.body?.refreshToken, process.env.JWT_REFRESH_SECRET);
+      if (payload.typ === 'refresh' && typeof payload.id === 'string' && payload.id) {
+        return `employee:${payload.id}`;
+      }
+    } catch (_) { /* Invalid credentials stay in the IP bucket; routes reject them. */ }
+    return `ip:${ipKeyGenerator(req.ip)}`;
+  };
+  const limits = (limit, scope) => [
+    createJsonLimiter({windowMs, limit: ipMax, scope: `network_${scope}`,
+      message: 'Too many authentication requests from this network. Please wait and try again.'}),
+    createJsonLimiter({windowMs, limit, keyGenerator, scope,
+      message: 'Too many authentication requests. Please wait and try again.'}),
+  ];
+  return {refresh: limits(refreshMax, 'auth_refresh'), logout: limits(logoutMax, 'auth_logout')};
+}
+
+const {refresh: authRefreshLimiters, logout: authLogoutLimiters} = createAuthTokenLimiters();
 
 const authPasswordChangeLimiter = createJsonLimiter({
+  scope: 'auth_password_change',
   windowMs: parsePositiveInt(
     process.env.AUTH_PASSWORD_CHANGE_RATE_LIMIT_WINDOW_MS,
     FIFTEEN_MINUTES_MS,
@@ -266,16 +330,17 @@ const dtrAssistantExportLimiter = createEmployeeAssistantLimiter({
 });
 
 module.exports = {
+  createApiRateLimits,
   createEmployeeAssistantLimiter,
   createPublicIpLimiter,
   createApplicantWorkflowLimiter,
-  generalApiReadLimiter,
-  generalApiLimiter,
   authLoginLimiter,
   authRegisterLimiter,
   authPasswordResetLimiter,
   authPasswordResetVerifyLimiter,
-  authTokenLimiter,
+  createAuthTokenLimiters,
+  authRefreshLimiters,
+  authLogoutLimiters,
   authPasswordChangeLimiter,
   publicApplicationCreateLimiter,
   publicApplicationUploadLimiter,

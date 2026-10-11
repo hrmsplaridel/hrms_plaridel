@@ -6,8 +6,6 @@ async function loadDtrAccess(userId, db = pool) {
                       WHERE admin_user_id = $1::uuid), false) AS reports_allowed,
             COALESCE((SELECT manage_allowed FROM dtr_admin_access
                       WHERE admin_user_id = $1::uuid), false) AS manage_allowed,
-            COALESCE((SELECT corrections_allowed FROM dtr_admin_access
-                      WHERE admin_user_id = $1::uuid), false) AS corrections_allowed,
             COALESCE((SELECT employees_allowed FROM dtr_admin_access
                       WHERE admin_user_id = $1::uuid), false) AS employees_allowed,
             COALESCE((SELECT leave_allowed FROM dtr_admin_access
@@ -75,7 +73,7 @@ const requireDtrManageAccess = requireDtrAccess('manage_allowed');
 const requireDtrReportsIfAdmin = requireDtrAccessIfAdmin('reports_allowed');
 const requireDtrManageIfAdmin = requireDtrAccessIfAdmin('manage_allowed');
 const requireDtrFeatureIfAdmin = (feature) => {
-  const fields = ['corrections_allowed', 'employees_allowed', 'leave_allowed', 'approvals_allowed', 'locator_allowed'];
+  const fields = ['employees_allowed', 'leave_allowed', 'approvals_allowed', 'locator_allowed'];
   if (!fields.includes(feature)) throw new Error(`Unknown DTR feature: ${feature}`);
   return requireDtrAccessIfAdmin(feature);
 };

@@ -9,7 +9,7 @@ const EMPLOYEE_ID = '00000000-0000-0000-0000-000000000101';
 const DEPARTMENT_ID = '00000000-0000-0000-0000-000000000201';
 const HEAD_ID = '00000000-0000-0000-0000-000000000301';
 
-function createHarness({ reviewerAvailable = true, signatureFailure = false } = {}) {
+function createHarness({ reviewerAvailable = true, signatureFailure = false, singleSession = false } = {}) {
   const state = {
     queries: [],
     inserts: [],
@@ -85,7 +85,8 @@ function createHarness({ reviewerAvailable = true, signatureFailure = false } = 
         }],
       };
     },
-    validateWorkingDay: async () => ({ ok: true }),
+    validateWorkingDay: async (_db,_employee,_date,slots) => singleSession && (slots.amOut || slots.pmIn)
+      ? {ok:false,error:'Single-session shifts use IN and OUT only.'} : {ok:true},
     getLocatorTypeByCode: async (_client, code) => ({
       code,
       label:
@@ -154,6 +155,14 @@ test('locator filing is blocked before insertion when no final reviewer is avail
   await assert.rejects(service.submit(validInput()), /No eligible final reviewer/);
   assert.equal(state.inserts.length, 0);
   assert.equal(state.notifications.length, 0);
+});
+
+test('single-session invalid middle segments are validated before insertion', async()=>{
+  const {service,state}=createHarness({singleSession:true});
+  await assert.rejects(service.submit(validInput({amOut:true})),/IN and OUT only/);
+  assert.equal(state.inserts.length,0);assert.ok(state.queries.includes('ROLLBACK'));
+  await service.submit(validInput({amIn:true,amOut:false,pmIn:false,pmOut:true}));
+  assert.equal(state.inserts.length,1);
 });
 
 test('signature failure rolls submission back before notifications or commit', async () => {

@@ -147,9 +147,11 @@ class EmployeeLocatorMobileSegmentSelector extends StatelessWidget {
     required this.onPmIn,
     required this.onPmOut,
     this.accent = const Color(0xFFF57C00),
+    this.singleSession = false,
   });
 
   final bool amIn;
+  final bool singleSession;
   final bool amOut;
   final bool pmIn;
   final bool pmOut;
@@ -174,28 +176,30 @@ class EmployeeLocatorMobileSegmentSelector extends StatelessWidget {
       child: Row(
         children: [
           _SegmentCell(
-            label: 'AM IN',
+            label: singleSession ? 'IN' : 'AM IN',
             selected: amIn,
             onTap: locked ? null : onAmIn,
             accent: accent,
           ),
+          if (!singleSession) ...[
+            _SegmentDivider(divider),
+            _SegmentCell(
+              label: 'AM OUT',
+              selected: amOut,
+              onTap: locked ? null : onAmOut,
+              accent: accent,
+            ),
+            _SegmentDivider(divider),
+            _SegmentCell(
+              label: 'PM IN',
+              selected: pmIn,
+              onTap: locked ? null : onPmIn,
+              accent: accent,
+            ),
+          ],
           _SegmentDivider(divider),
           _SegmentCell(
-            label: 'AM OUT',
-            selected: amOut,
-            onTap: locked ? null : onAmOut,
-            accent: accent,
-          ),
-          _SegmentDivider(divider),
-          _SegmentCell(
-            label: 'PM IN',
-            selected: pmIn,
-            onTap: locked ? null : onPmIn,
-            accent: accent,
-          ),
-          _SegmentDivider(divider),
-          _SegmentCell(
-            label: 'PM OUT',
+            label: singleSession ? 'OUT' : 'PM OUT',
             selected: pmOut,
             onTap: locked ? null : onPmOut,
             accent: accent,

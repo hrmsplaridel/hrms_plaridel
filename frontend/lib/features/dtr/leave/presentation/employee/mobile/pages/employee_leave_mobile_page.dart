@@ -132,6 +132,17 @@ class _EmployeeLeaveMobilePageState extends State<EmployeeLeaveMobilePage>
         !provider.myRequestsLoaded &&
         !provider.myBalancesLoaded;
     const creditTypes = {'vacationLeave', 'sickLeave'};
+    final showCredits =
+        context.watch<AuthProvider>().user?.leaveCreditEligible != false ||
+        provider.balances.any(
+          (b) =>
+              creditTypes.contains(b.effectiveLeaveTypeName) &&
+              (b.earnedDays != 0 ||
+                  b.usedDays != 0 ||
+                  b.pendingDays != 0 ||
+                  b.adjustedDays != 0 ||
+                  b.lastAccrualDate != null),
+        );
     final totalAvailable = provider.myBalancesLoaded
         ? provider.balances
               .where((b) => creditTypes.contains(b.effectiveLeaveTypeName))
@@ -157,6 +168,7 @@ class _EmployeeLeaveMobilePageState extends State<EmployeeLeaveMobilePage>
       showLoading: showLeaveSkeleton,
       loadingSkeleton: const MyLeaveLoadingSkeleton(compact: true),
       summaryStrip: EmployeeLeaveMobileSummaryStrip(
+        showCredits: showCredits,
         totalAvailable: totalAvailable,
         pendingCount: provider.myRequestsLoaded ? provider.pendingCount : null,
         totalPendingDays: totalPendingDays,
@@ -165,6 +177,7 @@ class _EmployeeLeaveMobilePageState extends State<EmployeeLeaveMobilePage>
             provider.myRequestsLoaded && provider.officialDate != null,
       ),
       balancesPanel: EmployeeLeaveMobileBalancesPanel(
+        showCredits: showCredits,
         balances: provider.balances,
         loading: provider.myBalancesLoading,
         error: provider.myBalancesError,

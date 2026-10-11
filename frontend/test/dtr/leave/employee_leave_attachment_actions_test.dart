@@ -5,9 +5,27 @@ import 'package:hrms_plaridel/features/dtr/leave/data/repositories/mock_leave_re
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_request.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_type.dart';
 import 'package:hrms_plaridel/features/dtr/leave/presentation/employee/shared/widgets/employee_leave_requests_panel.dart';
+import 'package:hrms_plaridel/features/dtr/leave/presentation/shared/widgets/leave_request_information.dart';
 import 'package:provider/provider.dart';
 
 void main() {
+  testWidgets('employee details use the shared layout on a narrow screen', (
+    tester,
+  ) async {
+    await _pumpPanel(tester, _request(withAttachment: true), width: 390);
+    await tester.tap(find.text('Sick Leave'));
+    await tester.pumpAndSettle();
+    expect(find.byType(LeaveRequestInformation), findsOneWidget);
+    expect(find.text('Employee Information'), findsOneWidget);
+    await tester.ensureVisible(
+      find.byKey(const Key('employee-leave-attachment-preview')),
+    );
+    expect(
+      find.byKey(const Key('employee-leave-attachment-preview')),
+      findsOneWidget,
+    );
+    expect(tester.takeException(), isNull);
+  });
   testWidgets('pending request shows its attachment and read-only actions', (
     tester,
   ) async {
@@ -20,6 +38,12 @@ void main() {
       findsOneWidget,
     );
     expect(find.byType(Dialog), findsNothing);
+    expect(find.text('Employee Information'), findsOneWidget);
+    expect(find.text('Leave Details'), findsOneWidget);
+    expect(find.text('Additional Context'), findsOneWidget);
+    expect(find.text('Office / Department'), findsOneWidget);
+    expect(find.text('Position Title'), findsOneWidget);
+    expect(tester.takeException(), isNull);
     expect(find.text('medical-certificate.pdf'), findsOneWidget);
     expect(
       find.byKey(const Key('employee-leave-attachment-preview')),
@@ -71,9 +95,10 @@ Future<void> _pumpPanel(
   WidgetTester tester,
   LeaveRequest request, {
   MockLeaveRepository? repository,
+  double width = 1200,
 }) async {
   tester.view.devicePixelRatio = 1;
-  tester.view.physicalSize = const Size(1200, 1000);
+  tester.view.physicalSize = Size(width, 1000);
   addTearDown(() {
     tester.view.resetDevicePixelRatio();
     tester.view.resetPhysicalSize();

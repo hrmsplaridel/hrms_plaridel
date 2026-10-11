@@ -53,7 +53,6 @@ String _field(String key) {
   const labels = {
     'reports_allowed': 'Report access',
     'manage_allowed': 'DTR management',
-    'corrections_allowed': 'Corrections',
     'employees_allowed': 'Employees',
     'leave_allowed': 'Leave',
     'approvals_allowed': 'Approvals',

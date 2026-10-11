@@ -42,7 +42,6 @@ void main() {
                       'is_active': true,
                       'reports_allowed': true,
                       'manage_allowed': false,
-                      'corrections_allowed': true,
                       'employees_allowed': false,
                       'leave_allowed': true,
                       'approvals_allowed': true,
@@ -206,7 +205,8 @@ void main() {
     tester,
   ) async {
     await openPage(tester);
-    expect(find.byType(CheckboxListTile), findsNWidgets(8));
+    expect(find.byType(CheckboxListTile), findsNWidgets(7));
+    expect(find.text('DTR corrections'), findsNothing);
 
     await tester.tap(find.text('Manage DTR logs'));
     await tester.tap(find.text('Employee profiles'));
@@ -287,7 +287,8 @@ void main() {
       expect(find.text('Manage Access'), findsOneWidget);
       expect(find.text('Account creation'), findsOneWidget);
       expect(find.byType(TabBar), findsNothing);
-      expect(find.byType(CheckboxListTile), findsNWidgets(8));
+      expect(find.byType(CheckboxListTile), findsNWidgets(7));
+    expect(find.text('DTR corrections'), findsNothing);
 
       await tester.tap(find.text('Account creation'));
       await tester.pumpAndSettle();

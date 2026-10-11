@@ -286,6 +286,7 @@ test('both scheduled runs execute accrual before DTR for the previous month', as
     };
 
     const scheduled = await runScheduledCompletedMonthEnd(pool, {
+      monthEndNotifier: async () => {}, failureNotifier: async () => {},
       runKind,
       now: new Date('2026-08-14T16:00:00.000Z'),
       accrualRunner: async (_pool, options) => {
@@ -344,6 +345,7 @@ test('scheduler reconciles queued older DTR months after the regular month', asy
   const pool = { connect: async () => client };
 
   const result = await runScheduledCompletedMonthEnd(pool, {
+      monthEndNotifier: async () => {}, failureNotifier: async () => {},
     now: new Date('2026-09-01T00:00:00.000Z'),
     accrualRunner: async (_pool, options) => ({
       targetYearMonth: options.targetMonth,
@@ -414,6 +416,7 @@ test('scheduler rebuilds queued DTR before reconciling its regular target month'
   const pool = { connect: async () => client };
 
   await runScheduledCompletedMonthEnd(pool, {
+      monthEndNotifier: async () => {}, failureNotifier: async () => {},
     now: new Date('2026-08-15T00:00:00.000Z'),
     accrualRunner: async (_pool, options) => ({
       targetYearMonth: options.targetMonth,

@@ -1,9 +1,11 @@
 'use strict';
 
 const { resolveDepartmentReviewers, replaceRequestReviewerSnapshot } = require('./departmentReviewerService');
-const { resolveFinalLeaveReviewerConfiguration, resolveFinalLeaveReviewers } = require('./leaveFinalReviewerService');
+const { resolveFinalLeaveReviewerConfiguration, resolveEligibleFinalReviewers } = require('./leaveFinalReviewerService');
 const { createSignatureAsset } = require('./docutrackerDocumentBuilderService');
 const { recordLocatorWorkflowEvent } = require('./locatorWorkflowHistory');
+const { resolveActiveMayor } = require('./officialSignatoryService');
+const { todayInHrmsTimezone } = require('../utils/dateRangeParser');
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const LABELS = { applicant: 'Applicant', department_head: 'Head of Office', hr_approver: 'Noted' };
@@ -11,6 +13,19 @@ const PENDING = new Set(['pending', 'pending_department_head', 'pending_hr']);
 function fail(code, message) {
   const statusCode = { FORBIDDEN: 403, NOT_FOUND: 404, VALIDATION: 400, CONFLICT: 409 }[code] || 500;
   throw Object.assign(new Error(message), { code, statusCode, payload: { error: message } });
+}
+
+async function substituteApplicantOfficial(db, row, officials) {
+  const slots = ['department_head', 'hr_approver'].filter(slot =>
+    officials[slot]?.id && String(officials[slot].id) === String(row.employee_id));
+  if (!slots.length) return officials;
+  const mayor = await resolveActiveMayor(db, todayInHrmsTimezone());
+  const result = { ...officials };
+  for (const slot of slots) {
+    result[slot] = { id: mayor?.employee_id || null, name: mayor?.name || '',
+      position_title: mayor?.position_title || 'Municipal Mayor' };
+  }
+  return result;
 }
 
 async function resolveOfficials(db, row) {
@@ -21,12 +36,12 @@ async function resolveOfficials(db, row) {
   // Final review eligibility is configured for today, unlike the employee's
   // department assignment, which follows the requested locator date.
   const final = await resolveFinalLeaveReviewerConfiguration(db);
-  return {
+  return substituteApplicantOfficial(db, row, {
     applicant: { id: row.employee_id, name: row.employee_name },
     department_head: { id: department.primary?.reviewerId || null, name: department.primary?.reviewerName || '' },
     hr_approver: { id: final.primary?.id || null, name: final.primary?.name || '',
       position_title: final.primary?.position_title || '' },
-  };
+  });
 }
 
 async function snapshotLocatorReviewers(db, options) {
@@ -47,10 +62,12 @@ async function loadContext(db, user, id, lock = false) {
     `SELECT ls.*, ls.slip_date::text AS slip_date_text, u.full_name AS employee_name,
        COALESCE(ls.request_type_label_snapshot, t.label) AS print_type_label,
        COALESCE(ls.request_type_location_label_snapshot, t.location_label) AS print_location_label,
+       (v.background_pdf IS NOT NULL) AS has_print_background,
        EXISTS (SELECT 1 FROM locator_slip_department_reviewers r
          WHERE r.locator_slip_id = ls.id AND r.reviewer_id = $2::uuid) AS is_reviewer
      FROM locator_slips ls JOIN users u ON u.id = ls.employee_id
      LEFT JOIN locator_request_types t ON t.code = ls.request_type
+     LEFT JOIN locator_print_template_versions v ON v.id = ls.print_template_version_id
      WHERE ls.id = $1::uuid ${lock ? 'FOR UPDATE OF ls' : ''}`,
     [id, user.id]
   );
@@ -64,7 +81,7 @@ async function loadContext(db, user, id, lock = false) {
   }
   // Legacy forms have no historical official snapshot. Resolve primary roles only,
   // never the routing fallback or the person who happened to approve.
-  const officials = { ...(row.print_signatories || await resolveOfficials(db, row)) };
+  let officials = { ...(row.print_signatories || await resolveOfficials(db, row)) };
   if (!row.print_signatories) {
     const primary = await db.query(
       `SELECT reviewer_id, reviewer_name_snapshot FROM locator_slip_department_reviewers
@@ -74,6 +91,9 @@ async function loadContext(db, user, id, lock = false) {
       officials.department_head = { id: primary.rows[0].reviewer_id, name: primary.rows[0].reviewer_name_snapshot };
     }
   }
+  // Also correct older snapshots that printed the applicant as their own
+  // official. Existing Mayor snapshots remain frozen for later printing.
+  officials = await substituteApplicantOfficial(db, row, officials);
   const finalOfficial = officials.hr_approver;
   if (finalOfficial?.id && finalOfficial.position_title === undefined) {
     const position = await db.query(
@@ -89,7 +109,7 @@ async function loadContext(db, user, id, lock = false) {
       position_title: position.rows[0]?.position_title || '' };
   }
   const finalReviewers = hr && !owner && PENDING.has(row.status)
-    ? await resolveFinalLeaveReviewers(db) : [];
+    ? await resolveEligibleFinalReviewers(db, row.employee_id, 'locator', id) : [];
   return { ...row, officials, owner, hr, reviewer,
     canFinalReview: finalReviewers.some((r) => r.id === user.id) };
 }
@@ -150,6 +170,8 @@ async function getLocatorSourceSignatures(db, user, module, table, id) {
       source_module: module, source_table: table, source_record_id: id,
       source_status: context.status, signatures,
       print_form: {
+        print_template_version_id: context.print_template_version_id || null,
+        has_print_background: context.has_print_background === true,
         employee_name: context.officials.applicant?.name || context.employee_name,
         slip_date: context.slip_date_text, office: context.office, reason: context.reason,
         request_type_label: context.print_type_label, location_label: context.print_location_label,

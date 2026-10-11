@@ -56,6 +56,7 @@ ALTER TABLE leave_requests
     'pending',
     'pending_department_head',
     'pending_hr',
+      'pending_mayor',
     'rejected_by_department_head',
     'rejected_by_hr',
     'returned',

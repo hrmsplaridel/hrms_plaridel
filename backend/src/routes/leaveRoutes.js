@@ -1,9 +1,14 @@
+const {requireLeaveFinalRole}=require('../services/leaveRouting');
+const { normalizeEligibleEmploymentTypes, assertLeaveEmploymentEligibility } = require('../services/leaveEmploymentEligibility');
+const { finalQueueVisibilitySql } = require('../services/approvalStageSeparation');
 const express = require('express');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 const { v4: uuidv4 } = require('uuid');
 const { pool } = require('../config/db');
+const { canAdjustLeaveCredits } = require('../services/leaveCreditAdjustmentEligibility');
+const { lockEmployeeLeaveFiling } = require('../services/leaveFilingLock');
 const { authMiddleware } = require('../middleware/auth');
 const { requireDtrFeatureIfAdmin } = require('../middleware/dtrAccess');
 const { requireAdmin, requireAdminOrHr } = require('../middleware/rbac');
@@ -25,6 +30,7 @@ const {
   isDepartmentHead,
 } = require('../services/departmentHeadService');
 const {
+  resolveDepartmentReviewers,
   replaceRequestReviewerSnapshot,
 } = require('../services/departmentReviewerService');
 const {
@@ -44,6 +50,7 @@ const {
 } = require('../services/holidayRangeUtils');
 const leaveNotifications = require('../services/leaveNotifications');
 const { runLeaveMonthlyAccrual } = require('../services/leaveMonthlyAccrual');
+const { notifyLeaveMonthEnd, notifyLeaveMonthEndFailure, notificationMonthForTarget } = require('../services/leaveMonthEndNotifications');
 const {
   runMonthlyAttendanceDeductions,
 } = require('../services/leaveAttendanceDeduction');
@@ -99,14 +106,14 @@ const {
   requireHrApprovalSignature,
 } = require('../services/docutrackerLeaveSignatureService');
 const {
-  ROLE_KEYS: OFFICIAL_SIGNATORY_ROLES,
   resolveActiveMayor,
-  resolveOfficialSignatory,
 } = require('../services/officialSignatoryService');
 const { todayInHrmsTimezone } = require('../utils/dateRangeParser');
-const { assertFinalLeaveReviewer, assertLeaveSubmissionReviewer, resolveFinalLeaveReviewers } = require('../services/leaveFinalReviewerService');
+const { assertFinalLeaveReviewer, assertLeaveSubmissionReviewer, resolveFinalLeaveReviewers, resolveFinalLeaveReviewerConfiguration } = require('../services/leaveFinalReviewerService');
 
 const router = express.Router();
+router.use('/print', authMiddleware, require('./leavePrintTemplates'));
+router.use('/routing', authMiddleware, require('./leaveRouting'));
 
 /** Fire-and-forget in-app notifications; never fails the HTTP handler. */
 function notifySafe(fn) {
@@ -155,9 +162,9 @@ function broadcastDtrLeaveRefresh(action, { userId, leaveRequestId, dateFrom, da
 }
 const protect = [authMiddleware];
 
-router.get('/final-reviewer/me', protect, requireAdminOrHr, async (req, res) => {
+router.get('/final-reviewer/me', protect, requireLeaveFinalRole, async (req, res) => {
   try {
-    const reviewers = await resolveFinalLeaveReviewers(pool);
+    const reviewers = req.user.role==='mayor' ? (await pool.query("SELECT id FROM users WHERE id=$1 AND role='mayor' AND is_active=true",[req.user.id])).rows : await resolveFinalLeaveReviewers(pool);
     return res.json({
       can_review: reviewers.some((reviewer) => String(reviewer.id) === String(req.user.id)),
     });
@@ -169,7 +176,18 @@ router.get('/final-reviewer/me', protect, requireAdminOrHr, async (req, res) => 
 
 router.get('/submission-availability', protect, async (req, res) => {
   try {
-    await assertLeaveSubmissionReviewer(pool, req.user.id);
+    try { await assertLeaveSubmissionReviewer(pool, req.user.id); }
+    catch(error) {
+      if(error.statusCode!==409) throw error;
+      const rules=await pool.query(`SELECT lt.* FROM leave_types lt JOIN users u ON u.id=$1
+       WHERE lt.is_active=true AND lt.approval_route='mayor'
+       AND (lt.eligible_employment_types IS NULL OR u.employment_type=ANY(lt.eligible_employment_types))`,[req.user.id]);
+      let available=false;
+      for(const rule of rules.rows) {
+        try {await assertLeaveSubmissionReviewer(pool,req.user.id,'leave',rule);available=true;break;} catch(_){}
+      }
+      if(!available)throw error;
+    }
     return res.json({ can_submit: true });
   } catch (err) {
     if (err.statusCode === 409) {
@@ -205,56 +223,6 @@ async function findAssignmentProfileByUserIdAtDate(db, userId, effectiveDate = n
      WHERE u.id = $1
      LIMIT 1`,
     [userId, effectiveDate]
-  );
-  return result.rows[0] || null;
-}
-
-async function findActiveEmployeeByPositionTitle(db, positionTitle) {
-  const result = await db.query(
-    `WITH candidates AS (
-       SELECT u.id AS user_id,
-              u.full_name,
-              p.name AS position_title,
-              a.department_id,
-              d.name AS department_name,
-              0 AS source_priority,
-              a.effective_from
-       FROM assignments a
-       JOIN users u ON u.id = a.employee_id
-       JOIN positions p ON p.id = a.position_id
-       LEFT JOIN departments d ON d.id = a.department_id
-       WHERE (a.is_active IS NULL OR a.is_active = true)
-         AND (u.is_active IS NULL OR u.is_active = true)
-         AND (p.is_active IS NULL OR p.is_active = true)
-         AND (a.effective_from IS NULL OR a.effective_from <= CURRENT_DATE)
-         AND (a.effective_to IS NULL OR a.effective_to >= CURRENT_DATE)
-         AND LOWER(p.name) = LOWER($1)
-
-       UNION ALL
-
-       SELECT u.id AS user_id,
-              u.full_name,
-              p.name AS position_title,
-              eop.department_id,
-              d.name AS department_name,
-              1 AS source_priority,
-              eop.effective_from
-       FROM employee_other_positions eop
-       JOIN users u ON u.id = eop.employee_id
-       JOIN positions p ON p.id = eop.position_id
-       LEFT JOIN departments d ON d.id = eop.department_id
-       WHERE eop.is_active = true
-         AND (u.is_active IS NULL OR u.is_active = true)
-         AND (p.is_active IS NULL OR p.is_active = true)
-         AND eop.effective_from <= CURRENT_DATE
-         AND (eop.effective_to IS NULL OR eop.effective_to >= CURRENT_DATE)
-         AND LOWER(p.name) = LOWER($1)
-     )
-     SELECT user_id, full_name, position_title, department_id, department_name
-     FROM candidates
-     ORDER BY source_priority, effective_from DESC NULLS LAST, full_name
-     LIMIT 1`,
-    [positionTitle]
   );
   return result.rows[0] || null;
 }
@@ -296,7 +264,6 @@ const CREDIT_BALANCE_BUCKET_TYPES = new Set([
   'vacationLeave',
   'sickLeave',
 ]);
-const HR_CERTIFICATION_POSITION_TITLE = 'Administrative Officer V';
 const SYSTEM_NO_CREDIT_LEAVE_TYPES = new Set([
   'maternityLeave',
   'paternityLeave',
@@ -320,6 +287,7 @@ const ANNUAL_QUOTA_LEAVE_USAGE_STATUSES = [
   'pending',
   'pending_department_head',
   'pending_hr',
+  'pending_mayor',
   'approved',
 ];
 
@@ -343,6 +311,7 @@ pool
         ADD COLUMN IF NOT EXISTS balance_ledger_type TEXT NOT NULL DEFAULT 'none',
         ADD COLUMN IF NOT EXISTS entitlement_basis TEXT NOT NULL DEFAULT 'per_request',
         ADD COLUMN IF NOT EXISTS sex_eligibility TEXT NOT NULL DEFAULT 'any',
+        ADD COLUMN IF NOT EXISTS eligible_employment_types TEXT[],
         ADD COLUMN IF NOT EXISTS employee_detail_schema JSONB NOT NULL DEFAULT '[]'::jsonb,
         ADD COLUMN IF NOT EXISTS is_system BOOLEAN NOT NULL DEFAULT false,
         ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT now();
@@ -497,6 +466,23 @@ function isValidIsoCalendarDate(value) {
 function invalidProvidedDate(rawValue, normalizedValue) {
   if (rawValue == null || String(rawValue).trim() === '') return false;
   return !isValidIsoCalendarDate(normalizedValue);
+}
+
+// Public filing dates are calendar dates, not timestamps or date-like prefixes.
+function requiredLeaveDateRangeError(startDate, endDate) {
+  if (startDate == null || endDate == null ||
+      (typeof startDate === 'string' && !startDate.trim()) ||
+      (typeof endDate === 'string' && !endDate.trim())) {
+    return 'start_date and end_date are required';
+  }
+  if (typeof startDate !== 'string' || !isValidIsoCalendarDate(startDate)) {
+    return 'start_date must be a valid date in YYYY-MM-DD format';
+  }
+  if (typeof endDate !== 'string' || !isValidIsoCalendarDate(endDate)) {
+    return 'end_date must be a valid date in YYYY-MM-DD format';
+  }
+  if (endDate < startDate) return 'end_date cannot be earlier than start_date';
+  return null;
 }
 
 function isWeekday(dateObj) {
@@ -674,7 +660,7 @@ async function hasOverlappingLeaveRequest(client, userId, startStr, endStr, excl
     `SELECT 1
      FROM leave_requests
      WHERE (user_id = $1 OR employee_id = $1)
-       AND status IN ('pending', 'pending_department_head', 'pending_hr', 'approved')
+       AND status IN ('pending', 'pending_department_head', 'pending_hr', 'pending_mayor', 'approved')
        AND start_date <= $3::date
        AND end_date >= $2::date
        AND ($4::uuid IS NULL OR id <> $4::uuid)
@@ -1003,6 +989,9 @@ function leaveTypeRowToApi(row = {}) {
       row.sex_eligibility ?? fallback.sex_eligibility,
       name
     ),
+    eligible_employment_types: row.eligible_employment_types ?? null,
+    approval_route: row.approval_route || 'hr',
+    mayor_employment_types: row.mayor_employment_types ?? null,
     employee_detail_schema: normalizeEmployeeDetailSchema(
       row.employee_detail_schema
     ),
@@ -1203,6 +1192,8 @@ function mapLeaveRowToApi(row) {
       details.custom_leave_type_text ||
       details.customLeaveTypeText ||
       systemLeaveTypeDisplayName(row.leave_type_name || row.leave_type),
+    final_review_route: row.final_review_route || 'hr',
+    final_reviewer_user_id: row.final_reviewer_user_id || null,
     attachment_name: row.attachment_name || null,
     attachment_path: row.attachment_path || null,
     attachment_mime_type: row.attachment_mime_type || null,
@@ -1463,6 +1454,10 @@ function leaveTypePayloadFromBody(body = {}, existing = null) {
         base.sex_eligibility,
       name
     ),
+    eligibleEmploymentTypes: normalizeEligibleEmploymentTypes(
+      Object.prototype.hasOwnProperty.call(body, 'eligible_employment_types')
+        ? body.eligible_employment_types : existing?.eligible_employment_types ?? null
+    ),
     employeeDetailSchema: normalizeEmployeeDetailSchema(
       bodyField('employee_detail_schema') ??
         existing?.employee_detail_schema ??
@@ -1524,13 +1519,14 @@ router.post('/types', protect, requireAdminOrHr, requireDtrFeatureIfAdmin('leave
         error: 'Leave type key must start with a letter and contain only letters, numbers, or underscore.',
       });
     }
+    const routing=require('../services/leaveRouting').normalizeRouting(req.body||{});
     const q = await pool.query(
       `INSERT INTO leave_types (
           name, display_name, description, is_active, is_system,
           employee_can_file, admin_only, allows_past_dates,
           requires_attachment, requires_attachment_when_over_days,
           max_days, minimum_advance_days, affects_dtr_normally, balance_ledger_type,
-          entitlement_basis, sex_eligibility, employee_detail_schema,
+          entitlement_basis, sex_eligibility, employee_detail_schema, eligible_employment_types, approval_route, mayor_employment_types,
           created_at, updated_at
         )
         VALUES (
@@ -1538,7 +1534,7 @@ router.post('/types', protect, requireAdminOrHr, requireDtrFeatureIfAdmin('leave
           $5, $6, $7,
           $8, $9,
           $10, $11, $12, $13,
-          $14, $15, $16::jsonb,
+          $14, $15, $16::jsonb, $17::text[], $18, $19::text[],
           now(), now()
         )
         RETURNING *`,
@@ -1559,6 +1555,8 @@ router.post('/types', protect, requireAdminOrHr, requireDtrFeatureIfAdmin('leave
         payload.entitlementBasis,
         payload.sexEligibility,
         serializeEmployeeDetailSchema(payload.employeeDetailSchema),
+        payload.eligibleEmploymentTypes,
+        routing.approval_route,routing.mayor_employment_types,
       ]
     );
     res.status(201).json(leaveTypeRowToApi(q.rows[0]));
@@ -1577,6 +1575,21 @@ router.put('/types/:id', protect, requireAdminOrHr, requireDtrFeatureIfAdmin('le
     }
     const existing = existingQ.rows[0];
     const isSystem = existing.is_system === true || SYSTEM_LEAVE_TYPE_NAMES.includes(existing.name);
+    if (isSystem) {
+      const body = req.body || {};
+      if (Object.keys(body).some(key => key !== 'eligible_employment_types')) {
+        return res.status(400).json({ error: 'Built-in leave rules are protected. Only employment-type eligibility can be configured.' });
+      }
+      if (!Object.prototype.hasOwnProperty.call(body, 'eligible_employment_types')) {
+        return res.json(leaveTypeRowToApi(existing));
+      }
+      const eligibility = normalizeEligibleEmploymentTypes(body.eligible_employment_types);
+      const updated = await pool.query(
+        `UPDATE leave_types SET eligible_employment_types = $1::text[], updated_at = now()
+         WHERE id = $2::uuid RETURNING *`, [eligibility, req.params.id]
+      );
+      return res.json(leaveTypeRowToApi(updated.rows[0]));
+    }
     const payload = leaveTypePayloadFromBody(req.body || {}, existing);
     const nextName = isSystem ? existing.name : payload.name;
     const nextActive = isSystem ? true : payload.isActive;
@@ -1613,6 +1626,7 @@ router.put('/types/:id', protect, requireAdminOrHr, requireDtrFeatureIfAdmin('le
            entitlement_basis = $15,
            sex_eligibility = $16,
            employee_detail_schema = $17::jsonb,
+           eligible_employment_types = $19::text[],
            updated_at = now()
        WHERE id = $18::uuid
        RETURNING *`,
@@ -1639,6 +1653,7 @@ router.put('/types/:id', protect, requireAdminOrHr, requireDtrFeatureIfAdmin('le
             : payload.employeeDetailSchema
         ),
         req.params.id,
+        payload.eligibleEmploymentTypes,
       ]
     );
     res.json(leaveTypeRowToApi(q.rows[0]));
@@ -1987,14 +2002,16 @@ async function releasePendingLeaveBalance(
 router.get('/working-days', protect, async (req, res) => {
   const userId = req.user?.id;
   if (!userId) return res.status(401).json({ error: 'Not authenticated' });
+  const dateError = requiredLeaveDateRangeError(
+    req.query.start_date || req.query.startDate,
+    req.query.end_date || req.query.endDate
+  );
+  if (dateError) return res.status(400).json({ error: dateError });
   const startStr = toIsoDateStr(req.query.start_date || req.query.startDate);
   const endStr = toIsoDateStr(req.query.end_date || req.query.endDate);
   const leaveTypeName = String(
     req.query.leave_type || req.query.leaveType || ''
   ).trim();
-  if (!startStr || !endStr) {
-    return res.status(400).json({ error: 'start_date and end_date are required' });
-  }
   try {
     const result = await computeEmployeeLeaveWorkingDays(pool, userId, startStr, endStr);
     if (result.days == null) {
@@ -2064,6 +2081,7 @@ router.post('/draft', protect, async (req, res) => {
         return res.status(400).json({ error: 'Invalid leave type' });
       }
       const leaveRule = await getLeaveTypeDefinition(client, leave_type);
+      await assertLeaveEmploymentEligibility(client, leaveRule, userId);
       const customFieldSchema = normalizeEmployeeDetailSchema(
         leaveRule?.employee_detail_schema
       );
@@ -2182,15 +2200,16 @@ router.post('/submit', protect, async (req, res) => {
       ...rest
     } = req.body || {};
 
+    const dateError = requiredLeaveDateRangeError(start_date, end_date);
+    if (dateError) return res.status(400).json({ error: dateError });
     const startStr = toIsoDateStr(start_date);
     const endStr = toIsoDateStr(end_date);
-    if (!startStr || !endStr) return res.status(400).json({ error: 'start_date and end_date are required' });
     const days = computeNumberOfDaysSync(startStr, endStr); // holiday-aware recomputed inside tx
 
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
-      await assertLeaveSubmissionReviewer(client, userId);
+      await lockEmployeeLeaveFiling(client, userId);
       const workingDayResult = await computeEmployeeLeaveWorkingDays(client, userId, startStr, endStr);
       const leaveTypeId = await ensureLeaveTypeIdByName(client, leave_type);
       if (!leaveTypeId) {
@@ -2198,6 +2217,8 @@ router.post('/submit', protect, async (req, res) => {
         return res.status(400).json({ error: 'Invalid leave type' });
       }
       const leaveRule = await getLeaveTypeDefinition(client, leave_type);
+      await assertLeaveEmploymentEligibility(client, leaveRule, userId);
+      await assertLeaveSubmissionReviewer(client, userId, 'leave', leaveRule);
       const customFieldSchema = normalizeEmployeeDetailSchema(
         leaveRule?.employee_detail_schema
       );
@@ -2302,6 +2323,13 @@ router.post('/submit', protect, async (req, res) => {
 
       // Two-stage workflow: determine initial submitted status.
       const reviewSnapshot = await getDepartmentReviewSnapshot(client, userId);
+      if(leaveRule?.approval_route==='mayor') {
+        const type=(await client.query('SELECT employment_type FROM users WHERE id=$1',[userId])).rows[0]?.employment_type;
+        const {chooseLeaveRoute}=require('../services/leaveRouting');
+        if(chooseLeaveRoute(leaveRule,type)==='mayor' && !reviewSnapshot?.departmentHeadUserId) {
+          const error=new Error('Configure a different department reviewer before submitting a Mayor-routed leave request.');error.statusCode=409;throw error;
+        }
+      }
       const submitStatus = reviewSnapshot?.departmentHeadUserId
         ? 'pending_department_head'
         : 'pending_hr';
@@ -2420,17 +2448,16 @@ router.post('/submit-with-attachment', protect, uploadLeaveAttachmentMemoryMw, a
       ...rest
     } = body;
 
+    const dateError = requiredLeaveDateRangeError(start_date, end_date);
+    if (dateError) return res.status(400).json({ error: dateError });
     const startStr = toIsoDateStr(start_date);
     const endStr = toIsoDateStr(end_date);
-    if (!startStr || !endStr) {
-      return res.status(400).json({ error: 'start_date and end_date are required' });
-    }
     const days = computeNumberOfDaysSync(startStr, endStr);
 
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
-      await assertLeaveSubmissionReviewer(client, userId);
+      await lockEmployeeLeaveFiling(client, userId);
       const workingDayResult = await computeEmployeeLeaveWorkingDays(client, userId, startStr, endStr);
       const leaveTypeId = await ensureLeaveTypeIdByName(client, leave_type);
       if (!leaveTypeId) {
@@ -2439,6 +2466,8 @@ router.post('/submit-with-attachment', protect, uploadLeaveAttachmentMemoryMw, a
       }
 
       const leaveRule = await getLeaveTypeDefinition(client, leave_type);
+      await assertLeaveEmploymentEligibility(client, leaveRule, userId);
+      await assertLeaveSubmissionReviewer(client, userId, 'leave', leaveRule);
       const customFieldSchema = normalizeEmployeeDetailSchema(
         leaveRule?.employee_detail_schema
       );
@@ -2554,6 +2583,13 @@ router.post('/submit-with-attachment', protect, uploadLeaveAttachmentMemoryMw, a
 
       const row = q.rows[0];
       const reviewSnapshot = await getDepartmentReviewSnapshot(client, userId);
+      if(leaveRule?.approval_route==='mayor') {
+        const type=(await client.query('SELECT employment_type FROM users WHERE id=$1',[userId])).rows[0]?.employment_type;
+        const {chooseLeaveRoute}=require('../services/leaveRouting');
+        if(chooseLeaveRoute(leaveRule,type)==='mayor' && !reviewSnapshot?.departmentHeadUserId) {
+          const error=new Error('Configure a different department reviewer before submitting a Mayor-routed leave request.');error.statusCode=409;throw error;
+        }
+      }
       const submitStatus = reviewSnapshot?.departmentHeadUserId
         ? 'pending_department_head'
         : 'pending_hr';
@@ -2668,7 +2704,7 @@ router.put('/:id', protect, async (req, res) => {
   const { id } = req.params;
   try {
     const existing = await pool.query(
-      `SELECT id, status, employee_official_snapshot
+      `SELECT id, status, employee_official_snapshot, leave_type_id
        FROM leave_requests
        WHERE id = $1 AND (user_id = $2 OR employee_id = $2)
          AND discarded_at IS NULL`,
@@ -2707,24 +2743,54 @@ router.put('/:id', protect, async (req, res) => {
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
+      await lockEmployeeLeaveFiling(client, userId);
+      // Serialize edits/submissions of this request before any write or reservation.
+      const lockedRequest = await client.query(
+        `SELECT id, status, employee_official_snapshot, leave_type_id
+         FROM leave_requests
+         WHERE id = $1 AND (user_id = $2 OR employee_id = $2)
+           AND discarded_at IS NULL
+         FOR UPDATE`,
+        [id, userId]
+      );
+      if (!lockedRequest.rows.length) {
+        await client.query('ROLLBACK');
+        return res.status(404).json({ error: 'Leave request not found' });
+      }
+      if (lockedRequest.rows[0].status !== status) {
+        await client.query('ROLLBACK');
+        return res.status(409).json({
+          error: 'This leave request has changed. Refresh before saving or submitting again.',
+        });
+      }
+      // Use the row read under lock for both the transition and filing snapshot.
+      existing.rows[0] = lockedRequest.rows[0];
+      ({ nextStatus, historyAction } = validateEmployeeUpdateTransition({
+        currentStatus: lockedRequest.rows[0].status,
+        desiredStatus,
+      }));
       const savingDraft = nextStatus === 'draft';
-      const submitting = ['pending', 'pending_department_head', 'pending_hr'].includes(nextStatus);
+      const submitting = ['pending', 'pending_department_head', 'pending_hr', 'pending_mayor'].includes(nextStatus);
       if (submitting && (!leave_type || !startStr || !endStr)) {
         await client.query('ROLLBACK');
         return res.status(400).json({
           error: 'Leave type, start date, and end date are required before submission.',
         });
       }
-      if (submitting) await assertLeaveSubmissionReviewer(client, userId);
       const leaveTypeId = await ensureLeaveTypeIdByName(client, leave_type);
       // FIX #1: isNotEmpty is Dart/Swift, not JS. Use .length > 0 instead.
       if (leave_type != null && String(leave_type).trim().length > 0 && !leaveTypeId) {
         await client.query('ROLLBACK');
         return res.status(400).json({ error: 'Invalid leave type' });
       }
+      const storedTypeRule = !leave_type && lockedRequest.rows[0].leave_type_id
+        ? await client.query('SELECT * FROM leave_types WHERE id = $1::uuid', [lockedRequest.rows[0].leave_type_id])
+        : null;
       const leaveRule = leave_type
         ? await getLeaveTypeDefinition(client, leave_type)
-        : null;
+        : storedTypeRule?.rows[0] ? leaveTypeRowToApi(storedTypeRule.rows[0]) : null;
+      await assertLeaveEmploymentEligibility(client, leaveRule, userId);
+      if (submitting) await assertLeaveSubmissionReviewer(client, userId, 'leave', leaveRule);
       const customFieldSchema = normalizeEmployeeDetailSchema(
         leaveRule?.employee_detail_schema
       );
@@ -2798,6 +2864,12 @@ router.put('/:id', protect, async (req, res) => {
 
           // Two-stage workflow: resolve actual target status.
           reviewSnapshot = await getDepartmentReviewSnapshot(client, userId);
+          if(leaveRule?.approval_route==='mayor') {
+            const emp=(await client.query('SELECT employment_type FROM users WHERE id=$1',[userId])).rows[0]?.employment_type;
+            if(require('../services/leaveRouting').chooseLeaveRoute(leaveRule,emp)==='mayor' && !reviewSnapshot?.departmentHeadUserId) {
+              const error=new Error('Configure a different department reviewer before submitting a Mayor-routed leave request.');error.statusCode=409;throw error;
+            }
+          }
           refreshReviewSnapshot = true;
           nextStatus = reviewSnapshot?.departmentHeadUserId
             ? 'pending_department_head'
@@ -2900,8 +2972,8 @@ router.put('/:id', protect, async (req, res) => {
       });
       // FIX #5b: Update pending_days when status transitions to a pending status via PUT.
       const leaveTypeName = leave_type ? String(leave_type) : null;
-      const isPendingTarget = nextStatus === 'pending' || nextStatus === 'pending_department_head' || nextStatus === 'pending_hr';
-      const wasPending = status === 'pending' || status === 'pending_department_head' || status === 'pending_hr';
+      const isPendingTarget = nextStatus === 'pending' || nextStatus === 'pending_department_head' || nextStatus === 'pending_hr' || nextStatus === 'pending_mayor';
+      const wasPending = status === 'pending' || status === 'pending_department_head' || (status === 'pending_hr' || status === 'pending_mayor');
       if (leaveTypeName && effectiveDays != null && effectiveDays > 0) {
         if (isPendingTarget && !wasPending) {
           // Moving INTO a pending status: increment pending_days.
@@ -2923,7 +2995,7 @@ router.put('/:id', protect, async (req, res) => {
       await client.query('COMMIT');
       if (
         (historyAction === 'submitted' || historyAction === 'resubmitted') &&
-        ['pending', 'pending_department_head', 'pending_hr'].includes(row.status)
+        ['pending', 'pending_department_head', 'pending_hr', 'pending_mayor'].includes(row.status)
       ) {
         const namePut = await pool.query('SELECT full_name FROM users WHERE id = $1', [userId]);
         const putEmpName = namePut.rows[0]?.full_name || 'Employee';
@@ -3060,7 +3132,7 @@ router.patch('/:id/cancel', protect, async (req, res) => {
     });
 
     // FIX #5c: Decrement pending_days on cancel (only if it was in a pending status — not draft).
-    if (status === 'pending' || status === 'pending_department_head' || status === 'pending_hr') {
+    if (status === 'pending' || status === 'pending_department_head' || (status === 'pending_hr' || status === 'pending_mayor')) {
       const cancelRow = cancelledReq.rows[0];
       const cancelDays = reservedCreditDaysFromRequest(q.rows[0]);
       const cancelUserId = cancelRow?.user_id || cancelRow?.employee_id;
@@ -3097,7 +3169,7 @@ router.patch('/:id/cancel', protect, async (req, res) => {
 
     await client.query('COMMIT');
     const mappedCancel = mapLeaveRowToApi(out.rows[0]);
-    if (status === 'pending' || status === 'pending_department_head' || status === 'pending_hr') {
+    if (status === 'pending' || status === 'pending_department_head' || (status === 'pending_hr' || status === 'pending_mayor')) {
       notifySafe(() =>
         leaveNotifications.notifyStakeholdersLeaveCancelled(pool, {
           leaveRequestId: id,
@@ -3255,7 +3327,7 @@ router.get('/my/:id/history', protect, async (req, res) => {
 
 // GET /api/leave/signatories?employee_id=uuid&leave_request_id=uuid
 // Printable leave form signatories:
-// 7.A = configured certifier, with Administrative Officer V as legacy fallback.
+// 7.A = primary final HR leave reviewer effective at approval/submission.
 // 7.B = department head snapshotted when the leave request was submitted.
 // 7.C/7.D = latest active Mayor, snapshotted when final approval is recorded.
 router.get('/signatories', protect, async (req, res) => {
@@ -3287,7 +3359,7 @@ router.get('/signatories', protect, async (req, res) => {
                 )::date::text AS submitted_on,
                 lr.review_department_id,
                 lr.approved_at::date::text AS approved_on,
-                lr.approving_authority_snapshot,
+                lr.approving_authority_snapshot,lr.final_review_route,lr.final_reviewer_user_id,
                 lr.assigned_department_head_id,
                 d.name AS review_department_name,
                 EXISTS (
@@ -3321,6 +3393,7 @@ router.get('/signatories', protect, async (req, res) => {
         return res.status(400).json({ error: 'employee_id does not match the leave request' });
       }
       const canReviewRequest =
+        (req.user.role==='mayor' && requestContext.final_reviewer_user_id===requesterId) ||
         requestContext.assigned_department_head_id === requesterId ||
         requestContext.requester_reviewed === true ||
         requestContext.requester_snapshotted_reviewer === true;
@@ -3340,15 +3413,12 @@ router.get('/signatories', protect, async (req, res) => {
       }
     }
 
-    const signatoryDate = requestContext?.submitted_on || todayInHrmsTimezone();
-    const configuredCertifier = await resolveOfficialSignatory(
+    const signatoryDate = requestContext?.approved_on ||
+      requestContext?.submitted_on || todayInHrmsTimezone();
+    const { primary: hrCertifier } = await resolveFinalLeaveReviewerConfiguration(
       pool,
-      OFFICIAL_SIGNATORY_ROLES.LEAVE_CREDIT_CERTIFIER,
       signatoryDate
     );
-    const hrCertifier = configuredCertifier
-      ? null
-      : await findActiveEmployeeByPositionTitle(pool, HR_CERTIFICATION_POSITION_TITLE);
     const approvingAuthority =
       requestContext?.status === 'approved' &&
       requestContext?.approving_authority_snapshot?.name
@@ -3374,11 +3444,24 @@ router.get('/signatories', protect, async (req, res) => {
         )
       : null;
 
+    const departmentId = requestContext?.review_department_id || departmentHeadInfo?.departmentId;
+    const primaryDepartment = departmentId
+      ? (await resolveDepartmentReviewers(pool, {
+          departmentId,
+          effectiveDate: requestContext?.submitted_on || signatoryDate,
+        })).primary
+      : null;
+    const applicantIsHead = String(primaryDepartment?.reviewerId ||
+      departmentHeadInfo?.departmentHeadUserId || '') === employeeId;
+    const applicantIsHr = String(hrCertifier?.id || '') === employeeId;
+    const replacement = applicantIsHead || applicantIsHr
+      ? mapOfficialSignatoryProfile(await resolveActiveMayor(pool, todayInHrmsTimezone()))
+      : null;
     res.json({
-      hr_certification_officer: configuredCertifier
-        ? mapOfficialSignatoryProfile(configuredCertifier)
-        : mapSignatoryProfile(hrCertifier),
-      recommendation_officer: departmentHeadProfile
+      hr_certification_officer: applicantIsHr ? replacement : hrCertifier
+        ? mapOfficialSignatoryProfile({ ...hrCertifier, employee_id: hrCertifier.id })
+        : null,
+      recommendation_officer: applicantIsHead ? replacement : departmentHeadProfile
         ? mapSignatoryProfile({
             ...departmentHeadProfile,
             department_id: departmentHeadInfo.departmentId || departmentHeadProfile.department_id,
@@ -3530,6 +3613,8 @@ router.post('/admin/forced-leave-deduction', protect, requireAdminOrHr, requireD
 // equivalent-day charge to Vacation Leave.
 // Body/query (optional): dry_run, target_month (YYYY-MM), max_catch_up_months (default 1)
 router.post('/admin/monthly-accrual', protect, requireAdminOrHr, requireDtrFeatureIfAdmin('leave_allowed'), async (req, res) => {
+  let notificationMonth = null;
+  let notificationDryRun = true;
   try {
     const dryRun =
       req.body?.dry_run === true ||
@@ -3545,6 +3630,8 @@ router.post('/admin/monthly-accrual', protect, requireAdminOrHr, requireDtrFeatu
       req.query?.target_month ??
       req.query?.year_month;
 
+    notificationDryRun = dryRun;
+    notificationMonth = notificationMonthForTarget(targetMonth);
     const accrualResult = await runLeaveMonthlyAccrual(pool, {
       dryRun,
       maxCatchUpMonths: Number.isFinite(maxCatchUpMonths) ? maxCatchUpMonths : undefined,
@@ -3579,6 +3666,7 @@ router.post('/admin/monthly-accrual', protect, requireAdminOrHr, requireDtrFeatu
       balanceEarnedAdjustmentsByUser: previewEarnedByUser,
     });
     const result = { ...accrualResult, attendanceDeductions };
+    await notifyLeaveMonthEnd(pool, { targetYearMonth: result.targetYearMonth, dryRun });
 
     const attendanceBalanceDetails = (attendanceDeductions.details || []).filter(
       (item) => Number(item.balance_delta || 0) !== 0
@@ -3627,6 +3715,9 @@ router.post('/admin/monthly-accrual', protect, requireAdminOrHr, requireDtrFeatu
     }
     res.status(200).json(result);
   } catch (err) {
+    if (!notificationDryRun && notificationMonth) {
+      await notifyLeaveMonthEndFailure(pool, { targetYearMonth: notificationMonth, actorId: req.user.id });
+    }
     console.error('[leave POST /admin/monthly-accrual]', err);
     res.status(400).json({ error: err.message || 'Monthly accrual failed' });
   }
@@ -3645,6 +3736,13 @@ const HR_REVIEW_SCOPE_SQL = `(
   )
 )`;
 
+function finalReviewScope(req, actor) {
+ if(req.user?.role==='mayor') return `(lr.final_review_route='mayor' AND lr.final_reviewer_user_id=${actor}
+ AND (lr.status='pending_mayor' OR EXISTS(SELECT 1 FROM leave_request_history mh WHERE mh.leave_request_id=lr.id
+ AND (mh.from_status='pending_mayor' OR mh.to_status='pending_mayor'))))`;
+ return `(COALESCE(lr.final_review_route,'hr')='hr' AND ${HR_REVIEW_SCOPE_SQL})`;
+}
+
 async function listLeaveReviewFilterOptions(db, scopeSql, params) {
   const result = await db.query(
     `SELECT DISTINCT COALESCE(lr.user_id, lr.employee_id) AS user_id,
@@ -3659,12 +3757,12 @@ async function listLeaveReviewFilterOptions(db, scopeSql, params) {
   return result.rows;
 }
 
-router.get('/filter-options', protect, requireAdminOrHr, requireDtrFeatureIfAdmin('leave_allowed'), async (_req, res) => {
+router.get('/filter-options', protect, requireLeaveFinalRole, requireDtrFeatureIfAdmin('leave_allowed'), async (req, res) => {
   try {
     const items = await listLeaveReviewFilterOptions(
       pool,
-      HR_REVIEW_SCOPE_SQL,
-      []
+      `${finalReviewScope(req, '$1::uuid')} AND ${finalQueueVisibilitySql('leave', 'lr', '$1::uuid')} AND COALESCE(lr.user_id, lr.employee_id) <> $1::uuid`,
+      [req.user?.id]
     );
     res.json(items);
   } catch (err) {
@@ -3673,7 +3771,7 @@ router.get('/filter-options', protect, requireAdminOrHr, requireDtrFeatureIfAdmi
   }
 });
 
-router.get('/', protect, requireAdminOrHr, requireDtrFeatureIfAdmin('leave_allowed'), async (req, res) => {
+router.get('/', protect, requireLeaveFinalRole, requireDtrFeatureIfAdmin('leave_allowed'), async (req, res) => {
   try {
     const paginated = req.query?.paginated === 'true';
     const status = (req.query?.status || '').toString().trim() || null;
@@ -3724,8 +3822,10 @@ router.get('/', protect, requireAdminOrHr, requireDtrFeatureIfAdmin('leave_allow
          AND ($6::timestamptz IS NULL OR lr.created_at >= $6)
          AND ($7::date IS NULL OR lr.created_at < ($7::date + interval '1 day'))
          AND ($8::text IS NULL OR d.name = $8)
-         AND ${HR_REVIEW_SCOPE_SQL}`;
-    const params = [status, leaveType, userId, startDateFrom, startDateTo, createdFrom, createdTo, department];
+         AND ${finalReviewScope(req, '$9::uuid')}
+         AND ${finalQueueVisibilitySql('leave', 'lr', '$9::uuid')}
+         AND COALESCE(lr.user_id, lr.employee_id) <> $9::uuid`;
+    const params = [status, leaveType, userId, startDateFrom, startDateTo, createdFrom, createdTo, department, req.user?.id];
     const rows = await pool.query(
       `SELECT lr.*, lt.name AS leave_type_name, u.full_name AS employee_full_name,
               d.name AS assignment_department_name,
@@ -3754,7 +3854,7 @@ router.get('/', protect, requireAdminOrHr, requireDtrFeatureIfAdmin('leave_allow
 });
 
 // GET /api/leave/pending (admin/HR — returns pending_hr + legacy pending)
-router.get('/pending', protect, requireAdminOrHr, requireDtrFeatureIfAdmin('leave_allowed'), async (_req, res) => {
+router.get('/pending', protect, requireLeaveFinalRole, requireDtrFeatureIfAdmin('leave_allowed'), async (req, res) => {
   try {
     const rows = await pool.query(
       `SELECT lr.*, lt.name AS leave_type_name, u.full_name AS employee_full_name,
@@ -3788,9 +3888,12 @@ router.get('/pending', protect, requireAdminOrHr, requireDtrFeatureIfAdmin('leav
          ORDER BY h.acted_at DESC
          LIMIT 1
        ) dhh ON true
-       WHERE lr.status IN ('pending', 'pending_hr')
+       WHERE ${finalReviewScope(req, '$1::uuid')} AND lr.status IN ('pending', 'pending_hr', 'pending_mayor')
+         AND ${finalQueueVisibilitySql('leave', 'lr', '$1::uuid')}
+         AND COALESCE(lr.user_id, lr.employee_id) <> $1::uuid
        ORDER BY lr.updated_at DESC NULLS LAST, lr.created_at DESC
-       LIMIT 200`
+       LIMIT 200`,
+      [req.user?.id]
     );
     res.json(rows.rows.map(mapLeaveRowToApi));
   } catch (err) {
@@ -3827,7 +3930,18 @@ router.get('/department-head/check', protect, async (req, res) => {
        LIMIT 1`,
       [userId]
     );
-    const assignedDepartment = assigned.rows[0] || null;
+    const activeBackup = await client.query(
+      `SELECT b.department_id, d.name AS department_name
+       FROM department_reviewer_backups b
+       JOIN users u ON u.id = b.employee_id
+       LEFT JOIN departments d ON d.id = b.department_id
+       WHERE b.employee_id = $1::uuid AND b.is_active = true AND u.is_active = true
+         AND b.effective_from <= $2::date
+         AND (b.effective_to IS NULL OR b.effective_to >= $2::date)
+       ORDER BY b.backup_rank, b.id LIMIT 1`,
+      [userId, todayInHrmsTimezone()]
+    );
+    const assignedDepartment = assigned.rows[0] || activeBackup.rows[0] || null;
 
     const hasHistoryResult = await client.query(
       `SELECT EXISTS (
@@ -3872,7 +3986,7 @@ router.get('/department-head/filter-options', protect, async (req, res) => {
          SELECT 1 FROM leave_request_history h
          WHERE h.leave_request_id = lr.id AND h.acted_by = $1::uuid
            AND h.action IN ('department_head_approved', 'department_head_rejected', 'department_head_returned')
-       ))`,
+       )) AND COALESCE(lr.user_id, lr.employee_id) <> $1::uuid`,
       [userId]
     );
     res.json(items);
@@ -3942,6 +4056,7 @@ router.get('/department-head', protect, async (req, res) => {
             )
             OR dhh.department_head_reviewer_id IS NOT NULL
           )
+          AND COALESCE(lr.user_id, lr.employee_id) <> $1::uuid
           AND ($2::text IS NULL OR lr.status = $2)
           AND ($3::text IS NULL OR lt.name = $3)
           AND ($4::uuid IS NULL OR lr.user_id = $4 OR lr.employee_id = $4)
@@ -3980,6 +4095,153 @@ router.get('/department-head', protect, async (req, res) => {
   }
 });
 
+// Shared finalization keeps department-only approval and HR approval accounting identical.
+async function finalizeLeaveApproval(client, r, {id, reviewerId, remarks, departmentFinal = false,
+  recommendationRemarks = null, approvedOtherDetails = null, approvedDaysWithPayRaw,
+  approvedDaysWithoutPayRaw}) {
+  const targetUserId = r.user_id || r.employee_id;
+  const startStr = toIsoDateStr(r.start_date);
+  const endStr = toIsoDateStr(r.end_date);
+  const workingDayResult = await computeEmployeeLeaveWorkingDays(
+    client,
+    targetUserId,
+    startStr,
+    endStr
+  );
+  const storedRequestedDays = r.days != null ? parseFloat(r.days) : null;
+  const approvalCoverage = assertCoverageMatchesRequestedDays(
+    workingDayResult.countedDates,
+    storedRequestedDays
+  );
+  const approvalDates = approvalCoverage.dates;
+  const approvalDays = approvalCoverage.days;
+  const leaveTypeRule = r.leave_type_name
+    ? await getLeaveTypeDefinition(client, r.leave_type_name)
+    : null;
+  assertRequiredLeaveAttachment({
+    rule: leaveTypeRule,
+    leaveType: r.leave_type_name,
+    days: approvalDays,
+    hasAttachment: storedLeaveAttachmentExists(r.attachment_path),
+  });
+  const allocation = resolveApprovalAllocation({
+    requestedDays: approvalDays,
+    approvedDaysWithPay: departmentFinal ? approvalDays : approvedDaysWithPayRaw,
+    approvedDaysWithoutPay: departmentFinal ? 0 : approvedDaysWithoutPayRaw,
+  });
+  const { historyAction } = departmentFinal
+    ? validateDepartmentHeadTransition({currentStatus: r.status, desiredStatus: 'pending_hr', finalReviewRoute: r.final_review_route})
+    : validateAdminTransition({currentStatus: r.status, desiredStatus: 'approved'});
+  if (!departmentFinal) await requireHrApprovalSignature(client, id, reviewerId);
+  const approvingAuthority = await resolveActiveMayor(
+    client,
+    todayInHrmsTimezone()
+  );
+
+  const updated = await client.query(
+    `UPDATE leave_requests
+     SET status = 'approved',
+         reviewer_id = $2::uuid,
+         reviewer_remarks = $3::text,
+         recommendation_remarks = $4::text,
+         approved_days_with_pay = $5::numeric,
+         approved_days_without_pay = $6::numeric,
+         approved_other_details = $7::text,
+         reserved_credit_days = 0,
+         reviewed_at = now(),
+         approved_by = $2::uuid,
+         approved_at = now(),
+         approving_authority_snapshot = $8::jsonb,
+         updated_at = now()
+     WHERE id = $1
+     RETURNING *`,
+     [
+       id,
+       reviewerId,
+       remarks,
+       recommendationRemarks,
+       allocation.approvedDaysWithPay,
+       allocation.approvedDaysWithoutPay,
+       approvedOtherDetails,
+       JSON.stringify(approvingAuthority || {}),
+     ]
+  );
+  const row = updated.rows[0];
+  const days = allocation.requestedDays;
+  const leaveTypeName = r.leave_type_name || null;
+
+  // Prevent approving if another pending/approved leave overlaps this range.
+  const hasOverlap = await hasOverlappingLeaveRequest(client, targetUserId, startStr, endStr, id);
+  if (hasOverlap) {
+    throw Object.assign(new Error('Overlapping leave request exists'), {statusCode: 400});
+  }
+
+  await assertAnnualQuotaLeaveLimit(client, {
+    userId: targetUserId,
+    leaveTypeName,
+    startStr,
+    endStr,
+    excludeId: id,
+  });
+
+  if (leaveTypeRule?.affects_dtr_normally !== false) {
+    await replaceApprovedLeaveCoverage(client, {
+      employeeId: targetUserId,
+      leaveRequestId: id,
+      dates: approvalDates,
+      actorUserId: reviewerId,
+    });
+  }
+
+  const reservedCreditDays = reservedCreditDaysFromRequest(r);
+
+  // Final approval releases this request's exact pending reservation but charges only
+  // the days HR classified as paid against the configured balance bucket.
+  await upsertLeaveBalanceDeduction(
+    client,
+    targetUserId,
+    leaveTypeName,
+    allocation.usedDaysToDeduct,
+    {
+      decrementPendingDays: true,
+      pendingDaysToRelease: reservedCreditDays,
+      ledgerContext: {
+        action: 'leave_approved',
+        leaveRequestId: id,
+        actorUserId: reviewerId,
+        actorKind: departmentFinal ? 'department_reviewer' : 'admin',
+        metadataJson: {
+          requested_days: allocation.requestedDays,
+          approved_days_with_pay: allocation.approvedDaysWithPay,
+          approved_days_without_pay: allocation.approvedDaysWithoutPay,
+          reserved_credit_days: reservedCreditDays,
+        },
+      },
+    }
+  );
+
+  await insertLeaveRequestHistory(client, {
+    leaveRequestId: id,
+    action: historyAction,
+    fromStatus: r.status,
+    toStatus: 'approved',
+    actedBy: reviewerId,
+    remarks: remarks || null,
+    metadataJson: {
+      leave_type: leaveTypeName,
+      start_date: startStr,
+      end_date: endStr,
+      number_of_days: days,
+      covered_work_dates: approvalDates,
+      approved_days_with_pay: allocation.approvedDaysWithPay,
+      approved_days_without_pay: allocation.approvedDaysWithoutPay,
+    },
+  });
+
+  return {row, leaveTypeName, startStr, endStr};
+}
+
+
 // PATCH /api/leave/:id/department-head-approve
 router.patch('/:id/department-head-approve', protect, async (req, res) => {
   const reviewerId = req.user?.id;
@@ -3992,6 +4254,7 @@ router.patch('/:id/department-head-approve', protect, async (req, res) => {
     const existing = await client.query(
       `SELECT lr.id, lr.status, lr.user_id, lr.employee_id,
               lr.start_date, lr.end_date, lr.review_department_id,
+              lr.final_review_route, lr.attachment_path, lr.reserved_credit_days,
               COALESCE(lr.number_of_days, lr.total_days) AS days,
               lt.name AS leave_type_name
        FROM leave_requests lr
@@ -4016,6 +4279,7 @@ router.patch('/:id/department-head-approve', protect, async (req, res) => {
     const { nextStatus, historyAction } = validateDepartmentHeadTransition({
       currentStatus: r.status,
       desiredStatus: 'pending_hr',
+      finalReviewRoute: r.final_review_route,
     });
     await assertAnnualQuotaLeaveLimit(client, {
       userId: r.user_id || r.employee_id,
@@ -4025,21 +4289,25 @@ router.patch('/:id/department-head-approve', protect, async (req, res) => {
       excludeId: id,
     });
     await requireDepartmentHeadApprovalSignature(client, id, reviewerId);
-    await client.query(
-      `UPDATE leave_requests
-       SET status = $2, reviewer_id = $3, reviewer_remarks = $4, reviewed_at = now(), updated_at = now()
-       WHERE id = $1`,
-      [id, nextStatus, reviewerId, remarks]
-    );
-    await insertLeaveRequestHistory(client, {
-      leaveRequestId: id,
-      action: historyAction,
-      fromStatus: r.status,
-      toStatus: nextStatus,
-      actedBy: reviewerId,
-      remarks,
-      metadataJson: { department_id: r.review_department_id || null },
-    });
+    if (nextStatus === 'approved') {
+      await finalizeLeaveApproval(client, r, {id, reviewerId, remarks, departmentFinal: true});
+    } else {
+      await client.query(
+        `UPDATE leave_requests
+         SET status = $2, reviewer_id = $3, reviewer_remarks = $4, reviewed_at = now(), updated_at = now()
+         WHERE id = $1`,
+        [id, nextStatus, reviewerId, remarks]
+      );
+      await insertLeaveRequestHistory(client, {
+        leaveRequestId: id,
+        action: historyAction,
+        fromStatus: r.status,
+        toStatus: nextStatus,
+        actedBy: reviewerId,
+        remarks,
+        metadataJson: { department_id: r.review_department_id || null },
+      });
+    }
     await client.query('COMMIT');
     const out = await pool.query(
       `SELECT lr.*, lt.name AS leave_type_name, u.full_name AS employee_full_name
@@ -4050,8 +4318,9 @@ router.patch('/:id/department-head-approve', protect, async (req, res) => {
       [id]
     );
     const mappedDhApprove = mapLeaveRowToApi(out.rows[0]);
-    notifySafe(() =>
+    if (nextStatus !== 'approved') notifySafe(() =>
       leaveNotifications.notifyDepartmentHeadApprovedForHr(pool, {
+        employeeUserId: r.user_id || r.employee_id,
         leaveRequestId: id,
         employeeName: mappedDhApprove.employee_name,
         leaveTypeName: mappedDhApprove.leave_type_name || mappedDhApprove.leave_type,
@@ -4063,14 +4332,20 @@ router.patch('/:id/department-head-approve', protect, async (req, res) => {
       leaveNotifications.notifyEmployee(pool, {
         employeeUserId: r.user_id || r.employee_id,
         leaveRequestId: id,
-        type: 'leave_endorsed_department_head',
-        title: 'Leave request endorsed by department head',
-        body: remarks
+        type: nextStatus === 'approved' ? 'leave_approved' : 'leave_endorsed_department_head',
+        title: nextStatus === 'approved' ? 'Leave request approved' : 'Leave request endorsed by department head',
+        body: nextStatus === 'approved'
+          ? `Your leave request was approved by the department reviewer. The Mayor signs the printed form manually.${remarks ? ` ${remarks}` : ''}`
+          : remarks
           ? `Your leave request has been endorsed by your department head and forwarded to HR for final approval. ${remarks}`
           : 'Your leave request has been endorsed by your department head and forwarded to HR for final approval.',
         metadata: { reviewer_remarks: remarks },
       })
     );
+    if (nextStatus === 'approved') broadcastDtrLeaveRefresh('leave_approved_applied_to_dtr', {
+      userId: r.user_id || r.employee_id, leaveRequestId: id,
+      dateFrom: toIsoDateStr(r.start_date), dateTo: toIsoDateStr(r.end_date),
+    });
     broadcastLeaveUpdated('department_head_approved', mappedDhApprove);
     res.json(mappedDhApprove);
   } catch (err) {
@@ -4290,7 +4565,7 @@ router.patch('/:id/department-head-return', protect, async (req, res) => {
 });
 
 // PATCH /api/leave/:id/approve (admin/HR)
-router.patch('/:id/approve', protect, requireAdminOrHr, requireDtrFeatureIfAdmin('leave_allowed'), async (req, res) => {
+router.patch('/:id/approve', protect, requireLeaveFinalRole, requireDtrFeatureIfAdmin('leave_allowed'), async (req, res) => {
   const reviewerId = req.user?.id;
   if (!reviewerId) return res.status(401).json({ error: 'Not authenticated' });
   const { id } = req.params;
@@ -4320,6 +4595,8 @@ router.patch('/:id/approve', protect, requireAdminOrHr, requireDtrFeatureIfAdmin
         return res.status(404).json({ error: 'Leave request not found' });
       }
       const r = existing.rows[0];
+      const targetUserId = r.user_id || r.employee_id;
+      await assertFinalLeaveReviewer(client, targetUserId, reviewerId, 'leave', id);
       // Prevent double deduction: if already approved, return current record and skip updates.
       if (r.status === 'approved') {
         await client.query('COMMIT');
@@ -4333,146 +4610,10 @@ router.patch('/:id/approve', protect, requireAdminOrHr, requireDtrFeatureIfAdmin
         );
         return res.json(mapLeaveRowToApi(out.rows[0]));
       }
-      const targetUserId = r.user_id || r.employee_id;
-      const startStr = toIsoDateStr(r.start_date);
-      const endStr = toIsoDateStr(r.end_date);
-      const workingDayResult = await computeEmployeeLeaveWorkingDays(
-        client,
-        targetUserId,
-        startStr,
-        endStr
-      );
-      const storedRequestedDays = r.days != null ? parseFloat(r.days) : null;
-      const approvalCoverage = assertCoverageMatchesRequestedDays(
-        workingDayResult.countedDates,
-        storedRequestedDays
-      );
-      const approvalDates = approvalCoverage.dates;
-      const approvalDays = approvalCoverage.days;
-      const leaveTypeRule = r.leave_type_name
-        ? await getLeaveTypeDefinition(client, r.leave_type_name)
-        : null;
-      assertRequiredLeaveAttachment({
-        rule: leaveTypeRule,
-        leaveType: r.leave_type_name,
-        days: approvalDays,
-        hasAttachment: storedLeaveAttachmentExists(r.attachment_path),
-      });
-      const allocation = resolveApprovalAllocation({
-        requestedDays: approvalDays,
-        approvedDaysWithPay: approvedDaysWithPayRaw,
-        approvedDaysWithoutPay: approvedDaysWithoutPayRaw,
-      });
-      const { historyAction } = validateAdminTransition({
-        currentStatus: r.status,
-        desiredStatus: 'approved',
-      });
-      await assertFinalLeaveReviewer(client, targetUserId, reviewerId);
-      await requireHrApprovalSignature(client, id, reviewerId);
-      const approvingAuthority = await resolveActiveMayor(
-        client,
-        todayInHrmsTimezone()
-      );
 
-      const updated = await client.query(
-        `UPDATE leave_requests
-         SET status = 'approved',
-             reviewer_id = $2::uuid,
-             reviewer_remarks = $3::text,
-             recommendation_remarks = $4::text,
-             approved_days_with_pay = $5::numeric,
-             approved_days_without_pay = $6::numeric,
-             approved_other_details = $7::text,
-             reserved_credit_days = 0,
-             reviewed_at = now(),
-             approved_by = $2::uuid,
-             approved_at = now(),
-             approving_authority_snapshot = $8::jsonb,
-             updated_at = now()
-         WHERE id = $1
-         RETURNING *`,
-         [
-           id,
-           reviewerId,
-           remarks,
-           recommendationRemarks,
-           allocation.approvedDaysWithPay,
-           allocation.approvedDaysWithoutPay,
-           approvedOtherDetails,
-           JSON.stringify(approvingAuthority || {}),
-         ]
-      );
-      const row = updated.rows[0];
-      const days = allocation.requestedDays;
-      const leaveTypeName = r.leave_type_name || null;
-
-      // Prevent approving if another pending/approved leave overlaps this range.
-      const hasOverlap = await hasOverlappingLeaveRequest(client, targetUserId, startStr, endStr, id);
-      if (hasOverlap) {
-        await client.query('ROLLBACK');
-        return res.status(400).json({ error: 'Overlapping leave request exists' });
-      }
-
-      await assertAnnualQuotaLeaveLimit(client, {
-        userId: targetUserId,
-        leaveTypeName,
-        startStr,
-        endStr,
-        excludeId: id,
-      });
-
-      if (leaveTypeRule?.affects_dtr_normally !== false) {
-        await replaceApprovedLeaveCoverage(client, {
-          employeeId: targetUserId,
-          leaveRequestId: id,
-          dates: approvalDates,
-          actorUserId: reviewerId,
-        });
-      }
-
-      const reservedCreditDays = reservedCreditDaysFromRequest(r);
-
-      // Final approval releases this request's exact pending reservation but charges only
-      // the days HR classified as paid against the configured balance bucket.
-      await upsertLeaveBalanceDeduction(
-        client,
-        targetUserId,
-        leaveTypeName,
-        allocation.usedDaysToDeduct,
-        {
-          decrementPendingDays: true,
-          pendingDaysToRelease: reservedCreditDays,
-          ledgerContext: {
-            action: 'leave_approved',
-            leaveRequestId: id,
-            actorUserId: reviewerId,
-            actorKind: 'admin',
-            metadataJson: {
-              requested_days: allocation.requestedDays,
-              approved_days_with_pay: allocation.approvedDaysWithPay,
-              approved_days_without_pay: allocation.approvedDaysWithoutPay,
-              reserved_credit_days: reservedCreditDays,
-            },
-          },
-        }
-      );
-
-      await insertLeaveRequestHistory(client, {
-        leaveRequestId: id,
-        action: historyAction,
-        fromStatus: r.status,
-        toStatus: 'approved',
-        actedBy: reviewerId,
-        remarks: remarks || null,
-        metadataJson: {
-          leave_type: leaveTypeName,
-          start_date: startStr,
-          end_date: endStr,
-          number_of_days: days,
-          covered_work_dates: approvalDates,
-          approved_days_with_pay: allocation.approvedDaysWithPay,
-          approved_days_without_pay: allocation.approvedDaysWithoutPay,
-        },
+      const {row, leaveTypeName, startStr, endStr} = await finalizeLeaveApproval(client, r, {
+        id, reviewerId, remarks, recommendationRemarks, approvedOtherDetails,
+        approvedDaysWithPayRaw, approvedDaysWithoutPayRaw,
       });
 
       await client.query('COMMIT');
@@ -4522,7 +4663,7 @@ router.patch('/:id/approve', protect, requireAdminOrHr, requireDtrFeatureIfAdmin
 });
 
 // PATCH /api/leave/:id/reject (admin/HR)
-router.patch('/:id/reject', protect, requireAdminOrHr, requireDtrFeatureIfAdmin('leave_allowed'), async (req, res) => {
+router.patch('/:id/reject', protect, requireLeaveFinalRole, requireDtrFeatureIfAdmin('leave_allowed'), async (req, res) => {
   const reviewerId = req.user?.id;
   if (!reviewerId) return res.status(401).json({ error: 'Not authenticated' });
   const { id } = req.params;
@@ -4547,7 +4688,7 @@ router.patch('/:id/reject', protect, requireAdminOrHr, requireDtrFeatureIfAdmin(
     }
     const currentRow = current.rows[0];
 
-    await assertFinalLeaveReviewer(client, currentRow.user_id || currentRow.employee_id, reviewerId);
+    await assertFinalLeaveReviewer(client, currentRow.user_id || currentRow.employee_id, reviewerId, 'leave', id);
 
     const { nextStatus: rejectNextStatus, historyAction } = validateAdminTransition({
       currentStatus: currentRow.status,
@@ -4642,7 +4783,7 @@ router.patch('/:id/reject', protect, requireAdminOrHr, requireDtrFeatureIfAdmin(
 // PATCH /api/leave/:id/revoke  (Phase 4 #15 — Admin only)
 // Revoke an approved leave: restore used_days balance + clean DTR.
 // ============================================================
-router.patch('/:id/revoke', protect, requireAdminOrHr, requireDtrFeatureIfAdmin('leave_allowed'), async (req, res) => {
+router.patch('/:id/revoke', protect, requireLeaveFinalRole, requireDtrFeatureIfAdmin('leave_allowed'), async (req, res) => {
   const reviewerId = req.user?.id;
   if (!reviewerId) return res.status(401).json({ error: 'Not authenticated' });
   const { id } = req.params;
@@ -4669,6 +4810,7 @@ router.patch('/:id/revoke', protect, requireAdminOrHr, requireDtrFeatureIfAdmin(
       return res.status(404).json({ error: 'Leave request not found' });
     }
     const r = current.rows[0];
+    await assertFinalLeaveReviewer(client,r.user_id||r.employee_id,reviewerId,'leave',id);
     if (r.status !== 'approved') {
       await client.query('ROLLBACK');
       return res.status(400).json({
@@ -4833,7 +4975,7 @@ router.patch('/:id/revoke', protect, requireAdminOrHr, requireDtrFeatureIfAdmin(
 });
 
 // PATCH /api/leave/:id/return
-router.patch('/:id/return', protect, requireAdminOrHr, requireDtrFeatureIfAdmin('leave_allowed'), async (req, res) => {
+router.patch('/:id/return', protect, requireLeaveFinalRole, requireDtrFeatureIfAdmin('leave_allowed'), async (req, res) => {
   const reviewerId = req.user?.id;
   if (!reviewerId) return res.status(401).json({ error: 'Not authenticated' });
   const { id } = req.params;
@@ -4858,11 +5000,11 @@ router.patch('/:id/return', protect, requireAdminOrHr, requireDtrFeatureIfAdmin(
     const currentRow = current.rows[0];
 
     // Admin can return from pending_hr or legacy pending
-    if (currentRow.status !== 'pending_hr' && currentRow.status !== 'pending') {
+    if (currentRow.status !== 'pending_hr' && currentRow.status !== 'pending_mayor' && currentRow.status !== 'pending') {
       await client.query('ROLLBACK');
       return res.status(400).json({ error: `Cannot return request with status '${currentRow.status}'` });
     }
-    await assertFinalLeaveReviewer(client, currentRow.user_id || currentRow.employee_id, reviewerId);
+    await assertFinalLeaveReviewer(client, currentRow.user_id || currentRow.employee_id, reviewerId, 'leave', id);
     const historyAction = 'returned';
 
     await client.query(
@@ -4963,6 +5105,7 @@ router.get('/ledger', protect, async (req, res) => {
   const leaveType = (req.query?.leave_type || '').toString().trim() || null;
   const action = (req.query?.action || '').toString().trim() || null;
   const affectedBucket = (req.query?.affected_bucket || '').toString().trim().toLowerCase() || null;
+  const hideZeroPending = ['1', 'true'].includes(String(req.query?.hide_zero_pending || '').toLowerCase());
   const from = (req.query?.from || req.query?.created_from || '').toString().trim() || null;
   const to = (req.query?.to || req.query?.created_to || '').toString().trim() || null;
   const includeAllUsers = ['1', 'true', 'yes'].includes(
@@ -5001,6 +5144,7 @@ router.get('/ledger', protect, async (req, res) => {
     from,
     to,
     affectedBucket,
+    hideZeroPending,
   });
 
   try {
@@ -5095,6 +5239,7 @@ router.get('/:id/form-credits', protect, async (req, res) => {
       `SELECT COALESCE(lr.user_id, lr.employee_id) AS employee_id,
               ($2::boolean = true
                 OR lr.user_id = $3::uuid OR lr.employee_id = $3::uuid
+                OR (lr.final_review_route='mayor' AND lr.final_reviewer_user_id=$3::uuid)
                 OR (lr.status = 'pending_department_head'
                     AND lr.assigned_department_head_id = $3::uuid)
                 OR EXISTS (
@@ -5190,7 +5335,8 @@ router.get('/balances/:userId', protect, async (req, res) => {
       `SELECT name,
               COALESCE(display_name, description, name) AS display_name,
               max_days,
-              sex_eligibility
+              sex_eligibility,
+              eligible_employment_types
        FROM leave_types
        WHERE is_active = true
          AND entitlement_basis = $1
@@ -5205,16 +5351,20 @@ router.get('/balances/:userId', protect, async (req, res) => {
       display: row.display_name || systemLeaveTypeDisplayName(row.name),
       quota: parseFloat(row.max_days),
       sex: normalizeSexEligibility(row.sex_eligibility, row.name),
+      employmentTypes: row.eligible_employment_types,
     }));
 
-    // Skip sex-restricted types the employee cannot use
+    // Skip employment- and sex-restricted types the employee cannot use
     let employeeSex = null;
+    let employeeEmploymentType = null;
     try {
-      const sexRow = await pool.query('SELECT sex FROM users WHERE id = $1::uuid LIMIT 1', [targetId]);
+      const sexRow = await pool.query('SELECT sex, employment_type FROM users WHERE id = $1::uuid LIMIT 1', [targetId]);
       employeeSex = sexRow.rows[0]?.sex || null;
+      employeeEmploymentType = sexRow.rows[0]?.employment_type || null;
     } catch (_) {}
 
     const applicableTypes = annualQuotaTypes.filter((t) => {
+      if (t.employmentTypes != null && !t.employmentTypes.includes(employeeEmploymentType)) return false;
       if (!t.sex || t.sex === 'any') return true;
       if (!employeeSex) return true; // unknown sex: show anyway
       return t.sex.toLowerCase() === employeeSex.toLowerCase();
@@ -5234,7 +5384,7 @@ router.get('/balances/:userId', protect, async (req, res) => {
            AND lr.start_date <= $3::date
            AND lr.end_date   >= $2::date
            AND lt.name = ANY($4::text[])
-           AND lr.status IN ('pending', 'pending_department_head', 'pending_hr', 'approved')`,
+           AND lr.status IN ('pending', 'pending_department_head', 'pending_hr', 'pending_mayor', 'approved')`,
          [targetId, startOfYear, endOfYear, synthTypeNames]
       );
 
@@ -5314,6 +5464,18 @@ router.post('/balances/:userId/adjustments', protect, requireAdminOrHr, requireD
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+    const employee = await client.query(
+      'SELECT employment_type, leave_credit_eligible FROM users WHERE id = $1::uuid FOR SHARE',
+      [targetId]
+    );
+    if (!employee.rows[0]) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({error:'Employee not found'});
+    }
+    if (!canAdjustLeaveCredits(employee.rows[0])) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({error:'This employee is not eligible for manual leave credit adjustments. JO/COS and employees with credits disabled are excluded.'});
+    }
     const balanceBucket = await resolveBalanceLedgerLeaveType(client, leaveType);
     if (!balanceBucket) {
       await client.query('ROLLBACK');
@@ -5539,7 +5701,7 @@ router.get('/:id/attachment', protect, async (req, res) => {
   try {
     const rows = await pool.query(
       `SELECT lr.user_id, lr.employee_id, lr.status,
-              lr.assigned_department_head_id,
+              lr.assigned_department_head_id,lr.final_reviewer_user_id,
               lr.attachment_path, lr.attachment_name, lr.attachment_mime_type,
               EXISTS (
                 SELECT 1 FROM leave_request_department_reviewers lrr
@@ -5574,7 +5736,7 @@ router.get('/:id/attachment', protect, async (req, res) => {
       historicalDepartmentHeadAction = history.rows[0]?.action || null;
     }
     const access = resolveLeaveAttachmentAccess({
-      role,
+      role: role==='mayor' && row.final_reviewer_user_id===userId ? 'hr' : role,
       userId,
       ownerUserId: targetUserId,
       requestStatus: row.status,
@@ -5679,6 +5841,7 @@ router.get('/:id', protect, async (req, res) => {
          AND (
            $2::boolean = true
            OR (lr.user_id = $3 OR lr.employee_id = $3)
+           OR (lr.final_review_route='mayor' AND lr.final_reviewer_user_id=$3::uuid)
             OR (
               lr.status = 'pending_department_head'
               AND lr.assigned_department_head_id = $3::uuid

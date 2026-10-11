@@ -304,6 +304,7 @@ class LeaveProvider extends ChangeNotifier {
       _normalize(query.leaveType) ?? '',
       _normalize(query.action) ?? '',
       _normalize(query.affectedBucket) ?? '',
+      query.hideZeroPending.toString(),
       _normalize(query.from) ?? '',
       _normalize(query.to) ?? '',
       query.limit.toString(),

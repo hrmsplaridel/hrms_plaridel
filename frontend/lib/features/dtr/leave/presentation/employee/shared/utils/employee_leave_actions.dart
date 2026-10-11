@@ -1,3 +1,4 @@
+import 'package:hrms_plaridel/features/dtr/leave/utils/configured_leave_pdf.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -102,6 +103,8 @@ class EmployeeLeaveActions {
       final doc = await LeaveRequestPdf.buildPdf(
         request: target,
         balances: balances,
+        certificationOfficerSignatureBytes:
+            formSignatories.certificationOfficerSignature?.signatureImageBytes,
         certificationOfficerName: formSignatories.certificationOfficer?.name,
         certificationOfficerTitle: formSignatories.certificationOfficer?.title,
         recommendationOfficerName: formSignatories.recommendationOfficer?.name,
@@ -111,8 +114,22 @@ class EmployeeLeaveActions {
         approvingAuthorityTitle: formSignatories.approvingAuthority?.title,
         applicantSignatureBytes:
             formSignatories.applicantSignature?.signatureImageBytes,
+        departmentHeadSignatureBytes:
+            formSignatories.departmentHeadSignature?.signatureImageBytes,
+        hrApproverSignatureBytes:
+            formSignatories.hrApproverSignature?.signatureImageBytes,
       );
-      final bytes = await doc.save();
+      final bytes = await saveConfiguredLeavePdf(
+        request: target,
+        document: doc,
+        departmentReviewer: formSignatories.recommendationOfficer?.name,
+        applicantSignature:
+            formSignatories.applicantSignature?.signatureImageBytes,
+        departmentSignature:
+            formSignatories.departmentHeadSignature?.signatureImageBytes,
+        finalSignature:
+            formSignatories.hrApproverSignature?.signatureImageBytes,
+      );
       if (!context.mounted || !isMounted()) return;
 
       ScaffoldMessenger.of(context).clearSnackBars();
@@ -160,6 +177,8 @@ class EmployeeLeaveActions {
       await LeaveRequestPdf.printLeaveRequest(
         request: target,
         balances: balances,
+        certificationOfficerSignatureBytes:
+            formSignatories.certificationOfficerSignature?.signatureImageBytes,
         certificationOfficerName: formSignatories.certificationOfficer?.name,
         certificationOfficerTitle: formSignatories.certificationOfficer?.title,
         recommendationOfficerName: formSignatories.recommendationOfficer?.name,
@@ -169,6 +188,10 @@ class EmployeeLeaveActions {
         approvingAuthorityTitle: formSignatories.approvingAuthority?.title,
         applicantSignatureBytes:
             formSignatories.applicantSignature?.signatureImageBytes,
+        departmentHeadSignatureBytes:
+            formSignatories.departmentHeadSignature?.signatureImageBytes,
+        hrApproverSignatureBytes:
+            formSignatories.hrApproverSignature?.signatureImageBytes,
         name: 'Leave_Application_${target.id ?? target.userId}.pdf',
       );
     } catch (e) {

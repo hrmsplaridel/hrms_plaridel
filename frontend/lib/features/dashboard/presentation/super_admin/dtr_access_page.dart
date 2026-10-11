@@ -15,7 +15,6 @@ class DtrAccessPageState extends State<DtrAccessPage> {
   static const _permissions = {
     'reports_allowed': 'View DTR reports',
     'manage_allowed': 'Manage DTR logs',
-    'corrections_allowed': 'DTR corrections',
     'employees_allowed': 'Employee profiles',
     'leave_allowed': 'Leave management',
     'approvals_allowed': 'Approvals & signatories',

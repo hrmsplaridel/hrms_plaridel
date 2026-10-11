@@ -20,8 +20,7 @@ const {
   scheduleAuthRefreshTokenCleanupCron,
 } = require('./jobs/authRefreshTokenCleanupScheduler');
 const {
-  generalApiReadLimiter,
-  generalApiLimiter,
+  createApiRateLimits,
 } = require('./middleware/rateLimiters');
 const { registerLongBondPaperForm } = require('./utils/registerLongBondPaper');
 
@@ -142,6 +141,7 @@ function isLocalBrowserOrigin(origin) {
 // Allow those in development, plus CORS_ORIGINS. Native / curl have no Origin.
 app.use(
   cors({
+    exposedHeaders: ['Retry-After', 'RateLimit', 'RateLimit-Policy'],
     origin(origin, callback) {
       if (
         !origin ||
@@ -190,7 +190,7 @@ app.get('/health/db', async (_req, res) => {
 });
 
 // API routes
-app.use('/api', generalApiReadLimiter, generalApiLimiter);
+app.use('/api', ...createApiRateLimits());
 app.use('/auth', authRoutes);
 app.use('/auth/password-reset-assistance', require('./routes/passwordResetAssistance').publicRouter);
 app.use('/api/password-reset-requests', require('./routes/passwordResetAssistance').adminRouter);
@@ -213,7 +213,6 @@ app.use('/api/biometric-attendance-logs', biometricAttendanceLogsRoutes);
 app.use('/api/overtime', overtimeRoutes);
 app.use('/api/calendar', calendarRoutes);
 app.use('/api/dtr-daily-summary', dtrDailySummaryRoutes);
-app.use('/api/dtr-corrections', require('./routes/dtrCorrections'));
 app.use('/api/system-audit', require('./routes/systemAudit'));
 app.use('/api/system-health', createSystemHealthRouter(healthMonitor, undefined, backupService));
 app.use('/api/system-backups', createSystemBackupsRouter(backupService));

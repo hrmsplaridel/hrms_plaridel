@@ -20,7 +20,7 @@ class LeaveStatusChip extends StatelessWidget {
         Colors.amber.shade100,
         Colors.amber.shade900,
       ),
-      LeaveRequestStatus.pendingHr => (
+      LeaveRequestStatus.pendingMayor || LeaveRequestStatus.pendingHr => (
         Colors.orange.shade100,
         Colors.orange.shade900,
       ),

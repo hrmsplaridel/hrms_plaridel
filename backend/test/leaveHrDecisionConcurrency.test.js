@@ -68,9 +68,11 @@ for (const firstAction of ['reject', 'return']) {
               await acquire(client);
               return { rows: [{ ...row, days: row.number_of_days }] };
             }
-            if (statement.includes('FROM positions p')) {
+            if (statement.includes('department_approver_id')) return { rows: [{ department_approver_id: null }] };
+            if (statement.includes('FROM primary_reviewer_designations')) {
               return { rows: [{ id: '33333333-3333-4333-8333-333333333333', name: 'Primary' }] };
             }
+            if (statement.startsWith('SELECT final_review_route')) return {rows:[{final_review_route:'hr'}]};
             if (statement.includes('FROM leave_final_reviewer_backups')) {
               return { rows: [{ id: '44444444-4444-4444-8444-444444444444', name: 'Backup' }] };
             }
@@ -86,6 +88,10 @@ for (const firstAction of ['reject', 'return']) {
             if (statement.startsWith('INSERT INTO leave_request_history')) {
               history.push(params[1]);
               return { rows: [] };
+            }
+            if (statement.startsWith('UPDATE user_notifications')) {
+              assert.equal(lockOwner, client);
+              return {rows:[]};
             }
             if (statement.startsWith('SELECT balance_ledger_type')) {
               return { rows: [{ balance_ledger_type: 'vacationLeave' }] };

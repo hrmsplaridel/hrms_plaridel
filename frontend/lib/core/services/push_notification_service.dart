@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:dio/dio.dart';
 import 'package:firebase_core/firebase_core.dart';
@@ -29,6 +30,41 @@ class PushNotificationService {
   StreamSubscription<String>? _tokenRefreshSub;
   StreamSubscription<RemoteMessage>? _foregroundMessageSub;
   String? _lastRegisteredToken;
+  StreamSubscription<RemoteMessage>? _messageOpenedSub;
+  final _monthEndTapController = StreamController<String>.broadcast();
+  String? _pendingMonthEndUserId;
+  Stream<String> get monthEndCreditHistoryTaps => _monthEndTapController.stream;
+
+  void handleNotificationTapData(Map<String, dynamic> data) {
+    final type = data['type'];
+    final userId = data['user_id']?.toString().trim() ?? '';
+    if (data['category'] != 'leave' ||
+        userId.isEmpty ||
+        (type != 'leave_month_end_balance_updated' &&
+            type != 'leave_month_end_balance_corrected')) {
+      return;
+    }
+    _pendingMonthEndUserId = userId;
+    _monthEndTapController.add(userId);
+  }
+
+  bool consumeMonthEndCreditHistoryTapFor(String? userId) {
+    if (userId == null || userId.isEmpty || _pendingMonthEndUserId != userId) {
+      return false;
+    }
+    _pendingMonthEndUserId = null;
+    return true;
+  }
+
+  void _handleLocalTap(String? payload) {
+    if (payload == null) return;
+    try {
+      final data = jsonDecode(payload);
+      if (data is Map) {
+        handleNotificationTapData(Map<String, dynamic>.from(data));
+      }
+    } catch (_) {} // Older notifications carry only their ID.
+  }
 
   static const AndroidNotificationChannel _androidChannel =
       AndroidNotificationChannel(
@@ -80,6 +116,18 @@ class PushNotificationService {
     _foregroundMessageSub = FirebaseMessaging.onMessage.listen(
       _showForegroundNotification,
     );
+    _messageOpenedSub = FirebaseMessaging.onMessageOpenedApp.listen(
+      (message) => handleNotificationTapData(message.data),
+    );
+    try {
+      final initialMessage = await FirebaseMessaging.instance
+          .getInitialMessage();
+      if (initialMessage != null) {
+        handleNotificationTapData(initialMessage.data);
+      }
+    } catch (e) {
+      debugPrint('Initial push notification unavailable: $e');
+    }
   }
 
   Future<void> _initLocalNotifications() async {
@@ -99,10 +147,18 @@ class PushNotificationService {
     );
     await _localNotifications.initialize(
       settings: settings,
-      onDidReceiveNotificationResponse: (_) {
+      onDidReceiveNotificationResponse: (response) {
         unawaited(DesktopLifecycleService.instance.showWindow());
+        _handleLocalTap(response.payload);
       },
     );
+    try {
+      final launch = await _localNotifications
+          .getNotificationAppLaunchDetails();
+      if (launch?.didNotificationLaunchApp == true) {
+        _handleLocalTap(launch?.notificationResponse?.payload);
+      }
+    } catch (_) {}
 
     if (defaultTargetPlatform == TargetPlatform.android) {
       await _localNotifications
@@ -138,7 +194,7 @@ class PushNotificationService {
         iOS: const DarwinNotificationDetails(),
         macOS: const DarwinNotificationDetails(),
       ),
-      payload: message.data['notification_id']?.toString(),
+      payload: jsonEncode(message.data),
     );
   }
 
@@ -146,6 +202,7 @@ class PushNotificationService {
     required String id,
     required String title,
     String? body,
+    Map<String, dynamic>? data,
   }) async {
     if (kIsWeb || defaultTargetPlatform != TargetPlatform.windows) return;
     await _localNotifications.show(
@@ -155,7 +212,7 @@ class PushNotificationService {
       notificationDetails: const NotificationDetails(
         windows: WindowsNotificationDetails(),
       ),
-      payload: id,
+      payload: data == null ? id : jsonEncode(data),
     );
   }
 
@@ -247,6 +304,8 @@ class PushNotificationService {
   }
 
   Future<void> dispose() async {
+    await _messageOpenedSub?.cancel();
+    _messageOpenedSub = null;
     await _tokenRefreshSub?.cancel();
     await _foregroundMessageSub?.cancel();
     _tokenRefreshSub = null;
