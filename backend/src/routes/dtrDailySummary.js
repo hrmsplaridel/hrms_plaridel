@@ -1,4 +1,6 @@
 const express = require('express');
+const {withHeavyWork} = require('../middleware/heavyWork');
+const {mapConcurrent, dtrRowConcurrency} = require('../services/heavyWorkQueue');
 const { pool } = require('../config/db');
 const { authMiddleware } = require('../middleware/auth');
 const { requireAdmin, requireAdminOrHr, requireAdminOrSupervisor } = require('../middleware/rbac');
@@ -1193,7 +1195,7 @@ async function listDtrDailySummaries(req, res) {
     let reportAssignmentsByEmployee = rawAssignmentsByEmployee;
     let reportScheduleOverrides = new Map();
     const savedShiftsByDate = new Map();
-    const rows = await Promise.all(rawRows.map(async (r) => {
+    const rows = await mapConcurrent(rawRows, dtrRowConcurrency, async (r) => {
       // Use the date-only text from SQL to avoid timezone shifting issues when JS receives Date objects.
       const dateStr = (r.attendance_date_iso && String(r.attendance_date_iso).slice(0, 10)) || toIsoDateStr(r.attendance_date);
       const shiftInfo = r.shift_snapshot || (dateStr
@@ -1327,7 +1329,7 @@ async function listDtrDailySummaries(req, res) {
         combine_late_and_undertime:
           effectiveAttendancePolicy?.combineLateAndUndertime ?? false,
       };
-    }));
+    });
 
     // Inject synthetic holiday rows for dates with no record
     if (startStr && endStr) {
@@ -1987,7 +1989,7 @@ router.get('/', protect, requireAnyDtrAccessForList, listDtrDailySummaries);
 // Returns report-ready DTR rows and historical assignment timelines in one
 // bounded request. The Flutter client may call this endpoint in batches when
 // more than MAX_DTR_BULK_REPORT_EMPLOYEES are selected.
-router.post('/bulk-report', protect, requireAdminOrSupervisor, requireDtrReportsIfAdmin, async (req, res) => {
+router.post('/bulk-report', protect, requireAdminOrSupervisor, requireDtrReportsIfAdmin, withHeavyWork(async (req, res) => {
   try {
     const { employee_ids, start_date, end_date } = req.body || {};
     const parsedEmployeeIds = parseEmployeeIdList(employee_ids);
@@ -2090,7 +2092,7 @@ router.post('/bulk-report', protect, requireAdminOrSupervisor, requireDtrReports
     console.error('[dtr-daily-summary POST /bulk-report]', err);
     return res.status(500).json({ error: 'Failed to prepare bulk DTR report' });
   }
-});
+}));
 
 // GET /api/dtr-daily-summary/summary - counts for dashboard (DTR + leave pipeline)
 router.get('/summary', protect, requireAdminOrSupervisor, requireDtrManageIfAdmin, async (req, res) => {

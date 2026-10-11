@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 
@@ -75,6 +76,33 @@ class ApiClient {
         onError: (error, handler) async {
           final status = error.response?.statusCode;
           final opts = error.requestOptions;
+
+          if (status == 503) {
+            // PDF responses use bytes, including JSON busy errors from the server.
+            dynamic data = error.response?.data;
+            if (data is List<int> && data.length <= 4096) {
+              try {
+                data = jsonDecode(utf8.decode(data));
+              } catch (_) {}
+            }
+            if (data is Map && data['code'] == 'HEAVY_OPERATION_BUSY') {
+              return handler.next(
+                DioException(
+                  requestOptions: opts,
+                  response: Response<dynamic>(
+                    requestOptions: opts,
+                    statusCode: status,
+                    headers: error.response!.headers,
+                    data: data,
+                  ),
+                  type: error.type,
+                  message: data['error']?.toString(),
+                  error: error.error,
+                  stackTrace: error.stackTrace,
+                ),
+              );
+            }
+          }
 
           if (status == 429 && error is! RateLimitCooldownException) {
             return handler.next(_rateLimitCooldown.record(error));

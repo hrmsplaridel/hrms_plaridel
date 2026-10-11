@@ -1,4 +1,5 @@
 const express=require('express');const multer=require('multer');
+const {withHeavyWork}=require('../middleware/heavyWork');
 const {pool}=require('../config/db');
 const {requireAdminOrHr}=require('../middleware/rbac');
 const {requireDtrFeatureIfAdmin}=require('../middleware/dtrAccess');
@@ -41,7 +42,7 @@ router.post('/types/:id',...manage,file,async(req,res)=>{
   await client.query('COMMIT');res.json(metadata(q.rows[0]));
  }catch(e){if(client)await client.query('ROLLBACK');failure(res,e);}finally{client?.release();}
 });
-router.post('/requests/:id/render',file,async(req,res)=>{
+router.post('/requests/:id/render',file,withHeavyWork(async(req,res)=>{
  try{
   const row=await requestVersion(pool,req.params.id,req.user);
   if(!req.file)throw Object.assign(new Error('Generated PDF required'),{status:400});
@@ -49,13 +50,13 @@ router.post('/requests/:id/render',file,async(req,res)=>{
   const bytes=await mergeLocatorBackground(row.background_pdf,req.file.buffer);
   res.set('Content-Type','application/pdf').set('Cache-Control','no-store').send(bytes);
  }catch(e){failure(res,e);}
-});
-router.post('/types/:id/preview',...manage,file,async(req,res)=>{
+}));
+router.post('/types/:id/preview',...manage,file,withHeavyWork(async(req,res)=>{
  try{
   const version=await typeVersion(pool,req.params.id);
   if(!req.file)throw Object.assign(new Error('Generated PDF required'),{status:400});
   const bytes=await mergeLocatorBackground(version.background_pdf,req.file.buffer);
   res.set('Content-Type','application/pdf').set('Cache-Control','no-store').send(bytes);
  }catch(e){failure(res,e);}
-});
+}));
 module.exports=router;

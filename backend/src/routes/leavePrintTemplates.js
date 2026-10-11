@@ -1,5 +1,6 @@
 const express=require('express');
 const multer=require('multer');
+const {withHeavyWork}=require('../middleware/heavyWork');
 const {pool}=require('../config/db');
 const {requireAdminOrHr}=require('../middleware/rbac');
 const {requireDtrFeatureIfAdmin}=require('../middleware/dtrAccess');
@@ -67,7 +68,7 @@ router.get('/requests/:id',async(req,res)=>{
    mayor_name:row.approving_authority_snapshot?.name||mayor?.name||'',mayor_title:mayor?.position_title||'Municipal Mayor'});
  }catch(e){failure(res,e);}
 });
-router.post('/requests/:id/render',file,async(req,res)=>{
+router.post('/requests/:id/render',file,withHeavyWork(async(req,res)=>{
  try{const row=await requestVersion(pool,req.params.id,req.user);
   if(!req.file)throw Object.assign(new Error('Generated PDF required'),{status:400});
   // A client must render the version it fetched, never silently mix versions.
@@ -75,12 +76,12 @@ router.post('/requests/:id/render',file,async(req,res)=>{
   const bytes=await mergeBackground(row.background_pdf,req.file.buffer,{layout:row.layout});
   res.set('Content-Type','application/pdf').set('Cache-Control','no-store').send(bytes);
  }catch(e){failure(res,e);}
-});
-router.post('/types/:id/preview',...manage,file,async(req,res)=>{
+}));
+router.post('/types/:id/preview',...manage,file,withHeavyWork(async(req,res)=>{
  try{const version=await typeVersion(pool,req.params.id);
   if(!req.file)throw Object.assign(new Error('Generated PDF required'),{status:400});
   const bytes=await mergeBackground(version.background_pdf,req.file.buffer,{layout:version.layout});
   res.set('Content-Type','application/pdf').set('Cache-Control','no-store').send(bytes);
  }catch(e){failure(res,e);}
-});
+}));
 module.exports=router;

@@ -22,6 +22,37 @@ void main() {
     );
   });
   test(
+    'PDF busy responses expose a readable message without replay or sign-out',
+    () async {
+      var calls = 0;
+      final dio = Dio()
+        ..httpClientAdapter = _Adapter((o) {
+          calls++;
+          return o.path.endsWith('/render')
+              ? _json(503, {
+                  'code': 'HEAVY_OPERATION_BUSY',
+                  'error':
+                      'Report/PDF processing is busy. Please try again in 5 seconds.',
+                  'retryAfterSeconds': 5,
+                }, '5')
+              : _json(200, {});
+        });
+      final client = ApiClient.forTesting(dio: dio, refreshDio: Dio())..init();
+      final error = await _failure(
+        () => client.post<List<int>>(
+          '/api/leave/print/requests/id/render',
+          options: Options(responseType: ResponseType.bytes),
+        ),
+      );
+      expect(error.response?.data, isA<Map>());
+      expect(error.message, contains('try again in 5 seconds'));
+      expect(calls, 1);
+      expect(await TokenStorage.instance.getToken(), 'employee-a');
+      expect((await client.post('/api/leave/id/approve')).statusCode, 200);
+      expect(calls, 2);
+    },
+  );
+  test(
     'shared read cooldown stops polling without blocking writes or replaying requests',
     () async {
       var calls = 0;
