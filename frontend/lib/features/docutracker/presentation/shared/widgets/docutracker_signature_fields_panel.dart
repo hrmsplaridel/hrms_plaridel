@@ -17,7 +17,11 @@ class DocuTrackerSignatureFieldsPanel extends StatelessWidget {
     this.onClose,
     this.onAddField,
     this.onInsertOwn,
+    this.isLocked,
   });
+
+  /// Fields that are part of a fixed template and can never be deleted.
+  final bool Function(DocuTrackerSignatureField field)? isLocked;
 
   final List<DocuTrackerSignatureField> fields;
   final int activePage;
@@ -123,7 +127,11 @@ class DocuTrackerSignatureFieldsPanel extends StatelessWidget {
                     field: field,
                     selected: field.id == selectedFieldId,
                     onActivePage: field.pageNumber == activePage,
-                    canDelete: canEditLayout && !field.isSigned && !isBusy,
+                    canDelete:
+                        canEditLayout &&
+                        !field.isSigned &&
+                        !isBusy &&
+                        isLocked?.call(field) != true,
                     canSign: field.canSign && !isBusy,
                     onSelect: () => onSelect(field),
                     onSign: () => onSign(field),
@@ -162,15 +170,19 @@ class _SignatureFieldCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final statusColor = field.isSigned
+    final statusAccent = field.isSigned
         ? const Color(0xFF15803D)
         : const Color(0xFFB45309);
-    final statusBackground = field.isSigned
-        ? const Color(0xFFDCFCE7)
-        : const Color(0xFFFFEDD5);
+    final statusColor = DocuTrackerTokens.toneOf(context, statusAccent);
+    final statusBackground = DocuTrackerTokens.tintOf(
+      context,
+      light: field.isSigned ? const Color(0xFFDCFCE7) : const Color(0xFFFFEDD5),
+      accent: statusAccent,
+      darkAlpha: 0.22,
+    );
     return Material(
       color: selected
-          ? DocuTrackerTokens.brandSoft
+          ? DocuTrackerTokens.brandSoftOf(context)
           : DocuTrackerTokens.surfaceOf(context),
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(DocuTrackerTokens.radiusSm),

@@ -2313,8 +2313,25 @@ CREATE TABLE IF NOT EXISTS docutracker_documents (
   cancelled_at TIMESTAMPTZ,
   archived_at TIMESTAMPTZ,
   deleted_at TIMESTAMPTZ,
+  release_required BOOLEAN NOT NULL DEFAULT false,
+  released_to_department_id UUID REFERENCES departments(id) ON DELETE SET NULL,
+  released_to_department_name TEXT,
+  released_by UUID REFERENCES users(id) ON DELETE SET NULL,
+  released_by_name TEXT,
+  released_at TIMESTAMPTZ,
+  release_remarks TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT docutracker_documents_release_native_check_v1
+    CHECK (NOT release_required OR source_module IS NULL),
+  CONSTRAINT docutracker_documents_release_state_check_v1
+    CHECK (
+      released_at IS NULL
+      OR (
+        release_required
+        AND btrim(COALESCE(released_to_department_name, '')) <> ''
+      )
+    ),
   CONSTRAINT docutracker_documents_priority_check_v1
     CHECK (priority IN ('low', 'normal', 'high', 'urgent')),
   CONSTRAINT docutracker_documents_confidentiality_check_v1
@@ -2406,11 +2423,13 @@ CREATE TABLE IF NOT EXISTS docutracker_document_history (
   is_overdue_log BOOLEAN DEFAULT false,
   is_escalation_log BOOLEAN DEFAULT false,
   escalation_level INT,
+  metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   CONSTRAINT chk_docutracker_history_action
     CHECK (action IS NULL OR action IN (
       'created', 'submitted', 'forwarded', 'approved', 'rejected', 'returned',
-      'metadata_updated', 'remark', 'escalated', 'overdue', 'assigned', 'signed'
+      'metadata_updated', 'remark', 'escalated', 'overdue', 'assigned', 'signed',
+      'released'
     ))
 );
 
@@ -2446,8 +2465,7 @@ CREATE TABLE IF NOT EXISTS docutracker_notifications (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   document_id UUID NOT NULL REFERENCES docutracker_documents(id) ON DELETE CASCADE,
   user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  type TEXT NOT NULL
-    CHECK (type IN ('assigned', 'deadline_near', 'overdue', 'escalated', 'returned', 'rejected')),
+  type TEXT NOT NULL,
   title TEXT,
   body TEXT,
   read BOOLEAN DEFAULT false,
@@ -2459,6 +2477,11 @@ CREATE TABLE IF NOT EXISTS docutracker_notifications (
   failed_at TIMESTAMPTZ,
   failure_reason TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT docutracker_notifications_type_check
+    CHECK (type IN (
+      'assigned', 'deadline_near', 'overdue', 'escalated', 'returned', 'rejected',
+      'released'
+    )),
   CONSTRAINT docutracker_notifications_channel_check_v1
     CHECK (channel IN ('in_app', 'email', 'sms', 'push')),
   CONSTRAINT docutracker_notifications_delivery_status_check_v1
@@ -2479,7 +2502,7 @@ CREATE TABLE IF NOT EXISTS docutracker_permissions (
   CONSTRAINT docutracker_permissions_action_check_prod_v1
     CHECK (action IN (
       'view', 'create', 'create_draft', 'submit', 'download', 'edit', 'delete',
-      'forward', 'approve', 'reject', 'return'
+      'forward', 'approve', 'reject', 'return', 'release'
     ))
 );
 
@@ -2538,6 +2561,9 @@ CREATE TABLE IF NOT EXISTS docutracker_signature_fields (
   signature_asset_id UUID REFERENCES docutracker_signature_assets(id) ON DELETE RESTRICT,
   signed_by UUID REFERENCES users(id) ON DELETE RESTRICT,
   signer_name_snapshot TEXT,
+  -- Printed identity frozen at signing; NULL on fields signed before it existed.
+  signer_position_snapshot TEXT,
+  signer_role_snapshot TEXT,
   signed_at TIMESTAMPTZ,
   locked_at TIMESTAMPTZ,
   created_by UUID REFERENCES users(id) ON DELETE SET NULL,
@@ -2549,6 +2575,12 @@ CREATE TABLE IF NOT EXISTS docutracker_signature_fields (
     OR
     (signature_asset_id IS NOT NULL AND signed_by IS NOT NULL AND signed_at IS NOT NULL
       AND locked_at IS NOT NULL AND signer_name_snapshot IS NOT NULL)
+  ),
+  CONSTRAINT docutracker_signature_fields_identity_snapshot_check_v1 CHECK (
+    (signer_position_snapshot IS NULL OR btrim(signer_position_snapshot) <> '')
+    AND (signer_role_snapshot IS NULL OR btrim(signer_role_snapshot) <> '')
+    AND (signed_at IS NOT NULL
+      OR (signer_position_snapshot IS NULL AND signer_role_snapshot IS NULL))
   )
 );
 
@@ -2695,6 +2727,9 @@ CREATE INDEX IF NOT EXISTS idx_docutracker_documents_source_record
   WHERE source_record_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_docutracker_documents_metadata_gin
   ON docutracker_documents USING GIN (metadata);
+CREATE INDEX IF NOT EXISTS idx_docutracker_documents_released_to_department
+  ON docutracker_documents(released_to_department_id, released_at DESC)
+  WHERE released_at IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS docutracker_document_types (
   document_type TEXT PRIMARY KEY,
@@ -2703,6 +2738,8 @@ CREATE TABLE IF NOT EXISTS docutracker_document_types (
   number_prefix TEXT,
   default_priority TEXT NOT NULL DEFAULT 'normal',
   is_enabled BOOLEAN NOT NULL DEFAULT true,
+  -- Approved documents of this type wait for an authorized release to a department.
+  requires_release BOOLEAN NOT NULL DEFAULT false,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   CONSTRAINT docutracker_document_types_type_not_blank
@@ -2713,10 +2750,10 @@ CREATE TABLE IF NOT EXISTS docutracker_document_types (
     CHECK (default_priority IN ('low', 'normal', 'high', 'urgent'))
 );
 
-INSERT INTO docutracker_document_types (document_type, display_name, description, number_prefix)
+INSERT INTO docutracker_document_types (document_type, display_name, description, number_prefix, requires_release)
 VALUES
-  ('memo', 'Memo', 'Internal memorandum document', 'MEMO'),
-  ('purchaseRequest', 'Purchase Request', 'Purchase request document', 'PR')
+  ('memo', 'Memo', 'Internal memorandum document', 'MEMO', true),
+  ('purchaseRequest', 'Purchase Request', 'Purchase request document', 'PR', false)
 ON CONFLICT (document_type) DO NOTHING;
 
 CREATE TABLE IF NOT EXISTS docutracker_document_files (
@@ -3551,6 +3588,17 @@ EXECUTE PROCEDURE set_updated_at();
 -- independently for upgrades while making this file the one-command installer.
 \ir migrations/docutracker/docutracker-install-all-in-order.sql
 \ir rsp-storage-attachment-policy.sql
+
+-- Default release authority (part of the baseline role policy). Seeded after
+-- the DocuTracker rollup: its earlier sections re-create narrower permission
+-- action checks that only the release section widens to include 'release'.
+INSERT INTO docutracker_permissions (role_id, user_id, document_type, action, granted)
+VALUES ('hr', NULL::uuid, 'memo', 'release', true)
+ON CONFLICT (role_id, document_type, action)
+WHERE role_id IS NOT NULL
+DO UPDATE SET
+  granted = EXCLUDED.granted,
+  updated_at = now();
 
 -- =========================================
 -- DOCUTRACKER WORKFLOW VERSIONING TABLES

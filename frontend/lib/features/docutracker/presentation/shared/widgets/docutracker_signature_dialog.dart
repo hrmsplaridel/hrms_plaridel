@@ -423,7 +423,10 @@ class _SignatureDialogState extends State<_SignatureDialog> {
           'Sign anywhere on the screen with your pen tablet, finger, or '
           'mouse — you can start from any spot. Your signature appears in '
           'the preview below, cropped and centered.',
-          style: TextStyle(color: DocuTrackerTokens.textMuted, fontSize: 13),
+          style: TextStyle(
+            color: DocuTrackerTokens.textMutedOf(context),
+            fontSize: 13,
+          ),
         ),
         const SizedBox(height: 10),
         SizedBox(
@@ -433,7 +436,9 @@ class _SignatureDialogState extends State<_SignatureDialog> {
             key: const Key('docutracker_signature_preview'),
             decoration: BoxDecoration(
               color: Colors.white,
-              border: Border.all(color: DocuTrackerTokens.borderSubtle),
+              border: Border.all(
+                color: DocuTrackerTokens.borderSubtleOf(context),
+              ),
               borderRadius: BorderRadius.circular(10),
             ),
             clipBehavior: Clip.antiAlias,
@@ -450,9 +455,9 @@ class _SignatureDialogState extends State<_SignatureDialog> {
                     child: Text(
                       'Your signature will appear here',
                       style: TextStyle(
-                        color: DocuTrackerTokens.textMuted.withValues(
-                          alpha: 0.6,
-                        ),
+                        color: DocuTrackerTokens.textMutedOf(
+                          context,
+                        ).withValues(alpha: 0.6),
                         fontSize: 18,
                         fontStyle: FontStyle.italic,
                       ),
@@ -521,7 +526,7 @@ class _SignatureDialogState extends State<_SignatureDialog> {
                 border: Border.all(
                   color: selected
                       ? DocuTrackerTokens.brand
-                      : DocuTrackerTokens.borderSubtle,
+                      : DocuTrackerTokens.borderSubtleOf(context),
                 ),
                 borderRadius: BorderRadius.circular(10),
               ),
@@ -533,7 +538,7 @@ class _SignatureDialogState extends State<_SignatureDialog> {
                         : Icons.radio_button_off,
                     color: selected
                         ? DocuTrackerTokens.brand
-                        : DocuTrackerTokens.textMuted,
+                        : DocuTrackerTokens.textMutedOf(context),
                   ),
                   const SizedBox(width: 12),
                   Expanded(

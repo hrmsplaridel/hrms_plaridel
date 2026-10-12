@@ -134,7 +134,7 @@ class _DocuTrackerEscalationConfigScreenState
               'using these rules. Department-specific rows take priority over global (no department). '
               'The target role must have an active user or the document will require admin intervention.',
               style: TextStyle(
-                color: AppTheme.textSecondary,
+                color: AppTheme.dashTextSecondaryOf(context),
                 fontSize: 13,
                 height: 1.35,
               ),
@@ -155,7 +155,7 @@ class _DocuTrackerEscalationConfigScreenState
                       child: Text(
                         'No escalation rules yet. Add one to enable automatic escalation.',
                         textAlign: TextAlign.center,
-                        style: TextStyle(color: AppTheme.textSecondary),
+                        style: TextStyle(color: AppTheme.dashTextSecondaryOf(context)),
                       ),
                     )
                   : ListView.separated(
@@ -168,11 +168,13 @@ class _DocuTrackerEscalationConfigScreenState
                             : _departmentNameById[c.departmentId] ??
                                   c.departmentId!;
                         return Material(
-                          color: Colors.white,
+                          color: AppTheme.dashPanelOf(context),
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(12),
                             side: BorderSide(
-                              color: Colors.black.withValues(alpha: 0.08),
+                              color: AppTheme.dashIsDark(context)
+                                  ? AppTheme.dashHairlineOf(context)
+                                  : Colors.black.withValues(alpha: 0.08),
                             ),
                           ),
                           child: ListTile(
@@ -189,7 +191,7 @@ class _DocuTrackerEscalationConfigScreenState
                               'After ${c.escalationDelayMinutes} min · max ${c.maxEscalationLevel} levels'
                               '${c.notifyOriginalSender ? " · notify sender" : ""}',
                               style: TextStyle(
-                                color: AppTheme.textSecondary,
+                                color: AppTheme.dashTextSecondaryOf(context),
                                 fontSize: 12,
                                 height: 1.35,
                               ),

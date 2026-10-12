@@ -20,23 +20,15 @@ class _LinkedSourceProvider extends DocuTrackerProvider {
       sourceModule: sourceModule,
       sourceTable: sourceTable,
       sourceRecordId: sourceRecordId,
-      title: 'Administrative Aide',
+      title: 'Records management training',
       status: 'submitted',
       fields: const [
-        DocuTrackerLinkedSourceField(
-          label: 'Applicant',
-          value: 'Juan Dela Cruz',
-        ),
-        DocuTrackerLinkedSourceField(
-          label: 'Position applied for',
-          value: 'Administrative Aide',
-        ),
+        DocuTrackerLinkedSourceField(label: 'Employee', value: 'Maria Santos'),
       ],
       attachments: const [],
       printData: const {
         'id': 'record-1',
-        'full_name': 'Juan Dela Cruz',
-        'email': 'juan@example.test',
+        'employee_name': 'Maria Santos',
         'status': 'submitted',
       },
     );
@@ -67,20 +59,23 @@ void main() {
     expect(source.printData, isEmpty);
   });
 
-  test('L&D and RSP statuses use module wording', () {
-    final ld = docuTrackerLinkedSourceStatusText(
-      sourceModule: 'ld',
-      status: 'needs_revision',
-    );
-    expect(ld.label, 'Needs revision');
-    expect(ld.description, 'L&D asked the employee to revise this report.');
+  test(
+    'L&D statuses use module wording; recruitment has no DocuTracker view',
+    () {
+      final ld = docuTrackerLinkedSourceStatusText(
+        sourceModule: 'ld',
+        status: 'needs_revision',
+      );
+      expect(ld.label, 'Needs revision');
+      expect(ld.description, 'L&D asked the employee to revise this report.');
 
-    final rsp = docuTrackerLinkedSourceStatusText(
-      sourceModule: 'rsp',
-      status: 'registered',
-    );
-    expect(rsp.label, 'Hired');
-  });
+      final rsp = docuTrackerLinkedSourceStatusText(
+        sourceModule: 'rsp',
+        status: 'registered',
+      );
+      expect(rsp.description, 'Status is managed by the source module.');
+    },
+  );
 
   test('L&D "seen" reads as a finished review', () {
     final seen = docuTrackerLinkedSourceStatusText(
@@ -157,7 +152,7 @@ void main() {
   });
 
   for (final width in [360.0, 768.0, 1440.0]) {
-    testWidgets('RSP linked document fits at $width', (tester) async {
+    testWidgets('L&D linked document fits at $width', (tester) async {
       tester.view.physicalSize = Size(width, 900);
       tester.view.devicePixelRatio = 1;
       addTearDown(tester.view.resetPhysicalSize);
@@ -169,11 +164,11 @@ void main() {
           child: const MaterialApp(
             home: DocuTrackerLinkedSourceDocumentScreen(
               document: DocuTrackerDocument(
-                id: 'source:rsp:record-1',
-                documentType: 'rsp',
-                title: 'Administrative Aide',
-                sourceModule: 'rsp',
-                sourceTable: 'recruitment_applications',
+                id: 'source:ld:record-1',
+                documentType: 'ld',
+                title: 'Records management training',
+                sourceModule: 'ld',
+                sourceTable: 'training_daily_reports',
                 sourceRecordId: 'record-1',
                 sourceOnly: true,
               ),
@@ -183,14 +178,11 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      expect(find.text('RECRUITMENT, SELECTION AND PLACEMENT'), findsOneWidget);
-      expect(find.text('Juan Dela Cruz'), findsOneWidget);
-      expect(find.text('Status: Application Submitted'), findsOneWidget);
+      expect(find.text('LEARNING AND DEVELOPMENT'), findsOneWidget);
+      expect(find.text('Maria Santos'), findsOneWidget);
+      expect(find.text('Status: Submitted'), findsOneWidget);
       expect(
-        find.text(
-          'The application is waiting for HR to review the submitted '
-          'documents.',
-        ),
+        find.text('The report was submitted and is waiting for L&D review.'),
         findsOneWidget,
       );
       expect(

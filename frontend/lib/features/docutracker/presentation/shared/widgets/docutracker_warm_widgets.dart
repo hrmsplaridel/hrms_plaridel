@@ -26,7 +26,7 @@ class DocuTrackerWarmFilterChip extends StatelessWidget {
         color: selected
             ? (dark
                   ? DocuTrackerTokens.brand.withValues(alpha: 0.22)
-                  : DocuTrackerTokens.brandSoft)
+                  : DocuTrackerTokens.brandSoftOf(context))
             : DocuTrackerTokens.surfaceOf(context),
         borderRadius: BorderRadius.circular(24),
         child: InkWell(

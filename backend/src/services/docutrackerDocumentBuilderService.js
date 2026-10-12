@@ -145,6 +145,32 @@ async function canEditBuilder(client, document, user) {
   return canUserPerformDocumentAction(client, { user, document, action: 'edit' });
 }
 
+// Printed signatory identity for a user row aliased `userAlias`: role plus the
+// position of their current assignment. The Mayor falls back to the title used
+// by resolveActiveMayor. Requires signerIdentityJoinSql(userAlias) in FROM.
+function signerIdentitySelectSql(userAlias, outputPrefix) {
+  return `LOWER(COALESCE(${userAlias}.role, '')) AS ${outputPrefix}_role,
+            CASE
+              WHEN LOWER(COALESCE(${userAlias}.role, '')) = 'mayor'
+                THEN COALESCE(NULLIF(current_assignment.position_name, ''), 'Municipal Mayor')
+              ELSE NULLIF(current_assignment.position_name, '')
+            END AS ${outputPrefix}_position`;
+}
+
+function signerIdentityJoinSql(userAlias) {
+  return `LEFT JOIN LATERAL (
+       SELECT p.name AS position_name
+       FROM assignments a
+       LEFT JOIN positions p ON p.id = a.position_id
+       WHERE a.employee_id = ${userAlias}.id
+         AND (a.is_active IS NULL OR a.is_active = true)
+         AND a.effective_from <= CURRENT_DATE
+         AND (a.effective_to IS NULL OR a.effective_to >= CURRENT_DATE)
+       ORDER BY a.effective_from DESC, a.created_at DESC, a.id DESC
+       LIMIT 1
+     ) current_assignment ON true`;
+}
+
 async function serializeBuilder(client, document, user) {
   const contentResult = await client.query(
     `SELECT format_version, pages, revision
@@ -152,12 +178,16 @@ async function serializeBuilder(client, document, user) {
      WHERE document_id = $1`,
     [document.id]
   );
+  // assigned_signer_* is the live identity shown before signing; once signed,
+  // clients print the signer_*_snapshot columns frozen by signLockedField.
   const fieldsResult = await client.query(
     `SELECT f.*,
             assigned.full_name AS assigned_signer_name,
+            ${signerIdentitySelectSql('assigned', 'assigned_signer')},
             encode(asset.image_bytes, 'base64') AS signature_image_base64
      FROM docutracker_signature_fields f
      JOIN users assigned ON assigned.id = f.assigned_signer_id
+     ${signerIdentityJoinSql('assigned')}
      LEFT JOIN docutracker_signature_assets asset ON asset.id = f.signature_asset_id
      WHERE f.document_id = $1
      ORDER BY f.page_number, f.created_at, f.id`,
@@ -447,22 +477,30 @@ async function signLockedField(client, user, documentId, field, input) {
   }
 
   const userResult = await client.query(
-    `SELECT full_name FROM users WHERE id = $1 AND is_active = true`,
+    `SELECT signer.full_name,
+            ${signerIdentitySelectSql('signer', 'signer')}
+     FROM users signer
+     ${signerIdentityJoinSql('signer')}
+     WHERE signer.id = $1 AND signer.is_active = true`,
     [user.id]
   );
   if (!userResult.rowCount) throw forbiddenError('Only an active user can sign');
   const signerName = userResult.rows[0].full_name;
+  const signerPosition = String(userResult.rows[0].signer_position || '').trim() || null;
+  const signerRole = String(userResult.rows[0].signer_role || '').trim() || null;
   const signed = await client.query(
     `UPDATE docutracker_signature_fields SET
        signature_asset_id = $1,
        signed_by = $2,
        signer_name_snapshot = $3,
+       signer_position_snapshot = $6,
+       signer_role_snapshot = $7,
        signed_at = now(),
        locked_at = now(),
        updated_at = now()
      WHERE id = $4 AND document_id = $5 AND assigned_signer_id = $2
      RETURNING *`,
-    [assetId, user.id, signerName, field.id, documentId]
+    [assetId, user.id, signerName, field.id, documentId, signerPosition, signerRole]
   );
   if (!signed.rowCount) throw conflictError('This signature field changed while it was being signed');
 

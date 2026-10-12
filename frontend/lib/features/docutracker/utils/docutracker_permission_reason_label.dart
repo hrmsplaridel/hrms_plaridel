@@ -14,6 +14,8 @@ String docuTrackerPermissionReasonLabel(
       'creator' => 'You created this document.',
       'explicit_permission' => 'Allowed by your assigned permissions.',
       'past_participant' => 'You participated earlier in this routing.',
+      'release_recipient' => 'This document was released to your department.',
+      'authorized_releaser' => 'You are authorized to release this document.',
       _ => 'You can perform this action.',
     };
   }
@@ -28,6 +30,8 @@ String docuTrackerPermissionReasonLabel(
       'You are on this step, but your role is not allowed to $actionName.',
     'blocked_by_workflow_rule' =>
       'You are on this step, but a workflow rule does not allow you to $actionName.',
+    'reassignment_required' =>
+      'The assigned reviewer is no longer eligible for this step. An administrator must reassign this document through Admin Recovery before anyone can $actionName it.',
     'relationship_required' =>
       'You must be the creator, current reviewer, or a step assignee to $actionName.',
     'explicit_permission' => 'Your account is not permitted to $actionName.',

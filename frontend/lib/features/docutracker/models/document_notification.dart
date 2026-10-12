@@ -16,7 +16,8 @@ class DocumentNotification {
   final String documentId;
   final String userId;
 
-  /// assigned | deadline_near | overdue | escalated | returned | rejected
+  /// assigned | deadline_near | overdue | escalated | returned | rejected |
+  /// released
   final String type;
   final String? title;
   final String? body;
@@ -31,6 +32,7 @@ class DocumentNotification {
   static const String typeEscalated = 'escalated';
   static const String typeReturned = 'returned';
   static const String typeRejected = 'rejected';
+  static const String typeReleased = 'released';
 
   factory DocumentNotification.fromJson(Map<String, dynamic> json) {
     return DocumentNotification(
@@ -64,6 +66,7 @@ class DocumentNotification {
     typeEscalated => 'Document escalated',
     typeReturned => 'Document returned',
     typeRejected => 'Document rejected',
+    typeReleased => 'Document released to your department',
     _ => type,
   };
 

@@ -122,8 +122,10 @@ class DocuTrackerAdminTonalButton extends StatelessWidget {
         label: Text(label),
         style: OutlinedButton.styleFrom(
           foregroundColor: DocuTrackerTokens.textPrimaryOf(context),
-          backgroundColor: DocuTrackerTokens.highlightPeach,
-          side: const BorderSide(color: DocuTrackerTokens.highlightPeachBorder),
+          backgroundColor: DocuTrackerTokens.highlightPeachOf(context),
+          side: BorderSide(
+            color: DocuTrackerTokens.highlightPeachBorderOf(context),
+          ),
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 11),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(24),
@@ -166,9 +168,9 @@ class DocuTrackerAdminFilterPill extends StatelessWidget {
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
           decoration: BoxDecoration(
-            color: DocuTrackerTokens.surface,
+            color: DocuTrackerTokens.surfaceOf(context),
             borderRadius: BorderRadius.circular(24),
-            border: Border.all(color: DocuTrackerTokens.borderSubtle),
+            border: Border.all(color: DocuTrackerTokens.borderSubtleOf(context)),
           ),
           child: DropdownButtonHideUnderline(
             child: DropdownButton<String?>(
@@ -205,9 +207,17 @@ class DocuTrackerPermissionAccessTag extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final bg = granted ? const Color(0xFFE8F5E9) : const Color(0xFFFFEBEE);
-    final fg = granted ? const Color(0xFF2E7D32) : const Color(0xFFC62828);
-    final border = granted ? const Color(0xFFA5D6A7) : const Color(0xFFEF9A9A);
+    final accent = granted ? const Color(0xFF2E7D32) : const Color(0xFFC62828);
+    final bg = DocuTrackerTokens.tintOf(
+      context,
+      light: granted ? const Color(0xFFE8F5E9) : const Color(0xFFFFEBEE),
+      accent: accent,
+      darkAlpha: 0.22,
+    );
+    final fg = DocuTrackerTokens.toneOf(context, accent);
+    final border = DocuTrackerTokens.isDark(context)
+        ? accent.withValues(alpha: 0.5)
+        : (granted ? const Color(0xFFA5D6A7) : const Color(0xFFEF9A9A));
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
@@ -287,12 +297,14 @@ class DocuTrackerAdminSidebarCard extends StatelessWidget {
       width: double.infinity,
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
-        color: backgroundColor ?? DocuTrackerTokens.surface,
+        color: backgroundColor ?? DocuTrackerTokens.surfaceOf(context),
         borderRadius: BorderRadius.circular(DocuTrackerTokens.radiusLg),
-        border: Border.all(color: DocuTrackerTokens.borderSubtle),
+        border: Border.all(color: DocuTrackerTokens.borderSubtleOf(context)),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.04),
+            color: Colors.black.withValues(
+              alpha: DocuTrackerTokens.isDark(context) ? 0.25 : 0.04,
+            ),
             blurRadius: 10,
             offset: const Offset(0, 2),
           ),
@@ -363,7 +375,7 @@ class DocuTrackerAdminToolRow extends StatelessWidget {
               ),
               Icon(
                 Icons.chevron_right_rounded,
-                color: DocuTrackerTokens.textMuted,
+                color: DocuTrackerTokens.textMutedOf(context),
               ),
             ],
           ),
@@ -415,7 +427,7 @@ class DocuTrackerWorkflowStepper extends StatelessWidget {
                   height: 2,
                   color: sorted[i].stepOrder < activeStepOrder
                       ? DocuTrackerTokens.brand
-                      : DocuTrackerTokens.borderSubtle,
+                      : DocuTrackerTokens.borderSubtleOf(context),
                 ),
               ),
             ),
@@ -443,10 +455,10 @@ class _StepColumn extends StatelessWidget {
 
     final fill = isActive || isComplete
         ? DocuTrackerTokens.brand
-        : DocuTrackerTokens.surfaceCream;
+        : DocuTrackerTokens.insetOf(context);
     final border = isActive || isComplete
         ? DocuTrackerTokens.brand
-        : DocuTrackerTokens.borderStrong;
+        : DocuTrackerTokens.borderStrongOf(context);
 
     return Column(
       children: [
@@ -475,7 +487,7 @@ class _StepColumn extends StatelessWidget {
                       fontWeight: FontWeight.w800,
                       color: isActive
                           ? Colors.white
-                          : DocuTrackerTokens.textMuted,
+                          : DocuTrackerTokens.textMutedOf(context),
                     ),
                   ),
           ),
@@ -619,7 +631,7 @@ class DocuTrackerActiveWorkflowCard extends StatelessWidget {
           width: 44,
           height: 44,
           decoration: BoxDecoration(
-            color: DocuTrackerTokens.brandSoft,
+            color: DocuTrackerTokens.brandSoftOf(context),
             borderRadius: BorderRadius.circular(12),
           ),
           child: Icon(_iconForType(config), color: DocuTrackerTokens.brand),
@@ -642,9 +654,10 @@ class DocuTrackerActiveWorkflowCard extends StatelessWidget {
                 spacing: 8,
                 runSpacing: 4,
                 children: [
-                  _metaPill('v${config.version}'),
-                  _metaPill('Default deadline: ${config.reviewDeadlineHours}h'),
+                  _metaPill(context, 'v${config.version}'),
+                  _metaPill(context, 'Default deadline: ${config.reviewDeadlineHours}h'),
                   _metaPill(
+                    context,
                     hasSteps ? '${steps.length} steps' : 'No steps yet',
                   ),
                 ],
@@ -680,20 +693,22 @@ class DocuTrackerActiveWorkflowCard extends StatelessWidget {
     );
   }
 
-  Widget _metaPill(String text) {
+  Widget _metaPill(BuildContext context, String text) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
       decoration: BoxDecoration(
-        color: DocuTrackerTokens.highlightPeach,
+        color: DocuTrackerTokens.highlightPeachOf(context),
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: DocuTrackerTokens.highlightPeachBorder),
+        border: Border.all(
+          color: DocuTrackerTokens.highlightPeachBorderOf(context),
+        ),
       ),
       child: Text(
         text,
         style: TextStyle(
           fontSize: 11,
           fontWeight: FontWeight.w600,
-          color: DocuTrackerTokens.textSecondary,
+          color: DocuTrackerTokens.textSecondaryOf(context),
         ),
       ),
     );
@@ -762,7 +777,7 @@ class DocuTrackerMirroredWorkflowCard extends StatelessWidget {
           width: 44,
           height: 44,
           decoration: BoxDecoration(
-            color: DocuTrackerTokens.brandSoft,
+            color: DocuTrackerTokens.brandSoftOf(context),
             borderRadius: BorderRadius.circular(8),
           ),
           child: Icon(_icon, color: DocuTrackerTokens.brand),
@@ -785,9 +800,9 @@ class DocuTrackerMirroredWorkflowCard extends StatelessWidget {
                 spacing: 6,
                 runSpacing: 4,
                 children: [
-                  _metaPill('System-managed'),
-                  _metaPill(workflow.sourceLabel),
-                  _metaPill('${workflow.steps.length} steps'),
+                  _metaPill(context, 'System-managed'),
+                  _metaPill(context, workflow.sourceLabel),
+                  _metaPill(context, '${workflow.steps.length} steps'),
                 ],
               ),
             ],
@@ -817,7 +832,7 @@ class DocuTrackerMirroredWorkflowCard extends StatelessWidget {
                 padding: const EdgeInsets.only(top: 15),
                 child: Container(
                   height: 2,
-                  color: DocuTrackerTokens.borderSubtle,
+                  color: DocuTrackerTokens.borderSubtleOf(context),
                 ),
               ),
             ),
@@ -839,12 +854,12 @@ class DocuTrackerMirroredWorkflowCard extends StatelessWidget {
           decoration: BoxDecoration(
             color: active
                 ? DocuTrackerTokens.brand
-                : DocuTrackerTokens.surfaceCream,
+                : DocuTrackerTokens.insetOf(context),
             shape: BoxShape.circle,
             border: Border.all(
               color: active
                   ? DocuTrackerTokens.brand
-                  : DocuTrackerTokens.borderStrong,
+                  : DocuTrackerTokens.borderStrongOf(context),
               width: 2,
             ),
           ),
@@ -853,7 +868,9 @@ class DocuTrackerMirroredWorkflowCard extends StatelessWidget {
             '${step.stepOrder}',
             style: TextStyle(
               fontWeight: FontWeight.w800,
-              color: active ? Colors.white : DocuTrackerTokens.textMuted,
+              color: active
+                  ? Colors.white
+                  : DocuTrackerTokens.textMutedOf(context),
             ),
           ),
         ),
@@ -889,20 +906,22 @@ class DocuTrackerMirroredWorkflowCard extends StatelessWidget {
     );
   }
 
-  Widget _metaPill(String text) {
+  Widget _metaPill(BuildContext context, String text) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
       decoration: BoxDecoration(
-        color: DocuTrackerTokens.highlightPeach,
+        color: DocuTrackerTokens.highlightPeachOf(context),
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: DocuTrackerTokens.highlightPeachBorder),
+        border: Border.all(
+          color: DocuTrackerTokens.highlightPeachBorderOf(context),
+        ),
       ),
       child: Text(
         text,
-        style: const TextStyle(
+        style: TextStyle(
           fontSize: 11,
           fontWeight: FontWeight.w600,
-          color: DocuTrackerTokens.textSecondary,
+          color: DocuTrackerTokens.textSecondaryOf(context),
         ),
       ),
     );
@@ -926,9 +945,11 @@ class DocuTrackerPeachDashedBox extends StatelessWidget {
       width: double.infinity,
       padding: padding,
       decoration: BoxDecoration(
-        color: DocuTrackerTokens.highlightPeach,
+        color: DocuTrackerTokens.highlightPeachOf(context),
         borderRadius: BorderRadius.circular(DocuTrackerTokens.radiusMd),
-        border: Border.all(color: DocuTrackerTokens.highlightPeachBorder),
+        border: Border.all(
+          color: DocuTrackerTokens.highlightPeachBorderOf(context),
+        ),
       ),
       child: child,
     );
@@ -1014,11 +1035,11 @@ class DocuTrackerPermissionMatrixRow extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
       decoration: BoxDecoration(
         color: isEven
-            ? DocuTrackerTokens.highlightPeach.withValues(alpha: 0.35)
-            : DocuTrackerTokens.surface,
+            ? DocuTrackerTokens.highlightPeachOf(context).withValues(alpha: 0.35)
+            : DocuTrackerTokens.surfaceOf(context),
         border: Border(
           bottom: BorderSide(
-            color: DocuTrackerTokens.borderSubtle.withValues(alpha: 0.8),
+            color: DocuTrackerTokens.borderSubtleOf(context).withValues(alpha: 0.8),
           ),
         ),
       ),
@@ -1098,7 +1119,7 @@ class DocuTrackerPermissionMatrixRow extends StatelessWidget {
       children: [
         CircleAvatar(
           radius: 18,
-          backgroundColor: DocuTrackerTokens.brandSoft,
+          backgroundColor: DocuTrackerTokens.brandSoftOf(context),
           child: Text(
             targetLabel.isNotEmpty ? targetLabel[0].toUpperCase() : '?',
             style: TextStyle(
@@ -1153,10 +1174,10 @@ class _PermissionMatrixActions extends StatelessWidget {
         alignment: Alignment.centerRight,
         child: PopupMenuButton<String>(
           padding: EdgeInsets.zero,
-          icon: const Icon(
+          icon: Icon(
             Icons.more_vert_rounded,
             size: 20,
-            color: DocuTrackerTokens.textMuted,
+            color: DocuTrackerTokens.textMutedOf(context),
           ),
           tooltip: 'Actions',
           onSelected: (value) {

@@ -123,9 +123,9 @@ class DocuTrackerPermissionGovernanceTabStrip extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(4),
       decoration: BoxDecoration(
-        color: DocuTrackerTokens.surface,
+        color: DocuTrackerTokens.surfaceOf(context),
         borderRadius: BorderRadius.circular(28),
-        border: Border.all(color: DocuTrackerTokens.borderSubtle),
+        border: Border.all(color: DocuTrackerTokens.borderSubtleOf(context)),
       ),
       child: Wrap(
         spacing: 4,
@@ -136,7 +136,7 @@ class DocuTrackerPermissionGovernanceTabStrip extends StatelessWidget {
               pressedScale: 0.98,
               child: Material(
                 color: selectedIndex == i
-                    ? DocuTrackerTokens.highlightPeach
+                    ? DocuTrackerTokens.highlightPeachOf(context)
                     : Colors.transparent,
                 borderRadius: BorderRadius.circular(24),
                 child: InkWell(
@@ -164,7 +164,7 @@ class DocuTrackerPermissionGovernanceTabStrip extends StatelessWidget {
                         fontWeight: FontWeight.w700,
                         color: selectedIndex == i
                             ? DocuTrackerTokens.brand
-                            : DocuTrackerTokens.textMuted,
+                            : DocuTrackerTokens.textMutedOf(context),
                       ),
                     ),
                   ),
@@ -197,7 +197,7 @@ class DocuTrackerPermissionGovernanceTypeFilter extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-      decoration: DocuTrackerTokens.cardDecoration(),
+      decoration: DocuTrackerTokens.cardDecoration(context: context),
       child: LayoutBuilder(
         builder: (context, constraints) {
           final stackReload = constraints.maxWidth < 640;
@@ -283,7 +283,7 @@ class _TypePill extends StatelessWidget {
     return Material(
       color: selected
           ? DocuTrackerTokens.brand
-          : DocuTrackerTokens.surfaceCream,
+          : DocuTrackerTokens.insetOf(context),
       borderRadius: BorderRadius.circular(24),
       child: InkWell(
         onTap: onTap,
@@ -295,7 +295,7 @@ class _TypePill extends StatelessWidget {
             border: Border.all(
               color: selected
                   ? DocuTrackerTokens.brand
-                  : DocuTrackerTokens.borderSubtle,
+                  : DocuTrackerTokens.borderSubtleOf(context),
             ),
           ),
           child: Text(
@@ -343,14 +343,14 @@ class DocuTrackerPermissionGovernanceMatrix extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      decoration: DocuTrackerTokens.cardDecoration(),
+      decoration: DocuTrackerTokens.cardDecoration(context: context),
       clipBehavior: Clip.antiAlias,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
-            color: DocuTrackerTokens.highlightPeach.withValues(alpha: 0.55),
+            color: DocuTrackerTokens.highlightPeachOf(context).withValues(alpha: 0.55),
             child: Row(
               children: [
                 Expanded(
@@ -361,7 +361,7 @@ class DocuTrackerPermissionGovernanceMatrix extends StatelessWidget {
                       fontSize: 10.5,
                       fontWeight: FontWeight.w800,
                       letterSpacing: 0.6,
-                      color: DocuTrackerTokens.textSecondary,
+                      color: DocuTrackerTokens.textSecondaryOf(context),
                     ),
                   ),
                 ),
@@ -374,7 +374,7 @@ class DocuTrackerPermissionGovernanceMatrix extends StatelessWidget {
                         fontSize: 10,
                         fontWeight: FontWeight.w800,
                         letterSpacing: 0.35,
-                        color: DocuTrackerTokens.textSecondary,
+                        color: DocuTrackerTokens.textSecondaryOf(context),
                       ),
                     ),
                   ),
@@ -385,7 +385,7 @@ class DocuTrackerPermissionGovernanceMatrix extends StatelessWidget {
             if (i > 0)
               Divider(
                 height: 1,
-                color: DocuTrackerTokens.borderSubtle.withValues(alpha: 0.8),
+                color: DocuTrackerTokens.borderSubtleOf(context).withValues(alpha: 0.8),
               ),
             _RoleMatrixRow(
               accentColor: roleAccentColor(roleIds[i]),
@@ -400,7 +400,7 @@ class DocuTrackerPermissionGovernanceMatrix extends StatelessWidget {
           if (footerText != null || onAddRole != null)
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
-              color: DocuTrackerTokens.highlightPeach.withValues(alpha: 0.35),
+              color: DocuTrackerTokens.highlightPeachOf(context).withValues(alpha: 0.35),
               child: Row(
                 children: [
                   if (footerText != null)
@@ -534,7 +534,7 @@ class DocuTrackerPermissionGovernanceToggle extends StatelessWidget {
           onChanged: onChanged,
           activeTrackColor: DocuTrackerTokens.brand,
           activeThumbColor: Colors.white,
-          inactiveTrackColor: DocuTrackerTokens.brandSoft,
+          inactiveTrackColor: DocuTrackerTokens.brandSoftOf(context),
           inactiveThumbColor: Colors.white,
           materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
         ),
@@ -546,7 +546,7 @@ class DocuTrackerPermissionGovernanceToggle extends StatelessWidget {
             letterSpacing: 0.4,
             color: value
                 ? DocuTrackerTokens.brand
-                : DocuTrackerTokens.textMuted,
+                : DocuTrackerTokens.textMutedOf(context),
           ),
         ),
       ],
@@ -625,9 +625,9 @@ class DocuTrackerPermissionGovernanceSidebar extends StatelessWidget {
         Container(
           padding: const EdgeInsets.all(18),
           decoration: BoxDecoration(
-            color: DocuTrackerTokens.highlightPeach.withValues(alpha: 0.45),
+            color: DocuTrackerTokens.highlightPeachOf(context).withValues(alpha: 0.45),
             borderRadius: BorderRadius.circular(DocuTrackerTokens.radiusLg),
-            border: Border.all(color: DocuTrackerTokens.borderSubtle),
+            border: Border.all(color: DocuTrackerTokens.borderSubtleOf(context)),
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -654,7 +654,7 @@ class DocuTrackerPermissionGovernanceSidebar extends StatelessWidget {
               ),
               const SizedBox(height: 10),
               _SummaryLine(
-                color: DocuTrackerTokens.textMuted,
+                color: DocuTrackerTokens.textMutedOf(context),
                 title: 'Limited Review',
                 subtitle: 'Employees, Guests',
               ),
@@ -734,8 +734,8 @@ class DocuTrackerPermissionGovernanceFooter extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
       decoration: BoxDecoration(
-        color: DocuTrackerTokens.surface,
-        border: Border(top: BorderSide(color: DocuTrackerTokens.borderSubtle)),
+        color: DocuTrackerTokens.surfaceOf(context),
+        border: Border(top: BorderSide(color: DocuTrackerTokens.borderSubtleOf(context))),
         boxShadow: [
           BoxShadow(
             color: Colors.black.withValues(alpha: 0.04),
@@ -755,7 +755,7 @@ class DocuTrackerPermissionGovernanceFooter extends StatelessWidget {
                 children: [
                   Icon(
                     Icons.assignment_outlined,
-                    color: DocuTrackerTokens.textMuted.withValues(alpha: 0.85),
+                    color: DocuTrackerTokens.textMutedOf(context).withValues(alpha: 0.85),
                     size: 22,
                   ),
                   if (pendingChanges > 0)
@@ -807,7 +807,7 @@ class DocuTrackerPermissionGovernanceFooter extends StatelessWidget {
                 onPressed: loading ? null : onReset,
                 style: OutlinedButton.styleFrom(
                   foregroundColor: DocuTrackerTokens.textPrimaryOf(context),
-                  side: const BorderSide(color: DocuTrackerTokens.borderStrong),
+                  side: BorderSide(color: DocuTrackerTokens.borderStrongOf(context)),
                   padding: const EdgeInsets.symmetric(
                     horizontal: 20,
                     vertical: 12,

@@ -31,7 +31,7 @@ class DocuTrackerDocumentSummaryHeader extends StatelessWidget {
 
     return Container(
       padding: const EdgeInsets.all(16),
-      decoration: DocuTrackerStyles.listCardDecoration(),
+      decoration: DocuTrackerStyles.listCardDecoration(context),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -51,7 +51,7 @@ class DocuTrackerDocumentSummaryHeader extends StatelessWidget {
                     Text(
                       document.documentNumber ?? '—',
                       style: TextStyle(
-                        color: AppTheme.textSecondary,
+                        color: AppTheme.dashTextSecondaryOf(context),
                         fontSize: 13,
                         fontWeight: FontWeight.w600,
                       ),
@@ -60,7 +60,7 @@ class DocuTrackerDocumentSummaryHeader extends StatelessWidget {
                     Text(
                       document.documentType,
                       style: TextStyle(
-                        color: AppTheme.textPrimary,
+                        color: AppTheme.dashTextPrimaryOf(context),
                         fontSize: 15,
                         fontWeight: FontWeight.w700,
                       ),
@@ -187,7 +187,7 @@ class _MetaChip extends StatelessWidget {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Icon(icon, size: 18, color: AppTheme.textSecondary),
+        Icon(icon, size: 18, color: AppTheme.dashTextSecondaryOf(context)),
         const SizedBox(width: 8),
         Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -195,7 +195,7 @@ class _MetaChip extends StatelessWidget {
             Text(
               label,
               style: TextStyle(
-                color: AppTheme.textSecondary,
+                color: AppTheme.dashTextSecondaryOf(context),
                 fontSize: 11,
                 fontWeight: FontWeight.w600,
               ),
@@ -203,7 +203,7 @@ class _MetaChip extends StatelessWidget {
             Text(
               value,
               style: TextStyle(
-                color: AppTheme.textPrimary,
+                color: AppTheme.dashTextPrimaryOf(context),
                 fontSize: 13,
                 fontWeight: FontWeight.w600,
               ),

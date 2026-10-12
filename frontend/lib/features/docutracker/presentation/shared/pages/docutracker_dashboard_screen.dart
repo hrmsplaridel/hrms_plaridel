@@ -549,18 +549,26 @@ class _DocuTrackerDashboardScreenState
                     vertical: 3,
                   ),
                   decoration: BoxDecoration(
-                    color: const Color(0xFFECFDF5),
+                    color: DocuTrackerTokens.tintOf(
+                      context,
+                      light: const Color(0xFFECFDF5),
+                      accent: const Color(0xFF16A34A),
+                    ),
                     borderRadius: BorderRadius.circular(20),
                     border: Border.all(
                       color: const Color(0xFF86EFAC).withValues(alpha: 0.6),
                     ),
                   ),
-                  child: const Text(
+                  child: Text(
                     'Live',
                     style: TextStyle(
                       fontSize: 10.5,
                       fontWeight: FontWeight.w800,
-                      color: Color(0xFF166534),
+                      color: DocuTrackerTokens.accentTextOf(
+                        context,
+                        light: const Color(0xFF166534),
+                        dark: const Color(0xFF86EFAC),
+                      ),
                     ),
                   ),
                 ),
@@ -638,8 +646,8 @@ class _DocuTrackerDashboardScreenState
                   },
                   style: OutlinedButton.styleFrom(
                     foregroundColor: DocuTrackerTokens.terracotta,
-                    side: const BorderSide(
-                      color: DocuTrackerTokens.borderStrong,
+                    side: BorderSide(
+                      color: DocuTrackerTokens.borderStrongOf(context),
                     ),
                     padding: const EdgeInsets.symmetric(vertical: 12),
                     shape: RoundedRectangleBorder(
@@ -944,7 +952,7 @@ class _DocuTrackerDashboardScreenState
                         ? DocuTrackerTokens.overdueAccent.withValues(
                             alpha: 0.35,
                           )
-                        : DocuTrackerTokens.borderSubtle,
+                        : DocuTrackerTokens.borderSubtleOf(context),
                   ),
                   child: _DocumentTile(
                     document: doc,
@@ -1123,7 +1131,10 @@ class _DocumentTileState extends State<_DocumentTile> {
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
             decoration: BoxDecoration(
               color: _hovering
-                  ? DocuTrackerTokens.surfaceCream.withValues(alpha: 0.5)
+                  ? DocuTrackerTokens.hoverSurfaceOf(
+                      context,
+                      light: DocuTrackerTokens.surfaceCream.withValues(alpha: 0.5),
+                    )
                   : Colors.transparent,
               borderRadius: BorderRadius.circular(DocuTrackerTokens.radiusMd),
             ),
@@ -1323,7 +1334,9 @@ class _WarmFilterChip extends StatelessWidget {
                 fontSize: 12.5,
                 fontWeight: FontWeight.w700,
                 color: selected
-                    ? DocuTrackerTokens.terracottaDark
+                    ? (dark
+                          ? const Color(0xFFFFB98A)
+                          : DocuTrackerTokens.terracottaDark)
                     : (dark
                           ? Colors.white.withValues(alpha: 0.85)
                           : DocuTrackerTokens.textSecondary),

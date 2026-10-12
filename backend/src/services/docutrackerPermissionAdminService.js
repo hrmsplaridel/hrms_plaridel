@@ -1,5 +1,9 @@
 const { writeGovernanceAudit } = require('./docutrackerGovernanceAudit');
-const { SYSTEM_ACCESS_ACTIONS } = require('./docutrackerSystemAccessActions');
+const { defaultRolePermissions } = require('./docutrackerPermissionDefaults');
+const {
+  RELEASE_ACTION,
+  SYSTEM_ACCESS_ACTIONS,
+} = require('./docutrackerSystemAccessActions');
 const {
   getEffectivePermissionExplanation,
 } = require('./docutrackerWorkflowService');
@@ -200,6 +204,66 @@ async function upsertPermissionRule(
   return row;
 }
 
+/** Re-inserts the default role rows for a scope after a role reset. */
+async function restoreRoleDefaults(client, { roleId, documentType, actions }) {
+  const restored = [];
+  for (const row of defaultRolePermissions(roleId, documentType, actions)) {
+    const result = await client.query(
+      `INSERT INTO docutracker_permissions
+         (user_id, role_id, document_type, action, granted)
+       VALUES (NULL, $1, $2, $3, $4)
+       ON CONFLICT (role_id, document_type, action) WHERE role_id IS NOT NULL
+       DO UPDATE SET granted = EXCLUDED.granted, updated_at = now()
+       RETURNING *`,
+      [roleId, documentType, row.action, row.granted]
+    );
+    if (result.rows?.[0]) restored.push(result.rows[0]);
+  }
+  return restored;
+}
+
+/**
+ * Audits a reset: removed rows pair with the default restored for the same
+ * action (or null when the reset leaves no rule), and defaults restored where
+ * no rule existed are recorded too.
+ */
+async function auditReset(client, { actorId, documentType, target, removed, restored }) {
+  const restoredByAction = new Map(
+    restored.map((row) => [normalizePermissionAction(row.action), row])
+  );
+  const paired = new Set();
+  for (const row of removed) {
+    const action = normalizePermissionAction(row.action);
+    const after = paired.has(action) ? null : restoredByAction.get(action) || null;
+    if (after) paired.add(action);
+    await writeGovernanceAudit(client, {
+      actorId,
+      eventType: 'permission_reset',
+      entityType: 'permission',
+      entityId: after?.id || row.id,
+      documentType,
+      targetUserId: target.userId,
+      targetRoleId: target.roleId,
+      beforeState: rowSnapshot(row),
+      afterState: after ? rowSnapshot(after) : null,
+    });
+  }
+  for (const row of restored) {
+    if (paired.has(normalizePermissionAction(row.action))) continue;
+    await writeGovernanceAudit(client, {
+      actorId,
+      eventType: 'permission_reset',
+      entityType: 'permission',
+      entityId: row.id,
+      documentType,
+      targetUserId: target.userId,
+      targetRoleId: target.roleId,
+      beforeState: null,
+      afterState: rowSnapshot(row),
+    });
+  }
+}
+
 async function applyPermissionChange(client, actorId, change) {
   const documentType = await validateDocumentType(client, change.documentType);
   const action = validatePermissionAction(change.action);
@@ -233,20 +297,25 @@ async function applyPermissionChange(client, actorId, change) {
        RETURNING *`,
       [documentType, variants, target.userId, target.roleId]
     );
-    for (const row of removed.rows || []) {
-      await writeGovernanceAudit(client, {
-        actorId,
-        eventType: 'permission_reset',
-        entityType: 'permission',
-        entityId: row.id,
-        documentType,
-        targetUserId: target.userId,
-        targetRoleId: target.roleId,
-        beforeState: rowSnapshot(row),
-        afterState: null,
-      });
+    const restored = target.roleId
+      ? await restoreRoleDefaults(client, {
+          roleId: target.roleId,
+          documentType,
+          actions: variants,
+        })
+      : [];
+    await auditReset(client, {
+      actorId,
+      documentType,
+      target,
+      removed: removed.rows || [],
+      restored,
+    });
+    const result = { action, granted: null, deleted: removed.rowCount || 0 };
+    if (restored.length > 0) {
+      result.restored_default = restored[0].granted === true;
     }
-    return { action, granted: null, deleted: removed.rowCount || 0 };
+    return result;
   }
 
   const row = await upsertPermissionRule(client, {
@@ -360,27 +429,27 @@ async function resetPermissionRules(pool, { actorId, body }) {
       action,
       lock: true,
     });
-    if (beforeRows.length === 0) return { deleted: 0 };
-
-    const ids = beforeRows.map((row) => row.id);
-    const removed = await client.query(
-      `DELETE FROM docutracker_permissions WHERE id = ANY($1::uuid[]) RETURNING *`,
-      [ids]
-    );
-    for (const row of removed.rows || []) {
-      await writeGovernanceAudit(client, {
-        actorId: actor,
-        eventType: 'permission_reset',
-        entityType: 'permission',
-        entityId: row.id,
-        documentType,
-        targetUserId: target.userId,
-        targetRoleId: target.roleId,
-        beforeState: rowSnapshot(row),
-        afterState: null,
-      });
-    }
-    return { deleted: removed.rowCount || 0 };
+    const removed = beforeRows.length === 0
+      ? { rows: [], rowCount: 0 }
+      : await client.query(
+          `DELETE FROM docutracker_permissions WHERE id = ANY($1::uuid[]) RETURNING *`,
+          [beforeRows.map((row) => row.id)]
+        );
+    const restored = target.roleId
+      ? await restoreRoleDefaults(client, {
+          roleId: target.roleId,
+          documentType,
+          actions: action ? permissionActionVariants(action) : null,
+        })
+      : [];
+    await auditReset(client, {
+      actorId: actor,
+      documentType,
+      target,
+      removed: removed.rows || [],
+      restored,
+    });
+    return { deleted: removed.rowCount || 0, restored: restored.length };
   });
 }
 
@@ -422,7 +491,7 @@ async function getPermissionPolicy(pool, { documentType, userId = null }) {
     role_id: roleId,
     permissions: Object.fromEntries(
       SYSTEM_PERMISSION_ACTIONS.map((action) => {
-        if (roleId === 'admin') {
+        if (roleId === 'admin' && action !== RELEASE_ACTION) {
           return [action, { granted: true, source: 'administrator' }];
         }
         return [
