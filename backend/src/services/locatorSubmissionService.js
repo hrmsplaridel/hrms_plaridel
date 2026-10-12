@@ -37,6 +37,8 @@ function createLocatorSubmissionService({
   recordHistory,
   snapshotReviewers,
   assertSubmissionReviewer,
+  canApproveForEmployee = async () => false,
+  saveApprovalSignature = persistLocatorSignature,
   saveApplicantSignature = persistLocatorSignature,
   nowProvider = () => new Date(),
   logger = console,
@@ -69,6 +71,9 @@ function createLocatorSubmissionService({
     pmOut,
     attachment = null,
     signature = null,
+    filedBy = null,
+    autoApprove = false,
+    approvalSignature = null,
   }) {
     const fieldValidation = validateLocatorRequiredFields({
       slipDate,
@@ -99,6 +104,10 @@ function createLocatorSubmissionService({
     let submitStatus = null;
     let departmentHeadUserId = null;
     let departmentReviewerUserIds = [];
+    const staffFiling = filedBy && String(filedBy.id) !== String(employeeUserId);
+    if (staffFiling && !['admin','hr'].includes(filedBy.role)) {
+      throw locatorSubmissionError(403, {error:'Only HR/admin can file for another employee.'});
+    }
 
     try {
       await client.query('BEGIN');
@@ -133,6 +142,13 @@ function createLocatorSubmissionService({
       if (!locatorType) {
         throw locatorSubmissionError(400, { error: 'Invalid request_type' });
       }
+      const access = locatorType.filing_access || 'employee';
+      if ((staffFiling && access === 'employee') || (!staffFiling && access === 'admin')) {
+        throw locatorSubmissionError(403, {error:staffFiling ? 'This locator type allows employee filing only.' : 'This locator type must be filed by HR/admin.'});
+      }
+      const approveNow = staffFiling && autoApprove && locatorType.auto_approve_admin === true &&
+        await canApproveForEmployee(client, employeeUserId, filedBy);
+      if (approveNow) submitStatus = 'pending_hr';
       const typeSnapshot = captureLocatorTypeSnapshot(locatorType);
       const attachmentError = locatorAttachmentRequiredError(
         locatorType,
@@ -260,11 +276,22 @@ function createLocatorSubmissionService({
         action: 'submitted',
         fromStatus: null,
         toStatus: submitStatus,
-        actorId: employeeUserId,
-        actorRole: 'employee',
+        actorId: staffFiling ? filedBy.id : employeeUserId,
+        actorRole: staffFiling ? filedBy.role : 'employee',
+        metadata: staffFiling ? {filed_for_employee:true,employee_id:employeeUserId,auto_approval:approveNow} : {},
       });
-      await saveApplicantSignature(client, { id: employeeUserId, role: 'employee' },
+      if (!staffFiling) await saveApplicantSignature(client, { id: employeeUserId, role: 'employee' },
         insertedRow.id, 'applicant', signature, { requireInput: true });
+      if (approveNow) {
+        await saveApprovalSignature(client, filedBy, insertedRow.id, 'hr_approver', approvalSignature, {requireInput:true});
+        await client.query(`UPDATE locator_slips SET status = 'approved', hr_reviewer_id=$2::uuid,
+          hr_reviewed_at=now(), hr_remarks='Approved during authorized staff filing', updated_at=now() WHERE id=$1::uuid`,
+          [insertedRow.id,filedBy.id]);
+        await recordHistory(client,{locatorSlipId:insertedRow.id,action:'hr_approved',fromStatus:submitStatus,
+          toStatus:'approved',actorId:filedBy.id,actorRole:filedBy.role,metadata:{filed_for_employee:true,auto_approval:true}});
+        submitStatus='approved';
+        insertedRow.status='approved';
+      }
       await client.query('COMMIT');
     } catch (error) {
       try {
@@ -302,6 +329,7 @@ function createLocatorSubmissionService({
         requestType,
         departmentHeadUserId,
         departmentReviewerUserIds,
+        filedBy: staffFiling ? filedBy.id : null,
       });
     } catch (error) {
       logger.error('[locator notification]', error);

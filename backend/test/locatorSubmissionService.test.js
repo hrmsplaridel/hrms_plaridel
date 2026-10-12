@@ -9,7 +9,7 @@ const EMPLOYEE_ID = '00000000-0000-0000-0000-000000000101';
 const DEPARTMENT_ID = '00000000-0000-0000-0000-000000000201';
 const HEAD_ID = '00000000-0000-0000-0000-000000000301';
 
-function createHarness({ reviewerAvailable = true, signatureFailure = false, singleSession = false } = {}) {
+function createHarness({ reviewerAvailable = true, signatureFailure = false, singleSession = false, autoApprove = false, filingAccess = 'both', approvalAllowed = autoApprove } = {}) {
   const state = {
     queries: [],
     inserts: [],
@@ -104,6 +104,7 @@ function createHarness({ reviewerAvailable = true, signatureFailure = false, sin
       dtr_print_label: code === 'work_from_home' ? 'WFH' : 'ON FIELD',
       requires_attachment: code === 'work_from_home',
       coverage_mode: code === 'work_from_home' ? 'wfh' : 'manual',
+      filing_access: filingAccess, auto_approve_admin: autoApprove,
     }),
     findConflicts: async () => ({
       ok: true,
@@ -144,6 +145,8 @@ function createHarness({ reviewerAvailable = true, signatureFailure = false, sin
         throw error;
       }
     },
+    canApproveForEmployee: async (_db, employeeId, actor) => approvalAllowed && actor.id !== employeeId,
+    saveApprovalSignature: async () => { if (signatureFailure) throw new Error('Approval signature required'); },
     nowProvider: () => new Date('2026-08-11T00:00:00.000Z'),
     logger: { error() {} },
   });
@@ -155,6 +158,41 @@ test('locator filing is blocked before insertion when no final reviewer is avail
   await assert.rejects(service.submit(validInput()), /No eligible final reviewer/);
   assert.equal(state.inserts.length, 0);
   assert.equal(state.notifications.length, 0);
+});
+
+test('staff filing records the actual actor without signing as the employee', async () => {
+  const {service,state}=createHarness();
+  await service.submit(validInput({filedBy:{id:HEAD_ID,role:'hr'}, autoApprove:true}));
+  assert.equal(state.history[0].actorId,HEAD_ID);
+  assert.equal(state.history[0].metadata.filed_for_employee,true);
+  assert.equal(state.inserts[0].row.status,'pending_department_head');
+});
+test('type policy blocks forbidden filing and staff without approval authority stay pending',async()=>{
+  const staff=createHarness({filingAccess:'employee'});
+  await assert.rejects(staff.service.submit(validInput({filedBy:{id:HEAD_ID,role:'hr'}})),/employee filing only/);
+  assert.equal(staff.state.inserts.length,0);
+  const employee=createHarness({filingAccess:'admin'});
+  await assert.rejects(employee.service.submit(validInput()),/filed by HR/);
+  assert.equal(employee.state.inserts.length,0);
+  const noApproval=createHarness({autoApprove:true,approvalAllowed:false});
+  await noApproval.service.submit(validInput({filedBy:{id:HEAD_ID,role:'hr'},autoApprove:true}));
+  assert.equal(noApproval.state.inserts[0].row.status,'pending_department_head');
+});
+
+test('authorized staff filing approves and records the approver in the same transaction', async () => {
+  const {service,state}=createHarness({autoApprove:true});
+  await service.submit(validInput({filedBy:{id:HEAD_ID,role:'hr'},autoApprove:true,approvalSignature:{signature_asset_id:'saved'}}));
+  assert.equal(state.history.at(-1).action,'hr_approved');
+  assert.equal(state.history.at(-1).actorId,HEAD_ID);
+  assert.ok(state.queries.some(q=>q.includes("status = 'approved'")));
+});
+
+test('failed bulk approval signature rolls back; self filing follows employee signature rules', async () => {
+  const {service,state}=createHarness({autoApprove:true,signatureFailure:true});
+  await assert.rejects(service.submit(validInput({filedBy:{id:HEAD_ID,role:'hr'},autoApprove:true})),/Approval signature/);
+  assert.equal(state.queries.includes('COMMIT'),false);
+  const self=createHarness({signatureFailure:true});
+  await assert.rejects(self.service.submit(validInput({filedBy:{id:EMPLOYEE_ID,role:'admin'},autoApprove:true})),/Signature required/);
 });
 
 test('single-session invalid middle segments are validated before insertion', async()=>{

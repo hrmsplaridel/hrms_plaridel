@@ -22,6 +22,80 @@ class _Signatures extends DocuTrackerProvider {
 
 void main() {
   setUpAll(() => ApiClient.instance.init());
+  for (final policy in [
+    ('employee', true, false),
+    ('admin', true, true),
+    ('both', true, true),
+    ('admin', false, false),
+  ]) {
+    testWidgets('staff filing action respects type policy $policy', (
+      tester,
+    ) async {
+      tester.view.physicalSize = const Size(1600, 1200);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      LocatorSlipDataCache.instance.invalidateRequests();
+      LocatorSlipDataCache.instance.invalidateTypes();
+      ApiClient.instance.dio.interceptors.clear();
+      ApiClient.instance.dio.interceptors.add(
+        InterceptorsWrapper(
+          onRequest: (o, h) {
+            dynamic data = <dynamic>[];
+            if (o.path.contains('/types')) {
+              data = [
+                {
+                  'code': 'test_type',
+                  'label': 'Test type',
+                  'filing_access': policy.$1,
+                  'is_active': policy.$2,
+                },
+              ];
+            } else if (o.path.endsWith('/final-reviewer/me')) {
+              data = {'can_review': true};
+            }
+            h.resolve(Response(requestOptions: o, statusCode: 200, data: data));
+          },
+        ),
+      );
+      final auth = AuthProvider()
+        ..replaceUser(
+          const AppUser(
+            id: 'reviewer',
+            email: 'reviewer@test.local',
+            role: 'admin',
+          ),
+        );
+      final realtime = AppRealtimeProvider();
+      await tester.pumpWidget(
+        MultiProvider(
+          providers: [
+            ChangeNotifierProvider.value(value: auth),
+            ChangeNotifierProvider.value(value: realtime),
+          ],
+          child: const MaterialApp(
+            home: Scaffold(
+              body: SingleChildScrollView(
+                child: AdminLocatorManagementScreen(),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip('More actions'));
+      await tester.pumpAndSettle();
+      expect(
+        find.text('File for employees'),
+        policy.$3 ? findsOneWidget : findsNothing,
+      );
+      expect(find.text('Record Correction'), findsOneWidget);
+      expect(find.text('Manage Types'), findsOneWidget);
+      await tester.pumpWidget(const SizedBox.shrink());
+      auth.dispose();
+      realtime.dispose();
+    });
+  }
   for (final own in [true, false]) {
     testWidgets(
       'locator details ${own ? "hide own" : "allow another employee"} review actions',

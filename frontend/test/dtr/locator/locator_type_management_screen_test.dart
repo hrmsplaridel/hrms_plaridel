@@ -169,10 +169,10 @@ void main() {
         250,
         scrollable: find
             .descendant(
-              of: find.byType(ListView),
+              of: find.byType(ListView).last,
               matching: find.byType(Scrollable),
             )
-            .last,
+            .first,
       );
       expect(find.text('Upload background'), findsOneWidget);
       Container sectionBox(String title) => tester.widget<Container>(
@@ -278,10 +278,10 @@ void main() {
           250,
           scrollable: find
               .descendant(
-                of: find.byType(ListView),
+                of: find.byType(ListView).last,
                 matching: find.byType(Scrollable),
               )
-              .last,
+              .first,
         );
         await Scrollable.ensureVisible(
           tester.element(find.text('Upload background')),
@@ -312,10 +312,10 @@ void main() {
             250,
             scrollable: find
                 .descendant(
-                  of: find.byType(ListView),
+                  of: find.byType(ListView).last,
                   matching: find.byType(Scrollable),
                 )
-                .last,
+                .first,
           );
           expect(find.text('locator-letterhead.pdf'), findsOneWidget);
           await Scrollable.ensureVisible(
@@ -348,6 +348,17 @@ void main() {
     await enterRequiredFields(tester);
     await tester.enterText(textField('Sort order'), '30');
     tester
+        .widget<DropdownButtonFormField<String>>(
+          find.byWidgetPredicate(
+            (w) =>
+                w is DropdownButtonFormField<String> &&
+                w.decoration.labelText == 'Who can file',
+          ),
+        )
+        .onChanged!('admin');
+    await tester.pump();
+    tester.widget<Switch>(find.byType(Switch).first).onChanged!(true);
+    tester
         .widget<DropdownButtonFormField<String>>(coverageDropdown())
         .onChanged!('wfh');
     await tester.pump();
@@ -359,6 +370,8 @@ void main() {
     final data = Map<String, dynamic>.from(post.data as Map);
     expect(data['sort_order'], 30);
     expect(data['coverage_mode'], 'wfh');
+    expect(data['filing_access'], 'admin');
+    expect(data['auto_approve_admin'], isTrue);
     expect(find.text('Locator type added.'), findsOneWidget);
   });
 

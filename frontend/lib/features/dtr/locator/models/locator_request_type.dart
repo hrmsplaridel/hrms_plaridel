@@ -8,6 +8,8 @@ class LocatorRequestType {
     required this.dtrSlotLabel,
     required this.dtrPrintLabel,
     this.requiresAttachment = false,
+    this.filingAccess = 'employee',
+    this.autoApproveAdmin = false,
     this.coverageMode = 'manual',
     this.isActive = true,
     this.isSystem = false,
@@ -50,6 +52,10 @@ class LocatorRequestType {
   final String dtrSlotLabel;
   final String dtrPrintLabel;
   final bool requiresAttachment;
+  final String filingAccess;
+  final bool autoApproveAdmin;
+  bool get employeeCanFile => filingAccess != 'admin';
+  bool get adminCanFile => filingAccess != 'employee';
   final String coverageMode;
   final bool isActive;
   final bool isSystem;
@@ -67,6 +73,8 @@ class LocatorRequestType {
     String? dtrSlotLabel,
     String? dtrPrintLabel,
     bool? requiresAttachment,
+    String? filingAccess,
+    bool? autoApproveAdmin,
     String? coverageMode,
     bool? isActive,
     bool? isSystem,
@@ -82,6 +90,8 @@ class LocatorRequestType {
       dtrSlotLabel: dtrSlotLabel ?? this.dtrSlotLabel,
       dtrPrintLabel: dtrPrintLabel ?? this.dtrPrintLabel,
       requiresAttachment: requiresAttachment ?? this.requiresAttachment,
+      filingAccess: filingAccess ?? this.filingAccess,
+      autoApproveAdmin: autoApproveAdmin ?? this.autoApproveAdmin,
       coverageMode: coverageMode ?? this.coverageMode,
       isActive: isActive ?? this.isActive,
       isSystem: isSystem ?? this.isSystem,
@@ -100,6 +110,8 @@ class LocatorRequestType {
       'dtr_slot_label': dtrSlotLabel,
       'dtr_print_label': dtrPrintLabel,
       'requires_attachment': requiresAttachment,
+      'filing_access': filingAccess,
+      'auto_approve_admin': autoApproveAdmin,
       'coverage_mode': coverageMode,
       'is_active': isActive,
       'sort_order': sortOrder,
@@ -111,6 +123,8 @@ class LocatorRequestType {
     final fallback = fromCode(code);
     return fallback.copyWith(
       id: json['id']?.toString(),
+      filingAccess: _read(json, ['filing_access'], 'employee'),
+      autoApproveAdmin: _readBool(json, ['auto_approve_admin']),
       code: code == null || code.isEmpty ? fallback.code : code,
       label: _read(json, ['label'], fallback.label),
       shortLabel: _read(json, [

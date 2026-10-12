@@ -692,19 +692,22 @@ class EmployeeLocatorSlipContentState extends State<EmployeeLocatorSlipContent>
 
     Future<void> previewForm(BuildContext dialogContext) async {
       try {
-        final bytes = await LocatorSlipPrint.buildPdf(
-          signatories: await loadLocatorFormSignatories(item.id),
-          id: item.id,
-          employeeName: item.employeeName,
-          dateText: _formatDate(item.date),
-          requestTypeLabel: item.requestType.label,
-          locationLabel: item.requestType.locationLabel,
-          office: item.office,
-          remarks: item.remarks,
-          amIn: item.amIn,
-          amOut: item.amOut,
-          pmIn: item.pmIn,
-          pmOut: item.pmOut,
+        final bytes = await LocatorSlipPrint.loadPreview(
+          dialogContext,
+          () async => LocatorSlipPrint.buildPdf(
+            signatories: await loadLocatorFormSignatories(item.id),
+            id: item.id,
+            employeeName: item.employeeName,
+            dateText: _formatDate(item.date),
+            requestTypeLabel: item.requestType.label,
+            locationLabel: item.requestType.locationLabel,
+            office: item.office,
+            remarks: item.remarks,
+            amIn: item.amIn,
+            amOut: item.amOut,
+            pmIn: item.pmIn,
+            pmOut: item.pmOut,
+          ),
         );
         if (!dialogContext.mounted) return;
         await showFormPdfPreview(
@@ -2139,7 +2142,7 @@ class EmployeeLocatorSlipContentState extends State<EmployeeLocatorSlipContent>
     try {
       final items = (await LocatorSlipDataCache.instance.listTypes(
         forceRefresh: forceRefresh,
-      )).where((type) => type.isActive).toList();
+      )).where((type) => type.isActive && type.employeeCanFile).toList();
       if (!_isCurrentAuthSession(userId, authGeneration) ||
           loadGeneration != _locatorTypesLoadGeneration) {
         return;

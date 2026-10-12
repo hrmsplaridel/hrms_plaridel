@@ -75,6 +75,7 @@ const {
 } = require('../services/locatorWorkflowHistory');
 
 const router = express.Router();
+const {validateStaffBatch,runStaffBatch}=require('../services/locatorStaffFiling');
 const protect = [authMiddleware];
 const LOCATOR_TYPE_TEXT_LIMITS = Object.freeze({
   label: 100,
@@ -224,6 +225,10 @@ function normalizeCoverageMode(value) {
 }
 
 function locatorTypePayloadFromBody(body, existing = null) {
+  const filingAccess = body.filing_access ?? existing?.filing_access ?? 'employee';
+  if (!['employee','admin','both'].includes(filingAccess)) locatorTypeValidationError('Filing access must be employee, admin, or both.');
+  const autoApproveAdmin=locatorTypeBooleanField(body.auto_approve_admin,existing?.auto_approve_admin === true,'Auto approve staff filing');
+  if (filingAccess === 'employee' && autoApproveAdmin) locatorTypeValidationError('Auto approval requires HR/admin filing.');
   const rawCode = existing?.code ?? body.code;
   if (rawCode === undefined || rawCode === null || !String(rawCode).trim()) {
     return locatorTypeValidationError('System code is required.');
@@ -241,6 +246,7 @@ function locatorTypePayloadFromBody(body, existing = null) {
     LOCATOR_TYPE_TEXT_LIMITS.label
   );
   return {
+    filing_access:filingAccess, auto_approve_admin:autoApproveAdmin,
     code,
     label,
     short_label: locatorTypeTextField(
@@ -290,6 +296,7 @@ function locatorTypePayloadFromBody(body, existing = null) {
 
 function mapLocatorTypeRow(row) {
   return {
+    filing_access:row.filing_access || 'employee',auto_approve_admin:row.auto_approve_admin === true,
     id: row.id,
     code: row.code,
     label: row.label,
@@ -796,11 +803,24 @@ const locatorSubmissionService = createLocatorSubmissionService({
   findConflicts: findLocatorRequestConflicts,
   fetchSlipDetails: fetchLocatorSlipDetails,
   mapInsertedRow: mapLocatorRow,
-  notifyAfterSubmit: locatorNotifications.notifyAfterSubmit,
+  notifyAfterSubmit: async (db, payload) => {
+    if (payload.status === 'approved') {
+      return locatorNotifications.notifyEmployee(db,{employeeUserId:payload.employeeUserId,slipId:payload.slipId,
+        type:'locator_approved_hr',title:'Locator request filed and approved',body:'HR filed and approved a locator request for you.'});
+    }
+    await locatorNotifications.notifyAfterSubmit(db,payload);
+    if(payload.filedBy)await locatorNotifications.notifyEmployee(db,{employeeUserId:payload.employeeUserId,slipId:payload.slipId,
+      type:'locator_filed_by_staff',title:'Locator request filed for you',body:'HR/admin filed a locator request for you. It is awaiting approval.'});
+  },
   broadcastSubmitted: (row) => broadcastLocatorUpdated('submitted', row),
   recordHistory: recordLocatorWorkflowEvent,
   snapshotReviewers: snapshotLocatorReviewers,
   assertSubmissionReviewer: (db, applicantId) => assertLeaveSubmissionReviewer(db, applicantId, 'locator'),
+  canApproveForEmployee: async (db, employeeId, actor) => {
+    if (String(employeeId) === String(actor.id)) return false;
+    const reviewers=await resolveFinalLeaveReviewers(db);
+    return reviewers.some(r=>String(r.id)===String(actor.id));
+  },
 });
 
 router.use('/print', protect, require('./locatorPrintTemplates'));
@@ -954,10 +974,10 @@ router.post('/types', protect, requireAdminOrHr, requireDtrFeatureIfAdmin('locat
       `INSERT INTO locator_request_types (
          code, label, short_label, location_label, location_hint,
          dtr_slot_label, dtr_print_label, requires_attachment,
-         coverage_mode, is_active, is_system, sort_order
+         coverage_mode, is_active, is_system, sort_order, filing_access, auto_approve_admin
        ) VALUES (
          $1::text, $2::text, $3::text, $4::text, $5::text,
-         $6::text, $7::text, $8::boolean, $9::text, $10::boolean, false, $11::integer
+         $6::text, $7::text, $8::boolean, $9::text, $10::boolean, false, $11::integer, $12::text, $13::boolean
        )
        RETURNING *`,
       [
@@ -972,6 +992,7 @@ router.post('/types', protect, requireAdminOrHr, requireDtrFeatureIfAdmin('locat
         payload.coverage_mode,
         payload.is_active,
         payload.sort_order,
+        payload.filing_access,payload.auto_approve_admin,
       ]
     );
     const item = mapLocatorTypeRow(inserted.rows[0]);
@@ -1005,6 +1026,7 @@ router.put('/types/:id', protect, requireAdminOrHr, requireDtrFeatureIfAdmin('lo
            coverage_mode = $8,
            is_active = $9,
            sort_order = $10,
+           filing_access = $12, auto_approve_admin = $13,
            updated_at = now()
        WHERE id = $11::uuid
        RETURNING *`,
@@ -1020,6 +1042,7 @@ router.put('/types/:id', protect, requireAdminOrHr, requireDtrFeatureIfAdmin('lo
         payload.is_active,
         payload.sort_order,
         req.params.id,
+        payload.filing_access,payload.auto_approve_admin,
       ]
     );
     const item = mapLocatorTypeRow(updated.rows[0]);
@@ -1141,6 +1164,64 @@ router.get('/my', protect, async (req, res) => {
     console.error('[locator GET /my]', err);
     res.status(500).json({ error: 'Failed to fetch locator slips' });
   }
+});
+
+// Staff filing is separately authorized; no client-supplied employee identity
+// is accepted by the existing employee submission endpoints.
+router.get('/admin/filing-employees',protect,requireAdminOrHr,requireDtrFeatureIfAdmin('locator_allowed'),async(req,res)=>{
+  const date=String(req.query.slip_date || '');
+  if (!parseLocatorDateOnly(date)) return res.status(400).json({error:'Select a valid locator date.'});
+  const offset=Math.max(0,Number.parseInt(req.query.offset,10)||0);
+  const search=String(req.query.search || '').trim().slice(0,100);
+  try {
+    const result=await pool.query(`SELECT u.id,u.full_name,d.name AS department_name,count(*) OVER()::int AS total
+      FROM users u JOIN LATERAL (SELECT a.department_id FROM assignments a
+        WHERE a.employee_id=u.id AND a.effective_from <= $1::date AND (a.effective_to IS NULL OR a.effective_to >= $1::date)
+        AND a.shift_id IS NOT NULL ORDER BY a.effective_from DESC,a.created_at DESC,a.id DESC LIMIT 1) a ON true
+      LEFT JOIN departments d ON d.id=a.department_id
+      WHERE u.id <> $2::uuid AND u.is_active=true AND COALESCE(u.employment_status,'active')='active'
+        AND (u.date_hired IS NULL OR u.date_hired <= $1::date) AND (u.separation_date IS NULL OR u.separation_date >= $1::date)
+        AND ($3::text='' OR u.full_name ILIKE '%' || $3 || '%' OR d.name ILIKE '%' || $3 || '%')
+      ORDER BY u.full_name,u.id LIMIT 100 OFFSET $4`,[date,req.user.id,search,offset]);
+    res.json({employees:result.rows,total:result.rows[0]?.total || 0});
+  }catch(error){console.error('[locator staff employees]',error);res.status(500).json({error:'Unable to load employees.'});}
+});
+
+router.post('/admin/file',protect,requireAdminOrHr,requireDtrFeatureIfAdmin('locator_allowed'),uploadLocatorAttachmentMw,async(req,res)=>{
+  const sourcePath=req.file ? `${LOCATOR_ATTACHMENT_SUBDIR}/${req.file.filename}` : null;
+  try {
+    let ids=req.body.employee_ids;
+    if(typeof ids==='string'){try{ids=JSON.parse(ids);}catch(_){ids=null;}}
+    ids=validateStaffBatch(ids);
+    if(ids.includes(req.user.id))return res.status(400).json({error:'Use My Requests to file your own locator.'});
+    const slipDate=String(req.body.slip_date || '').trim();
+    const requestType=normalizeRequestType(req.body.request_type);
+    const fields=validateLocatorRequiredFields({slipDate,requestType,office:String(req.body.office||'').trim(),reason:String(req.body.reason||'').trim(),
+      slots:{amIn:boolField(req.body.full_shift)||boolField(req.body.am_in),amOut:boolField(req.body.am_out),pmIn:boolField(req.body.pm_in),pmOut:boolField(req.body.pm_out)}});
+    if(!fields.valid)return res.status(400).json({error:fields.error});
+    const results=await runStaffBatch(ids,async employeeId=>{
+      const employee=await pool.query(`SELECT id FROM users WHERE id=$1::uuid AND is_active=true
+        AND COALESCE(employment_status,'active')='active' AND (date_hired IS NULL OR date_hired <= $2::date)
+        AND (separation_date IS NULL OR separation_date >= $2::date)`,[employeeId,slipDate]);
+      if(!employee.rows.length)throw Object.assign(new Error('Employee is inactive or unavailable on this date.'),{statusCode:400});
+      const coverage=await resolveLocatorShiftCoverage(pool,employeeId,parseLocatorDateOnly(slipDate));
+      if(!coverage.can_file)throw Object.assign(new Error(coverage.error),{statusCode:400});
+      const full=boolField(req.body.full_shift);
+      let attachment=null;
+      if(sourcePath){
+        const name=`${require('crypto').randomUUID()}${path.extname(req.file.filename)}`;
+        fs.copyFileSync(path.join(locatorAttachmentDir,req.file.filename),path.join(locatorAttachmentDir,name));
+        attachment={path:`${LOCATOR_ATTACHMENT_SUBDIR}/${name}`,name:req.file.originalname,mimeType:req.file.mimetype};
+      }
+      try{return await locatorSubmissionService.submit({employeeUserId:employeeId,filedBy:req.user,autoApprove:true,
+        approvalSignature:req.body.signature,slipDate,requestType,office:String(req.body.office||'').trim(),reason:String(req.body.reason||'').trim(),
+        amIn:full||boolField(req.body.am_in),amOut:full ? !coverage.single_session : boolField(req.body.am_out),
+        pmIn:full ? !coverage.single_session : boolField(req.body.pm_in),pmOut:full||boolField(req.body.pm_out),attachment});
+      }catch(error){if(attachment)removeLocatorAttachmentFile(attachment.path);throw error;}
+    });
+    res.status(200).json({results,created:results.filter(r=>r.request).length,failed:results.filter(r=>r.error).length});
+  }catch(error){res.status(error.statusCode||500).json({error:error.statusCode ? error.message : 'Unable to file locator requests.'});}
+  finally{if(sourcePath)removeLocatorAttachmentFile(sourcePath);}
 });
 
 // POST /api/locator-slips/submit

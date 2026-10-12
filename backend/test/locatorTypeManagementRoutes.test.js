@@ -28,6 +28,7 @@ function rowFromCreateParams(params) {
     is_active: params[9],
     is_system: false,
     sort_order: params[10],
+    filing_access:params[11], auto_approve_admin:params[12],
   };
 }
 
@@ -36,7 +37,7 @@ async function withCreateRoute(run) {
   const events = [];
   const query = async (sql, params = []) => {
     const statement = String(sql).replace(/\s+/g, ' ').trim();
-    if (statement.startsWith('INSERT INTO locator_request_types') && params.length === 11) {
+    if (statement.startsWith('INSERT INTO locator_request_types') && params.length === 13) {
       inserts.push({ statement, params });
       return { rows: [rowFromCreateParams(params)] };
     }
@@ -159,6 +160,9 @@ test('locator type creation rejects malformed rules without writing', async () =
       [{ coverage_mode: 'wfhh' }, /Coverage mode must be manual or wfh/],
       [{ requires_attachment: 'yes' }, /Requires attachment must be a boolean/],
       [{ is_active: 'enabled' }, /Available for filing must be a boolean/],
+      [{ filing_access: 'anyone' }, /Filing access must/],
+      [{ auto_approve_admin: 'yes' }, /must be a boolean/],
+      [{ filing_access: 'employee', auto_approve_admin: true }, /Auto approval requires/],
     ];
 
     for (const [override, message] of cases) {
@@ -181,6 +185,7 @@ test('locator type creation persists valid explicit rules', async () => {
         coverage_mode: 'wfh',
         is_active: false,
         sort_order: 30,
+        filing_access:'admin',auto_approve_admin:true,
       },
     }, res);
 
@@ -190,10 +195,21 @@ test('locator type creation persists valid explicit rules', async () => {
     assert.equal(inserts[0].params[8], 'wfh');
     assert.equal(inserts[0].params[9], false);
     assert.equal(inserts[0].params[10], 30);
+    assert.equal(inserts[0].params[11], 'admin');
+    assert.equal(inserts[0].params[12], true);
+    assert.equal(res.body.filing_access,'admin');
     assert.equal(events.length, 1);
     assert.equal(events[0].name, 'locator_type_updated');
     assert.equal(events[0].payload.action, 'created');
     assert.equal(events[0].payload.code, 'remote_work');
+  });
+});
+test('locator type creation preserves employee-only filing by default',async()=>{
+  await withCreateRoute(async(handler,inserts)=>{
+    const res=responseRecorder();await handler({body:basePayload},res);
+    assert.equal(res.statusCode,201);
+    assert.equal(inserts[0].params[11],'employee');
+    assert.equal(inserts[0].params[12],false);
   });
 });
 

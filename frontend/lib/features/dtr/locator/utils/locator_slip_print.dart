@@ -13,6 +13,25 @@ import 'locator_form_signatories.dart';
 class LocatorSlipPrint {
   const LocatorSlipPrint._();
 
+  static Future<Uint8List> loadPreview(
+    BuildContext context,
+    Future<Uint8List> Function() load,
+  ) async {
+    final messenger = ScaffoldMessenger.of(context);
+    messenger.clearSnackBars();
+    final loading = messenger.showSnackBar(
+      const SnackBar(
+        content: Text('Loading preview…'),
+        duration: Duration(minutes: 5),
+      ),
+    );
+    try {
+      return await load();
+    } finally {
+      if (messenger.mounted) loading.close();
+    }
+  }
+
   static Future<Uint8List> buildPdf({
     required String? id,
     required String employeeName,

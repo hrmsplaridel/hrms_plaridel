@@ -49,6 +49,8 @@ class _LocatorTypeManagementScreenState
   bool _saving = false;
   String? _loadError;
   bool _requiresAttachment = false;
+  String _filingAccess = 'employee';
+  bool _autoApproveAdmin = false;
   bool _isActive = true;
   String _coverageMode = 'manual';
   LocatorPrintDraft _printDraft = const LocatorPrintDraft();
@@ -145,6 +147,8 @@ class _LocatorTypeManagementScreenState
       _dtrPrintLabelController.clear();
       _sortOrderController.text = '${(_items.length + 1) * 10}';
       _requiresAttachment = false;
+      _filingAccess = 'employee';
+      _autoApproveAdmin = false;
       _isActive = true;
       _coverageMode = 'manual';
     });
@@ -170,6 +174,8 @@ class _LocatorTypeManagementScreenState
       _dtrPrintLabelController.text = item.dtrPrintLabel;
       _sortOrderController.text = item.sortOrder.toString();
       _requiresAttachment = item.requiresAttachment;
+      _filingAccess = item.filingAccess;
+      _autoApproveAdmin = item.autoApproveAdmin;
       _isActive = item.isActive;
       _coverageMode = item.coverageMode == 'wfh' ? 'wfh' : 'manual';
     });
@@ -188,6 +194,8 @@ class _LocatorTypeManagementScreenState
         'dtr_slot_label': _dtrSlotLabelController.text.trim(),
         'dtr_print_label': _dtrPrintLabelController.text.trim(),
         'requires_attachment': _requiresAttachment,
+        'filing_access': _filingAccess,
+        'auto_approve_admin': _autoApproveAdmin,
         'coverage_mode': _coverageMode,
         'is_active': _isActive,
         'sort_order': int.parse(_sortOrderController.text.trim()),
@@ -794,6 +802,39 @@ class _LocatorTypeManagementScreenState
       title: 'Filing Requirements',
       icon: Icons.fact_check_outlined,
       children: [
+        SizedBox(
+          width: 360,
+          child: DropdownButtonFormField<String>(
+            initialValue: _filingAccess,
+            isExpanded: true,
+            decoration: AppTheme.dashInputDecoration(
+              context,
+              labelText: 'Who can file',
+            ),
+            items: const [
+              DropdownMenuItem(
+                value: 'both',
+                child: Text('Employee and HR/admin'),
+              ),
+              DropdownMenuItem(value: 'employee', child: Text('Employee only')),
+              DropdownMenuItem(value: 'admin', child: Text('HR/admin only')),
+            ],
+            onChanged: (value) => setState(() {
+              _filingAccess = value!;
+              if (value == 'employee') _autoApproveAdmin = false;
+            }),
+          ),
+        ),
+        _settingTile(
+          icon: Icons.check_circle_outline,
+          title: 'Auto approve HR/admin filing',
+          subtitle:
+              'Only assigned final reviewers can auto approve. Other staff filings follow normal approval.',
+          value: _autoApproveAdmin,
+          onChanged: (value) => setState(() {
+            if (_filingAccess != 'employee') _autoApproveAdmin = value;
+          }),
+        ),
         _settingTile(
           icon: Icons.attach_file_rounded,
           title: 'Require attachment',

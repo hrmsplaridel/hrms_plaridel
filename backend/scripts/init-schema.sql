@@ -1220,6 +1220,9 @@ CREATE INDEX IF NOT EXISTS idx_user_push_tokens_user_active
 -- LOCATOR REQUESTS
 -- =========================================
 CREATE TABLE IF NOT EXISTS locator_request_types (
+  filing_access TEXT NOT NULL DEFAULT 'employee',
+  auto_approve_admin BOOLEAN NOT NULL DEFAULT false,
+  CONSTRAINT chk_locator_filing_access CHECK (filing_access IN ('employee','admin','both') AND (NOT auto_approve_admin OR filing_access <> 'employee')),
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   code TEXT NOT NULL
     CONSTRAINT chk_locator_request_types_code_format

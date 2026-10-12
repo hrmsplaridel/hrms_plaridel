@@ -17,6 +17,7 @@ import 'package:hrms_plaridel/core/widgets/form_pdf_preview.dart';
 import 'package:hrms_plaridel/core/services/app_realtime_provider.dart';
 import 'package:hrms_plaridel/features/dtr/locator/presentation/admin/pages/locator_type_management_screen.dart';
 import 'package:hrms_plaridel/features/dtr/locator/presentation/admin/widgets/admin_locator_correction_dialog.dart';
+import 'package:hrms_plaridel/features/dtr/locator/presentation/admin/widgets/admin_locator_filing_dialog.dart';
 import 'package:hrms_plaridel/features/dtr/locator/utils/locator_slip_print.dart';
 import 'package:hrms_plaridel/features/dtr/locator/utils/locator_form_signatories.dart';
 import 'package:hrms_plaridel/features/dtr/locator/utils/locator_signature_prompt.dart';
@@ -48,7 +49,7 @@ enum _LocatorAdminQueue {
   final String label;
 }
 
-enum _LocatorHeaderAction { recordCorrection, manageTypes }
+enum _LocatorHeaderAction { fileForEmployees, recordCorrection, manageTypes }
 
 class AdminLocatorManagementScreen extends StatefulWidget {
   const AdminLocatorManagementScreen({super.key});
@@ -199,30 +200,39 @@ class _AdminLocatorManagementScreenState
             ),
             onSelected: (action) {
               switch (action) {
+                case _LocatorHeaderAction.fileForEmployees:
+                  unawaited(_fileForEmployees());
                 case _LocatorHeaderAction.recordCorrection:
                   unawaited(_recordLocatorCorrection());
                 case _LocatorHeaderAction.manageTypes:
                   unawaited(_openTypeManagement());
               }
             },
-            itemBuilder: (context) => const [
-              PopupMenuItem<_LocatorHeaderAction>(
+            itemBuilder: (context) => [
+              if (_locatorTypes.any(
+                (type) => type.isActive && type.adminCanFile,
+              ))
+                const PopupMenuItem<_LocatorHeaderAction>(
+                  value: _LocatorHeaderAction.fileForEmployees,
+                  child: Text('File for employees'),
+                ),
+              const PopupMenuItem<_LocatorHeaderAction>(
                 value: _LocatorHeaderAction.recordCorrection,
                 child: Row(
                   children: [
                     Icon(Icons.edit_calendar_outlined, size: 18),
                     SizedBox(width: 10),
-                    Text('Record Correction'),
+                    Expanded(child: Text('Record Correction')),
                   ],
                 ),
               ),
-              PopupMenuItem<_LocatorHeaderAction>(
+              const PopupMenuItem<_LocatorHeaderAction>(
                 value: _LocatorHeaderAction.manageTypes,
                 child: Row(
                   children: [
                     Icon(Icons.tune_rounded, size: 18),
                     SizedBox(width: 10),
-                    Text('Manage Types'),
+                    Expanded(child: Text('Manage Types')),
                   ],
                 ),
               ),
@@ -855,8 +865,12 @@ class _AdminLocatorManagementScreenState
   void _showDetailsDialog(_LocatorAdminRecord item) {
     final actorId = context.read<AuthProvider>().user?.id.trim() ?? '';
     final isOwnRequest = actorId.isNotEmpty && actorId == item.employeeId;
-    final canReview = _canFinalReview && item.canHrReview &&
-        actorId.isNotEmpty && item.employeeId.isNotEmpty && !isOwnRequest;
+    final canReview =
+        _canFinalReview &&
+        item.canHrReview &&
+        actorId.isNotEmpty &&
+        item.employeeId.isNotEmpty &&
+        !isOwnRequest;
     final slipDate = item.slipDateValue;
     final returnBlockedByPastDate =
         canReview &&
@@ -895,7 +909,9 @@ class _AdminLocatorManagementScreenState
               if (isOwnRequest && item.canHrReview)
                 const Padding(
                   padding: EdgeInsets.all(16),
-                  child: Text('Another assigned reviewer must review your request.'),
+                  child: Text(
+                    'Another assigned reviewer must review your request.',
+                  ),
                 ),
               Padding(
                 padding: const EdgeInsets.fromLTRB(24, 18, 10, 16),
@@ -1247,22 +1263,29 @@ class _AdminLocatorManagementScreenState
                           OutlinedButton.icon(
                             onPressed: () async {
                               try {
-                                final bytes = await LocatorSlipPrint.buildPdf(
-                                  signatories: await loadLocatorFormSignatories(
-                                    item.id,
-                                  ),
-                                  id: item.id,
-                                  employeeName: item.employeeName,
-                                  dateText: item.slipDateLabel,
-                                  requestTypeLabel: item.requestType.label,
-                                  locationLabel: item.requestType.locationLabel,
-                                  office: item.office,
-                                  remarks: item.reason,
-                                  amIn: item.amIn,
-                                  amOut: item.amOut,
-                                  pmIn: item.pmIn,
-                                  pmOut: item.pmOut,
-                                );
+                                final bytes =
+                                    await LocatorSlipPrint.loadPreview(
+                                      dialogContext,
+                                      () async => LocatorSlipPrint.buildPdf(
+                                        signatories:
+                                            await loadLocatorFormSignatories(
+                                              item.id,
+                                            ),
+                                        id: item.id,
+                                        employeeName: item.employeeName,
+                                        dateText: item.slipDateLabel,
+                                        requestTypeLabel:
+                                            item.requestType.label,
+                                        locationLabel:
+                                            item.requestType.locationLabel,
+                                        office: item.office,
+                                        remarks: item.reason,
+                                        amIn: item.amIn,
+                                        amOut: item.amOut,
+                                        pmIn: item.pmIn,
+                                        pmOut: item.pmOut,
+                                      ),
+                                    );
                                 if (!dialogContext.mounted) return;
                                 await showFormPdfPreview(
                                   context: dialogContext,
@@ -2051,6 +2074,30 @@ class _AdminLocatorManagementScreenState
     );
     controller.dispose();
     return result;
+  }
+
+  Future<void> _fileForEmployees() async {
+    final types = _locatorTypes
+        .where((t) => t.isActive && t.adminCanFile)
+        .toList();
+    if (types.isEmpty) {
+      _showLocatorSnack(
+        'No locator types allow HR/admin filing. Configure a type first.',
+      );
+      return;
+    }
+    final created = await openResponsiveRightSidePanel<bool>(
+      context: context,
+      barrierLabel: 'Close locator filing form',
+      breakpoint: 0,
+      minWidth: 620,
+      initialWidthFraction: 0.45,
+      builder: (_) => AdminLocatorFilingDialog(requestTypes: types),
+    );
+    if (created == true && mounted) {
+      LocatorSlipDataCache.instance.invalidateRequests();
+      await _load(forceRefresh: true);
+    }
   }
 
   Future<void> _recordLocatorCorrection() async {
