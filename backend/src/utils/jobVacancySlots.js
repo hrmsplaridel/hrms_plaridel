@@ -1,5 +1,6 @@
 const { pool } = require('../config/db');
 const { excludeMayorIntakeStubSql } = require('./mayorIntakeStub');
+const { todayInHrmsTimezone } = require('./dateRangeParser');
 
 /** Lowercase, trimmed, without common HR prefixes — used to match applications to vacancies. */
 function normalizePositionKey(raw) {
@@ -55,6 +56,108 @@ function parseMaxApplicants(v) {
   const n = Number(v);
   if (!Number.isFinite(n) || n < 1) return null;
   return Math.min(100000, Math.floor(n));
+}
+
+/** Whole-number age from a request value. Blank is null. */
+function parseOptionalWholeAge(raw) {
+  if (raw == null || raw === '') return { ok: true, value: null };
+  const s = typeof raw === 'number' ? String(raw) : String(raw).trim();
+  if (!/^\d+$/.test(s)) {
+    return { ok: false, error: 'Age must be a whole number.' };
+  }
+  const n = Number(s);
+  if (!Number.isSafeInteger(n)) {
+    return { ok: false, error: 'Age must be a whole number.' };
+  }
+  return { ok: true, value: n };
+}
+
+/**
+ * @returns {{ ok: true, minimumAge: number, maximumAge: number|null } | { ok: false, error: string }}
+ */
+function parseVacancyAgeRequirements(rawMinimum, rawMaximum) {
+  if (rawMinimum == null || rawMinimum === '') {
+    return { ok: false, error: 'Minimum age is required.' };
+  }
+  const minimum = parseOptionalWholeAge(rawMinimum);
+  if (!minimum.ok || minimum.value == null) {
+    return { ok: false, error: 'Minimum age must be a whole number.' };
+  }
+  const maximum = parseOptionalWholeAge(rawMaximum);
+  if (!maximum.ok) {
+    return { ok: false, error: 'Maximum age must be a whole number.' };
+  }
+  if (maximum.value != null && maximum.value < minimum.value) {
+    return {
+      ok: false,
+      error: 'Maximum age must be greater than or equal to minimum age.',
+    };
+  }
+  return { ok: true, minimumAge: minimum.value, maximumAge: maximum.value };
+}
+
+/** Stored minimum, or 18 when an older vacancy has no age rule yet. */
+function vacancyMinimumAge(v) {
+  const parsed = parseOptionalWholeAge(v?.minimum_age);
+  if (!parsed.ok || parsed.value == null) return 18;
+  return parsed.value;
+}
+
+/** Stored maximum, or null when the vacancy has no maximum. */
+function vacancyMaximumAge(v) {
+  if (v == null || v.maximum_age == null || v.maximum_age === '') return null;
+  const parsed = parseOptionalWholeAge(v.maximum_age);
+  if (!parsed.ok) return null;
+  return parsed.value;
+}
+
+/** Completed years on a calendar date. Both arguments are YYYY-MM-DD. */
+function ageOnCalendarDate(dobIso, todayIso) {
+  const [y, m, d] = String(dobIso).split('-').map(Number);
+  const [ty, tm, td] = String(todayIso).split('-').map(Number);
+  let age = ty - y;
+  if (tm < m || (tm === m && td < d)) age -= 1;
+  return age;
+}
+
+/**
+ * @returns {{ ok: true, age: number } | { ok: false, status: number, error: string, code: string }}
+ */
+function assertApplicantAgeForVacancy(vacancy, dobIso, todayIso = todayInHrmsTimezone()) {
+  const minimum = vacancyMinimumAge(vacancy);
+  const maximum = vacancyMaximumAge(vacancy);
+  const age = ageOnCalendarDate(dobIso, todayIso);
+  if (age < minimum) {
+    return {
+      ok: false,
+      status: 400,
+      error: `This vacancy requires applicants to be at least ${minimum} years old.`,
+      code: 'AGE_BELOW_MINIMUM',
+    };
+  }
+  if (maximum != null && age > maximum) {
+    return {
+      ok: false,
+      status: 400,
+      error: `This vacancy accepts applicants up to ${maximum} years old.`,
+      code: 'AGE_ABOVE_MAXIMUM',
+    };
+  }
+  return { ok: true, age };
+}
+
+async function assertApplicantMeetsVacancyAge(positionTrimmed, dobIso) {
+  const vacancies = await loadVacanciesFromDb();
+  const vac = findListedVacancyForPosition(vacancies, positionTrimmed);
+  if (!vac) {
+    return {
+      ok: false,
+      status: 409,
+      error: 'This position is not currently open for applications.',
+      code: 'POSITION_NOT_OPEN',
+    };
+  }
+  return assertApplicantAgeForVacancy(vac, dobIso);
 }
 
 /**
@@ -289,6 +392,12 @@ module.exports = {
   normalizePositionKey,
   normalizeStoredPositionKey,
   parseMaxApplicants,
+  parseVacancyAgeRequirements,
+  vacancyMinimumAge,
+  vacancyMaximumAge,
+  ageOnCalendarDate,
+  assertApplicantAgeForVacancy,
+  assertApplicantMeetsVacancyAge,
   loadAnnouncementFromDb,
   loadVacanciesFromDb,
   findVacancyForPosition,

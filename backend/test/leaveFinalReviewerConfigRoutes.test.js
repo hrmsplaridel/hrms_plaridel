@@ -11,7 +11,7 @@ test('final reviewer config reports the official holder and ranked backups', asy
   const pool = {
     async query(sql) {
       const statement = String(sql);
-      if (statement.includes('FROM positions p')) {
+      if (statement.includes('FROM primary_reviewer_designations')) {
         return { rows: [{ id: primaryId, name: 'Official Reviewer' }] };
       }
       if (statement.includes('FROM leave_final_reviewer_backups')) {

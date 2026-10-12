@@ -1,4 +1,4 @@
-import 'dart:async';
+import 'package:hrms_plaridel/core/services/foreground_refresh.dart';
 import 'package:flutter/material.dart';
 import 'package:hrms_plaridel/core/api/client.dart';
 import 'package:hrms_plaridel/core/api/user_facing_api_error.dart';
@@ -10,7 +10,8 @@ class SystemBackupsPage extends StatefulWidget {
 }
 
 class _SystemBackupsPageState extends State<SystemBackupsPage> {
-  Timer? _timer;
+  late final ForegroundRefresh _refresh;
+  bool _resetSettingsPending = false;
   Map<String, dynamic>? _data;
   bool _loading = false, _saving = false, _dirty = false, _enabled = false;
   String? _error;
@@ -21,19 +22,34 @@ class _SystemBackupsPageState extends State<SystemBackupsPage> {
   @override
   void initState() {
     super.initState();
+    _refresh = ForegroundRefresh(
+      interval: () => Duration(seconds: _backupRunning ? 10 : 60),
+      onRefresh: _fetch,
+    );
     _load();
-    _timer = Timer.periodic(const Duration(seconds: 10), (_) => _load());
   }
 
   @override
   void dispose() {
-    _timer?.cancel();
+    _refresh.dispose();
     _retention.dispose();
     super.dispose();
   }
 
   Future<void> _load({bool resetSettings = false}) async {
+    _resetSettingsPending |= resetSettings;
+    await _refresh.refresh(trailing: resetSettings);
+  }
+
+  bool get _backupRunning {
+    final history = _data?['history'] as List? ?? [];
+    return history.isNotEmpty && history.first['status'] == 'running';
+  }
+
+  Future<void> _fetch() async {
     if (_loading || _saving) return;
+    final resetSettings = _resetSettingsPending;
+    _resetSettingsPending = false;
     setState(() => _loading = true);
     try {
       final data = (await ApiClient.instance.get<Map<String, dynamic>>(

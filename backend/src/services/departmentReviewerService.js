@@ -42,25 +42,18 @@ async function resolveDepartmentReviewers(
 
   const primaryResult = await client.query(
     `SELECT u.id AS reviewer_id,
-            COALESCE(NULLIF(btrim(u.full_name), ''), u.email, u.id::text) AS reviewer_name
-     FROM assignments a
-     JOIN positions p ON p.id = a.position_id
-     JOIN position_department_head_periods head_period
-       ON head_period.position_id = p.id
-      AND head_period.department_id = a.department_id
-      AND head_period.is_active = true
-      AND head_period.effective_from <= $2::date
-      AND (head_period.effective_to IS NULL OR head_period.effective_to >= $2::date)
-     JOIN users u ON u.id = a.employee_id
-     WHERE a.department_id = $1::uuid
-       AND p.department_id = $1::uuid
-       AND a.is_active = true
-       AND p.is_active = true
-       AND a.effective_from <= $2::date
-       AND (a.effective_to IS NULL OR a.effective_to >= $2::date)
-       AND (u.is_active IS NULL OR u.is_active = true)
+            COALESCE(NULLIF(btrim(u.full_name), ''), u.email, u.id::text) AS reviewer_name,
+            head_period.id AS designation_id, head_period.position_title_snapshot AS position_title,
+            head_period.effective_from::text AS effective_from, head_period.effective_to::text AS effective_to
+     FROM primary_reviewer_designations head_period
+     JOIN users u ON u.id = head_period.employee_id
+     WHERE head_period.scope_key = 'department:' || $1::uuid::text
+       AND head_period.department_id = $1::uuid
+       AND head_period.is_active = true
+       AND head_period.effective_from <= $2::date
+       AND (head_period.effective_to IS NULL OR head_period.effective_to >= $2::date)
+       AND u.is_active = true
        AND ($3::uuid IS NULL OR u.id <> $3::uuid)
-     ORDER BY a.effective_from DESC, a.created_at DESC, a.id DESC
      LIMIT 1`,
     [departmentId, date, excludeUserId]
   );
@@ -86,6 +79,10 @@ async function resolveDepartmentReviewers(
     ? {
         reviewerId: primaryRow.reviewer_id,
         reviewerName: primaryRow.reviewer_name,
+        position_title: primaryRow.position_title || null,
+        designation_id: primaryRow.designation_id || null,
+        effective_from: primaryRow.effective_from || null,
+        effective_to: primaryRow.effective_to || null,
         reviewerRole: 'primary',
         backupRank: null,
       }

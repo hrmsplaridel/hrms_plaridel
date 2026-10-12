@@ -51,8 +51,8 @@ class NotificationRepository {
       final data = res.data;
       if (data == null) return 0;
       return (data['unread_count'] as num?)?.toInt() ?? 0;
-    } on DioException {
-      return 0;
+    } on DioException catch (e) {
+      throw NotificationLoadException(_friendlyMessage(e));
     }
   }
 

@@ -1,3 +1,4 @@
+const { savePrimaryReviewer } = require('../services/primaryReviewerDesignation');
 const express = require('express');
 const { pool } = require('../config/db');
 const { authMiddleware } = require('../middleware/auth');
@@ -108,6 +109,23 @@ router.get('/:id/deactivation-preview', protect, requireAdmin, async (req, res) 
 });
 
 // GET /api/departments/:id/reviewer-config - current Head, backups, and roster
+router.put('/:id/reviewer-primary', protect, requireAdmin, requireDtrFeatureIfAdmin('approvals_allowed'), async (req, res) => {
+  try {
+    const result = await savePrimaryReviewer(pool, {
+      departmentId: req.params.id,
+      employeeId: req.body?.employee_id,
+      effectiveFrom: req.body?.effective_from,
+      effectiveTo: req.body?.effective_to,
+      actorId: req.user.id,
+    });
+    return res.json(result);
+  } catch (error) {
+    if (error.statusCode) return res.status(error.statusCode).json({ error: error.message });
+    console.error('[primary reviewer designation]', error);
+    return res.status(500).json({ error: 'Failed to save primary reviewer' });
+  }
+});
+
 router.get('/:id/reviewer-config', protect, requireAdmin, requireDtrFeatureIfAdmin('approvals_allowed'), async (req, res) => {
   try {
     const effectiveDate = String(req.query.effective_date || dateInTimeZone());
@@ -127,8 +145,10 @@ router.get('/:id/reviewer-config', protect, requireAdmin, requireDtrFeatureIfAdm
     });
     const roster = await pool.query(
       `SELECT DISTINCT ON (u.id)
-              u.id, COALESCE(NULLIF(btrim(u.full_name), ''), u.email) AS name
+              u.id, COALESCE(NULLIF(btrim(u.full_name), ''), u.email) AS name,
+              p.name AS position_title
        FROM assignments a
+       LEFT JOIN positions p ON p.id = a.position_id
        JOIN users u ON u.id = a.employee_id
        WHERE a.department_id = $1::uuid
          AND a.effective_from <= $2::date
@@ -179,7 +199,13 @@ router.put('/:id/reviewer-backups', protect, requireAdmin, requireDtrFeatureIfAd
       departmentId: req.params.id,
       effectiveDate: effectiveFrom,
     });
-    if (resolved.primary && employeeIds.includes(String(resolved.primary.reviewerId))) {
+    const overlappingPrimary = employeeIds.length ? await client.query(
+      `SELECT id FROM primary_reviewer_designations WHERE scope_key = 'department:' || $1::uuid::text
+       AND employee_id = ANY($2::uuid[]) AND is_active = true
+       AND (effective_to IS NULL OR effective_to >= $3::date) LIMIT 1`,
+      [req.params.id, employeeIds, effectiveFrom]
+    ) : { rows: [] };
+    if (overlappingPrimary.rows.length || (resolved.primary && employeeIds.includes(String(resolved.primary.reviewerId)))) {
       await client.query('ROLLBACK');
       return res.status(409).json({ error: 'The official Department Head cannot also be a backup reviewer' });
     }
@@ -204,15 +230,6 @@ router.put('/:id/reviewer-backups', protect, requireAdmin, requireDtrFeatureIfAd
           error: 'Every backup reviewer must be assigned to this department on the effective date',
           invalid_employee_ids: invalidIds,
         });
-      }
-      const disabled = await client.query(`SELECT u.id FROM users u
-        LEFT JOIN dtr_admin_access access ON access.admin_user_id = u.id
-        WHERE u.id = ANY($1::uuid[]) AND u.role = 'admin'
-          AND (COALESCE(access.leave_allowed, false) = false
-            OR COALESCE(access.locator_allowed, false) = false)`, [employeeIds]);
-      if (disabled.rows.length) {
-        await client.query('ROLLBACK');
-        return res.status(409).json({ error: 'Enable Leave and Locator access for each admin reviewer before assigning them.' });
       }
     }
 

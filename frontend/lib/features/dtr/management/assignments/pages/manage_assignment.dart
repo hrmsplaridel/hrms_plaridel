@@ -1571,23 +1571,25 @@ class _ManageAssignmentState extends State<ManageAssignment> {
 
   @override
   Widget build(BuildContext context) {
-    final w = MediaQuery.of(context).size.width;
-    final isNarrow = w < 700;
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          'Assignment',
-          style: TextStyle(
-            color: _headingColor(context),
-            fontSize: 24,
-            fontWeight: FontWeight.w800,
-          ),
-        ),
-        const SizedBox(height: 20),
-        isNarrow ? _buildNarrowLayout() : _buildWideLayout(),
-      ],
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final isNarrow = constraints.maxWidth < 1000;
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Assignment',
+              style: TextStyle(
+                color: _headingColor(context),
+                fontSize: 24,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+            const SizedBox(height: 20),
+            isNarrow ? _buildNarrowLayout() : _buildWideLayout(),
+          ],
+        );
+      },
     );
   }
 }

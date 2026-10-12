@@ -72,4 +72,16 @@ class RspLdSavedEntriesApi {
   static Future<void> deleteRow(String table, String id) async {
     await ApiClient.instance.delete<void>('$_prefix/$table/$id');
   }
+
+  static Future<List<Map<String, dynamic>>> editHistory(
+    String table,
+    String id,
+  ) async {
+    final res = await ApiClient.instance.get<Map<String, dynamic>>(
+      '$_prefix/$table/$id/edit-history',
+    );
+    final edits = res.data?['edits'];
+    if (edits is! List) return [];
+    return edits.map((item) => Map<String, dynamic>.from(item as Map)).toList();
+  }
 }

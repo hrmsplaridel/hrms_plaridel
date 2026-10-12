@@ -3,6 +3,7 @@ import 'package:hrms_plaridel/features/learning_development/data/repositories/rs
 /// One applicant row in the Selection Line-up table (no pre-filled values).
 class SelectionLineupApplicant {
   const SelectionLineupApplicant({
+    this.applicationId,
     this.name,
     this.education,
     this.experience,
@@ -10,6 +11,8 @@ class SelectionLineupApplicant {
     this.eligibility,
   });
 
+  /// Recruitment application this row belongs to. Not shown on the form.
+  final String? applicationId;
   final String? name;
   final String? education;
   final String? experience;
@@ -18,6 +21,7 @@ class SelectionLineupApplicant {
 
   factory SelectionLineupApplicant.fromJson(Map<String, dynamic> json) {
     return SelectionLineupApplicant(
+      applicationId: json['application_id']?.toString(),
       name: json['name']?.toString(),
       education: json['education']?.toString(),
       experience: json['experience']?.toString(),
@@ -27,6 +31,8 @@ class SelectionLineupApplicant {
   }
 
   Map<String, dynamic> toJson() => {
+    if (applicationId != null && applicationId!.trim().isNotEmpty)
+      'application_id': applicationId,
     'name': name,
     'education': education,
     'experience': experience,

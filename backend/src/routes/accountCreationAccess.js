@@ -1,4 +1,5 @@
 const express = require('express');
+const { broadcastAppEvent } = require('../websockets/appEvents');
 const { pool } = require('../config/db');
 const { authMiddleware } = require('../middleware/auth');
 const { requireSuperAdmin } = require('../middleware/rbac');
@@ -81,6 +82,11 @@ router.put('/:adminId', authMiddleware, requireSuperAdmin, async (req, res) => {
       );
     }
     await client.query('COMMIT');
+    try {
+      broadcastAppEvent('admin_access_changed', {}, { userIds: [adminId] });
+    } catch (error) {
+      console.error('[admin access] live update failed', error);
+    }
     res.json({ admin_id: adminId, allowed });
   } catch (error) {
     if (client) {

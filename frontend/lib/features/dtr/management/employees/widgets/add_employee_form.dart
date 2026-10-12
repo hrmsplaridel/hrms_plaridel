@@ -34,6 +34,9 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
   DateTime? _dateHired;
   DateTime? _separationDate;
   bool _leaveCreditEligible = true;
+  bool get _excludesMonthlyCredits =>
+      _employmentType == 'job_order' ||
+      _employmentType == 'contract_of_service';
   Uint8List? _selectedImageBytes;
   bool _saving = false;
   int? _lastAppliedPrefillStamp;
@@ -58,6 +61,20 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
       }
     }
     return null;
+  }
+
+  static DateTime? _parseHireDateOfBirth(String? raw) {
+    final match = RegExp(
+      r'^(\d{4})-(\d{2})-(\d{2})',
+    ).firstMatch(raw?.trim() ?? '');
+    if (match == null) return null;
+    final year = int.parse(match.group(1)!);
+    final month = int.parse(match.group(2)!);
+    final day = int.parse(match.group(3)!);
+    final date = DateTime(year, month, day);
+    if (date.year != year || date.month != month || date.day != day)
+      return null;
+    return date;
   }
 
   void _ensureTemporaryPassword() {
@@ -135,10 +152,12 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
     final sex = _normalizeHireSex(hire.applicantSex);
     final suffix = _normalizeHireSuffix(hire.applicantSuffix);
     final address = hire.applicantAddress?.trim();
+    final dateOfBirth = _parseHireDateOfBirth(hire.applicantDateOfBirth);
 
     setState(() {
       if (sex != null) _sex = sex;
       if (suffix != null) _suffix = suffix;
+      if (dateOfBirth != null) _dateOfBirth = dateOfBirth;
       if (address != null && address.isNotEmpty) {
         _prefillRawAddress = address;
         _addressFormKey = GlobalKey<StructuredAddressFormState>();
@@ -298,7 +317,11 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
         '$firstName${middleName.isNotEmpty ? ' $middleName' : ''} $lastName$suffixPart'
             .trim();
     final privilege = _privilege ?? 'Employee';
-    final role = privilege == 'Admin' ? 'admin' : 'employee';
+    final role = switch (privilege) {
+      'Admin' => 'admin',
+      'Mayor' => 'mayor',
+      _ => 'employee',
+    };
 
     setState(() => _saving = true);
     try {
@@ -415,9 +438,7 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
       _clearForm();
       if (widget.onAccountCreated != null) {
         if (postCommitWarnings.isNotEmpty) {
-          _showSnackBar(
-            'Account was saved. ${postCommitWarnings.join(' ')}',
-          );
+          _showSnackBar('Account was saved. ${postCommitWarnings.join(' ')}');
         }
         widget.onAccountCreated!();
       } else {
@@ -733,9 +754,14 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
             'Select role first',
             style: TextStyle(color: _chromeMutedColor(context)),
           ),
-          items: const [
-            DropdownMenuItem(value: 'Employee', child: Text('Employee')),
-            DropdownMenuItem(value: 'Admin', child: Text('Administrator')),
+          items: [
+            const DropdownMenuItem(value: 'Employee', child: Text('Employee')),
+            const DropdownMenuItem(
+              value: 'Admin',
+              child: Text('Administrator'),
+            ),
+            if (context.watch<AuthProvider>().user?.role == 'super_admin')
+              const DropdownMenuItem(value: 'Mayor', child: Text('Mayor')),
           ],
           onChanged: (v) => setState(() {
             _privilege = v;
@@ -743,6 +769,14 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
           }),
           validator: (v) => v == null ? 'Select a role first' : null,
         ),
+        if (_privilege == 'Mayor') ...[
+          const SizedBox(height: 10),
+          const Text(
+            'Only one Mayor account can be active. Deactivate the previous '
+            'Mayor in Employee Profiles before creating a replacement. '
+            'Department and position can be assigned below.',
+          ),
+        ],
         if (_privilege != null) ...[
           const SizedBox(height: 18),
           TextFormField(
@@ -1024,23 +1058,14 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
             ),
           ),
           const SizedBox(height: 20),
-          DropdownButtonFormField<String>(
-            initialValue: _employmentType,
+          EmploymentTypeField(
+            value: _employmentType,
             decoration: _fieldDecoration('Employment Type'),
-            hint: Text(
-              'Employment Type',
-              style: TextStyle(
-                color: AppTheme.textSecondary.withValues(alpha: 0.85),
-                fontSize: 14,
-              ),
-            ),
-            items: [
-              'regular',
-              'contractual',
-              'job_order',
-              'casual',
-            ].map((o) => DropdownMenuItem(value: o, child: Text(o))).toList(),
-            onChanged: (v) => setState(() => _employmentType = v),
+            hint: const Text('Employment Type'),
+            onChanged: (v) => setState(() {
+              _employmentType = v;
+              if (_excludesMonthlyCredits) _leaveCreditEligible = false;
+            }),
           ),
           const SizedBox(height: 20),
           TextFormField(
@@ -1196,7 +1221,11 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
                   fontWeight: FontWeight.w600,
                 ),
               ),
-              subtitle: _requiresSeparationDate(_employmentStatus)
+              subtitle: _excludesMonthlyCredits
+                  ? const Text(
+                      'JO and COS accounts do not earn monthly VL/SL credits.',
+                    )
+                  : _requiresSeparationDate(_employmentStatus)
                   ? const Text(
                       'Used to calculate the prorated final-month credit.',
                     )
@@ -1208,8 +1237,9 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
                 color: AppTheme.primaryNavy,
               ),
               onChanged:
-                  _employmentStatus == 'active' ||
-                      _requiresSeparationDate(_employmentStatus)
+                  !_excludesMonthlyCredits &&
+                      (_employmentStatus == 'active' ||
+                          _requiresSeparationDate(_employmentStatus))
                   ? (value) => setState(() => _leaveCreditEligible = value)
                   : null,
             ),

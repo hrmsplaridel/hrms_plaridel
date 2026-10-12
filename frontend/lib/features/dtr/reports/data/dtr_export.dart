@@ -675,8 +675,15 @@ class DtrExport {
       return (displayedMinutes ~/ 60, displayedMinutes % 60);
     }
 
-    // Absent: no punch at all (no timeIn and no breakIn).
-    if (r == null || (r.timeIn == null && r.breakIn == null)) {
+    // Approved locator coverage can replace physical punches. In that case
+    // use the backend penalty, including any uncovered part of the shift.
+    final hasCalculatedLocatorCoverage =
+        _isOnFieldByLocator(r) && r?.undertimeMinutes != null;
+    // A genuinely absent day still uses the full assigned shift duration.
+    if (r == null ||
+        (r.timeIn == null &&
+            r.breakIn == null &&
+            !hasCalculatedLocatorCoverage)) {
       final h = wh.floor();
       final m = ((wh - h) * 60).round();
       return (h, m);

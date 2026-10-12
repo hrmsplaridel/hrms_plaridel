@@ -25,28 +25,6 @@ class ApprovalConfigurationRepository {
     return rows(response.data);
   }
 
-  Future<List<Map<String, dynamic>>> positions(String? departmentId) async {
-    final result = <Map<String, dynamic>>[];
-    var page = 1;
-    while (true) {
-      final response = await ApiClient.instance.get<Map<String, dynamic>>(
-        '/api/positions',
-        queryParameters: {
-          'status': 'Active',
-          'paginated': true,
-          'page': page,
-          'limit': 100,
-          if (departmentId != null) 'department_id': departmentId,
-        },
-      );
-      final data = response.data!;
-      result.addAll(rows(data['items']));
-      if (page >= (data['pagination']['page_count'] as num).toInt()) break;
-      page++;
-    }
-    return result;
-  }
-
   Future<Map<String, dynamic>> reviewers(
     String? departmentId,
     String? date,
@@ -73,12 +51,14 @@ class ApprovalConfigurationRepository {
     );
   }
 
-  Future<void> saveDesignation(
-    String positionId,
+  Future<void> savePrimary(
+    String? departmentId,
     Map<String, dynamic> values,
   ) async {
     await ApiClient.instance.put<dynamic>(
-      '/api/positions/$positionId',
+      departmentId == null
+          ? '/api/positions/leave-final-reviewer-primary'
+          : '/api/departments/$departmentId/reviewer-primary',
       data: values,
     );
   }

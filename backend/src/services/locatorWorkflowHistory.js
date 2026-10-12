@@ -1,3 +1,4 @@
+const {completeReviewNotifications} = require('./reviewNotificationCompletion');
 const LOCATOR_HISTORY_ACTION_TITLES = Object.freeze({
   submitted: 'Submitted',
   retroactive_correction_recorded: 'Retroactive Correction Recorded',
@@ -100,6 +101,7 @@ async function recordLocatorWorkflowEvent(client, {
       JSON.stringify(metadata || {}),
     ]
   );
+  await completeReviewNotifications(client, 'locator_slip', locatorSlipId, fromStatus, toStatus);
   return result.rows[0] || null;
 }
 

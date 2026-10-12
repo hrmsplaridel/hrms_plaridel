@@ -162,7 +162,9 @@ Future<List<_ApplicantHint>> _fetchApplicantHints() async {
         .map(
           (a) => _ApplicantHint(
             name: a.fullName.trim(),
-            school: a.course?.trim().isNotEmpty == true ? a.course!.trim() : null,
+            school: a.course?.trim().isNotEmpty == true
+                ? a.course!.trim()
+                : null,
           ),
         )
         .toList();
@@ -465,10 +467,14 @@ class OjtWorkImmersionEvaluationEditor extends StatefulWidget {
     required this.onPrint,
     this.onPreview,
     required this.onDownloadPdf,
+    this.applicantOnly = false,
   });
 
   final OjtWorkImmersionEvaluation entry;
   final bool readOnly;
+
+  /// Applicant recruitment mode keeps interviewer scoring on the HR side.
+  final bool applicantOnly;
   final void Function(OjtWorkImmersionEvaluation) onSave;
   final VoidCallback onCancel;
   final Future<void> Function(OjtWorkImmersionEvaluation) onPrint;
@@ -531,13 +537,29 @@ class _OjtWorkImmersionEvaluationEditorState
     _recommendation = e.overallRecommendation?.trim().isNotEmpty == true
         ? e.overallRecommendation!.trim()
         : null;
-    _ojtFocus.addListener(() {
-      if (mounted) setState(() {});
-    });
-    _interviewerFocus.addListener(() {
-      if (mounted) setState(() {});
-    });
-    if (!widget.readOnly) _loadLookups();
+    _ojtFocus.addListener(_onOjtFocusChanged);
+    _interviewerFocus.addListener(_onInterviewerFocusChanged);
+    // Applicant mode must not call the admin applicant or employee lookups.
+    if (!widget.readOnly && !widget.applicantOnly) _loadLookups();
+  }
+
+  /// Admin name suggestions rebuild on focus. Applicant mode has no suggestion
+  /// list, and a focus rebuild detaches the web text input before typing starts.
+  void _onOjtFocusChanged() {
+    if (!mounted || widget.readOnly || widget.applicantOnly) return;
+    if (_applicants.isEmpty) return;
+    setState(() {});
+  }
+
+  void _onInterviewerFocusChanged() {
+    if (!mounted || widget.readOnly || widget.applicantOnly) return;
+    if (_employees.isEmpty) return;
+    setState(() {});
+  }
+
+  void _clearFieldError(String? error, void Function() clear) {
+    if (error == null) return;
+    setState(clear);
   }
 
   Future<void> _loadLookups() async {
@@ -603,8 +625,17 @@ class _OjtWorkImmersionEvaluationEditorState
   }
 
   bool _validate() {
-    _ojtError = _ojt.text.trim().isEmpty ? 'OJT / Immersion is required.' : null;
+    _ojtError = _ojt.text.trim().isEmpty
+        ? 'OJT / Immersion is required.'
+        : null;
     _schoolError = _school.text.trim().isEmpty ? 'School is required.' : null;
+    if (widget.applicantOnly) {
+      _dateError = null;
+      _scoreError = null;
+      _interviewerError = null;
+      setState(() {});
+      return _ojtError == null && _schoolError == null;
+    }
     _dateError = _date.text.trim().isEmpty
         ? 'Date of interview is required.'
         : null;
@@ -614,9 +645,7 @@ class _OjtWorkImmersionEvaluationEditorState
       _teamScore,
       _adaptScore,
     ].where((s) => !OjtWorkImmersionEvaluation.isValidScore(s)).length;
-    _scoreError = missing > 0
-        ? 'Score every criterion from 1 to 5.'
-        : null;
+    _scoreError = missing > 0 ? 'Score every criterion from 1 to 5.' : null;
     _interviewerError = _interviewer.text.trim().isEmpty
         ? 'Interviewer is required.'
         : null;
@@ -636,8 +665,10 @@ class _OjtWorkImmersionEvaluationEditorState
     widget.onSave(_buildCurrent());
   }
 
+  bool get _evaluationLocked => widget.readOnly || widget.applicantOnly;
+
   Future<void> _pickDate() async {
-    if (widget.readOnly) return;
+    if (_evaluationLocked) return;
     final now = DateTime.now();
     final parsed = _tryParseDate(_date.text);
     final picked = await showDatePicker(
@@ -705,10 +736,18 @@ class _OjtWorkImmersionEvaluationEditorState
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         TextFormField(
+          key: const ValueKey('ojt-immersion-field'),
           controller: _ojt,
           focusNode: _ojtFocus,
           readOnly: widget.readOnly,
-          onChanged: (_) => setState(() => _ojtError = null),
+          keyboardType: TextInputType.text,
+          onChanged: (_) {
+            final refreshSuggestions = !widget.applicantOnly &&
+                !widget.readOnly &&
+                _applicants.isNotEmpty;
+            if (_ojtError == null && !refreshSuggestions) return;
+            setState(() => _ojtError = null);
+          },
           decoration: _decoration(
             context,
             label: 'OJT / Immersion',
@@ -833,17 +872,21 @@ class _OjtWorkImmersionEvaluationEditorState
   }
 
   Widget _infoCard() {
+    final dateLocked = _evaluationLocked;
     return _sectionCard(
       title: 'APPLICANT / INTERVIEW INFORMATION',
       child: LayoutBuilder(
         builder: (context, constraints) {
           final wide = constraints.maxWidth > 640;
-          final fields = [
+          final fields = <Widget>[
             _applicantField(),
             TextFormField(
+              key: const ValueKey('ojt-school-field'),
               controller: _school,
               readOnly: widget.readOnly,
-              onChanged: (_) => setState(() => _schoolError = null),
+              keyboardType: TextInputType.text,
+              onChanged: (_) =>
+                  _clearFieldError(_schoolError, () => _schoolError = null),
               decoration: _decoration(
                 context,
                 label: 'School',
@@ -853,17 +896,20 @@ class _OjtWorkImmersionEvaluationEditorState
             TextFormField(
               controller: _date,
               readOnly: true,
-              onTap: widget.readOnly ? null : _pickDate,
+              onTap: dateLocked ? null : _pickDate,
               decoration: _decoration(
                 context,
                 label: 'Date of Interview',
-                hint: widget.readOnly ? null : 'Select date',
+                hint: dateLocked ? null : 'Select date',
                 error: _dateError,
-                suffixIcon: widget.readOnly
+                suffixIcon: dateLocked
                     ? null
                     : IconButton(
                         tooltip: 'Pick date',
-                        icon: const Icon(Icons.calendar_today_rounded, size: 18),
+                        icon: const Icon(
+                          Icons.calendar_today_rounded,
+                          size: 18,
+                        ),
                         onPressed: _pickDate,
                       ),
               ),
@@ -882,11 +928,10 @@ class _OjtWorkImmersionEvaluationEditorState
           return Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Expanded(flex: 2, child: fields[0]),
-              const SizedBox(width: 12),
-              Expanded(child: fields[1]),
-              const SizedBox(width: 12),
-              Expanded(child: fields[2]),
+              for (var i = 0; i < fields.length; i++) ...[
+                if (i > 0) const SizedBox(width: 12),
+                Expanded(flex: i == 0 ? 2 : 1, child: fields[i]),
+              ],
             ],
           );
         },
@@ -901,9 +946,7 @@ class _OjtWorkImmersionEvaluationEditorState
       decoration: BoxDecoration(
         color: AppTheme.primaryNavy.withValues(alpha: 0.05),
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(
-          color: AppTheme.primaryNavy.withValues(alpha: 0.14),
-        ),
+        border: Border.all(color: AppTheme.primaryNavy.withValues(alpha: 0.14)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -972,7 +1015,7 @@ class _OjtWorkImmersionEvaluationEditorState
   }
 
   Widget _criterionCard(_OjtCriterionDef def) {
-    final ro = widget.readOnly;
+    final ro = _evaluationLocked;
     late final int? score;
     late final TextEditingController notes;
     late final ValueChanged<int>? onScore;
@@ -1091,6 +1134,7 @@ class _OjtWorkImmersionEvaluationEditorState
 
   Widget _summaryCard() {
     final total = _total;
+    final ro = _evaluationLocked;
     final recItems = <String>{
       ...OjtWorkImmersionEvaluation.recommendationOptions,
       if (_recommendation != null) _recommendation!,
@@ -1137,7 +1181,7 @@ class _OjtWorkImmersionEvaluationEditorState
             ),
           ],
           const SizedBox(height: 12),
-          widget.readOnly
+          ro
               ? TextFormField(
                   readOnly: true,
                   initialValue: _recommendation ?? '—',
@@ -1163,7 +1207,7 @@ class _OjtWorkImmersionEvaluationEditorState
           const SizedBox(height: 12),
           TextFormField(
             controller: _strengths,
-            readOnly: widget.readOnly,
+            readOnly: ro,
             minLines: 3,
             maxLines: 5,
             decoration: _decoration(context, label: 'Key Strengths'),
@@ -1171,48 +1215,71 @@ class _OjtWorkImmersionEvaluationEditorState
           const SizedBox(height: 12),
           TextFormField(
             controller: _concerns,
-            readOnly: widget.readOnly,
+            readOnly: ro,
             minLines: 3,
             maxLines: 5,
             decoration: _decoration(context, label: 'Key Concerns'),
           ),
-          const SizedBox(height: 14),
-          Container(
-            padding: const EdgeInsets.all(14),
-            decoration: BoxDecoration(
-              color: AppTheme.dashPanelOf(context),
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: AppTheme.dashHairlineOf(context)),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'INTERVIEWER SIGNATURE',
-                  style: AppTheme.dashSectionTitle(context),
-                ),
-                const SizedBox(height: 10),
-                Container(
-                  height: 30,
-                  margin: const EdgeInsets.only(bottom: 6),
-                  decoration: BoxDecoration(
-                    border: Border(
-                      bottom: BorderSide(
-                        color: AppTheme.dashHairlineOf(context),
+          if (!widget.applicantOnly) ...[
+            const SizedBox(height: 14),
+            Container(
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: AppTheme.dashPanelOf(context),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: AppTheme.dashHairlineOf(context)),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'INTERVIEWER SIGNATURE',
+                    style: AppTheme.dashSectionTitle(context),
+                  ),
+                  const SizedBox(height: 10),
+                  Container(
+                    height: 30,
+                    margin: const EdgeInsets.only(bottom: 6),
+                    decoration: BoxDecoration(
+                      border: Border(
+                        bottom: BorderSide(
+                          color: AppTheme.dashHairlineOf(context),
+                        ),
                       ),
                     ),
                   ),
-                ),
-                _interviewerField(),
-              ],
+                  _interviewerField(),
+                ],
+              ),
             ),
-          ),
+          ],
         ],
       ),
     );
   }
 
   Widget _actionBar(bool ro) {
+    if (widget.applicantOnly) {
+      return Wrap(
+        spacing: 8,
+        runSpacing: 8,
+        children: [
+          if (!ro)
+            FilledButton.icon(
+              onPressed: _save,
+              icon: const Icon(Icons.send_rounded, size: 18),
+              label: const Text('Submit to HR'),
+              style: FilledButton.styleFrom(
+                backgroundColor: const Color(0xFFE85D04),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 18,
+                  vertical: 12,
+                ),
+              ),
+            ),
+        ],
+      );
+    }
     return Wrap(
       spacing: 8,
       runSpacing: 8,
@@ -1391,9 +1458,7 @@ class _OjtScoreChip extends StatelessWidget {
               style: TextStyle(
                 fontSize: 15,
                 fontWeight: FontWeight.w800,
-                color: selected
-                    ? navy
-                    : AppTheme.dashTextPrimaryOf(context),
+                color: selected ? navy : AppTheme.dashTextPrimaryOf(context),
               ),
             ),
           ),

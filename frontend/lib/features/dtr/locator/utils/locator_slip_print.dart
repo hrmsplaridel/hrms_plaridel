@@ -1,4 +1,6 @@
 import 'dart:typed_data';
+import 'package:dio/dio.dart';
+import 'package:hrms_plaridel/core/api/client.dart';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show rootBundle;
@@ -337,7 +339,19 @@ class LocatorSlipPrint {
       ),
     );
 
-    return doc.save();
+    final bytes = await doc.save();
+    if (id != null && form['has_print_background'] == true) {
+      final response = await ApiClient.instance.post<List<int>>(
+        '/api/locator-slips/print/requests/$id/render',
+        data: FormData.fromMap({
+          'version_id': form['print_template_version_id'],
+          'file': MultipartFile.fromBytes(bytes, filename: 'locator.pdf'),
+        }),
+        options: Options(responseType: ResponseType.bytes),
+      );
+      return Uint8List.fromList(response.data!);
+    }
+    return bytes;
   }
 
   static Future<void> printForm({

@@ -10,7 +10,8 @@ const STATUSES = Object.freeze([
   'draft',
   'pending',                     // legacy alias for pending_hr
   'pending_department_head',     // awaiting department head
-  'pending_hr',                  // awaiting HR/admin
+  'pending_hr',
+  'pending_mayor',                  // awaiting HR/admin
   'rejected_by_department_head', // dept head rejected
   'rejected_by_hr',              // HR/admin rejected
   'returned',
@@ -61,7 +62,7 @@ function canEmployeeCancel(currentStatus) {
     currentStatus === 'draft' ||
     currentStatus === 'pending' ||
     currentStatus === 'pending_department_head' ||
-    currentStatus === 'pending_hr' ||
+    currentStatus === 'pending_hr' || currentStatus === 'pending_mayor' ||
     currentStatus === 'returned'
   );
 }
@@ -109,7 +110,7 @@ function validateEmployeeUpdateTransition({ currentStatus, desiredStatus }) {
   if (
     toStatus === 'pending' ||
     toStatus === 'pending_department_head' ||
-    toStatus === 'pending_hr'
+    toStatus === 'pending_hr' || toStatus === 'pending_mayor'
   ) {
     if (fromStatus === 'draft') {
       return { nextStatus: toStatus, historyAction: 'submitted' };
@@ -139,14 +140,14 @@ function validateEmployeeCancelTransition({ currentStatus }) {
  * Validate department head transitions.
  * Department head can act on pending_department_head requests.
  */
-function validateDepartmentHeadTransition({ currentStatus, desiredStatus }) {
+function validateDepartmentHeadTransition({ currentStatus, desiredStatus, finalReviewRoute }) {
   if (currentStatus !== 'pending_department_head') {
     throw invalidTransitionError(currentStatus, desiredStatus);
   }
 
   switch (desiredStatus) {
     case 'pending_hr':
-      return { nextStatus: 'pending_hr', historyAction: 'department_head_approved' };
+      return { nextStatus: finalReviewRoute === 'mayor' ? 'approved' : 'pending_hr', historyAction: 'department_head_approved' };
     case 'rejected_by_department_head':
       return { nextStatus: 'rejected_by_department_head', historyAction: 'department_head_rejected' };
     case 'returned':
@@ -162,7 +163,7 @@ function validateDepartmentHeadTransition({ currentStatus, desiredStatus }) {
  */
 function validateAdminTransition({ currentStatus, desiredStatus }) {
   // Accept both 'pending_hr' and legacy 'pending'
-  if (currentStatus !== 'pending_hr' && currentStatus !== 'pending') {
+  if (currentStatus !== 'pending_hr' && currentStatus !== 'pending_mayor' && currentStatus !== 'pending') {
     throw invalidTransitionError(currentStatus, desiredStatus);
   }
 
@@ -171,7 +172,7 @@ function validateAdminTransition({ currentStatus, desiredStatus }) {
       return { nextStatus: 'approved', historyAction: 'approved' };
     case 'rejected':
     case 'rejected_by_hr':
-      return { nextStatus: 'rejected_by_hr', historyAction: 'rejected' };
+      return { nextStatus: currentStatus==='pending_mayor'?'rejected':'rejected_by_hr', historyAction: 'rejected' };
     case 'returned':
       return { nextStatus: 'returned', historyAction: 'returned' };
     default:

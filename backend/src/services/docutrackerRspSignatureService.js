@@ -8,6 +8,16 @@ const {
 } = require('./officialSignatoryService');
 const { todayInHrmsTimezone } = require('../utils/dateRangeParser');
 const { insertNotification } = require('./notificationService');
+const {
+  APPLICANTS_PROFILE_TABLE,
+  REQUIRED_SLOTS,
+  applicantsProfileSignatureState,
+  shouldSendApplicantsProfileAssignmentNotice,
+} = require('./applicantsProfileSignatureLock');
+const {
+  TURN_AROUND_TIME_TABLE,
+  shouldSendTatNotedByAssignmentNotice,
+} = require('./turnAroundTimeEditAudit');
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const SOURCE_SIGNATURE_CONFIGS = Object.freeze({
@@ -444,7 +454,7 @@ async function insertSourceSignatureAssignment(
     },
   });
   const formTitle = await loadFormTitle(db, sourceModule, sourceTable, sourceRecordId);
-  await notifyAssignedSigner(db, {
+  await notifySourceAssignmentIfDue(db, {
     assignedSignerId,
     actorId,
     sourceModule,
@@ -455,6 +465,117 @@ async function insertSourceSignatureAssignment(
     formTitle,
   });
   return true;
+}
+
+async function preparedByHasSigned(db, sourceRecordId) {
+  const result = await db.query(
+    `SELECT signature_asset_id, signed_at
+     FROM docutracker_rsp_source_signatures
+     WHERE source_table = $1
+       AND source_record_id = $2::uuid
+       AND slot_key = 'prepared_by'`,
+    [APPLICANTS_PROFILE_TABLE, sourceRecordId]
+  );
+  const row = result.rows[0];
+  return Boolean(row?.signature_asset_id && row?.signed_at);
+}
+
+async function tatPreparedByHasSigned(db, sourceRecordId) {
+  const result = await db.query(
+    `SELECT signature_asset_id, signed_at
+     FROM docutracker_rsp_source_signatures
+     WHERE source_table = $1
+       AND source_record_id = $2::uuid
+       AND slot_key = 'prepared_by'`,
+    [TURN_AROUND_TIME_TABLE, sourceRecordId]
+  );
+  const row = result.rows[0];
+  return Boolean(row?.signature_asset_id && row?.signed_at);
+}
+
+/** Applicants Profile Checked By, and TAT Noted By, wait until Prepared By has signed. */
+async function notifySourceAssignmentIfDue(db, notice) {
+  if (notice.sourceTable === APPLICANTS_PROFILE_TABLE && notice.slotKey === 'checked_by') {
+    const preparedBySigned = await preparedByHasSigned(db, notice.sourceRecordId);
+    if (!shouldSendApplicantsProfileAssignmentNotice({
+      sourceTable: notice.sourceTable,
+      slotKey: notice.slotKey,
+      preparedBySigned,
+    })) {
+      return;
+    }
+  }
+  if (notice.sourceTable === TURN_AROUND_TIME_TABLE && notice.slotKey === 'noted_by') {
+    const preparedBySigned = await tatPreparedByHasSigned(db, notice.sourceRecordId);
+    if (!shouldSendTatNotedByAssignmentNotice({
+      sourceTable: notice.sourceTable,
+      slotKey: notice.slotKey,
+      preparedBySigned,
+    })) {
+      return;
+    }
+  }
+  await notifyAssignedSigner(db, notice);
+}
+
+async function readApplicantsProfileSignatureLock(db, recordId) {
+  const form = await db.query(
+    `SELECT id FROM applicants_profile_entries WHERE id = $1::uuid FOR UPDATE`,
+    [recordId]
+  );
+  if (!form.rowCount) {
+    return { found: false, signature_status: 'needs_setup', locked: false };
+  }
+  try {
+    const signatures = await db.query(
+      `SELECT slot_key, assigned_signer_id, signature_asset_id, signed_at
+       FROM docutracker_rsp_source_signatures
+       WHERE source_table = $1
+         AND source_record_id = $2::uuid
+         AND slot_key = ANY($3::text[])`,
+      [APPLICANTS_PROFILE_TABLE, recordId, REQUIRED_SLOTS]
+    );
+    return {
+      found: true,
+      ...applicantsProfileSignatureState(signatures.rows),
+    };
+  } catch (error) {
+    if (error?.code === '42P01' || error?.code === '42703') {
+      return { found: true, signature_status: 'needs_setup', locked: false };
+    }
+    throw error;
+  }
+}
+
+async function annotateApplicantsProfileSignatureState(db, rows) {
+  if (!rows?.length) return rows || [];
+  try {
+    const signatures = await db.query(
+      `SELECT source_record_id, slot_key, assigned_signer_id, signature_asset_id, signed_at
+       FROM docutracker_rsp_source_signatures
+       WHERE source_table = $1
+         AND source_record_id = ANY($2::uuid[])
+         AND slot_key = ANY($3::text[])`,
+      [APPLICANTS_PROFILE_TABLE, rows.map((row) => row.id), REQUIRED_SLOTS]
+    );
+    const grouped = new Map();
+    for (const row of signatures.rows) {
+      const list = grouped.get(String(row.source_record_id)) || [];
+      list.push(row);
+      grouped.set(String(row.source_record_id), list);
+    }
+    return rows.map((row) => {
+      const state = applicantsProfileSignatureState(grouped.get(String(row.id)) || []);
+      return {
+        ...row,
+        signature_status: state.signature_status,
+        signatures_locked: state.locked,
+      };
+    });
+  } catch (error) {
+    if (error?.code === '42P01' || error?.code === '42703') return rows;
+    throw error;
+  }
 }
 
 /**
@@ -944,7 +1065,7 @@ async function assignSourceSigner(pool, user, sourceModule, sourceTable, sourceR
     await client.query('COMMIT');
     const formTitle = await loadFormTitle(pool, sourceModule, sourceTable, sourceRecordId);
     if (!previous || String(previous.assigned_signer_id) !== signerId) {
-      await notifyAssignedSigner(pool, {
+      await notifySourceAssignmentIfDue(pool, {
         assignedSignerId: signerId,
         actorId: user.id,
         sourceModule,
@@ -1075,4 +1196,7 @@ module.exports = {
   assignRspSourceSigner,
   signSourceSlot,
   signRspSourceSlot,
+  readApplicantsProfileSignatureLock,
+  annotateApplicantsProfileSignatureState,
+  applicantsProfileSignatureState,
 };

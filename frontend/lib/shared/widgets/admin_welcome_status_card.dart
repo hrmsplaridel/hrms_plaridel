@@ -370,113 +370,125 @@ class _AdminWelcomeStatusCardState extends State<AdminWelcomeStatusCard> {
   }
 
   Widget _buildAdminHeaderCluster(Color primary, Color secondary) {
-    final fill = widget.fillWidth;
-    final dark = AppTheme.dashIsDark(context);
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final bounded = constraints.maxWidth.isFinite;
+        final narrow = bounded && constraints.maxWidth < 560;
+        final time = _adminHeaderTimeGroup(primary, secondary);
+        final weather = _adminHeaderWeatherGroup(primary, secondary);
+        final location = _adminHeaderLocationGroup(secondary);
+        final refresh = _adminHeaderRefresh();
 
-    return ConstrainedBox(
-      constraints: fill
-          ? const BoxConstraints()
-          : const BoxConstraints(minWidth: 360, maxWidth: 430),
-      child: Container(
-        width: fill ? double.infinity : 400,
-        padding: EdgeInsets.fromLTRB(fill ? 14 : 16, 14, fill ? 12 : 14, 14),
-        decoration: BoxDecoration(
-          color: dark
-              ? Colors.white.withValues(alpha: 0.05)
-              : const Color(0xFFFFF7F0),
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(
-            color: AppTheme.primaryNavy.withValues(alpha: dark ? 0.22 : 0.14),
-          ),
-        ),
-        child: LayoutBuilder(
-          builder: (context, inner) {
-            final stackInner = inner.maxWidth < 300;
-            final time = _adminHeaderTimeColumn(primary, secondary);
-            final weather = _adminHeaderWeatherColumn(primary, secondary);
-            if (stackInner) {
-              return Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
+        if (narrow) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Wrap(
+                spacing: 14,
+                runSpacing: 10,
+                crossAxisAlignment: WrapCrossAlignment.center,
                 children: [
                   time,
-                  Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 12),
-                    child: Divider(
-                      height: 1,
-                      thickness: 1,
-                      color: AppTheme.dashHairlineOf(context),
-                    ),
-                  ),
                   weather,
-                ],
-              );
-            }
-            return IntrinsicHeight(
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Expanded(flex: 5, child: time),
-                  Container(
-                    width: 1,
-                    margin: const EdgeInsets.symmetric(horizontal: 12),
-                    color: AppTheme.dashHairlineOf(context),
-                  ),
-                  Expanded(flex: 6, child: weather),
+                  if (location != null) location,
                 ],
               ),
-            );
-          },
+              const SizedBox(height: 8),
+              refresh,
+            ],
+          );
+        }
+
+        final row = Row(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            time,
+            _adminHeaderDivider(),
+            weather,
+            if (location != null) ...[
+              _adminHeaderDivider(),
+              location,
+            ],
+            const SizedBox(width: 8),
+            refresh,
+          ],
+        );
+        if (widget.fillWidth) {
+          return SizedBox(width: double.infinity, child: row);
+        }
+        return row;
+      },
+    );
+  }
+
+  Widget _adminHeaderDivider() {
+    return Container(
+      width: 1,
+      height: 32,
+      margin: const EdgeInsets.symmetric(horizontal: 14),
+      color: AppTheme.dashHairlineOf(context),
+    );
+  }
+
+  Widget _adminHeaderRefresh() {
+    return SizedBox(
+      width: 44,
+      height: 44,
+      child: Center(
+        child: _WelcomeActionButton(
+          icon: Icons.refresh_rounded,
+          tooltip: 'Refresh weather',
+          onTap: _weatherLoading ? null : () => _loadWeather(force: true),
+          loading: _weatherLoading,
+          flat: true,
         ),
       ),
     );
   }
 
-  Widget _adminHeaderTimeColumn(Color primary, Color secondary) {
+  Widget _adminHeaderTimeGroup(Color primary, Color secondary) {
     return Tooltip(
       message: 'Toggle time format',
       child: InkWell(
         onTap: _toggleClockFormat,
         borderRadius: BorderRadius.circular(8),
         child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 2),
+          padding: const EdgeInsets.symmetric(vertical: 2, horizontal: 2),
           child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
             children: [
               Icon(
                 Icons.schedule_rounded,
-                size: 20,
+                size: 18,
                 color: AppTheme.primaryNavy.withValues(alpha: 0.9),
               ),
               const SizedBox(width: 8),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      _timeLabel,
-                      style: TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.w800,
-                        color: primary,
-                        height: 1.15,
-                        fontFeatures: const [FontFeature.tabularFigures()],
-                      ),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    _timeLabel,
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w800,
+                      color: primary,
+                      height: 1.1,
+                      fontFeatures: const [FontFeature.tabularFigures()],
                     ),
-                    const SizedBox(height: 4),
-                    Text(
-                      _dateLabel,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w600,
-                        color: secondary,
-                        height: 1.3,
-                      ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    _dateLabel,
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: secondary,
+                      height: 1.2,
                     ),
-                  ],
-                ),
+                  ),
+                ],
               ),
             ],
           ),
@@ -485,73 +497,88 @@ class _AdminWelcomeStatusCardState extends State<AdminWelcomeStatusCard> {
     );
   }
 
-  Widget _adminHeaderWeatherColumn(Color primary, Color secondary) {
-    final refresh = _WelcomeActionButton(
-      icon: Icons.refresh_rounded,
-      tooltip: 'Refresh weather',
-      onTap: _weatherLoading ? null : () => _loadWeather(force: true),
-      loading: _weatherLoading,
-      flat: true,
-    );
-
+  Widget _adminHeaderWeatherGroup(Color primary, Color secondary) {
     if (_weatherLoading && _weather == null) {
-      return Stack(
-        children: [
-          Padding(
-            padding: const EdgeInsets.only(right: 28),
-            child: Shimmer.fromColors(
-              baseColor: AppTheme.dashIsDark(context)
-                  ? const Color(0xFF2A3140)
-                  : AppTheme.lightGray.withValues(alpha: 0.55),
-              highlightColor: AppTheme.dashIsDark(context)
-                  ? const Color(0xFF3D4451)
-                  : AppTheme.white,
-              period: const Duration(milliseconds: 1200),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Container(
-                    width: 64,
-                    height: 18,
-                    decoration: BoxDecoration(
-                      color: AppTheme.dashMutedSurfaceOf(context),
-                      borderRadius: BorderRadius.circular(6),
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Container(
-                    width: 96,
-                    height: 11,
-                    decoration: BoxDecoration(
-                      color: AppTheme.dashMutedSurfaceOf(context),
-                      borderRadius: BorderRadius.circular(5),
-                    ),
-                  ),
-                ],
-              ),
-            ),
+      return Shimmer.fromColors(
+        baseColor: AppTheme.dashIsDark(context)
+            ? const Color(0xFF2A3140)
+            : AppTheme.lightGray.withValues(alpha: 0.55),
+        highlightColor: AppTheme.dashIsDark(context)
+            ? const Color(0xFF3D4451)
+            : AppTheme.white,
+        period: const Duration(milliseconds: 1200),
+        child: Container(
+          width: 88,
+          height: 28,
+          decoration: BoxDecoration(
+            color: AppTheme.dashMutedSurfaceOf(context),
+            borderRadius: BorderRadius.circular(6),
           ),
-          Positioned(top: 0, right: 0, child: refresh),
-        ],
+        ),
       );
     }
 
     final weather = _weather;
     if (weather == null) {
-      return Stack(
+      return Row(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          Padding(
-            padding: const EdgeInsets.only(right: 28, top: 4),
-            child: Text(
-              'Weather unavailable',
-              style: TextStyle(fontSize: 13, color: secondary, height: 1.3),
-            ),
+          Icon(
+            Icons.cloud_off_outlined,
+            size: 18,
+            color: secondary,
           ),
-          Positioned(top: 0, right: 0, child: refresh),
+          const SizedBox(width: 6),
+          Text(
+            'Weather unavailable',
+            style: TextStyle(fontSize: 12.5, color: secondary, height: 1.2),
+          ),
         ],
       );
     }
+
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(weather.icon, size: 20, color: const Color(0xFF1565C0)),
+        const SizedBox(width: 8),
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              weather.temperatureLabel,
+              style: TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.w800,
+                color: primary,
+                height: 1.1,
+              ),
+            ),
+            const SizedBox(height: 2),
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 120),
+              child: Text(
+                weather.condition,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: secondary,
+                  height: 1.2,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget? _adminHeaderLocationGroup(Color secondary) {
+    final weather = _weather;
+    if (weather == null) return null;
 
     final isDefaultLocation =
         weather.locationSource == WeatherLocationSource.municipalityDefault;
@@ -563,84 +590,43 @@ class _AdminWelcomeStatusCardState extends State<AdminWelcomeStatusCard> {
       WeatherLocationSource.municipalityDefault =>
         'No custom location set.\nTap to choose your location.',
     };
-    final placeLabel = _adminHeaderPlaceLabel(weather.locationLabel);
 
-    return Stack(
-      children: [
-        Padding(
-          padding: const EdgeInsets.only(right: 28),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+    return Tooltip(
+      message: locationHint,
+      child: InkWell(
+        onTap: _changeLocation,
+        borderRadius: BorderRadius.circular(8),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 2),
+          child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Row(
-                children: [
-                  Icon(weather.icon, size: 20, color: const Color(0xFF1565C0)),
-                  const SizedBox(width: 8),
-                  Text(
-                    weather.temperatureLabel,
-                    style: TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.w800,
-                      color: primary,
-                      height: 1.15,
-                    ),
-                  ),
-                ],
+              Icon(
+                isDefaultLocation
+                    ? Icons.add_location_alt_outlined
+                    : Icons.location_on_outlined,
+                size: 16,
+                color: AppTheme.primaryNavy.withValues(alpha: 0.85),
               ),
-              const SizedBox(height: 4),
-              Text(
-                weather.condition,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w600,
-                  color: secondary,
-                  height: 1.3,
-                ),
-              ),
-              const SizedBox(height: 2),
-              Tooltip(
-                message: locationHint,
-                child: InkWell(
-                  onTap: _changeLocation,
-                  borderRadius: BorderRadius.circular(4),
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 1),
-                    child: Row(
-                      children: [
-                        Icon(
-                          isDefaultLocation
-                              ? Icons.add_location_alt_outlined
-                              : Icons.location_on_outlined,
-                          size: 14,
-                          color: AppTheme.primaryNavy.withValues(alpha: 0.85),
-                        ),
-                        const SizedBox(width: 4),
-                        Expanded(
-                          child: Text(
-                            placeLabel,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                              fontSize: 12.5,
-                              fontWeight: FontWeight.w600,
-                              color: secondary,
-                              height: 1.3,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
+              const SizedBox(width: 4),
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 150),
+                child: Text(
+                  _adminHeaderPlaceLabel(weather.locationLabel),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w600,
+                    color: secondary,
+                    height: 1.2,
                   ),
                 ),
               ),
             ],
           ),
         ),
-        Positioned(top: 0, right: 0, child: refresh),
-      ],
+      ),
     );
   }
 

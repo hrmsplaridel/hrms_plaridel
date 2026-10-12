@@ -11,6 +11,14 @@ const {
 const USER_ID = '00000000-0000-0000-0000-000000000101';
 const ACTOR_ID = '00000000-0000-0000-0000-000000000102';
 
+test('ledger display omits only zero pending movements before counting and paging', () => {
+  const filters = buildLeaveBalanceHistoryFilters({scopeAllUsers: true, hideZeroPending: true});
+  assert.match(filters.whereSql, /NOT \(LOWER\(l.affected_bucket\) = 'pending' AND l.days_changed = 0\)/);
+  assert.equal(filters.summaryWhereSql, 'true');
+  assert.deepEqual(filters.params, []);
+  assert.equal(buildLeaveBalanceHistoryFilters({scopeAllUsers: true}).whereSql, 'true');
+});
+
 test('balance-history summary includes both dates but excludes activity bucket', () => {
   const filters = buildLeaveBalanceHistoryFilters({
     scopedUserId: USER_ID,

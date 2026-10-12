@@ -86,6 +86,7 @@ function buildLeaveBalanceHistoryFilters({
   from = '',
   to = '',
   affectedBucket = '',
+  hideZeroPending = false,
 }) {
   const summaryWhere = [];
   const summaryParams = [];
@@ -113,6 +114,9 @@ function buildLeaveBalanceHistoryFilters({
     : 'true';
   const where = [...summaryWhere];
   const params = [...summaryParams];
+  if (hideZeroPending) {
+    where.push("NOT (LOWER(l.affected_bucket) = 'pending' AND l.days_changed = 0)");
+  }
   if (affectedBucket) {
     const parameter = params.length + 1;
     where.push(`LOWER(l.affected_bucket) = $${parameter}`);

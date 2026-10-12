@@ -1,32 +1,25 @@
 import 'dart:math' show min;
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 
 import 'package:hrms_plaridel/core/api/user_facing_api_error.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
-import 'package:hrms_plaridel/features/recruitment/data/hire_credentials_email_copy.dart';
-import 'package:hrms_plaridel/features/recruitment/data/recruitment_hire_prefill.dart';
 import 'package:hrms_plaridel/features/recruitment/presentation/applicant/widgets/rsp_applicant_exam_ui.dart';
 
-/// Admin dialog: send hire congratulations + HRMS login credentials via server email.
+/// HR confirmation before the server emails a randomized password.
 class RspHireApplicantEmailDialog extends StatefulWidget {
   const RspHireApplicantEmailDialog({
     super.key,
     required this.applicantEmail,
     required this.applicantName,
-    required this.sendHireEmail,
-    this.initialUsername,
-    this.initialPassword,
+    required this.sendCredentials,
+    this.resend = false,
   });
 
   final String applicantEmail;
   final String applicantName;
-  final Future<void> Function(String username, String password) sendHireEmail;
-
-  /// Prefill from the account HR just created (login email + password used).
-  final String? initialUsername;
-  final String? initialPassword;
+  final Future<void> Function() sendCredentials;
+  final bool resend;
 
   @override
   State<RspHireApplicantEmailDialog> createState() =>
@@ -35,71 +28,28 @@ class RspHireApplicantEmailDialog extends StatefulWidget {
 
 class _RspHireApplicantEmailDialogState
     extends State<RspHireApplicantEmailDialog> {
-  final _userCtrl = TextEditingController();
-  final _passCtrl = TextEditingController();
-  final _formKey = GlobalKey<FormState>();
   bool _sending = false;
 
-  static const _accent = RspApplicantExamUi.accent;
-  static const _navy = AppTheme.primaryNavy;
-
-  @override
-  void initState() {
-    super.initState();
-    final user = widget.initialUsername?.trim();
-    final pass = widget.initialPassword;
-    _userCtrl.text = (user != null && user.isNotEmpty)
-        ? user
-        : widget.applicantEmail.trim();
-    _passCtrl.text = (pass != null && pass.isNotEmpty)
-        ? pass
-        : generateTemporaryAccountPassword();
-    _userCtrl.addListener(_onCredentialsChanged);
-    _passCtrl.addListener(_onCredentialsChanged);
-  }
-
-  void _onCredentialsChanged() => setState(() {});
-
-  @override
-  void dispose() {
-    _userCtrl.removeListener(_onCredentialsChanged);
-    _passCtrl.removeListener(_onCredentialsChanged);
-    _userCtrl.dispose();
-    _passCtrl.dispose();
-    super.dispose();
-  }
-
   String get _messagePreview {
-    return buildHireCredentialsEmailPreview(
-      applicantName: widget.applicantName,
-      username: _userCtrl.text,
-      password: _passCtrl.text,
-    );
-  }
-
-  Future<void> _copyEmail() async {
-    await Clipboard.setData(ClipboardData(text: widget.applicantEmail));
-    if (!mounted) return;
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(const SnackBar(content: Text('Email address copied.')));
-  }
-
-  Future<void> _copyField(String value, String label) async {
-    final text = value.trim();
-    if (text.isEmpty) return;
-    await Clipboard.setData(ClipboardData(text: text));
-    if (!mounted) return;
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(SnackBar(content: Text('$label copied.')));
+    final name = widget.applicantName.trim().isEmpty
+        ? 'Applicant'
+        : widget.applicantName.trim();
+    final email = widget.applicantEmail.trim();
+    return 'Hello $name,\n\n'
+        'Congratulations on joining LGU Plaridel. Your HRMS login details are below.\n\n'
+        'Username: $email\n'
+        'Password: a new randomized password, included only in the email.\n\n'
+        'For your security and convenience, we recommend changing this randomized password after you sign in.\n\n'
+        'This email is not encrypted. Keep your password private.\n\n'
+        'Best regards,\n'
+        'Human Resource Management Office\n'
+        'LGU Plaridel';
   }
 
   Future<void> _submit() async {
-    if (!(_formKey.currentState?.validate() ?? false)) return;
     setState(() => _sending = true);
     try {
-      await widget.sendHireEmail(_userCtrl.text.trim(), _passCtrl.text);
+      await widget.sendCredentials();
       if (!mounted) return;
       Navigator.of(context).pop(true);
     } catch (e) {
@@ -136,173 +86,44 @@ class _RspHireApplicantEmailDialogState
               Flexible(
                 child: SingleChildScrollView(
                   padding: const EdgeInsets.fromLTRB(22, 20, 22, 8),
-                  child: Form(
-                    key: _formKey,
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        _InfoCard(
-                          icon: Icons.alternate_email_rounded,
-                          label: 'Recipient',
-                          child: Row(
-                            children: [
-                              Expanded(
-                                child: SelectableText(
-                                  widget.applicantEmail,
-                                  style: const TextStyle(
-                                    fontSize: 15,
-                                    fontWeight: FontWeight.w700,
-                                    height: 1.35,
-                                    color: AppTheme.textPrimary,
-                                  ),
-                                ),
-                              ),
-                              IconButton(
-                                tooltip: 'Copy email',
-                                onPressed: _copyEmail,
-                                icon: Icon(
-                                  Icons.copy_rounded,
-                                  size: 20,
-                                  color: _navy.withValues(alpha: 0.85),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                        const SizedBox(height: 14),
-                        _MessagePreviewCard(body: _messagePreview),
-                        const SizedBox(height: 22),
-                        Row(
-                          children: [
-                            Icon(Icons.key_rounded, size: 20, color: _navy),
-                            const SizedBox(width: 8),
-                            const Text(
-                              'Login details',
-                              style: TextStyle(
-                                fontSize: 15,
-                                fontWeight: FontWeight.w800,
-                                color: AppTheme.textPrimary,
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          'Included in the email body sent from the HRMS server.',
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: AppTheme.textSecondary.withValues(
-                              alpha: 0.9,
-                            ),
-                          ),
-                        ),
-                        const SizedBox(height: 12),
-                        TextFormField(
-                          controller: _userCtrl,
-                          readOnly: true,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      _InfoCard(
+                        icon: Icons.alternate_email_rounded,
+                        label: 'Recipient',
+                        child: SelectableText(
+                          widget.applicantEmail,
                           style: const TextStyle(
-                            fontWeight: FontWeight.w600,
                             fontSize: 15,
-                          ),
-                          decoration: AppTheme.dashInputDecoration(
-                            context,
-                            labelText: 'Username',
-                            hintText: 'HRMS login username',
-                            prefixIcon: const Icon(
-                              Icons.person_outline_rounded,
-                            ),
-                          ).copyWith(
-                            suffixIcon: IconButton(
-                              tooltip: 'Copy username',
-                              onPressed: () =>
-                                  _copyField(_userCtrl.text, 'Username'),
-                              icon: const Icon(Icons.copy_rounded, size: 20),
-                            ),
-                          ),
-                          validator: (v) {
-                            if (v == null || v.trim().isEmpty) {
-                              return 'Username is missing';
-                            }
-                            return null;
-                          },
-                        ),
-                        const SizedBox(height: 12),
-                        TextFormField(
-                          controller: _passCtrl,
-                          readOnly: true,
-                          style: const TextStyle(
                             fontWeight: FontWeight.w700,
-                            fontSize: 15,
-                          ),
-                          decoration: AppTheme.dashInputDecoration(
-                            context,
-                            labelText: 'Temporary password',
-                            hintText: 'Generated on Create Account',
-                            prefixIcon: const Icon(Icons.lock_outline_rounded),
-                          ).copyWith(
-                            helperText:
-                                'Same randomized password from Create Account. '
-                                'This is what the applicant will receive.',
-                            helperMaxLines: 2,
-                            suffixIcon: IconButton(
-                              tooltip: 'Copy password',
-                              onPressed: () =>
-                                  _copyField(_passCtrl.text, 'Password'),
-                              icon: const Icon(Icons.copy_rounded, size: 20),
-                            ),
-                          ),
-                          validator: (v) {
-                            if (v == null || v.isEmpty) {
-                              return 'Temporary password is missing';
-                            }
-                            return null;
-                          },
-                        ),
-                        const SizedBox(height: 16),
-                        Container(
-                          padding: const EdgeInsets.all(14),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFFFFF8E6),
-                            borderRadius: BorderRadius.circular(
-                              RspApplicantExamUi.radiusMd,
-                            ),
-                            border: Border.all(
-                              color: _accent.withValues(alpha: 0.35),
-                            ),
-                          ),
-                          child: Row(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Icon(
-                                Icons.shield_outlined,
-                                size: 22,
-                                color: _accent,
-                              ),
-                              const SizedBox(width: 12),
-                              Expanded(
-                                child: Text(
-                                  'Email is not end-to-end encrypted. Send only '
-                                  'credentials you intend them to use. Ask them to '
-                                  'change the password after first login.',
-                                  style: TextStyle(
-                                    fontSize: 12.5,
-                                    height: 1.5,
-                                    color: AppTheme.textPrimary.withValues(
-                                      alpha: 0.88,
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ],
+                            height: 1.35,
+                            color: AppTheme.textPrimary,
                           ),
                         ),
-                      ],
-                    ),
+                      ),
+                      const SizedBox(height: 14),
+                      _MessagePreviewCard(body: _messagePreview),
+                      const SizedBox(height: 16),
+                      Text(
+                        widget.resend
+                            ? 'Sending again creates a new password. The previous password stops working and is not shown here.'
+                            : 'The username is this email. The server generates the password and includes it only in the email.',
+                        style: TextStyle(
+                          fontSize: 12.5,
+                          height: 1.45,
+                          color: AppTheme.textSecondary.withValues(alpha: 0.95),
+                        ),
+                      ),
+                    ],
                   ),
                 ),
               ),
               _DialogFooter(
                 sending: _sending,
+                sendLabel: widget.resend
+                    ? 'Generate New Password & Resend Credentials'
+                    : 'Send Account Credentials',
                 onCancel: () => Navigator.of(context).pop(),
                 onSend: _submit,
               ),
@@ -527,11 +348,13 @@ class _MessagePreviewCard extends StatelessWidget {
 class _DialogFooter extends StatelessWidget {
   const _DialogFooter({
     required this.sending,
+    required this.sendLabel,
     required this.onCancel,
     required this.onSend,
   });
 
   final bool sending;
+  final String sendLabel;
   final VoidCallback onCancel;
   final VoidCallback onSend;
 
@@ -566,8 +389,9 @@ class _DialogFooter extends StatelessWidget {
               style: TextStyle(fontWeight: FontWeight.w700),
             ),
           ),
-          const Spacer(),
-          FilledButton.icon(
+          const SizedBox(width: 8),
+          Flexible(
+            child: FilledButton.icon(
             onPressed: sending ? null : onSend,
             icon: sending
                 ? const SizedBox(
@@ -579,7 +403,7 @@ class _DialogFooter extends StatelessWidget {
                     ),
                   )
                 : const Icon(Icons.send_rounded, size: 20),
-            label: Text(sending ? 'Sending…' : 'Send email'),
+            label: Text(sending ? 'Sending…' : sendLabel),
             style: FilledButton.styleFrom(
               backgroundColor: RspApplicantExamUi.accent,
               disabledBackgroundColor: RspApplicantExamUi.accent.withValues(
@@ -594,6 +418,7 @@ class _DialogFooter extends StatelessWidget {
                 fontSize: 15,
                 fontWeight: FontWeight.w700,
               ),
+            ),
             ),
           ),
         ],

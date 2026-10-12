@@ -1068,17 +1068,6 @@ class _ActionBrainstormingEditorState extends State<ActionBrainstormingEditor> {
                 color: AppTheme.dashTextSecondaryOf(context),
               ),
             ),
-            if (!ro) ...[
-              const SizedBox(height: 14),
-              FilledButton.icon(
-                onPressed: _addEmployee,
-                icon: const Icon(Icons.add_rounded, size: 18),
-                label: const Text('Add Employee'),
-                style: FilledButton.styleFrom(
-                  backgroundColor: AppTheme.primaryNavy,
-                ),
-              ),
-            ],
           ],
         ),
       );
@@ -1838,7 +1827,7 @@ class _AbCoachingEditorDialogState extends State<_AbCoachingEditorDialog> {
                       },
                       decoration: _decoration(
                         context,
-                        label: 'Employee / Name',
+                        label: 'Full name',
                         hint: widget.employees.isNotEmpty
                             ? 'Search or type a name'
                             : 'Full name',
@@ -1862,24 +1851,27 @@ class _AbCoachingEditorDialogState extends State<_AbCoachingEditorDialog> {
                           padding: const EdgeInsets.symmetric(vertical: 4),
                           children: [
                             for (final m in matches)
-                              ListTile(
-                                dense: true,
-                                title: Text(
-                                  m.fullName,
-                                  style: const TextStyle(
-                                    fontWeight: FontWeight.w600,
-                                    fontSize: 13.5,
+                              Listener(
+                                behavior: HitTestBehavior.opaque,
+                                onPointerDown: (_) => _selectEmployee(m),
+                                child: ListTile(
+                                  dense: true,
+                                  title: Text(
+                                    m.fullName,
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.w600,
+                                      fontSize: 13.5,
+                                    ),
+                                  ),
+                                  subtitle: Text(
+                                    [m.positionName, m.departmentName]
+                                        .where(
+                                          (s) => (s ?? '').trim().isNotEmpty,
+                                        )
+                                        .join(' · '),
+                                    style: const TextStyle(fontSize: 11.5),
                                   ),
                                 ),
-                                subtitle: Text(
-                                  [m.positionName, m.departmentName]
-                                      .where(
-                                        (s) => (s ?? '').trim().isNotEmpty,
-                                      )
-                                      .join(' · '),
-                                  style: const TextStyle(fontSize: 11.5),
-                                ),
-                                onTap: () => _selectEmployee(m),
                               ),
                           ],
                           ),

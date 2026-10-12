@@ -10,6 +10,7 @@ import 'package:hrms_plaridel/core/api/token_storage.dart';
 import 'package:hrms_plaridel/core/services/push_notification_service.dart';
 import 'package:hrms_plaridel/features/dtr/assistant/data/dtr_assistant_session_storage.dart';
 import 'package:hrms_plaridel/features/dtr/locator/data/repositories/locator_slip_data_cache.dart';
+import 'package:hrms_plaridel/features/dtr/leave/data/repositories/leave_type_definition_cache.dart';
 
 enum SessionRestoreResult { restored, noSession, temporarilyUnavailable }
 
@@ -69,6 +70,7 @@ class AuthProvider extends ChangeNotifier {
     final nextRole = (nextUser?.role ?? '').trim().toLowerCase();
     if (currentId != nextId || currentRole != nextRole) {
       LocatorSlipDataCache.instance.invalidateAll();
+      LeaveTypeDefinitionCache.instance.invalidate();
     }
   }
 
@@ -153,6 +155,7 @@ class AuthProvider extends ChangeNotifier {
       final refresh = data['refreshToken'] as String?;
       await TokenStorage.instance.setTokens(access: token, refresh: refresh);
       LocatorSlipDataCache.instance.invalidateAll();
+      LeaveTypeDefinitionCache.instance.invalidate();
 
       final userData = data['user'] as Map<String, dynamic>?;
       if (userData != null) {
@@ -242,6 +245,7 @@ class AuthProvider extends ChangeNotifier {
     _isSigningOut = true;
     notifyListeners();
     LocatorSlipDataCache.instance.invalidateAll();
+    LeaveTypeDefinitionCache.instance.invalidate();
     try {
       await PushNotificationService.instance.unregisterCurrentToken();
       final refresh = await TokenStorage.instance.getRefreshToken();

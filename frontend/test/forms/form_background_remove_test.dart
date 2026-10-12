@@ -29,19 +29,42 @@ void main() {
     expect(removed, isTrue);
   });
 
-  testWidgets('Forms list shows a Print background entry', (tester) async {
+  testWidgets('Forms header shows one Print Background button', (tester) async {
     var opened = false;
     await tester.pumpWidget(
       MaterialApp(
         home: Scaffold(
-          body: FormsPrintBackgroundEntry(onOpen: () => opened = true),
+          body: FormsHubHeader(
+            isNarrow: false,
+            onPrintBackground: () => opened = true,
+          ),
         ),
       ),
     );
 
-    expect(find.text('Print background'), findsOneWidget);
-    await tester.tap(find.text('Print background'));
+    expect(find.text('Print Background'), findsOneWidget);
+    expect(find.text('Upload, preview, or remove a letterhead.'), findsNothing);
+    expect(find.byType(OutlinedButton), findsOneWidget);
+    await tester.tap(find.text('Print Background'));
     await tester.pump();
     expect(opened, isTrue);
+  });
+
+  testWidgets('narrow Forms header keeps Print Background visible', (tester) async {
+    await tester.binding.setSurfaceSize(const Size(360, 700));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: FormsHubHeader(
+            isNarrow: true,
+            onPrintBackground: () {},
+          ),
+        ),
+      ),
+    );
+
+    expect(find.text('Forms'), findsOneWidget);
+    expect(find.text('Print Background'), findsOneWidget);
   });
 }

@@ -2958,23 +2958,18 @@ class FormPdf {
     pw.Widget signatory({
       required String label,
       required String? stored,
-      required String defaultName,
-      required String defaultTitle,
       required DocuTrackerSourceSignature? signature,
     }) {
       final storedName = _signatureName(signature, blank(stored));
-      final useOfficial = storedName.isEmpty;
       return pw.Column(
         crossAxisAlignment: pw.CrossAxisAlignment.start,
         children: [
           pw.Text(label, style: labelStyle),
           _signatureImage(signature, height: 28),
           pw.Text(
-            useOfficial ? defaultName : storedName,
+            storedName,
             style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold),
           ),
-          if (useOfficial)
-            pw.Text(defaultTitle, style: const pw.TextStyle(fontSize: 8)),
         ],
       );
     }
@@ -3007,8 +3002,6 @@ class FormPdf {
                 child: signatory(
                   label: 'Prepared by:',
                   stored: e.preparedBy,
-                  defaultName: 'WILMAMAE JOY S. MUTIA',
-                  defaultTitle: 'HRMDO Staff',
                   signature: signatures?.signatureFor('prepared_by'),
                 ),
               ),
@@ -3016,8 +3009,6 @@ class FormPdf {
                 child: signatory(
                   label: 'Checked by:',
                   stored: e.checkedBy,
-                  defaultName: 'MARCELO B. CAÑARES',
-                  defaultTitle: 'HRMDO',
                   signature: signatures?.signatureFor('checked_by'),
                 ),
               ),
@@ -3485,13 +3476,9 @@ class FormPdf {
       final bodyLines = rows.length <= 3 ? 5 : 3;
       final preparedName = _signatureName(
         signatures?.signatureFor('prepared_by'),
-        _idpField(e.preparedByName).isEmpty
-            ? 'MARCELO B. CAÑARES'
-            : _idpField(e.preparedByName),
+        _idpField(e.preparedByName),
       );
-      final preparedTitle = _idpField(e.preparedByTitle).isEmpty
-          ? 'Administrative Officer V / HRMDO'
-          : _idpField(e.preparedByTitle);
+      final preparedTitle = _idpField(e.preparedByTitle);
 
       pw.Widget cell(
         String text, {
@@ -4402,18 +4389,12 @@ class FormPdf {
       horizontalInside: pw.BorderSide(width: 0.4, color: PdfColors.black),
       verticalInside: pw.BorderSide(width: 0.4, color: PdfColors.black),
     );
-    final preparedTitle = _idpField(e.preparedByTitle).isEmpty
-        ? TurnAroundTimeEntry.defaultPreparedByTitle
-        : _idpField(e.preparedByTitle);
+    final preparedTitle = _idpField(e.preparedByTitle);
     final notedName = _signatureName(
       signatures?.signatureFor('noted_by'),
-      _idpField(e.notedByName).isEmpty
-          ? TurnAroundTimeEntry.defaultNotedByName
-          : _idpField(e.notedByName),
+      _idpField(e.notedByName),
     );
-    final notedTitle = _idpField(e.notedByTitle).isEmpty
-        ? TurnAroundTimeEntry.defaultNotedByTitle
-        : _idpField(e.notedByTitle);
+    final notedTitle = _idpField(e.notedByTitle);
     final preparedName = _signatureName(
       signatures?.signatureFor('prepared_by'),
       _idpField(e.preparedByName),

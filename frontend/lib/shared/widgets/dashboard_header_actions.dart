@@ -375,7 +375,8 @@ class _DashboardSidebarProfileCardState
                           const SizedBox(height: 2),
                           Text(
                             widget.subtitle,
-                            maxLines: 1,
+                            maxLines: 2,
+                            softWrap: true,
                             overflow: TextOverflow.ellipsis,
                             style: TextStyle(
                               color: AppTheme.dashTextSecondaryOf(context),
@@ -817,7 +818,8 @@ class _AdminAccountMenuButton extends StatefulWidget {
   final String? tooltip;
 
   @override
-  State<_AdminAccountMenuButton> createState() => _AdminAccountMenuButtonState();
+  State<_AdminAccountMenuButton> createState() =>
+      _AdminAccountMenuButtonState();
 }
 
 class _AdminAccountMenuButtonState extends State<_AdminAccountMenuButton> {
@@ -1050,7 +1052,9 @@ class _AdminAccountCard extends StatelessWidget {
     final dark = AppTheme.dashIsDark(context);
     final primary = AppTheme.dashTextPrimaryOf(context);
     final secondary = AppTheme.dashTextSecondaryOf(context);
-    final surface = dark ? AppTheme.dashPanelOf(context) : const Color(0xFFFFFCF9);
+    final surface = dark
+        ? AppTheme.dashPanelOf(context)
+        : const Color(0xFFFFFCF9);
     final id = (employeeId ?? '').trim();
 
     return Material(
@@ -1086,10 +1090,7 @@ class _AdminAccountCard extends StatelessWidget {
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  _AdminMenuAvatar(
-                    name: displayName,
-                    avatarPath: avatarPath,
-                  ),
+                  _AdminMenuAvatar(name: displayName, avatarPath: avatarPath),
                   const SizedBox(width: 12),
                   Expanded(
                     child: Column(
@@ -1347,8 +1348,7 @@ class _AdminMenuActionState extends State<_AdminMenuAction> {
 
   @override
   Widget build(BuildContext context) {
-    final labelColor =
-        widget.labelColor ?? AppTheme.dashTextPrimaryOf(context);
+    final labelColor = widget.labelColor ?? AppTheme.dashTextPrimaryOf(context);
     return MouseRegion(
       cursor: SystemMouseCursors.click,
       onEnter: (_) => setState(() => _hovered = true),
@@ -1387,9 +1387,10 @@ class _AdminMenuActionState extends State<_AdminMenuAction> {
                   Icon(
                     Icons.chevron_right_rounded,
                     size: 20,
-                    color: (widget.labelColor ??
-                            AppTheme.dashTextSecondaryOf(context))
-                        .withValues(alpha: 0.8),
+                    color:
+                        (widget.labelColor ??
+                                AppTheme.dashTextSecondaryOf(context))
+                            .withValues(alpha: 0.8),
                   ),
                 ],
               ),

@@ -112,7 +112,7 @@ function createReleaseDb({ docs = [memoDoc()], permissions = basePermissions() }
       const rows = permissionRows(params[0], { userIds: [params[1]], roleIds: params[2] });
       return { rowCount: rows.length, rows };
     }
-    if (text.includes('position_department_head_periods')) return { rowCount: 0, rows: [] };
+    if (text.includes('primary_reviewer_designations')) return { rowCount: 0, rows: [] };
     if (text.includes('FROM assignments a') && text.includes('JOIN users u')) {
       const rows = userList
         .filter((u) => u.dept === params[0])

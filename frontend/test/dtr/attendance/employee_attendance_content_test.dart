@@ -232,6 +232,91 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
     provider.dispose();
   });
+  testWidgets('rate-limit warning keeps matching cached attendance visible', (
+    tester,
+  ) async {
+    final adapter = _AttendancePageAdapter(
+      officialDate: '2026-09-14',
+      attendanceResponses: [
+        Future.value(_attendanceResponse(['2026-09-14'])),
+        Future.value(
+          ResponseBody.fromString(
+            jsonEncode({
+              'error': 'Too many requests',
+              'rateLimitScope': 'api_read',
+            }),
+            429,
+            headers: {
+              Headers.contentTypeHeader: [Headers.jsonContentType],
+              'retry-after': ['60'],
+            },
+          ),
+        ),
+      ],
+    );
+    final provider = await _pumpAttendance(
+      tester,
+      adapter: adapter,
+      size: const Size(1000, 800),
+    );
+    await _pumpUntil(tester, () => find.text('14 Mon').evaluate().isNotEmpty);
+    unawaited(
+      provider.loadTimeRecordsForUser(
+        startDate: provider.filterStart,
+        endDate: provider.filterEnd,
+        forceRefresh: true,
+      ),
+    );
+    await _pumpUntil(tester, () => provider.employeeAttendanceError != null);
+    expect(find.text('Could not load attendance'), findsOneWidget);
+    expect(find.text('14 Mon'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox.shrink());
+    provider.dispose();
+  });
+  testWidgets(
+    'hidden attendance defers realtime reads and refreshes on return',
+    (tester) async {
+      // Exercise widget lifecycle independently of the preceding 429 test's cooldown.
+      final interceptors = ApiClient.instance.dio.interceptors.toList();
+      ApiClient.instance.dio.interceptors.clear();
+      addTearDown(() {
+        ApiClient.instance.dio.interceptors.clear();
+        ApiClient.instance.dio.interceptors.addAll(interceptors);
+      });
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      final adapter = _AttendancePageAdapter(
+        officialDate: '2026-09-14',
+        attendanceResponses: [
+          Future.value(_attendanceResponse(['2026-09-14'])),
+          Future.value(_attendanceResponse(['2026-09-14'])),
+        ],
+      );
+      final provider = await _pumpAttendance(
+        tester,
+        adapter: adapter,
+        size: const Size(1000, 800),
+      );
+      await _pumpUntil(tester, () => find.text('14 Mon').evaluate().isNotEmpty);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
+      provider.debugPublishDtrUpdate(
+        const DtrUpdateEvent(
+          action: 'updated',
+          userId: 'employee-a',
+          date: '2026-09-14',
+        ),
+      );
+      await tester.pump();
+      await tester.pump(const Duration(seconds: 1));
+      expect(adapter.attendanceRequests, hasLength(1));
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await _pumpUntil(tester, () => adapter.attendanceRequests.length == 2);
+      expect(find.text('14 Mon'), findsOneWidget);
+      await tester.pumpWidget(const SizedBox.shrink());
+      provider.dispose();
+    },
+  );
 }
 
 Future<DtrProvider> _pumpAttendance(

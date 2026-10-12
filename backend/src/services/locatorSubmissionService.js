@@ -120,7 +120,8 @@ function createLocatorSubmissionService({
       const workingDayCheck = await validateWorkingDay(
         client,
         employeeUserId,
-        slipDateInfo
+        slipDateInfo,
+        {amIn,amOut,pmIn,pmOut}
       );
       if (!workingDayCheck.ok) {
         throw locatorSubmissionError(400, { error: workingDayCheck.error });

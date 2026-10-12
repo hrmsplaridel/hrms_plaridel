@@ -1,6 +1,10 @@
+import '../widgets/leave_routing_settings.dart';
+import '../widgets/leave_print_settings.dart';
+import '../widgets/leave_employment_eligibility_field.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:hrms_plaridel/shared/widgets/workforce_loading_skeleton.dart';
+import 'package:hrms_plaridel/shared/widgets/form_settings_section.dart';
 
 import 'package:hrms_plaridel/core/api/client.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
@@ -33,6 +37,13 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
   int _page = 0;
   bool _loading = true;
   bool _saving = false;
+  LeavePrintDraft _creationPrint = const LeavePrintDraft();
+  String? _pendingPrintTypeId;
+  int _printDraftEpoch = 0;
+  Map<String, dynamic> _creationRouting = {
+    'approval_route': 'hr',
+    'mayor_employment_types': null,
+  };
   bool _isActive = true;
   bool _employeeCanFile = true;
   bool _adminOnly = false;
@@ -42,6 +53,7 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
   String _balanceLedgerType = 'none';
   String _entitlementBasis = LeaveEntitlementBasis.perRequest;
   String _sexEligibility = 'any';
+  List<String>? _eligibleEmploymentTypes;
   List<LeaveCustomFieldDefinition> _customFields = const [];
   List<int> _customFieldUiIds = const [];
   Set<int> _autoCustomFieldUiIds = const {};
@@ -163,6 +175,9 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
     _sexEligibility = _sexEligibilityTypes.containsKey(item.sexEligibility)
         ? item.sexEligibility
         : 'any';
+    _eligibleEmploymentTypes = item.eligibleEmploymentTypes == null
+        ? null
+        : [...item.eligibleEmploymentTypes!];
     _customFields = List<LeaveCustomFieldDefinition>.from(
       item.employeeDetailSchema,
     );
@@ -193,6 +208,13 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
   void _newCustom() {
     setState(() {
       _selected = null;
+      _creationPrint = const LeavePrintDraft();
+      _pendingPrintTypeId = null;
+      _printDraftEpoch++;
+      _creationRouting = {
+        'approval_route': 'hr',
+        'mayor_employment_types': null,
+      };
       _nameController.clear();
       _displayNameController.clear();
       _descriptionController.clear();
@@ -208,6 +230,7 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
       _balanceLedgerType = 'none';
       _entitlementBasis = LeaveEntitlementBasis.perRequest;
       _sexEligibility = 'any';
+      _eligibleEmploymentTypes = null;
       _customFields = const [];
       _customFieldUiIds = const [];
       _autoCustomFieldUiIds = const {};
@@ -237,9 +260,18 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
 
   Future<void> _save() async {
     if (!_formKey.currentState!.validate()) return;
+    if (_eligibleEmploymentTypes?.isEmpty == true) {
+      _showMessage('Select at least one eligible employment type.');
+      return;
+    }
     setState(() => _saving = true);
     final selected = _selected;
-    final data = _payloadFromForm();
+    final data = selected?.isSystem == true
+        ? <String, dynamic>{
+            'eligible_employment_types': _eligibleEmploymentTypes,
+          }
+        : _payloadFromForm();
+    if (selected?.id == null) data.addAll(_creationRouting);
     try {
       LeaveTypeDefinition? saved;
       if (selected?.id == null) {
@@ -249,6 +281,26 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
         );
         final body = res.data;
         if (body != null) saved = LeaveTypeDefinition.fromJson(body);
+        if (saved?.id != null && _creationPrint.hasChanges) {
+          try {
+            await _creationPrint.save(saved!.id!);
+            _creationPrint = const LeavePrintDraft();
+            _pendingPrintTypeId = null;
+          } catch (e) {
+            // Creation succeeded; retain its ID and file for an upload-only retry.
+            _pendingPrintTypeId = saved!.id;
+            LeaveTypeDefinitionCache.instance.invalidate();
+            if (!mounted) return;
+            _applySavedType(saved);
+            final message = e is DioException
+                ? _messageFromDio(e)
+                : 'Upload failed.';
+            _showMessage(
+              'Leave type created, but print settings could not be saved. $message Retry using Save print settings.',
+            );
+            return;
+          }
+        }
         _showMessage('Leave type added.');
       } else {
         final res = await ApiClient.instance.put<Map<String, dynamic>>(
@@ -350,6 +402,7 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
       'balance_ledger_type': _balanceLedgerType,
       'entitlement_basis': _entitlementBasis,
       'sex_eligibility': _sexEligibility,
+      'eligible_employment_types': _eligibleEmploymentTypes,
       'employee_detail_schema': _customFields
           .map((field) => field.toJson())
           .toList(growable: false),
@@ -493,10 +546,9 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
                     ),
                   ),
                 ),
-                TextButton.icon(
+                TextButton(
                   onPressed: _saving ? null : _newCustom,
-                  icon: const Icon(Icons.add_rounded),
-                  label: const Text('New custom leave type'),
+                  child: const Text('New custom leave type'),
                 ),
                 const SizedBox(width: 8),
                 IconButton(
@@ -524,13 +576,14 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
   }
 
   Widget _buildList() {
-    if (_loading)
+    if (_loading) {
       return const SingleChildScrollView(
         child: WorkforceRowsSkeleton(
           columns: [2, 1],
           label: 'Loading leave types',
         ),
       );
+    }
     final items = _filteredItems;
     _clampPage(items.length);
     final pageStart = items.isEmpty ? 0 : _page * _typesPerPage;
@@ -667,9 +720,6 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
                               label: systemLocked
                                   ? 'Protected'
                                   : (isDraft ? 'Draft' : 'Custom'),
-                              icon: systemLocked
-                                  ? Icons.lock_rounded
-                                  : Icons.tune_rounded,
                               color: systemLocked
                                   ? AppTheme.primaryNavy
                                   : AppTheme.primaryNavy,
@@ -677,13 +727,11 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
                             if (selected?.isActive == true)
                               _statusPill(
                                 label: 'Active',
-                                icon: Icons.check_circle_rounded,
                                 color: const Color(0xFF2E7D32),
                               )
                             else if (selected?.id != null)
                               _statusPill(
                                 label: 'Inactive',
-                                icon: Icons.pause_circle_outline_rounded,
                                 color: _mutedColor(context),
                               ),
                           ],
@@ -691,7 +739,7 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
                         const SizedBox(height: 6),
                         Text(
                           systemLocked
-                              ? 'Built-in CSC leave type. View only.'
+                              ? 'Built-in rules are protected. Employment-type eligibility and printed forms can be configured.'
                               : 'Configure filing, balance, and DTR behavior.',
                           style: TextStyle(
                             color: _mutedColor(context),
@@ -713,267 +761,321 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
                     _InfoPanel(
                       icon: Icons.lock_outline_rounded,
                       text:
-                          'Built-in CSC leave types are protected. Create a custom leave type when you need editable rules.',
+                          'Built-in rules are protected. Employment-type eligibility and printed forms can be configured here.',
                     ),
-                  _sectionTitle(Icons.badge_outlined, 'Basic Information'),
-                  TextFormField(
-                    controller: _displayNameController,
-                    readOnly: _saving || systemLocked,
-                    style: AppTheme.dashFieldTextStyle(context),
-                    decoration: _inputDecoration('Leave type name'),
-                    validator: (v) =>
-                        v == null || v.trim().isEmpty ? 'Required' : null,
-                  ),
-                  const SizedBox(height: 12),
-                  if (systemLocked)
-                    _ReadOnlyValue(
-                      label: 'Entitlement basis',
-                      value: LeaveEntitlementBasis.label(
-                        _selected?.entitlementBasis ?? _entitlementBasis,
-                      ),
-                      helperText:
-                          'Defines whether the limit is accrued, annual, event-based, request-based, or compliance-based.',
-                    )
-                  else
-                    DropdownButtonFormField<String>(
-                      key: ValueKey(_entitlementBasis),
-                      initialValue: _entitlementBasis,
-                      isExpanded: true,
-                      dropdownColor: AppTheme.dashPanelOf(context),
+                  _settingsSection([
+                    _sectionTitle('Basic Information'),
+                    TextFormField(
+                      controller: _displayNameController,
+                      readOnly: _saving || systemLocked,
                       style: AppTheme.dashFieldTextStyle(context),
-                      decoration: _inputDecoration(
-                        'Entitlement basis',
-                        helperText: 'Defines how Max working days is applied.',
-                      ),
-                      items: _entitlementBasisTypes.entries
-                          .map(
-                            (entry) => DropdownMenuItem<String>(
-                              value: entry.key,
-                              child: Text(
-                                entry.value,
-                                style: AppTheme.dashFieldTextStyle(context),
-                              ),
-                            ),
-                          )
-                          .toList(),
-                      onChanged: _saving
-                          ? null
-                          : (value) => setState(
-                              () => _entitlementBasis =
-                                  value ?? LeaveEntitlementBasis.perRequest,
-                            ),
+                      decoration: _inputDecoration('Leave type name'),
+                      validator: (v) =>
+                          v == null || v.trim().isEmpty ? 'Required' : null,
                     ),
-                  const SizedBox(height: 12),
-                  TextFormField(
-                    controller: _nameController,
-                    readOnly: _saving || systemLocked,
-                    style: AppTheme.dashFieldTextStyle(context),
-                    decoration: _inputDecoration(
-                      'System code',
-                      helperText: 'Example: bereavementLeave',
-                    ),
-                    validator: (v) {
-                      final text = v?.trim() ?? '';
-                      if (text.isEmpty) return 'Required';
-                      if (!RegExp(r'^[A-Za-z][A-Za-z0-9_]*$').hasMatch(text)) {
-                        return 'Use letters, numbers, or underscore only';
-                      }
-                      return null;
-                    },
-                  ),
-                  const SizedBox(height: 12),
-                  TextFormField(
-                    controller: _descriptionController,
-                    readOnly: _saving || systemLocked,
-                    style: AppTheme.dashFieldTextStyle(context),
-                    decoration: _inputDecoration('Description'),
-                    maxLines: 2,
-                  ),
-                  const SizedBox(height: 24),
-                  _sectionTitle(Icons.rule_rounded, 'Filing Requirements'),
-                  Wrap(
-                    spacing: 10,
-                    runSpacing: 10,
-                    children: [
-                      _ruleChip(
-                        label: 'Active',
-                        value: _isActive,
-                        editable: !systemLocked,
-                        onChanged: (v) => setState(() => _isActive = v),
-                      ),
-                      _ruleChip(
-                        label: 'Employees can file',
-                        value: _employeeCanFile,
-                        editable: !systemLocked,
-                        onChanged: (v) => setState(() => _employeeCanFile = v),
-                      ),
-                      _ruleChip(
-                        label: 'HR/Admin only',
-                        value: _adminOnly,
-                        editable: !systemLocked,
-                        onChanged: (v) => setState(() => _adminOnly = v),
-                      ),
-                      _ruleChip(
-                        label: 'Allow past-date filing',
-                        value: _allowsPastDates,
-                        editable: !systemLocked,
-                        onChanged: (v) => setState(() => _allowsPastDates = v),
-                      ),
-                      _ruleChip(
-                        label: 'Require attachment',
-                        value: _requiresAttachment,
-                        editable: !systemLocked,
-                        onChanged: _setRequiresAttachment,
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 16),
-                  if (systemLocked)
-                    _ReadOnlyValue(
-                      label: 'Employee sex eligibility',
-                      value:
-                          _sexEligibilityTypes[_sexEligibility] ??
-                          leaveTypeSexEligibilityLabel(_sexEligibility),
-                      helperText:
-                          'Protected types keep their assigned eligibility rule.',
-                    )
-                  else
-                    DropdownButtonFormField<String>(
-                      key: ValueKey('sex-$_sexEligibility'),
-                      initialValue: _sexEligibility,
-                      isExpanded: true,
-                      dropdownColor: AppTheme.dashPanelOf(context),
-                      style: AppTheme.dashFieldTextStyle(context),
-                      decoration: _inputDecoration(
-                        'Employee sex eligibility',
+                    const SizedBox(height: 12),
+                    if (systemLocked)
+                      _ReadOnlyValue(
+                        label: 'Entitlement basis',
+                        value: LeaveEntitlementBasis.label(
+                          _selected?.entitlementBasis ?? _entitlementBasis,
+                        ),
                         helperText:
-                            'Controls which employee accounts can file this leave type.',
-                      ),
-                      items: _sexEligibilityTypes.entries
-                          .map(
-                            (entry) => DropdownMenuItem(
-                              value: entry.key,
-                              child: Text(
-                                entry.value,
-                                style: AppTheme.dashFieldTextStyle(context),
+                            'Defines whether the limit is accrued, annual, event-based, request-based, or compliance-based.',
+                      )
+                    else
+                      DropdownButtonFormField<String>(
+                        key: ValueKey(_entitlementBasis),
+                        initialValue: _entitlementBasis,
+                        isExpanded: true,
+                        dropdownColor: AppTheme.dashPanelOf(context),
+                        style: AppTheme.dashFieldTextStyle(context),
+                        decoration: _inputDecoration(
+                          'Entitlement basis',
+                          helperText:
+                              'Defines how Max working days is applied.',
+                        ),
+                        items: _entitlementBasisTypes.entries
+                            .map(
+                              (entry) => DropdownMenuItem<String>(
+                                value: entry.key,
+                                child: Text(
+                                  entry.value,
+                                  style: AppTheme.dashFieldTextStyle(context),
+                                ),
                               ),
-                            ),
-                          )
-                          .toList(),
-                      onChanged: _saving
-                          ? null
-                          : (v) => setState(() => _sexEligibility = v ?? 'any'),
+                            )
+                            .toList(),
+                        onChanged: _saving
+                            ? null
+                            : (value) => setState(
+                                () => _entitlementBasis =
+                                    value ?? LeaveEntitlementBasis.perRequest,
+                              ),
+                      ),
+                    const SizedBox(height: 12),
+                    TextFormField(
+                      controller: _nameController,
+                      readOnly: _saving || systemLocked,
+                      style: AppTheme.dashFieldTextStyle(context),
+                      decoration: _inputDecoration(
+                        'System code',
+                        helperText: 'Example: bereavementLeave',
+                      ),
+                      validator: (v) {
+                        final text = v?.trim() ?? '';
+                        if (text.isEmpty) return 'Required';
+                        if (!RegExp(
+                          r'^[A-Za-z][A-Za-z0-9_]*$',
+                        ).hasMatch(text)) {
+                          return 'Use letters, numbers, or underscore only';
+                        }
+                        return null;
+                      },
                     ),
+                    const SizedBox(height: 12),
+                    TextFormField(
+                      controller: _descriptionController,
+                      readOnly: _saving || systemLocked,
+                      style: AppTheme.dashFieldTextStyle(context),
+                      decoration: _inputDecoration('Description'),
+                      maxLines: 2,
+                    ),
+                  ]),
                   const SizedBox(height: 16),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: TextFormField(
-                          controller: _minimumAdvanceDaysController,
-                          readOnly: _saving || systemLocked,
-                          style: AppTheme.dashFieldTextStyle(context),
-                          keyboardType: TextInputType.number,
-                          decoration: _inputDecoration(
-                            'Minimum advance days',
-                            helperText: 'Blank means no advance rule',
-                          ),
-                          validator: _validateNonNegativeInteger,
+                  _settingsSection([
+                    _sectionTitle('Filing Requirements'),
+                    Wrap(
+                      spacing: 10,
+                      runSpacing: 10,
+                      children: [
+                        _ruleChip(
+                          label: 'Active',
+                          value: _isActive,
+                          editable: !systemLocked,
+                          onChanged: (v) => setState(() => _isActive = v),
                         ),
+                        _ruleChip(
+                          label: 'Employees can file',
+                          value: _employeeCanFile,
+                          editable: !systemLocked,
+                          onChanged: (v) =>
+                              setState(() => _employeeCanFile = v),
+                        ),
+                        _ruleChip(
+                          label: 'HR/Admin only',
+                          value: _adminOnly,
+                          editable: !systemLocked,
+                          onChanged: (v) => setState(() => _adminOnly = v),
+                        ),
+                        _ruleChip(
+                          label: 'Allow past-date filing',
+                          value: _allowsPastDates,
+                          editable: !systemLocked,
+                          onChanged: (v) =>
+                              setState(() => _allowsPastDates = v),
+                        ),
+                        _ruleChip(
+                          label: 'Require attachment',
+                          value: _requiresAttachment,
+                          editable: !systemLocked,
+                          onChanged: _setRequiresAttachment,
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 16),
+                    LeaveEmploymentEligibilityField(
+                      value: _eligibleEmploymentTypes,
+                      enabled: !_saving,
+                      onChanged: (value) =>
+                          setState(() => _eligibleEmploymentTypes = value),
+                    ),
+                    const SizedBox(height: 16),
+                    if (systemLocked)
+                      _ReadOnlyValue(
+                        label: 'Employee sex eligibility',
+                        value:
+                            _sexEligibilityTypes[_sexEligibility] ??
+                            leaveTypeSexEligibilityLabel(_sexEligibility),
+                        helperText:
+                            'Protected types keep their assigned eligibility rule.',
+                      )
+                    else
+                      DropdownButtonFormField<String>(
+                        key: ValueKey('sex-$_sexEligibility'),
+                        initialValue: _sexEligibility,
+                        isExpanded: true,
+                        dropdownColor: AppTheme.dashPanelOf(context),
+                        style: AppTheme.dashFieldTextStyle(context),
+                        decoration: _inputDecoration(
+                          'Employee sex eligibility',
+                          helperText:
+                              'Controls which employee accounts can file this leave type.',
+                        ),
+                        items: _sexEligibilityTypes.entries
+                            .map(
+                              (entry) => DropdownMenuItem(
+                                value: entry.key,
+                                child: Text(
+                                  entry.value,
+                                  style: AppTheme.dashFieldTextStyle(context),
+                                ),
+                              ),
+                            )
+                            .toList(),
+                        onChanged: _saving
+                            ? null
+                            : (v) =>
+                                  setState(() => _sexEligibility = v ?? 'any'),
                       ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: TextFormField(
-                          controller: _maxDaysController,
-                          readOnly: _saving || systemLocked,
-                          style: AppTheme.dashFieldTextStyle(context),
-                          keyboardType: const TextInputType.numberWithOptions(
-                            decimal: true,
-                          ),
-                          decoration: _inputDecoration(
-                            'Max working days',
-                            helperText: 'Blank means no limit',
-                          ),
-                          validator: (value) => _validatePositiveNumber(
-                            value,
-                            label: 'Maximum working days',
+                    const SizedBox(height: 16),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: TextFormField(
+                            controller: _minimumAdvanceDaysController,
+                            readOnly: _saving || systemLocked,
+                            style: AppTheme.dashFieldTextStyle(context),
+                            keyboardType: TextInputType.number,
+                            decoration: _inputDecoration(
+                              'Minimum advance days',
+                              helperText: 'Blank means no advance rule',
+                            ),
+                            validator: _validateNonNegativeInteger,
                           ),
                         ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: TextFormField(
+                            controller: _maxDaysController,
+                            readOnly: _saving || systemLocked,
+                            style: AppTheme.dashFieldTextStyle(context),
+                            keyboardType: const TextInputType.numberWithOptions(
+                              decimal: true,
+                            ),
+                            decoration: _inputDecoration(
+                              'Max working days',
+                              helperText: 'Blank means no limit',
+                            ),
+                            validator: (value) => _validatePositiveNumber(
+                              value,
+                              label: 'Maximum working days',
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    TextFormField(
+                      controller: _attachmentOverDaysController,
+                      enabled:
+                          systemLocked || (!_saving && _requiresAttachment),
+                      readOnly: _saving || systemLocked || !_requiresAttachment,
+                      style: AppTheme.dashFieldTextStyle(context),
+                      keyboardType: const TextInputType.numberWithOptions(
+                        decimal: true,
                       ),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-                  TextFormField(
-                    controller: _attachmentOverDaysController,
-                    enabled: systemLocked || (!_saving && _requiresAttachment),
-                    readOnly: _saving || systemLocked || !_requiresAttachment,
-                    style: AppTheme.dashFieldTextStyle(context),
-                    keyboardType: const TextInputType.numberWithOptions(
-                      decimal: true,
+                      decoration: _inputDecoration(
+                        'Require attachment over days',
+                        helperText: _requiresAttachment
+                            ? 'Optional threshold'
+                            : 'Turn on Require attachment first',
+                      ),
+                      validator: _requiresAttachment
+                          ? (value) => _validatePositiveNumber(
+                              value,
+                              label: 'Attachment threshold days',
+                            )
+                          : null,
                     ),
-                    decoration: _inputDecoration(
-                      'Require attachment over days',
-                      helperText: _requiresAttachment
-                          ? 'Optional threshold'
-                          : 'Turn on Require attachment first',
-                    ),
-                    validator: _requiresAttachment
-                        ? (value) => _validatePositiveNumber(
-                            value,
-                            label: 'Attachment threshold days',
-                          )
-                        : null,
-                  ),
+                  ]),
                   if (!systemLocked) ...[
-                    const SizedBox(height: 24),
-                    _buildCustomFieldsSection(),
+                    const SizedBox(height: 16),
+                    _settingsSection([_buildCustomFieldsSection()]),
                   ],
-                  const SizedBox(height: 24),
-                  _sectionTitle(Icons.sync_alt_rounded, 'Balance and DTR'),
-                  _ruleChip(
-                    label: 'Show on DTR',
-                    value: _affectsDtrNormally,
-                    editable: !systemLocked,
-                    onChanged: (v) => setState(() => _affectsDtrNormally = v),
-                  ),
-                  const SizedBox(height: 14),
-                  if (systemLocked)
-                    _ReadOnlyValue(
-                      label: 'Credit handling',
-                      value:
-                          _ledgerTypes[_balanceLedgerType] ??
-                          'Does not use leave credits',
-                      helperText:
-                          'Protected types keep their assigned credit policy.',
-                    )
-                  else
-                    DropdownButtonFormField<String>(
-                      key: ValueKey(_balanceLedgerType),
-                      initialValue: _balanceLedgerType,
-                      isExpanded: true,
-                      dropdownColor: AppTheme.dashPanelOf(context),
-                      style: AppTheme.dashFieldTextStyle(context),
-                      decoration: _inputDecoration(
-                        'Credit handling',
-                        helperText:
-                            'Choose whether this type deducts VL/SL, has its own balance, or needs no credits.',
-                      ),
-                      items: _ledgerTypes.entries
-                          .map(
-                            (entry) => DropdownMenuItem(
-                              value: entry.key,
-                              child: Text(
-                                entry.value,
-                                style: AppTheme.dashFieldTextStyle(context),
-                              ),
-                            ),
-                          )
-                          .toList(),
-                      onChanged: _saving
-                          ? null
-                          : (v) => setState(
-                              () => _balanceLedgerType = v ?? 'none',
-                            ),
+                  const SizedBox(height: 16),
+                  _settingsSection([
+                    _sectionTitle('Balance and DTR'),
+                    _ruleChip(
+                      label: 'Show on DTR',
+                      value: _affectsDtrNormally,
+                      editable: !systemLocked,
+                      onChanged: (v) => setState(() => _affectsDtrNormally = v),
                     ),
+                    const SizedBox(height: 14),
+                    if (systemLocked)
+                      _ReadOnlyValue(
+                        label: 'Credit handling',
+                        value:
+                            _ledgerTypes[_balanceLedgerType] ??
+                            'Does not use leave credits',
+                        helperText:
+                            'Protected types keep their assigned credit policy.',
+                      )
+                    else
+                      DropdownButtonFormField<String>(
+                        key: ValueKey(_balanceLedgerType),
+                        initialValue: _balanceLedgerType,
+                        isExpanded: true,
+                        dropdownColor: AppTheme.dashPanelOf(context),
+                        style: AppTheme.dashFieldTextStyle(context),
+                        decoration: _inputDecoration(
+                          'Credit handling',
+                          helperText:
+                              'Choose whether this type deducts VL/SL, has its own balance, or needs no credits.',
+                        ),
+                        items: _ledgerTypes.entries
+                            .map(
+                              (entry) => DropdownMenuItem(
+                                value: entry.key,
+                                child: Text(
+                                  entry.value,
+                                  style: AppTheme.dashFieldTextStyle(context),
+                                ),
+                              ),
+                            )
+                            .toList(),
+                        onChanged: _saving
+                            ? null
+                            : (v) => setState(
+                                () => _balanceLedgerType = v ?? 'none',
+                              ),
+                      ),
+                  ]),
+                  const SizedBox(height: 16),
+                  _settingsSection([
+                    LeaveRoutingSettings(
+                      key: ValueKey('routing-${selected?.id ?? 'new'}'),
+                      leaveTypeId: selected?.id,
+                      onChanged: (value) => _creationRouting = value,
+                    ),
+                  ]),
+                  const SizedBox(height: 16),
+                  _settingsSection([
+                    LeavePrintSettings(
+                      key: ValueKey(
+                        'print-${selected?.id ?? 'new-$_printDraftEpoch'}',
+                      ),
+                      leaveTypeId: selected?.id,
+                      enabled: !_saving,
+                      onSaved: () {
+                        if (_pendingPrintTypeId == selected?.id) {
+                          setState(() {
+                            _pendingPrintTypeId = null;
+                            _creationPrint = const LeavePrintDraft();
+                          });
+                        }
+                      },
+                      initialDraft:
+                          selected?.id != null &&
+                              selected?.id == _pendingPrintTypeId
+                          ? _creationPrint
+                          : null,
+                      onChanged: selected?.id == null
+                          ? (value) => _creationPrint = value
+                          : null,
+                    ),
+                  ]),
                 ],
               ),
             ),
@@ -998,20 +1100,10 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
       ),
       child: Row(
         children: [
-          Icon(
-            systemLocked ? Icons.lock_rounded : Icons.info_outline_rounded,
-            color: systemLocked
-                ? (_isDark(context)
-                      ? AppTheme.primaryNavyLight
-                      : AppTheme.primaryNavy)
-                : _mutedColor(context),
-            size: 18,
-          ),
-          const SizedBox(width: 8),
           Expanded(
             child: Text(
               systemLocked
-                  ? 'Protected CSC leave types cannot be edited.'
+                  ? 'Built-in rules are protected. You can save employment-type eligibility.'
                   : isCreating
                   ? 'Create this leave type to make it available under the configured filing rules.'
                   : isSelectedActive
@@ -1022,32 +1114,22 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
           ),
           const SizedBox(width: 12),
           if (selected?.id != null && !systemLocked) ...[
-            OutlinedButton.icon(
+            OutlinedButton(
               onPressed: canToggleActive ? _toggleSelectedActive : null,
-              icon: Icon(
-                isSelectedActive ? Icons.block_rounded : Icons.restore_rounded,
-              ),
-              label: Text(isSelectedActive ? 'Deactivate' : 'Reactivate'),
+              child: Text(isSelectedActive ? 'Deactivate' : 'Reactivate'),
             ),
             const SizedBox(width: 10),
           ],
-          FilledButton.icon(
-            onPressed: _saving || systemLocked ? null : _save,
-            icon: _saving
-                ? const SizedBox(
-                    width: 16,
-                    height: 16,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : Icon(
-                    isCreating
-                        ? Icons.add_circle_outline_rounded
-                        : Icons.save_rounded,
-                  ),
-            label: Text(
+          FilledButton(
+            onPressed: _saving ? null : _save,
+            child: Text(
               _saving
                   ? (isCreating ? 'Creating...' : 'Saving...')
-                  : (isCreating ? 'Create Leave Type' : 'Save Changes'),
+                  : (isCreating
+                        ? 'Create Leave Type'
+                        : systemLocked
+                        ? 'Save Eligibility'
+                        : 'Save Changes'),
             ),
           ),
         ],
@@ -1062,17 +1144,13 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
         Row(
           children: [
             Expanded(
-              child: _sectionTitle(
-                Icons.dynamic_form_outlined,
-                'Custom Form Fields',
-              ),
+              child: _sectionTitle('Custom Form Fields'),
             ),
-            OutlinedButton.icon(
+            OutlinedButton(
               onPressed: _saving || _customFields.length >= 20
                   ? null
                   : _addCustomField,
-              icon: const Icon(Icons.add_rounded, size: 18),
-              label: const Text('Add field'),
+              child: const Text('Add field'),
             ),
           ],
         ),
@@ -1310,18 +1388,11 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
     );
   }
 
-  Widget _sectionTitle(IconData icon, String label) {
-    final dark = _isDark(context);
+  Widget _sectionTitle(String label) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
       child: Row(
         children: [
-          Icon(
-            icon,
-            size: 18,
-            color: dark ? AppTheme.primaryNavyLight : AppTheme.primaryNavy,
-          ),
-          const SizedBox(width: 8),
           Text(
             label,
             style: TextStyle(
@@ -1334,6 +1405,13 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
       ),
     );
   }
+
+  Widget _settingsSection(List<Widget> children) => FormSettingsSection(
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: children,
+    ),
+  );
 
   Widget _ruleChip({
     required String label,
@@ -1363,12 +1441,6 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(
-              value ? Icons.check_circle_rounded : Icons.cancel_outlined,
-              size: 18,
-              color: color,
-            ),
-            const SizedBox(width: 8),
             Text(
               label,
               style: TextStyle(
@@ -1386,7 +1458,6 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
 
   Widget _statusPill({
     required String label,
-    required IconData icon,
     required Color color,
   }) {
     return Container(
@@ -1399,8 +1470,6 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, size: 14, color: color),
-          const SizedBox(width: 5),
           Text(
             label,
             style: TextStyle(
@@ -1481,9 +1550,6 @@ class _LeaveTypeListTile extends StatelessWidget {
     final accent = selected
         ? (dark ? AppTheme.primaryNavyLight : AppTheme.primaryNavy)
         : Colors.transparent;
-    final iconColor = selected
-        ? (dark ? AppTheme.primaryNavyLight : AppTheme.primaryNavy)
-        : AppTheme.dashTextSecondaryOf(context);
     return Material(
       color: selected
           ? (dark
@@ -1499,21 +1565,6 @@ class _LeaveTypeListTile extends StatelessWidget {
           padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
           child: Row(
             children: [
-              Container(
-                width: 34,
-                height: 34,
-                alignment: Alignment.center,
-                decoration: BoxDecoration(
-                  color: iconColor.withValues(alpha: 0.1),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Icon(
-                  item.isSystem ? Icons.verified_outlined : Icons.tune_rounded,
-                  color: iconColor,
-                  size: 19,
-                ),
-              ),
-              const SizedBox(width: 12),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,

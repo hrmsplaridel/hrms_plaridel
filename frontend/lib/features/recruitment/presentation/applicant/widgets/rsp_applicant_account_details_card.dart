@@ -46,7 +46,9 @@ class RspApplicantAccountDetailsCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: const Color(0xFF2E7D32).withValues(alpha: 0.22)),
+        border: Border.all(
+          color: const Color(0xFF2E7D32).withValues(alpha: 0.22),
+        ),
       ),
       child: Column(
         children: [
@@ -97,9 +99,7 @@ class RspApplicantAccountDetailsCard extends StatelessWidget {
                       child: CircularProgressIndicator(strokeWidth: 2),
                     )
                   : const Icon(Icons.refresh_rounded, size: 18),
-              label: Text(
-                refreshBusy ? 'Checking status…' : 'Refresh status',
-              ),
+              label: Text(refreshBusy ? 'Checking status…' : 'Refresh status'),
             ),
           ],
         ],

@@ -990,7 +990,7 @@ test('IDP create snapshots automatic reviewed/noted/approved signers when resolv
       if (sql.includes('FROM departments') && sql.includes('lower(btrim(name))')) {
         return { rowCount: 1, rows: [{ id: departmentId }] };
       }
-      if (sql.includes('position_department_head_periods') && sql.includes('LIMIT 1')) {
+      if (sql.includes('primary_reviewer_designations') && sql.includes('LIMIT 1')) {
         return {
           rowCount: 1,
           rows: [{ reviewer_id: deptHeadId, reviewer_name: 'Dept Head' }],
@@ -1068,7 +1068,7 @@ test('IDP department_head slot falls back to the rank-1 backup when no Head is a
       if (sql.includes('FROM departments') && sql.includes('lower(btrim(name))')) {
         return { rowCount: 1, rows: [{ id: departmentId }] };
       }
-      if (sql.includes('position_department_head_periods') && sql.includes('LIMIT 1')) {
+      if (sql.includes('primary_reviewer_designations') && sql.includes('LIMIT 1')) {
         return { rowCount: 0, rows: [] };
       }
       if (sql.includes('FROM department_reviewer_backups')) {

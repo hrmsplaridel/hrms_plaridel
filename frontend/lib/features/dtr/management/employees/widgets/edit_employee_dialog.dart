@@ -60,7 +60,11 @@ class _EditEmployeeDialogState extends State<_EditEmployeeDialog> {
     }
     _contactController.text = _profile.contactNumber ?? '';
     _salaryGradeController.text = _profile.salaryGrade ?? '';
-    _privilege = _profile.role == 'admin' ? 'Admin' : 'Employee';
+    _privilege = _profile.role == 'mayor'
+        ? 'Mayor'
+        : _profile.role == 'admin'
+        ? 'Admin'
+        : 'Employee';
     _suffix = _profile.suffix;
     _sex = _profile.sex;
     _dateOfBirth = _profile.dateOfBirth;
@@ -218,7 +222,7 @@ class _EditEmployeeDialogState extends State<_EditEmployeeDialog> {
         'first_name': firstName,
         'full_name': fullName,
         'last_name': lastName,
-        'role': role,
+        if (_profile.role != 'mayor') 'role': role,
         ...buildClearableEmployeeProfileUpdateFields(
           middleName: middleName,
           suffix: _suffix,
@@ -539,11 +543,13 @@ class _EditEmployeeDialogState extends State<_EditEmployeeDialog> {
               'Select role',
               style: TextStyle(color: AppTheme.dashTextSecondaryOf(context)),
             ),
-            items: [
-              'Admin',
-              'Employee',
-            ].map((o) => DropdownMenuItem(value: o, child: Text(o))).toList(),
-            onChanged: (v) => setState(() => _privilege = v),
+            items:
+                (_profile.role == 'mayor' ? ['Mayor'] : ['Admin', 'Employee'])
+                    .map((o) => DropdownMenuItem(value: o, child: Text(o)))
+                    .toList(),
+            onChanged: _profile.role == 'mayor'
+                ? null
+                : (v) => setState(() => _privilege = v),
             validator: (v) => v == null ? 'Required' : null,
           ),
           const SizedBox(height: 16),
@@ -772,25 +778,11 @@ class _EditEmployeeDialogState extends State<_EditEmployeeDialog> {
             ),
           ),
           const SizedBox(height: 16),
-          DropdownButtonFormField<String>(
-            initialValue: _employmentType ?? '',
+          EmploymentTypeField(
+            value: _employmentType,
             decoration: _inputDecoration('Employment Type'),
             hint: const Text('Employment Type'),
-            items: [
-              const DropdownMenuItem<String>(
-                value: '',
-                child: Text('Not specified'),
-              ),
-              ...[
-                'regular',
-                'contractual',
-                'job_order',
-                'casual',
-              ].map((o) => DropdownMenuItem(value: o, child: Text(o))),
-            ],
-            onChanged: (v) => setState(
-              () => _employmentType = v == null || v.isEmpty ? null : v,
-            ),
+            onChanged: (v) => setState(() => _employmentType = v),
           ),
           const SizedBox(height: 16),
           TextFormField(

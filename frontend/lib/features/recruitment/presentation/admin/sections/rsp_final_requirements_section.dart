@@ -297,7 +297,10 @@ class _RspFinalRequirementsSectionState
     return needsAttention || _expandedIds.contains(id);
   }
 
-  void _toggleExpanded(RecruitmentApplication app, {required bool needsAttention}) {
+  void _toggleExpanded(
+    RecruitmentApplication app, {
+    required bool needsAttention,
+  }) {
     setState(() {
       if (_isCardExpanded(app.id, needsAttention: needsAttention)) {
         _collapsedIds.add(app.id);
@@ -328,7 +331,10 @@ class _RspFinalRequirementsSectionState
           _buildStatsRow(ac),
           const SizedBox(height: 14),
         ],
-        _buildToolbar(hasActiveFilters: hasActiveFilters, shown: filtered.length),
+        _buildToolbar(
+          hasActiveFilters: hasActiveFilters,
+          shown: filtered.length,
+        ),
         const SizedBox(height: 16),
         if (_loading)
           const Padding(
@@ -463,9 +469,8 @@ class _RspFinalRequirementsSectionState
             icon: Icons.check_circle_outline_rounded,
             color: RspFinalReqUi.success,
             selected: _statusFilter == _FinalReqStatusFilter.approved,
-            onTap: () => setState(
-              () => _statusFilter = _FinalReqStatusFilter.approved,
-            ),
+            onTap: () =>
+                setState(() => _statusFilter = _FinalReqStatusFilter.approved),
           ),
           _statCard(
             label: 'Hired',
@@ -495,9 +500,7 @@ class _RspFinalRequirementsSectionState
           children: cards
               .map(
                 (card) => SizedBox(
-                  width: c.maxWidth >= 560
-                      ? (c.maxWidth - 10) / 2
-                      : c.maxWidth,
+                  width: c.maxWidth >= 560 ? (c.maxWidth - 10) / 2 : c.maxWidth,
                   child: card,
                 ),
               )
@@ -578,10 +581,7 @@ class _RspFinalRequirementsSectionState
     );
   }
 
-  Widget _buildToolbar({
-    required bool hasActiveFilters,
-    required int shown,
-  }) {
+  Widget _buildToolbar({required bool hasActiveFilters, required int shown}) {
     final hairline = RspFinalReqUi.hairlineOf(context);
 
     final search = TextField(
@@ -603,10 +603,7 @@ class _RspFinalRequirementsSectionState
     final positionDd = DropdownButtonFormField<String>(
       initialValue: _selectedPositionFilter,
       isExpanded: true,
-      decoration: RspFinalReqUi.filterDecoration(
-        context,
-        label: 'Position',
-      ),
+      decoration: RspFinalReqUi.filterDecoration(context, label: 'Position'),
       items: <DropdownMenuItem<String>>[
         const DropdownMenuItem<String>(
           value: null,
@@ -712,13 +709,16 @@ class _RspFinalRequirementsSectionState
                 TextButton.icon(
                   onPressed: _loading
                       ? null
-                      : () =>
-                            setState(() => _selectedAppliedDate = DateTime.now()),
+                      : () => setState(
+                          () => _selectedAppliedDate = DateTime.now(),
+                        ),
                   icon: const Icon(Icons.today_outlined, size: 16),
                   label: const Text('Today'),
                 ),
                 TextButton(
-                  onPressed: _loading || !hasActiveFilters ? null : _clearFilters,
+                  onPressed: _loading || !hasActiveFilters
+                      ? null
+                      : _clearFilters,
                   child: const Text('Clear filters'),
                 ),
                 const SizedBox(width: 6),
@@ -751,14 +751,15 @@ class _RspFinalRequirementsSectionState
                     onPressed: _loading
                         ? null
                         : () => setState(
-                              () => _selectedAppliedDate = DateTime.now(),
-                            ),
+                            () => _selectedAppliedDate = DateTime.now(),
+                          ),
                     icon: const Icon(Icons.today_outlined, size: 16),
                     label: const Text('Today'),
                   ),
                   TextButton(
-                    onPressed:
-                        _loading || !hasActiveFilters ? null : _clearFilters,
+                    onPressed: _loading || !hasActiveFilters
+                        ? null
+                        : _clearFilters,
                     child: const Text('Clear filters'),
                   ),
                   Text(
@@ -844,8 +845,7 @@ class _RspFinalRequirementsSectionState
           Material(
             color: Colors.transparent,
             child: InkWell(
-              onTap: () =>
-                  _toggleExpanded(app, needsAttention: needsAttention),
+              onTap: () => _toggleExpanded(app, needsAttention: needsAttention),
               child: Padding(
                 padding: const EdgeInsets.fromLTRB(14, 12, 10, 12),
                 child: _buildCardHeader(
@@ -1038,7 +1038,9 @@ class _RspFinalRequirementsSectionState
         RspFinalReqUi.statusBadge(label: statusLabel, color: statusColor),
         const SizedBox(width: 4),
         Icon(
-          expanded ? Icons.keyboard_arrow_up_rounded : Icons.keyboard_arrow_down_rounded,
+          expanded
+              ? Icons.keyboard_arrow_up_rounded
+              : Icons.keyboard_arrow_down_rounded,
           color: canCollapse || !expanded
               ? RspFinalReqUi.accentOf(context)
               : RspFinalReqUi.secondaryTextOf(context),
@@ -1054,12 +1056,10 @@ class _RspFinalRequirementsSectionState
     required bool approved,
     required bool hired,
   }) {
-    final uploadedCount = RspFinalRequirementDocKind.values
-        .where((k) {
-          final p = app.finalRequirementPath(k)?.trim();
-          return p != null && p.isNotEmpty;
-        })
-        .length;
+    final uploadedCount = RspFinalRequirementDocKind.values.where((k) {
+      final p = app.finalRequirementPath(k)?.trim();
+      return p != null && p.isNotEmpty;
+    }).length;
     final step3Enabled = app.orientationAttended == true || hired;
     final showStep8 = approved;
 
@@ -1185,7 +1185,10 @@ class _RspFinalRequirementsSectionState
                   children: [
                     docsCol,
                     const SizedBox(height: 10),
-                    Divider(height: 1, color: RspFinalReqUi.hairlineOf(context)),
+                    Divider(
+                      height: 1,
+                      color: RspFinalReqUi.hairlineOf(context),
+                    ),
                     const SizedBox(height: 10),
                     Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1253,16 +1256,18 @@ class _RspFinalRequirementsSectionState
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
               decoration: BoxDecoration(
-                color: (allUploaded
-                        ? RspFinalReqUi.success
-                        : RspFinalReqUi.warning)
-                    .withValues(alpha: 0.12),
+                color:
+                    (allUploaded
+                            ? RspFinalReqUi.success
+                            : RspFinalReqUi.warning)
+                        .withValues(alpha: 0.12),
                 borderRadius: BorderRadius.circular(999),
                 border: Border.all(
-                  color: (allUploaded
-                          ? RspFinalReqUi.success
-                          : RspFinalReqUi.warning)
-                      .withValues(alpha: 0.35),
+                  color:
+                      (allUploaded
+                              ? RspFinalReqUi.success
+                              : RspFinalReqUi.warning)
+                          .withValues(alpha: 0.35),
                 ),
               ),
               child: Row(
@@ -1511,9 +1516,7 @@ class _RspFinalRequirementsSectionState
               Icon(
                 icon,
                 size: 16,
-                color: active
-                    ? accent
-                    : RspFinalReqUi.secondaryTextOf(context),
+                color: active ? accent : RspFinalReqUi.secondaryTextOf(context),
               ),
               const SizedBox(width: 6),
               Text(
@@ -1521,9 +1524,7 @@ class _RspFinalRequirementsSectionState
                 style: TextStyle(
                   fontSize: 13,
                   fontWeight: FontWeight.w700,
-                  color: active
-                      ? accent
-                      : RspFinalReqUi.primaryTextOf(context),
+                  color: active ? accent : RspFinalReqUi.primaryTextOf(context),
                 ),
               ),
             ],
@@ -1649,9 +1650,7 @@ class _RspFinalRequirementsSectionState
               Icon(
                 icon,
                 size: 14,
-                color: active
-                    ? accent
-                    : RspFinalReqUi.secondaryTextOf(context),
+                color: active ? accent : RspFinalReqUi.secondaryTextOf(context),
               ),
               const SizedBox(height: 2),
               Text(
@@ -1661,9 +1660,7 @@ class _RspFinalRequirementsSectionState
                 style: TextStyle(
                   fontSize: 10.5,
                   fontWeight: FontWeight.w700,
-                  color: active
-                      ? accent
-                      : RspFinalReqUi.primaryTextOf(context),
+                  color: active ? accent : RspFinalReqUi.primaryTextOf(context),
                 ),
               ),
             ],

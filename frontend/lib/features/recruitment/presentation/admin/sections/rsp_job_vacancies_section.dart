@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import 'package:hrms_plaridel/core/api/user_facing_api_error.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
@@ -13,12 +14,16 @@ class _VacancyFormItem {
       education = TextEditingController(),
       experience = TextEditingController(),
       training = TextEditingController(),
+      minimumAge = TextEditingController(text: '18'),
+      maximumAge = TextEditingController(),
       closingDate = TextEditingController(),
       maxApplicants = TextEditingController();
   final TextEditingController headline;
   final TextEditingController education;
   final TextEditingController experience;
   final TextEditingController training;
+  final TextEditingController minimumAge;
+  final TextEditingController maximumAge;
   final TextEditingController closingDate;
   final TextEditingController maxApplicants;
 
@@ -31,6 +36,8 @@ class _VacancyFormItem {
     education.dispose();
     experience.dispose();
     training.dispose();
+    minimumAge.dispose();
+    maximumAge.dispose();
     closingDate.dispose();
     maxApplicants.dispose();
   }
@@ -66,6 +73,8 @@ class _RspJobVacanciesSectionState extends State<RspJobVacanciesSection> {
         'education': v.education.text.trim(),
         'experience': v.experience.text.trim(),
         'training': v.training.text.trim(),
+        'minimum_age': v.minimumAge.text.trim(),
+        'maximum_age': v.maximumAge.text.trim(),
         'closing_date': v.closingDate.text.trim(),
         'max_applicants': v.maxApplicants.text.trim(),
       };
@@ -99,8 +108,8 @@ class _RspJobVacanciesSectionState extends State<RspJobVacanciesSection> {
           content: Text(
             value
                 ? (hasListedTitle
-                    ? 'Landing page is now open for hiring.'
-                    : 'Hiring is on, but no job title is listed. Applicants cannot apply until you add a vacant position and save.')
+                      ? 'Landing page is now open for hiring.'
+                      : 'Hiring is on, but no job title is listed. Applicants cannot apply until you add a vacant position and save.')
                 : 'Landing page now shows no vacancies.',
           ),
         ),
@@ -161,6 +170,8 @@ class _RspJobVacanciesSectionState extends State<RspJobVacanciesSection> {
           item.education.text = v.education ?? '';
           item.experience.text = v.experience ?? '';
           item.training.text = v.training ?? '';
+          item.minimumAge.text = '${v.minimumAge}';
+          item.maximumAge.text = v.maximumAge != null ? '${v.maximumAge}' : '';
           item.closingDate.text = v.closingDate != null
               ? '${v.closingDate!.year.toString().padLeft(4, '0')}-${v.closingDate!.month.toString().padLeft(2, '0')}-${v.closingDate!.day.toString().padLeft(2, '0')}'
               : _autoCloseDate();
@@ -269,7 +280,37 @@ class _RspJobVacanciesSectionState extends State<RspJobVacanciesSection> {
     });
   }
 
+  String? _validateAgeFields() {
+    for (var i = 0; i < _vacancies.length; i++) {
+      final v = _vacancies[i];
+      final label = v.headline.text.trim().isEmpty
+          ? 'Position ${i + 1}'
+          : v.headline.text.trim();
+      final minRaw = v.minimumAge.text.trim();
+      if (minRaw.isEmpty) return '$label: Minimum age is required.';
+      if (!RegExp(r'^\d+$').hasMatch(minRaw)) {
+        return '$label: Minimum age must be a whole number.';
+      }
+      final maxRaw = v.maximumAge.text.trim();
+      if (maxRaw.isEmpty) continue;
+      if (!RegExp(r'^\d+$').hasMatch(maxRaw)) {
+        return '$label: Maximum age must be a whole number.';
+      }
+      if (int.parse(maxRaw) < int.parse(minRaw)) {
+        return '$label: Maximum age must be greater than or equal to minimum age.';
+      }
+    }
+    return null;
+  }
+
   Future<void> _save() async {
+    final ageError = _validateAgeFields();
+    if (ageError != null) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(ageError)));
+      return;
+    }
     setState(() => _saving = true);
     try {
       final list = _vacancies.map((v) {
@@ -292,6 +333,10 @@ class _RspJobVacanciesSectionState extends State<RspJobVacanciesSection> {
           education: ed.isEmpty ? null : ed,
           experience: ex.isEmpty ? null : ex,
           training: tr.isEmpty ? null : tr,
+          minimumAge: int.parse(v.minimumAge.text.trim()),
+          maximumAge: v.maximumAge.text.trim().isEmpty
+              ? null
+              : int.parse(v.maximumAge.text.trim()),
           closingDate: cd,
           maxApplicants: maxParsed,
         );
@@ -505,11 +550,7 @@ class _RspJobVacanciesSectionState extends State<RspJobVacanciesSection> {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(
-            icon,
-            size: 14,
-            color: AppTheme.dashTextSecondaryOf(context),
-          ),
+          Icon(icon, size: 14, color: AppTheme.dashTextSecondaryOf(context)),
           const SizedBox(width: 5),
           Flexible(
             child: Text(
@@ -632,13 +673,7 @@ class _RspJobVacanciesSectionState extends State<RspJobVacanciesSection> {
                   ],
                 ),
                 const SizedBox(height: 12),
-                Row(
-                  children: [
-                    status,
-                    const Spacer(),
-                    toggle,
-                  ],
-                ),
+                Row(children: [status, const Spacer(), toggle]),
               ],
             )
           : Row(
@@ -857,6 +892,38 @@ class _RspJobVacanciesSectionState extends State<RspJobVacanciesSection> {
         ),
       ],
     );
+    final minimumAge = Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _fieldLabel(context, 'Minimum Age'),
+        TextField(
+          controller: v.minimumAge,
+          onChanged: (_) => setState(() {}),
+          keyboardType: TextInputType.number,
+          inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+          maxLines: 1,
+          decoration: _vacancyInput(context, hint: '18'),
+        ),
+      ],
+    );
+    final maximumAge = Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _fieldLabel(context, 'Maximum Age (Optional)'),
+        TextField(
+          controller: v.maximumAge,
+          onChanged: (_) => setState(() {}),
+          keyboardType: TextInputType.number,
+          inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+          maxLines: 1,
+          decoration: _vacancyInput(context, hint: 'No maximum'),
+        ),
+        _helperText(
+          context,
+          'Leave blank for no maximum. Applicants must be at least the minimum age.',
+        ),
+      ],
+    );
     final maxApplicants = Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -888,6 +955,10 @@ class _RspJobVacanciesSectionState extends State<RspJobVacanciesSection> {
           const SizedBox(height: 14),
           training,
           const SizedBox(height: 14),
+          minimumAge,
+          const SizedBox(height: 14),
+          maximumAge,
+          const SizedBox(height: 14),
           due,
           const SizedBox(height: 14),
           maxApplicants,
@@ -909,6 +980,15 @@ class _RspJobVacanciesSectionState extends State<RspJobVacanciesSection> {
               Expanded(child: experience),
               const SizedBox(width: 14),
               Expanded(child: training),
+            ],
+          ),
+          const SizedBox(height: 14),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(child: minimumAge),
+              const SizedBox(width: 14),
+              Expanded(child: maximumAge),
             ],
           ),
           const SizedBox(height: 14),
@@ -938,16 +1018,25 @@ class _RspJobVacanciesSectionState extends State<RspJobVacanciesSection> {
           ],
         ),
         const SizedBox(height: 14),
+        training,
+        const SizedBox(height: 14),
         Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Expanded(child: training),
+            Expanded(child: minimumAge),
             const SizedBox(width: 14),
-            Expanded(child: maxApplicants),
+            Expanded(child: maximumAge),
           ],
         ),
         const SizedBox(height: 14),
-        due,
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(flex: 3, child: due),
+            const SizedBox(width: 14),
+            Expanded(flex: 2, child: maxApplicants),
+          ],
+        ),
       ],
     );
   }

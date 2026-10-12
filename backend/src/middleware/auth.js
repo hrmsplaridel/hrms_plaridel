@@ -1,5 +1,12 @@
 const jwt = require('jsonwebtoken');
 const { pool } = require('../config/db');
+const verifiedAccount = Symbol('verifiedAccount');
+
+function getVerifiedUser(req) {
+  const verified = req[verifiedAccount];
+  return verified && verified.authorization === req.headers.authorization &&
+    verified.user === req.user ? verified.user : null;
+}
 
 /**
  * Verify JWT and attach req.user = { id, email, role }.
@@ -7,6 +14,7 @@ const { pool } = require('../config/db');
  */
 function createAuthMiddleware(db = pool) {
   return async function authMiddleware(req, res, next) {
+    if (getVerifiedUser(req)) return next();
     const authHeader = req.headers.authorization;
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
       return res.status(401).json({ error: 'Missing or invalid Authorization header' });
@@ -42,6 +50,7 @@ function createAuthMiddleware(db = pool) {
         email: account.email,
         role: String(account.role || 'employee').toLowerCase(),
       };
+      req[verifiedAccount] = {authorization: authHeader, user: req.user};
       return next();
     } catch (err) {
       if (!['JsonWebTokenError', 'TokenExpiredError', 'NotBeforeError'].includes(err?.name)) {
@@ -55,4 +64,4 @@ function createAuthMiddleware(db = pool) {
 
 const authMiddleware = createAuthMiddleware();
 
-module.exports = { authMiddleware, createAuthMiddleware };
+module.exports = { authMiddleware, createAuthMiddleware, getVerifiedUser };

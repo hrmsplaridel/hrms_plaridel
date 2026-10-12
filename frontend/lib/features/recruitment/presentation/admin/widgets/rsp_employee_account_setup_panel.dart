@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
-import 'package:hrms_plaridel/core/api/client.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/features/recruitment/data/recruitment_hire_prefill.dart';
 import 'package:hrms_plaridel/features/recruitment/models/recruitment_application.dart';
@@ -74,6 +73,7 @@ class _RspEmployeeAccountSetupPanelState
       phone: app.phone,
       sex: app.sex,
       address: app.address,
+      dateOfBirth: app.dateOfBirth,
     );
     widget.onGoToCreateAccount?.call();
     if (mounted) {
@@ -99,43 +99,6 @@ class _RspEmployeeAccountSetupPanelState
       return;
     }
 
-    final hire = context.read<RecruitmentHirePrefill>();
-    final stored = hire.credentialsFor(app.id);
-    var loginUsername = stored?.loginEmail ?? to;
-    final loginPassword = resolveHireLoginPassword(
-      storedPassword: stored?.password,
-      persistedPassword: app.hireLoginPassword,
-    );
-    if ((stored?.loginEmail ?? '').trim().isEmpty) {
-      final persistedUser = app.hireLoginUsername?.trim();
-      if (persistedUser != null && persistedUser.isNotEmpty) {
-        loginUsername = persistedUser;
-      }
-    }
-
-    if (stored == null &&
-        _accountLinked &&
-        app.hiredUserId != null &&
-        app.hiredUserId!.trim().isNotEmpty) {
-      try {
-        final res = await ApiClient.instance.get<Map<String, dynamic>>(
-          '/api/employees/${app.hiredUserId!.trim()}',
-        );
-        final linkedEmail = res.data?['email']?.toString().trim();
-        if (linkedEmail != null && linkedEmail.isNotEmpty) {
-          loginUsername = linkedEmail;
-        }
-        } catch (_) {
-        // Fall back to applicant email and the generated Create Account password.
-      }
-    }
-
-    hire.recordCreatedCredentials(
-      applicationId: app.id,
-      loginEmail: loginUsername,
-      password: loginPassword,
-    );
-
     if (!mounted) return;
     final sent = await showDialog<bool>(
       context: context,
@@ -145,10 +108,9 @@ class _RspEmployeeAccountSetupPanelState
         applicantName: app.fullName.trim().isEmpty
             ? 'Applicant'
             : app.fullName.trim(),
-        initialUsername: loginUsername,
-        initialPassword: loginPassword,
-        sendHireEmail: (username, password) => RecruitmentRepo.instance
-            .sendHireCredentialEmail(app.id, username, password),
+        resend: app.hireCredentialsEmailSent,
+        sendCredentials: () =>
+            RecruitmentRepo.instance.sendAccountCredentials(app.id),
       ),
     );
     if (sent == true && mounted) {
@@ -235,7 +197,11 @@ class _RspEmployeeAccountSetupPanelState
                       : Icons.mark_email_read_outlined,
                   size: 16,
                 ),
-                label: Text(emailSent ? 'Send again' : 'Email applicant'),
+                label: Text(
+                  emailSent
+                      ? 'Generate New Password & Resend Credentials'
+                      : 'Send Account Credentials',
+                ),
                 style: FilledButton.styleFrom(
                   backgroundColor: navy,
                   foregroundColor: Colors.white,
@@ -253,7 +219,11 @@ class _RspEmployeeAccountSetupPanelState
                       : Icons.mark_email_read_outlined,
                   size: compact ? 16 : 20,
                 ),
-                label: Text(emailSent ? 'Send again' : 'Email applicant'),
+                label: Text(
+                  emailSent
+                      ? 'Generate New Password & Resend Credentials'
+                      : 'Send Account Credentials',
+                ),
                 style: OutlinedButton.styleFrom(
                   foregroundColor: emailMuted
                       ? AppTheme.dashTextSecondaryOf(context)
@@ -389,7 +359,7 @@ class _RspEmployeeAccountSetupPanelState
             ] else ...[
               if (emailSent) ...[
                 Text(
-                  'Last credentials email${app.hireCredentialsEmailSentAt != null ? ' · ${_formatSchedule(app.hireCredentialsEmailSentAt!, context)}' : ''}. You can send again with the current temporary password.',
+                  'Last credentials email${app.hireCredentialsEmailSentAt != null ? ' · ${_formatSchedule(app.hireCredentialsEmailSentAt!, context)}' : ''}. Sending again generates a new password.',
                   style: TextStyle(
                     fontSize: 12,
                     color: AppTheme.dashTextSecondaryOf(context),

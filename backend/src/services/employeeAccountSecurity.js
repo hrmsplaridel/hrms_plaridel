@@ -71,6 +71,14 @@ async function lockAndValidateAccountTransition(
         : String(nextEmploymentStatus).toLowerCase(),
   };
 
+  if (previous.role === 'mayor' && next.role !== 'mayor') {
+    throw new EmployeeAccountSecurityError(
+      'The Mayor role cannot be changed. Deactivate the account when replacing the Mayor.',
+      403,
+      'MAYOR_ROLE_PROTECTED'
+    );
+  }
+
   if (sameId(actorId, targetId) && !next.is_active) {
     throw new EmployeeAccountSecurityError(
       'You cannot deactivate your own administrator account',

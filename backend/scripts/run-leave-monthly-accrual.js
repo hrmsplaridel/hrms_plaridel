@@ -12,6 +12,7 @@ require('dotenv').config({ path: require('path').join(__dirname, '../.env') });
 
 const { pool } = require('../src/config/db');
 const { runLeaveMonthlyAccrual } = require('../src/services/leaveMonthlyAccrual');
+const { notifyLeaveMonthEnd, notifyLeaveMonthEndFailure, notificationMonthForTarget } = require('../src/services/leaveMonthEndNotifications');
 const {
   runMonthlyAttendanceDeductions,
 } = require('../src/services/leaveAttendanceDeduction');
@@ -60,11 +61,16 @@ async function main() {
     balanceEarnedAdjustmentsByUser: previewEarnedByUser,
   });
   const result = { ...accrualResult, attendanceDeductions };
+  await notifyLeaveMonthEnd(pool, { targetYearMonth: result.targetYearMonth, dryRun });
   console.log(JSON.stringify(result, null, 2));
   await pool.end();
 }
 
-main().catch((e) => {
+main().catch(async (e) => {
+  const options = parseArgs();
+  const month = notificationMonthForTarget(options.targetMonth);
+  if (!options.dryRun && month) await notifyLeaveMonthEndFailure(pool, { targetYearMonth: month });
+  await pool.end();
   console.error(e);
   process.exit(1);
 });

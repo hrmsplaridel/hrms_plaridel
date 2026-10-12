@@ -278,7 +278,10 @@ class _RspOrientationSchedulerState extends State<RspOrientationScheduler> {
                 prefixIcon: const Icon(Icons.event_note_outlined, size: 18),
               ),
               items: [
-                DropdownMenuItem(value: null, child: RspSchedulingUi.ddText('All')),
+                DropdownMenuItem(
+                  value: null,
+                  child: RspSchedulingUi.ddText('All'),
+                ),
                 DropdownMenuItem(
                   value: 'pending',
                   child: RspSchedulingUi.ddText('Not scheduled'),
@@ -333,8 +336,7 @@ class _RspOrientationSchedulerState extends State<RspOrientationScheduler> {
             child: TextButton.icon(
               onPressed: _loading
                   ? null
-                  : () =>
-                      setState(() => _selectedAppliedDate = DateTime.now()),
+                  : () => setState(() => _selectedAppliedDate = DateTime.now()),
               icon: const Icon(Icons.today_outlined, size: 18),
               label: const Text('Today'),
             ),
@@ -742,7 +744,9 @@ class _RspOrientationSchedulerState extends State<RspOrientationScheduler> {
                       ),
                       const SizedBox(height: 8),
                       RspSchedulingUi.statusBadge(
-                        label: scheduled == null ? 'Not scheduled' : 'Scheduled',
+                        label: scheduled == null
+                            ? 'Not scheduled'
+                            : 'Scheduled',
                         icon: scheduled == null
                             ? Icons.schedule_rounded
                             : Icons.event_available_rounded,

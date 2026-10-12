@@ -1,6 +1,10 @@
+import 'package:hrms_plaridel/features/dtr/leave/presentation/admin/admin_my_leave_entry.dart';
+import 'package:hrms_plaridel/features/dtr/locator/presentation/employee/pages/employee_locator_slip_screen.dart';
+import 'package:flutter/foundation.dart' show mapEquals;
+import 'package:hrms_plaridel/core/services/admin_access_refresh.dart';
+import 'package:hrms_plaridel/core/services/foreground_poller.dart';
+import 'package:hrms_plaridel/core/services/app_realtime_provider.dart';
 import 'dart:async';
-import 'package:hrms_plaridel/features/dtr/attendance/presentation/widgets/dtr_corrections_dialog.dart';
-import 'package:hrms_plaridel/features/dtr/attendance/presentation/pages/admin_dtr_corrections_page.dart';
 import 'dart:ui' show lerpDouble;
 import 'package:flutter/material.dart';
 import 'package:shimmer/shimmer.dart';
@@ -35,6 +39,7 @@ import 'package:hrms_plaridel/features/dtr/attendance/presentation/pages/dtr_das
 import 'package:hrms_plaridel/features/dtr/dtr_routes.dart';
 import 'package:hrms_plaridel/features/dtr/management/employees/pages/manage_employee.dart';
 import 'package:hrms_plaridel/features/dtr/management/assignments/pages/manage_assignment.dart';
+import 'package:hrms_plaridel/features/dtr/management/widgets/workforce_setup_navigation.dart';
 import 'package:hrms_plaridel/features/dtr/management/departments/pages/manage_department.dart';
 import 'package:hrms_plaridel/features/dtr/management/positions/pages/manage_position.dart';
 import 'package:hrms_plaridel/features/dtr/management/shifts/pages/manage_shift.dart';
@@ -59,6 +64,8 @@ import 'package:hrms_plaridel/shared/widgets/feature_card.dart';
 import 'package:hrms_plaridel/features/dashboard/presentation/employee/employee_dashboard.dart';
 import 'package:hrms_plaridel/features/notifications/data/notification_provider.dart';
 import 'package:hrms_plaridel/features/notifications/models/notification_tap_result.dart';
+import 'package:hrms_plaridel/core/services/push_notification_service.dart';
+import 'package:hrms_plaridel/features/dtr/leave/presentation/shared/pages/leave_balance_history_screen.dart';
 import 'package:hrms_plaridel/features/notifications/presentation/widgets/open_notifications_panel.dart';
 import 'package:hrms_plaridel/features/dashboard/presentation/admin/desktop/widgets/recruitment_hub_analytics.dart';
 import 'package:hrms_plaridel/features/dashboard/presentation/admin/desktop/widgets/recruitment_monitoring_stats.dart';
@@ -335,6 +342,7 @@ enum AdminMenu {
   dashboard,
   myAttendance,
   myLeave,
+  myLocator,
   myProfile,
   dtr,
   rsp,
@@ -355,10 +363,20 @@ class AdminDashboard extends StatefulWidget {
 class _AdminDashboardState extends State<AdminDashboard>
     with WidgetsBindingObserver {
   AdminMenu _selectedMenu = AdminMenu.dashboard;
+  LeaveSection _myLeaveSection = LeaveSection.requests;
+  int _myLeaveEntryVersion = 0;
+  AdminAccessRefresh? _accessRefresh;
+  int _accountAccessVersion = 0;
+  int _dtrAccessVersion = 0;
   bool? _canCreateAccount;
   bool _canViewDtrReports = false;
   bool _canManageDtr = false;
   Map<String, bool> _dtrFeatureAccess = {};
+  bool get _canAccessDtr => hasAdminDtrAccess(
+    canViewReports: _canViewDtrReports,
+    canManage: _canManageDtr,
+    featureAccess: _dtrFeatureAccess,
+  );
   bool _sidebarCollapsed = false;
   final GlobalKey<_DtrContentState> _dtrContentKey =
       GlobalKey<_DtrContentState>();
@@ -371,17 +389,30 @@ class _AdminDashboardState extends State<AdminDashboard>
   late final Widget _settingsPanelWidget;
 
   Widget _settingsPanel() => _settingsPanelWidget;
-  Timer? _notificationPollTimer;
+  ForegroundPoller? _notificationPollTimer;
   String? _pendingSourceModule;
   String? _pendingSourceTable;
   String? _pendingSourceRecordId;
   int _docuTrackerDeepLinkKey = 0;
 
+  StreamSubscription<String>? _monthEndPushTapSub;
+
+  void _openPendingMonthEndCreditHistory() {
+    if (!mounted) return;
+    if (PushNotificationService.instance.consumeMonthEndCreditHistoryTapFor(
+      context.read<AuthProvider>().user?.id,
+    )) {
+      _applyNotificationTapResult(
+        const NotificationTapResult(
+          NotificationTapKind.employeeLeaveCreditHistory,
+        ),
+      );
+    }
+  }
+
   @override
   void initState() {
     super.initState();
-    _loadAccountCreationAccess();
-    _loadDtrAccess();
     _settingsPanelWidget = DashboardProfilePanel(
       key: _settingsPanelKey,
       onBack: _closeMyProfile,
@@ -390,24 +421,44 @@ class _AdminDashboardState extends State<AdminDashboard>
     FormPdf.warmupThenPrefetchBackgrounds();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
+      _monthEndPushTapSub = PushNotificationService
+          .instance
+          .monthEndCreditHistoryTaps
+          .listen((_) => _openPendingMonthEndCreditHistory());
+      _openPendingMonthEndCreditHistory();
+      _accessRefresh = AdminAccessRefresh(
+        realtime: context.read<AppRealtimeProvider>(),
+        onRefresh: () async {
+          await Future.wait([
+            _loadAccountCreationAccess(),
+            _loadDtrAccess(),
+            context.read<LeaveProvider>().checkIsDepartmentHead(
+              forceRefresh: true,
+            ),
+          ]);
+        },
+      );
+      unawaited(_accessRefresh!.refresh());
       context.read<NotificationProvider>().refreshUnreadCount();
       context.read<DocuTrackerProvider>().loadNotifications();
       context.read<DocuTrackerProvider>().loadSourceSignatureRequests();
       _notificationPollTimer?.cancel();
-      _notificationPollTimer = Timer.periodic(const Duration(seconds: 30), (_) {
-        if (!mounted) return;
-        context.read<NotificationProvider>().refreshUnreadCount();
-        context.read<DocuTrackerProvider>().loadNotifications();
-        context.read<DocuTrackerProvider>().loadSourceSignatureRequests();
-      });
+      _notificationPollTimer = ForegroundPoller(
+        interval: const Duration(seconds: 30),
+        onTick: () {
+          if (!mounted) return;
+          unawaited(_accessRefresh?.refresh());
+          context.read<NotificationProvider>().refreshUnreadCount();
+          context.read<DocuTrackerProvider>().loadNotifications();
+          context.read<DocuTrackerProvider>().loadSourceSignatureRequests();
+        },
+      );
     });
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed && mounted) {
-      _loadAccountCreationAccess();
-      _loadDtrAccess();
       context.read<NotificationProvider>().refreshUnreadCount();
       context.read<DocuTrackerProvider>().loadNotifications();
       context.read<DocuTrackerProvider>().loadSourceSignatureRequests();
@@ -416,18 +467,22 @@ class _AdminDashboardState extends State<AdminDashboard>
 
   @override
   void dispose() {
+    _monthEndPushTapSub?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     _notificationPollTimer?.cancel();
+    _accessRefresh?.dispose();
     super.dispose();
   }
 
   Future<void> _loadAccountCreationAccess() async {
+    final version = ++_accountAccessVersion;
     try {
       final response = await ApiClient.instance.get<Map<String, dynamic>>(
         '/api/account-creation-access/me',
       );
-      if (!mounted) return;
+      if (!mounted || version != _accountAccessVersion) return;
       final allowed = response.data?['allowed'] == true;
+      if (_canCreateAccount == allowed) return;
       setState(() {
         _canCreateAccount = allowed;
         if (!allowed && _selectedMenu == AdminMenu.createAccount) {
@@ -435,7 +490,7 @@ class _AdminDashboardState extends State<AdminDashboard>
         }
       });
     } catch (_) {
-      if (mounted) {
+      if (mounted && version == _accountAccessVersion) {
         setState(() {
           _canCreateAccount = false;
           if (_selectedMenu == AdminMenu.createAccount) {
@@ -447,34 +502,50 @@ class _AdminDashboardState extends State<AdminDashboard>
   }
 
   Future<void> _loadDtrAccess() async {
+    final version = ++_dtrAccessVersion;
     try {
       final response = await ApiClient.instance.get<Map<String, dynamic>>(
         '/api/dtr-access/me',
       );
-      if (!mounted) return;
+      if (!mounted || version != _dtrAccessVersion) return;
+      final reports = response.data?['reports_allowed'] == true;
+      final manage = response.data?['manage_allowed'] == true;
+      final features = {
+        for (final field in const [
+          'employees_allowed',
+          'leave_allowed',
+          'approvals_allowed',
+          'locator_allowed',
+        ])
+          field: response.data?[field] == true,
+      };
+      if (_canViewDtrReports == reports &&
+          _canManageDtr == manage &&
+          mapEquals(_dtrFeatureAccess, features)) {
+        return;
+      }
       setState(() {
-        _canViewDtrReports = response.data?['reports_allowed'] == true;
-        _canManageDtr = response.data?['manage_allowed'] == true;
-        _dtrFeatureAccess = {
-          for (final field in const [
-            'corrections_allowed',
-            'employees_allowed',
-            'leave_allowed',
-            'approvals_allowed',
-            'locator_allowed',
-          ])
-            field: response.data?[field] == true,
-        };
+        _canViewDtrReports = reports;
+        _canManageDtr = manage;
+        _dtrFeatureAccess = features;
       });
+      _closeUnavailableDtr();
     } catch (_) {
-      if (mounted) {
+      if (mounted && version == _dtrAccessVersion) {
         setState(() {
           _canViewDtrReports = false;
           _canManageDtr = false;
           _dtrFeatureAccess = {};
         });
+        _closeUnavailableDtr();
       }
     }
+  }
+
+  void _closeUnavailableDtr() {
+    if (_selectedMenu != AdminMenu.dtr || _canAccessDtr) return;
+    setState(() => _selectedMenu = AdminMenu.dashboard);
+    DashboardContentNavigator.showHome(_contentNavKey);
   }
 
   Future<void> _handleOpenNotifications() async {
@@ -488,15 +559,18 @@ class _AdminDashboardState extends State<AdminDashboard>
   void _applyNotificationTapResult(NotificationTapResult? result) {
     if (result == null || result.kind == NotificationTapKind.none) return;
     switch (result.kind) {
-      case NotificationTapKind.dtrCorrectionReview:
-      case NotificationTapKind.dtrCorrectionRequests:
-        showDtrCorrections(
-          context,
-          review: result.kind == NotificationTapKind.dtrCorrectionReview,
-          requestId: result.referenceId,
+      case NotificationTapKind.employeeLeaveCreditHistory:
+        Navigator.of(context).push(
+          MaterialPageRoute<void>(
+            builder: (_) => const LeaveBalanceHistoryScreen(isAdmin: false),
+          ),
         );
         break;
       case NotificationTapKind.adminDtrLeaveManagement:
+        if (_dtrFeatureAccess['leave_allowed'] != true) {
+          _onMenuSelected(AdminMenu.myLeave);
+          break;
+        }
         setState(() => _selectedMenu = AdminMenu.dtr);
         DashboardContentNavigator.showHome(_contentNavKey);
         // DTR mounts on the next frame(s) after the nested navigator rebuilds home.
@@ -507,6 +581,10 @@ class _AdminDashboardState extends State<AdminDashboard>
         });
         break;
       case NotificationTapKind.adminDtrLocatorManagement:
+        if (_dtrFeatureAccess['locator_allowed'] != true) {
+          _onMenuSelected(AdminMenu.myLocator);
+          break;
+        }
         setState(() => _selectedMenu = AdminMenu.dtr);
         DashboardContentNavigator.showHome(_contentNavKey);
         WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -543,11 +621,24 @@ class _AdminDashboardState extends State<AdminDashboard>
         });
         DashboardContentNavigator.showHome(_contentNavKey);
         break;
-      case NotificationTapKind.none:
-      case NotificationTapKind.employeeLeaveApprovals:
-      case NotificationTapKind.employeeLeaveRequests:
       case NotificationTapKind.employeeLocatorApprovals:
       case NotificationTapKind.employeeLocatorRequests:
+        setState(() => _selectedMenu = AdminMenu.myLocator);
+        DashboardContentNavigator.showHome(_contentNavKey);
+        break;
+      case NotificationTapKind.employeeLeaveApprovals:
+      case NotificationTapKind.employeeLeaveRequests:
+        setState(() {
+          _selectedMenu = AdminMenu.myLeave;
+          _myLeaveEntryVersion++;
+          _myLeaveSection =
+              result.kind == NotificationTapKind.employeeLeaveApprovals
+              ? LeaveSection.approvals
+              : LeaveSection.requests;
+        });
+        DashboardContentNavigator.showHome(_contentNavKey);
+        break;
+      case NotificationTapKind.none:
       case NotificationTapKind.employeeMyAttendance:
         break;
     }
@@ -604,6 +695,11 @@ class _AdminDashboardState extends State<AdminDashboard>
   }
 
   void _onMenuSelected(AdminMenu menu) {
+    if (menu == AdminMenu.dtr && !_canAccessDtr) {
+      _loadDtrAccess();
+      _closeUnavailableDtr();
+      return;
+    }
     if (menu == AdminMenu.createAccount && _canCreateAccount != true) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -720,7 +816,9 @@ class _AdminDashboardState extends State<AdminDashboard>
   }
 
   Widget _buildContent(String displayName) {
-    switch (_selectedMenu) {
+    switch (_selectedMenu == AdminMenu.dtr && !_canAccessDtr
+        ? AdminMenu.dashboard
+        : _selectedMenu) {
       case AdminMenu.dashboard:
         return _DashboardContent();
       case AdminMenu.myAttendance:
@@ -729,7 +827,15 @@ class _AdminDashboardState extends State<AdminDashboard>
           adminPortal: true,
         );
       case AdminMenu.myLeave:
-        return EmployeeLeaveScreen(onFileLeavePressed: _openMyLeaveRequestForm);
+        return AdminMyLeaveEntry(
+          key: ValueKey(_myLeaveEntryVersion),
+          initialSection: _myLeaveSection,
+          requestsContent: EmployeeLeaveScreen(
+            onFileLeavePressed: _openMyLeaveRequestForm,
+          ),
+        );
+      case AdminMenu.myLocator:
+        return const EmployeeLocatorSlipScreen();
       case AdminMenu.myProfile:
         return _settingsPanel();
       case AdminMenu.dtr:
@@ -816,6 +922,7 @@ class _AdminDashboardState extends State<AdminDashboard>
                 child: _Sidebar(
                   selectedMenu: _selectedMenu,
                   canCreateAccount: _canCreateAccount == true,
+                  canAccessDtr: _canAccessDtr,
                   avatarPath: avatarPath,
                   email: email,
                   displayName: displayName,
@@ -838,6 +945,7 @@ class _AdminDashboardState extends State<AdminDashboard>
                     showBrand: false,
                     selectedMenu: _selectedMenu,
                     canCreateAccount: _canCreateAccount == true,
+                    canAccessDtr: _canAccessDtr,
                     avatarPath: avatarPath,
                     email: email,
                     displayName: displayName,
@@ -940,6 +1048,36 @@ class _AdminDashboardState extends State<AdminDashboard>
   }
 }
 
+/// Personal filing remains available independently of DTR management grants.
+class AdminPersonalPortalSection extends StatelessWidget {
+  const AdminPersonalPortalSection({
+    super.key,
+    required this.selectedMenu,
+    required this.onTap,
+  });
+  final AdminMenu selectedMenu;
+  final ValueChanged<AdminMenu> onTap;
+
+  @override
+  Widget build(BuildContext context) => Column(
+    mainAxisSize: MainAxisSize.min,
+    children: [
+      const DashboardSidebarSectionLabel('MY PORTAL'),
+      for (final item in const [
+        (AdminMenu.myAttendance, 'My Attendance', Icons.schedule_outlined),
+        (AdminMenu.myLeave, 'My Leave', Icons.event_note_outlined),
+        (AdminMenu.myLocator, 'My Locator', Icons.location_on_outlined),
+      ])
+        DashboardSidebarNavTile(
+          icon: item.$3,
+          label: item.$2,
+          selected: selectedMenu == item.$1,
+          onTap: () => onTap(item.$1),
+        ),
+    ],
+  );
+}
+
 class AdminSystemAdministrationSection extends StatelessWidget {
   const AdminSystemAdministrationSection({
     super.key,
@@ -971,10 +1109,47 @@ class AdminSystemAdministrationSection extends StatelessWidget {
   }
 }
 
+bool hasAdminDtrAccess({
+  required bool canViewReports,
+  required bool canManage,
+  required Map<String, bool> featureAccess,
+}) =>
+    canViewReports ||
+    canManage ||
+    const [
+      'employees_allowed',
+      'leave_allowed',
+      'approvals_allowed',
+      'locator_allowed',
+    ].any((field) => featureAccess[field] == true);
+
+class AdminDtrNavigationTile extends StatelessWidget {
+  const AdminDtrNavigationTile({
+    super.key,
+    required this.canAccessDtr,
+    required this.selectedMenu,
+    required this.onTap,
+  });
+  final bool canAccessDtr;
+  final AdminMenu selectedMenu;
+  final ValueChanged<AdminMenu> onTap;
+
+  @override
+  Widget build(BuildContext context) => canAccessDtr
+      ? DashboardSidebarNavTile(
+          icon: Icons.access_time_outlined,
+          label: 'DTR',
+          selected: selectedMenu == AdminMenu.dtr,
+          onTap: () => onTap(AdminMenu.dtr),
+        )
+      : const SizedBox.shrink();
+}
+
 class _Sidebar extends StatelessWidget {
   const _Sidebar({
     required this.selectedMenu,
     required this.canCreateAccount,
+    required this.canAccessDtr,
     this.avatarPath,
     required this.email,
     required this.displayName,
@@ -986,6 +1161,7 @@ class _Sidebar extends StatelessWidget {
 
   final AdminMenu selectedMenu;
   final bool canCreateAccount;
+  final bool canAccessDtr;
   final String? avatarPath;
   final String email;
   final String displayName;
@@ -1019,19 +1195,7 @@ class _Sidebar extends StatelessWidget {
               color: AppTheme.dashHairlineOf(context),
             ),
           ),
-        DashboardSidebarSectionLabel('MY PORTAL'),
-        DashboardSidebarNavTile(
-          icon: Icons.schedule_outlined,
-          label: 'My Attendance',
-          selected: selectedMenu == AdminMenu.myAttendance,
-          onTap: () => onTap(AdminMenu.myAttendance),
-        ),
-        DashboardSidebarNavTile(
-          icon: Icons.event_note_outlined,
-          label: 'My Leave',
-          selected: selectedMenu == AdminMenu.myLeave,
-          onTap: () => onTap(AdminMenu.myLeave),
-        ),
+        AdminPersonalPortalSection(selectedMenu: selectedMenu, onTap: onTap),
         DashboardSidebarSectionLabel('MANAGEMENT'),
         DashboardSidebarNavTile(
           icon: Icons.how_to_reg_outlined,
@@ -1045,11 +1209,10 @@ class _Sidebar extends StatelessWidget {
           selected: selectedMenu == AdminMenu.ld,
           onTap: () => onTap(AdminMenu.ld),
         ),
-        DashboardSidebarNavTile(
-          icon: Icons.access_time_outlined,
-          label: 'DTR',
-          selected: selectedMenu == AdminMenu.dtr,
-          onTap: () => onTap(AdminMenu.dtr),
+        AdminDtrNavigationTile(
+          canAccessDtr: canAccessDtr,
+          selectedMenu: selectedMenu,
+          onTap: onTap,
         ),
         DashboardSidebarNavTile(
           icon: Icons.folder_outlined,
@@ -1100,7 +1263,10 @@ class _Sidebar extends StatelessWidget {
           ),
           child: DashboardSidebarProfileCard(
             displayName: displayName,
-            subtitle: email.isNotEmpty ? email : 'System Administrator',
+            subtitle: context.select<AuthProvider, String>((auth) {
+              final position = auth.user?.positionName?.trim() ?? '';
+              return position.isNotEmpty ? position : "No position assigned";
+            }),
             avatarPath: avatarPath,
           ),
         ),
@@ -1731,7 +1897,7 @@ class _DtrContentState extends State<_DtrContent> {
   /// 5 = Department, 6 = Position, 7 = Shift, 8 = Leave Management,
   /// 9–10 = Holiday / Policy via [_ManageContent], 11 = Biometric Devices,
   /// 12 = Locator Slip Management, 13 = Weekly Schedule,
-  /// 14 = Approvals & Signatories, 15 = DTR Corrections
+  /// 14 = Approvals & Signatories
   int _dtrSectionIndex = 0;
   final Map<int, _DtrFeatureCacheEntry> _featureCache = {};
   int _featureCacheClock = 0;
@@ -1747,7 +1913,6 @@ class _DtrContentState extends State<_DtrContent> {
       8: 'leave_allowed',
       12: 'locator_allowed',
       14: 'approvals_allowed',
-      15: 'corrections_allowed',
     }.entries) {
       if (oldWidget.featureAccess[entry.value] !=
           widget.featureAccess[entry.value]) {
@@ -1760,6 +1925,9 @@ class _DtrContentState extends State<_DtrContent> {
     }
     if (oldWidget.canCreateAccount != widget.canCreateAccount) {
       _featureCache.remove(3);
+      if (!widget.canCreateAccount && _dtrSectionIndex == 3) {
+        _dtrSectionIndex = 0;
+      }
     }
     if (oldWidget.canViewReports && !widget.canViewReports) {
       _featureCache.remove(2);
@@ -1800,7 +1968,6 @@ class _DtrContentState extends State<_DtrContent> {
       8: 'leave_allowed',
       12: 'locator_allowed',
       14: 'approvals_allowed',
-      15: 'corrections_allowed',
     };
     if (features.containsKey(index) &&
         widget.featureAccess[features[index]] != true) {
@@ -1824,104 +1991,10 @@ class _DtrContentState extends State<_DtrContent> {
   bool get _isInWorkforceSetup =>
       _workforceSetupSections.contains(_dtrSectionIndex);
 
-  String _workforceSetupLabel(int index) => switch (index) {
-    4 => 'Assignments',
-    5 => 'Departments',
-    6 => 'Positions',
-    7 => 'Shifts',
-    13 => 'Weekly Schedule',
-    9 => 'Holidays',
-    10 => 'Attendance Policies',
-    _ => 'Workforce Setup',
-  };
-
-  IconData _workforceSetupIcon(int index) => switch (index) {
-    4 => Icons.assignment_rounded,
-    5 => Icons.business_rounded,
-    6 => Icons.work_rounded,
-    7 => Icons.access_time_rounded,
-    13 => Icons.calendar_view_week_rounded,
-    9 => Icons.calendar_today_rounded,
-    10 => Icons.policy_rounded,
-    _ => Icons.settings_rounded,
-  };
-
-  Widget _buildWorkforceSetupNavigation() {
-    final borderColor = AppTheme.dashHairlineOf(context);
-    final panelColor = AppTheme.dashPanelOf(context);
-    final textColor = AppTheme.dashTextPrimaryOf(context);
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          'Workforce Setup',
-          style: TextStyle(
-            color: textColor,
-            fontSize: 20,
-            fontWeight: FontWeight.w700,
-          ),
-        ),
-        const SizedBox(height: 12),
-        DecoratedBox(
-          decoration: BoxDecoration(
-            color: panelColor,
-            border: Border.all(color: borderColor),
-            borderRadius: BorderRadius.circular(8),
-          ),
-          child: SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: Row(
-              children: [
-                for (final index in _workforceSetupSections)
-                  _buildWorkforceSetupTab(index),
-              ],
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildWorkforceSetupTab(int index) {
-    final selected = _dtrSectionIndex == index;
-    final foreground = selected
-        ? Colors.white
-        : AppTheme.dashTextSecondaryOf(context);
-
-    return Semantics(
-      button: true,
-      selected: selected,
-      child: Material(
-        color: selected ? AppTheme.primaryNavy : Colors.transparent,
-        child: InkWell(
-          onTap: () => _openDtrSection(index),
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(minWidth: 148, minHeight: 46),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(_workforceSetupIcon(index), size: 18, color: foreground),
-                  const SizedBox(width: 8),
-                  Text(
-                    _workforceSetupLabel(index),
-                    style: TextStyle(
-                      color: foreground,
-                      fontSize: 14,
-                      fontWeight: selected ? FontWeight.w700 : FontWeight.w600,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
+  Widget _buildWorkforceSetupNavigation() => WorkforceSetupNavigation(
+    selectedIndex: _dtrSectionIndex,
+    onSelected: _openDtrSection,
+  );
 
   Widget _buildDtrFeature(int index) {
     if (index == 1) return DtrMain(section: DtrSection.timeLogs);
@@ -1931,7 +2004,6 @@ class _DtrContentState extends State<_DtrContent> {
     if (index == 12) return const AdminLocatorManagementScreen();
     if (index == 13) return const ManageWeeklySchedule();
     if (index == 14) return const ApprovalsSignatoriesPage();
-    if (index == 15) return const AdminDtrCorrectionsPage();
     return _ManageContent(
       subIndex: index - 3,
       canCreateAccount: widget.canCreateAccount,
@@ -2061,14 +2133,6 @@ class _DtrContentState extends State<_DtrContent> {
                             'Manage and correct daily time-in/out records. Add, edit, or delete entries.',
                         icon: Icons.schedule_rounded,
                         onTap: () => _openDtrSection(1),
-                      ),
-                    if (widget.featureAccess['corrections_allowed'] == true)
-                      FeatureCard(
-                        title: 'DTR Corrections',
-                        subtitle:
-                            'Review employee attendance correction requests and decisions.',
-                        icon: Icons.fact_check_outlined,
-                        onTap: () => _openDtrSection(15),
                       ),
                     if (widget.canViewReports)
                       FeatureCard(
@@ -2470,63 +2534,13 @@ class _LdFormsSectionState extends State<_LdFormsSection> {
               ),
             ],
           ),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    colors: [
-                      AppTheme.primaryNavy.withValues(alpha: 0.16),
-                      AppTheme.letterheadNavy.withValues(alpha: 0.08),
-                    ],
-                  ),
-                  borderRadius: BorderRadius.circular(14),
-                  border: Border.all(
-                    color: AppTheme.primaryNavy.withValues(alpha: 0.14),
-                  ),
-                ),
-                child: const Icon(
-                  Icons.description_rounded,
-                  color: AppTheme.primaryNavy,
-                  size: 26,
-                ),
-              ),
-              const SizedBox(width: 16),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Forms',
-                      style: TextStyle(
-                        color: AppTheme.dashTextPrimaryOf(context),
-                        fontSize: 20,
-                        fontWeight: FontWeight.w800,
-                        letterSpacing: -0.2,
-                      ),
-                    ),
-                    const SizedBox(height: 6),
-                    Text(
-                      'Select a form or set a print background.',
-                      style: TextStyle(
-                        color: AppTheme.dashTextSecondaryOf(context),
-                        fontSize: 13.5,
-                        height: 1.4,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
+          child: FormsHubHeader(
+            isNarrow: isNarrow,
+            onPrintBackground: () =>
+                setState(() => _showPrintBackground = true),
           ),
         ),
         const SizedBox(height: 20),
-        FormsPrintBackgroundEntry(
-          onOpen: () => setState(() => _showPrintBackground = true),
-        ),
-        const SizedBox(height: 16),
         _formGrid(),
       ],
     );

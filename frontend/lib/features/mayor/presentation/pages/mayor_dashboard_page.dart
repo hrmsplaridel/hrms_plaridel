@@ -13,29 +13,13 @@ import 'package:hrms_plaridel/shared/widgets/dashboard_header_actions.dart';
 import 'package:hrms_plaridel/shared/widgets/dashboard_mobile_bottom_nav.dart';
 import 'package:hrms_plaridel/shared/widgets/portal_sidebar_brand.dart';
 import 'package:hrms_plaridel/shared/widgets/admin_welcome_status_card.dart';
+import 'package:hrms_plaridel/shared/data/philippine_courses.dart';
 import 'package:hrms_plaridel/shared/models/philippine_address_data.dart';
+import 'package:hrms_plaridel/shared/widgets/searchable_dropdown_field.dart';
 import 'package:hrms_plaridel/features/mayor/data/mayor_endorsement_offices.dart';
 import 'package:hrms_plaridel/shared/utils/time_greeting.dart';
 import 'package:hrms_plaridel/shared/widgets/structured_address_fields.dart';
 import 'package:provider/provider.dart';
-
-const _kCourseOptions = <String>[
-  'Bachelor of Science in Information Technology',
-  'Bachelor of Science in Computer Science',
-  'Bachelor of Science in Civil Engineering',
-  'Bachelor of Science in Accountancy',
-  'Bachelor of Science in Business Administration',
-  'Bachelor of Science in Public Administration',
-  'Bachelor of Science in Nursing',
-  'Bachelor of Elementary Education',
-  'Bachelor of Secondary Education',
-  'Bachelor of Science in Psychology',
-  'Bachelor of Science in Criminology',
-  'Bachelor of Science in Hospitality Management',
-  'Bachelor of Science in Agriculture',
-  'Bachelor of Arts in Communication',
-  'Bachelor of Laws',
-];
 
 class MayorDashboardPage extends StatefulWidget {
   const MayorDashboardPage({super.key});
@@ -2466,23 +2450,17 @@ class _MayorEndorsementIntakeDialogState
   }
 
   Widget _buildCourseField() {
-    return Autocomplete<String>(
-      optionsBuilder: (text) {
-        final q = text.text.trim().toLowerCase();
-        if (q.isEmpty) return _kCourseOptions;
-        return _kCourseOptions.where((c) => c.toLowerCase().contains(q));
-      },
-      onSelected: (value) => _courseCtrl.text = value,
-      fieldViewBuilder: (context, textCtrl, focusNode, onSubmit) {
-        if (textCtrl.text != _courseCtrl.text) {
-          textCtrl.text = _courseCtrl.text;
-        }
-        return TextField(
-          controller: textCtrl,
-          focusNode: focusNode,
-          onChanged: (v) => _courseCtrl.text = v,
-          decoration: _dec('Course (searchable and typeable)'),
-        );
+    return SearchableDropdownField(
+      options: kPhilippineCourses,
+      value: _courseCtrl.text,
+      allowCustom: true,
+      searchText: philippineCourseSearchText,
+      textCapitalization: TextCapitalization.words,
+      decoration: _dec('Search or type a course'),
+      onChanged: (value) {
+        final next = value ?? '';
+        if (_courseCtrl.text == next) return;
+        _courseCtrl.text = next;
       },
     );
   }

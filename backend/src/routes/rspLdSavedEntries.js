@@ -11,7 +11,45 @@ const { requireAdmin } = require('../middleware/rbac');
 const {
   creatorOwnedSlotKeys,
   initializeCreatorSourceSignatures,
+  readApplicantsProfileSignatureLock,
+  annotateApplicantsProfileSignatureState,
 } = require('../services/docutrackerRspSignatureService');
+const {
+  APPLICANTS_PROFILE_TABLE,
+  LOCKED_CODE,
+  LOCKED_MESSAGE,
+} = require('../services/applicantsProfileSignatureLock');
+const { validateTurnAroundTimeCreate } = require('../services/rspTurnAroundTimeCreate');
+const { writeGovernanceAudit } = require('../services/docutrackerGovernanceAudit');
+const {
+  SELECTION_LINEUP_TABLE,
+  EDIT_EVENT: SELECTION_LINEUP_EDIT_EVENT,
+  EDIT_ENTITY: SELECTION_LINEUP_EDIT_ENTITY,
+  diffSelectionLineup,
+  signatureStateFromSlot: lineupSignatureStateFromSlot,
+  buildContentEditAudit: buildLineupContentEditAudit,
+  serializeEditHistoryRow: serializeLineupEditHistoryRow,
+} = require('../services/selectionLineupEditAudit');
+const {
+  COMPUTATION_OF_POINTS_TABLE,
+  EDIT_EVENT: COMPUTATION_EDIT_EVENT,
+  EDIT_ENTITY: COMPUTATION_EDIT_ENTITY,
+  diffComputationOfPoints,
+  signatureStateFromSlot: computationSignatureStateFromSlot,
+  shouldRecordContentEdit,
+  buildContentEditAudit: buildComputationContentEditAudit,
+  serializeEditHistoryRow: serializeComputationEditHistoryRow,
+} = require('../services/computationOfPointsEditAudit');
+const {
+  TURN_AROUND_TIME_TABLE,
+  EDIT_EVENT: TAT_EDIT_EVENT,
+  EDIT_ENTITY: TAT_EDIT_ENTITY,
+  diffTurnAroundTime,
+  planTatRevision,
+  shouldRecordTatEdit,
+  buildContentEditAudit: buildTatContentEditAudit,
+  serializeEditHistoryRow: serializeTatEditHistoryRow,
+} = require('../services/turnAroundTimeEditAudit');
 
 const router = express.Router();
 
@@ -583,6 +621,66 @@ async function ensureRspLdSavedEntryTables() {
 
 router.use(authMiddleware, requireAdmin);
 
+const EDIT_HISTORY_FORMS = Object.freeze({
+  [SELECTION_LINEUP_TABLE]: Object.freeze({
+    entity: SELECTION_LINEUP_EDIT_ENTITY,
+    event: SELECTION_LINEUP_EDIT_EVENT,
+    serialize: serializeLineupEditHistoryRow,
+  }),
+  [COMPUTATION_OF_POINTS_TABLE]: Object.freeze({
+    entity: COMPUTATION_EDIT_ENTITY,
+    event: COMPUTATION_EDIT_EVENT,
+    serialize: serializeComputationEditHistoryRow,
+  }),
+  [TURN_AROUND_TIME_TABLE]: Object.freeze({
+    entity: TAT_EDIT_ENTITY,
+    event: TAT_EDIT_EVENT,
+    serialize: serializeTatEditHistoryRow,
+  }),
+});
+
+router.get('/:table/:id/edit-history', async (req, res) => {
+  const { table, id } = req.params;
+  const historyForm = EDIT_HISTORY_FORMS[table];
+  if (!historyForm) {
+    return res.status(404).json({ error: 'Edit history is not available for this form' });
+  }
+  if (!UUID_RE.test(id)) {
+    return res.status(400).json({ error: 'Invalid id' });
+  }
+  try {
+    await ensureRspLdSavedEntryTables();
+    const found = await pool.query(
+      `SELECT id FROM ${quoteIdent(table)} WHERE id = $1`,
+      [id],
+    );
+    if (!found.rowCount) return res.status(404).json({ error: 'Not found' });
+    const history = await pool.query(
+      `SELECT a.id, a.created_at, a.actor_id, a.before_state, a.after_state, a.reason,
+              u.full_name AS actor_name
+       FROM docutracker_governance_audit a
+       LEFT JOIN users u ON u.id = a.actor_id
+       WHERE a.entity_type = $1
+         AND a.entity_id = $2
+         AND a.event_type = $3
+       ORDER BY a.created_at DESC`,
+      [historyForm.entity, id, historyForm.event],
+    );
+    return res.json({
+      ok: true,
+      edits: history.rows.map(historyForm.serialize),
+    });
+  } catch (err) {
+    if (err.code === '42P01' || err.code === '42703') {
+      return res.status(503).json({
+        error: 'Edit history is not available until the governance audit table is installed.',
+      });
+    }
+    console.error('[rspLdSavedEntries GET edit-history]', err);
+    return res.status(500).json({ error: 'Failed to load edit history' });
+  }
+});
+
 router.get('/:table/:id', async (req, res) => {
   const { table, id } = req.params;
   if (!isAllowedTable(table)) {
@@ -597,6 +695,10 @@ router.get('/:table/:id', async (req, res) => {
     const result = await pool.query(q, [id]);
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Not found' });
+    }
+    if (table === APPLICANTS_PROFILE_TABLE) {
+      const [annotated] = await annotateApplicantsProfileSignatureState(pool, result.rows);
+      return res.json(annotated);
     }
     return res.json(result.rows[0]);
   } catch (err) {
@@ -619,6 +721,9 @@ router.get('/:table', async (req, res) => {
     await ensureRspLdSavedEntryTables();
     const q = `SELECT * FROM ${quoteIdent(table)} ORDER BY created_at DESC`;
     const result = await pool.query(q);
+    if (table === APPLICANTS_PROFILE_TABLE) {
+      return res.json(await annotateApplicantsProfileSignatureState(pool, result.rows));
+    }
     return res.json(result.rows);
   } catch (err) {
     if (err.code === '42P01') {
@@ -639,6 +744,18 @@ router.post('/:table', async (req, res) => {
   let payload = pickPayload(table, req.body);
   delete payload.id;
   payload = stringifyJsonbForPg(table, payload);
+  if (table === 'turn_around_time_entries') {
+    const check = validateTurnAroundTimeCreate(payload);
+    if (!check.ok) {
+      return res.status(check.status).json({
+        error: check.error,
+        code: check.code,
+        fields: check.fields,
+      });
+    }
+    payload.position = check.position;
+    payload.office = check.office;
+  }
   if (Object.keys(payload).length === 0) {
     return res.status(400).json({ error: 'Empty body' });
   }
@@ -667,8 +784,11 @@ router.post('/:table', async (req, res) => {
       table,
       result.rows[0].id
     );
+    const saved = table === APPLICANTS_PROFILE_TABLE
+      ? (await annotateApplicantsProfileSignatureState(client, result.rows))[0]
+      : result.rows[0];
     await client.query('COMMIT');
-    return res.status(201).json(result.rows[0]);
+    return res.status(201).json(saved);
   } catch (err) {
     if (client) {
       try { await client.query('ROLLBACK'); } catch (_) {}
@@ -718,6 +838,148 @@ router.put('/:table/:id', async (req, res) => {
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
+      let lineupAudit = null;
+      if (table === SELECTION_LINEUP_TABLE) {
+        const current = await client.query(
+          `SELECT * FROM ${quoteIdent(table)} WHERE id = $1::uuid FOR UPDATE`,
+          [id],
+        );
+        if (!current.rowCount) {
+          await client.query('ROLLBACK');
+          return res.status(404).json({ error: 'Not found' });
+        }
+        const diff = diffSelectionLineup(current.rows[0], payload);
+        if (diff) {
+          let signature = lineupSignatureStateFromSlot(null);
+          try {
+            const slot = await client.query(
+              `SELECT assigned_signer_id, signature_asset_id, signed_at, signer_name_snapshot
+               FROM docutracker_rsp_source_signatures
+               WHERE source_table = $1 AND source_record_id = $2::uuid AND slot_key = 'prepared_by'`,
+              [SELECTION_LINEUP_TABLE, id],
+            );
+            signature = lineupSignatureStateFromSlot(slot.rows[0]);
+          } catch (slotErr) {
+            if (slotErr.code !== '42P01' && slotErr.code !== '42703') throw slotErr;
+          }
+          const actor = await client.query(
+            `SELECT full_name FROM users WHERE id = $1::uuid`,
+            [req.user.id],
+          );
+          lineupAudit = buildLineupContentEditAudit({
+            recordId: id,
+            actorId: req.user.id,
+            actorName: actor.rows[0]?.full_name || null,
+            diff,
+            signature,
+          });
+        }
+      }
+      let computationAudit = null;
+      if (table === COMPUTATION_OF_POINTS_TABLE) {
+        const current = await client.query(
+          `SELECT * FROM ${quoteIdent(table)} WHERE id = $1::uuid FOR UPDATE`,
+          [id],
+        );
+        if (!current.rowCount) {
+          await client.query('ROLLBACK');
+          return res.status(404).json({ error: 'Not found' });
+        }
+        const diff = diffComputationOfPoints(current.rows[0], payload);
+        if (diff) {
+          let signature = computationSignatureStateFromSlot(null);
+          try {
+            const slot = await client.query(
+              `SELECT assigned_signer_id, signature_asset_id, signed_at, signer_name_snapshot
+               FROM docutracker_rsp_source_signatures
+               WHERE source_table = $1 AND source_record_id = $2::uuid AND slot_key = 'prepared_by'`,
+              [COMPUTATION_OF_POINTS_TABLE, id],
+            );
+            signature = computationSignatureStateFromSlot(slot.rows[0]);
+          } catch (slotErr) {
+            if (slotErr.code !== '42P01' && slotErr.code !== '42703') throw slotErr;
+          }
+          const actor = await client.query(
+            `SELECT full_name FROM users WHERE id = $1::uuid`,
+            [req.user.id],
+          );
+          computationAudit = buildComputationContentEditAudit({
+            recordId: id,
+            actorId: req.user.id,
+            actorName: actor.rows[0]?.full_name || null,
+            diff,
+            signature,
+          });
+        }
+      }
+      let tatAudit = null;
+      if (table === TURN_AROUND_TIME_TABLE) {
+        const current = await client.query(
+          `SELECT * FROM ${quoteIdent(table)} WHERE id = $1::uuid FOR UPDATE`,
+          [id],
+        );
+        if (!current.rowCount) {
+          await client.query('ROLLBACK');
+          return res.status(404).json({ error: 'Not found' });
+        }
+        const diff = diffTurnAroundTime(current.rows[0], payload);
+        let signatureRows = [];
+        if (diff) {
+          try {
+            const slots = await client.query(
+              `SELECT slot_key, assigned_signer_id, signed_by, signer_name_snapshot,
+                      signed_at, signature_asset_id
+               FROM docutracker_rsp_source_signatures
+               WHERE source_table = $1 AND source_record_id = $2::uuid
+               ORDER BY slot_key
+               FOR UPDATE`,
+              [TURN_AROUND_TIME_TABLE, id],
+            );
+            signatureRows = slots.rows;
+          } catch (slotErr) {
+            if (slotErr.code !== '42P01' && slotErr.code !== '42703') throw slotErr;
+          }
+          const plan = planTatRevision({ diff, signatureRows });
+          if (plan.clearSlotKeys.length > 0) {
+            await client.query(
+              `UPDATE docutracker_rsp_source_signatures
+               SET signature_asset_id = NULL,
+                   signed_by = NULL,
+                   signer_name_snapshot = NULL,
+                   signed_at = NULL,
+                   updated_at = now()
+               WHERE source_table = $1
+                 AND source_record_id = $2::uuid
+                 AND slot_key = ANY($3::text[])`,
+              [TURN_AROUND_TIME_TABLE, id, plan.clearSlotKeys],
+            );
+          }
+          const actor = await client.query(
+            `SELECT full_name FROM users WHERE id = $1::uuid`,
+            [req.user.id],
+          );
+          tatAudit = buildTatContentEditAudit({
+            recordId: id,
+            actorId: req.user.id,
+            actorName: actor.rows[0]?.full_name || null,
+            diff,
+            plan,
+          });
+        }
+      }
+      // Lock the profile row before reading signatures so a final signature
+      // cannot commit between this check and the update.
+      if (table === APPLICANTS_PROFILE_TABLE) {
+        const lock = await readApplicantsProfileSignatureLock(client, id);
+        if (!lock.found) {
+          await client.query('ROLLBACK');
+          return res.status(404).json({ error: 'Not found' });
+        }
+        if (lock.locked) {
+          await client.query('ROLLBACK');
+          return res.status(409).json({ error: LOCKED_MESSAGE, code: LOCKED_CODE });
+        }
+      }
       const q = `UPDATE ${quoteIdent(table)} SET ${setClause} WHERE id = $${values.length} RETURNING *`;
       const result = await client.query(q, values);
       if (result.rows.length === 0) {
@@ -726,8 +988,20 @@ router.put('/:table/:id', async (req, res) => {
       }
       // Fill any still-missing automatic signature slots (does not override existing).
       await initializeCreatorSourceSignatures(client, req.user, table, id);
+      const saved = table === APPLICANTS_PROFILE_TABLE
+        ? (await annotateApplicantsProfileSignatureState(client, result.rows))[0]
+        : result.rows[0];
+      if (lineupAudit) {
+        await writeGovernanceAudit(client, lineupAudit);
+      }
+      if (shouldRecordContentEdit(computationAudit, result.rowCount)) {
+        await writeGovernanceAudit(client, computationAudit);
+      }
+      if (shouldRecordTatEdit(tatAudit, result.rowCount)) {
+        await writeGovernanceAudit(client, tatAudit);
+      }
       await client.query('COMMIT');
-      return res.json(result.rows[0]);
+      return res.json(saved);
     } catch (inner) {
       try { await client.query('ROLLBACK'); } catch (_) {}
       throw inner;
@@ -756,8 +1030,115 @@ router.delete('/:table/:id', async (req, res) => {
   if (!UUID_RE.test(id)) {
     return res.status(400).json({ error: 'Invalid id' });
   }
+  let client;
   try {
     await ensureRspLdSavedEntryTables();
+    if (table === APPLICANTS_PROFILE_TABLE) {
+      client = await pool.connect();
+      await client.query('BEGIN');
+      const lock = await readApplicantsProfileSignatureLock(client, id);
+      if (!lock.found) {
+        await client.query('ROLLBACK');
+        return res.status(404).json({ error: 'Not found' });
+      }
+      if (lock.locked) {
+        await client.query('ROLLBACK');
+        return res.status(409).json({ error: LOCKED_MESSAGE, code: LOCKED_CODE });
+      }
+      const result = await client.query(
+        `DELETE FROM ${quoteIdent(table)} WHERE id = $1 RETURNING id`,
+        [id]
+      );
+      await client.query('COMMIT');
+      if (result.rows.length === 0) {
+        return res.status(404).json({ error: 'Not found' });
+      }
+      return res.status(204).send();
+    }
+    if (table === SELECTION_LINEUP_TABLE) {
+      client = await pool.connect();
+      await client.query('BEGIN');
+      const current = await client.query(
+        `SELECT id FROM ${quoteIdent(table)} WHERE id = $1::uuid FOR UPDATE`,
+        [id],
+      );
+      if (!current.rowCount) {
+        await client.query('ROLLBACK');
+        return res.status(404).json({ error: 'Not found' });
+      }
+      try {
+        await client.query(
+          `DELETE FROM docutracker_rsp_source_signatures
+           WHERE source_table = $1 AND source_record_id = $2::uuid`,
+          [SELECTION_LINEUP_TABLE, id],
+        );
+      } catch (slotErr) {
+        if (slotErr.code !== '42P01' && slotErr.code !== '42703') throw slotErr;
+      }
+      const result = await client.query(
+        `DELETE FROM ${quoteIdent(table)} WHERE id = $1 RETURNING id`,
+        [id],
+      );
+      await client.query('COMMIT');
+      if (!result.rowCount) return res.status(404).json({ error: 'Not found' });
+      return res.status(204).send();
+    }
+    if (table === COMPUTATION_OF_POINTS_TABLE) {
+      client = await pool.connect();
+      await client.query('BEGIN');
+      const current = await client.query(
+        `SELECT id FROM ${quoteIdent(table)} WHERE id = $1::uuid FOR UPDATE`,
+        [id],
+      );
+      if (!current.rowCount) {
+        await client.query('ROLLBACK');
+        return res.status(404).json({ error: 'Not found' });
+      }
+      try {
+        await client.query(
+          `DELETE FROM docutracker_rsp_source_signatures
+           WHERE source_table = $1 AND source_record_id = $2::uuid`,
+          [COMPUTATION_OF_POINTS_TABLE, id],
+        );
+      } catch (slotErr) {
+        if (slotErr.code !== '42P01' && slotErr.code !== '42703') throw slotErr;
+      }
+      const result = await client.query(
+        `DELETE FROM ${quoteIdent(table)} WHERE id = $1 RETURNING id`,
+        [id],
+      );
+      await client.query('COMMIT');
+      if (!result.rowCount) return res.status(404).json({ error: 'Not found' });
+      return res.status(204).send();
+    }
+    if (table === TURN_AROUND_TIME_TABLE) {
+      client = await pool.connect();
+      await client.query('BEGIN');
+      const current = await client.query(
+        `SELECT id FROM ${quoteIdent(table)} WHERE id = $1::uuid FOR UPDATE`,
+        [id],
+      );
+      if (!current.rowCount) {
+        await client.query('ROLLBACK');
+        return res.status(404).json({ error: 'Not found' });
+      }
+      try {
+        await client.query(
+          `DELETE FROM docutracker_rsp_source_signatures
+           WHERE source_table = $1 AND source_record_id = $2::uuid`,
+          [TURN_AROUND_TIME_TABLE, id],
+        );
+      } catch (slotErr) {
+        if (slotErr.code !== '42P01' && slotErr.code !== '42703') throw slotErr;
+      }
+      const result = await client.query(
+        `DELETE FROM ${quoteIdent(table)} WHERE id = $1 RETURNING id`,
+        [id],
+      );
+      await client.query('COMMIT');
+      if (!result.rowCount) return res.status(404).json({ error: 'Not found' });
+      return res.status(204).send();
+    }
     const q = `DELETE FROM ${quoteIdent(table)} WHERE id = $1 RETURNING id`;
     const result = await pool.query(q, [id]);
     if (result.rows.length === 0) {
@@ -765,6 +1146,9 @@ router.delete('/:table/:id', async (req, res) => {
     }
     return res.status(204).send();
   } catch (err) {
+    if (client) {
+      try { await client.query('ROLLBACK'); } catch (_) {}
+    }
     if (err.code === '42P01') {
       return res.status(503).json({
         error: 'Form table not found in database. Run init-schema.sql.',
@@ -772,6 +1156,8 @@ router.delete('/:table/:id', async (req, res) => {
     }
     console.error('[rspLdSavedEntries DELETE]', err);
     return res.status(500).json({ error: 'Failed to delete record' });
+  } finally {
+    client?.release();
   }
 });
 

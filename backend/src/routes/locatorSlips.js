@@ -1,3 +1,4 @@
+const { finalQueueVisibilitySql } = require('../services/approvalStageSeparation');
 const express = require('express');
 const fs = require('fs');
 const path = require('path');
@@ -37,6 +38,7 @@ const {
   validateLocatorAttachmentForReview,
   validateLocatorRequiredFields,
   validateLocatorWorkingDayForEmployee,
+  resolveLocatorShiftCoverage,
 } = require('../services/locatorFilingRules');
 const {
   findLocatorRequestConflicts,
@@ -801,6 +803,8 @@ const locatorSubmissionService = createLocatorSubmissionService({
   assertSubmissionReviewer: (db, applicantId) => assertLeaveSubmissionReviewer(db, applicantId, 'locator'),
 });
 
+router.use('/print', protect, require('./locatorPrintTemplates'));
+
 router.get('/final-reviewer/me', protect, requireAdminOrHr, async (req, res) => {
   try {
     const reviewers = await resolveFinalLeaveReviewers(pool);
@@ -841,6 +845,17 @@ router.get('/context', protect, (_req, res) => {
   res.json({ official_date: currentHrmsDate() });
 });
 
+router.get('/shift-coverage', protect, async (req, res) => {
+  const date = parseLocatorDateOnly(req.query.slip_date);
+  if (!date) return res.status(400).json({error:'Invalid slip_date'});
+  try {
+    res.json(await resolveLocatorShiftCoverage(pool, req.user.id, date));
+  } catch (err) {
+    console.error('[locator shift coverage]', err);
+    res.status(500).json({error:'Could not load the shift for the selected date.'});
+  }
+});
+
 // GET /api/locator-slips/department-head/check
 router.get('/department-head/check', protect, async (req, res) => {
   const userId = req.user?.id;
@@ -874,11 +889,23 @@ router.get('/department-head/check', protect, async (req, res) => {
        LIMIT 1`,
       [userId]
     );
-    const assignedDepartmentId = assigned.rows[0]?.department_id || null;
-    const assignedDepartmentName = assigned.rows[0]?.department_name || null;
+    const activeBackup = await client.query(
+      `SELECT b.department_id, d.name AS department_name
+       FROM department_reviewer_backups b
+       JOIN users u ON u.id = b.employee_id
+       LEFT JOIN departments d ON d.id = b.department_id
+       WHERE b.employee_id = $1::uuid AND b.is_active = true AND u.is_active = true
+         AND b.effective_from <= $2::date
+         AND (b.effective_to IS NULL OR b.effective_to >= $2::date)
+       ORDER BY b.backup_rank, b.id LIMIT 1`,
+      [userId, currentHrmsDate()]
+    );
+    const assignedDepartment = assigned.rows[0] || activeBackup.rows[0];
+    const assignedDepartmentId = assignedDepartment?.department_id || null;
+    const assignedDepartmentName = assignedDepartment?.department_name || null;
     const reviewedDepartmentId = reviewed.rows[0]?.department_id || null;
     const reviewedDepartmentName = reviewed.rows[0]?.department_name || null;
-    const canReviewPending = current.isDeptHead || assigned.rows.length > 0;
+    const canReviewPending = current.isDeptHead || Boolean(assignedDepartment);
     const hasReviewHistory = reviewed.rows.length > 0;
     res.json({
       // Keep the legacy field while clients migrate to the explicit capabilities.
@@ -1294,7 +1321,8 @@ router.post(
       const workingDay = await validateLocatorWorkingDayForEmployee(
         client,
         employeeId,
-        parseLocatorDateOnly(slipDate)
+        parseLocatorDateOnly(slipDate),
+        {amIn,amOut,pmIn,pmOut}
       );
       if (!workingDay.ok) {
         await client.query('ROLLBACK');
@@ -1615,7 +1643,8 @@ router.patch('/:id/resubmit', protect, async (req, res) => {
     const workingDayCheck = await validateLocatorWorkingDayForEmployee(
       client,
       userId,
-      parseLocatorDateOnly(correction.slipDate)
+      parseLocatorDateOnly(correction.slipDate),
+      correction
     );
     if (!workingDayCheck.ok) {
       await client.query('ROLLBACK');
@@ -2000,7 +2029,8 @@ router.get('/department-head', protect, async (req, res) => {
        LEFT JOIN users dh ON dh.id = ls.dept_head_reviewer_id
        LEFT JOIN users hr ON hr.id = ls.hr_reviewer_id
        LEFT JOIN locator_request_types lrt ON lrt.code = ls.request_type
-       WHERE (
+       WHERE ls.employee_id <> $1::uuid
+         AND (
            (
              ls.status = 'pending_department_head'
              AND (
@@ -2180,6 +2210,7 @@ router.patch('/:id/department-head-approve', protect, async (req, res) => {
     const mapped = await fetchLocatorSlipDetails(pool, id);
     notifySafe(() =>
       locatorNotifications.notifyDepartmentHeadApprovedForHr(pool, {
+        employeeUserId: mapped.employee_id,
         slipId: id,
         employeeName: mapped.employee_name,
         slipDate: mapped.slip_date,
@@ -2446,6 +2477,7 @@ router.get('/admin', protect, requireAdminOrHr, requireDtrFeatureIfAdmin('locato
       from,
       to,
       search,
+      req.user?.id,
     ];
     const filterSql = `
       FROM locator_slips ls
@@ -2457,6 +2489,8 @@ router.get('/admin', protect, requireAdminOrHr, requireDtrFeatureIfAdmin('locato
       LEFT JOIN users corrector ON corrector.id = ls.retroactive_corrected_by
       LEFT JOIN users revoker ON revoker.id = ls.revoked_by
       WHERE ($1::text[] IS NULL OR ls.status = ANY($1::text[]))
+        AND ls.employee_id <> $8::uuid
+        AND ${finalQueueVisibilitySql('locator', 'ls', '$8::uuid')}
         AND (
           ls.status IN ('pending', 'pending_hr')
           OR ls.is_retroactive_correction = true
@@ -2510,15 +2544,16 @@ router.get('/admin', protect, requireAdminOrHr, requireDtrFeatureIfAdmin('locato
               lrt.coverage_mode AS request_type_coverage_mode
        ${filterSql}
        ORDER BY ls.updated_at DESC, ls.created_at DESC, ls.id DESC
-       LIMIT $8::integer OFFSET $9::integer`,
+       LIMIT $9::integer OFFSET $10::integer`,
         [...filterParams, pageSize, offset]
       ),
       pool.query(
         `SELECT DISTINCT d.id, d.name
          FROM locator_slips ls
          JOIN departments d ON d.id = ls.department_id
-         WHERE d.name IS NOT NULL AND btrim(d.name) <> ''
-         ORDER BY d.name`
+         WHERE ls.employee_id <> $1::uuid AND ${finalQueueVisibilitySql('locator', 'ls', '$1::uuid')} AND d.name IS NOT NULL AND btrim(d.name) <> ''
+         ORDER BY d.name`,
+        [req.user?.id]
       ),
       pool.query(
         `SELECT u.id,
@@ -2530,9 +2565,10 @@ router.get('/admin', protect, requireAdminOrHr, requireDtrFeatureIfAdmin('locato
                 ) AS department_ids
          FROM locator_slips ls
          JOIN users u ON u.id = ls.employee_id
-         WHERE u.full_name IS NOT NULL AND btrim(u.full_name) <> ''
+         WHERE ls.employee_id <> $1::uuid AND ${finalQueueVisibilitySql('locator', 'ls', '$1::uuid')} AND u.full_name IS NOT NULL AND btrim(u.full_name) <> ''
          GROUP BY u.id, u.full_name
-         ORDER BY u.full_name`
+         ORDER BY u.full_name`,
+        [req.user?.id]
       ),
     ]);
     res.json({
@@ -2597,7 +2633,7 @@ router.patch('/:id/return-for-correction', protect, requireAdminOrHr, requireDtr
         error: `Cannot return locator slip with status '${row.status}'`,
       });
     }
-    await assertFinalLeaveReviewer(client, row.employee_id, reviewerId, 'locator');
+    await assertFinalLeaveReviewer(client, row.employee_id, reviewerId, 'locator', id);
     const returnWindow = evaluateLocatorReturnWindow({
       slipDate: row.slip_date_text,
     });
@@ -2692,7 +2728,7 @@ router.patch('/:id/approve', protect, requireAdminOrHr, requireDtrFeatureIfAdmin
         error: `Cannot approve locator slip with status '${current.rows[0].status}'`,
       });
     }
-    await assertFinalLeaveReviewer(client, current.rows[0].employee_id, reviewerId, 'locator');
+    await assertFinalLeaveReviewer(client, current.rows[0].employee_id, reviewerId, 'locator', id);
     const attachmentError = locatorReviewAttachmentError(current.rows[0]);
     if (attachmentError) {
       await client.query('ROLLBACK');
@@ -2933,7 +2969,7 @@ router.patch('/:id/reject', protect, requireAdminOrHr, requireDtrFeatureIfAdmin(
         error: `Cannot reject locator slip with status '${current.rows[0].status}'`,
       });
     }
-    await assertFinalLeaveReviewer(client, current.rows[0].employee_id, reviewerId, 'locator');
+    await assertFinalLeaveReviewer(client, current.rows[0].employee_id, reviewerId, 'locator', id);
     await client.query(
       `UPDATE locator_slips
        SET status = 'rejected_by_hr',

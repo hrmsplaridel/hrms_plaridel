@@ -1,3 +1,5 @@
+import '../widgets/employment_type_field.dart';
+import '../widgets/employee_details_view.dart';
 import 'dart:async';
 
 import 'package:dio/dio.dart';
@@ -5,6 +7,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
+import 'package:hrms_plaridel/providers/auth_provider.dart';
 import 'package:shimmer/shimmer.dart';
 
 import 'package:hrms_plaridel/core/api/avatar_url.dart';
@@ -100,7 +103,11 @@ class _EmployeeProfile {
   final String? departmentName;
   final String? positionName;
 
-  String get roleDisplay => role == 'admin' ? 'Admin' : 'Employee';
+  String get roleDisplay => role == 'mayor'
+      ? 'Mayor'
+      : role == 'admin'
+      ? 'Admin'
+      : 'Employee';
 
   /// Current assignment from API (department · position), or em dash if none.
   String get assignmentDisplay {
@@ -1056,29 +1063,36 @@ class _ManageEmployeeState extends State<ManageEmployee> {
 
   @override
   Widget build(BuildContext context) {
-    final w = MediaQuery.of(context).size.width;
-    final isNarrow = w < 700;
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final width = constraints.maxWidth.isFinite
+            ? constraints.maxWidth
+            : MediaQuery.of(context).size.width;
+        final isNarrow = width < 900;
 
-    return CallbackShortcuts(
-      bindings: <ShortcutActivator, VoidCallback>{
-        const SingleActivator(
-          LogicalKeyboardKey.keyM,
-          control: true,
-          shift: true,
-        ): _toggleMultiSelectMode,
-        const SingleActivator(LogicalKeyboardKey.escape): _exitMultiSelectMode,
+        return CallbackShortcuts(
+          bindings: <ShortcutActivator, VoidCallback>{
+            const SingleActivator(
+              LogicalKeyboardKey.keyM,
+              control: true,
+              shift: true,
+            ): _toggleMultiSelectMode,
+            const SingleActivator(LogicalKeyboardKey.escape):
+                _exitMultiSelectMode,
+          },
+          child: Focus(
+            autofocus: true,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _buildEmployeesHeader(isNarrow: isNarrow),
+                const SizedBox(height: 20),
+                isNarrow ? _buildNarrowLayout() : _buildWideLayout(),
+              ],
+            ),
+          ),
+        );
       },
-      child: Focus(
-        autofocus: true,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            _buildEmployeesHeader(isNarrow: isNarrow),
-            const SizedBox(height: 20),
-            isNarrow ? _buildNarrowLayout() : _buildWideLayout(),
-          ],
-        ),
-      ),
     );
   }
 
@@ -1155,16 +1169,17 @@ class _ManageEmployeeState extends State<ManageEmployee> {
             .clamp(150.0, 220.0)
             .toDouble();
 
-        return Row(
-          crossAxisAlignment: CrossAxisAlignment.center,
+        return Wrap(
+          spacing: gap,
+          runSpacing: gap,
+          crossAxisAlignment: WrapCrossAlignment.center,
           children: [
             SizedBox(width: searchWidth, child: _buildSearchField()),
-            const SizedBox(width: gap),
             SizedBox(
               width: roleWidth,
               child: _buildDropdown(
                 _privilegeFilter,
-                ['All', 'Admin', 'Employee'],
+                ['All', 'Admin', 'Employee', 'Mayor'],
                 (v) {
                   setState(() {
                     _privilegeFilter = v ?? 'All';
@@ -1174,7 +1189,6 @@ class _ManageEmployeeState extends State<ManageEmployee> {
                 },
               ),
             ),
-            const SizedBox(width: gap),
             SizedBox(
               width: statusWidth,
               child: _buildDropdown(
@@ -1189,9 +1203,7 @@ class _ManageEmployeeState extends State<ManageEmployee> {
                 },
               ),
             ),
-            const SizedBox(width: gap),
             _buildDepartmentFilterDropdown(width: departmentWidth),
-            const SizedBox(width: gap),
             _buildBiometricDeviceFilterDropdown(width: deviceWidth),
           ],
         );
@@ -2265,6 +2277,19 @@ class _ManageEmployeeState extends State<ManageEmployee> {
                   ],
                 ),
               ),
+            ),
+          ],
+          if (hasSelection) ...[
+            const SizedBox(height: 12),
+            TextButton(
+              onPressed: () => openResponsiveRightSidePanel<void>(
+                context: context,
+                barrierLabel: 'Close employee details',
+                breakpoint: 900,
+                initialWidthFraction: 0.52,
+                builder: (_) => EmployeeDetailsView(employeeId: sel.id),
+              ),
+              child: const Text('View full details'),
             ),
           ],
           if (hasSelection && widget.onOpenAssignmentForEmployee != null) ...[

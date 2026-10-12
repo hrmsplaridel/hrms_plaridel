@@ -16,6 +16,46 @@ void main() {
     ApiClient.instance.init();
   });
 
+  for (final admin in [true, false]) {
+    test(
+      '${admin ? 'admin' : 'employee'} attendance retains matching rows when rate limited',
+      () async {
+        ApiClient.instance.dio.interceptors.clear();
+        ApiClient.instance.dio.httpClientAdapter = _QueuedAttendanceAdapter([
+          _attendanceResponseFor('2026-08-03'),
+          ResponseBody.fromString(
+            jsonEncode({'error': 'Too many requests. Wait 60 seconds.'}),
+            429,
+            headers: {
+              Headers.contentTypeHeader: [Headers.jsonContentType],
+            },
+          ),
+        ]);
+        final provider = DtrProvider();
+        addTearDown(provider.dispose);
+        provider.onAuthUserChanged('employee-a');
+        Future<void> load(bool force) => admin
+            ? provider.loadTimeRecordsForAdmin(
+                startDate: DateTime(2026, 8),
+                endDate: DateTime(2026, 8, 31),
+                userId: 'employee-a',
+                forceRefresh: force,
+              )
+            : provider.loadTimeRecordsForUser(
+                startDate: DateTime(2026, 8),
+                endDate: DateTime(2026, 8, 31),
+                forceRefresh: force,
+              );
+        await load(false);
+        expect(provider.timeRecords, hasLength(1));
+        await load(true);
+        expect(provider.timeRecords, hasLength(1));
+        expect(provider.error, contains('60 seconds'));
+        if (!admin) expect(provider.employeeAttendanceHasResult, isTrue);
+      },
+    );
+  }
+
   test('sign out clears attendance and filter state immediately', () async {
     ApiClient.instance.dio.httpClientAdapter = _StaticAttendanceAdapter();
     final provider = DtrProvider();

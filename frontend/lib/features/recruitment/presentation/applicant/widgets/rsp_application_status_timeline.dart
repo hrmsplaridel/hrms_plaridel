@@ -286,6 +286,9 @@ class RspApplicationStatusTimeline extends StatelessWidget {
         }
         return 'Under review. You will be notified when your documents are approved so you can take the exam.';
       case 'document_approved':
+        if (!application.assessmentUnlocked && !hasExamResult) {
+          return 'Approved. Complete the form HR assigns before Assessment.';
+        }
         return 'Approved. Continue to the exams via the Recruitment Application page.';
       case 'document_declined':
         return 'Your documents were not approved. Replace the PDFs and resubmit for HR review.';
@@ -305,6 +308,11 @@ class RspApplicationStatusTimeline extends StatelessWidget {
   _TimelineStepStatus _documentReviewStatus(String status, bool hasExamResult) {
     if (status == 'document_declined') return _TimelineStepStatus.failed;
     if (status == 'submitted' && !hasExamResult) {
+      return _TimelineStepStatus.current;
+    }
+    if (status == 'document_approved' &&
+        !application.assessmentUnlocked &&
+        !hasExamResult) {
       return _TimelineStepStatus.current;
     }
     if (status == 'document_approved') return _TimelineStepStatus.done;
@@ -328,6 +336,9 @@ class RspApplicationStatusTimeline extends StatelessWidget {
       return 'Completed (status on file).';
     }
     if (status == 'document_approved') {
+      if (!application.assessmentUnlocked && !hasExamResult) {
+        return 'Available after HR approves the assigned form.';
+      }
       return 'Ready — use Recruitment Application and continue with your email.';
     }
     if (status == 'submitted' || status == 'document_declined') {
@@ -346,7 +357,12 @@ class RspApplicationStatusTimeline extends StatelessWidget {
     if (status == 'passed' || status == 'failed' || status == 'registered') {
       return _TimelineStepStatus.done;
     }
-    if (status == 'document_approved') return _TimelineStepStatus.current;
+    if (status == 'document_approved') {
+      if (!application.assessmentUnlocked && !hasExamResult) {
+        return _TimelineStepStatus.pending;
+      }
+      return _TimelineStepStatus.current;
+    }
     return _TimelineStepStatus.pending;
   }
 
@@ -427,6 +443,10 @@ class RspApplicationStatusTimeline extends StatelessWidget {
     if ((_examPassedInferred) ||
         application.status == 'passed' ||
         application.status == 'registered') {
+      if (application.step4GateRequired &&
+          !application.deliberationSchedulingUnlocked) {
+        return 'Exam passed. Complete the Work Experience Sheet and wait for HR to finish preparation.';
+      }
       return 'Exam passed. HR will schedule deliberation — check back here.';
     }
     return 'HR will contact you if you are shortlisted. Final decision is from the HR office.';

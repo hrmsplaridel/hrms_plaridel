@@ -1,4 +1,7 @@
+import 'package:hrms_plaridel/features/dtr/leave/utils/configured_leave_pdf.dart';
 import 'dart:async';
+
+import 'package:hrms_plaridel/shared/widgets/reviewer_access_notice.dart';
 
 import 'package:flutter/material.dart';
 import 'package:hrms_plaridel/shared/widgets/workforce_loading_skeleton.dart';
@@ -18,6 +21,8 @@ import 'package:hrms_plaridel/features/dtr/leave/models/leave_request.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_type.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_type_definition.dart';
 import 'package:hrms_plaridel/features/dtr/leave/utils/employee_leave_card_view_screen.dart';
+import 'package:hrms_plaridel/features/dtr/leave/utils/leave_card_employee_loader.dart';
+import 'package:hrms_plaridel/features/dtr/leave/utils/leave_adjustment_employee_loader.dart';
 import 'package:hrms_plaridel/features/dtr/leave/utils/leave_form_signatories.dart';
 import 'package:hrms_plaridel/features/dtr/leave/presentation/shared/pages/leave_balance_history_screen.dart';
 import 'package:hrms_plaridel/features/dtr/leave/presentation/admin/pages/leave_type_management_screen.dart';
@@ -46,6 +51,7 @@ class AdminLeaveScreen extends StatefulWidget {
   const AdminLeaveScreen({
     super.key,
     this.isDepartmentHead = false,
+    this.isMayor = false,
     this.canReviewPending = true,
     this.onApprove,
     this.onReturnRequest,
@@ -53,6 +59,7 @@ class AdminLeaveScreen extends StatefulWidget {
   });
 
   final bool isDepartmentHead;
+  final bool isMayor;
   final bool canReviewPending;
   final LeaveApproveAction? onApprove;
   final LeaveDecisionAction? onReturnRequest;
@@ -86,17 +93,34 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
   bool _requestReloadQueued = false;
   bool _queuedForceRefresh = false;
   bool _canReviewFinal = false;
+  bool _checkingReviewer = true;
+  bool _reviewerCheckFailed = false;
+  int _reviewerCheckVersion = 0;
 
   Future<void> _loadFinalReviewerEligibility() async {
     if (widget.isDepartmentHead) return;
+    final version = ++_reviewerCheckVersion;
+    setState(() {
+      // Keep confirmed access visible until the recheck denies access or fails.
+      _checkingReviewer = true;
+      _reviewerCheckFailed = false;
+    });
     try {
       final response = await ApiClient.instance.get<Map<String, dynamic>>(
         '/api/leave/final-reviewer/me',
       );
-      if (!mounted) return;
-      setState(() => _canReviewFinal = response.data?['can_review'] == true);
+      if (!mounted || version != _reviewerCheckVersion) return;
+      setState(() {
+        _canReviewFinal = response.data?['can_review'] == true;
+        _checkingReviewer = false;
+      });
     } catch (_) {
-      if (mounted) setState(() => _canReviewFinal = false);
+      if (!mounted || version != _reviewerCheckVersion) return;
+      setState(() {
+        _canReviewFinal = false;
+        _checkingReviewer = false;
+        _reviewerCheckFailed = true;
+      });
     }
   }
 
@@ -175,7 +199,6 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
         _startAutoRefresh();
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (mounted && _isScreenActive) {
-            unawaited(_loadFinalReviewerEligibility());
             unawaited(_safeAutoRefresh(forceRefresh: true));
           }
         });
@@ -187,9 +210,6 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
     }
     _initialized = true;
     _isScreenActive = isScreenActive;
-    WidgetsBinding.instance.addPostFrameCallback(
-      (_) => _loadFinalReviewerEligibility(),
-    );
     if (_isScreenActive) {
       WidgetsBinding.instance.addPostFrameCallback((_) => _loadRequests());
     }
@@ -591,21 +611,25 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
             ]);
           },
           onManageSignatures: _openSignatureLibrary,
-          onForcedLeaveDeduction: widget.isDepartmentHead
+          onForcedLeaveDeduction: widget.isDepartmentHead || widget.isMayor
               ? null
               : _applyForcedLeaveDeduction,
-          onYearEndForcedLeave: widget.isDepartmentHead
+          onYearEndForcedLeave: widget.isDepartmentHead || widget.isMayor
               ? null
               : _yearEndForcedLeaveDeduction,
-          onMonthlyAccrual: widget.isDepartmentHead ? null : _runMonthlyAccrual,
-          onManualBalanceAdjustment: widget.isDepartmentHead
+          onMonthlyAccrual: widget.isDepartmentHead || widget.isMayor
+              ? null
+              : _runMonthlyAccrual,
+          onManualBalanceAdjustment: widget.isDepartmentHead || widget.isMayor
               ? null
               : _manualBalanceAdjustment,
-          onEmployeeLeaveCard: widget.isDepartmentHead
+          onEmployeeLeaveCard: widget.isDepartmentHead || widget.isMayor
               ? null
               : _openEmployeeLeaveCard,
-          onLeaveLedger: widget.isDepartmentHead ? null : _openLeaveLedger,
-          onLeaveTypeRules: widget.isDepartmentHead
+          onLeaveLedger: widget.isDepartmentHead || widget.isMayor
+              ? null
+              : _openLeaveLedger,
+          onLeaveTypeRules: widget.isDepartmentHead || widget.isMayor
               ? null
               : _openLeaveTypeRules,
         ),
@@ -629,103 +653,115 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
           ),
         ],
         const SizedBox(height: 24),
-        AdminLeaveRequestQueuePanel(
-          requests: filteredRequests,
-          filterKey: [
-            _statusFilter?.value ?? '',
-            _leaveTypeFilter ?? '',
-            _departmentFilter ?? '',
-            _employeeFilter ?? '',
-            _startDateFrom?.toIso8601String() ?? '',
-            _startDateTo?.toIso8601String() ?? '',
-          ].join('|'),
-          isDepartmentHead: widget.isDepartmentHead,
-          loading: provider.reviewLoading(
-            departmentHead: widget.isDepartmentHead,
-          ),
-          initialLoadComplete: provider.reviewInitialLoadComplete(
-            departmentHead: widget.isDepartmentHead,
-          ),
-          initialLoadAttempted: provider.reviewLoadAttempted(
-            departmentHead: widget.isDepartmentHead,
-          ),
-          onRetry: () => _loadRequests(forceRefresh: true),
-          totalCount: provider.reviewTotal(
-            departmentHead: widget.isDepartmentHead,
-          ),
-          hasMore: provider.reviewHasMore(
-            departmentHead: widget.isDepartmentHead,
-          ),
-          loadingMore: provider.reviewLoadingMore(
-            departmentHead: widget.isDepartmentHead,
-          ),
-          loadMoreError: provider.reviewLoadMoreError(
-            departmentHead: widget.isDepartmentHead,
-          ),
-          onLoadMore: () => provider.loadMoreReviewRequests(
-            query: _currentReviewQuery(),
-            departmentHead: widget.isDepartmentHead,
-          ),
-          selectedRequest: selected,
-          filterBar: AdminLeaveFilterBar(
+        if (!widget.isDepartmentHead && !_canReviewFinal)
+          ReviewerAccessNotice(
+            requestType: 'leave',
+            checking: _checkingReviewer,
+            failed: _reviewerCheckFailed,
+            onRetry: () async {
+              await _loadRequests(forceRefresh: true);
+            },
+          )
+        else
+          AdminLeaveRequestQueuePanel(
+            requests: filteredRequests,
+            filterKey: [
+              _statusFilter?.value ?? '',
+              _leaveTypeFilter ?? '',
+              _departmentFilter ?? '',
+              _employeeFilter ?? '',
+              _startDateFrom?.toIso8601String() ?? '',
+              _startDateTo?.toIso8601String() ?? '',
+            ].join('|'),
             isDepartmentHead: widget.isDepartmentHead,
-            status: _statusFilter,
-            leaveType: _leaveTypeFilter,
-            leaveTypeOptions: leaveTypeOptions,
-            department: _departmentFilter,
-            departments: departments,
-            employee: _employeeFilter,
-            employees: employees
-                .map(
-                  (e) => AdminLeaveEmployeeFilterOption(id: e.id, name: e.name),
-                )
-                .toList(),
-            startDateFrom: _startDateFrom,
-            startDateTo: _startDateTo,
-            onStatusChanged: (value) {
-              setState(() => _statusFilter = value);
-              _loadRequests();
-            },
-            onLeaveTypeChanged: (value) {
-              setState(() => _leaveTypeFilter = value);
-              _loadRequests();
-            },
-            onDepartmentChanged: (value) {
-              setState(() {
-                _departmentFilter = value;
-                _employeeFilter = null;
-              });
-              _loadRequests();
-            },
-            onEmployeeChanged: (value) {
-              setState(() => _employeeFilter = value);
-              _loadRequests();
-            },
-            onStartDateFromChanged: (value) {
-              setState(() => _startDateFrom = value);
-              _loadRequests();
-            },
-            onStartDateToChanged: (value) {
-              setState(() => _startDateTo = value);
-              _loadRequests();
-            },
-            onReset: () {
-              setState(() {
-                _statusFilter = null;
-                _leaveTypeFilter = null;
-                _departmentFilter = null;
-                _employeeFilter = null;
-                _startDateFrom = null;
-                _startDateTo = null;
-              });
-              _loadRequests();
+            loading: provider.reviewLoading(
+              departmentHead: widget.isDepartmentHead,
+            ),
+            initialLoadComplete: provider.reviewInitialLoadComplete(
+              departmentHead: widget.isDepartmentHead,
+            ),
+            initialLoadAttempted: provider.reviewLoadAttempted(
+              departmentHead: widget.isDepartmentHead,
+            ),
+            onRetry: () => _loadRequests(forceRefresh: true),
+            totalCount: provider.reviewTotal(
+              departmentHead: widget.isDepartmentHead,
+            ),
+            hasMore: provider.reviewHasMore(
+              departmentHead: widget.isDepartmentHead,
+            ),
+            loadingMore: provider.reviewLoadingMore(
+              departmentHead: widget.isDepartmentHead,
+            ),
+            loadMoreError: provider.reviewLoadMoreError(
+              departmentHead: widget.isDepartmentHead,
+            ),
+            onLoadMore: () => provider.loadMoreReviewRequests(
+              query: _currentReviewQuery(),
+              departmentHead: widget.isDepartmentHead,
+            ),
+            selectedRequest: selected,
+            filterBar: AdminLeaveFilterBar(
+              isMayor: widget.isMayor,
+              isDepartmentHead: widget.isDepartmentHead,
+              status: _statusFilter,
+              leaveType: _leaveTypeFilter,
+              leaveTypeOptions: leaveTypeOptions,
+              department: _departmentFilter,
+              departments: departments,
+              employee: _employeeFilter,
+              employees: employees
+                  .map(
+                    (e) =>
+                        AdminLeaveEmployeeFilterOption(id: e.id, name: e.name),
+                  )
+                  .toList(),
+              startDateFrom: _startDateFrom,
+              startDateTo: _startDateTo,
+              onStatusChanged: (value) {
+                setState(() => _statusFilter = value);
+                _loadRequests();
+              },
+              onLeaveTypeChanged: (value) {
+                setState(() => _leaveTypeFilter = value);
+                _loadRequests();
+              },
+              onDepartmentChanged: (value) {
+                setState(() {
+                  _departmentFilter = value;
+                  _employeeFilter = null;
+                });
+                _loadRequests();
+              },
+              onEmployeeChanged: (value) {
+                setState(() => _employeeFilter = value);
+                _loadRequests();
+              },
+              onStartDateFromChanged: (value) {
+                setState(() => _startDateFrom = value);
+                _loadRequests();
+              },
+              onStartDateToChanged: (value) {
+                setState(() => _startDateTo = value);
+                _loadRequests();
+              },
+              onReset: () {
+                setState(() {
+                  _statusFilter = null;
+                  _leaveTypeFilter = null;
+                  _departmentFilter = null;
+                  _employeeFilter = null;
+                  _startDateFrom = null;
+                  _startDateTo = null;
+                });
+                _loadRequests();
+              },
+            ),
+            onSelect: (request) {
+              setState(() => _selectedRequest = request);
+              _openRequestDetailsPanel(request);
             },
           ),
-          onSelect: (request) {
-            setState(() => _selectedRequest = request);
-            _openRequestDetailsPanel(request);
-          },
-        ),
       ],
     );
   }
@@ -757,6 +793,10 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
 
   Future<void> _performLoadRequests({bool forceRefresh = false}) async {
     if (!mounted) return;
+    if (!widget.isDepartmentHead) {
+      await _loadFinalReviewerEligibility();
+      if (!mounted || !_canReviewFinal) return;
+    }
     final provider = context.read<LeaveProvider>();
     final query = _currentReviewQuery();
     if (widget.isDepartmentHead) {
@@ -895,6 +935,8 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
       final document = await LeaveRequestPdf.buildPdf(
         request: target,
         balances: balances,
+        certificationOfficerSignatureBytes:
+            formSignatories.certificationOfficerSignature?.signatureImageBytes,
         certificationOfficerName: formSignatories.certificationOfficer?.name,
         certificationOfficerTitle: formSignatories.certificationOfficer?.title,
         recommendationOfficerName: formSignatories.recommendationOfficer?.name,
@@ -909,9 +951,19 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
         hrApproverSignatureBytes:
             formSignatories.hrApproverSignature?.signatureImageBytes,
       );
+      final bytes = await saveConfiguredLeavePdf(
+        request: target,
+        document: document,
+        departmentReviewer: formSignatories.recommendationOfficer?.name,
+        applicantSignature:
+            formSignatories.applicantSignature?.signatureImageBytes,
+        departmentSignature:
+            formSignatories.departmentHeadSignature?.signatureImageBytes,
+        finalSignature:
+            formSignatories.hrApproverSignature?.signatureImageBytes,
+      );
       final filename = 'Leave_Application_${target.id ?? target.userId}.pdf';
       if (preview) {
-        final bytes = await document.save();
         if (!mounted) return;
         await showFormPdfPreview(
           context: context,
@@ -920,10 +972,7 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
           filename: filename,
         );
       } else {
-        await Printing.layoutPdf(
-          onLayout: (_) => document.save(),
-          name: filename,
-        );
+        await Printing.layoutPdf(onLayout: (_) async => bytes, name: filename);
       }
     } catch (e) {
       if (!mounted) return;
@@ -990,9 +1039,11 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
         request: request,
         slotKey: 'hr_approver',
         title: 'Confirm Final Approval Signature',
-        signatureTitle: 'HR/Admin E-Signature',
+        signatureTitle: widget.isMayor
+            ? 'Mayor E-Signature'
+            : 'HR/Admin E-Signature',
         unsignedMessage: 'No final approver signature selected',
-        waitingMessage: 'Only an authorized HR reviewer can sign here.',
+        waitingMessage: 'Only the assigned final reviewer can sign here.',
         confirmLabel: 'Sign and Approve',
       ),
     );
@@ -1314,7 +1365,9 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
         signatureTitle: 'Department Head E-Signature',
         unsignedMessage: 'No department reviewer signature selected',
         waitingMessage: 'Only the assigned department reviewer can sign here.',
-        confirmLabel: 'Sign and Forward to HR',
+        confirmLabel: request.finalReviewRoute == 'mayor'
+            ? 'Sign and Approve'
+            : 'Sign and Forward to HR',
       ),
     );
     if (!mounted || signed != true) return;
@@ -1329,7 +1382,9 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
     if (!mounted) return;
     _showMessage(
       ok
-          ? 'Forwarded to HR for final approval.'
+          ? request.finalReviewRoute == 'mayor'
+                ? 'Approved. The Mayor signs the printed form manually.'
+                : 'Forwarded to HR for final approval.'
           : (leaveProvider.error ?? 'Department head approval failed.'),
     );
     if (ok) await _loadRequests();
@@ -1750,14 +1805,7 @@ class _EmployeeLeaveCardPickerDialogState
         }
       }
 
-      final res = await ApiClient.instance.get<dynamic>(
-        '/api/employees',
-        queryParameters: const {'status': 'Active', 'limit': 1000, 'offset': 0},
-      );
-      final payload = res.data;
-      final employeeRows = payload is Map
-          ? (payload['employees'] as List<dynamic>? ?? const <dynamic>[])
-          : (payload is List ? payload : const <dynamic>[]);
+      final employeeRows = await loadLeaveCardEmployees();
       final rows =
           employeeRows
               .whereType<Map>()
@@ -1965,7 +2013,7 @@ class _EmployeeLeaveCardPickerDialogState
                           .copyWith(
                             isDense: true,
                             helperText: _employees.isEmpty
-                                ? 'No employees found for this department.'
+                                ? 'No currently assigned employees with VL/SL credit eligibility or history found.'
                                 : '${_employees.length} employee(s) found',
                           ),
                       items: _employees
@@ -2379,14 +2427,7 @@ class _ManualBalanceAdjustmentDialogState
               .toList()
             ..sort();
 
-      final res = await ApiClient.instance.get<dynamic>(
-        '/api/employees',
-        queryParameters: const {'status': 'Active', 'limit': 1000, 'offset': 0},
-      );
-      final payload = res.data;
-      final employeeRows = payload is Map
-          ? (payload['employees'] as List<dynamic>? ?? const <dynamic>[])
-          : (payload is List ? payload : const <dynamic>[]);
+      final employeeRows = await loadLeaveAdjustmentEmployees();
       final rows =
           employeeRows
               .whereType<Map>()
@@ -2753,7 +2794,7 @@ class _ManualBalanceAdjustmentDialogState
                   ? 'Select department first'
                   : (hasEmployees
                         ? 'Select employee'
-                        : 'No employees in this department'),
+                        : 'No eligible employees in this department'),
             ),
             items: _filteredEmployees
                 .map(
@@ -2775,7 +2816,7 @@ class _ManualBalanceAdjustmentDialogState
             const SizedBox(height: 12),
             _statusPanel(
               icon: Icons.person_off_outlined,
-              message: 'No active employees found for this department.',
+              message: 'No employees eligible for credit adjustments found for this department.',
             ),
           ],
           const SizedBox(height: 12),

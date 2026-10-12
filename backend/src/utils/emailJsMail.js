@@ -2,7 +2,7 @@
  * EmailJS REST API (https://www.emailjs.com/docs/rest-api/send/).
  * Set EMAILJS_SERVICE_ID, EMAILJS_PUBLIC_KEY, and at least one template ID in .env.
  *
- * In EmailJS → Email Templates, map "To Email" to a variable (e.g. {{hr_email}}) or use a fixed HR inbox.
+ * Applicant OTP and hire credentials map "To Email" to {{to_email}}.
  * Template parameter names below must match what you use in the template body/subject.
  */
 
@@ -104,18 +104,6 @@ function getConfig() {
   return { serviceId, publicKey };
 }
 
-function isEmailJsConfiguredForHr() {
-  const { serviceId, publicKey } = getConfig();
-  const templateId = (process.env.EMAILJS_TEMPLATE_NEW_APPLICATION_ID || '').trim();
-  return !!(serviceId && publicKey && templateId);
-}
-
-function isEmailJsConfiguredForApplicant() {
-  const { serviceId, publicKey } = getConfig();
-  const templateId = (process.env.EMAILJS_TEMPLATE_APPLICANT_CONFIRM_ID || '').trim();
-  return !!(serviceId && publicKey && templateId);
-}
-
 function formatEmailJsError(status, text) {
   let msg = `EmailJS HTTP ${status}: ${text}`;
   if (status === 403 && /non-browser|browser environments/i.test(text)) {
@@ -168,60 +156,6 @@ async function sendEmailJs(opts) {
     const status = sdkErr?.status || sdkErr?.httpStatus || 0;
     const text = sdkErr?.text || sdkErr?.message || String(sdkErr);
     throw formatEmailJsError(status, text);
-  }
-}
-
-/**
- * Optional non-blocking notifications after a new recruitment application is stored.
- * @param {import('pg').QueryResultRow} row — row from recruitment_applications RETURNING
- */
-async function notifyNewRecruitmentApplication(row) {
-  const hrTemplateId = (process.env.EMAILJS_TEMPLATE_NEW_APPLICATION_ID || '').trim();
-  const applicantTemplateId = (
-    process.env.EMAILJS_TEMPLATE_APPLICANT_CONFIRM_ID || ''
-  ).trim();
-  if (!hrTemplateId && !applicantTemplateId) return;
-
-  const hrEmail = (process.env.EMAILJS_HR_NOTIFY_TO || '').trim();
-  const submittedAt = row.created_at
-    ? new Date(row.created_at).toLocaleString('en-PH', {
-        timeZone: 'Asia/Manila',
-        dateStyle: 'medium',
-        timeStyle: 'short',
-      })
-    : new Date().toISOString();
-
-  const baseParams = {
-    applicant_name: String(row.full_name || '').trim(),
-    applicant_email: String(row.email || '').trim(),
-    applicant_phone: row.phone ? String(row.phone).trim() : '—',
-    position_applied_for: row.position_applied_for
-      ? String(row.position_applied_for).trim()
-      : 'Not specified',
-    application_id: String(row.id || ''),
-    submitted_at: submittedAt,
-  };
-
-  if (hrEmail) {
-    baseParams.hr_email = hrEmail;
-  }
-
-  if (hrTemplateId) {
-    await sendEmailJs({
-      templateId: hrTemplateId,
-      templateParams: baseParams,
-    });
-  }
-
-  if (applicantTemplateId && row.email) {
-    await sendEmailJs({
-      templateId: applicantTemplateId,
-      templateParams: {
-        ...baseParams,
-        // Use in template "To Email" as {{to_email}} so the applicant receives the message
-        to_email: String(row.email).trim(),
-      },
-    });
   }
 }
 
@@ -385,10 +319,92 @@ async function sendContactUsEmailJs(opts) {
   });
 }
 
+function recruitmentTemplateId(envName) {
+  return (process.env[envName] || '').trim();
+}
+
+function textParam(value, max) {
+  const text = value == null ? '' : String(value).trim();
+  return text.slice(0, max);
+}
+
+/**
+ * Applicant document decision. To Email = {{to_email}}.
+ * Env: EMAILJS_TEMPLATE_RSP_DOCUMENT_DECISION_ID
+ */
+async function sendRspDocumentDecisionEmailJs(opts) {
+  await sendEmailJs({
+    templateId: recruitmentTemplateId('EMAILJS_TEMPLATE_RSP_DOCUMENT_DECISION_ID'),
+    templateParams: {
+      to_email: textParam(opts.to, 254),
+      applicant_name: textParam(opts.applicantName, 200) || 'Applicant',
+      application_number: textParam(opts.applicationNumber, 40),
+      position: textParam(opts.position, 200),
+      decision: textParam(opts.decision, 40),
+      next_step: textParam(opts.nextStep, 500),
+    },
+  });
+}
+
+/**
+ * Deliberation or orientation schedule. To Email = {{to_email}}.
+ * Env: EMAILJS_TEMPLATE_RSP_SCHEDULE_NOTICE_ID
+ */
+async function sendRspScheduleNoticeEmailJs(opts) {
+  await sendEmailJs({
+    templateId: recruitmentTemplateId('EMAILJS_TEMPLATE_RSP_SCHEDULE_NOTICE_ID'),
+    templateParams: {
+      to_email: textParam(opts.to, 254),
+      applicant_name: textParam(opts.applicantName, 200) || 'Applicant',
+      position: textParam(opts.position, 200),
+      application_number: textParam(opts.applicationNumber, 40),
+      event_name: textParam(opts.eventName, 40),
+      schedule_at: textParam(opts.scheduleAt, 120),
+      instructions: textParam(opts.instructions, 500),
+    },
+  });
+}
+
+/**
+ * Issued form or Work Experience Sheet assignment / revision.
+ * Env: EMAILJS_TEMPLATE_RSP_ACTION_REQUIRED_ID
+ */
+async function sendRspActionRequiredEmailJs(opts) {
+  await sendEmailJs({
+    templateId: recruitmentTemplateId('EMAILJS_TEMPLATE_RSP_ACTION_REQUIRED_ID'),
+    templateParams: {
+      to_email: textParam(opts.to, 254),
+      applicant_name: textParam(opts.applicantName, 200) || 'Applicant',
+      position: textParam(opts.position, 200),
+      application_number: textParam(opts.applicationNumber, 40),
+      action_title: textParam(opts.actionTitle, 120),
+      action_detail: textParam(opts.actionDetail, 500),
+      hr_comment: textParam(opts.hrComment, 500),
+    },
+  });
+}
+
+/**
+ * One final requirement was returned for a new upload.
+ * Env: EMAILJS_TEMPLATE_RSP_FINAL_REQUIREMENT_RETURNED_ID
+ */
+async function sendRspFinalRequirementReturnedEmailJs(opts) {
+  await sendEmailJs({
+    templateId: recruitmentTemplateId('EMAILJS_TEMPLATE_RSP_FINAL_REQUIREMENT_RETURNED_ID'),
+    templateParams: {
+      to_email: textParam(opts.to, 254),
+      applicant_name: textParam(opts.applicantName, 200) || 'Applicant',
+      position: textParam(opts.position, 200),
+      application_number: textParam(opts.applicationNumber, 40),
+      document_name: textParam(opts.documentName, 80),
+      reason: textParam(opts.reason, 500),
+      instructions: textParam(opts.instructions, 500),
+    },
+  });
+}
+
 module.exports = {
   sendEmailJs,
-  isEmailJsConfiguredForHr,
-  isEmailJsConfiguredForApplicant,
   isEmailJsConfiguredForHireEmail,
   sendHireCredentialsEmailJs,
   HIRE_CREDENTIALS_EMAIL_SUBJECT,
@@ -399,5 +415,8 @@ module.exports = {
   sendContactUsEmailJs,
   isEmailJsRspOtpConfigured,
   sendRspEmailOtpEmailJs,
-  notifyNewRecruitmentApplication,
+  sendRspDocumentDecisionEmailJs,
+  sendRspScheduleNoticeEmailJs,
+  sendRspActionRequiredEmailJs,
+  sendRspFinalRequirementReturnedEmailJs,
 };

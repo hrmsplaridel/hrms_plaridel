@@ -4,6 +4,9 @@ const { authMiddleware } = require('../middleware/auth');
 const { requireAdminOrSupervisor } = require('../middleware/rbac');
 const {
   parseMaxApplicants,
+  parseVacancyAgeRequirements,
+  vacancyMinimumAge,
+  vacancyMaximumAge,
   enrichVacanciesWithApplicationCounts,
 } = require('../utils/jobVacancySlots');
 
@@ -34,6 +37,31 @@ async function ensureTable() {
   await pool.query(
     `ALTER TABLE public.job_vacancy_announcement
        ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT now();`
+  );
+
+  await pool.query(
+    `UPDATE public.job_vacancy_announcement
+     SET vacancies = (
+       SELECT COALESCE(
+         jsonb_agg(
+           CASE
+             WHEN jsonb_typeof(elem->'minimum_age') = 'number'
+               THEN elem
+             ELSE elem || '{"minimum_age":18}'::jsonb
+           END
+           ORDER BY ord
+         ),
+         '[]'::jsonb
+       )
+       FROM jsonb_array_elements(COALESCE(vacancies, '[]'::jsonb))
+         WITH ORDINALITY AS listed(elem, ord)
+     )
+     WHERE jsonb_typeof(vacancies) = 'array'
+       AND EXISTS (
+         SELECT 1
+         FROM jsonb_array_elements(vacancies) elem
+         WHERE jsonb_typeof(elem->'minimum_age') IS DISTINCT FROM 'number'
+       )`
   );
 }
 
@@ -69,6 +97,11 @@ router.get('/', async (_req, res) => {
     ) {
       vacancies = [{ headline: row.headline, body: row.body }];
     }
+    vacancies = vacancies.map((v) => ({
+      ...v,
+      minimum_age: vacancyMinimumAge(v),
+      maximum_age: vacancyMaximumAge(v),
+    }));
     vacancies = await enrichVacanciesWithApplicationCounts(vacancies);
 
     const acceptingApplications =
@@ -115,30 +148,35 @@ router.put('/', protect, requireAdminOrSupervisor, async (req, res) => {
     const optStr = (x) =>
       typeof x === 'string' && x.trim().length ? x.trim() : null;
 
-    const normalizedVacancies = list
-      .filter((v) => v && typeof v === 'object')
-      .map((v) => {
-        const max = parseMaxApplicants(v.max_applicants);
-        const education = optStr(v.education);
-        const experience = optStr(v.experience);
-        const training = optStr(v.training);
-        const closing_date = optStr(v.closing_date);
-        return {
-          headline:
-            typeof v.headline === 'string' && v.headline.trim().length
-              ? v.headline.trim()
-              : null,
-          body:
-            typeof v.body === 'string' && v.body.trim().length
-              ? v.body.trim()
-              : null,
-          ...(education != null ? { education } : {}),
-          ...(experience != null ? { experience } : {}),
-          ...(training != null ? { training } : {}),
-          ...(closing_date != null ? { closing_date } : {}),
-          ...(max != null ? { max_applicants: max } : {}),
-        };
+    const normalizedVacancies = [];
+    for (const v of list.filter((item) => item && typeof item === 'object')) {
+      const ages = parseVacancyAgeRequirements(v.minimum_age, v.maximum_age);
+      if (!ages.ok) {
+        return res.status(400).json({ error: ages.error });
+      }
+      const max = parseMaxApplicants(v.max_applicants);
+      const education = optStr(v.education);
+      const experience = optStr(v.experience);
+      const training = optStr(v.training);
+      const closing_date = optStr(v.closing_date);
+      normalizedVacancies.push({
+        headline:
+          typeof v.headline === 'string' && v.headline.trim().length
+            ? v.headline.trim()
+            : null,
+        body:
+          typeof v.body === 'string' && v.body.trim().length
+            ? v.body.trim()
+            : null,
+        ...(education != null ? { education } : {}),
+        ...(experience != null ? { experience } : {}),
+        ...(training != null ? { training } : {}),
+        ...(closing_date != null ? { closing_date } : {}),
+        ...(max != null ? { max_applicants: max } : {}),
+        minimum_age: ages.minimumAge,
+        ...(ages.maximumAge != null ? { maximum_age: ages.maximumAge } : {}),
       });
+    }
 
     // Ensure landing-page table exists (idempotent).
     await ensureTable();
