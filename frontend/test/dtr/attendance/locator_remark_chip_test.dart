@@ -9,6 +9,22 @@ void main() {
       'On Field',
     );
     expect(compactLocatorRemark('Late + Undertime'), 'Late + Undertime');
+    expect(
+      compactLocatorRemark('No Electricity (AM IN, AM OUT, PM IN, PM OUT)'),
+      'No Electricity',
+    );
+    expect(
+      compactLocatorRemark('Custom Locator (PM IN, PM OUT)'),
+      'Custom Locator',
+    );
+    expect(
+      compactLocatorRemark('Medical Leave (Paid)'),
+      'Medical Leave (Paid)',
+    );
+    expect(
+      compactLocatorRemark('Field Work (AM IN, office visit)'),
+      'Field Work (AM IN, office visit)',
+    );
   });
 
   testWidgets('locator chip retains the covered slots in a tooltip', (

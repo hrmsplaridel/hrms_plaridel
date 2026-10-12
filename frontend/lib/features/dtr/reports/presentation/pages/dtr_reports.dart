@@ -1014,9 +1014,7 @@ class _DtrReportsState extends State<DtrReports> {
   }
 
   static String _normalizeAttendanceRemark(String remark) {
-    final value = remark.trim();
-    if (value.toLowerCase().startsWith('work from home')) return 'WFH';
-    return value;
+    return compactLocatorRemark(normalizeAttendanceRemark(remark));
   }
 
   Future<void> _generateDtr(
