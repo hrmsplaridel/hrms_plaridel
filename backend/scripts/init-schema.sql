@@ -651,6 +651,7 @@ CREATE TABLE IF NOT EXISTS leave_types (
   description TEXT,
   is_active BOOLEAN NOT NULL DEFAULT true,
   employee_can_file BOOLEAN NOT NULL DEFAULT true,
+  admin_can_file BOOLEAN NOT NULL DEFAULT true,
   admin_only BOOLEAN NOT NULL DEFAULT false,
   allows_past_dates BOOLEAN NOT NULL DEFAULT true,
   requires_attachment BOOLEAN NOT NULL DEFAULT false,

@@ -107,6 +107,7 @@ class LeaveTypeDefinition {
     this.isSystem = false,
     this.employeeCanFile = true,
     this.adminOnly = false,
+    this.adminCanFile = true,
     this.allowsPastDates = true,
     this.requiresAttachment = false,
     this.requiresAttachmentWhenOverDays,
@@ -128,6 +129,7 @@ class LeaveTypeDefinition {
   final bool isSystem;
   final bool employeeCanFile;
   final bool adminOnly;
+  final bool adminCanFile;
   final bool allowsPastDates;
   final bool requiresAttachment;
   final double? requiresAttachmentWhenOverDays;
@@ -160,6 +162,8 @@ class LeaveTypeDefinition {
           json['employee_can_file'] != false &&
           json['employeeCanFile'] != false,
       adminOnly: json['admin_only'] == true || json['adminOnly'] == true,
+      adminCanFile:
+          json['admin_can_file'] != false && json['adminCanFile'] != false,
       allowsPastDates:
           json['allows_past_dates'] != false &&
           json['allowsPastDates'] != false,
@@ -210,6 +214,7 @@ class LeaveTypeDefinition {
       'is_active': isActive,
       'employee_can_file': employeeCanFile,
       'admin_only': adminOnly,
+      'admin_can_file': adminCanFile,
       'allows_past_dates': allowsPastDates,
       'requires_attachment': requiresAttachment,
       'requires_attachment_when_over_days': requiresAttachmentWhenOverDays,
@@ -235,6 +240,7 @@ class LeaveTypeDefinition {
     bool? isSystem,
     bool? employeeCanFile,
     bool? adminOnly,
+    bool? adminCanFile,
     bool? allowsPastDates,
     bool? requiresAttachment,
     double? requiresAttachmentWhenOverDays,
@@ -256,6 +262,7 @@ class LeaveTypeDefinition {
       isSystem: isSystem ?? this.isSystem,
       employeeCanFile: employeeCanFile ?? this.employeeCanFile,
       adminOnly: adminOnly ?? this.adminOnly,
+      adminCanFile: adminCanFile ?? this.adminCanFile,
       allowsPastDates: allowsPastDates ?? this.allowsPastDates,
       requiresAttachment: requiresAttachment ?? this.requiresAttachment,
       requiresAttachmentWhenOverDays:

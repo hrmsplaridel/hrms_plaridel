@@ -34,7 +34,17 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.byType(DropdownButtonFormField<String>));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Department approval → Manual Mayor signing').last);
+    await tester.tap(
+      find.text('Department approval → Manual Mayor signing').last,
+    );
+    await tester.pumpAndSettle();
+    expect(find.byType(FilterChip), findsNothing);
+    expect(find.text('Limit to employment types'), findsOneWidget);
+    expect(find.text('JO, COS selected'), findsOneWidget);
+    await tester.tap(find.text('JO, COS selected'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Permanent'));
+    await tester.tap(find.text('Apply'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Save routing'));
     await tester.pumpAndSettle();
@@ -42,6 +52,7 @@ void main() {
     expect(saved!['mayor_employment_types'], [
       'job_order',
       'contract_of_service',
+      'permanent',
     ]);
   });
 }

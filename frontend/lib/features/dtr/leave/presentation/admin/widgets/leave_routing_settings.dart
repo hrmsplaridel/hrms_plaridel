@@ -90,7 +90,10 @@ class _State extends State<LeaveRoutingSettings> {
         decoration: const InputDecoration(labelText: 'Approval route'),
         items: const [
           DropdownMenuItem(value: 'hr', child: Text('Department → Final HR')),
-          DropdownMenuItem(value: 'mayor', child: Text('Department approval → Manual Mayor signing')),
+          DropdownMenuItem(
+            value: 'mayor',
+            child: Text('Department approval → Manual Mayor signing'),
+          ),
         ],
         onChanged: busy
             ? null
@@ -108,9 +111,8 @@ class _State extends State<LeaveRoutingSettings> {
         Material(
           type: MaterialType.transparency,
           child: SwitchListTile(
-            title: const Text(
-              'Apply manual Mayor signing only to selected employment types',
-            ),
+            contentPadding: EdgeInsets.zero,
+            title: const Text('Limit to employment types'),
             value: types != null,
             onChanged: busy
                 ? null
@@ -125,45 +127,99 @@ class _State extends State<LeaveRoutingSettings> {
           ),
         ),
         if (types != null)
-          Wrap(
-            spacing: 8,
-            children: employmentTypeLabels.entries
-                .map(
-                  (e) => FilterChip(
-                    label: Text(e.value),
-                    selected: types!.contains(e.key),
-                    onSelected: busy
-                        ? null
-                        : (selected) {
-                            setState(() {
-                              final next = [...types!];
-                              if (selected) {
-                                next.add(e.key);
-                              } else {
-                                next.remove(e.key);
-                              }
-                              types = next;
-                            });
-                            changed();
-                          },
-                  ),
-                )
-                .toList(),
+          InkWell(
+            onTap: busy ? null : _selectTypes,
+            child: InputDecorator(
+              decoration: const InputDecoration(
+                labelText: 'Employment types',
+                suffixIcon: Icon(Icons.expand_more),
+              ),
+              child: Text(_selectionLabel),
+            ),
           ),
-        const Text(
-          'Selected types are approved in the system by the department reviewer. The Mayor signs the printed form manually. Other types keep Department Review → Final HR.',
+        const SizedBox(height: 8),
+        Text(
+          types == null
+              ? 'Department approval for all types; Mayor signs the printed form.'
+              : 'Selected types: department approval and manual Mayor signing. Others: Final HR.',
         ),
       ],
       if (error != null)
         Text(error!, style: const TextStyle(color: Colors.red)),
       if (widget.leaveTypeId != null)
-        FilledButton(
-          onPressed: busy ? _disabled : () => _save(),
-          child: const Text('Save routing'),
+        Padding(
+          padding: const EdgeInsets.only(top: 12),
+          child: Align(
+            alignment: Alignment.centerRight,
+            child: FilledButton(
+              onPressed: busy ? _disabled : () => _save(),
+              child: const Text('Save routing'),
+            ),
+          ),
         ),
       if (error != null)
         TextButton(onPressed: _load, child: const Text('Retry')),
     ],
   );
   VoidCallback? get _disabled => null;
+
+  String get _selectionLabel => types!.isEmpty
+      ? 'Select employment types'
+      : '${types!.map((type) => switch (type) {
+          'job_order' => 'JO',
+          'contract_of_service' => 'COS',
+          _ => employmentTypeLabels[type] ?? type,
+        }).join(', ')} selected';
+
+  Future<void> _selectTypes() async {
+    final selected = [...types!];
+    final result = await showDialog<List<String>>(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (context, update) => AlertDialog(
+          title: const Text('Employment types'),
+          content: SizedBox(
+            width: 400,
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: employmentTypeLabels.entries
+                    .map(
+                      (entry) => CheckboxListTile(
+                        contentPadding: EdgeInsets.zero,
+                        title: Text(entry.value),
+                        value: selected.contains(entry.key),
+                        onChanged: (value) => update(() {
+                          if (value == true) {
+                            selected.add(entry.key);
+                          } else {
+                            selected.remove(entry.key);
+                          }
+                        }),
+                      ),
+                    )
+                    .toList(),
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: selected.isEmpty
+                  ? null
+                  : () => Navigator.pop(dialogContext, selected),
+              child: const Text('Apply'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (result != null && mounted) {
+      setState(() => types = result);
+      changed();
+    }
+  }
 }

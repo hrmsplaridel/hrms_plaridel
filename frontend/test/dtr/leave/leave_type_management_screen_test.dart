@@ -178,6 +178,41 @@ void main() {
     await tester.pump();
   }
 
+  for (final access in ['both', 'admin', 'employee']) {
+    final adminOnly = access == 'admin';
+    testWidgets('filing dropdown saves access=$access', (tester) async {
+      await mount(tester);
+      await enterRequiredName(tester, 'Custom Filing');
+      await tester.scrollUntilVisible(
+        stringDropdown('Who can file'),
+        250,
+        scrollable: formScrollable(),
+      );
+      expect(find.text('Employees can file'), findsNothing);
+      expect(find.text('HR/Admin only'), findsNothing);
+      final dropdown = tester.widget<DropdownButtonFormField<String>>(
+        stringDropdown('Who can file'),
+      );
+      expect(dropdown.initialValue, 'both');
+      await tester.tap(stringDropdown('Who can file'));
+      await tester.pumpAndSettle();
+      expect(find.text('Employee only'), findsWidgets);
+      await tester.tap(find.text('Employee and HR/admin').last);
+      await tester.pumpAndSettle();
+      dropdown.onChanged!(access);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Create Leave Type'));
+      await tester.pumpAndSettle();
+      final create = requests.singleWhere(
+        (r) => r.path == '/api/leave/types' && r.method == 'POST',
+      );
+      final data = create.data as Map;
+      expect(data['employee_can_file'], !adminOnly);
+      expect(data['admin_only'], adminOnly);
+      expect(data['admin_can_file'], access != 'employee');
+    });
+  }
+
   testWidgets('leave type settings use consistent bordered sections', (
     tester,
   ) async {
@@ -441,6 +476,7 @@ void main() {
         'display_name': 'Bereavement Leave',
         'is_active': true,
         'is_system': false,
+        'admin_can_file': false,
         'employee_can_file': true,
         'admin_only': false,
         'allows_past_dates': true,
@@ -466,6 +502,7 @@ void main() {
     final data = Map<String, dynamic>.from(put.data as Map);
     expect(data['name'], 'bereavementLeave');
     expect(data['display_name'], 'Bereavement and Funeral Leave');
+    expect(data['admin_can_file'], false);
     expect(find.text('Leave type updated.'), findsOneWidget);
   });
 

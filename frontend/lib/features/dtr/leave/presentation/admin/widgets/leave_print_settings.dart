@@ -235,6 +235,7 @@ class _LeavePrintSettingsState extends State<LeavePrintSettings> {
         DropdownButtonFormField<String>(
           key: ValueKey(_savedLayout),
           initialValue: _layout,
+          isExpanded: true,
           decoration: const InputDecoration(labelText: 'Form layout'),
           items: const [
             DropdownMenuItem(value: 'csc', child: Text('Standard CSC form')),
@@ -251,27 +252,21 @@ class _LeavePrintSettingsState extends State<LeavePrintSettings> {
                 },
         ),
         const SizedBox(height: 10),
-        Text(
-          _remove
-              ? 'Background will be removed'
-              : _file?.name ?? _background ?? 'No background uploaded',
-        ),
-        const Text(
-          'Portrait A4 letterhead only · PDF, PNG or JPEG · up to 5 MB',
-        ),
-        const Text(
-          'Wellness layout applies to JO/COS employees. Other employment types use the default CSC form. The Mayor’s name is printed with a blank signature area for manual signing.',
-        ),
-        Wrap(
-          spacing: 12,
-          runSpacing: 8,
+        Row(
           children: [
-            TextButton(
-              onPressed: _disabled ? null : _pick,
-              child: const Text('Upload background'),
+            Expanded(
+              child: Text(
+                _remove
+                    ? 'Background will be removed'
+                    : _file?.name ?? _background ?? 'No background uploaded',
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              ),
             ),
-            if (_background != null || _file != null)
-              TextButton(
+            if (!_remove && (_background != null || _file != null))
+              IconButton(
+                tooltip: 'Remove background',
+                icon: const Icon(Icons.close, size: 18),
                 onPressed: _disabled
                     ? null
                     : () {
@@ -281,17 +276,34 @@ class _LeavePrintSettingsState extends State<LeavePrintSettings> {
                         });
                         _changed();
                       },
-                child: const Text('Remove background'),
+              ),
+          ],
+        ),
+        const Text('A4 portrait · PDF, PNG or JPEG · Max 5 MB'),
+        if (_layout == 'wellness') ...[
+          const SizedBox(height: 8),
+          const Text(
+            'JO/COS: Wellness form with manual Mayor signing. Others: CSC form.',
+          ),
+        ],
+        const SizedBox(height: 12),
+        Wrap(
+          spacing: 12,
+          runSpacing: 8,
+          children: [
+            TextButton(
+              onPressed: _disabled ? null : _pick,
+              child: const Text('Upload background'),
+            ),
+            if (widget.leaveTypeId != null)
+              TextButton(
+                onPressed: _disabled ? null : _preview,
+                child: const Text('Preview'),
               ),
             if (widget.leaveTypeId != null)
               FilledButton(
                 onPressed: _disabled ? null : _save,
                 child: const Text('Save print settings'),
-              ),
-            if (widget.leaveTypeId != null)
-              TextButton(
-                onPressed: _disabled ? null : _preview,
-                child: const Text('Preview saved form'),
               ),
             if (_error != null && widget.leaveTypeId != null)
               TextButton(

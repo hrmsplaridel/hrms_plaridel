@@ -302,6 +302,7 @@ pool
         ADD COLUMN IF NOT EXISTS display_name TEXT,
         ADD COLUMN IF NOT EXISTS employee_can_file BOOLEAN NOT NULL DEFAULT true,
         ADD COLUMN IF NOT EXISTS admin_only BOOLEAN NOT NULL DEFAULT false,
+        ADD COLUMN IF NOT EXISTS admin_can_file BOOLEAN NOT NULL DEFAULT true,
         ADD COLUMN IF NOT EXISTS allows_past_dates BOOLEAN NOT NULL DEFAULT true,
         ADD COLUMN IF NOT EXISTS requires_attachment BOOLEAN NOT NULL DEFAULT false,
         ADD COLUMN IF NOT EXISTS requires_attachment_when_over_days NUMERIC,
@@ -961,6 +962,7 @@ function leaveTypeRowToApi(row = {}) {
         : fallback.employee_can_file !== false,
     admin_only:
       row.admin_only != null ? row.admin_only === true : fallback.admin_only === true,
+    admin_can_file: row.admin_can_file !== false,
     allows_past_dates:
       row.allows_past_dates != null
         ? row.allows_past_dates === true
@@ -1418,6 +1420,7 @@ function leaveTypePayloadFromBody(body = {}, existing = null) {
     isActive: boolField('is_active', existing?.is_active ?? true),
     employeeCanFile: boolField('employee_can_file', existing?.employee_can_file ?? base.employee_can_file !== false),
     adminOnly: boolField('admin_only', existing?.admin_only ?? base.admin_only === true),
+    adminCanFile: boolField('admin_can_file', existing?.admin_can_file ?? true),
     allowsPastDates: boolField('allows_past_dates', existing?.allows_past_dates ?? base.allows_past_dates !== false),
     requiresAttachment: boolField('requires_attachment', existing?.requires_attachment ?? base.requires_attachment === true),
     requiresAttachmentWhenOverDays: numberField(
@@ -1527,7 +1530,7 @@ router.post('/types', protect, requireAdminOrHr, requireDtrFeatureIfAdmin('leave
           requires_attachment, requires_attachment_when_over_days,
           max_days, minimum_advance_days, affects_dtr_normally, balance_ledger_type,
           entitlement_basis, sex_eligibility, employee_detail_schema, eligible_employment_types, approval_route, mayor_employment_types,
-          created_at, updated_at
+          admin_can_file, created_at, updated_at
         )
         VALUES (
           $1, $2, $3, $4, false,
@@ -1535,7 +1538,7 @@ router.post('/types', protect, requireAdminOrHr, requireDtrFeatureIfAdmin('leave
           $8, $9,
           $10, $11, $12, $13,
           $14, $15, $16::jsonb, $17::text[], $18, $19::text[],
-          now(), now()
+          $20, now(), now()
         )
         RETURNING *`,
       [
@@ -1557,6 +1560,7 @@ router.post('/types', protect, requireAdminOrHr, requireDtrFeatureIfAdmin('leave
         serializeEmployeeDetailSchema(payload.employeeDetailSchema),
         payload.eligibleEmploymentTypes,
         routing.approval_route,routing.mayor_employment_types,
+        payload.adminCanFile,
       ]
     );
     res.status(201).json(leaveTypeRowToApi(q.rows[0]));
@@ -1627,6 +1631,7 @@ router.put('/types/:id', protect, requireAdminOrHr, requireDtrFeatureIfAdmin('le
            sex_eligibility = $16,
            employee_detail_schema = $17::jsonb,
            eligible_employment_types = $19::text[],
+           admin_can_file = $20,
            updated_at = now()
        WHERE id = $18::uuid
        RETURNING *`,
@@ -1654,6 +1659,7 @@ router.put('/types/:id', protect, requireAdminOrHr, requireDtrFeatureIfAdmin('le
         ),
         req.params.id,
         payload.eligibleEmploymentTypes,
+        payload.adminCanFile,
       ]
     );
     res.json(leaveTypeRowToApi(q.rows[0]));

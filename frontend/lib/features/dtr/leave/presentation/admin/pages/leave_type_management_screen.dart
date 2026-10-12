@@ -47,6 +47,7 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
   bool _isActive = true;
   bool _employeeCanFile = true;
   bool _adminOnly = false;
+  bool _adminCanFile = true;
   bool _allowsPastDates = true;
   bool _requiresAttachment = false;
   bool _affectsDtrNormally = true;
@@ -162,6 +163,7 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
     _isActive = item.isActive;
     _employeeCanFile = item.employeeCanFile;
     _adminOnly = item.adminOnly;
+    _adminCanFile = item.adminCanFile;
     _allowsPastDates = item.allowsPastDates;
     _requiresAttachment = item.requiresAttachment;
     _attachmentOverDaysController.text = _requiresAttachment
@@ -224,6 +226,7 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
       _isActive = true;
       _employeeCanFile = true;
       _adminOnly = false;
+      _adminCanFile = true;
       _allowsPastDates = true;
       _requiresAttachment = false;
       _affectsDtrNormally = true;
@@ -391,6 +394,7 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
       'is_active': isActiveOverride ?? _isActive,
       'employee_can_file': _employeeCanFile,
       'admin_only': _adminOnly,
+      'admin_can_file': _adminCanFile,
       'allows_past_dates': _allowsPastDates,
       'requires_attachment': _requiresAttachment,
       'requires_attachment_when_over_days': _requiresAttachment
@@ -845,6 +849,43 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
                   const SizedBox(height: 16),
                   _settingsSection([
                     _sectionTitle('Filing Requirements'),
+                    ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 360),
+                      child: DropdownButtonFormField<String>(
+                        key: ValueKey(
+                          'filing-$_employeeCanFile-$_adminOnly-$_adminCanFile',
+                        ),
+                        initialValue: _employeeCanFile && !_adminOnly
+                            ? (_adminCanFile ? 'both' : 'employee')
+                            : 'admin',
+                        isExpanded: true,
+                        dropdownColor: AppTheme.dashPanelOf(context),
+                        style: AppTheme.dashFieldTextStyle(context),
+                        decoration: _inputDecoration('Who can file'),
+                        items: const [
+                          DropdownMenuItem(
+                            value: 'employee',
+                            child: Text('Employee only'),
+                          ),
+                          DropdownMenuItem(
+                            value: 'both',
+                            child: Text('Employee and HR/admin'),
+                          ),
+                          DropdownMenuItem(
+                            value: 'admin',
+                            child: Text('HR/admin only'),
+                          ),
+                        ],
+                        onChanged: _saving || systemLocked
+                            ? null
+                            : (value) => setState(() {
+                                _employeeCanFile = value != 'admin';
+                                _adminOnly = value == 'admin';
+                                _adminCanFile = value != 'employee';
+                              }),
+                      ),
+                    ),
+                    const SizedBox(height: 16),
                     Wrap(
                       spacing: 10,
                       runSpacing: 10,
@@ -854,19 +895,6 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
                           value: _isActive,
                           editable: !systemLocked,
                           onChanged: (v) => setState(() => _isActive = v),
-                        ),
-                        _ruleChip(
-                          label: 'Employees can file',
-                          value: _employeeCanFile,
-                          editable: !systemLocked,
-                          onChanged: (v) =>
-                              setState(() => _employeeCanFile = v),
-                        ),
-                        _ruleChip(
-                          label: 'HR/Admin only',
-                          value: _adminOnly,
-                          editable: !systemLocked,
-                          onChanged: (v) => setState(() => _adminOnly = v),
                         ),
                         _ruleChip(
                           label: 'Allow past-date filing',
@@ -1143,9 +1171,7 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
       children: [
         Row(
           children: [
-            Expanded(
-              child: _sectionTitle('Custom Form Fields'),
-            ),
+            Expanded(child: _sectionTitle('Custom Form Fields')),
             OutlinedButton(
               onPressed: _saving || _customFields.length >= 20
                   ? null
@@ -1456,10 +1482,7 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
     );
   }
 
-  Widget _statusPill({
-    required String label,
-    required Color color,
-  }) {
+  Widget _statusPill({required String label, required Color color}) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
       decoration: BoxDecoration(
