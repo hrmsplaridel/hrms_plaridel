@@ -2526,6 +2526,9 @@ CREATE TABLE IF NOT EXISTS docutracker_signature_fields (
   signature_asset_id UUID REFERENCES docutracker_signature_assets(id) ON DELETE RESTRICT,
   signed_by UUID REFERENCES users(id) ON DELETE RESTRICT,
   signer_name_snapshot TEXT,
+  -- Printed identity frozen at signing; NULL on fields signed before it existed.
+  signer_position_snapshot TEXT,
+  signer_role_snapshot TEXT,
   signed_at TIMESTAMPTZ,
   locked_at TIMESTAMPTZ,
   created_by UUID REFERENCES users(id) ON DELETE SET NULL,
@@ -2537,6 +2540,12 @@ CREATE TABLE IF NOT EXISTS docutracker_signature_fields (
     OR
     (signature_asset_id IS NOT NULL AND signed_by IS NOT NULL AND signed_at IS NOT NULL
       AND locked_at IS NOT NULL AND signer_name_snapshot IS NOT NULL)
+  ),
+  CONSTRAINT docutracker_signature_fields_identity_snapshot_check_v1 CHECK (
+    (signer_position_snapshot IS NULL OR btrim(signer_position_snapshot) <> '')
+    AND (signer_role_snapshot IS NULL OR btrim(signer_role_snapshot) <> '')
+    AND (signed_at IS NOT NULL
+      OR (signer_position_snapshot IS NULL AND signer_role_snapshot IS NULL))
   )
 );
 

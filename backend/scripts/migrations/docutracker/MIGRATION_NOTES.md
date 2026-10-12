@@ -4,6 +4,48 @@ One entry per migration file added under this folder. Newest first.
 
 ---
 
+## migrate-docutracker-signature-identity-snapshot-v1.sql
+
+- **Date:** 2026-10-12
+- **Purpose:** Freezes the printed signer identity of a signed builder field (official
+  Memo *Prepared by* / *Approved by*). `signer_name_snapshot` already existed; this adds
+  the position and role held **at signing**, so a later promotion, transfer, rename,
+  deactivation or a new Mayor never changes an already signed document. Unsigned fields
+  keep showing the live directory identity (`assigned_signer_name/_position/_role`).
+- **Affected tables / columns:** `docutracker_signature_fields`: new nullable
+  `signer_position_snapshot TEXT` and `signer_role_snapshot TEXT`. Written only by
+  `signLockedField` (sign, re-sign and add-own-signature), from the same current-assignment
+  rule as the live signatory line (the Mayor falls back to "Municipal Mayor").
+- **Constraints:** `docutracker_signature_fields_identity_snapshot_check_v1`: snapshots are
+  NULL or non-blank, and only a signed row (`signed_at IS NOT NULL`) may carry them.
+  Added `NOT VALID`, then validated.
+- **Indexes:** none.
+- **Triggers:** none.
+- **Seed data:** none.
+- **Backfill:** none, on purpose. Fields signed before this migration keep NULL snapshots:
+  the historical position is unknown and is not fabricated from today's directory. The
+  Memo prints their stored signer name with no position line and no "HON." prefix.
+- **Required for existing databases:** yes. Without it signing fails (the UPDATE writes
+  the new columns). Reading builders works either way (`SELECT f.*`).
+- **init-schema.sql updated:** yes (both columns and the named CHECK on the
+  `docutracker_signature_fields` CREATE TABLE).
+- **Rollup regenerated:** yes, `node backend/scripts/build-docutracker-all.js`
+  (section 33 "SIGNER IDENTITY SNAPSHOT" in `post-production-hardening.sql` and
+  `install-all-in-order.sql`; phase 3 headers now read 10-33).
+- **Tests run:** `node --test` over `backend/test/docutracker*.test.js` (fake pools);
+  Flutter `test/docutracker test/shared`. Also verified on throwaway databases (dropped
+  afterwards): fresh `init-schema.sql` install then this migration twice, and this
+  migration twice on a `pg_dump --schema-only` copy of the dev schema. Applied once to
+  the dev database (5 existing signed fields left with NULL snapshots), and the real
+  signing SQL was exercised there inside a rolled-back transaction.
+- **Compatibility:** additive and idempotent (single transaction, `ADD COLUMN IF NOT
+  EXISTS`, constraint drop/re-create). API responses gain `signer_position_snapshot` and
+  `signer_role_snapshot`; older clients ignore them.
+- **Rollback notes:** drop the CHECK, then the two columns. Signed Memos would then fall
+  back to printing no position (the client never substitutes live data for a signed field).
+
+---
+
 ## migrate-docutracker-document-release-v1.sql
 
 - **Date:** 2026-10-07

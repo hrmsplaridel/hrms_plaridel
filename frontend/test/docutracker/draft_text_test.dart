@@ -12,6 +12,7 @@ import 'package:hrms_plaridel/features/docutracker/models/document_purchase_item
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_purchase_items_table.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/pages/docutracker_document_builder_screen.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_create_document_dialog.dart';
+import 'package:hrms_plaridel/features/docutracker/services/employee_directory_lookup.dart';
 import 'package:hrms_plaridel/features/docutracker/utils/docutracker_draft_text.dart';
 
 const _document = DocuTrackerDocument(
@@ -72,7 +73,17 @@ class _DraftProvider extends DocuTrackerProvider {
     data = _data(pages: pages, revision: revision + 1, fields: signatureFields);
     return data;
   }
+
+  @override
+  Future<DocuTrackerDocument?> fetchDocument(String documentId) async => null;
+
+  @override
+  Future<List<EmployeeDirectoryEntry>> loadEmployeeDirectoryEntries() async =>
+      const <EmployeeDirectoryEntry>[];
 }
+
+String _memoField(WidgetTester tester, String key) =>
+    tester.widget<TextField>(find.byKey(ValueKey(key))).controller!.text;
 
 Future<void> _pump(
   WidgetTester tester,
@@ -194,15 +205,19 @@ void main() {
   );
 
   test(
-    'memo starter includes exact title, description, and editable placeholders',
+    'memo starter uses the official template with exact title and description',
     () {
-      final text = DocuTrackerDraftText.compose(_document);
-      expect(text, contains('SUBJECT: Office meeting'));
-      expect(text, contains(_document.description!));
+      final text = DocuTrackerDraftText.compose(
+        _document,
+        now: DateTime.utc(2026, 10, 6, 17, 30),
+      );
       expect(text, contains('MEMORANDUM'));
-      expect(text, contains('[SENDER NAME]'));
-      expect(text, contains('[Recipient / office]'));
-      expect(text, contains('[deadline]'));
+      expect(text, contains('Subject: Office meeting'));
+      expect(text, contains('Date: October 7, 2026'));
+      expect(text, contains(_document.description!));
+      expect(text, contains('[State the instructions'));
+      // Sender/signature blocks belong to the template's signature fields.
+      expect(text, isNot(contains('[SENDER NAME]')));
       expect(text, isNot(contains('null')));
     },
   );
@@ -301,46 +316,39 @@ void main() {
     );
   });
 
-  testWidgets(
-    'starter stays editable through page navigation and saves user changes',
-    (tester) async {
-      final provider = _DraftProvider(_data());
-      await _pump(tester, provider);
-      final controller = _controller(tester);
-      final starter = controller.document.toPlainText();
-      expect(starter, contains(_document.description!));
-      expect(find.text('Unsaved changes'), findsOneWidget);
-      expect(provider.savedPages, isNull);
-      final start = starter.indexOf('[Recipient / office]');
-      controller.replaceText(
-        start,
-        '[Recipient / office]'.length,
-        'All employees',
-        TextSelection.collapsed(offset: start + 13),
-      );
-      await tester.tap(find.byTooltip('More'));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('Add Page'));
-      await tester.pumpAndSettle();
-      await tester.tap(find.byTooltip('Previous page'));
-      await tester.pumpAndSettle();
-      expect(identical(_controller(tester), controller), isTrue);
-      expect(controller.document.toPlainText(), contains('TO: All employees'));
-      await tester.tap(find.byTooltip('Save — Unsaved changes'));
-      await tester.pumpAndSettle();
-      expect(provider.savedPages, hasLength(2));
-      expect(
-        quill.Document.fromJson(provider.savedPages!.first.delta).toPlainText(),
-        contains('TO: All employees'),
-      );
-      expect(
-        _controller(tester).document.toPlainText(),
-        isNot(contains('[Recipient / office]')),
-      );
-      expect(find.text('Saved'), findsOneWidget);
-      expect(tester.takeException(), isNull);
-    },
-  );
+  testWidgets('memo starter stays editable and saves user changes', (
+    tester,
+  ) async {
+    final provider = _DraftProvider(_data());
+    await _pump(tester, provider);
+    final controller = _controller(tester);
+    expect(controller.document.toPlainText(), contains(_document.description!));
+    expect(_memoField(tester, 'memo-field-subject'), 'Office meeting');
+    expect(find.text('Unsaved changes'), findsOneWidget);
+    expect(provider.savedPages, isNull);
+    await tester.enterText(
+      find.byKey(const ValueKey('memo-field-to')),
+      'All employees',
+    );
+    controller.replaceText(
+      0,
+      0,
+      'Reminder: ',
+      const TextSelection.collapsed(offset: 10),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Save — Unsaved changes'));
+    await tester.pumpAndSettle();
+    expect(provider.savedPages, hasLength(1));
+    expect(provider.savedPages!.single.memo?.to, 'All employees');
+    expect(
+      quill.Document.fromJson(provider.savedPages!.single.delta).toPlainText(),
+      startsWith('Reminder: '),
+    );
+    expect(_memoField(tester, 'memo-field-to'), 'All employees');
+    expect(find.text('Saved'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
 
   for (final scenario in [
     'existing text',
@@ -394,7 +402,7 @@ void main() {
       await tester.tap(find.byKey(const Key('docutracker-create-submit')));
       await tester.pumpAndSettle();
       final text = _controller(tester).document.toPlainText();
-      expect(text, contains('SUBJECT: Staff orientation'));
+      expect(_memoField(tester, 'memo-field-subject'), 'Staff orientation');
       expect(text, contains('Discuss the new attendance guidelines.'));
       expect(find.text('Unsaved changes'), findsOneWidget);
       expect(tester.takeException(), isNull);

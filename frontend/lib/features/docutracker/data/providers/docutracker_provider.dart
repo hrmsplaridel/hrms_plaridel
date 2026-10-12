@@ -950,6 +950,30 @@ class DocuTrackerProvider extends ChangeNotifier {
     }
   }
 
+  /// Latest copy of one document, or null when it cannot be fetched. Unlike
+  /// [refreshDocument], a failure does not set the screen-wide [error].
+  Future<DocuTrackerDocument?> fetchDocument(String documentId) async {
+    final authGeneration = _authGeneration;
+    try {
+      final res = await _repo.getDocument(documentId);
+      if (!_isCurrentAuthGeneration(authGeneration)) return null;
+      if (res is! DocuTrackerSuccess<DocuTrackerDocument>) return null;
+      _upsertLocalDocument(res.value);
+      notifyListeners();
+      return res.value;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Active employees, used to suggest default Memo signers. Empty when the
+  /// directory is unavailable.
+  Future<List<EmployeeDirectoryEntry>> loadEmployeeDirectoryEntries() async {
+    final lookup = EmployeeDirectoryLookup();
+    await lookup.load();
+    return lookup.isLoaded ? lookup.entries : const <EmployeeDirectoryEntry>[];
+  }
+
   /// Create document and start workflow.
   Future<DocuTrackerDocument?> createDocument({
     required String title,
@@ -1435,6 +1459,7 @@ class DocuTrackerProvider extends ChangeNotifier {
     required double y,
     required double width,
     required double height,
+    String? label,
     String? signatureAssetId,
     Uint8List? imageBytes,
     String mimeType = 'image/png',
@@ -1453,6 +1478,7 @@ class DocuTrackerProvider extends ChangeNotifier {
       y: y,
       width: width,
       height: height,
+      label: label,
       signatureAssetId: signatureAssetId,
       imageBytes: imageBytes,
       mimeType: mimeType,

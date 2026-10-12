@@ -973,6 +973,7 @@ class DocuTrackerRepository implements DocuTrackerPermissionsDataSource {
     required double y,
     required double width,
     required double height,
+    String? label,
     String? signatureAssetId,
     Uint8List? imageBytes,
     String mimeType = 'image/png',
@@ -988,6 +989,7 @@ class DocuTrackerRepository implements DocuTrackerPermissionsDataSource {
           'position_y': y,
           'width': width,
           'height': height,
+          if (label != null) 'label': label,
           if (signatureAssetId != null)
             'signature_asset_id': signatureAssetId
           else ...<String, dynamic>{

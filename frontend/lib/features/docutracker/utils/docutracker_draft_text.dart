@@ -1,5 +1,6 @@
 import '../models/document.dart';
 import '../models/document_builder.dart';
+import '../models/docutracker_memo_template.dart';
 import '../models/document_type.dart';
 import '../models/document_purchase_items.dart';
 
@@ -10,9 +11,13 @@ abstract final class DocuTrackerDraftText {
   /// not a certification of the municipality's procurement requirements.
   /// https://fo8.dswd.gov.ph/km-portal/wp-content/uploads/2024/04/DSWD-Handbook-of-Style_2020.pdf
   /// https://malita.gov.ph/wp-content/uploads/2025/08/PR-N2506-534-.pdf
-  static DocuTrackerDocumentPage composePage(DocuTrackerDocument document) {
+  static DocuTrackerDocumentPage composePage(
+    DocuTrackerDocument document, {
+    DateTime? now,
+  }) {
     final type = DocumentType.fromValue(document.documentType);
-    if (type != DocumentType.memo && type != DocumentType.purchaseRequest) {
+    if (type == DocumentType.memo) return _composeMemo(document, now: now);
+    if (type != DocumentType.purchaseRequest) {
       return DocuTrackerDocumentPage(
         delta: [
           {'insert': '${_composeGeneral(document)}\n'},
@@ -20,7 +25,7 @@ abstract final class DocuTrackerDraftText {
       );
     }
     final operations = <Map<String, dynamic>>[];
-    final size = type == DocumentType.memo ? '16' : '14';
+    const size = '14';
     void line(
       String text, {
       bool bold = false,
@@ -54,68 +59,66 @@ abstract final class DocuTrackerDraftText {
         ? '[Subject]'
         : document.title.trim();
     final description = document.description?.trim() ?? '';
-    if (type == DocumentType.memo) {
-      line('MEMORANDUM', bold: true, centered: true);
-      line('No. [Number], s. [Year]', centered: true);
-      gap();
-      label('TO', '[Recipient / office]');
-      label('FROM', '[Sender name and designation]');
-      label('SUBJECT', title);
-      label('DATE', '[Day Month Year]');
-      gap();
-      line(
-        description.isEmpty
-            ? '[State the purpose and background of this memorandum.]'
-            : description,
-        justify: true,
-      );
-      gap();
-      line(
-        'In connection with the above, [state the instructions, supporting details, or arrangements].',
-        justify: true,
-      );
-      gap();
-      line(
-        'Please [required action] on or before [deadline]. For questions or clarification, contact [contact person and office].',
-        justify: true,
-      );
-      gap();
-      gap();
-      line('[SIGNATURE / E-SIGNATURE]');
-      line('[SENDER NAME]', bold: true);
-      line('[Designation]');
-      gap();
-      label('Attachments', '[List, if any; otherwise remove this line]');
-    } else {
-      line('PURCHASE REQUEST', bold: true, centered: true);
-      gap();
-      label('LGU', 'Municipality of Plaridel');
-      label('Fund', '[Fund]');
-      label('Office / Section', '[Requesting office / section]');
-      label('PR No.', '[Assigned PR number]');
-      label('Date', '[Day Month Year]');
-      label('F/P/P', '[Function / Program / Project code]');
-      label('Project / Subject', title);
-      gap();
-      operations.add({'insert': DocumentPurchaseItems.blank().toInsertJson()});
-      operations.add({'insert': '\n'});
-      gap();
-      label(
-        'Purpose',
-        description.isEmpty
-            ? '[Explain why the items are needed.]'
-            : description,
-      );
-      gap();
-      line('Requested by:', bold: true);
-      line('Signature: ____________________');
-      line('Printed name: [Requesting official]\nDesignation: [Designation]');
-      gap();
-      line('Approved by:', bold: true);
-      line('Signature: ____________________');
-      line('Printed name: [Approving official]\nDesignation: [Designation]');
-    }
+    line('PURCHASE REQUEST', bold: true, centered: true);
+    gap();
+    label('LGU', 'Municipality of Plaridel');
+    label('Fund', '[Fund]');
+    label('Office / Section', '[Requesting office / section]');
+    label('PR No.', '[Assigned PR number]');
+    label('Date', '[Day Month Year]');
+    label('F/P/P', '[Function / Program / Project code]');
+    label('Project / Subject', title);
+    gap();
+    operations.add({'insert': DocumentPurchaseItems.blank().toInsertJson()});
+    operations.add({'insert': '\n'});
+    gap();
+    label(
+      'Purpose',
+      description.isEmpty ? '[Explain why the items are needed.]' : description,
+    );
+    gap();
+    line('Requested by:', bold: true);
+    line('Signature: ____________________');
+    line('Printed name: [Requesting official]\nDesignation: [Designation]');
+    gap();
+    line('Approved by:', bold: true);
+    line('Signature: ____________________');
+    line('Printed name: [Approving official]\nDesignation: [Designation]');
     return DocuTrackerDocumentPage(delta: operations);
+  }
+
+  /// Official Memorandum template: letterhead, labels and signature blocks
+  /// are fixed by the template; only To/Subject/Date/CC and the body are
+  /// drafted here. The date defaults to the creation date (Manila time).
+  static DocuTrackerDocumentPage _composeMemo(
+    DocuTrackerDocument document, {
+    DateTime? now,
+  }) {
+    final description = document.description?.trim() ?? '';
+    final paragraphs = <String>[
+      description.isEmpty
+          ? '[State the purpose and background of this memorandum.]'
+          : description,
+      '[State the instructions, required action, and deadline, if any.]',
+    ];
+    return DocuTrackerDocumentPage(
+      memo: DocuTrackerMemoTemplate(
+        subject: document.title.trim(),
+        date: docuTrackerMemoDateText(
+          document.createdAt ?? now ?? DateTime.now(),
+        ),
+      ),
+      delta: [
+        for (final paragraph in paragraphs) ...[
+          {'insert': paragraph},
+          {
+            'insert': '\n',
+            'attributes': {'align': 'justify'},
+          },
+          {'insert': '\n'},
+        ],
+      ],
+    );
   }
 
   /// Only a newly opened, untouched blank builder is eligible for prefilling.
@@ -125,14 +128,25 @@ abstract final class DocuTrackerDraftText {
       data.revision == 0 &&
       data.signatureFields.isEmpty &&
       data.pages.length == 1 &&
+      data.pages.single.memo == null &&
       data.pages.single.delta.every((operation) {
         final insert = operation['insert'];
         return insert is String && insert.trim().isEmpty;
       });
 
-  static String compose(DocuTrackerDocument document) {
+  static String compose(DocuTrackerDocument document, {DateTime? now}) {
     final text = StringBuffer();
-    for (final operation in composePage(document).delta) {
+    final page = composePage(document, now: now);
+    final memo = page.memo;
+    if (memo != null) {
+      text
+        ..writeln('MEMORANDUM')
+        ..writeln('To: ${memo.to}')
+        ..writeln('Subject: ${memo.subject}')
+        ..writeln('Date: ${memo.date}')
+        ..writeln();
+    }
+    for (final operation in page.delta) {
       final insert = operation['insert'];
       if (insert is String) {
         text.write(insert);
