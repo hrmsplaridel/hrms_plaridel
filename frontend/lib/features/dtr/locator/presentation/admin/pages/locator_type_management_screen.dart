@@ -259,6 +259,7 @@ class _LocatorTypeManagementScreenState
               _printEpoch++;
             });
           } catch (_) {
+            setState(() => _printEpoch++);
             _showMessage('Locator type updated, but its print settings could not be saved. Retry using Save print settings.');
             return;
           }
@@ -751,6 +752,9 @@ class _LocatorTypeManagementScreenState
                             '${_selected?.id ?? 'new'}-$_printEpoch',
                           ),
                           typeId: _selected?.id,
+                          onCustomFieldsChanged: (fields) => setState(
+                            () => _customFields = List.of(fields),
+                          ),
                           readRequestType: () => LocatorRequestType.locator.copyWith(
                             code:_codeController.text.trim(),label:_labelController.text.trim().isEmpty?'Locator Slip':_labelController.text.trim(),
                             locationLabel:_locationLabelController.text.trim(),locationHint:_locationHintController.text.trim(),approvalRoute:_approvalRoute,

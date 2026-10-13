@@ -1,3 +1,4 @@
+const {printLayoutPageSize}=require('./printLayoutPageSettings');
 const FIELDS=new Set(['employee_name','date','request_type','office','reason','time_segments']);
 const SIGNATURES=new Set(['applicant','department_head','hr_approver']);
 function invalid(message){throw Object.assign(new Error(message),{status:400});}
@@ -6,7 +7,12 @@ function normalizeLocatorPrintLayout(value, {fields=FIELDS, signatures=SIGNATURE
   if(typeof value==='string'){try{value=JSON.parse(value);}catch(_){invalid('Printed layout must be valid JSON');}}
   if(!value || Array.isArray(value) || value.version!==1 || !['portrait','landscape'].includes(value.orientation))invalid('Invalid printed layout or orientation');
   if(!Array.isArray(value.elements)||value.elements.length<1||value.elements.length>60)invalid('Printed layout needs 1 to 60 elements');
-  const [pageWidth,pageHeight]=value.orientation==='portrait'?[595.28,841.89]:[841.89,595.28];
+  const [pageWidth,pageHeight]=printLayoutPageSize(value);
+  const fontFamilies=new Set(['sans','serif','mono']);
+  if(value.font_family!=null&&!fontFamilies.has(value.font_family))invalid('Unsupported font family');
+  if(value.default_font_size!==undefined&&(typeof value.default_font_size!=='number'||!Number.isFinite(value.default_font_size)||value.default_font_size<6||value.default_font_size>72))invalid('Default font size must be 6 to 72 points');
+  const margins=value.margins??{top:0,right:0,bottom:0,left:0};
+  if(!margins||Array.isArray(margins)||typeof margins!=='object'||['top','right','bottom','left'].some(k=>typeof margins[k]!=='number'||!Number.isFinite(margins[k])||margins[k]<0)||margins.left+margins.right>pageWidth-100||margins.top+margins.bottom>pageHeight-100)invalid('Margins must leave at least 100 points of usable page width and height');
   const ids=new Set();
   const elements=value.elements.map(item=>{
     if(!item || typeof item!=='object')invalid('Invalid layout element');
@@ -14,10 +20,11 @@ function normalizeLocatorPrintLayout(value, {fields=FIELDS, signatures=SIGNATURE
     if(!/^[a-zA-Z0-9_-]{1,64}$/.test(id)||ids.has(id))invalid('Layout element IDs must be unique');ids.add(id);
     if(!['field','text','signature','line','table'].includes(item.kind))invalid('Unknown layout element');
     for(const key of ['x','y','width','height','font_size'])if(typeof item[key]!=='number'||!Number.isFinite(item[key]))invalid('Layout dimensions must be numbers');
-    if(item.x<0||item.y<0||item.width<20||item.height<2||item.x+item.width>pageWidth+.1||item.y+item.height>pageHeight+.1||item.font_size<8||item.font_size>28)invalid('Keep layout elements within the page and use fonts from 8 to 28 points');
+    if(item.x<margins.left||item.y<margins.top||item.width<20||item.height<2||item.x+item.width>pageWidth-margins.right+.1||item.y+item.height>pageHeight-margins.bottom+.1||item.font_size<6||item.font_size>72)invalid('Keep layout elements within the page margins and use fonts from 6 to 72 points');
     const align=item.align??'left';if(!['left','center','right'].includes(align))invalid('Invalid text alignment');
     const label=String(item.label??'').trim();if(label.length>100)invalid('Field labels must not exceed 100 characters');
-    const base={id,kind:item.kind,x:item.x,y:item.y,width:item.width,height:item.height,font_size:item.font_size,align,bold:item.bold===true};
+    if(item.font_family!=null&&!fontFamilies.has(item.font_family))invalid('Unsupported element font family');
+    const base={...(item.font_family!=null?{font_family:item.font_family}:{}),id,kind:item.kind,x:item.x,y:item.y,width:item.width,height:item.height,font_size:item.font_size,align,bold:item.bold===true};
     if(item.kind==='table'){
       if(!Array.isArray(item.cells)||item.cells.length<1||item.cells.length>12||!Array.isArray(item.cells[0])||item.cells[0].length<1||item.cells[0].length>6)invalid('Tables need 1 to 12 rows and 1 to 6 columns');
       const columns=item.cells[0].length;
@@ -49,12 +56,13 @@ function normalizeLocatorPrintLayout(value, {fields=FIELDS, signatures=SIGNATURE
       return {...base,source:item.source,label,show_label:item.show_label!==false};
     }
     if(item.kind==='signature'){
+      if((item.font_family!=null||value.font_family!=null)&&item.height<Math.max(60,item.font_size*3.5+12))invalid('Signature blocks need enough height for their font size. Increase the height or reduce the font size.');
       if(!signatures.has(item.source)||item.height<60||item.width<100)invalid('Signature blocks need a valid signer and at least 100 by 60 points');
       return {...base,source:item.source,label};
     }
     return base;
   });
-  const normalized={version:1,orientation:value.orientation,elements};
+  const normalized={version:1,orientation:value.orientation,...(value.paper_size!==undefined?{paper_size:value.paper_size}:{}),...(value.margins!==undefined?{margins:{top:margins.top,right:margins.right,bottom:margins.bottom,left:margins.left}}:{}),...(value.font_family!=null?{font_family:value.font_family}:{}),...(value.default_font_size!==undefined?{default_font_size:value.default_font_size}:{}),elements};
   if(Buffer.byteLength(JSON.stringify(normalized,null,1),'utf8')>100000)invalid('Printed layout must fit within 100 KB');
   return normalized;
 }

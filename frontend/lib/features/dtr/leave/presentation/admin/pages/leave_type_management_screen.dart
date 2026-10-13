@@ -1106,6 +1106,19 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
                         'print-${selected?.id ?? 'new'}-$_printDraftEpoch',
                       ),
                       leaveTypeId: selected?.id,
+                      onCustomFieldsChanged: systemLocked
+                          ? null
+                          : (fields) => setState(() {
+                              final ids = {
+                                for (var i = 0; i < _customFields.length; i++)
+                                  _customFields[i].key: _customFieldUiIds[i],
+                              };
+                              _customFields = List.of(fields);
+                              _customFieldUiIds = [
+                                for (final field in fields)
+                                  ids[field.key] ?? _nextCustomFieldUiId++,
+                              ];
+                            }),
                       readLeaveType: () => LeaveTypeDefinition(
                         name: _nameController.text,
                         displayName: _displayNameController.text,

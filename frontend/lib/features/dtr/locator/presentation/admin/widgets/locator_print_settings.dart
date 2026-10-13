@@ -1,3 +1,4 @@
+import 'package:hrms_plaridel/features/dtr/leave/models/leave_type_definition.dart';
 import 'dart:typed_data';
 import 'dart:convert';
 import '../../../models/locator_print_layout.dart';
@@ -50,6 +51,7 @@ class LocatorPrintSettings extends StatefulWidget {
     this.onSaved,
     this.enabled = true,
     this.readRequestType,
+    this.onCustomFieldsChanged,
   });
   final String? typeId;
   final LocatorPrintDraft? initialDraft;
@@ -57,6 +59,7 @@ class LocatorPrintSettings extends StatefulWidget {
   final VoidCallback? onSaved;
   final bool enabled;
   final LocatorRequestType Function()? readRequestType;
+  final ValueChanged<List<LeaveCustomFieldDefinition>>? onCustomFieldsChanged;
   @override
   State<LocatorPrintSettings> createState() => _LocatorPrintSettingsState();
 }
@@ -66,7 +69,7 @@ class _LocatorPrintSettingsState extends State<LocatorPrintSettings> {
   String? _background, _error;
   bool _loading = false, _busy = false, _remove = false;
   LocatorPrintLayout? _layout;
-  bool _layoutChanged=false;
+  bool _layoutChanged=false, _schemaNeedsSave=false;
   bool get _disabled => _busy || !widget.enabled;
   @override
   void initState() {
@@ -132,6 +135,9 @@ class _LocatorPrintSettingsState extends State<LocatorPrintSettings> {
   }
 
   Future<void> _save() async {
+    if (_schemaNeedsSave) {
+      return;
+    }
     setState(() {
       _busy = true;
       _error = null;
@@ -221,8 +227,8 @@ class _LocatorPrintSettingsState extends State<LocatorPrintSettings> {
 
   LocatorRequestType get _requestType=>widget.readRequestType?.call()??LocatorRequestType.locator;
   DioMediaType _fileType(PlatformFile file)=>DioMediaType.parse(file.extension?.toLowerCase()=='pdf'?'application/pdf':file.extension?.toLowerCase()=='png'?'image/png':'image/jpeg');
-  Future<void> _previewDraft(LocatorPrintLayout? layout)async{
-    final type=_requestType;
+  Future<void> _previewDraft(LocatorPrintLayout? layout, {List<LeaveCustomFieldDefinition>? customFields})async{
+    final type=customFields==null?_requestType:_requestType.copyWith(employeeDetailSchema:customFields);
     final bytes=layout!=null?await buildLocatorLayoutPdf(layout:layout,form:locatorLayoutSample(type),signatories:LocatorFormSignatories(
       applicant:locatorLayoutSampleSignatory(type,'applicant'),departmentHead:locatorLayoutSampleSignatory(type,'department_head'),finalApprover:locatorLayoutSampleSignatory(type,'hr_approver'),
     )):await LocatorSlipPrint.buildPdf(id:null,employeeName:'Sample Employee',dateText:'Oct 13, 2026',requestTypeLabel:type.label,locationLabel:type.locationLabel,office:'Municipal Hall',remarks:'Sample purpose',amIn:true,amOut:true,pmIn:true,pmOut:true,
@@ -247,6 +253,11 @@ class _LocatorPrintSettingsState extends State<LocatorPrintSettings> {
       if(!mounted)return;
       final result=await showDialog<LocatorPrintLayout>(context:context,builder:(_)=>LocatorPrintLayoutEditor(
         requestType:_requestType,initialLayout:_layout,backgroundPdf:pdf,backgroundImage:image,onPreview:_previewDraft,
+        onPreviewWithFields:(layout,fields)=>_previewDraft(layout,customFields:fields),
+        onCustomFieldsChanged:widget.onCustomFieldsChanged==null?null:(fields){
+          widget.onCustomFieldsChanged!(fields);
+          setState(()=>_schemaNeedsSave=true);
+        },
       ));
       if(result!=null && mounted){setState((){_layout=result;_layoutChanged=true;});_changed();}
     }catch(_){if(mounted)setState(()=>_error='Could not open the layout editor. Please retry.');}
@@ -272,8 +283,9 @@ class _LocatorPrintSettingsState extends State<LocatorPrintSettings> {
               : _file?.name ?? _background ?? 'No background uploaded',
         ),
         const Text(
-          'A4 letterhead · portrait or landscape · PDF, PNG or JPEG · up to 5 MB',
+          'A4, Letter, Long Bond or Legal · portrait or landscape · PDF, PNG or JPEG · up to 5 MB',
         ),
+        if (_schemaNeedsSave) const Text('Save the type changes to keep the new fields and layout.'),
         const Text(
           'Design a page using the background, fields and signatures. Existing forms keep their saved template.',
         ),
@@ -302,7 +314,7 @@ class _LocatorPrintSettingsState extends State<LocatorPrintSettings> {
               ),
             if (widget.typeId != null)
               FilledButton(
-                onPressed: _disabled ? null : _save,
+                onPressed: _disabled || _schemaNeedsSave ? null : _save,
                 child: const Text('Save print settings'),
               ),
               TextButton(

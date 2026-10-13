@@ -5,6 +5,7 @@ import 'package:pdf/widgets.dart' as pw;
 import '../models/locator_print_layout.dart';
 import '../models/locator_request_type.dart';
 import 'locator_form_signatories.dart';
+import 'print_layout_fonts.dart';
 
 Map<String, dynamic> locatorLayoutSample(LocatorRequestType type) => {
   'employee_name': 'Sample Employee',
@@ -94,15 +95,35 @@ Future<Uint8List> buildLocatorLayoutPdf({
 }) async {
   final error = layout.validate();
   if (error != null) throw FormatException(error);
+  final requestedFamilies = {
+    if (layout.fontFamily != null) layout.fontFamily!,
+    for (final item in layout.elements)
+      if (item.fontFamily != null) item.fontFamily!,
+  };
+  final fonts = <String, (pw.Font, pw.Font)>{};
+  for (final family in requestedFamilies) {
+    fonts[family] = await loadPrintLayoutFonts(family);
+  }
+  final defaultFonts =
+      fonts[layout.fontFamily] ??
+      (
+        regularFont ?? pw.Font.helvetica(),
+        strongFont ?? pw.Font.helveticaBold(),
+      );
+  final font = defaultFonts.$1, boldFont = defaultFonts.$2;
+  pw.Font itemFont(LocatorPrintElement item, bool bold) {
+    final pair = fonts[item.fontFamily ?? layout.fontFamily] ?? defaultFonts;
+    return bold ? pair.$2 : pair.$1;
+  }
+
   final doc = pw.Document(
-    theme: regularFont != null || strongFont != null
-        ? pw.ThemeData.withFont(base: regularFont, bold: strongFont)
+    theme:
+        layout.fontFamily != null || regularFont != null || strongFont != null
+        ? pw.ThemeData.withFont(base: font, bold: boldFont)
         : null,
   );
-  final overflow = <String, String>{};
+  final overflow = <String, String>{}, overflowFonts = <String, pw.Font>{};
   final format = PdfPageFormat(layout.pageWidth, layout.pageHeight);
-  final font = regularFont ?? pw.Font.helvetica(),
-      boldFont = strongFont ?? pw.Font.helveticaBold();
   pw.TextAlign alignment(String value) => switch (value) {
     'center' => pw.TextAlign.center,
     'right' => pw.TextAlign.right,
@@ -145,7 +166,7 @@ Future<Uint8List> buildLocatorLayoutPdf({
     pw.Context context,
   ) {
     final cell = item.cells[row][column];
-    final chosen = item.bold || (item.headerRow && row == 0) ? boldFont : font;
+    final chosen = itemFont(item, item.bold || (item.headerRow && row == 0));
     final value = cell.kind == 'field'
         ? locatorLayoutValue(cell.source, form)
         : cell.text;
@@ -157,6 +178,7 @@ Future<Uint8List> buildLocatorLayoutPdf({
           item.headerRow && row > 0 && item.cells[0][column].kind == 'text'
           ? item.cells[0][column].text
           : '';
+      overflowFonts['table:${item.id}:$row:$column'] = chosen;
       overflow['table:${item.id}:$row:$column'] =
           '${heading.isEmpty ? 'Table row ${row + 1}, column ${column + 1}' : heading}: $value';
     }
@@ -188,7 +210,9 @@ Future<Uint8List> buildLocatorLayoutPdf({
   }
 
   pw.Widget itemWidget(LocatorPrintElement item, pw.Context context) {
-    final chosen = item.bold ? boldFont : font;
+    final chosen = itemFont(item, item.bold),
+        itemBold = itemFont(item, true),
+        itemRegular = itemFont(item, false);
     if (item.kind == 'table') {
       final total = item.columnWidths.fold(0.0, (a, b) => a + b);
       final rowHeight = item.height / item.cells.length;
@@ -218,6 +242,13 @@ Future<Uint8List> buildLocatorLayoutPdf({
       return pw.Center(child: pw.Container(height: 1, color: PdfColors.black));
     }
     if (item.kind == 'signature') {
+      final styled = item.fontFamily != null || layout.fontFamily != null;
+      final nameSize = styled
+          ? item.fontSize
+          : item.fontSize.clamp(8, 12).toDouble();
+      final captionSize = styled
+          ? (item.fontSize * .75).clamp(6, 54).toDouble()
+          : 8.0;
       final person =
           extraSignatories[item.source] ??
           switch (item.source) {
@@ -239,16 +270,13 @@ Future<Uint8List> buildLocatorLayoutPdf({
                   ),
           ),
           pw.SizedBox(
-            height: 14,
+            height: styled ? nameSize * 1.2 : 14,
             child: name.isEmpty
                 ? null
                 : pw.FittedBox(
                     child: pw.Text(
                       name,
-                      style: pw.TextStyle(
-                        font: boldFont,
-                        fontSize: item.fontSize.clamp(8, 12),
-                      ),
+                      style: pw.TextStyle(font: itemBold, fontSize: nameSize),
                     ),
                   ),
           ),
@@ -258,7 +286,7 @@ Future<Uint8List> buildLocatorLayoutPdf({
             textAlign: alignment(item.align),
             maxLines: 2,
             overflow: pw.TextOverflow.clip,
-            style: pw.TextStyle(font: font, fontSize: 8),
+            style: pw.TextStyle(font: itemRegular, fontSize: captionSize),
           ),
         ],
       );
@@ -279,6 +307,7 @@ Future<Uint8List> buildLocatorLayoutPdf({
     final rows = wrap(value, item.width, item.fontSize, context, chosen);
     final hasOverflow = rows.length > count;
     if (hasOverflow && value.isNotEmpty) {
+      overflowFonts[item.source] = chosen;
       overflow[item.source] =
           '${item.label.isEmpty ? item.source : item.label}: $value';
     }
@@ -298,7 +327,7 @@ Future<Uint8List> buildLocatorLayoutPdf({
               item.label,
               maxLines: 1,
               overflow: pw.TextOverflow.clip,
-              style: pw.TextStyle(font: boldFont, fontSize: 8),
+              style: pw.TextStyle(font: itemBold, fontSize: 8),
             ),
           ),
         pw.Expanded(
@@ -367,7 +396,23 @@ Future<Uint8List> buildLocatorLayoutPdf({
   if (overflow.isNotEmpty) {
     doc.addPage(
       pw.MultiPage(
-        pageFormat: PdfPageFormat.a4,
+        pageFormat:
+            layout.paperSize != 'a4' ||
+                !layout.margins.isEmpty ||
+                layout.fontFamily != null
+            ? format
+            : PdfPageFormat.a4,
+        margin:
+            layout.paperSize != 'a4' ||
+                !layout.margins.isEmpty ||
+                layout.fontFamily != null
+            ? pw.EdgeInsets.fromLTRB(
+                layout.margins.left,
+                layout.margins.top,
+                layout.margins.right,
+                layout.margins.bottom,
+              )
+            : null,
         maxPages: 100,
         build: (_) => [
           pw.Text(
@@ -379,16 +424,19 @@ Future<Uint8List> buildLocatorLayoutPdf({
             '${form['employee_name'] ?? ''} / ${form['slip_date'] ?? ''}',
           ),
           pw.SizedBox(height: 16),
-          for (final value in overflow.values)
-            for (var offset = 0; offset < value.length; offset += 500)
+          for (final entry in overflow.entries)
+            for (var offset = 0; offset < entry.value.length; offset += 500)
               pw.Padding(
                 padding: const pw.EdgeInsets.only(bottom: 8),
                 child: pw.Text(
-                  value.substring(
+                  entry.value.substring(
                     offset,
-                    (offset + 500).clamp(0, value.length),
+                    (offset + 500).clamp(0, entry.value.length),
                   ),
-                  style: pw.TextStyle(font: font, fontSize: 11),
+                  style: pw.TextStyle(
+                    font: overflowFonts[entry.key] ?? font,
+                    fontSize: layout.defaultFontSize,
+                  ),
                 ),
               ),
         ],

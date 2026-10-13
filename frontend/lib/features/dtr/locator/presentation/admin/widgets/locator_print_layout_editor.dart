@@ -11,6 +11,9 @@ import '../../../models/locator_request_type.dart';
 import '../../../utils/locator_layout_pdf.dart';
 import '../../../utils/locator_form_signatories.dart';
 import 'print_layout_table_properties.dart';
+import 'print_layout_page_properties.dart';
+import 'print_layout_field_dialog.dart';
+import 'package:hrms_plaridel/features/dtr/leave/models/leave_type_definition.dart';
 
 /// Domain-specific fields and sample values for the shared printed page editor.
 class PrintLayoutEditorBindings {
@@ -36,12 +39,20 @@ class LocatorPrintLayoutEditor extends StatefulWidget {
     this.backgroundPdf,
     this.backgroundImage,
     required this.onPreview,
+    this.onCustomFieldsChanged,
+    this.onPreviewWithFields,
   });
   final LocatorRequestType requestType;
   final PrintLayoutEditorBindings? bindings;
   final LocatorPrintLayout? initialLayout;
   final Uint8List? backgroundPdf, backgroundImage;
   final Future<void> Function(LocatorPrintLayout) onPreview;
+  final ValueChanged<List<LeaveCustomFieldDefinition>>? onCustomFieldsChanged;
+  final Future<void> Function(
+    LocatorPrintLayout,
+    List<LeaveCustomFieldDefinition>,
+  )?
+  onPreviewWithFields;
   @override
   State<LocatorPrintLayoutEditor> createState() =>
       _LocatorPrintLayoutEditorState();
@@ -49,10 +60,13 @@ class LocatorPrintLayoutEditor extends StatefulWidget {
 
 class _LocatorPrintLayoutEditorState extends State<LocatorPrintLayoutEditor> {
   late LocatorPrintLayout _layout;
+  late List<LeaveCustomFieldDefinition> _customFields;
+  bool _customFieldsChanged = false;
   String? _selectedId, _error;
   Uint8List? _background;
   bool _busy = false, _loadingBackground = false;
-  String? _backgroundOrientation;
+  String? _backgroundOrientation, _backgroundPaper;
+  final _pagePropertiesKey = GlobalKey<PrintLayoutPagePropertiesState>();
   double? _zoom;
   bool _showGrid = false, _showSettings = false;
   final _workspaceVertical = ScrollController();
@@ -68,6 +82,7 @@ class _LocatorPrintLayoutEditorState extends State<LocatorPrintLayoutEditor> {
   void initState() {
     super.initState();
     _layout = widget.initialLayout ?? _defaults('portrait');
+    _customFields = List.of(widget.requestType.employeeDetailSchema);
     _select(_layout.elements.firstOrNull?.id);
     _loadBackground();
   }
@@ -100,6 +115,10 @@ class _LocatorPrintLayoutEditorState extends State<LocatorPrintLayoutEditor> {
       }
       final codec = await ui.instantiateImageCodec(image);
       final frame = await codec.getNextFrame();
+      final paper = printPaperFromAspect(
+        frame.image.width.toDouble(),
+        frame.image.height.toDouble(),
+      );
       final orientation = frame.image.width > frame.image.height
           ? 'landscape'
           : 'portrait';
@@ -109,8 +128,9 @@ class _LocatorPrintLayoutEditorState extends State<LocatorPrintLayoutEditor> {
       setState(() {
         _background = image;
         _backgroundOrientation = orientation;
+        _backgroundPaper = paper;
         if (widget.initialLayout == null) {
-          _layout = _defaults(orientation);
+          _layout = _defaults(orientation).withPageSettings(paperSize: paper);
           _select(_layout.elements.firstOrNull?.id);
         }
       });
@@ -156,7 +176,9 @@ class _LocatorPrintLayoutEditorState extends State<LocatorPrintLayoutEditor> {
 
   bool _commitProperties() {
     final item = _selected;
-    if (item == null) return true;
+    if (item == null) {
+      return _pagePropertiesKey.currentState?.commit(base: _layout) ?? true;
+    }
     if (item.kind == 'signature' &&
         _customSignatureCaptions.contains(item.id) &&
         item.label.trim().isEmpty) {
@@ -165,9 +187,18 @@ class _LocatorPrintLayoutEditorState extends State<LocatorPrintLayoutEditor> {
       );
       return false;
     }
+    final original = {
+      'x': item.x,
+      'y': item.y,
+      'width': item.width,
+      'height': item.height,
+      'font_size': item.fontSize,
+    };
     final values = {
       for (final entry in _numbers.entries)
-        entry.key: double.tryParse(entry.value.text),
+        entry.key: entry.value.text == original[entry.key]!.toStringAsFixed(1)
+            ? original[entry.key]
+            : double.tryParse(entry.value.text),
     };
     if (values.values.any((v) => v == null || !v.isFinite)) {
       setState(() => _error = 'Enter valid dimensions.');
@@ -179,6 +210,9 @@ class _LocatorPrintLayoutEditorState extends State<LocatorPrintLayoutEditor> {
       width: values['width'],
       height: values['height'],
       fontSize: values['font_size'],
+      fontFamily: values['font_size'] != item.fontSize
+          ? item.fontFamily ?? _layout.fontFamily ?? 'sans'
+          : item.fontFamily,
     );
     final trial = _layout.copyWith(
       elements: [
@@ -191,7 +225,7 @@ class _LocatorPrintLayoutEditorState extends State<LocatorPrintLayoutEditor> {
       return false;
     }
     _replace(next);
-    return true;
+    return _pagePropertiesKey.currentState?.commit(base: _layout) ?? true;
   }
 
   Future<void> _preview() async {
@@ -202,15 +236,24 @@ class _LocatorPrintLayoutEditorState extends State<LocatorPrintLayoutEditor> {
       return;
     }
     if (_backgroundOrientation != null &&
-        _layout.orientation != _backgroundOrientation) {
+        (_layout.orientation != _backgroundOrientation ||
+            _layout.paperSize != _backgroundPaper)) {
       setState(
-        () => _error = 'Choose the same page orientation as the background.',
+        () => _error =
+            'Choose the same paper size and orientation as the background.',
       );
       return;
     }
     setState(() => _busy = true);
     try {
-      await widget.onPreview(_layout);
+      if (widget.onPreviewWithFields != null) {
+        await widget.onPreviewWithFields!(
+          _layout,
+          List.unmodifiable(_customFields),
+        );
+      } else {
+        await widget.onPreview(_layout);
+      }
     } catch (e) {
       if (mounted) setState(() => _error = userFacingApiError(e));
     } finally {
@@ -226,11 +269,16 @@ class _LocatorPrintLayoutEditorState extends State<LocatorPrintLayoutEditor> {
       return;
     }
     if (_backgroundOrientation != null &&
-        _layout.orientation != _backgroundOrientation) {
+        (_layout.orientation != _backgroundOrientation ||
+            _layout.paperSize != _backgroundPaper)) {
       setState(
-        () => _error = 'Choose the same page orientation as the background.',
+        () => _error =
+            'Choose the same paper size and orientation as the background.',
       );
       return;
+    }
+    if (_customFieldsChanged) {
+      widget.onCustomFieldsChanged?.call(List.unmodifiable(_customFields));
     }
     Navigator.of(context).pop(_layout);
   }
@@ -245,19 +293,44 @@ class _LocatorPrintLayoutEditorState extends State<LocatorPrintLayoutEditor> {
         'department_head': 'Department signature',
         'hr_approver': 'Final signature',
       };
-  Map<String, String> get _fields =>
-      widget.bindings?.fields ??
-      {
-        'employee_name': 'Employee name',
-        'date': 'Date',
-        'request_type': 'Request type',
-        'office': widget.requestType.locationLabel,
-        'reason': 'Remarks / Reasons',
-        'time_segments': 'DTR slots',
-        for (final field in widget.requestType.employeeDetailSchema)
-          'custom:${field.key}': field.label,
-      };
+  Map<String, String> get _fields => {
+    ...?widget.bindings?.fields,
+    if (widget.bindings == null) ...{
+      'employee_name': 'Employee name',
+      'date': 'Date',
+      'request_type': 'Request type',
+      'office': widget.requestType.locationLabel,
+      'reason': 'Remarks / Reasons',
+      'time_segments': 'DTR slots',
+    },
+    for (final field in _customFields) 'custom:${field.key}': field.label,
+  };
+  Future<void> _createField() async {
+    if (!_commitProperties() || widget.onCustomFieldsChanged == null) return;
+    if (_customFields.length >= 20 || _layout.elements.length >= 60) {
+      setState(
+        () => _error = 'Use at most 20 additional fields and 60 page elements.',
+      );
+      return;
+    }
+    final field = await showDialog<LeaveCustomFieldDefinition>(
+      context: context,
+      builder: (_) => PrintLayoutFieldDialog(
+        existingFields: List.unmodifiable(_customFields),
+      ),
+    );
+    if (field == null || !mounted) return;
+    setState(() {
+      _customFields = [..._customFields, field];
+      _customFieldsChanged = true;
+    });
+    _add('field|custom:${field.key}');
+  }
+
   void _add(String data, {Offset? point}) {
+    if (!(_pagePropertiesKey.currentState?.commit(base: _layout) ?? true)) {
+      return;
+    }
     if (_layout.elements.length >= 60) {
       setState(() => _error = 'Use at most 60 elements.');
       return;
@@ -272,29 +345,43 @@ class _LocatorPrintLayoutEditorState extends State<LocatorPrintLayoutEditor> {
             _ => 'Final approver',
           }
         : _fields[source] ?? '';
-    final width = kind == 'table'
-            ? 400.0
-            : kind == 'text'
-            ? 300.0
-            : 240.0,
-        height = kind == 'table'
-            ? 120.0
-            : kind == 'signature'
-            ? 80.0
-            : kind == 'line'
-            ? 2.0
-            : 40.0;
+    final width = math.min(
+          _layout.contentWidth,
+          kind == 'table'
+              ? 400.0
+              : kind == 'text'
+              ? 300.0
+              : 240.0,
+        ),
+        height = math.min(
+          _layout.contentHeight,
+          kind == 'table'
+              ? math.max(120.0, 3 * (_layout.defaultFontSize * 1.5 + 8))
+              : kind == 'signature'
+              ? math.max(80.0, _layout.defaultFontSize * 3.5 + 12)
+              : kind == 'line'
+              ? 2.0
+              : math.max(40.0, _layout.defaultFontSize * 1.5 + 12),
+        );
     final item = LocatorPrintElement(
       id: 'item_${DateTime.now().microsecondsSinceEpoch}',
       kind: kind,
       source: source,
       text: kind == 'text' ? 'New text' : '',
       label: kind == 'signature' ? '' : label,
-      x: (point?.dx ?? 40).clamp(0, _layout.pageWidth - width),
-      y: (point?.dy ?? 180).clamp(0, _layout.pageHeight - height),
+      x: (point?.dx ?? math.max(40, _layout.margins.left)).clamp(
+        _layout.margins.left,
+        _layout.pageWidth - _layout.margins.right - width,
+      ),
+      y: (point?.dy ?? math.max(180, _layout.margins.top)).clamp(
+        _layout.margins.top,
+        _layout.pageHeight - _layout.margins.bottom - height,
+      ),
       width: width,
       height: height,
       bold: kind == 'text',
+      fontSize: _layout.defaultFontSize,
+      fontFamily: _layout.fontFamily ?? 'sans',
       columnWidths: kind == 'table' ? const [1, 1] : const [],
       cells: kind == 'table'
           ? const [
@@ -307,6 +394,12 @@ class _LocatorPrintLayoutEditorState extends State<LocatorPrintLayoutEditor> {
             ]
           : const [],
     );
+    final trial = _layout.copyWith(elements: [..._layout.elements, item]);
+    final validation = trial.validate();
+    if (validation != null) {
+      setState(() => _error = validation);
+      return;
+    }
     setState(() {
       _layout = _layout.copyWith(elements: [..._layout.elements, item]);
       _select(item.id);
@@ -406,66 +499,14 @@ class _LocatorPrintLayoutEditorState extends State<LocatorPrintLayoutEditor> {
     ),
   );
 
-  Widget _pageSettings() => Column(
-    crossAxisAlignment: CrossAxisAlignment.stretch,
-    children: [
-      Text(
-        _layout.orientation == 'portrait'
-            ? 'A4 · 210 × 297 mm'
-            : 'A4 · 297 × 210 mm',
-        style: TextStyle(
-          fontSize: 12,
-          color: AppTheme.dashTextSecondaryOf(context),
-        ),
-      ),
-      const SizedBox(height: 16),
-      DropdownButtonFormField<String>(
-        initialValue: _layout.orientation,
-        key: ValueKey(_layout.orientation),
-        style: TextStyle(
-          fontSize: 14,
-          fontFamily: AppTheme.fontFamily,
-          color: AppTheme.dashTextPrimaryOf(context),
-        ),
-        decoration: AppTheme.dashInputDecoration(
-          context,
-          labelText: 'A4 orientation',
-          radius: 8,
-        ),
-        items: const [
-          DropdownMenuItem(value: 'portrait', child: Text('Portrait')),
-          DropdownMenuItem(value: 'landscape', child: Text('Landscape')),
-        ],
-        onChanged: _busy
-            ? null
-            : (value) {
-                if (value == null) return;
-                final old = _layout,
-                    next = _layout.copyWith(orientation: value);
-                setState(() {
-                  _layout = next.copyWith(
-                    elements: [
-                      for (final e in old.elements)
-                        e.copyWith(
-                          x: (e.x / old.pageWidth * next.pageWidth).clamp(
-                            0,
-                            next.pageWidth - e.width.clamp(20, next.pageWidth),
-                          ),
-                          y: (e.y / old.pageHeight * next.pageHeight).clamp(
-                            0,
-                            next.pageHeight -
-                                e.height.clamp(2, next.pageHeight),
-                          ),
-                          width: e.width.clamp(20, next.pageWidth),
-                          height: e.height.clamp(2, next.pageHeight),
-                        ),
-                    ],
-                  );
-                  _select(_selectedId);
-                });
-              },
-      ),
-    ],
+  Widget _pageSettings() => PrintLayoutPageProperties(
+    key: _pagePropertiesKey,
+    layout: _layout,
+    enabled: !_busy,
+    onChanged: (next) => setState(() {
+      _layout = next;
+      _select(_selectedId);
+    }),
   );
 
   Widget _palette() => Wrap(
@@ -621,6 +662,44 @@ class _LocatorPrintLayoutEditorState extends State<LocatorPrintLayoutEditor> {
             },
           ),
         const SizedBox(height: 16),
+        if (selected.kind != 'line')
+          DropdownButtonFormField<String>(
+            key: ValueKey('element-font-${selected.id}-${selected.fontFamily}'),
+            initialValue: selected.fontFamily ?? 'inherit',
+            isExpanded: true,
+            decoration: AppTheme.dashInputDecoration(
+              context,
+              labelText: 'Element font family',
+              radius: 8,
+            ),
+            items: [
+              const DropdownMenuItem(
+                value: 'inherit',
+                child: Text('Use page font'),
+              ),
+              for (final e in printFontLabels.entries)
+                DropdownMenuItem(
+                  value: e.key,
+                  child: Text(
+                    e.value,
+                    style: TextStyle(fontFamily: printFontFamilies[e.key]),
+                  ),
+                ),
+            ],
+            onChanged: _busy
+                ? null
+                : (v) {
+                    if (v != null) {
+                      _replace(
+                        selected.copyWith(
+                          fontFamily: v == 'inherit' ? null : v,
+                          inheritFont: v == 'inherit',
+                        ),
+                      );
+                    }
+                  },
+          ),
+        const SizedBox(height: 16),
         Wrap(
           spacing: 8,
           runSpacing: 8,
@@ -708,6 +787,48 @@ class _LocatorPrintLayoutEditorState extends State<LocatorPrintLayoutEditor> {
     );
   }
 
+  Widget _signaturePreview(LocatorPrintElement item, double scale) {
+    final styled = item.fontFamily != null || _layout.fontFamily != null;
+    final family =
+        printFontFamilies[item.fontFamily ?? _layout.fontFamily] ??
+        AppTheme.fontFamily;
+    return Column(
+      children: [
+        const Expanded(child: Icon(Icons.draw_outlined, color: Colors.black26)),
+        SizedBox(
+          height: (styled ? item.fontSize * 1.2 : 14) * scale,
+          child: FittedBox(
+            child: Text(
+              'Sample signer',
+              style: TextStyle(
+                color: Colors.black,
+                fontFamily: family,
+                fontSize: (styled ? item.fontSize : 10) * scale,
+                fontWeight: styled ? FontWeight.bold : FontWeight.normal,
+              ),
+            ),
+          ),
+        ),
+        Divider(height: 3 * scale),
+        Text(
+          locatorSignatureCaption(
+            item,
+            widget.bindings?.sampleSignatory(item.source) ??
+                locatorLayoutSampleSignatory(widget.requestType, item.source),
+          ),
+          textAlign: TextAlign.center,
+          maxLines: 2,
+          overflow: TextOverflow.clip,
+          style: TextStyle(
+            color: Colors.black,
+            fontFamily: family,
+            fontSize: (styled ? (item.fontSize * .75).clamp(6, 54) : 8) * scale,
+          ),
+        ),
+      ],
+    );
+  }
+
   Widget _tablePreview(
     LocatorPrintElement item,
     double scale,
@@ -754,6 +875,10 @@ class _LocatorPrintLayoutEditorState extends State<LocatorPrintLayoutEditor> {
                         style: TextStyle(
                           color: Colors.black,
                           fontSize: item.fontSize * scale,
+                          fontFamily:
+                              printFontFamilies[item.fontFamily ??
+                                  _layout.fontFamily] ??
+                              AppTheme.fontFamily,
                           height: 1.5,
                           fontWeight: item.bold || (item.headerRow && r == 0)
                               ? FontWeight.bold
@@ -770,8 +895,16 @@ class _LocatorPrintLayoutEditorState extends State<LocatorPrintLayoutEditor> {
   }
 
   Widget _page(double scale) {
-    final sample =
-        widget.bindings?.sample ?? locatorLayoutSample(widget.requestType);
+    final customSample = locatorLayoutSample(
+      widget.requestType.copyWith(employeeDetailSchema: _customFields),
+    );
+    final sample = {
+      ...?widget.bindings?.sample,
+      if (widget.bindings == null) ...customSample,
+      'additional_details': customSample['additional_details'],
+      'employee_detail_schema_snapshot':
+          customSample['employee_detail_schema_snapshot'],
+    };
     return Align(
       alignment: Alignment.topCenter,
       child: SizedBox(
@@ -796,6 +929,24 @@ class _LocatorPrintLayoutEditorState extends State<LocatorPrintLayoutEditor> {
                       child: Image.memory(_background!, fit: BoxFit.fill),
                     ),
                   ),
+                if (!_layout.margins.isEmpty)
+                  Positioned(
+                    left: _layout.margins.left * scale,
+                    top: _layout.margins.top * scale,
+                    width: _layout.contentWidth * scale,
+                    height: _layout.contentHeight * scale,
+                    child: IgnorePointer(
+                      child: Container(
+                        key: const ValueKey('layout-margin-guides'),
+                        decoration: BoxDecoration(
+                          border: Border.all(
+                            color: Colors.blueGrey.withValues(alpha: .5),
+                            width: .7,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
                 if (_showGrid)
                   Positioned.fill(
                     child: IgnorePointer(
@@ -813,6 +964,7 @@ class _LocatorPrintLayoutEditorState extends State<LocatorPrintLayoutEditor> {
                     item: item,
                     scale: scale,
                     pageSize: Size(_layout.pageWidth, _layout.pageHeight),
+                    margins: _layout.margins,
                     enabled: !_busy,
                     onSelect: () => setState(() => _select(item.id)),
                     onMoved: (next) => _replace(next, sync: true),
@@ -830,42 +982,7 @@ class _LocatorPrintLayoutEditorState extends State<LocatorPrintLayoutEditor> {
                           : item.kind == 'line'
                           ? const Divider(color: Colors.black, height: 1)
                           : item.kind == 'signature'
-                          ? Column(
-                              children: [
-                                const Expanded(
-                                  child: Icon(
-                                    Icons.draw_outlined,
-                                    color: Colors.black26,
-                                  ),
-                                ),
-                                Text(
-                                  'Sample signer',
-                                  style: TextStyle(
-                                    color: Colors.black,
-                                    fontSize: 10 * scale,
-                                  ),
-                                ),
-                                const Divider(height: 2),
-                                Text(
-                                  locatorSignatureCaption(
-                                    item,
-                                    widget.bindings?.sampleSignatory(
-                                          item.source,
-                                        ) ??
-                                        locatorLayoutSampleSignatory(
-                                          widget.requestType,
-                                          item.source,
-                                        ),
-                                  ),
-                                  textAlign: TextAlign.center,
-                                  maxLines: 1,
-                                  style: TextStyle(
-                                    color: Colors.black,
-                                    fontSize: 8 * scale,
-                                  ),
-                                ),
-                              ],
-                            )
+                          ? _signaturePreview(item, scale)
                           : Column(
                               crossAxisAlignment: CrossAxisAlignment.stretch,
                               children: [
@@ -877,6 +994,10 @@ class _LocatorPrintLayoutEditorState extends State<LocatorPrintLayoutEditor> {
                                     style: TextStyle(
                                       color: Colors.black,
                                       fontSize: 8 * scale,
+                                      fontFamily:
+                                          printFontFamilies[item.fontFamily ??
+                                              _layout.fontFamily] ??
+                                          AppTheme.fontFamily,
                                       fontWeight: FontWeight.bold,
                                     ),
                                   ),
@@ -897,6 +1018,10 @@ class _LocatorPrintLayoutEditorState extends State<LocatorPrintLayoutEditor> {
                                     style: TextStyle(
                                       color: Colors.black,
                                       fontSize: item.fontSize * scale,
+                                      fontFamily:
+                                          printFontFamilies[item.fontFamily ??
+                                              _layout.fontFamily] ??
+                                          AppTheme.fontFamily,
                                       fontWeight: item.bold
                                           ? FontWeight.bold
                                           : FontWeight.normal,
@@ -986,8 +1111,23 @@ class _LocatorPrintLayoutEditorState extends State<LocatorPrintLayoutEditor> {
           PopupMenuButton<String>(
             tooltip: 'Insert field',
             enabled: !_busy,
-            onSelected: _add,
+            onSelected: (value) {
+              if (value == 'create_field') {
+                _createField();
+              } else {
+                _add(value);
+              }
+            },
             itemBuilder: (_) => [
+              if (widget.onCustomFieldsChanged != null) ...[
+                PopupMenuItem(
+                  value: 'create_field',
+                  enabled:
+                      _customFields.length < 20 && _layout.elements.length < 60,
+                  child: const Text('Create new field'),
+                ),
+                const PopupMenuDivider(),
+              ],
               for (final entry in _fields.entries)
                 PopupMenuItem(
                   value: 'field|${entry.key}',
@@ -1079,7 +1219,15 @@ class _LocatorPrintLayoutEditorState extends State<LocatorPrintLayoutEditor> {
               isSelected: _showSettings,
               onPressed: _busy
                   ? null
-                  : () => setState(() => _showSettings = !_showSettings),
+                  : () {
+                      if (_pagePropertiesKey.currentState?.commit(
+                            base: _layout,
+                          ) ==
+                          false) {
+                        return;
+                      }
+                      setState(() => _showSettings = !_showSettings);
+                    },
               icon: const Icon(Icons.tune, size: 20),
               selectedIcon: const Icon(
                 Icons.tune,
@@ -1141,7 +1289,7 @@ class _LocatorPrintLayoutEditorState extends State<LocatorPrintLayoutEditor> {
         ),
         const SizedBox(height: 12),
         Text(
-          'A4 · ${_layout.orientation == 'portrait' ? 'Portrait' : 'Landscape'}',
+          '${printPaperLabels[_layout.paperSize]} · ${_layout.orientation == 'portrait' ? 'Portrait' : 'Landscape'}',
           style: TextStyle(fontSize: 11, color: rulerColor),
         ),
       ],
@@ -1441,6 +1589,7 @@ class _DraggableLayoutElement extends StatefulWidget {
     required this.item,
     required this.scale,
     required this.pageSize,
+    required this.margins,
     required this.enabled,
     required this.onSelect,
     required this.onMoved,
@@ -1450,6 +1599,7 @@ class _DraggableLayoutElement extends StatefulWidget {
   final LocatorPrintElement item;
   final double scale;
   final Size pageSize;
+  final PrintLayoutMargins margins;
   final bool enabled;
   final VoidCallback onSelect;
   final ValueChanged<LocatorPrintElement> onMoved;
@@ -1488,8 +1638,14 @@ class _DraggableLayoutElementState extends State<_DraggableLayoutElement> {
   void _move(DragUpdateDetails details) {
     final next = _position.value + details.delta / widget.scale;
     _position.value = Offset(
-      next.dx.clamp(0, widget.pageSize.width - widget.item.width),
-      next.dy.clamp(0, widget.pageSize.height - widget.item.height),
+      next.dx.clamp(
+        widget.margins.left,
+        widget.pageSize.width - widget.margins.right - widget.item.width,
+      ),
+      next.dy.clamp(
+        widget.margins.top,
+        widget.pageSize.height - widget.margins.bottom - widget.item.height,
+      ),
     );
   }
 

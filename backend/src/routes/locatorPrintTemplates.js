@@ -1,3 +1,4 @@
+const {checkPrintBackgroundSize}=require('../services/printLayoutPageSettings');
 const express=require('express');const multer=require('multer');
 const {withHeavyWork}=require('../middleware/heavyWork');
 const {pool}=require('../config/db');
@@ -49,7 +50,7 @@ router.get('/types/:id/background',...manage,async(req,res)=>{
 async function checkOrientation(background,layout){
  if(!background||!layout)return;
  const doc=await PDFDocument.load(background);const {width,height}=doc.getPage(0).getSize();
- if((width>height)!==(layout.orientation==='landscape'))throw Object.assign(new Error('Choose the same page orientation as the background'),{status:400});
+ checkPrintBackgroundSize(width,height,layout);
 }
 router.post('/types/:id',...manage,file,async(req,res)=>{
  let client;

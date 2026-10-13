@@ -14,6 +14,14 @@ void main() {
       ..addFont(rootBundle.load('assets/fonts/NotoSans-Regular.ttf'))
       ..addFont(rootBundle.load('assets/fonts/NotoSans-Bold.ttf'));
     await loader.load();
+    for (final family in ['NotoSerif', 'NotoSansMono']) {
+      final fontLoader = FontLoader(family)
+        ..addFont(
+          rootBundle.load('assets/fonts/form-layout/$family-Regular.ttf'),
+        )
+        ..addFont(rootBundle.load('assets/fonts/form-layout/$family-Bold.ttf'));
+      await fontLoader.load();
+    }
     final icons = FontLoader('MaterialIcons')
       ..addFont(rootBundle.load('fonts/MaterialIcons-Regular.otf'));
     await icons.load();
@@ -41,6 +49,7 @@ void main() {
   for (final (name, size, dark, settings) in [
     ('desktop', const Size(1440, 900), false, false),
     ('table', const Size(1440, 900), false, false),
+    ('page_settings', const Size(1440, 900), false, false),
     ('dark', const Size(1440, 900), true, false),
     ('mobile', const Size(390, 844), false, false),
     ('mobile_settings', const Size(390, 844), false, true),
@@ -56,13 +65,95 @@ void main() {
           home: Scaffold(
             body: LocatorPrintLayoutEditor(
               requestType: type,
-              initialLayout:name=='table'?const LocatorPrintLayout(elements:[
-                LocatorPrintElement(id:'summary_table',kind:'table',x:40,y:180,width:515,height:140,fontSize:11,columnWidths:[1,2],cells:[
-                  [LocatorPrintTableCell(text:'Employee'),LocatorPrintTableCell(text:'Destination')],
-                  [LocatorPrintTableCell(kind:'field',source:'employee_name'),LocatorPrintTableCell(kind:'field',source:'custom:destination')],
-                  [LocatorPrintTableCell(text:'Departure date'),LocatorPrintTableCell(kind:'field',source:'custom:departure')],
-                ]),
-              ]):null,
+              initialLayout: name == 'page_settings'
+                  ? const LocatorPrintLayout(
+                      paperSize: 'long',
+                      fontFamily: 'serif',
+                      defaultFontSize: 14,
+                      margins: PrintLayoutMargins(
+                        top: 36,
+                        right: 36,
+                        bottom: 36,
+                        left: 36,
+                      ),
+                      elements: [
+                        LocatorPrintElement(
+                          id: 'title',
+                          kind: 'text',
+                          text: 'TRAVEL ORDER',
+                          x: 60,
+                          y: 90,
+                          width: 480,
+                          height: 70,
+                          fontSize: 32,
+                          bold: true,
+                          align: 'center',
+                        ),
+                        LocatorPrintElement(
+                          id: 'name',
+                          kind: 'field',
+                          source: 'employee_name',
+                          label: 'Employee name',
+                          x: 60,
+                          y: 180,
+                          width: 400,
+                          height: 70,
+                          fontSize: 18,
+                          fontFamily: 'sans',
+                        ),
+                        LocatorPrintElement(
+                          id: 'office',
+                          kind: 'field',
+                          source: 'office',
+                          label: 'Purpose of travel',
+                          x: 60,
+                          y: 260,
+                          width: 400,
+                          height: 70,
+                          fontSize: 14,
+                          fontFamily: 'mono',
+                        ),
+                      ],
+                    )
+                  : name == 'table'
+                  ? const LocatorPrintLayout(
+                      elements: [
+                        LocatorPrintElement(
+                          id: 'summary_table',
+                          kind: 'table',
+                          x: 40,
+                          y: 180,
+                          width: 515,
+                          height: 140,
+                          fontSize: 11,
+                          columnWidths: [1, 2],
+                          cells: [
+                            [
+                              LocatorPrintTableCell(text: 'Employee'),
+                              LocatorPrintTableCell(text: 'Destination'),
+                            ],
+                            [
+                              LocatorPrintTableCell(
+                                kind: 'field',
+                                source: 'employee_name',
+                              ),
+                              LocatorPrintTableCell(
+                                kind: 'field',
+                                source: 'custom:destination',
+                              ),
+                            ],
+                            [
+                              LocatorPrintTableCell(text: 'Departure date'),
+                              LocatorPrintTableCell(
+                                kind: 'field',
+                                source: 'custom:departure',
+                              ),
+                            ],
+                          ],
+                        ),
+                      ],
+                    )
+                  : null,
               onPreview: (_) async {},
             ),
           ),

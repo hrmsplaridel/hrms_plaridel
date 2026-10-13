@@ -1,3 +1,5 @@
+import 'dart:convert';
+import '../locator/designer_field_test_helpers.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -249,6 +251,24 @@ void main() {
     }
   });
 
+  testWidgets('designer-created leave field is added to form fields and saved before its layout', (tester) async {
+    await mount(tester);await enterRequiredName(tester,'Custom Travel Leave');
+    await tester.scrollUntilVisible(find.text('Design layout'),250,scrollable:formScrollable());
+    await Scrollable.ensureVisible(tester.element(find.text('Design layout')),alignment:.5);await tester.pumpAndSettle();
+    await tester.tap(find.text('Design layout'));await tester.pumpAndSettle();
+    await createDesignerField(tester,'Arrival date');
+    await tester.tap(find.text('Use layout'));await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(find.text('Arrival date'),-250,scrollable:formScrollable());
+    expect(tester.widget<TextFormField>(textField('Field label')).initialValue,'Arrival date');
+    await tester.tap(find.text('Create Leave Type'));await tester.pumpAndSettle();
+    final saved=requests.singleWhere((r)=>r.method=='POST' && r.path=='/api/leave/types');
+    final field=((saved.data as Map)['employee_detail_schema'] as List).single as Map;
+    expect(field['label'],'Arrival date');expect(field['type'],'date');expect(field['required'],true);
+    final print=requests.singleWhere((r)=>r.method=='POST' && r.path.startsWith('/api/leave/print/types/'));
+    final layout=jsonDecode((print.data as FormData).fields.singleWhere((e)=>e.key=='print_layout').value) as Map;
+    expect((layout['elements'] as List).where((e)=>e['source']=='custom:${field['key']}').length,1);
+    expect(requests.indexOf(saved),lessThan(requests.indexOf(print)));
+  });
   for (final failUpload in [false, true]) {
     testWidgets(
       'new type selects a background before creation; upload failure=$failUpload',

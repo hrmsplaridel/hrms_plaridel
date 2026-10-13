@@ -1,3 +1,4 @@
+import 'designer_field_test_helpers.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
@@ -155,6 +156,26 @@ void main() {
     await tester.enterText(textField('DTR display text'), 'Remote');
     await tester.enterText(textField('DTR print text'), 'REMOTE');
   }
+  testWidgets('designer-created locator field appears in type fields and saves its print binding', (tester) async {
+    await mount(tester);await enterRequiredFields(tester);
+    final scrollable=find.descendant(of:find.byType(ListView).last,matching:find.byType(Scrollable)).first;
+    await tester.scrollUntilVisible(find.text('Design layout'),250,scrollable:scrollable);
+    await tester.tap(find.text('Design layout'));await tester.pumpAndSettle();
+    await createDesignerField(tester,'Arrival date');
+    await tester.tap(find.byTooltip('Insert field'));await tester.pumpAndSettle();
+    expect(find.text('Arrival date'),findsWidgets);
+    await tester.tap(find.text('Arrival date').last);await tester.pumpAndSettle();
+    await tester.tap(find.text('Use layout'));await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(find.text('Arrival date'),-250,scrollable:scrollable);
+    expect(tester.widget<TextFormField>(textField('Field label')).initialValue,'Arrival date');
+    await tester.tap(find.text('Create Type'));await tester.pumpAndSettle();
+    final saved=requests.singleWhere((r)=>r.method=='POST' && r.path=='/api/locator-slips/types');
+    final field=((saved.data as Map)['employee_detail_schema'] as List).single as Map;
+    expect(field['label'],'Arrival date');expect(field['type'],'date');expect(field['required'],true);
+    final print=requests.singleWhere((r)=>r.method=='POST' && r.path.startsWith('/api/locator-slips/print/types/'));
+    final layout=jsonDecode((print.data as FormData).fields.singleWhere((e)=>e.key=='print_layout').value) as Map;
+    expect((layout['elements'] as List).where((e)=>e['source']=='custom:${field['key']}').length,2);
+  });
   testWidgets('new type saves its designed layout without needing a background upload', (tester)async{
     await mount(tester);await enterRequiredFields(tester);
     final scrollable=find.descendant(of:find.byType(ListView).last,matching:find.byType(Scrollable)).first;
@@ -190,6 +211,35 @@ void main() {
     expect(find.text('Locator type updated.'),findsOneWidget);
   });
 
+  testWidgets('new designer field persists when existing type print save fails and can retry', (tester) async {
+    await mount(tester);await enterRequiredFields(tester);
+    await tester.tap(find.text('Create Type'));await tester.pumpAndSettle();
+    ApiClient.instance.dio.interceptors.insert(0,InterceptorsWrapper(onRequest:(o,h){
+      if(o.method=='PUT' && o.path.startsWith('/api/locator-slips/types/')) {
+        requests.add(o);h.resolve(Response(requestOptions:o,statusCode:200,data:o.data));
+      } else { h.next(o); }
+    }));
+    final scrollable=find.descendant(of:find.byType(ListView).last,matching:find.byType(Scrollable)).first;
+    await tester.scrollUntilVisible(find.text('Design layout'),250,scrollable:scrollable);
+    await tester.drag(find.byType(ListView).last,const Offset(0,-300));await tester.pumpAndSettle();
+    await tester.tap(find.text('Design layout'));await tester.pumpAndSettle();
+    await createDesignerField(tester,'Processing date');
+    await tester.tap(find.text('Use layout'));await tester.pumpAndSettle();
+    rejectBackground=true;
+    await tester.tap(find.text('Save Changes'));await tester.pumpAndSettle();
+    final update=requests.singleWhere((r)=>r.method=='PUT');
+    expect(((update.data as Map)['employee_detail_schema'] as List).single['label'],'Processing date');
+    await tester.scrollUntilVisible(find.text('Save print settings'),250,scrollable:scrollable);
+    final button=find.ancestor(of:find.text('Save print settings'),matching:find.byType(FilledButton));
+    expect(tester.widget<FilledButton>(button).onPressed,isNotNull);
+    rejectBackground=false;
+    await Scrollable.ensureVisible(tester.element(button),alignment:.5);await tester.pumpAndSettle();await tester.tap(button);await tester.pumpAndSettle();
+    final prints=requests.where((r)=>r.method=='POST' && r.path.startsWith('/api/locator-slips/print/types/')).toList();
+    expect(prints.length,2);
+    expect(requests.where((r)=>r.method=='PUT').length,1);
+    final layout=jsonDecode((prints.last.data as FormData).fields.singleWhere((e)=>e.key=='print_layout').value) as Map;
+    expect((layout['elements'] as List).any((e)=>e['label']=='Processing date'),true);
+  });
   testWidgets('custom locator fields are included when creating a type', (tester) async {
     await mount(tester);
     await enterRequiredFields(tester);

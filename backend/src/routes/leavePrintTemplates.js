@@ -1,3 +1,4 @@
+const {checkPrintBackgroundSize}=require('../services/printLayoutPageSettings');
 const express=require('express');
 const {PDFDocument}=require('pdf-lib');
 const {normalizeLeavePrintLayout}=require('../services/leavePrintLayout');
@@ -52,14 +53,14 @@ router.post('/types/:id',...manage,file,async(req,res)=>{
  let client;
  try{
   const layout=validateLayout(req.body.layout);
-  const uploaded=req.file?await validateBackground(req.file.buffer,req.file.mimetype,{allowLandscape:layout==='custom'}):null;
+  const uploaded=req.file?await validateBackground(req.file.buffer,req.file.mimetype,{allowLandscape:layout==='custom',allowPaperSizes:layout==='custom'}):null;
   client=await pool.connect();await client.query('BEGIN');
   const current=await typeVersion(client,req.params.id,true);
   const remove=req.body.remove_background==='true';
   const printLayout=layout==='custom'?normalizeLeavePrintLayout(req.body.print_layout===undefined?current.print_layout:req.body.print_layout):null;
   if(layout==='custom'&&!printLayout)throw Object.assign(new Error('Custom printed layout is required'),{status:400});
   const background=remove?null:uploaded||current.background_pdf||null;
-  if(background)await validateBackground(background,'application/pdf',{allowLandscape:layout==='custom'});
+  if(background)await validateBackground(background,'application/pdf',{allowLandscape:layout==='custom',allowPaperSizes:layout==='custom'});
   await checkOrientation(background,printLayout);
   const q=await client.query(`INSERT INTO leave_print_template_versions(leave_type_id,layout,background_pdf,background_name,created_by,print_layout)
    VALUES($1,$2,$3,$4,$5,$6::jsonb) RETURNING *`,[req.params.id,layout,background,
@@ -94,7 +95,7 @@ router.post('/types/:id/preview',...manage,file,withHeavyWork(async(req,res)=>{
 async function checkOrientation(background,layout){
  if(!background||!layout)return;
  const doc=await PDFDocument.load(background);const {width,height}=doc.getPage(0).getSize();
- if((width>height)!==(layout.orientation==='landscape'))throw Object.assign(new Error('Choose the same page orientation as the background'),{status:400});
+ checkPrintBackgroundSize(width,height,layout);
 }
 router.get('/types/:id/background',...manage,async(req,res)=>{
  try{const row=await typeVersion(pool,req.params.id);
@@ -112,7 +113,7 @@ router.post('/preview',...manage,draftFiles,withHeavyWork(async(req,res)=>{
  if(layout==='custom'&&!printLayout)throw Object.assign(new Error('Custom printed layout is required'),{status:400});
  const overlay=req.files?.file?.[0];if(!overlay)throw Object.assign(new Error('Generated PDF required'),{status:400});
  const uploaded=req.files?.background?.[0];
- const background=req.body.remove_background==='true'?null:uploaded?await validateBackground(uploaded.buffer,uploaded.mimetype,{allowLandscape:layout==='custom'}):current?.background_pdf||null;
+ const background=req.body.remove_background==='true'?null:uploaded?await validateBackground(uploaded.buffer,uploaded.mimetype,{allowLandscape:layout==='custom',allowPaperSizes:layout==='custom'}):current?.background_pdf||null;
  const bytes=await mergeBackground(background,overlay.buffer,{layout,printLayout});
  res.set('Content-Type','application/pdf').set('Cache-Control','no-store').send(bytes);
  }catch(e){failure(res,e);}

@@ -38,7 +38,7 @@ test('migration snapshots submitted forms, updates drafts, preserves versions on
  assert.deepEqual((await db.query('SELECT print_layout FROM leave_print_template_versions WHERE id=$1',[v3])).rows[0].print_layout,definition);
  assert.equal((await db.query('SELECT print_layout FROM leave_print_template_versions WHERE id=$1',[v1])).rows[0].print_layout,null);
  await assert.rejects(db.query("INSERT INTO leave_print_template_versions(leave_type_id,layout)VALUES($1,'custom')",[type]),/chk_leave_print_layout/);
- const tableLayout={version:1,orientation:'portrait',elements:[{id:'table',kind:'table',x:40,y:180,width:400,height:120,font_size:11,column_widths:[1,2],header_row:true,borders:true,cells:[[{kind:'text',text:'Name'},{kind:'text',text:'Days'}],[{kind:'field',source:'employee_name'},{kind:'field',source:'working_days'}]]}]};
+ const tableLayout={version:1,orientation:'portrait',paper_size:'long',margins:{top:36,right:36,bottom:36,left:36},font_family:'serif',default_font_size:14,elements:[{id:'table',kind:'table',x:40,y:180,width:400,height:120,font_size:11,column_widths:[1,2],header_row:true,borders:true,cells:[[{kind:'text',text:'Name'},{kind:'text',text:'Days'}],[{kind:'field',source:'employee_name'},{kind:'field',source:'working_days'}]]}]};
  const normalizedTable=require('../src/services/leavePrintLayout').normalizeLeavePrintLayout(tableLayout);
  const tableVersion=(await db.query("INSERT INTO leave_print_template_versions(leave_type_id,layout,print_layout)VALUES($1,'custom',$2::jsonb)RETURNING id",[type,JSON.stringify(normalizedTable)])).rows[0].id;
  await db.query('UPDATE leave_types SET print_template_version_id=$1 WHERE id=$2',[tableVersion,type]);

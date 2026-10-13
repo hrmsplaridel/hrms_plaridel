@@ -1,5 +1,63 @@
 import 'dart:convert';
+import 'dart:math' as math;
 import 'locator_request_type.dart';
+
+const printPaperSizes = <String, (double, double)>{
+  'a4': (595.28, 841.89),
+  'letter': (612, 792),
+  'long': (612, 936),
+  'legal': (612, 1008),
+};
+const printPaperLabels = <String, String>{
+  'a4': 'A4 (210 × 297 mm)',
+  'letter': 'Letter (8.5 × 11 in)',
+  'long': 'Long Bond (8.5 × 13 in)',
+  'legal': 'Legal (8.5 × 14 in)',
+};
+const printFontFamilies = <String, String>{
+  'sans': 'NotoSans',
+  'serif': 'NotoSerif',
+  'mono': 'NotoSansMono',
+};
+const printFontLabels = <String, String>{
+  'sans': 'Noto Sans',
+  'serif': 'Noto Serif',
+  'mono': 'Noto Sans Mono',
+};
+String printPaperFromAspect(double width, double height) {
+  final ratio = math.min(width, height) / math.max(width, height);
+  return printPaperSizes.keys.reduce(
+    (a, b) =>
+        (ratio - printPaperSizes[a]!.$1 / printPaperSizes[a]!.$2).abs() <=
+            (ratio - printPaperSizes[b]!.$1 / printPaperSizes[b]!.$2).abs()
+        ? a
+        : b,
+  );
+}
+
+class PrintLayoutMargins {
+  const PrintLayoutMargins({
+    this.top = 0,
+    this.right = 0,
+    this.bottom = 0,
+    this.left = 0,
+  });
+  final double top, right, bottom, left;
+  bool get isEmpty => top == 0 && right == 0 && bottom == 0 && left == 0;
+  Map<String, dynamic> toJson() => {
+    'top': top,
+    'right': right,
+    'bottom': bottom,
+    'left': left,
+  };
+  factory PrintLayoutMargins.fromJson(Map<String, dynamic> json) =>
+      PrintLayoutMargins(
+        top: (json['top'] as num).toDouble(),
+        right: (json['right'] as num).toDouble(),
+        bottom: (json['bottom'] as num).toDouble(),
+        left: (json['left'] as num).toDouble(),
+      );
+}
 
 class LocatorPrintTableCell {
   const LocatorPrintTableCell({
@@ -31,6 +89,7 @@ class LocatorPrintElement {
     this.width = 240,
     this.height = 40,
     this.fontSize = 11,
+    this.fontFamily,
     this.align = 'left',
     this.bold = false,
     this.showLabel = true,
@@ -41,6 +100,7 @@ class LocatorPrintElement {
   });
   final String id, kind, source, text, label, align;
   final double x, y, width, height, fontSize;
+  final String? fontFamily;
   final bool bold, showLabel;
   final List<List<LocatorPrintTableCell>> cells;
   final List<double> columnWidths;
@@ -54,6 +114,8 @@ class LocatorPrintElement {
     double? width,
     double? height,
     double? fontSize,
+    String? fontFamily,
+    bool inheritFont = false,
     String? align,
     bool? bold,
     bool? showLabel,
@@ -72,6 +134,7 @@ class LocatorPrintElement {
     width: width ?? this.width,
     height: height ?? this.height,
     fontSize: fontSize ?? this.fontSize,
+    fontFamily: inheritFont ? null : fontFamily ?? this.fontFamily,
     align: align ?? this.align,
     bold: bold ?? this.bold,
     showLabel: showLabel ?? this.showLabel,
@@ -91,6 +154,7 @@ class LocatorPrintElement {
     'width': width,
     'height': height,
     'font_size': fontSize,
+    if (fontFamily != null) 'font_family': fontFamily,
     'align': align,
     'bold': bold,
     'show_label': showLabel,
@@ -115,6 +179,7 @@ class LocatorPrintElement {
         width: (json['width'] as num).toDouble(),
         height: (json['height'] as num).toDouble(),
         fontSize: (json['font_size'] as num).toDouble(),
+        fontFamily: json['font_family'] as String?,
         align: json['align'] as String? ?? 'left',
         bold: json['bold'] == true,
         showLabel: json['show_label'] != false,
@@ -140,27 +205,61 @@ class LocatorPrintElement {
 class LocatorPrintLayout {
   const LocatorPrintLayout({
     this.orientation = 'portrait',
+    this.paperSize = 'a4',
+    this.margins = const PrintLayoutMargins(),
+    this.fontFamily,
+    this.defaultFontSize = 11,
     required this.elements,
   });
-  final String orientation;
+  final String orientation, paperSize;
+  final PrintLayoutMargins margins;
+  final String? fontFamily;
+  final double defaultFontSize;
   final List<LocatorPrintElement> elements;
-  double get pageWidth => orientation == 'portrait' ? 595.28 : 841.89;
-  double get pageHeight => orientation == 'portrait' ? 841.89 : 595.28;
+  double get pageWidth => orientation == 'portrait'
+      ? (printPaperSizes[paperSize] ?? printPaperSizes['a4']!).$1
+      : (printPaperSizes[paperSize] ?? printPaperSizes['a4']!).$2;
+  double get pageHeight => orientation == 'portrait'
+      ? (printPaperSizes[paperSize] ?? printPaperSizes['a4']!).$2
+      : (printPaperSizes[paperSize] ?? printPaperSizes['a4']!).$1;
+  double get contentWidth => pageWidth - margins.left - margins.right;
+  double get contentHeight => pageHeight - margins.top - margins.bottom;
   LocatorPrintLayout copyWith({
     String? orientation,
+    String? paperSize,
+    PrintLayoutMargins? margins,
+    String? fontFamily,
+    bool inheritFont = false,
+    double? defaultFontSize,
     List<LocatorPrintElement>? elements,
   }) => LocatorPrintLayout(
     orientation: orientation ?? this.orientation,
+    paperSize: paperSize ?? this.paperSize,
+    margins: margins ?? this.margins,
+    fontFamily: inheritFont ? null : fontFamily ?? this.fontFamily,
+    defaultFontSize: defaultFontSize ?? this.defaultFontSize,
     elements: elements ?? this.elements,
   );
   Map<String, dynamic> toJson() => {
     'version': 1,
     'orientation': orientation,
+    if (paperSize != 'a4') 'paper_size': paperSize,
+    if (!margins.isEmpty) 'margins': margins.toJson(),
+    if (fontFamily != null) 'font_family': fontFamily,
+    if (defaultFontSize != 11) 'default_font_size': defaultFontSize,
     'elements': elements.map((e) => e.toJson()).toList(),
   };
   factory LocatorPrintLayout.fromJson(Map<String, dynamic> json) =>
       LocatorPrintLayout(
         orientation: json['orientation'] as String,
+        paperSize: json['paper_size'] as String? ?? 'a4',
+        margins: json['margins'] is Map
+            ? PrintLayoutMargins.fromJson(
+                Map<String, dynamic>.from(json['margins'] as Map),
+              )
+            : const PrintLayoutMargins(),
+        fontFamily: json['font_family'] as String?,
+        defaultFontSize: (json['default_font_size'] as num? ?? 11).toDouble(),
         elements: (json['elements'] as List)
             .map(
               (e) => LocatorPrintElement.fromJson(
@@ -169,7 +268,100 @@ class LocatorPrintLayout {
             )
             .toList(),
       );
+  String? pageSettingsError() {
+    if (!printPaperSizes.containsKey(paperSize) ||
+        !['portrait', 'landscape'].contains(orientation)) {
+      return 'Choose a supported paper size and orientation.';
+    }
+    if (fontFamily != null && !printFontFamilies.containsKey(fontFamily)) {
+      return 'Choose a supported font family.';
+    }
+    if (!defaultFontSize.isFinite ||
+        defaultFontSize < 6 ||
+        defaultFontSize > 72) {
+      return 'Default font size must be 6 to 72 points.';
+    }
+    if ([
+          margins.top,
+          margins.right,
+          margins.bottom,
+          margins.left,
+        ].any((v) => !v.isFinite || v < 0) ||
+        contentWidth < 100 ||
+        contentHeight < 100) {
+      return 'Margins must leave at least 100 points of usable page width and height.';
+    }
+    return null;
+  }
+
+  LocatorPrintLayout withPageSettings({
+    String? paperSize,
+    String? orientation,
+    PrintLayoutMargins? margins,
+  }) {
+    final next = copyWith(
+      paperSize: paperSize,
+      orientation: orientation,
+      margins: margins,
+    );
+    if (next.pageSettingsError() != null) return next;
+    return next.copyWith(
+      elements: [for (final item in elements) _fitElement(item, next)],
+    );
+  }
+
+  LocatorPrintElement _fitElement(
+    LocatorPrintElement item,
+    LocatorPrintLayout next,
+  ) {
+    final minWidth = item.kind == 'signature'
+        ? 100.0
+        : item.kind == 'table'
+        ? 20 *
+              item.columnWidths.fold(0.0, (a, b) => a + b) /
+              item.columnWidths.reduce(math.min)
+        : 20.0;
+    final minHeight = switch (item.kind) {
+      'signature' =>
+        item.fontFamily != null || next.fontFamily != null
+            ? math.max(60.0, item.fontSize * 3.5 + 12)
+            : 60.0,
+      'field' => 20.0,
+      'text' => 12.0,
+      'table' => item.cells.length * (item.fontSize * 1.5 + 8),
+      _ => 2.0,
+    };
+    final width = (item.width / contentWidth * next.contentWidth).clamp(
+      math.min(minWidth, next.contentWidth),
+      next.contentWidth,
+    );
+    final height = (item.height / contentHeight * next.contentHeight).clamp(
+      math.min(minHeight, next.contentHeight),
+      next.contentHeight,
+    );
+    return item.copyWith(
+      width: width.toDouble(),
+      height: height.toDouble(),
+      x:
+          (next.margins.left +
+                  (item.x - margins.left) / contentWidth * next.contentWidth)
+              .clamp(
+                next.margins.left,
+                next.pageWidth - next.margins.right - width,
+              ),
+      y:
+          (next.margins.top +
+                  (item.y - margins.top) / contentHeight * next.contentHeight)
+              .clamp(
+                next.margins.top,
+                next.pageHeight - next.margins.bottom - height,
+              ),
+    );
+  }
+
   String? validate() {
+    final pageError = pageSettingsError();
+    if (pageError != null) return pageError;
     if (elements.isEmpty || elements.length > 60) {
       return 'Add 1 to 60 elements.';
     }
@@ -178,16 +370,20 @@ class LocatorPrintLayout {
     }
     for (final e in elements) {
       if ([e.x, e.y, e.width, e.height, e.fontSize].any((n) => !n.isFinite) ||
-          e.x < 0 ||
-          e.y < 0 ||
+          e.x < margins.left ||
+          e.y < margins.top ||
           e.width < 20 ||
           e.height < 2 ||
-          e.x + e.width > pageWidth + .1 ||
-          e.y + e.height > pageHeight + .1) {
-        return 'Keep all elements inside the page.';
+          e.x + e.width > pageWidth - margins.right + .1 ||
+          e.y + e.height > pageHeight - margins.bottom + .1) {
+        return 'Keep all elements inside the page margins.';
       }
-      if (e.fontSize < 8 || e.fontSize > 28) {
-        return 'Font size must be 8 to 28 points.';
+      if (e.fontFamily != null &&
+          !printFontFamilies.containsKey(e.fontFamily)) {
+        return 'Choose a supported element font family.';
+      }
+      if (e.fontSize < 6 || e.fontSize > 72) {
+        return 'Font size must be 6 to 72 points.';
       }
       if (e.kind == 'text' && (e.text.trim().isEmpty || e.text.length > 500)) {
         return 'Text needs 1 to 500 characters.';
@@ -227,6 +423,11 @@ class LocatorPrintLayout {
             }
           }
         }
+      }
+      if (e.kind == 'signature' &&
+          (e.fontFamily != null || fontFamily != null) &&
+          e.height < math.max(60, e.fontSize * 3.5 + 12)) {
+        return 'Signature blocks need enough height for their font size. Increase the height or reduce the font size.';
       }
       if (e.kind == 'signature' && (e.width < 100 || e.height < 60)) {
         return 'Signature blocks need at least 100 by 60 points.';

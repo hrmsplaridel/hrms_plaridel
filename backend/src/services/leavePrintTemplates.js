@@ -1,34 +1,32 @@
 const {PDFDocument} = require('pdf-lib');
+const {PAPER_SIZES}=require('./printLayoutPageSettings');
 function invalid(message) {return Object.assign(new Error(message),{status:400});}
 function validateLayout(layout) {
  if(!['csc','wellness','custom'].includes(layout)) throw invalid('Unsupported printed form layout');
  return layout;
 }
-async function validateBackground(bytes,mime,{allowLandscape=false}={}) {
- if(!bytes?.length || bytes.length>5242880) throw invalid('Background must be at most 5 MB');
- try {
+async function validateBackground(bytes,mime,{allowLandscape=false,allowPaperSizes=false}={}) {
+ if(!bytes?.length || bytes.length>5242880)throw invalid('Background must be at most 5 MB');
+ const sizes=Object.values(allowPaperSizes?PAPER_SIZES:{a4:PAPER_SIZES.a4}).flatMap(size=>allowLandscape?[size,[size[1],size[0]]]:[size]);
+ const message=allowPaperSizes?'Use an A4, Letter, Long Bond or Legal background':allowLandscape?'Use an A4 background':'Use a portrait A4 background';
+ try{
   let doc;
-  if(mime==='application/pdf') doc=await PDFDocument.load(bytes);
-  else if(['image/png','image/jpeg'].includes(mime)) {
-   doc=await PDFDocument.create();
-   const img=mime==='image/png'?await doc.embedPng(bytes):await doc.embedJpg(bytes);
-   const landscape=allowLandscape && img.width>img.height;
-   const width=landscape?841.89:595.28,height=landscape?595.28:841.89;
-   if(Math.abs(img.width/img.height-width/height)>0.025) throw invalid(allowLandscape?'Use an A4 background':'Use a portrait A4 background');
-   doc.addPage([width,height]).drawImage(img,{x:0,y:0,width,height});
-  } else throw invalid('Use PDF, PNG or JPEG');
-  if(doc.getPageCount()!==1) throw invalid('Use a single-page background');
-  const page=doc.getPage(0), {width,height}=page.getSize();
-  const portrait=Math.abs(width-595.28)<=3 && Math.abs(height-841.89)<=3;
-  const landscape=allowLandscape && Math.abs(width-841.89)<=3 && Math.abs(height-595.28)<=3;
-  if((!portrait&&!landscape) || page.getRotation().angle!==0)
-   throw invalid(allowLandscape?'Use an A4 background':'Use a portrait A4 background');
-  // Rebuild using embedded artwork; interactive content is not copied.
-  if(!page.node.Contents()) page.drawRectangle({x:0,y:0,width:1,height:1,opacity:0});
-  const clean=await PDFDocument.create(); const artwork=await clean.embedPage(page);
-  clean.addPage(landscape?[841.89,595.28]:[595.28,841.89]).drawPage(artwork);
+  if(mime==='application/pdf')doc=await PDFDocument.load(bytes);
+  else if(['image/png','image/jpeg'].includes(mime)){
+   doc=await PDFDocument.create();const img=mime==='image/png'?await doc.embedPng(bytes):await doc.embedJpg(bytes);
+   const size=sizes.reduce((a,b)=>Math.abs(img.width/img.height-a[0]/a[1])<=Math.abs(img.width/img.height-b[0]/b[1])?a:b);
+   if(Math.abs(img.width/img.height-size[0]/size[1])>0.025)throw invalid(message);
+   doc.addPage(size).drawImage(img,{x:0,y:0,width:size[0],height:size[1]});
+  }else throw invalid('Use PDF, PNG or JPEG');
+  if(doc.getPageCount()!==1)throw invalid('Use a single-page background');
+  const page=doc.getPage(0),{width,height}=page.getSize();
+  const size=sizes.find(size=>Math.abs(width-size[0])<=3&&Math.abs(height-size[1])<=3);
+  if(!size||page.getRotation().angle!==0)throw invalid(message);
+  if(!page.node.Contents())page.drawRectangle({x:0,y:0,width:1,height:1,opacity:0});
+  const clean=await PDFDocument.create();const artwork=await clean.embedPage(page);
+  clean.addPage(size).drawPage(artwork,{x:0,y:0,width:size[0],height:size[1]});
   return Buffer.from(await clean.save());
- } catch(e) {if(e.status) throw e; throw invalid('Could not read background PDF or image');}
+ }catch(e){if(e.status)throw e;throw invalid('Could not read background PDF or image');}
 }
 async function mergeBackground(background,overlay,{layout='wellness',printLayout=null}={}) {
  if(layout==='custom') {

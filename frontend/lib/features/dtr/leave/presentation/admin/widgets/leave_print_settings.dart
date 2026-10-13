@@ -69,6 +69,7 @@ class LeavePrintSettings extends StatefulWidget {
     this.initialDraft,
     this.enabled = true,
     this.readLeaveType,
+    this.onCustomFieldsChanged,
   });
   final String? leaveTypeId;
   final ValueChanged<LeavePrintDraft>? onChanged;
@@ -76,6 +77,7 @@ class LeavePrintSettings extends StatefulWidget {
   final LeavePrintDraft? initialDraft;
   final bool enabled;
   final LeaveTypeDefinition Function()? readLeaveType;
+  final ValueChanged<List<LeaveCustomFieldDefinition>>? onCustomFieldsChanged;
   @override
   State<LeavePrintSettings> createState() => _LeavePrintSettingsState();
 }
@@ -85,7 +87,10 @@ class _LeavePrintSettingsState extends State<LeavePrintSettings> {
   LocatorPrintLayout? _printLayout;
   String? _background, _error;
   PlatformFile? _file;
-  bool _loading = true, _busy = false, _remove = false;
+  bool _loading = true,
+      _busy = false,
+      _remove = false,
+      _schemaNeedsSave = false;
   LeavePrintDraft? _restoreDraft;
   bool get _disabled => _busy || !widget.enabled;
   void _changed() => widget.onChanged?.call(
@@ -174,6 +179,9 @@ class _LeavePrintSettingsState extends State<LeavePrintSettings> {
   }
 
   Future<void> _save() async {
+    if (_schemaNeedsSave) {
+      return;
+    }
     setState(() {
       _busy = true;
       _error = null;
@@ -230,8 +238,15 @@ class _LeavePrintSettingsState extends State<LeavePrintSettings> {
         ? 'image/png'
         : 'image/jpeg',
   );
-  Future<void> _previewDraft(LocatorPrintLayout? custom) async {
-    final request = leaveLayoutSampleRequest(_type);
+  Future<void> _previewDraft(
+    LocatorPrintLayout? custom, {
+    List<LeaveCustomFieldDefinition>? customFields,
+  }) async {
+    final request = leaveLayoutSampleRequest(
+      customFields == null
+          ? _type
+          : _type.copyWith(employeeDetailSchema: customFields),
+    );
     final bytes = custom != null
         ? await buildLeaveLayoutPdf(
             layout: custom,
@@ -329,6 +344,7 @@ class _LeavePrintSettingsState extends State<LeavePrintSettings> {
         builder: (_) => LocatorPrintLayoutEditor(
           requestType: LocatorRequestType.locator.copyWith(
             label: type.displayName,
+            employeeDetailSchema: type.employeeDetailSchema,
           ),
           initialLayout: _printLayout,
           backgroundPdf: pdf,
@@ -342,6 +358,14 @@ class _LeavePrintSettingsState extends State<LeavePrintSettings> {
             sampleSignatory: leaveLayoutSampleSignatory,
           ),
           onPreview: _previewDraft,
+          onPreviewWithFields: (layout, fields) =>
+              _previewDraft(layout, customFields: fields),
+          onCustomFieldsChanged: widget.onCustomFieldsChanged == null
+              ? null
+              : (fields) {
+                  widget.onCustomFieldsChanged!(fields);
+                  setState(() => _schemaNeedsSave = true);
+                },
         ),
       );
       if (result != null && mounted) {
@@ -427,13 +451,21 @@ class _LeavePrintSettingsState extends State<LeavePrintSettings> {
               ),
           ],
         ),
-        const Text('A4 portrait · PDF, PNG or JPEG · Max 5 MB'),
+        Text(
+          _layout == 'custom'
+              ? 'A4, Letter, Long Bond or Legal · portrait or landscape · PDF, PNG or JPEG · Max 5 MB'
+              : 'A4 portrait · PDF, PNG or JPEG · Max 5 MB',
+        ),
         if (_layout == 'wellness') ...[
           const SizedBox(height: 8),
           const Text(
             'JO/COS: Wellness form with manual Mayor signing. Others: CSC form.',
           ),
         ],
+        if (_schemaNeedsSave)
+          const Text(
+            'Save the type changes to keep the new fields and layout.',
+          ),
         const SizedBox(height: 12),
         Wrap(
           spacing: 12,
@@ -456,7 +488,7 @@ class _LeavePrintSettingsState extends State<LeavePrintSettings> {
             ),
             if (widget.leaveTypeId != null)
               FilledButton(
-                onPressed: _disabled ? null : _save,
+                onPressed: _disabled || _schemaNeedsSave ? null : _save,
                 child: const Text('Save print settings'),
               ),
             if (_error != null && widget.leaveTypeId != null)
