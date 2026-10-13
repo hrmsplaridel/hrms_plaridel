@@ -206,12 +206,8 @@ class LocatorPrintLayout {
           id: 'signature_${entry.value}',
           kind: 'signature',
           source: entry.value,
-          label: switch (entry.value) {
-            'applicant' => 'Employee',
-            'department_head' => 'Head of Office',
-            _ =>
-              type.approvalRoute == 'hr' ? 'Final reviewer' : 'Municipal Mayor',
-          },
+          // An empty signature label uses the request's signer position.
+          label: '',
           x: 40 + entry.key * (signatureWidth + 14),
           y: signatureY,
           width: signatureWidth,

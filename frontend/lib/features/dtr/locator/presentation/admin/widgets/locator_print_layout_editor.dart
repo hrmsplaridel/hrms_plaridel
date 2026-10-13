@@ -9,6 +9,7 @@ import 'package:hrms_plaridel/core/api/user_facing_api_error.dart';
 import '../../../models/locator_print_layout.dart';
 import '../../../models/locator_request_type.dart';
 import '../../../utils/locator_layout_pdf.dart';
+import '../../../utils/locator_form_signatories.dart';
 
 class LocatorPrintLayoutEditor extends StatefulWidget {
   const LocatorPrintLayoutEditor({
@@ -44,6 +45,7 @@ class _LocatorPrintLayoutEditorState extends State<LocatorPrintLayoutEditor> {
       name: TextEditingController(),
   };
   final _label = TextEditingController();
+  final _customSignatureCaptions = <String>{};
   @override
   void initState() {
     super.initState();
@@ -141,6 +143,14 @@ class _LocatorPrintLayoutEditorState extends State<LocatorPrintLayoutEditor> {
   bool _commitProperties() {
     final item = _selected;
     if (item == null) return true;
+    if (item.kind == 'signature' &&
+        _customSignatureCaptions.contains(item.id) &&
+        item.label.trim().isEmpty) {
+      setState(
+        () => _error = "Enter a custom label or choose Signer's position.",
+      );
+      return false;
+    }
     final values = {
       for (final entry in _numbers.entries)
         entry.key: double.tryParse(entry.value.text),
@@ -247,7 +257,7 @@ class _LocatorPrintLayoutEditorState extends State<LocatorPrintLayoutEditor> {
       kind: kind,
       source: source,
       text: kind == 'text' ? 'New text' : '',
-      label: label,
+      label: kind == 'signature' ? '' : label,
       x: (point?.dx ?? 40).clamp(0, _layout.pageWidth - width),
       y: (point?.dy ?? 180).clamp(0, _layout.pageHeight - height),
       width: width,
@@ -443,6 +453,10 @@ class _LocatorPrintLayoutEditorState extends State<LocatorPrintLayoutEditor> {
         ),
       );
     }
+    final automaticCaption =
+        selected.kind == 'signature' &&
+        selected.label.isEmpty &&
+        !_customSignatureCaptions.contains(selected.id);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -480,7 +494,65 @@ class _LocatorPrintLayoutEditorState extends State<LocatorPrintLayoutEditor> {
             ),
           ],
         ),
-        if (selected.kind != 'line')
+        if (selected.kind == 'signature') ...[
+          DropdownButtonFormField<String>(
+            key: ValueKey('caption-${selected.id}-$automaticCaption'),
+            initialValue: automaticCaption ? 'position' : 'custom',
+            isExpanded: true,
+            style: TextStyle(
+              fontSize: 14,
+              fontFamily: AppTheme.fontFamily,
+              color: AppTheme.dashTextPrimaryOf(context),
+            ),
+            decoration: AppTheme.dashInputDecoration(
+              context,
+              labelText: 'Signature caption',
+              radius: 8,
+            ),
+            items: const [
+              DropdownMenuItem(
+                value: 'position',
+                child: Text(
+                  "Signer's position",
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              DropdownMenuItem(value: 'custom', child: Text('Custom label')),
+            ],
+            onChanged: _busy
+                ? null
+                : (value) {
+                    if (value == 'position') {
+                      _customSignatureCaptions.remove(selected.id);
+                      _replace(selected.copyWith(label: ''), sync: true);
+                    } else if (value == 'custom') {
+                      _customSignatureCaptions.add(selected.id);
+                      _replace(
+                        selected.copyWith(
+                          label: selected.label.isEmpty
+                              ? locatorSignatureCaption(
+                                  selected,
+                                  const LocatorPrintedSignatory(),
+                                )
+                              : selected.label,
+                        ),
+                        sync: true,
+                      );
+                    }
+                  },
+          ),
+          const SizedBox(height: 8),
+          if (automaticCaption)
+            Text(
+              'Uses the position recorded for this signer on the request.',
+              style: TextStyle(
+                fontSize: 12,
+                color: AppTheme.dashTextSecondaryOf(context),
+              ),
+            ),
+          const SizedBox(height: 8),
+        ],
+        if (selected.kind != 'line' && !automaticCaption)
           TextField(
             controller: _label,
             maxLength: selected.kind == 'text' ? 500 : 100,
@@ -494,11 +566,16 @@ class _LocatorPrintLayoutEditorState extends State<LocatorPrintLayoutEditor> {
               labelText: selected.kind == 'text' ? 'Text' : 'Label',
               radius: 8,
             ).copyWith(counterText: ''),
-            onChanged: (value) => _replace(
-              selected.kind == 'text'
-                  ? selected.copyWith(text: value)
-                  : selected.copyWith(label: value),
-            ),
+            onChanged: (value) {
+              if (selected.kind == 'signature') {
+                _customSignatureCaptions.add(selected.id);
+              }
+              _replace(
+                selected.kind == 'text'
+                    ? selected.copyWith(text: value)
+                    : selected.copyWith(label: value),
+              );
+            },
           ),
         const SizedBox(height: 16),
         Wrap(
@@ -655,7 +732,13 @@ class _LocatorPrintLayoutEditorState extends State<LocatorPrintLayoutEditor> {
                                 ),
                                 const Divider(height: 2),
                                 Text(
-                                  item.label,
+                                  locatorSignatureCaption(
+                                    item,
+                                    locatorLayoutSampleSignatory(
+                                      widget.requestType,
+                                      item.source,
+                                    ),
+                                  ),
                                   textAlign: TextAlign.center,
                                   maxLines: 1,
                                   style: TextStyle(

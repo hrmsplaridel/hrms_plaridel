@@ -173,6 +173,48 @@ test('legacy titles resolve for the snapshotted official without replacing their
   assert.deepEqual(lookup.params, [final, context.slip_date_text]);
 });
 
+test('legacy employee and department captions use their positions on the locator date', async () => {
+  const db = mockDb(context, [ink(employee, 'applicant')]);
+  const result = await getLocatorSourceSignatures(db, { id: employee, role: 'employee' }, 'dtr', 'locator_slips', requestId);
+  assert.equal(result.print_signatories.applicant.name, 'Applicant');
+  assert.equal(result.print_signatories.applicant.position_title, 'Historical Position');
+  assert.equal(result.print_signatories.applicant.signature_image_base64, 'aW5r');
+  assert.equal(result.print_signatories.department_head.position_title, 'Historical Position');
+  const lookups = db.calls.filter(call => call.sql.includes('FROM assignments a JOIN positions p'));
+  assert.deepEqual(lookups.map(call => call.params), [[employee, context.slip_date_text], [head, context.slip_date_text]]);
+});
+
+test('position snapshots including missing positions stay frozen when printed later', async () => {
+  const db = mockDb({ ...context, print_signatories: {
+    ...officials,
+    applicant: { ...officials.applicant, position_title: 'Administrative Aide' },
+    department_head: { ...officials.department_head, position_title: '' },
+  } });
+  const result = await getLocatorSourceSignatures(db, { id: employee, role: 'employee' }, 'dtr', 'locator_slips', requestId);
+  assert.equal(result.print_signatories.applicant.position_title, 'Administrative Aide');
+  assert.equal(result.print_signatories.department_head.position_title, '');
+  assert.equal(db.calls.some(call => call.sql.includes('FROM assignments a JOIN positions p')), false);
+});
+
+test('filing snapshots employee position and the designated head position without replacing official identities', async () => {
+  let captured;
+  const db = { async query(sql, params) {
+    if (sql.includes('FROM locator_slips ls')) return { rows: [context] };
+    if (sql.includes('primary_reviewer_designations head_period')) return { rows: [{ reviewer_id: head, reviewer_name: 'Official Head', position_title: 'Department Manager' }] };
+    if (sql.includes("scope_key = 'final_hr'")) return { rows: [{ id: final, name: 'Official Final Approver', position_title: 'HR Officer' }] };
+    if (sql.includes('FROM assignments a JOIN positions p')) {
+      assert.deepEqual(params, [employee, context.slip_date_text]);
+      return { rows: [{ position_title: 'Administrative Aide' }] };
+    }
+    if (sql.includes('SET print_signatories')) captured = JSON.parse(params[1]);
+    return { rows: [] };
+  } };
+  await snapshotLocatorReviewers(db, { requestType: 'locator', requestId, departmentId: requestId, reviewers: [] });
+  assert.deepEqual(captured.applicant, { id: employee, name: 'Applicant', position_title: 'Administrative Aide' });
+  assert.deepEqual(captured.department_head, { id: head, name: 'Official Head', position_title: 'Department Manager' });
+  assert.equal(captured.hr_approver.position_title, 'HR Officer');
+});
+
 test('unrelated employees cannot read signatures and unsupported sources are rejected', async () => {
   const db = mockDb(context);
   await assert.rejects(getLocatorSourceSignatures(db, { id: backup, role: 'employee' }, 'dtr', 'locator_slips', requestId), { code: 'NOT_FOUND' });

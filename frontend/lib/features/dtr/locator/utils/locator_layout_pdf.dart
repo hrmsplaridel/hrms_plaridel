@@ -54,6 +54,35 @@ String locatorLayoutValue(String source, Map<String, dynamic> form) {
   return value is bool ? (value ? 'Yes' : 'No') : value?.toString() ?? '';
 }
 
+String locatorSignatureCaption(
+  LocatorPrintElement item,
+  LocatorPrintedSignatory person,
+) {
+  if (item.label.trim().isNotEmpty) {
+    return item.label.trim();
+  }
+  if (person.positionTitle.trim().isNotEmpty) {
+    return person.positionTitle.trim();
+  }
+  return switch (item.source) {
+    'applicant' => 'Employee',
+    'department_head' => 'Head of Office',
+    _ => 'Final approver',
+  };
+}
+
+LocatorPrintedSignatory locatorLayoutSampleSignatory(
+  LocatorRequestType type,
+  String source,
+) => LocatorPrintedSignatory(
+  name: 'Sample signer',
+  positionTitle: switch (source) {
+    'applicant' => 'Sample employee position',
+    'department_head' => 'Department Head',
+    _ => type.approvalRoute == 'hr' ? 'HR Officer' : 'Municipal Mayor',
+  },
+);
+
 Future<Uint8List> buildLocatorLayoutPdf({
   required LocatorPrintLayout layout,
   required Map<String, dynamic> form,
@@ -138,7 +167,7 @@ Future<Uint8List> buildLocatorLayoutPdf({
           ),
           pw.Divider(height: 3, thickness: .7),
           pw.Text(
-            item.label.isNotEmpty ? item.label : person.positionTitle,
+            locatorSignatureCaption(item, person),
             textAlign: alignment(item.align),
             maxLines: 2,
             overflow: pw.TextOverflow.clip,

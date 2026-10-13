@@ -223,8 +223,8 @@ class _LocatorPrintSettingsState extends State<LocatorPrintSettings> {
   DioMediaType _fileType(PlatformFile file)=>DioMediaType.parse(file.extension?.toLowerCase()=='pdf'?'application/pdf':file.extension?.toLowerCase()=='png'?'image/png':'image/jpeg');
   Future<void> _previewDraft(LocatorPrintLayout? layout)async{
     final type=_requestType;
-    final bytes=layout!=null?await buildLocatorLayoutPdf(layout:layout,form:locatorLayoutSample(type),signatories:const LocatorFormSignatories(
-      applicant:LocatorPrintedSignatory(name:'Sample Employee'),departmentHead:LocatorPrintedSignatory(name:'Department Head'),finalApprover:LocatorPrintedSignatory(name:'Final Approver'),
+    final bytes=layout!=null?await buildLocatorLayoutPdf(layout:layout,form:locatorLayoutSample(type),signatories:LocatorFormSignatories(
+      applicant:locatorLayoutSampleSignatory(type,'applicant'),departmentHead:locatorLayoutSampleSignatory(type,'department_head'),finalApprover:locatorLayoutSampleSignatory(type,'hr_approver'),
     )):await LocatorSlipPrint.buildPdf(id:null,employeeName:'Sample Employee',dateText:'Oct 13, 2026',requestTypeLabel:type.label,locationLabel:type.locationLabel,office:'Municipal Hall',remarks:'Sample purpose',amIn:true,amOut:true,pmIn:true,pmOut:true,
       signatories:LocatorFormSignatories(form:locatorLayoutSample(type)));
     final response=await ApiClient.instance.post<List<int>>('/api/locator-slips/print/preview',data:FormData.fromMap({

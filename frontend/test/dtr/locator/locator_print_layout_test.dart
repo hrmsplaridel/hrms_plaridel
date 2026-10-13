@@ -31,6 +31,12 @@ void main() {
         layout.toJson(),
       );
       expect(layout.validate(), null);
+      expect(
+        layout.elements
+            .where((e) => e.kind == 'signature')
+            .every((e) => e.label.isEmpty),
+        isTrue,
+      );
       final bad = layout.copyWith(
         elements: [layout.elements.first.copyWith(x: 1000)],
       );
@@ -73,6 +79,54 @@ void main() {
           r'/Type\s*/Page\b',
         ).allMatches(String.fromCharCodes(long)).length,
         greaterThan(1),
+      );
+    },
+  );
+  test(
+    'automatic signature captions use the actual position with role fallback and preserve custom labels',
+    () {
+      final layout = LocatorPrintLayout.defaults(type);
+      for (final source in ['applicant', 'department_head', 'hr_approver']) {
+        final item = layout.elements.firstWhere((e) => e.source == source);
+        expect(
+          locatorSignatureCaption(
+            item,
+            const LocatorPrintedSignatory(
+              positionTitle: 'Administrative Officer',
+            ),
+          ),
+          'Administrative Officer',
+        );
+        expect(
+          locatorSignatureCaption(
+            item.copyWith(label: 'Authorized signer'),
+            const LocatorPrintedSignatory(
+              positionTitle: 'Administrative Officer',
+            ),
+          ),
+          'Authorized signer',
+        );
+      }
+      final applicant = layout.elements.firstWhere(
+        (e) => e.source == 'applicant',
+      );
+      expect(
+        locatorSignatureCaption(applicant, const LocatorPrintedSignatory()),
+        'Employee',
+      );
+      expect(
+        locatorSignatureCaption(
+          layout.elements.firstWhere((e) => e.source == 'department_head'),
+          const LocatorPrintedSignatory(),
+        ),
+        'Head of Office',
+      );
+      expect(
+        locatorSignatureCaption(
+          layout.elements.firstWhere((e) => e.source == 'hr_approver'),
+          const LocatorPrintedSignatory(positionTitle: 'Municipal Mayor'),
+        ),
+        'Municipal Mayor',
       );
     },
   );
@@ -241,6 +295,85 @@ void main() {
       },
     );
   }
+  testWidgets(
+    'signature captions can use actual position or preserve a custom label',
+    (t) async {
+      t.view.physicalSize = const Size(1500, 1200);
+      t.view.devicePixelRatio = 1;
+      addTearDown(t.view.resetPhysicalSize);
+      addTearDown(t.view.resetDevicePixelRatio);
+      final defaults = LocatorPrintLayout.defaults(type);
+      final applicant = defaults.elements.firstWhere(
+        (e) => e.source == 'applicant',
+      );
+      final layout = defaults.copyWith(
+        elements: [
+          for (final item in defaults.elements)
+            item.id == applicant.id ? item.copyWith(label: 'Employee') : item,
+        ],
+      );
+      LocatorPrintLayout? previewed;
+      await t.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: LocatorPrintLayoutEditor(
+              requestType: type,
+              initialLayout: layout,
+              onPreview: (value) async => previewed = value,
+            ),
+          ),
+        ),
+      );
+      await t.pumpAndSettle();
+      await t.tap(find.byKey(ValueKey('layout-element-${applicant.id}')));
+      await t.pumpAndSettle();
+      expect(find.text('Custom label'), findsOneWidget);
+      final captionMenu = find
+          .ancestor(
+            of: find.text('Custom label'),
+            matching: find.byType(DropdownButtonFormField<String>),
+          )
+          .first;
+      await t.tap(captionMenu);
+      await t.pumpAndSettle();
+      await t.tap(find.text("Signer's position").last);
+      await t.pumpAndSettle();
+      await t.tap(find.text('Preview layout'));
+      await t.pumpAndSettle();
+      expect(
+        previewed!.elements.firstWhere((e) => e.source == 'applicant').label,
+        '',
+      );
+      await t.tap(
+        find
+            .ancestor(
+              of: find.text("Signer's position"),
+              matching: find.byType(DropdownButtonFormField<String>),
+            )
+            .first,
+      );
+      await t.pumpAndSettle();
+      await t.tap(find.text('Custom label').last);
+      await t.pumpAndSettle();
+      final input = find.byWidgetPredicate(
+        (w) => w is TextField && w.decoration?.labelText == 'Label',
+      );
+      await t.enterText(input, '');
+      await t.tap(find.text('Preview layout'));
+      await t.pumpAndSettle();
+      expect(
+        find.text("Enter a custom label or choose Signer's position."),
+        findsOneWidget,
+      );
+      await t.enterText(input, 'Authorized employee');
+      await t.tap(find.text('Preview layout'));
+      await t.pumpAndSettle();
+      expect(
+        previewed!.elements.firstWhere((e) => e.source == 'applicant').label,
+        'Authorized employee',
+      );
+    },
+  );
   testWidgets('editor fills a narrow screen and can be closed', (t) async {
     t.view.physicalSize = const Size(390, 844);
     t.view.devicePixelRatio = 1;
@@ -326,9 +459,11 @@ void main() {
       // Keep zoom as a number: whole doubles stringify differently on the web
       // ("1") and the native runtime ("1.0"). Labels must not be selection keys.
       expect(
-        t.widget<DropdownButton<dynamic>>(
-          find.byKey(const ValueKey('layout-zoom')),
-        ).value,
+        t
+            .widget<DropdownButton<dynamic>>(
+              find.byKey(const ValueKey('layout-zoom')),
+            )
+            .value,
         1.0,
       );
       expect(t.getRect(page).width, greaterThan(fittedPage.width));

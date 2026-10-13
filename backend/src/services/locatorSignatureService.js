@@ -28,6 +28,26 @@ async function substituteApplicantOfficial(db, row, officials) {
   return result;
 }
 
+async function resolveMissingPositionTitles(db, officials, date) {
+  const result = { ...officials };
+  for (const slot of ['hr_approver', 'applicant', 'department_head']) {
+    const person = result[slot];
+    // A stored empty title is also a snapshot; only enrich older missing fields.
+    if (!person?.id || person.position_title !== undefined) continue;
+    const position = await db.query(
+      `SELECT p.name AS position_title
+       FROM assignments a JOIN positions p ON p.id = a.position_id
+       WHERE a.employee_id = $1::uuid
+         AND a.effective_from <= $2::date
+         AND (a.effective_to IS NULL OR a.effective_to >= $2::date)
+       ORDER BY a.effective_from DESC, a.created_at DESC, a.id DESC LIMIT 1`,
+      [person.id, date]
+    );
+    result[slot] = { ...person, position_title: position.rows[0]?.position_title || '' };
+  }
+  return result;
+}
+
 async function resolveOfficials(db, row) {
   const date = row.slip_date_text;
   const department = await resolveDepartmentReviewers(db, {
@@ -38,12 +58,16 @@ async function resolveOfficials(db, row) {
   const final = row.final_review_route && row.final_review_route!=='hr'
     ? await resolveActiveMayor(db,todayInHrmsTimezone()).then(m=>({primary:m?{id:m.employee_id,name:m.name,position_title:m.position_title}:null}))
     : await resolveFinalLeaveReviewerConfiguration(db);
-  return substituteApplicantOfficial(db, row, {
+  const officials = await substituteApplicantOfficial(db, row, {
     applicant: { id: row.employee_id, name: row.employee_name },
-    department_head: row.final_review_route==='mayor_direct'?{id:null,name:''}:{ id: department.primary?.reviewerId || null, name: department.primary?.reviewerName || '' },
+    department_head: row.final_review_route==='mayor_direct'?{id:null,name:''}:{
+      id: department.primary?.reviewerId || null, name: department.primary?.reviewerName || '',
+      ...(department.primary?.position_title ? { position_title: department.primary.position_title } : {}),
+    },
     hr_approver: { id: final.primary?.id || null, name: final.primary?.name || '',
       position_title: final.primary?.position_title || '' },
   });
+  return resolveMissingPositionTitles(db, officials, date);
 }
 
 async function snapshotLocatorReviewers(db, options) {
@@ -97,20 +121,7 @@ async function loadContext(db, user, id, lock = false) {
   // Also correct older snapshots that printed the applicant as their own
   // official. Existing Mayor snapshots remain frozen for later printing.
   officials = await substituteApplicantOfficial(db, row, officials);
-  const finalOfficial = officials.hr_approver;
-  if (finalOfficial?.id && finalOfficial.position_title === undefined) {
-    const position = await db.query(
-      `SELECT p.name AS position_title
-       FROM assignments a JOIN positions p ON p.id = a.position_id
-       WHERE a.employee_id = $1::uuid
-         AND a.effective_from <= $2::date
-         AND (a.effective_to IS NULL OR a.effective_to >= $2::date)
-       ORDER BY a.effective_from DESC, a.created_at DESC, a.id DESC LIMIT 1`,
-      [finalOfficial.id, row.slip_date_text]
-    );
-    officials.hr_approver = { ...finalOfficial,
-      position_title: position.rows[0]?.position_title || '' };
-  }
+  officials = await resolveMissingPositionTitles(db, officials, row.slip_date_text);
   const finalReviewers = hr && !owner && PENDING.has(row.status)
     ? await resolveEligibleFinalReviewers(db, row.employee_id, 'locator', id) : [];
   return { ...row, officials, owner, hr, reviewer,
