@@ -4,11 +4,20 @@ import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:hrms_plaridel/core/api/client.dart';
 import '../models/leave_request.dart';
+import 'leave_layout_pdf.dart';
+import '../../locator/models/locator_print_layout.dart';
+import '../../locator/utils/locator_form_signatories.dart';
 
 Future<Uint8List> saveConfiguredLeavePdf({
   required LeaveRequest request,
   required pw.Document document,
   String? departmentReviewer,
+  String? departmentReviewerTitle,
+  String? approvingAuthorityName,
+  String? approvingAuthorityTitle,
+  String? certificationOfficerName,
+  String? certificationOfficerTitle,
+  Uint8List? certificationSignature,
   Uint8List? applicantSignature,
   Uint8List? departmentSignature,
   Uint8List? finalSignature,
@@ -18,6 +27,45 @@ Future<Uint8List> saveConfiguredLeavePdf({
     '/api/leave/print/requests/${request.id}',
   );
   final config = response.data!;
+  Uint8List? customBytes;
+  if (config['layout'] == 'custom') {
+    if (config['print_layout'] is! Map) {
+      throw const FormatException('Saved custom leave layout is missing.');
+    }
+    final manualMayor = request.finalReviewRoute == 'mayor';
+    customBytes = await buildLeaveLayoutPdf(
+      layout: LocatorPrintLayout.fromJson(
+        Map<String, dynamic>.from(config['print_layout'] as Map),
+      ),
+      request: request,
+      signatories: LocatorFormSignatories(
+        applicant: LocatorPrintedSignatory(
+          name: request.employeeName ?? '',
+          positionTitle: request.positionTitle ?? '',
+          signatureBytes: applicantSignature,
+        ),
+        departmentHead: LocatorPrintedSignatory(
+          name: departmentReviewer ?? request.departmentHeadReviewerName ?? '',
+          positionTitle: departmentReviewerTitle ?? '',
+          signatureBytes: departmentSignature,
+        ),
+        finalApprover: LocatorPrintedSignatory(
+          name: manualMayor
+              ? config['mayor_name']?.toString() ?? ''
+              : approvingAuthorityName ?? '',
+          positionTitle: manualMayor
+              ? config['mayor_title']?.toString() ?? 'Municipal Mayor'
+              : approvingAuthorityTitle ?? '',
+          signatureBytes: manualMayor ? null : finalSignature,
+        ),
+      ),
+      certificationOfficer: LocatorPrintedSignatory(
+        name: certificationOfficerName ?? '',
+        positionTitle: certificationOfficerTitle ?? '',
+        signatureBytes: certificationSignature,
+      ),
+    );
+  }
   final doc = config['layout'] == 'wellness'
       ? await buildWellnessLeavePdf(
           request: request,
@@ -33,8 +81,10 @@ Future<Uint8List> saveConfiguredLeavePdf({
           mayorSignature: null,
         )
       : document;
-  final bytes = await doc.save();
-  if (config['has_background'] != true) return bytes;
+  final bytes = customBytes ?? await doc.save();
+  if (config['has_background'] != true && config['layout'] != 'custom') {
+    return bytes;
+  }
   final result = await ApiClient.instance.post<List<int>>(
     '/api/leave/print/requests/${request.id}/render',
     data: FormData.fromMap({

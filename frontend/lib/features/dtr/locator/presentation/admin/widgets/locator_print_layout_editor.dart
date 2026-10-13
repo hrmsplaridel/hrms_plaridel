@@ -10,17 +10,35 @@ import '../../../models/locator_print_layout.dart';
 import '../../../models/locator_request_type.dart';
 import '../../../utils/locator_layout_pdf.dart';
 import '../../../utils/locator_form_signatories.dart';
+import 'print_layout_table_properties.dart';
+
+/// Domain-specific fields and sample values for the shared printed page editor.
+class PrintLayoutEditorBindings {
+  const PrintLayoutEditorBindings({
+    required this.fields,
+    required this.signatures,
+    required this.sample,
+    required this.defaultLayout,
+    required this.sampleSignatory,
+  });
+  final Map<String, String> fields, signatures;
+  final Map<String, dynamic> sample;
+  final LocatorPrintLayout Function(String orientation) defaultLayout;
+  final LocatorPrintedSignatory Function(String source) sampleSignatory;
+}
 
 class LocatorPrintLayoutEditor extends StatefulWidget {
   const LocatorPrintLayoutEditor({
     super.key,
     required this.requestType,
     this.initialLayout,
+    this.bindings,
     this.backgroundPdf,
     this.backgroundImage,
     required this.onPreview,
   });
   final LocatorRequestType requestType;
+  final PrintLayoutEditorBindings? bindings;
   final LocatorPrintLayout? initialLayout;
   final Uint8List? backgroundPdf, backgroundImage;
   final Future<void> Function(LocatorPrintLayout) onPreview;
@@ -49,8 +67,7 @@ class _LocatorPrintLayoutEditorState extends State<LocatorPrintLayoutEditor> {
   @override
   void initState() {
     super.initState();
-    _layout =
-        widget.initialLayout ?? LocatorPrintLayout.defaults(widget.requestType);
+    _layout = widget.initialLayout ?? _defaults('portrait');
     _select(_layout.elements.firstOrNull?.id);
     _loadBackground();
   }
@@ -93,10 +110,7 @@ class _LocatorPrintLayoutEditorState extends State<LocatorPrintLayoutEditor> {
         _background = image;
         _backgroundOrientation = orientation;
         if (widget.initialLayout == null) {
-          _layout = LocatorPrintLayout.defaults(
-            widget.requestType,
-            orientation: orientation,
-          );
+          _layout = _defaults(orientation);
           _select(_layout.elements.firstOrNull?.id);
         }
       });
@@ -221,16 +235,28 @@ class _LocatorPrintLayoutEditorState extends State<LocatorPrintLayoutEditor> {
     Navigator.of(context).pop(_layout);
   }
 
-  Map<String, String> get _fields => {
-    'employee_name': 'Employee name',
-    'date': 'Date',
-    'request_type': 'Request type',
-    'office': widget.requestType.locationLabel,
-    'reason': 'Remarks / Reasons',
-    'time_segments': 'DTR slots',
-    for (final field in widget.requestType.employeeDetailSchema)
-      'custom:${field.key}': field.label,
-  };
+  LocatorPrintLayout _defaults(String orientation) =>
+      widget.bindings?.defaultLayout(orientation) ??
+      LocatorPrintLayout.defaults(widget.requestType, orientation: orientation);
+  Map<String, String> get _signatures =>
+      widget.bindings?.signatures ??
+      const {
+        'applicant': 'Employee signature',
+        'department_head': 'Department signature',
+        'hr_approver': 'Final signature',
+      };
+  Map<String, String> get _fields =>
+      widget.bindings?.fields ??
+      {
+        'employee_name': 'Employee name',
+        'date': 'Date',
+        'request_type': 'Request type',
+        'office': widget.requestType.locationLabel,
+        'reason': 'Remarks / Reasons',
+        'time_segments': 'DTR slots',
+        for (final field in widget.requestType.employeeDetailSchema)
+          'custom:${field.key}': field.label,
+      };
   void _add(String data, {Offset? point}) {
     if (_layout.elements.length >= 60) {
       setState(() => _error = 'Use at most 60 elements.');
@@ -246,8 +272,14 @@ class _LocatorPrintLayoutEditorState extends State<LocatorPrintLayoutEditor> {
             _ => 'Final approver',
           }
         : _fields[source] ?? '';
-    final width = kind == 'text' ? 300.0 : 240.0,
-        height = kind == 'signature'
+    final width = kind == 'table'
+            ? 400.0
+            : kind == 'text'
+            ? 300.0
+            : 240.0,
+        height = kind == 'table'
+            ? 120.0
+            : kind == 'signature'
             ? 80.0
             : kind == 'line'
             ? 2.0
@@ -263,6 +295,17 @@ class _LocatorPrintLayoutEditorState extends State<LocatorPrintLayoutEditor> {
       width: width,
       height: height,
       bold: kind == 'text',
+      columnWidths: kind == 'table' ? const [1, 1] : const [],
+      cells: kind == 'table'
+          ? const [
+              [
+                LocatorPrintTableCell(text: 'Column 1'),
+                LocatorPrintTableCell(text: 'Column 2'),
+              ],
+              [LocatorPrintTableCell(), LocatorPrintTableCell()],
+              [LocatorPrintTableCell(), LocatorPrintTableCell()],
+            ]
+          : const [],
     );
     setState(() {
       _layout = _layout.copyWith(elements: [..._layout.elements, item]);
@@ -431,13 +474,10 @@ class _LocatorPrintLayoutEditorState extends State<LocatorPrintLayoutEditor> {
     children: [
       _paletteButton('Text / title', 'text'),
       _paletteButton('Line', 'line'),
+      _paletteButton('Table', 'table'),
       for (final entry in _fields.entries)
         _paletteButton(entry.value, 'field|${entry.key}'),
-      for (final entry in const {
-        'applicant': 'Employee signature',
-        'department_head': 'Department signature',
-        'hr_approver': 'Final signature',
-      }.entries)
+      for (final entry in _signatures.entries)
         _paletteButton(entry.value, 'signature|${entry.key}'),
     ],
   );
@@ -467,6 +507,7 @@ class _LocatorPrintLayoutEditorState extends State<LocatorPrintLayoutEditor> {
                 switch (selected.kind) {
                   'text' => 'Text / title',
                   'line' => 'Line',
+                  'table' => 'Table',
                   'signature' => 'Signature',
                   _ => selected.label.isEmpty ? 'Field' : selected.label,
                 },
@@ -552,7 +593,9 @@ class _LocatorPrintLayoutEditorState extends State<LocatorPrintLayoutEditor> {
             ),
           const SizedBox(height: 8),
         ],
-        if (selected.kind != 'line' && !automaticCaption)
+        if (selected.kind != 'line' &&
+            selected.kind != 'table' &&
+            !automaticCaption)
           TextField(
             controller: _label,
             maxLength: selected.kind == 'text' ? 500 : 100,
@@ -642,6 +685,14 @@ class _LocatorPrintLayoutEditorState extends State<LocatorPrintLayoutEditor> {
             const Text('Bold'),
           ],
         ),
+        if (selected.kind == 'table')
+          PrintLayoutTableProperties(
+            key: ValueKey('table-properties-${selected.id}'),
+            element: selected,
+            fields: _fields,
+            enabled: !_busy,
+            onChanged: (next) => _replace(next, sync: true),
+          ),
         if (selected.kind == 'field')
           Row(
             children: [
@@ -657,8 +708,70 @@ class _LocatorPrintLayoutEditorState extends State<LocatorPrintLayoutEditor> {
     );
   }
 
+  Widget _tablePreview(
+    LocatorPrintElement item,
+    double scale,
+    Map<String, dynamic> form,
+  ) {
+    if (item.cells.isEmpty || item.columnWidths.isEmpty) {
+      return const SizedBox();
+    }
+    final count =
+        ((item.height / item.cells.length - 8) / (item.fontSize * 1.5))
+            .floor()
+            .clamp(1, 100);
+    return Column(
+      children: [
+        for (var r = 0; r < item.cells.length; r++)
+          Expanded(
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                for (var c = 0; c < item.cells[r].length; c++)
+                  Expanded(
+                    flex: (item.columnWidths[c] * 1000).round().clamp(1, 10000),
+                    child: Container(
+                      padding: EdgeInsets.all(4 * scale),
+                      decoration: BoxDecoration(
+                        color: item.headerRow && r == 0
+                            ? Colors.grey.shade100
+                            : null,
+                        border: item.borders
+                            ? Border.all(color: Colors.black, width: .5 * scale)
+                            : null,
+                      ),
+                      child: Text(
+                        item.cells[r][c].kind == 'field'
+                            ? locatorLayoutValue(item.cells[r][c].source, form)
+                            : item.cells[r][c].text,
+                        textAlign: switch (item.align) {
+                          'center' => TextAlign.center,
+                          'right' => TextAlign.right,
+                          _ => TextAlign.left,
+                        },
+                        maxLines: count,
+                        overflow: TextOverflow.clip,
+                        style: TextStyle(
+                          color: Colors.black,
+                          fontSize: item.fontSize * scale,
+                          height: 1.5,
+                          fontWeight: item.bold || (item.headerRow && r == 0)
+                              ? FontWeight.bold
+                              : FontWeight.normal,
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+      ],
+    );
+  }
+
   Widget _page(double scale) {
-    final sample = locatorLayoutSample(widget.requestType);
+    final sample =
+        widget.bindings?.sample ?? locatorLayoutSample(widget.requestType);
     return Align(
       alignment: Alignment.topCenter,
       child: SizedBox(
@@ -712,7 +825,9 @@ class _LocatorPrintLayoutEditorState extends State<LocatorPrintLayoutEditor> {
                               : Colors.transparent,
                         ),
                       ),
-                      child: item.kind == 'line'
+                      child: item.kind == 'table'
+                          ? _tablePreview(item, scale, sample)
+                          : item.kind == 'line'
                           ? const Divider(color: Colors.black, height: 1)
                           : item.kind == 'signature'
                           ? Column(
@@ -734,10 +849,13 @@ class _LocatorPrintLayoutEditorState extends State<LocatorPrintLayoutEditor> {
                                 Text(
                                   locatorSignatureCaption(
                                     item,
-                                    locatorLayoutSampleSignatory(
-                                      widget.requestType,
-                                      item.source,
-                                    ),
+                                    widget.bindings?.sampleSignatory(
+                                          item.source,
+                                        ) ??
+                                        locatorLayoutSampleSignatory(
+                                          widget.requestType,
+                                          item.source,
+                                        ),
                                   ),
                                   textAlign: TextAlign.center,
                                   maxLines: 1,
@@ -847,6 +965,24 @@ class _LocatorPrintLayoutEditorState extends State<LocatorPrintLayoutEditor> {
               ),
             ),
           ),
+          OutlinedButton.icon(
+            onPressed: _busy ? null : () => _add('table'),
+            icon: const Icon(Icons.table_chart_outlined, size: 18),
+            label: const Text('Insert table'),
+            style: OutlinedButton.styleFrom(
+              minimumSize: const Size(0, 36),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              textStyle: const TextStyle(
+                fontSize: 13,
+                fontFamily: AppTheme.fontFamily,
+                fontWeight: FontWeight.w500,
+              ),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
+            ),
+          ),
           PopupMenuButton<String>(
             tooltip: 'Insert field',
             enabled: !_busy,
@@ -858,11 +994,7 @@ class _LocatorPrintLayoutEditorState extends State<LocatorPrintLayoutEditor> {
                   child: Text(entry.value),
                 ),
               const PopupMenuDivider(),
-              for (final entry in const {
-                'applicant': 'Employee signature',
-                'department_head': 'Department signature',
-                'hr_approver': 'Final signature',
-              }.entries)
+              for (final entry in _signatures.entries)
                 PopupMenuItem(
                   value: 'signature|${entry.key}',
                   child: Text(entry.value),

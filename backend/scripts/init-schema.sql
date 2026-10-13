@@ -3858,3 +3858,4 @@ COMMIT;
 \ir migrations/dtr/20261013_locator_approval_routing.sql
 \ir migrations/dtr/20261013_locator_custom_fields.sql
 \ir migrations/dtr/20261013_locator_print_layouts.sql
+\ir migrations/dtr/20261013_leave_print_layouts.sql

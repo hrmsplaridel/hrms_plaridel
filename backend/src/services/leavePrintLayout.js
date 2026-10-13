@@ -1,0 +1,5 @@
+const {normalizeLocatorPrintLayout}=require('./locatorPrintLayout');
+const FIELDS=new Set(['employee_name','date','request_type','office','reason','position','salary','start_date','end_date','inclusive_dates','working_days','location_option','location_details','sick_leave_nature','sick_illness_details','maternity_delivery_type','expected_delivery_date','child_delivery_date','accident_date','calamity_date','adoption_parent_role','adoption_placement_date','vawc_support_document_type','vawc_case_details','solo_parent_id_number','solo_parent_id_expiry_date','women_illness_details','study_purpose','study_purpose_details','other_purpose','other_purpose_details','commutation','approved_days_with_pay','approved_days_without_pay','approved_other_details','recommendation_remarks','disapproval_reason','hr_remarks']);
+const SIGNATURES=new Set(['applicant','department_head','hr_approver','certification_officer']);
+function normalizeLeavePrintLayout(value){return normalizeLocatorPrintLayout(value,{fields:FIELDS,signatures:SIGNATURES});}
+module.exports={normalizeLeavePrintLayout};

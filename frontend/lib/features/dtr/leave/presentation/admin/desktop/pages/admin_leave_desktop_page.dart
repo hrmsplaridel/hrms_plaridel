@@ -955,6 +955,12 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
         request: target,
         document: document,
         departmentReviewer: formSignatories.recommendationOfficer?.name,
+        departmentReviewerTitle: formSignatories.recommendationOfficer?.title,
+        approvingAuthorityName: formSignatories.approvingAuthority?.name,
+        approvingAuthorityTitle: formSignatories.approvingAuthority?.title,
+        certificationOfficerName: formSignatories.certificationOfficer?.name,
+        certificationOfficerTitle: formSignatories.certificationOfficer?.title,
+        certificationSignature: formSignatories.certificationOfficerSignature?.signatureImageBytes,
         applicantSignature:
             formSignatories.applicantSignature?.signatureImageBytes,
         departmentSignature:

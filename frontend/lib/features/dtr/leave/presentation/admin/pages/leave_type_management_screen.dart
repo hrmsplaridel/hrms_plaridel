@@ -153,6 +153,11 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
   }
 
   void _select(LeaveTypeDefinition item) {
+    if (_pendingPrintTypeId != item.id) {
+      _creationPrint = const LeavePrintDraft();
+      _pendingPrintTypeId = null;
+    }
+    _printDraftEpoch++;
     _selected = item;
     _nameController.text = item.name;
     _displayNameController.text = item.displayName;
@@ -312,6 +317,22 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
         );
         final body = res.data;
         if (body != null) saved = LeaveTypeDefinition.fromJson(body);
+        if (_creationPrint.hasChanges) {
+          try {
+            await _creationPrint.save(selected.id!);
+            _creationPrint = const LeavePrintDraft();
+            _pendingPrintTypeId = null;
+          } catch (e) {
+            _pendingPrintTypeId = selected.id;
+            LeaveTypeDefinitionCache.instance.invalidate();
+            if (!mounted) return;
+            if (saved != null) _applySavedType(saved);
+            _showMessage(
+              'Leave type updated, but print settings could not be saved. Retry using Save print settings.',
+            );
+            return;
+          }
+        }
         _showMessage('Leave type updated.');
       }
       LeaveTypeDefinitionCache.instance.invalidate();
@@ -1082,26 +1103,27 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
                   _settingsSection([
                     LeavePrintSettings(
                       key: ValueKey(
-                        'print-${selected?.id ?? 'new-$_printDraftEpoch'}',
+                        'print-${selected?.id ?? 'new'}-$_printDraftEpoch',
                       ),
                       leaveTypeId: selected?.id,
+                      readLeaveType: () => LeaveTypeDefinition(
+                        name: _nameController.text,
+                        displayName: _displayNameController.text,
+                        employeeDetailSchema: _customFields,
+                      ),
                       enabled: !_saving,
                       onSaved: () {
-                        if (_pendingPrintTypeId == selected?.id) {
-                          setState(() {
-                            _pendingPrintTypeId = null;
-                            _creationPrint = const LeavePrintDraft();
-                          });
-                        }
+                        setState(() {
+                          _pendingPrintTypeId = null;
+                          _creationPrint = const LeavePrintDraft();
+                        });
                       },
                       initialDraft:
                           selected?.id != null &&
                               selected?.id == _pendingPrintTypeId
                           ? _creationPrint
                           : null,
-                      onChanged: selected?.id == null
-                          ? (value) => _creationPrint = value
-                          : null,
+                      onChanged: (value) => _creationPrint = value,
                     ),
                   ]),
                 ],

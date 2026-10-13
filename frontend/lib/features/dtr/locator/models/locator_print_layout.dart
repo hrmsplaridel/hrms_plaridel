@@ -1,4 +1,23 @@
+import 'dart:convert';
 import 'locator_request_type.dart';
+
+class LocatorPrintTableCell {
+  const LocatorPrintTableCell({
+    this.kind = 'text',
+    this.text = '',
+    this.source = '',
+  });
+  final String kind, text, source;
+  Map<String, dynamic> toJson() => kind == 'field'
+      ? {'kind': kind, 'source': source}
+      : {'kind': kind, 'text': text};
+  factory LocatorPrintTableCell.fromJson(Map<String, dynamic> json) =>
+      LocatorPrintTableCell(
+        kind: json['kind'] as String? ?? 'text',
+        text: json['text'] as String? ?? '',
+        source: json['source'] as String? ?? '',
+      );
+}
 
 class LocatorPrintElement {
   const LocatorPrintElement({
@@ -15,10 +34,17 @@ class LocatorPrintElement {
     this.align = 'left',
     this.bold = false,
     this.showLabel = true,
+    this.cells = const [],
+    this.columnWidths = const [],
+    this.headerRow = true,
+    this.borders = true,
   });
   final String id, kind, source, text, label, align;
   final double x, y, width, height, fontSize;
   final bool bold, showLabel;
+  final List<List<LocatorPrintTableCell>> cells;
+  final List<double> columnWidths;
+  final bool headerRow, borders;
   LocatorPrintElement copyWith({
     String? id,
     String? text,
@@ -31,6 +57,10 @@ class LocatorPrintElement {
     String? align,
     bool? bold,
     bool? showLabel,
+    List<List<LocatorPrintTableCell>>? cells,
+    List<double>? columnWidths,
+    bool? headerRow,
+    bool? borders,
   }) => LocatorPrintElement(
     id: id ?? this.id,
     kind: kind,
@@ -45,6 +75,10 @@ class LocatorPrintElement {
     align: align ?? this.align,
     bold: bold ?? this.bold,
     showLabel: showLabel ?? this.showLabel,
+    cells: cells ?? this.cells,
+    columnWidths: columnWidths ?? this.columnWidths,
+    headerRow: headerRow ?? this.headerRow,
+    borders: borders ?? this.borders,
   );
   Map<String, dynamic> toJson() => {
     'id': id,
@@ -60,6 +94,14 @@ class LocatorPrintElement {
     'align': align,
     'bold': bold,
     'show_label': showLabel,
+    if (kind == 'table') ...{
+      'cells': cells
+          .map((row) => row.map((cell) => cell.toJson()).toList())
+          .toList(),
+      'column_widths': columnWidths,
+      'header_row': headerRow,
+      'borders': borders,
+    },
   };
   factory LocatorPrintElement.fromJson(Map<String, dynamic> json) =>
       LocatorPrintElement(
@@ -76,6 +118,22 @@ class LocatorPrintElement {
         align: json['align'] as String? ?? 'left',
         bold: json['bold'] == true,
         showLabel: json['show_label'] != false,
+        cells: (json['cells'] as List? ?? [])
+            .map(
+              (row) => (row as List)
+                  .map(
+                    (cell) => LocatorPrintTableCell.fromJson(
+                      Map<String, dynamic>.from(cell as Map),
+                    ),
+                  )
+                  .toList(),
+            )
+            .toList(),
+        columnWidths: (json['column_widths'] as List? ?? [])
+            .map((w) => (w as num).toDouble())
+            .toList(),
+        headerRow: json['header_row'] != false,
+        borders: json['borders'] != false,
       );
 }
 
@@ -135,11 +193,50 @@ class LocatorPrintLayout {
         return 'Text needs 1 to 500 characters.';
       }
       if (e.label.length > 100) return 'Labels must be 100 characters or less.';
-      if (e.kind == 'field' && e.height < 20) return 'Field boxes need at least 20 points of height.';
-      if (e.kind == 'text' && e.height < 12) return 'Text boxes need at least 12 points of height.';
+      if (e.kind == 'field' && e.height < 20) {
+        return 'Field boxes need at least 20 points of height.';
+      }
+      if (e.kind == 'text' && e.height < 12) {
+        return 'Text boxes need at least 12 points of height.';
+      }
+      if (e.kind == 'table') {
+        if (e.cells.isEmpty ||
+            e.cells.length > 12 ||
+            e.cells.first.isEmpty ||
+            e.cells.first.length > 6 ||
+            e.cells.any((row) => row.length != e.cells.first.length)) {
+          return 'Tables need 1 to 12 rows and 1 to 6 matching columns.';
+        }
+        if (e.columnWidths.length != e.cells.first.length ||
+            e.columnWidths.any((w) => !w.isFinite || w < .1 || w > 10)) {
+          return 'Column width weights must be 0.1 to 10.';
+        }
+        final total = e.columnWidths.fold(0.0, (a, b) => a + b);
+        if (e.height < e.cells.length * (e.fontSize * 1.5 + 8) ||
+            e.columnWidths.any((w) => e.width * w / total < 20)) {
+          return 'Table rows need enough height for their font; columns need 20 points.';
+        }
+        for (final row in e.cells) {
+          for (final cell in row) {
+            if (!['text', 'field'].contains(cell.kind) ||
+                (cell.kind == 'field' && cell.source.isEmpty)) {
+              return 'Each cell needs text or a field.';
+            }
+            if (cell.text.length > 500) {
+              return 'Cell text must be 500 characters or less.';
+            }
+          }
+        }
+      }
       if (e.kind == 'signature' && (e.width < 100 || e.height < 60)) {
         return 'Signature blocks need at least 100 by 60 points.';
       }
+    }
+    if (utf8
+            .encode(const JsonEncoder.withIndent(' ').convert(toJson()))
+            .length >
+        100000) {
+      return 'Printed layout must fit within 100 KB.';
     }
     return null;
   }

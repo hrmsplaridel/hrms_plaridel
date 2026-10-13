@@ -67,6 +67,7 @@ String locatorSignatureCaption(
   return switch (item.source) {
     'applicant' => 'Employee',
     'department_head' => 'Head of Office',
+    'certification_officer' => 'Certification officer',
     _ => 'Final approver',
   };
 }
@@ -87,13 +88,21 @@ Future<Uint8List> buildLocatorLayoutPdf({
   required LocatorPrintLayout layout,
   required Map<String, dynamic> form,
   required LocatorFormSignatories signatories,
+  Map<String, LocatorPrintedSignatory> extraSignatories = const {},
+  pw.Font? regularFont,
+  pw.Font? strongFont,
 }) async {
   final error = layout.validate();
   if (error != null) throw FormatException(error);
-  final doc = pw.Document();
+  final doc = pw.Document(
+    theme: regularFont != null || strongFont != null
+        ? pw.ThemeData.withFont(base: regularFont, bold: strongFont)
+        : null,
+  );
   final overflow = <String, String>{};
   final format = PdfPageFormat(layout.pageWidth, layout.pageHeight);
-  final font = pw.Font.helvetica(), boldFont = pw.Font.helveticaBold();
+  final font = regularFont ?? pw.Font.helvetica(),
+      boldFont = strongFont ?? pw.Font.helveticaBold();
   pw.TextAlign alignment(String value) => switch (value) {
     'center' => pw.TextAlign.center,
     'right' => pw.TextAlign.right,
@@ -127,17 +136,95 @@ Future<Uint8List> buildLocatorLayoutPdf({
     return rows;
   }
 
+  pw.Widget tableCell(
+    LocatorPrintElement item,
+    int row,
+    int column,
+    double width,
+    double height,
+    pw.Context context,
+  ) {
+    final cell = item.cells[row][column];
+    final chosen = item.bold || (item.headerRow && row == 0) ? boldFont : font;
+    final value = cell.kind == 'field'
+        ? locatorLayoutValue(cell.source, form)
+        : cell.text;
+    final count = ((height - 8) / (item.fontSize * 1.5)).floor().clamp(0, 100);
+    final lines = wrap(value, width - 8, item.fontSize, context, chosen);
+    final continued = lines.length > count;
+    if (continued && value.isNotEmpty) {
+      final heading =
+          item.headerRow && row > 0 && item.cells[0][column].kind == 'text'
+          ? item.cells[0][column].text
+          : '';
+      overflow['table:${item.id}:$row:$column'] =
+          '${heading.isEmpty ? 'Table row ${row + 1}, column ${column + 1}' : heading}: $value';
+    }
+    final shown = count == 0
+        ? ''
+        : continued
+        ? '${lines.take((count - 1).clamp(0, count)).join('\n')}\nSee continuation'
+              .trim()
+        : lines.join('\n');
+    return pw.SizedBox(
+      width: width,
+      height: height,
+      child: pw.Container(
+        padding: const pw.EdgeInsets.all(4),
+        decoration: pw.BoxDecoration(
+          color: item.headerRow && row == 0 ? PdfColors.grey100 : null,
+          border: item.borders ? pw.Border.all(width: .5) : null,
+        ),
+        child: pw.Text(
+          shown,
+          textAlign: alignment(item.align),
+          softWrap: false,
+          maxLines: count.clamp(1, 100),
+          overflow: pw.TextOverflow.clip,
+          style: pw.TextStyle(font: chosen, fontSize: item.fontSize),
+        ),
+      ),
+    );
+  }
+
   pw.Widget itemWidget(LocatorPrintElement item, pw.Context context) {
     final chosen = item.bold ? boldFont : font;
+    if (item.kind == 'table') {
+      final total = item.columnWidths.fold(0.0, (a, b) => a + b);
+      final rowHeight = item.height / item.cells.length;
+      return pw.Column(
+        children: [
+          for (var r = 0; r < item.cells.length; r++)
+            pw.SizedBox(
+              height: rowHeight,
+              child: pw.Row(
+                children: [
+                  for (var c = 0; c < item.cells[r].length; c++)
+                    tableCell(
+                      item,
+                      r,
+                      c,
+                      item.width * item.columnWidths[c] / total,
+                      rowHeight,
+                      context,
+                    ),
+                ],
+              ),
+            ),
+        ],
+      );
+    }
     if (item.kind == 'line') {
       return pw.Center(child: pw.Container(height: 1, color: PdfColors.black));
     }
     if (item.kind == 'signature') {
-      final person = switch (item.source) {
-        'applicant' => signatories.applicant,
-        'department_head' => signatories.departmentHead,
-        _ => signatories.finalApprover,
-      };
+      final person =
+          extraSignatories[item.source] ??
+          switch (item.source) {
+            'applicant' => signatories.applicant,
+            'department_head' => signatories.departmentHead,
+            _ => signatories.finalApprover,
+          };
       final name = person.name.isEmpty && item.source == 'applicant'
           ? form['employee_name']?.toString() ?? ''
           : person.name;
@@ -264,7 +351,16 @@ Future<Uint8List> buildLocatorLayoutPdf({
     final source = 'custom:${field['key']}';
     final value = locatorLayoutValue(source, form);
     if (value.isNotEmpty &&
-        !layout.elements.any((e) => e.kind == 'field' && e.source == source)) {
+        !layout.elements.any(
+          (e) =>
+              (e.kind == 'field' && e.source == source) ||
+              (e.kind == 'table' &&
+                  e.cells.any(
+                    (row) => row.any(
+                      (cell) => cell.kind == 'field' && cell.source == source,
+                    ),
+                  )),
+        )) {
       overflow[source] = '${field['label']}: $value';
     }
   }

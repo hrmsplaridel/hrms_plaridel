@@ -122,3 +122,12 @@ test('failed locator settings writes roll back',async()=>{
   });
   assert.equal(res.code,500);assert.ok(calls.includes('ROLLBACK'));assert.ok(!calls.includes('COMMIT'));
 });
+
+test('locator table settings append a version with all cell bindings intact',async()=>{
+ const layout={version:1,orientation:'portrait',elements:[{id:'table',kind:'table',x:40,y:180,width:400,height:120,font_size:11,column_widths:[1,2],header_row:true,borders:false,cells:[[{kind:'text',text:'Name'},{kind:'text',text:'Destination'}],[{kind:'field',source:'employee_name'},{kind:'field',source:'custom:destination'}]]}]};
+ const res=await route('/types/:id','post',{params:{id:'type'},body:{print_layout:JSON.stringify(layout)},user:{id:'admin'}},async(sql,p)=>{
+ if(sql.startsWith('SELECT t.'))return {rows:[{id:'old',print_layout:null}]};
+ if(sql.startsWith('INSERT INTO'))return {rows:[{id:'new',print_layout:JSON.parse(p[4])}]};return {rows:[]};
+ });
+ assert.equal(res.code,200);assert.deepEqual(res.body.print_layout.elements[0].cells,layout.elements[0].cells);assert.equal(res.body.print_layout.elements[0].borders,false);
+});

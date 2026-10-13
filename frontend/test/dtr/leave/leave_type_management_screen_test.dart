@@ -506,6 +506,178 @@ void main() {
     expect(find.text('Leave type updated.'), findsOneWidget);
   });
 
+  for (final failUpload in [false, true]) {
+    testWidgets(
+      'new type saves a designed leave layout after creation; failure=$failUpload',
+      (tester) async {
+        await mount(tester);
+        await enterRequiredName(tester, 'Custom Leave Form');
+        await tester.scrollUntilVisible(
+          find.text('Design layout'),
+          250,
+          scrollable: formScrollable(),
+        );
+        await Scrollable.ensureVisible(
+          tester.element(find.text('Design layout')),
+          alignment: .5,
+        );
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Design layout'));
+        await tester.pumpAndSettle();
+        expect(find.text('CUSTOM LEAVE FORM'), findsWidgets);
+        await tester.tap(find.text('Use layout'));
+        await tester.pumpAndSettle();
+        rejectPrint = failUpload;
+        await tester.tap(find.text('Create Leave Type'));
+        await tester.pumpAndSettle();
+        expect(
+          requests
+              .where((r) => r.path == '/api/leave/types' && r.method == 'POST')
+              .length,
+          1,
+        );
+        final form =
+            requests
+                    .firstWhere(
+                      (r) =>
+                          r.method == 'POST' &&
+                          r.path.startsWith('/api/leave/print/types/'),
+                    )
+                    .data
+                as FormData;
+        expect(
+          form.fields.singleWhere((f) => f.key == 'layout').value,
+          'custom',
+        );
+        expect(
+          form.fields.singleWhere((f) => f.key == 'print_layout').value,
+          contains('CUSTOM LEAVE FORM'),
+        );
+        if (failUpload) {
+          expect(
+            find.textContaining('Leave type created, but print settings'),
+            findsOneWidget,
+          );
+          expect(find.text('Edit layout'), findsOneWidget);
+          rejectPrint = false;
+          await tester.scrollUntilVisible(
+            find.text('Save print settings'),
+            100,
+            scrollable: formScrollable(),
+          );
+          await Scrollable.ensureVisible(
+            tester.element(find.text('Save print settings')),
+            alignment: .5,
+          );
+          await tester.pumpAndSettle();
+          await tester.tap(find.text('Save print settings'));
+          await tester.pumpAndSettle();
+          expect(
+            requests
+                .where(
+                  (r) => r.path == '/api/leave/types' && r.method == 'POST',
+                )
+                .length,
+            1,
+          );
+          expect(
+            requests
+                .where(
+                  (r) =>
+                      r.method == 'POST' &&
+                      r.path.startsWith('/api/leave/print/types/'),
+                )
+                .length,
+            2,
+          );
+        }
+      },
+    );
+  }
+
+  for (final failPrint in [false, true]) {
+    testWidgets(
+      'Save Changes persists existing type custom layout and retains retry; failure=$failPrint',
+      (tester) async {
+        rows = [
+          {
+            'id': '22222222-2222-4222-8222-222222222222',
+            'name': 'customLeave',
+            'display_name': 'Custom Leave',
+            'is_system': false,
+            'employee_detail_schema': [
+              {'key': 'destination', 'label': 'Destination', 'type': 'text'},
+            ],
+          },
+        ];
+        await mount(tester);
+        await tester.scrollUntilVisible(
+          find.text('Design layout'),
+          250,
+          scrollable: formScrollable(),
+        );
+        await Scrollable.ensureVisible(
+          tester.element(find.text('Design layout')),
+          alignment: .5,
+        );
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Design layout'));
+        await tester.pumpAndSettle();
+        expect(find.text('Destination'), findsWidgets);
+        await tester.tap(find.text('Use layout'));
+        await tester.pumpAndSettle();
+        rejectPrint = failPrint;
+        await tester.tap(find.text('Save Changes'));
+        await tester.pumpAndSettle();
+        final upload = requests.firstWhere(
+          (r) =>
+              r.method == 'POST' &&
+              r.path.startsWith('/api/leave/print/types/'),
+        );
+        final form = upload.data as FormData;
+        expect(
+          form.fields.singleWhere((f) => f.key == 'layout').value,
+          'custom',
+        );
+        expect(
+          form.fields.singleWhere((f) => f.key == 'print_layout').value,
+          contains('custom:destination'),
+        );
+        if (failPrint) {
+          expect(
+            find.textContaining('Leave type updated, but print settings'),
+            findsOneWidget,
+          );
+          expect(find.text('Edit layout'), findsOneWidget);
+          rejectPrint = false;
+          await tester.scrollUntilVisible(
+            find.text('Save print settings'),
+            100,
+            scrollable: formScrollable(),
+          );
+          await Scrollable.ensureVisible(
+            tester.element(find.text('Save print settings')),
+            alignment: .5,
+          );
+          await tester.pumpAndSettle();
+          await tester.tap(find.text('Save print settings'));
+          await tester.pumpAndSettle();
+          expect(requests.where((r) => r.method == 'PUT').length, 1);
+          expect(
+            requests
+                .where(
+                  (r) =>
+                      r.method == 'POST' &&
+                      r.path.startsWith('/api/leave/print/types/'),
+                )
+                .length,
+            2,
+          );
+        }
+      },
+    );
+  }
+
   testWidgets('duplicate-key API error is shown without adding an item', (
     tester,
   ) async {

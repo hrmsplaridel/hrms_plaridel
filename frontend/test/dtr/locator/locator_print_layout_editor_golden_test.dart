@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_type_definition.dart';
 import 'package:hrms_plaridel/features/dtr/locator/models/locator_request_type.dart';
+import 'package:hrms_plaridel/features/dtr/locator/models/locator_print_layout.dart';
 import 'package:hrms_plaridel/features/dtr/locator/presentation/admin/widgets/locator_print_layout_editor.dart';
 
 void main() {
@@ -39,6 +40,7 @@ void main() {
   );
   for (final (name, size, dark, settings) in [
     ('desktop', const Size(1440, 900), false, false),
+    ('table', const Size(1440, 900), false, false),
     ('dark', const Size(1440, 900), true, false),
     ('mobile', const Size(390, 844), false, false),
     ('mobile_settings', const Size(390, 844), false, true),
@@ -54,6 +56,13 @@ void main() {
           home: Scaffold(
             body: LocatorPrintLayoutEditor(
               requestType: type,
+              initialLayout:name=='table'?const LocatorPrintLayout(elements:[
+                LocatorPrintElement(id:'summary_table',kind:'table',x:40,y:180,width:515,height:140,fontSize:11,columnWidths:[1,2],cells:[
+                  [LocatorPrintTableCell(text:'Employee'),LocatorPrintTableCell(text:'Destination')],
+                  [LocatorPrintTableCell(kind:'field',source:'employee_name'),LocatorPrintTableCell(kind:'field',source:'custom:destination')],
+                  [LocatorPrintTableCell(text:'Departure date'),LocatorPrintTableCell(kind:'field',source:'custom:departure')],
+                ]),
+              ]):null,
               onPreview: (_) async {},
             ),
           ),

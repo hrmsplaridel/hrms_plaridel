@@ -1,7 +1,7 @@
 const {PDFDocument} = require('pdf-lib');
 function invalid(message) {return Object.assign(new Error(message),{status:400});}
 function validateLayout(layout) {
- if(!['csc','wellness'].includes(layout)) throw invalid('Unsupported printed form layout');
+ if(!['csc','wellness','custom'].includes(layout)) throw invalid('Unsupported printed form layout');
  return layout;
 }
 async function validateBackground(bytes,mime,{allowLandscape=false}={}) {
@@ -30,7 +30,11 @@ async function validateBackground(bytes,mime,{allowLandscape=false}={}) {
   return Buffer.from(await clean.save());
  } catch(e) {if(e.status) throw e; throw invalid('Could not read background PDF or image');}
 }
-async function mergeBackground(background,overlay,{layout='wellness'}={}) {
+async function mergeBackground(background,overlay,{layout='wellness',printLayout=null}={}) {
+ if(layout==='custom') {
+  if(!printLayout)throw invalid('Custom printed layout is required');
+  return require('./locatorPrintTemplates').mergeLocatorBackground(background,overlay,printLayout);
+ }
  const doc=await PDFDocument.load(overlay);
  if(doc.getPageCount()>10) throw invalid('Printed form exceeds 10 pages');
  if(!background) return Buffer.from(overlay);
