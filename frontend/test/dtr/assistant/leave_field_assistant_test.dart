@@ -17,6 +17,7 @@ class _FieldApi extends DtrAssistantApi {
     String? conversationId,
     String? externalConsentVersion,
     Map<String, dynamic>? formContext,
+    Map<String, dynamic>? requestReference,
     CancelToken? cancelToken,
   }) async {
     calls.add(formContext!);

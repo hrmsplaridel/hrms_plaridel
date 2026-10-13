@@ -336,6 +336,23 @@ test('DTR assistant service uses employee-self data for real HRMS scenarios', as
     message: 'what about its status?',
   });
   assert.equal(statusFollowUp.intent, 'latest_leave_request');
+  assert.equal(statusFollowUp.intentSource, 'selected_request');
+  assert.deepEqual(statusFollowUp.sources.leaveRequestIds, ['leave-rejected']);
+  const ambiguous = await chatWithDtrAssistant(pool, {
+    user: { ...user, id: `${user.id}-overview-0` }, message: 'Is it approved?',
+  });
+  assert.equal(ambiguous.intentSource, 'request_selection');
+  assert.ok(ambiguous.message.actions.length > 1);
+  assert.equal(ambiguous.message.actions[0].type, 'select_request');
+  const unavailable = await chatWithDtrAssistant(pool, {
+    user, message: 'Check this request.',
+    requestReference: {module: 'leave', id: '11111111-1111-4111-8111-111111111111'},
+  });
+  assert.match(unavailable.message.content, /no longer available/);
+  assert.deepEqual(unavailable.sources.leaveRequestIds, []);
+  await assert.rejects(chatWithDtrAssistant(pool, {
+    user, message: 'Check this request.', requestReference: {module: 'leave', id: 'invalid'},
+  }), /valid request/);
 
   const malicious = await chatWithDtrAssistant(pool, {
     user,

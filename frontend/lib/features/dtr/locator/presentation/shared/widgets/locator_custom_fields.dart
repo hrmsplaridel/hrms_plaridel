@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:hrms_plaridel/features/dtr/assistant/presentation/widgets/active_assistant_field.dart';
 import 'package:hrms_plaridel/features/dtr/assistant/presentation/widgets/field_guidance_editor.dart';
 import 'package:hrms_plaridel/features/dtr/assistant/presentation/widgets/leave_field_assistant.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
@@ -120,7 +121,20 @@ class _LocatorCustomFieldInputsState extends State<LocatorCustomFieldInputs> {
                         label: const Text('Help me fill this'),
                       ),
                     ),
-                  _input(context, field),
+                  if (widget.requestType != null)
+                    ActiveAssistantField(
+                      module: 'locator',
+                      type: widget.requestType!,
+                      fieldKey: field.key,
+                      read: () => values[field.key]?.toString() ?? '',
+                      apply: (value) => setState(() {
+                        values[field.key] = value;
+                        _revision++;
+                      }),
+                      child: _input(context, field),
+                    )
+                  else
+                    _input(context, field),
                 ],
               ),
             ),

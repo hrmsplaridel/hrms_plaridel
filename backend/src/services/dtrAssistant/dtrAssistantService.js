@@ -1,5 +1,6 @@
 const crypto = require('crypto');
 const { assistLeaveField } = require('./leaveFieldAssistant');
+const { requestChoices, choiceActions, isRequestFollowUp, formChatContext } = require('./dtrAssistantRequestFocus');
 const { chatCompletion } = require('../llm/llmClient');
 const { getLlmConfig } = require('../llm/llmConfig');
 const { loadEmployeeAssistantContext } = require('./dtrAssistantDataService');
@@ -501,6 +502,8 @@ function buildNextAssistantMemory(previous, next) {
 
   return {
     intent: next.intent || previous?.intent || null,
+    selectedRequest: next.selectedRequest !== undefined ? next.selectedRequest : (topic === previous?.topic ? previous?.selectedRequest : null),
+    requestChoices: next.requestChoices || (topic === previous?.topic ? previous?.requestChoices : []) || [],
     topic,
     leaveType,
     locatorType,
@@ -2526,6 +2529,7 @@ async function chatWithDtrAssistant(
     conversationId,
     externalConsentVersion,
     formContext,
+    requestReference,
     signal,
   }
 ) {
@@ -2534,16 +2538,9 @@ async function chatWithDtrAssistant(
   const profile = resolveModelProfile(modelProfile);
   assertExternalConsent(profile, externalConsentVersion);
   const scope = getEmployeeSelfScope(user);
-  if (formContext) {
-    const fieldReply = await assistLeaveField(pool, formContext, signal);
-    throwIfAssistantRequestAborted(signal);
-    return buildAssistantResult({
-      ...fieldReply,
-      provider: 'hrms', model: 'leave-field-assistant', modelProfile: profile.id,
-      mode: scope.mode, context: emptyAssistantContext(),
-      intent: 'leave_form_field_help', intentConfidence: 1,
-      intentSource: 'active_form', text, conversationId,
-    });
+  if (requestReference && (!['leave', 'locator'].includes(requestReference.module) ||
+      typeof requestReference.id !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(requestReference.id))) {
+    throw Object.assign(new Error('Select a valid request.'), { statusCode: 400 });
   }
   const conversationKey = normalizeConversationId(conversationId);
   const turnGeneration = beginAssistantTurn(scope.userId, conversationKey);
@@ -2557,6 +2554,64 @@ async function chatWithDtrAssistant(
       turnGeneration
     );
   const memory = readMemory();
+  const activeForm = !requestReference && !intent ? formChatContext(formContext, text, memory) : null;
+  if (activeForm) {
+    const fieldReply = await assistLeaveField(pool, activeForm, signal);
+    throwIfAssistantRequestAborted(signal);
+    saveMemory({ ...memory, formFocus: { module: activeForm.module || 'leave',
+      type: activeForm.locatorType || activeForm.leaveType, key: activeForm.fieldKey, bindingId: activeForm.bindingId } });
+    return buildAssistantResult({
+      ...fieldReply,
+      provider: 'hrms', model: 'form-field-assistant', modelProfile: profile.id,
+      mode: scope.mode, context: emptyAssistantContext(),
+      intent: activeForm.module === 'locator' ? 'locator_form_field_help' : 'leave_form_field_help', intentConfidence: 1,
+      intentSource: 'active_form', text, conversationId: conversationKey,
+    });
+  }
+  const followUp = !intent && isRequestFollowUp(text) && parseAssistantDateRange(text).label === 'today';
+  const explicitTopic = explicitTopicFromText(text);
+  const rememberedChoices = (memory?.requestChoices || []).filter((item) => !explicitTopic || item.module === explicitTopic);
+  let focusedRequest = requestReference || (followUp &&
+    (!explicitTopic || explicitTopic === memory?.selectedRequest?.module) ? memory?.selectedRequest : null);
+  if (!focusedRequest && followUp && rememberedChoices.length === 1) focusedRequest = rememberedChoices[0];
+  if (!focusedRequest && followUp && rememberedChoices.length > 1) {
+    return buildAssistantResult({
+      content: 'Which request do you mean? Choose its type and date below.',
+      actions: choiceActions(rememberedChoices), provider: 'hrms', model: 'request-selection',
+      modelProfile: profile.id, mode: scope.mode, context: emptyAssistantContext(),
+      intent: 'request_status_overview', intentConfidence: 1, intentSource: 'request_selection',
+      text, conversationId: conversationKey,
+    });
+  }
+  if (focusedRequest) {
+    if (!['leave', 'locator'].includes(focusedRequest.module) ||
+        typeof focusedRequest.id !== 'string' || !/^[a-zA-Z0-9-]{1,80}$/.test(focusedRequest.id)) {
+      throw Object.assign(new Error('Select a valid request.'), { statusCode: 400 });
+    }
+    const tracking = /\b(who|where|reviewer|holding|waiting|kinsa|sino|asa)\b/i.test(text);
+    const reason = /\b(why|reason|remarks|bakit|ngano)\b/i.test(text);
+    const focusedIntent = focusedRequest.module === 'leave'
+      ? tracking ? 'leave_approval_tracker' : reason ? 'leave_rejection_reason' : 'latest_leave_request'
+      : tracking ? 'locator_approval_tracker' : reason ? 'locator_rejection_reason' : 'locator_status';
+    const context = await loadEmployeeAssistantContext(pool, {
+      userId: scope.userId, message: text, dateRange: parseAssistantDateRange(text),
+      intents: [focusedIntent], requestReference: focusedRequest, signal,
+    });
+    throwIfAssistantRequestAborted(signal);
+    // Defense in depth: never fall back to a different row if the selected ID is unavailable.
+    context.recent_leave_requests = (context.recent_leave_requests || []).filter((row) => focusedRequest.module === 'leave' && row.id === focusedRequest.id);
+    context.recent_locator_slips = (context.recent_locator_slips || []).filter((row) => focusedRequest.module === 'locator' && row.id === focusedRequest.id);
+    const found = requestChoices(context, focusedRequest.module);
+    saveMemory(buildNextAssistantMemory(memory, { intent: focusedIntent, text,
+      selectedRequest: found[0] || null, requestChoices: found, modelProfile: profile.id }));
+    return buildAssistantResult({
+      content: found.length ? buildFastEmployeeAssistantReply(text, context, focusedIntent).replace('Your latest leave request:', 'Your selected leave request:')
+        : 'That request is no longer available in your account. Ask for your current request status to select another.',
+      provider: 'hrms', model: 'request-status-refresh', modelProfile: profile.id,
+      mode: scope.mode, context, intent: focusedIntent, intentConfidence: 1,
+      intentSource: 'selected_request', text, conversationId: conversationKey,
+    });
+  }
   const normalizedTextForRules = normalizeAssistantMessageForRules(text);
   const forcedIntent = normalizeIntent(intent);
   const rawScoredIntent = scoreEmployeeAssistantIntent(
@@ -2644,6 +2699,8 @@ async function chatWithDtrAssistant(
       .join('\n\n');
     saveMemory(buildNextAssistantMemory(routingMemory, {
       intent: overviewIntent,
+      selectedRequest: null,
+      requestChoices: requestChoices(context),
       text: normalizedTextForRules,
       dateRange: context.date_range,
       modelProfile: profile.id,
@@ -2652,6 +2709,7 @@ async function chatWithDtrAssistant(
     return buildAssistantResult({
       conversationId: conversationKey,
       content,
+      actions: choiceActions(requestChoices(context)),
       provider: 'hrms',
       model: 'hrms-request-status-rules',
       modelProfile: profile.id,
@@ -3056,6 +3114,11 @@ async function chatWithDtrAssistant(
 
     saveMemory(buildNextAssistantMemory(extractionMemory, {
       intent: resolvedIntent,
+      ...(['latest_leave_request', 'locator_status', 'latest_locator_request'].includes(resolvedIntent)
+        ? { selectedRequest: resolvedIntent === 'latest_leave_request' || requestChoices(context, topicForIntent(resolvedIntent)).length === 1
+              ? requestChoices(context, topicForIntent(resolvedIntent))[0] || null : null,
+            requestChoices: requestChoices(context, topicForIntent(resolvedIntent)) }
+        : { selectedRequest: null, requestChoices: requestChoices(context, topicForIntent(resolvedIntent)) }),
       text: plannedText,
       leaveType: memoryLeaveTypeForIntent(
         resolvedIntent,

@@ -1,4 +1,6 @@
+import 'package:hrms_plaridel/features/dtr/assistant/presentation/widgets/application_review.dart';
 import 'package:hrms_plaridel/features/dtr/assistant/presentation/widgets/leave_field_assistant.dart';
+import 'package:hrms_plaridel/features/dtr/assistant/presentation/widgets/active_assistant_field.dart';
 import 'dart:async';
 import 'dart:convert';
 import '../../../shared/widgets/locator_custom_fields.dart';
@@ -3022,6 +3024,18 @@ class _LocatorSlipFormDialog extends StatefulWidget {
 }
 
 class _LocatorSlipFormDialogState extends State<_LocatorSlipFormDialog> {
+  Widget _activeAssistantField(
+    String key,
+    Widget child,
+    TextEditingController controller,
+  ) => ActiveAssistantField(
+    module: 'locator',
+    type: _requestType.code,
+    fieldKey: key,
+    read: () => controller.text,
+    apply: (value) => controller.text = value,
+    child: child,
+  );
   Widget _fieldHelp(
     String key,
     String label,
@@ -3313,7 +3327,12 @@ class _LocatorSlipFormDialogState extends State<_LocatorSlipFormDialog> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _datePicker(),
+        OutlinedButton.icon(
+          onPressed: _reviewApplication,
+          icon: const Icon(Icons.fact_check_outlined),
+          label: const Text('Review my application'),
+        ),
+        KeyedSubtree(key: _reviewDateKey, child: _datePicker()),
         const SizedBox(height: 14),
         _requestTypeDropdown(),
         if (_isWfhRequest) ...[
@@ -3321,20 +3340,24 @@ class _LocatorSlipFormDialogState extends State<_LocatorSlipFormDialog> {
           _wfhCoverageDropdown(),
         ],
         const SizedBox(height: 14),
-        _segmentSelector(),
+        KeyedSubtree(key: _reviewCoverageKey, child: _segmentSelector()),
         const SizedBox(height: 14),
         _fieldHelp('office', _requestType.locationLabel, _officeController),
         EmployeeLocatorMobileLabeledField(
           label: _requestType.locationLabel,
           labelColor: AppTheme.dashTextSecondaryOf(context),
-          child: TextFormField(
-            controller: _officeController,
-            decoration: _inputDecoration().copyWith(
-              hintText: _requestType.locationHint,
+          child: _activeAssistantField(
+            'office',
+            TextFormField(
+              controller: _officeController,
+              decoration: _inputDecoration().copyWith(
+                hintText: _requestType.locationHint,
+              ),
+              validator: (v) => (v == null || v.trim().isEmpty)
+                  ? '${_requestType.locationLabel} is required'
+                  : null,
             ),
-            validator: (v) => (v == null || v.trim().isEmpty)
-                ? '${_requestType.locationLabel} is required'
-                : null,
+            _officeController,
           ),
         ),
         const SizedBox(height: 12),
@@ -3342,21 +3365,25 @@ class _LocatorSlipFormDialogState extends State<_LocatorSlipFormDialog> {
         EmployeeLocatorMobileLabeledField(
           label: 'Remarks / Reasons',
           labelColor: AppTheme.dashTextSecondaryOf(context),
-          child: TextFormField(
-            controller: _remarksController,
-            minLines: 4,
-            maxLines: 4,
-            decoration: _inputDecoration().copyWith(
-              hintText: 'Enter remarks...',
-              alignLabelWithHint: true,
-              contentPadding: const EdgeInsets.symmetric(
-                horizontal: 12,
-                vertical: 12,
+          child: _activeAssistantField(
+            'reason',
+            TextFormField(
+              controller: _remarksController,
+              minLines: 4,
+              maxLines: 4,
+              decoration: _inputDecoration().copyWith(
+                hintText: 'Enter remarks...',
+                alignLabelWithHint: true,
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 12,
+                ),
               ),
+              validator: (v) => (v == null || v.trim().isEmpty)
+                  ? 'Remarks/Reasons is required'
+                  : null,
             ),
-            validator: (v) => (v == null || v.trim().isEmpty)
-                ? 'Remarks/Reasons is required'
-                : null,
+            _remarksController,
           ),
         ),
         if (_requestType.employeeDetailSchema.isNotEmpty)
@@ -3371,7 +3398,7 @@ class _LocatorSlipFormDialogState extends State<_LocatorSlipFormDialog> {
           ),
         if (_requiresAttachment) ...[
           const SizedBox(height: 14),
-          _attachmentPicker(),
+          KeyedSubtree(key: _reviewAttachmentKey, child: _attachmentPicker()),
         ],
       ],
     );
@@ -3627,44 +3654,64 @@ class _LocatorSlipFormDialogState extends State<_LocatorSlipFormDialog> {
     );
   }
 
-  void _save() {
+  final _reviewDateKey = GlobalKey();
+  final _reviewCoverageKey = GlobalKey();
+  final _reviewAttachmentKey = GlobalKey();
+
+  List<ApplicationReviewIssue> _submissionIssues() {
+    final issues = reviewFormFields(_formKey.currentState);
     if (_loadingShiftCoverage || _shiftCoverageError != null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Check your shift for the selected date before submitting.',
-          ),
+      issues.add(
+        ApplicationReviewIssue(
+          'Check your shift for the selected date before submitting.',
+          target: _reviewCoverageKey.currentContext,
         ),
       );
-      return;
     }
-    _clearHiddenSegments();
-    final hasTimeSegment = _amIn || _amOut || _pmIn || _pmOut;
-    if (!hasTimeSegment) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Select at least one IN/OUT marker')),
+    if (!(_amIn || _amOut || _pmIn || _pmOut)) {
+      issues.add(
+        ApplicationReviewIssue(
+          'Select at least one IN/OUT marker.',
+          target: _reviewCoverageKey.currentContext,
+        ),
       );
-      return;
     }
-    if (!_formKey.currentState!.validate()) return;
-    final requestDate = DateTime(_date.year, _date.month, _date.day);
     final today = DateTime(
       widget.officialDate.year,
       widget.officialDate.month,
       widget.officialDate.day,
     );
-    if (requestDate.isBefore(today)) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Employees cannot file a locator for a past date. Contact HR for a correction.',
-          ),
+    if (DateTime(_date.year, _date.month, _date.day).isBefore(today)) {
+      issues.add(
+        ApplicationReviewIssue(
+          'Employees cannot file a locator for a past date. Contact HR for a correction.',
+          target: _reviewDateKey.currentContext,
         ),
       );
-      return;
     }
     if (_requiresAttachment && _effectiveAttachmentName == null) {
-      setState(() => _showAttachmentError = true);
+      issues.add(
+        ApplicationReviewIssue(
+          'Attach the document required for this locator type.',
+          target: _reviewAttachmentKey.currentContext,
+        ),
+      );
+    }
+    return issues;
+  }
+
+  Future<void> _reviewApplication() async {
+    await showApplicationReview(context, _submissionIssues());
+  }
+
+  void _save() {
+    _clearHiddenSegments();
+    final issues = _submissionIssues();
+    if (issues.isNotEmpty) {
+      if (_requiresAttachment && _effectiveAttachmentName == null) {
+        setState(() => _showAttachmentError = true);
+      }
+      showApplicationReview(context, issues);
       return;
     }
 
