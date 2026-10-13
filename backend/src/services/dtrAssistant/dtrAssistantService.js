@@ -1,4 +1,5 @@
 const crypto = require('crypto');
+const { assistLeaveField } = require('./leaveFieldAssistant');
 const { chatCompletion } = require('../llm/llmClient');
 const { getLlmConfig } = require('../llm/llmConfig');
 const { loadEmployeeAssistantContext } = require('./dtrAssistantDataService');
@@ -624,7 +625,7 @@ function buildSuggestions(intent) {
       { text: 'Check leave balance first', intent: 'leave_balance' },
     ];
   }
-  if (intent === 'clarify_status_topic') {
+  if (intent === 'clarify_status_topic' || intent === 'request_status_overview') {
     return [
       { text: 'Check DTR status', intent: 'today_dtr' },
       { text: 'Check leave request status', intent: 'latest_leave_request' },
@@ -2524,6 +2525,7 @@ async function chatWithDtrAssistant(
     modelProfile,
     conversationId,
     externalConsentVersion,
+    formContext,
     signal,
   }
 ) {
@@ -2532,6 +2534,17 @@ async function chatWithDtrAssistant(
   const profile = resolveModelProfile(modelProfile);
   assertExternalConsent(profile, externalConsentVersion);
   const scope = getEmployeeSelfScope(user);
+  if (formContext) {
+    const fieldReply = await assistLeaveField(pool, formContext, signal);
+    throwIfAssistantRequestAborted(signal);
+    return buildAssistantResult({
+      ...fieldReply,
+      provider: 'hrms', model: 'leave-field-assistant', modelProfile: profile.id,
+      mode: scope.mode, context: emptyAssistantContext(),
+      intent: 'leave_form_field_help', intentConfidence: 1,
+      intentSource: 'active_form', text, conversationId,
+    });
+  }
   const conversationKey = normalizeConversationId(conversationId);
   const turnGeneration = beginAssistantTurn(scope.userId, conversationKey);
   const readMemory = () => getAssistantMemory(scope.userId, conversationKey);
@@ -2602,6 +2615,56 @@ async function chatWithDtrAssistant(
     routingMemory,
     memoryIntent
   );
+  // A broad status question should check filed requests before asking the
+  // employee to name a module. Keep topic-specific follow-ups on their topic.
+  const asksRequestStatus = /\b(status|approved|accepted|pending|rejected|returned|cancelled|canceled|na approve)\b/.test(normalizedTextForRules);
+  const asksBothRequestTopics =
+    /\bleave\b/.test(normalizedTextForRules) &&
+    /\b(locator|pass slip|wfh|official business)\b/.test(normalizedTextForRules);
+  const asksStatusOverview = !forcedIntent && asksRequestStatus && (
+    asksBothRequestTopics ||
+    (!memoryIntent && !routingMemory?.pendingClarification &&
+      !explicitTopicFromText(normalizedTextForRules))
+  );
+  if (asksStatusOverview) {
+    const overviewIntent = 'request_status_overview';
+    const context = await loadEmployeeAssistantContext(pool, {
+      userId: scope.userId,
+      message: normalizedTextForRules,
+      dateRange: parseAssistantDateRange(normalizedTextForRules),
+      intents: ['latest_leave_request', 'locator_status'],
+      signal,
+    });
+    throwIfAssistantRequestAborted(signal);
+    context.assistant_context_gate = contextDecision;
+    const content = ['latest_leave_request', 'locator_status']
+      .map((requestIntent) => buildFastEmployeeAssistantReply(
+        normalizedTextForRules, context, requestIntent
+      ))
+      .join('\n\n');
+    saveMemory(buildNextAssistantMemory(routingMemory, {
+      intent: overviewIntent,
+      text: normalizedTextForRules,
+      dateRange: context.date_range,
+      modelProfile: profile.id,
+      pendingClarification: null,
+    }));
+    return buildAssistantResult({
+      conversationId: conversationKey,
+      content,
+      provider: 'hrms',
+      model: 'hrms-request-status-rules',
+      modelProfile: profile.id,
+      mode: scope.mode,
+      context,
+      intent: overviewIntent,
+      intentConfidence: 1,
+      intentSource: 'request_status_rules',
+      attachments: [],
+      text: normalizedTextForRules,
+      memory: readMemory(),
+    });
+  }
   const clarificationIntent = routingMemory?.pendingClarification
     ? null
     : clarificationIntentForMessage(

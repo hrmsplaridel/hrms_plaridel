@@ -56,6 +56,7 @@ class _TurnAssistantApi extends DtrAssistantApi {
     String? modelProfile,
     String? conversationId,
     String? externalConsentVersion,
+    Map<String, dynamic>? formContext,
     CancelToken? cancelToken,
   }) {
     final completer = Completer<DtrAssistantMessage>();

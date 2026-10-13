@@ -1,3 +1,4 @@
+import 'package:hrms_plaridel/features/dtr/assistant/presentation/widgets/leave_field_assistant.dart';
 import 'dart:async';
 import 'dart:convert';
 import '../../../shared/widgets/locator_custom_fields.dart';
@@ -797,7 +798,10 @@ class EmployeeLocatorSlipContentState extends State<EmployeeLocatorSlipContent>
                     ? 'No reason provided.'
                     : item.remarks.trim(),
               ),
-              LocatorCustomFieldDetails(fields:item.requestType.employeeDetailSchema,values:item.additionalDetails),
+              LocatorCustomFieldDetails(
+                fields: item.requestType.employeeDetailSchema,
+                values: item.additionalDetails,
+              ),
               if (returnBlockedByPastDate) ...[
                 const SizedBox(height: 12),
                 const EmployeeLocatorMobileDetailSection(
@@ -1963,7 +1967,12 @@ class EmployeeLocatorSlipContentState extends State<EmployeeLocatorSlipContent>
         res = await ApiClient.instance.dio.post<Map<String, dynamic>>(
           '/api/locator-slips/submit-with-attachment',
           data: FormData.fromMap({
-            ...payload.map((key, value) => MapEntry(key, value is Map ? jsonEncode(value) : value.toString())),
+            ...payload.map(
+              (key, value) => MapEntry(
+                key,
+                value is Map ? jsonEncode(value) : value.toString(),
+              ),
+            ),
             'file': MultipartFile.fromBytes(
               attachmentBytes,
               filename: attachmentName,
@@ -2675,7 +2684,7 @@ class EmployeeLocatorSlipContentState extends State<EmployeeLocatorSlipContent>
             pmIn: item.pmIn,
             pmOut: item.pmOut,
             existingAttachmentName: item.attachmentName,
-            additionalDetails:item.additionalDetails,
+            additionalDetails: item.additionalDetails,
           ),
         ),
       ),
@@ -3013,13 +3022,39 @@ class _LocatorSlipFormDialog extends StatefulWidget {
 }
 
 class _LocatorSlipFormDialogState extends State<_LocatorSlipFormDialog> {
+  Widget _fieldHelp(
+    String key,
+    String label,
+    TextEditingController controller,
+  ) => Align(
+    alignment: Alignment.centerRight,
+    child: TextButton.icon(
+      icon: const Icon(Icons.auto_awesome_outlined, size: 16),
+      label: const Text('Help me fill this'),
+      onPressed: () async {
+        final type = _requestType.code;
+        final suggestion = await showDialog<String>(
+          context: context,
+          builder: (_) => LeaveFieldAssistant(
+            module: 'locator',
+            leaveType: type,
+            fieldKey: key,
+            label: label,
+            initialValue: controller.text,
+          ),
+        );
+        if (!mounted || suggestion == null || type != _requestType.code) return;
+        controller.text = suggestion;
+      },
+    ),
+  );
   final _formKey = GlobalKey<FormState>();
   late DateTime _date;
   LocatorRequestType _requestType = LocatorRequestType.locator;
   _WfhCoverage _wfhCoverage = _WfhCoverage.wholeDay;
   final _officeController = TextEditingController();
   final _remarksController = TextEditingController();
-  final _additionalDetails = <String,dynamic>{};
+  final _additionalDetails = <String, dynamic>{};
 
   bool _amIn = false;
   bool _amOut = false;
@@ -3288,6 +3323,7 @@ class _LocatorSlipFormDialogState extends State<_LocatorSlipFormDialog> {
         const SizedBox(height: 14),
         _segmentSelector(),
         const SizedBox(height: 14),
+        _fieldHelp('office', _requestType.locationLabel, _officeController),
         EmployeeLocatorMobileLabeledField(
           label: _requestType.locationLabel,
           labelColor: AppTheme.dashTextSecondaryOf(context),
@@ -3302,6 +3338,7 @@ class _LocatorSlipFormDialogState extends State<_LocatorSlipFormDialog> {
           ),
         ),
         const SizedBox(height: 12),
+        _fieldHelp('reason', 'Remarks / Reasons', _remarksController),
         EmployeeLocatorMobileLabeledField(
           label: 'Remarks / Reasons',
           labelColor: AppTheme.dashTextSecondaryOf(context),
@@ -3322,8 +3359,16 @@ class _LocatorSlipFormDialogState extends State<_LocatorSlipFormDialog> {
                 : null,
           ),
         ),
-        if (_requestType.employeeDetailSchema.isNotEmpty) Padding(
-          padding:const EdgeInsets.only(top:14),child:LocatorCustomFieldInputs(key:ValueKey('fields-${_requestType.code}'),fields:_requestType.employeeDetailSchema,values:_additionalDetails)),
+        if (_requestType.employeeDetailSchema.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.only(top: 14),
+            child: LocatorCustomFieldInputs(
+              requestType: _requestType.code,
+              key: ValueKey('fields-${_requestType.code}'),
+              fields: _requestType.employeeDetailSchema,
+              values: _additionalDetails,
+            ),
+          ),
         if (_requiresAttachment) ...[
           const SizedBox(height: 14),
           _attachmentPicker(),
@@ -3630,7 +3675,7 @@ class _LocatorSlipFormDialogState extends State<_LocatorSlipFormDialog> {
         requestType: _requestType,
         office: _officeController.text.trim(),
         remarks: _remarksController.text.trim(),
-        additionalDetails:Map.of(_additionalDetails),
+        additionalDetails: Map.of(_additionalDetails),
         amIn: _amIn,
         amOut: _amOut,
         pmIn: _pmIn,
@@ -3682,7 +3727,7 @@ class _LocatorSlipDraft {
   final LocatorRequestType requestType;
   final String office;
   final String remarks;
-  final Map<String,dynamic> additionalDetails;
+  final Map<String, dynamic> additionalDetails;
   final String? rawStatus;
   final String? departmentHeadName;
   final DateTime? departmentHeadReviewedAt;
@@ -3770,7 +3815,7 @@ class _LocatorSlipDraft {
       pendingAttachmentName:
           pendingAttachmentName ?? this.pendingAttachmentName,
       status: status ?? this.status,
-      additionalDetails:additionalDetails,
+      additionalDetails: additionalDetails,
     );
   }
 
@@ -3806,7 +3851,9 @@ class _LocatorSlipDraft {
       }),
       office: (json['office'] ?? '').toString(),
       remarks: (json['reason'] ?? '').toString(),
-      additionalDetails:Map<String,dynamic>.from(json['additional_details'] as Map? ?? {}),
+      additionalDetails: Map<String, dynamic>.from(
+        json['additional_details'] as Map? ?? {},
+      ),
       attachmentName: json['attachment_name']?.toString(),
       rawStatus: rawStatus,
       departmentHeadName:

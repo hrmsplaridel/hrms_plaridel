@@ -106,5 +106,15 @@ void main() {
     );
     expect(fields.single.label, 'Transport');
     expect(fields.single.options, ['Car', 'Bus']);
+    await t.ensureVisible(find.widgetWithText(TextFormField, 'Field instruction'));
+    await t.enterText(find.widgetWithText(TextFormField, 'Field instruction'), 'Select your actual transport.');
+    await t.pump();
+    await t.ensureVisible(find.widgetWithText(TextFormField, 'Example input'));
+    await t.enterText(find.widgetWithText(TextFormField, 'Example input'), 'Bus (example only).');
+    await t.pump();
+    final saved = fields.single.toJson();
+    expect(saved['instruction'], 'Select your actual transport.');
+    expect(saved['example'], 'Bus (example only).');
+    expect(saved['options'], ['Car', 'Bus']);
   });
 }

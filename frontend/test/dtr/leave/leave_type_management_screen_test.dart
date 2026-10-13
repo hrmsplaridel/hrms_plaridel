@@ -461,6 +461,15 @@ void main() {
       );
       await tester.enterText(textField('Field label'), 'Relationship');
       await tester.pump();
+      for (final entry in {
+        'Field instruction': 'State your actual relationship.',
+        'Example input': 'Sibling (sample only).',
+        'Suggested sentence template': 'The person is my [relationship].',
+      }.entries) {
+        await tester.ensureVisible(textField(entry.key));
+        await tester.enterText(textField(entry.key), entry.value);
+        await tester.pump();
+      }
 
       await tester.tap(find.text('Create Leave Type'));
       await tester.pumpAndSettle();
@@ -476,6 +485,9 @@ void main() {
       expect(data['employee_detail_schema'], [
         {
           'key': 'custom_relationship',
+          'instruction': 'State your actual relationship.',
+          'example': 'Sibling (sample only).',
+          'sentence_template': 'The person is my [relationship].',
           'label': 'Relationship',
           'type': 'text',
           'required': false,

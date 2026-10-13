@@ -2,6 +2,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:hrms_plaridel/features/dtr/assistant/presentation/widgets/leave_field_assistant.dart';
 
 import 'package:hrms_plaridel/core/api/client.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
@@ -494,7 +495,9 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
   String? _leaveTypeDefinitionAccountEligibilityMessage(
     LeaveTypeDefinition definition,
   ) {
-    if (!definition.isEmploymentTypeEligible(context.read<AuthProvider>().user?.employmentType)) {
+    if (!definition.isEmploymentTypeEligible(
+      context.read<AuthProvider>().user?.employmentType,
+    )) {
       return '${definition.displayName} is not available for your employment type.';
     }
     return _accountEligibilityMessage(
@@ -2159,12 +2162,58 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
     );
   }
 
+  int _assistantFieldRevision = 0;
+
+  Widget _fieldHelp(
+    String fieldKey,
+    String label, {
+    TextEditingController? controller,
+    bool canDraft = true,
+  }) => Align(
+    alignment: Alignment.centerRight,
+    child: TextButton.icon(
+      icon: const Icon(Icons.auto_awesome_outlined, size: 16),
+      label: const Text('Help me fill this'),
+      onPressed: () async {
+        final leaveType = _leaveTypeName;
+        final initial =
+            controller?.text ?? _customDetailValues[fieldKey]?.toString() ?? '';
+        final suggestion = await showDialog<String>(
+          context: context,
+          builder: (_) => LeaveFieldAssistant(
+            leaveType: leaveType,
+            fieldKey: fieldKey,
+            label: label,
+            initialValue: initial,
+            canDraft: canDraft,
+          ),
+        );
+        if (!mounted || suggestion == null || leaveType != _leaveTypeName) {
+          return;
+        }
+        setState(() {
+          if (controller != null) {
+            controller.text = suggestion;
+          } else {
+            _customDetailValues[fieldKey] = suggestion;
+            _assistantFieldRevision++;
+          }
+        });
+      },
+    ),
+  );
+
   Widget _buildDetailsCard() {
     List<Widget> children = [_buildSectionTitle('3. Leave Details')];
 
     // Shared Reasons
     children.addAll([
       const SizedBox(height: 16),
+      _fieldHelp(
+        'reason',
+        'General Reason / Remarks',
+        controller: _reasonController,
+      ),
       TextFormField(
         controller: _reasonController,
         maxLines: 2,
@@ -2202,6 +2251,12 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
         ),
         if (_locationOption != null) ...[
           const SizedBox(height: 8),
+          _fieldHelp(
+            'location_details',
+            'Location details',
+            controller: _locationDetailsController,
+            canDraft: true,
+          ),
           TextFormField(
             controller: _locationDetailsController,
             decoration: _inputDecoration('Specify location...'),
@@ -2238,6 +2293,12 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
         ),
         if (_sickLeaveNature != null) ...[
           const SizedBox(height: 8),
+          _fieldHelp(
+            'sick_illness_details',
+            'Illness details',
+            controller: _sickIllnessController,
+            canDraft: true,
+          ),
           TextFormField(
             controller: _sickIllnessController,
             decoration: _inputDecoration('Specify illness details...'),
@@ -2424,6 +2485,12 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
               : null,
         ),
         const SizedBox(height: 12),
+        _fieldHelp(
+          'vawc_case_details',
+          'Case details',
+          controller: _vawcCaseDetailsController,
+          canDraft: true,
+        ),
         TextFormField(
           controller: _vawcCaseDetailsController,
           maxLines: 2,
@@ -2438,6 +2505,12 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
     } else if (_leaveType == LeaveType.soloParentLeave) {
       children.addAll([
         const SizedBox(height: 16),
+        _fieldHelp(
+          'solo_parent_id_number',
+          'Solo Parent ID Number',
+          controller: _soloParentIdNumberController,
+          canDraft: false,
+        ),
         TextFormField(
           controller: _soloParentIdNumberController,
           decoration: _inputDecoration('Solo Parent ID Number'),
@@ -2458,6 +2531,12 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
     } else if (_leaveType == LeaveType.specialLeaveBenefitsForWomen) {
       children.addAll([
         const SizedBox(height: 16),
+        _fieldHelp(
+          'women_illness_details',
+          'Illness details',
+          controller: _womenIllnessController,
+          canDraft: true,
+        ),
         TextFormField(
           controller: _womenIllnessController,
           decoration: _inputDecoration('Specify illness details...'),
@@ -2492,6 +2571,12 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
         ),
         if (_studyPurpose != null) ...[
           const SizedBox(height: 8),
+          _fieldHelp(
+            'study_purpose_details',
+            'Study purpose',
+            controller: _studyPurposeDetailsController,
+            canDraft: true,
+          ),
           TextFormField(
             controller: _studyPurposeDetailsController,
             decoration: _inputDecoration('Specify study leave details...'),
@@ -2512,6 +2597,13 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
         ),
         const SizedBox(height: 12),
         for (final field in _selectedCustomFields) ...[
+          _fieldHelp(
+            field.key,
+            field.label,
+            canDraft:
+                field.type == LeaveCustomFieldType.text ||
+                field.type == LeaveCustomFieldType.longText,
+          ),
           _buildCustomDetailField(field),
           const SizedBox(height: 12),
         ],
@@ -2592,7 +2684,9 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
       case LeaveCustomFieldType.text:
       case LeaveCustomFieldType.longText:
         return TextFormField(
-          key: ValueKey('custom-$_leaveTypeName-${field.key}'),
+          key: ValueKey(
+            'custom-$_leaveTypeName-${field.key}-$_assistantFieldRevision',
+          ),
           initialValue: value?.toString() ?? '',
           keyboardType: field.type == LeaveCustomFieldType.number
               ? const TextInputType.numberWithOptions(decimal: true)

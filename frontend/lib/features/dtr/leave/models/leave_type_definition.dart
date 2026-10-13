@@ -41,6 +41,9 @@ class LeaveCustomFieldDefinition {
     this.required = false,
     this.maxLength,
     this.options = const [],
+    this.instruction = '',
+    this.example = '',
+    this.sentenceTemplate = '',
   });
 
   final String key;
@@ -49,12 +52,18 @@ class LeaveCustomFieldDefinition {
   final bool required;
   final int? maxLength;
   final List<String> options;
+  final String instruction;
+  final String example;
+  final String sentenceTemplate;
 
   factory LeaveCustomFieldDefinition.fromJson(Map<String, dynamic> json) {
     final rawOptions = json['options'];
     return LeaveCustomFieldDefinition(
       key: json['key']?.toString() ?? '',
       label: json['label']?.toString() ?? '',
+      instruction: json['instruction']?.toString() ?? '',
+      example: json['example']?.toString() ?? '',
+      sentenceTemplate: json['sentence_template']?.toString() ?? '',
       type: leaveCustomFieldTypeFromString(json['type']?.toString()),
       required: json['required'] == true,
       maxLength: LeaveTypeDefinition._parseInt(
@@ -74,6 +83,10 @@ class LeaveCustomFieldDefinition {
     'label': label.trim(),
     'type': type.value,
     'required': required,
+    if (instruction.trim().isNotEmpty) 'instruction': instruction.trim(),
+    if (example.trim().isNotEmpty) 'example': example.trim(),
+    if (sentenceTemplate.trim().isNotEmpty)
+      'sentence_template': sentenceTemplate.trim(),
     if (type == LeaveCustomFieldType.text ||
         type == LeaveCustomFieldType.longText)
       'max_length':

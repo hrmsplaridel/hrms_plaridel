@@ -282,12 +282,24 @@ function normalizeEmployeeDetailSchema(value, { strict = false } = {}) {
       continue;
     }
 
+    const guidance = {};
+    for (const property of ['instruction', 'example', 'sentence_template']) {
+      const value = item[property];
+      if (value == null) continue;
+      if (strict && (typeof value !== 'string' || value.trim().length > 1000)) {
+        throw leaveDetailsPolicyError(`Field ${property} for "${label}" must be text up to 1000 characters.`);
+      }
+      if (typeof value === 'string' && value.trim()) {
+        guidance[property] = value.trim().slice(0, 1000);
+      }
+    }
     seenKeys.add(key);
     normalized.push({
       key,
       label,
       type,
       required: item.required === true,
+      ...guidance,
       ...(type === 'text' || type === 'long_text'
         ? { max_length: maxLength }
         : {}),

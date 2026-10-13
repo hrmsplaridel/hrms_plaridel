@@ -3,6 +3,7 @@ import '../widgets/leave_print_settings.dart';
 import '../widgets/leave_employment_eligibility_field.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
+import 'package:hrms_plaridel/features/dtr/assistant/presentation/widgets/field_guidance_editor.dart';
 import 'package:hrms_plaridel/shared/widgets/workforce_loading_skeleton.dart';
 import 'package:hrms_plaridel/shared/widgets/form_settings_section.dart';
 
@@ -527,10 +528,16 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
     bool? required,
     int? maxLength,
     List<String>? options,
+    String? instruction,
+    String? example,
+    String? sentenceTemplate,
   }) {
     final nextType = type ?? field.type;
     return LeaveCustomFieldDefinition(
       key: key ?? field.key,
+      instruction: instruction ?? field.instruction,
+      example: example ?? field.example,
+      sentenceTemplate: sentenceTemplate ?? field.sentenceTemplate,
       label: label ?? field.label,
       type: nextType,
       required: required ?? field.required,
@@ -1345,6 +1352,19 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
             ],
           ),
           const SizedBox(height: 12),
+          FieldGuidanceEditor(
+            field: field,
+            enabled: !_saving,
+            onChanged: (instruction, example, template) => _replaceCustomField(
+              index,
+              _updatedCustomField(
+                field,
+                instruction: instruction,
+                example: example,
+                sentenceTemplate: template,
+              ),
+            ),
+          ),
           InputDecorator(
             decoration: _inputDecoration(
               'System key',

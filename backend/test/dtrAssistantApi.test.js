@@ -281,6 +281,7 @@ test('DTR assistant API enforces auth and preserves route contracts', async (t) 
       targetUserId: otherEmployeeId,
       modelProfile: 'tools_ollama',
       conversationId: 'chat-api-contract',
+      formContext: { leaveType: 'vacationLeave', fieldKey: 'reason', task: 'explain' },
     },
   });
   assert.equal(chat.status, 200);
@@ -288,6 +289,9 @@ test('DTR assistant API enforces auth and preserves route contracts', async (t) 
   assert.equal(captured[0].user.id, employeeId);
   assert.equal(captured[0].targetUserId, undefined);
   assert.equal(captured[0].conversationId, 'chat-api-contract');
+  assert.deepEqual(captured[0].formContext, {
+    leaveType: 'vacationLeave', fieldKey: 'reason', task: 'explain',
+  });
   assert.ok(captured[0].signal instanceof AbortSignal);
   assert.equal(
     chat.json.message.feedbackToken,

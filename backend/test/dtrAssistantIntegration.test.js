@@ -254,7 +254,12 @@ test('DTR assistant service uses employee-self data for real HRMS scenarios', as
           signalDelayedContextStarted();
           await delayedContextRelease;
         }
-        return assistantContext(dateRange, userId);
+        const context = assistantContext(dateRange, userId);
+        if (userId.endsWith('-no-requests')) {
+          context.recent_leave_requests = [];
+          context.recent_locator_slips = [];
+        }
+        return context;
       },
     }
   );
@@ -289,6 +294,48 @@ test('DTR assistant service uses employee-self data for real HRMS scenarios', as
     id: '33333333-3333-4333-8333-333333333333',
     role: 'employee',
   };
+
+  for (const [index, message] of [
+    'what is my status?',
+    'ano ang status ko?',
+    'unsay status nako?',
+    'what is the status of my filed leave and locator?',
+    'approved na ba?',
+  ].entries()) {
+    const statusUser = { ...user, id: `${user.id}-overview-${index}` };
+    const overview = await chatWithDtrAssistant(pool, {
+      user: statusUser,
+      message,
+    });
+    assert.equal(overview.intent, 'request_status_overview', message);
+    assert.equal(loaded.at(-1).userId, statusUser.id);
+    assert.deepEqual(loaded.at(-1).intents, ['latest_leave_request', 'locator_status']);
+    assert.match(overview.message.content, /Sick Leave/i);
+    assert.match(overview.message.content, /rejected/i);
+    assert.match(overview.message.content, /locator/i);
+    assert.match(overview.message.content, /approved|aprubado/i);
+    assert.equal(overview.message.provider, 'hrms');
+    assert.doesNotMatch(overview.message.content, /Which status|not sure what/i);
+  }
+
+  const noRequests = await chatWithDtrAssistant(pool, {
+    user: { ...user, id: `${user.id}-no-requests` },
+    message: 'what is my status?',
+  });
+  assert.match(noRequests.message.content, /no leave request records/i);
+  assert.match(noRequests.message.content, /no locator slip records/i);
+
+  const followUpUser = { ...user, id: `${user.id}-status-follow-up` };
+  await chatWithDtrAssistant(pool, {
+    user: followUpUser,
+    message: 'what is my leave status?',
+    intent: 'latest_leave_request',
+  });
+  const statusFollowUp = await chatWithDtrAssistant(pool, {
+    user: followUpUser,
+    message: 'what about its status?',
+  });
+  assert.equal(statusFollowUp.intent, 'latest_leave_request');
 
   const malicious = await chatWithDtrAssistant(pool, {
     user,

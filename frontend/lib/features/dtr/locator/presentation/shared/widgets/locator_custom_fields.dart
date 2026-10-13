@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:hrms_plaridel/features/dtr/assistant/presentation/widgets/field_guidance_editor.dart';
+import 'package:hrms_plaridel/features/dtr/assistant/presentation/widgets/leave_field_assistant.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_type_definition.dart';
 import 'package:hrms_plaridel/shared/widgets/form_settings_section.dart';
@@ -49,14 +51,49 @@ class LocatorCustomFieldDetails extends StatelessWidget {
   }
 }
 
-class LocatorCustomFieldInputs extends StatelessWidget {
+class LocatorCustomFieldInputs extends StatefulWidget {
   const LocatorCustomFieldInputs({
     super.key,
     required this.fields,
     required this.values,
+    this.requestType,
   });
   final List<LeaveCustomFieldDefinition> fields;
   final Map<String, dynamic> values;
+  final String? requestType;
+  @override
+  State<LocatorCustomFieldInputs> createState() =>
+      _LocatorCustomFieldInputsState();
+}
+
+class _LocatorCustomFieldInputsState extends State<LocatorCustomFieldInputs> {
+  List<LeaveCustomFieldDefinition> get fields => widget.fields;
+  Map<String, dynamic> get values => widget.values;
+  int _revision = 0;
+
+  Future<void> _help(LeaveCustomFieldDefinition field) async {
+    final type = widget.requestType;
+    if (type == null) return;
+    final suggestion = await showDialog<String>(
+      context: context,
+      builder: (_) => LeaveFieldAssistant(
+        module: 'locator',
+        leaveType: type,
+        fieldKey: field.key,
+        label: field.label,
+        initialValue: values[field.key]?.toString() ?? '',
+        canDraft:
+            field.type == LeaveCustomFieldType.text ||
+            field.type == LeaveCustomFieldType.longText,
+      ),
+    );
+    if (!mounted || suggestion == null || widget.requestType != type) return;
+    setState(() {
+      values[field.key] = suggestion;
+      _revision++;
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     if (fields.isEmpty) return const SizedBox.shrink();
@@ -71,7 +108,21 @@ class LocatorCustomFieldInputs extends StatelessWidget {
           for (final field in fields)
             Padding(
               padding: const EdgeInsets.only(top: 12),
-              child: _input(context, field),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  if (widget.requestType != null)
+                    Align(
+                      alignment: Alignment.centerRight,
+                      child: TextButton.icon(
+                        onPressed: () => _help(field),
+                        icon: const Icon(Icons.auto_awesome_outlined, size: 16),
+                        label: const Text('Help me fill this'),
+                      ),
+                    ),
+                  _input(context, field),
+                ],
+              ),
             ),
         ],
       ),
@@ -153,7 +204,7 @@ class LocatorCustomFieldInputs extends StatelessWidget {
       );
     }
     return TextFormField(
-      key: ValueKey(field.key),
+      key: ValueKey('${field.key}-$_revision'),
       initialValue: values[field.key]?.toString(),
       decoration: decoration,
       maxLines: field.type == LeaveCustomFieldType.longText ? 4 : 1,
@@ -197,16 +248,24 @@ class LocatorCustomFieldEditor extends StatelessWidget {
     LeaveCustomFieldType? type,
     bool? required,
     List<String>? options,
+    String? instruction,
+    String? example,
+    String? sentenceTemplate,
   }) {
     final field = fields[index];
     final nextType = type ?? field.type;
     final next = List<LeaveCustomFieldDefinition>.from(fields);
     next[index] = LeaveCustomFieldDefinition(
       key: field.key,
+      instruction: instruction ?? field.instruction,
+      example: example ?? field.example,
+      sentenceTemplate: sentenceTemplate ?? field.sentenceTemplate,
       label: label ?? field.label,
       type: nextType,
       required: required ?? field.required,
-      maxLength: nextType == LeaveCustomFieldType.longText ? 2000 : 255,
+      maxLength: nextType == field.type
+          ? field.maxLength
+          : (nextType == LeaveCustomFieldType.longText ? 2000 : 255),
       options: options ?? field.options,
     );
     onChanged(next);
@@ -329,6 +388,16 @@ class LocatorCustomFieldEditor extends StatelessWidget {
                           .toList(),
                     ),
                   ),
+                FieldGuidanceEditor(
+                  field: entry.value,
+                  enabled: enabled,
+                  onChanged: (instruction, example, template) => _replace(
+                    entry.key,
+                    instruction: instruction,
+                    example: example,
+                    sentenceTemplate: template,
+                  ),
+                ),
                 const Divider(),
               ],
             ),
