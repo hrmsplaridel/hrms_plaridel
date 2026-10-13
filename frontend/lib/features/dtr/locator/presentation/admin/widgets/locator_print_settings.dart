@@ -1,4 +1,10 @@
 import 'dart:typed_data';
+import 'dart:convert';
+import '../../../models/locator_print_layout.dart';
+import '../../../models/locator_request_type.dart';
+import '../../../utils/locator_layout_pdf.dart';
+import '../../../utils/locator_form_signatories.dart';
+import 'locator_print_layout_editor.dart';
 import 'package:dio/dio.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
@@ -7,13 +13,17 @@ import 'package:hrms_plaridel/core/widgets/form_pdf_preview.dart';
 import 'package:hrms_plaridel/features/dtr/locator/utils/locator_slip_print.dart';
 
 class LocatorPrintDraft {
-  const LocatorPrintDraft({this.file});
+  const LocatorPrintDraft({this.file,this.layout,this.layoutChanged=false,this.removeBackground=false});
   final PlatformFile? file;
+  final LocatorPrintLayout? layout;
+  final bool layoutChanged,removeBackground;
+  bool get hasChanges=>file!=null||layoutChanged||removeBackground;
   Future<void> save(String typeId, {bool removeBackground = false}) async {
     await ApiClient.instance.post(
       '/api/locator-slips/print/types/$typeId',
       data: FormData.fromMap({
-        'remove_background': removeBackground.toString(),
+        'remove_background': (removeBackground||this.removeBackground).toString(),
+        if(layoutChanged) 'print_layout': jsonEncode(layout?.toJson()),
         if (file != null)
           'file': MultipartFile.fromBytes(
             file!.bytes!,
@@ -39,12 +49,14 @@ class LocatorPrintSettings extends StatefulWidget {
     this.onChanged,
     this.onSaved,
     this.enabled = true,
+    this.readRequestType,
   });
   final String? typeId;
   final LocatorPrintDraft? initialDraft;
   final ValueChanged<LocatorPrintDraft>? onChanged;
   final VoidCallback? onSaved;
   final bool enabled;
+  final LocatorRequestType Function()? readRequestType;
   @override
   State<LocatorPrintSettings> createState() => _LocatorPrintSettingsState();
 }
@@ -53,15 +65,20 @@ class _LocatorPrintSettingsState extends State<LocatorPrintSettings> {
   PlatformFile? _file;
   String? _background, _error;
   bool _loading = false, _busy = false, _remove = false;
+  LocatorPrintLayout? _layout;
+  bool _layoutChanged=false;
   bool get _disabled => _busy || !widget.enabled;
   @override
   void initState() {
     super.initState();
     _file = widget.initialDraft?.file;
+    _layout=widget.initialDraft?.layout;
+    _layoutChanged=widget.initialDraft?.layoutChanged??false;
+    _remove=widget.initialDraft?.removeBackground??false;
     if (widget.typeId != null) _load();
   }
 
-  void _changed() => widget.onChanged?.call(LocatorPrintDraft(file: _file));
+  void _changed() => widget.onChanged?.call(LocatorPrintDraft(file:_file,layout:_layout,layoutChanged:_layoutChanged,removeBackground:_remove));
   Future<void> _load() async {
     setState(() {
       _loading = true;
@@ -72,7 +89,10 @@ class _LocatorPrintSettingsState extends State<LocatorPrintSettings> {
         '/api/locator-slips/print/types/${widget.typeId}',
       );
       if (mounted) {
-        setState(() => _background = r.data?['background_name']?.toString());
+        setState(() {
+          _background = r.data?['background_name']?.toString();
+          if(!_layoutChanged)_layout=r.data?['print_layout'] is Map?LocatorPrintLayout.fromJson(Map<String,dynamic>.from(r.data!['print_layout'] as Map)):null;
+        });
       }
     } catch (_) {
       if (mounted) {
@@ -119,11 +139,13 @@ class _LocatorPrintSettingsState extends State<LocatorPrintSettings> {
     try {
       await LocatorPrintDraft(
         file: _file,
+        layout:_layout,layoutChanged:_layoutChanged,
       ).save(widget.typeId!, removeBackground: _remove);
       if (!mounted) return;
       setState(() {
         _file = null;
         _remove = false;
+        _layoutChanged=false;
       });
       widget.onSaved?.call();
       await _load();
@@ -158,6 +180,10 @@ class _LocatorPrintSettingsState extends State<LocatorPrintSettings> {
       _error = null;
     });
     try {
+      if(_layout!=null || _layoutChanged || widget.typeId==null || _file!=null || _remove){
+        await _previewDraft(_layout);
+        return;
+      }
       final bytes = await LocatorSlipPrint.buildPdf(
         id: null,
         employeeName: 'Sample Employee',
@@ -193,6 +219,40 @@ class _LocatorPrintSettingsState extends State<LocatorPrintSettings> {
     }
   }
 
+  LocatorRequestType get _requestType=>widget.readRequestType?.call()??LocatorRequestType.locator;
+  DioMediaType _fileType(PlatformFile file)=>DioMediaType.parse(file.extension?.toLowerCase()=='pdf'?'application/pdf':file.extension?.toLowerCase()=='png'?'image/png':'image/jpeg');
+  Future<void> _previewDraft(LocatorPrintLayout? layout)async{
+    final type=_requestType;
+    final bytes=layout!=null?await buildLocatorLayoutPdf(layout:layout,form:locatorLayoutSample(type),signatories:const LocatorFormSignatories(
+      applicant:LocatorPrintedSignatory(name:'Sample Employee'),departmentHead:LocatorPrintedSignatory(name:'Department Head'),finalApprover:LocatorPrintedSignatory(name:'Final Approver'),
+    )):await LocatorSlipPrint.buildPdf(id:null,employeeName:'Sample Employee',dateText:'Oct 13, 2026',requestTypeLabel:type.label,locationLabel:type.locationLabel,office:'Municipal Hall',remarks:'Sample purpose',amIn:true,amOut:true,pmIn:true,pmOut:true,
+      signatories:LocatorFormSignatories(form:locatorLayoutSample(type)));
+    final response=await ApiClient.instance.post<List<int>>('/api/locator-slips/print/preview',data:FormData.fromMap({
+      if(widget.typeId!=null)'type_id':widget.typeId,
+      'print_layout':jsonEncode(layout?.toJson()),'remove_background':_remove.toString(),
+      'file':MultipartFile.fromBytes(bytes,filename:'preview.pdf'),
+      if(_file!=null)'background':MultipartFile.fromBytes(_file!.bytes!,filename:_file!.name,contentType:_fileType(_file!)),
+    }),options:Options(responseType:ResponseType.bytes));
+    if(mounted)await showFormPdfPreview(context:context,bytes:Uint8List.fromList(response.data!),title:'Printed Form Preview',filename:'Locator_Form_Sample.pdf');
+  }
+  Future<void> _editLayout()async{
+    setState((){_busy=true;_error=null;});
+    try{
+      Uint8List? pdf,image;
+      if(_file!=null){if(_file!.extension?.toLowerCase()=='pdf'){pdf=_file!.bytes;}else{image=_file!.bytes;}}
+      else if(!_remove && _background!=null && widget.typeId!=null){
+        final response=await ApiClient.instance.get<List<int>>('/api/locator-slips/print/types/${widget.typeId}/background',options:Options(responseType:ResponseType.bytes));
+        pdf=Uint8List.fromList(response.data!);
+      }
+      if(!mounted)return;
+      final result=await showDialog<LocatorPrintLayout>(context:context,builder:(_)=>LocatorPrintLayoutEditor(
+        requestType:_requestType,initialLayout:_layout,backgroundPdf:pdf,backgroundImage:image,onPreview:_previewDraft,
+      ));
+      if(result!=null && mounted){setState((){_layout=result;_layoutChanged=true;});_changed();}
+    }catch(_){if(mounted)setState(()=>_error='Could not open the layout editor. Please retry.');}
+    finally{if(mounted)setState(()=>_busy=false);}
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_loading) return const LinearProgressIndicator();
@@ -215,12 +275,14 @@ class _LocatorPrintSettingsState extends State<LocatorPrintSettings> {
           'A4 letterhead · portrait or landscape · PDF, PNG or JPEG · up to 5 MB',
         ),
         const Text(
-          'The locator slip is fitted between the letterhead and footer. Without a background, the current landscape form is used.',
+          'Design a page using the background, fields and signatures. Existing forms keep their saved template.',
         ),
         Wrap(
           spacing: 12,
           runSpacing: 8,
           children: [
+            TextButton.icon(onPressed:_disabled?null:_editLayout,icon:const Icon(Icons.dashboard_customize_outlined),label:Text(_layout==null?'Design layout':'Edit layout')),
+            if(_layout!=null)TextButton(onPressed:_disabled?null:(){setState((){_layout=null;_layoutChanged=true;});_changed();},child:const Text('Use default layout')),
             TextButton(
               onPressed: _disabled ? null : _pick,
               child: const Text('Upload background'),
@@ -243,10 +305,9 @@ class _LocatorPrintSettingsState extends State<LocatorPrintSettings> {
                 onPressed: _disabled ? null : _save,
                 child: const Text('Save print settings'),
               ),
-            if (widget.typeId != null)
               TextButton(
                 onPressed: _disabled ? null : _preview,
-                child: const Text('Preview saved form'),
+                child: Text(_layoutChanged||widget.typeId==null||_file!=null||_remove?'Preview layout':'Preview saved form'),
               ),
             if (widget.typeId != null && _error != null)
               TextButton(
@@ -257,7 +318,7 @@ class _LocatorPrintSettingsState extends State<LocatorPrintSettings> {
         ),
         if (widget.typeId == null)
           const Text(
-            'The background will be saved when you create the locator type.',
+            'The background and layout will be saved when you create the locator type.',
           ),
       ],
     );

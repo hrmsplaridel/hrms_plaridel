@@ -10,6 +10,21 @@ import 'package:hrms_plaridel/features/dtr/locator/utils/locator_slip_print.dart
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
+  test('locator PDF includes long custom answers on supplemental pages', () async {
+    final bytes=await LocatorSlipPrint.buildPdf(
+      id:null,employeeName:'Alice',dateText:'Oct 13, 2026',requestTypeLabel:'Field visit',
+      locationLabel:'Destination',office:'HR',remarks:'Visit',amIn:true,amOut:true,pmIn:true,pmOut:true,
+      signatories:LocatorFormSignatories(form:{
+        'employee_detail_schema_snapshot':[
+          {'key':'contact','label':'Contact person','type':'text'},
+          {'key':'notes','label':'Visit notes','type':'long_text'},
+        ],
+        'additional_details':{'contact':'Bob','notes':List.filled(1000,'Long visit answer').join(' ')},
+      }),
+    );
+    expect(RegExp(r'/Type\s*/Page\b').allMatches(String.fromCharCodes(bytes)).length,greaterThan(1));
+  });
+
   test(
     'locator PDF merges only its request-bound saved background version',
     () async {

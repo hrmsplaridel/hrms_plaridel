@@ -1,4 +1,5 @@
 import 'dart:convert';
+import '../../shared/widgets/locator_custom_fields.dart';
 import 'package:dio/dio.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
@@ -24,6 +25,7 @@ class _AdminLocatorFilingDialogState extends State<AdminLocatorFilingDialog> {
       _office = TextEditingController(),
       _reason = TextEditingController();
   final _selected = <String>{};
+  final _additionalDetails = <String,dynamic>{};
   List<Map<String, dynamic>> _employees = [];
   List<Map<String, dynamic>> _results = [];
   late LocatorRequestType _type;
@@ -137,6 +139,7 @@ class _AdminLocatorFilingDialogState extends State<AdminLocatorFilingDialog> {
         'request_type': _type.code,
         'office': _office.text.trim(),
         'reason': _reason.text.trim(),
+        'additional_details': jsonEncode(_additionalDetails),
         'full_shift': _slots.values.every((v) => v).toString(),
         for (final slot in _slots.entries) slot.key: slot.value.toString(),
         if (signature != null) 'signature': jsonEncode(signature),
@@ -255,12 +258,17 @@ class _AdminLocatorFilingDialogState extends State<AdminLocatorFilingDialog> {
                   ? null
                   : (t) => setState(() {
                       _type = t!;
+                      _additionalDetails.clear();
                       _attachment = null;
                     }),
             ),
             const SizedBox(height: 12),
             Text(
-              _type.autoApproveAdmin && _canReview
+              _type.approvalRoute == 'mayor_direct'
+                  ? 'Requests go directly to the Mayor for approval.'
+                  : _type.approvalRoute == 'mayor'
+                  ? 'Department approval is followed by manual Mayor signing for the selected employment types.'
+                  : _type.autoApproveAdmin && _canReview
                   ? 'Valid requests will be approved using your signature.'
                   : 'Requests follow the normal department and HR approval route.',
             ),
@@ -302,6 +310,12 @@ class _AdminLocatorFilingDialogState extends State<AdminLocatorFilingDialog> {
               decoration: _decoration('Purpose / Reason'),
               validator: (v) =>
                   (v ?? '').trim().isEmpty ? 'Enter the reason' : null,
+            ),
+            if (_type.employeeDetailSchema.isNotEmpty) Padding(
+              padding:const EdgeInsets.only(top:12),
+              child:AbsorbPointer(absorbing:_saving,child:LocatorCustomFieldInputs(
+                key:ValueKey('fields-${_type.code}'),fields:_type.employeeDetailSchema,values:_additionalDetails,
+              )),
             ),
             if (_type.requiresAttachment)
               OutlinedButton(

@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'dart:convert';
+import '../../shared/widgets/locator_custom_fields.dart';
 
 import 'package:hrms_plaridel/shared/widgets/reviewer_access_notice.dart';
 
@@ -39,6 +41,7 @@ enum _LocatorAdminQueue {
   all('All'),
   pendingDeptHead('Pending Department Review'),
   pendingHrAdmin('Pending HR Admin'),
+  pendingMayor('Pending Mayor'),
   returned('Returned for Correction'),
   approved('Approved'),
   revoked('Revoked'),
@@ -186,59 +189,60 @@ class _AdminLocatorManagementScreenState
           style: TextStyle(color: _mutedColor(context), fontSize: 14),
         ),
         const SizedBox(height: 16),
-        Align(
-          alignment: Alignment.centerRight,
-          child: PopupMenuButton<_LocatorHeaderAction>(
-            tooltip: 'More actions',
-            icon: Icon(
-              Icons.more_vert_rounded,
-              color: AppTheme.dashTextSecondaryOf(context),
-            ),
-            color: AppTheme.dashPanelOf(context),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(8),
-            ),
-            onSelected: (action) {
-              switch (action) {
-                case _LocatorHeaderAction.fileForEmployees:
-                  unawaited(_fileForEmployees());
-                case _LocatorHeaderAction.recordCorrection:
-                  unawaited(_recordLocatorCorrection());
-                case _LocatorHeaderAction.manageTypes:
-                  unawaited(_openTypeManagement());
-              }
-            },
-            itemBuilder: (context) => [
-              if (_locatorTypes.any(
-                (type) => type.isActive && type.adminCanFile,
-              ))
+        if (context.read<AuthProvider>().user?.role != 'mayor')
+          Align(
+            alignment: Alignment.centerRight,
+            child: PopupMenuButton<_LocatorHeaderAction>(
+              tooltip: 'More actions',
+              icon: Icon(
+                Icons.more_vert_rounded,
+                color: AppTheme.dashTextSecondaryOf(context),
+              ),
+              color: AppTheme.dashPanelOf(context),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
+              onSelected: (action) {
+                switch (action) {
+                  case _LocatorHeaderAction.fileForEmployees:
+                    unawaited(_fileForEmployees());
+                  case _LocatorHeaderAction.recordCorrection:
+                    unawaited(_recordLocatorCorrection());
+                  case _LocatorHeaderAction.manageTypes:
+                    unawaited(_openTypeManagement());
+                }
+              },
+              itemBuilder: (context) => [
+                if (_locatorTypes.any(
+                  (type) => type.isActive && type.adminCanFile,
+                ))
+                  const PopupMenuItem<_LocatorHeaderAction>(
+                    value: _LocatorHeaderAction.fileForEmployees,
+                    child: Text('File for employees'),
+                  ),
                 const PopupMenuItem<_LocatorHeaderAction>(
-                  value: _LocatorHeaderAction.fileForEmployees,
-                  child: Text('File for employees'),
+                  value: _LocatorHeaderAction.recordCorrection,
+                  child: Row(
+                    children: [
+                      Icon(Icons.edit_calendar_outlined, size: 18),
+                      SizedBox(width: 10),
+                      Expanded(child: Text('Record Correction')),
+                    ],
+                  ),
                 ),
-              const PopupMenuItem<_LocatorHeaderAction>(
-                value: _LocatorHeaderAction.recordCorrection,
-                child: Row(
-                  children: [
-                    Icon(Icons.edit_calendar_outlined, size: 18),
-                    SizedBox(width: 10),
-                    Expanded(child: Text('Record Correction')),
-                  ],
+                const PopupMenuItem<_LocatorHeaderAction>(
+                  value: _LocatorHeaderAction.manageTypes,
+                  child: Row(
+                    children: [
+                      Icon(Icons.tune_rounded, size: 18),
+                      SizedBox(width: 10),
+                      Expanded(child: Text('Manage Types')),
+                    ],
+                  ),
                 ),
-              ),
-              const PopupMenuItem<_LocatorHeaderAction>(
-                value: _LocatorHeaderAction.manageTypes,
-                child: Row(
-                  children: [
-                    Icon(Icons.tune_rounded, size: 18),
-                    SizedBox(width: 10),
-                    Expanded(child: Text('Manage Types')),
-                  ],
-                ),
-              ),
-            ],
+              ],
+            ),
           ),
-        ),
         const SizedBox(height: 12),
         _buildFilterPanel(context),
         const SizedBox(height: 16),
@@ -1061,6 +1065,7 @@ class _AdminLocatorManagementScreenState
                         ),
                       ),
                       const SizedBox(height: 16),
+                      LocatorCustomFieldDetails(fields:item.requestType.employeeDetailSchema,values:item.additionalDetails),
                       _locatorDetailsSection(
                         dialogContext,
                         title: 'Review information',
@@ -1372,9 +1377,13 @@ class _AdminLocatorManagementScreenState
             remarks: null,
             completed: false,
           ));
-        } else if (item.status == 'pending_hr' || item.status == 'pending') {
+        } else if (item.status == 'pending_hr' ||
+            item.status == 'pending' ||
+            item.status == 'pending_mayor') {
           history.add((
-            title: 'Pending HR Admin',
+            title: item.status == 'pending_mayor'
+                ? 'Pending Mayor'
+                : 'Pending HR Admin',
             actor: item.hrReviewerName,
             date: null,
             remarks: null,
@@ -1681,14 +1690,15 @@ class _AdminLocatorManagementScreenState
           remarks: null,
           completed: false,
         ),
-      if (item.deptHeadReviewedAt != null ||
-          item.status == 'pending_hr' ||
-          item.status == 'pending' ||
-          item.status == 'approved' ||
-          item.status == 'revoked' ||
-          item.status == 'rejected_by_hr' ||
-          item.status == 'returned_for_correction' ||
-          item.status == 'rejected_by_department_head')
+      if (item.finalReviewRoute != 'mayor_direct' &&
+          (item.deptHeadReviewedAt != null ||
+              item.status == 'pending_hr' ||
+              item.status == 'pending' ||
+              item.status == 'approved' ||
+              item.status == 'revoked' ||
+              item.status == 'rejected_by_hr' ||
+              item.status == 'returned_for_correction' ||
+              item.status == 'rejected_by_department_head'))
         (
           title: item.status == 'rejected_by_department_head'
               ? 'Rejected by Department Head'
@@ -1703,7 +1713,9 @@ class _AdminLocatorManagementScreenState
         ),
       if (item.canHrReview)
         (
-          title: 'Pending HR Admin',
+          title: item.status == 'pending_mayor'
+              ? 'Pending Mayor'
+              : 'Pending HR Admin',
           actor: item.hrReviewerName,
           date: null,
           remarks: null,
@@ -1711,9 +1723,17 @@ class _AdminLocatorManagementScreenState
         ),
       if (item.status == 'approved' || item.status == 'revoked')
         (
-          title: 'Approved by HR',
-          actor: item.hrReviewerName,
-          date: item.hrReviewedAt,
+          title: item.finalReviewRoute == 'mayor_direct'
+              ? 'Approved by Mayor'
+              : item.finalReviewRoute == 'mayor'
+              ? 'Approved for manual Mayor signing'
+              : 'Approved by HR',
+          actor: item.finalReviewRoute == 'mayor'
+              ? item.deptHeadReviewerName
+              : item.hrReviewerName,
+          date: item.finalReviewRoute == 'mayor'
+              ? item.deptHeadReviewedAt
+              : item.hrReviewedAt,
           remarks: item.hrRemarks,
           completed: true,
         ),
@@ -1908,6 +1928,7 @@ class _AdminLocatorManagementScreenState
         _LocatorAdminQueue.all => null,
         _LocatorAdminQueue.pendingDeptHead => 'pending_department_head',
         _LocatorAdminQueue.pendingHrAdmin => 'pending_hr',
+        _LocatorAdminQueue.pendingMayor => 'pending_mayor',
         _LocatorAdminQueue.returned => 'returned_for_correction',
         _LocatorAdminQueue.approved => 'approved',
         _LocatorAdminQueue.revoked => 'revoked',
@@ -2120,6 +2141,7 @@ class _AdminLocatorManagementScreenState
       'request_type': draft.requestType.code,
       'office': draft.office,
       'reason': draft.reason,
+      'additional_details': jsonEncode(draft.additionalDetails),
       'retroactive_correction_reason': draft.correctionReason,
       'am_in': draft.amIn.toString(),
       'am_out': draft.amOut.toString(),
@@ -2317,8 +2339,10 @@ class _LocatorAdminRecord {
     this.requestType = LocatorRequestType.locator,
     required this.office,
     required this.reason,
+    this.additionalDetails = const {},
     this.attachmentName,
     required this.status,
+    this.finalReviewRoute = 'hr',
     this.deptHeadReviewerName,
     this.deptHeadReviewedAt,
     this.deptHeadRemarks,
@@ -2348,8 +2372,10 @@ class _LocatorAdminRecord {
   final LocatorRequestType requestType;
   final String office;
   final String reason;
+  final Map<String,dynamic> additionalDetails;
   final String? attachmentName;
   final String status;
+  final String finalReviewRoute;
   final String? deptHeadReviewerName;
   final DateTime? deptHeadReviewedAt;
   final String? deptHeadRemarks;
@@ -2372,7 +2398,9 @@ class _LocatorAdminRecord {
 
   bool get canHrReview {
     final normalized = status.toLowerCase();
-    return normalized == 'pending_hr' || normalized == 'pending';
+    return normalized == 'pending_hr' ||
+        normalized == 'pending' ||
+        normalized == 'pending_mayor';
   }
 
   String? get revokeDisabledReason {
@@ -2394,6 +2422,8 @@ class _LocatorAdminRecord {
     switch (status.toLowerCase()) {
       case 'pending_department_head':
         return 'Pending Department Review';
+      case 'pending_mayor':
+        return 'Pending Mayor';
       case 'pending_hr':
       case 'pending':
         return 'Pending HR Admin';
@@ -2443,6 +2473,7 @@ class _LocatorAdminRecord {
       departmentName: (json['department_name'] ?? '').toString(),
       slipDate: (json['slip_date'] ?? '').toString(),
       requestType: LocatorRequestType.fromJson({
+        'employee_detail_schema': json['employee_detail_schema_snapshot'],
         'code': json['request_type'],
         'label': json['request_type_label'],
         'short_label': json['request_type_short_label'],
@@ -2455,8 +2486,10 @@ class _LocatorAdminRecord {
       }),
       office: (json['office'] ?? '').toString(),
       reason: (json['reason'] ?? '').toString(),
+      additionalDetails:Map<String,dynamic>.from(json['additional_details'] as Map? ?? {}),
       attachmentName: _trimOrNull(json['attachment_name']),
       status: (json['status'] ?? '').toString(),
+      finalReviewRoute: (json['final_review_route'] ?? 'hr').toString(),
       deptHeadReviewerName: _trimOrNull(json['dept_head_reviewer_name']),
       deptHeadReviewedAt: _parseDateTime(json['dept_head_reviewed_at']),
       deptHeadRemarks: _trimOrNull(json['dept_head_remarks']),

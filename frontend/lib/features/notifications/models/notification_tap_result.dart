@@ -67,7 +67,11 @@ class NotificationTapResult {
     final cat = n.category.toLowerCase();
     final t = n.type.toLowerCase();
     final isPrivileged = role == 'admin' || role == 'hr';
-
+    if (cat == 'locator' && role == 'mayor' && t == 'locator_pending_mayor') {
+      return const NotificationTapResult(
+        NotificationTapKind.adminDtrLocatorManagement,
+      );
+    }
 
     if (cat == 'leave' && role == 'mayor') {
       return const NotificationTapResult(NotificationTapKind.none);

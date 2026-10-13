@@ -3,6 +3,19 @@ import 'package:hrms_plaridel/features/notifications/models/app_notification.dar
 import 'package:hrms_plaridel/features/notifications/models/notification_tap_result.dart';
 
 void main() {
+  test('Mayor locator alert opens locator approval management', () {
+    final result = NotificationTapResult.fromNotification(
+      AppNotification(
+        id: 'notice',
+        category: 'locator',
+        type: 'locator_pending_mayor',
+        title: 'Mayor approval',
+        createdAt: DateTime(2026, 10, 13),
+      ),
+      role: 'mayor',
+    );
+    expect(result.kind, NotificationTapKind.adminDtrLocatorManagement);
+  });
   test('obsolete Mayor approval notifications have no approval destination', () {
     for (final type in ['leave_pending_mayor','leave_forwarded_to_mayor']) {
       final result=NotificationTapResult.fromNotification(AppNotification(id:'notice',category:'leave',type:type,

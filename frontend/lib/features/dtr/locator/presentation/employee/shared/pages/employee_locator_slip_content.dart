@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import '../../../shared/widgets/locator_custom_fields.dart';
 
 import 'package:dio/dio.dart';
 import 'package:file_picker/file_picker.dart';
@@ -380,7 +381,8 @@ class EmployeeLocatorSlipContentState extends State<EmployeeLocatorSlipContent>
       if (_selectedStatusFilter != null) {
         if (_selectedStatusFilter == 'pending') {
           if (item.status != _LocatorSlipStatus.pendingDepartmentHead &&
-              item.status != _LocatorSlipStatus.pendingHr) {
+              item.status != _LocatorSlipStatus.pendingHr &&
+              item.status != _LocatorSlipStatus.pendingMayor) {
             return false;
           }
         } else if (_selectedStatusFilter == 'approved') {
@@ -633,6 +635,7 @@ class EmployeeLocatorSlipContentState extends State<EmployeeLocatorSlipContent>
     if (item == null || id == null || id.isEmpty) return false;
     return item.status == _LocatorSlipStatus.pendingDepartmentHead ||
         item.status == _LocatorSlipStatus.pendingHr ||
+        item.status == _LocatorSlipStatus.pendingMayor ||
         item.status == _LocatorSlipStatus.returnedForCorrection;
   }
 
@@ -794,6 +797,7 @@ class EmployeeLocatorSlipContentState extends State<EmployeeLocatorSlipContent>
                     ? 'No reason provided.'
                     : item.remarks.trim(),
               ),
+              LocatorCustomFieldDetails(fields:item.requestType.employeeDetailSchema,values:item.additionalDetails),
               if (returnBlockedByPastDate) ...[
                 const SizedBox(height: 12),
                 const EmployeeLocatorMobileDetailSection(
@@ -1946,6 +1950,7 @@ class EmployeeLocatorSlipContentState extends State<EmployeeLocatorSlipContent>
         'request_type': created.requestType.code,
         'office': created.office,
         'reason': created.remarks,
+        'additional_details': created.additionalDetails,
       };
       final attachmentBytes = created.pendingAttachmentBytes;
       final attachmentName = created.pendingAttachmentName?.trim();
@@ -1958,7 +1963,7 @@ class EmployeeLocatorSlipContentState extends State<EmployeeLocatorSlipContent>
         res = await ApiClient.instance.dio.post<Map<String, dynamic>>(
           '/api/locator-slips/submit-with-attachment',
           data: FormData.fromMap({
-            ...payload.map((key, value) => MapEntry(key, value.toString())),
+            ...payload.map((key, value) => MapEntry(key, value is Map ? jsonEncode(value) : value.toString())),
             'file': MultipartFile.fromBytes(
               attachmentBytes,
               filename: attachmentName,
@@ -1996,7 +2001,9 @@ class EmployeeLocatorSlipContentState extends State<EmployeeLocatorSlipContent>
         setState(() => _slips.insert(0, inserted!));
       }
       final msg = inserted != null
-          ? (inserted.status == _LocatorSlipStatus.pendingHr
+          ? (inserted.status == _LocatorSlipStatus.pendingMayor
+                ? 'Request submitted. Awaiting Mayor approval.'
+                : inserted.status == _LocatorSlipStatus.pendingHr
                 ? 'Request submitted. Awaiting HR approval.'
                 : 'Request submitted. Awaiting department head approval.')
           : 'Request submitted successfully.';
@@ -2668,6 +2675,7 @@ class EmployeeLocatorSlipContentState extends State<EmployeeLocatorSlipContent>
             pmIn: item.pmIn,
             pmOut: item.pmOut,
             existingAttachmentName: item.attachmentName,
+            additionalDetails:item.additionalDetails,
           ),
         ),
       ),
@@ -2711,6 +2719,7 @@ class EmployeeLocatorSlipContentState extends State<EmployeeLocatorSlipContent>
           'request_type': corrected.requestType.code,
           'office': corrected.office,
           'reason': corrected.remarks,
+          'additional_details': corrected.additionalDetails,
           'am_in': corrected.amIn,
           'am_out': corrected.amOut,
           'pm_in': corrected.pmIn,
@@ -3010,6 +3019,7 @@ class _LocatorSlipFormDialogState extends State<_LocatorSlipFormDialog> {
   _WfhCoverage _wfhCoverage = _WfhCoverage.wholeDay;
   final _officeController = TextEditingController();
   final _remarksController = TextEditingController();
+  final _additionalDetails = <String,dynamic>{};
 
   bool _amIn = false;
   bool _amOut = false;
@@ -3117,6 +3127,7 @@ class _LocatorSlipFormDialogState extends State<_LocatorSlipFormDialog> {
       }
 
       _requestType = type;
+      _additionalDetails.clear();
       _clearHiddenSegments();
       _showAttachmentError = false;
       if (!type.requiresAttachment) {
@@ -3144,6 +3155,7 @@ class _LocatorSlipFormDialogState extends State<_LocatorSlipFormDialog> {
     );
     _date = today;
     final initial = widget.initialValues;
+    _additionalDetails.addAll(initial?.additionalDetails ?? {});
     if (widget.requestTypes.isNotEmpty) {
       if (initial?.requestTypeCode != null &&
           initial!.requestTypeCode!.trim().isNotEmpty) {
@@ -3310,6 +3322,8 @@ class _LocatorSlipFormDialogState extends State<_LocatorSlipFormDialog> {
                 : null,
           ),
         ),
+        if (_requestType.employeeDetailSchema.isNotEmpty) Padding(
+          padding:const EdgeInsets.only(top:14),child:LocatorCustomFieldInputs(key:ValueKey('fields-${_requestType.code}'),fields:_requestType.employeeDetailSchema,values:_additionalDetails)),
         if (_requiresAttachment) ...[
           const SizedBox(height: 14),
           _attachmentPicker(),
@@ -3616,6 +3630,7 @@ class _LocatorSlipFormDialogState extends State<_LocatorSlipFormDialog> {
         requestType: _requestType,
         office: _officeController.text.trim(),
         remarks: _remarksController.text.trim(),
+        additionalDetails:Map.of(_additionalDetails),
         amIn: _amIn,
         amOut: _amOut,
         pmIn: _pmIn,
@@ -3636,6 +3651,7 @@ class _LocatorSlipDraft {
     this.requestType = LocatorRequestType.locator,
     required this.office,
     required this.remarks,
+    this.additionalDetails = const {},
     this.rawStatus,
     this.departmentHeadName,
     this.departmentHeadReviewedAt,
@@ -3666,6 +3682,7 @@ class _LocatorSlipDraft {
   final LocatorRequestType requestType;
   final String office;
   final String remarks;
+  final Map<String,dynamic> additionalDetails;
   final String? rawStatus;
   final String? departmentHeadName;
   final DateTime? departmentHeadReviewedAt;
@@ -3753,6 +3770,7 @@ class _LocatorSlipDraft {
       pendingAttachmentName:
           pendingAttachmentName ?? this.pendingAttachmentName,
       status: status ?? this.status,
+      additionalDetails:additionalDetails,
     );
   }
 
@@ -3775,6 +3793,7 @@ class _LocatorSlipDraft {
       date: _parseDateOnly(json['slip_date']) ?? DateTime(1970, 1, 1),
       employeeName: (json['employee_name'] ?? 'Employee').toString(),
       requestType: LocatorRequestType.fromJson({
+        'employee_detail_schema': json['employee_detail_schema_snapshot'],
         'code': json['request_type'],
         'label': json['request_type_label'],
         'short_label': json['request_type_short_label'],
@@ -3787,6 +3806,7 @@ class _LocatorSlipDraft {
       }),
       office: (json['office'] ?? '').toString(),
       remarks: (json['reason'] ?? '').toString(),
+      additionalDetails:Map<String,dynamic>.from(json['additional_details'] as Map? ?? {}),
       attachmentName: json['attachment_name']?.toString(),
       rawStatus: rawStatus,
       departmentHeadName:
@@ -3835,6 +3855,7 @@ enum _LocatorSlipStatus {
   draft('Draft'),
   pendingDepartmentHead('Pending Department Review'),
   pendingHr('Pending HR Admin'),
+  pendingMayor('Pending Mayor'),
   returnedForCorrection('Returned for Correction'),
   approved('Approved'),
   revoked('Revoked'),
@@ -3853,6 +3874,8 @@ enum _LocatorSlipStatus {
       case 'pending_hr':
       case 'pending':
         return _LocatorSlipStatus.pendingHr;
+      case 'pending_mayor':
+        return _LocatorSlipStatus.pendingMayor;
       case 'returned_for_correction':
         return _LocatorSlipStatus.returnedForCorrection;
       case 'approved':
@@ -4306,8 +4329,13 @@ String _departmentHeadStatusLabel(_LocatorSlipDraft item) {
       Colors.amber.shade300,
       Colors.amber.shade900,
     ),
-    _LocatorSlipStatus.pendingDepartmentHead || _LocatorSlipStatus.pendingHr =>
-      (Colors.blue.shade50, Colors.blue.shade300, Colors.blue.shade900),
+    _LocatorSlipStatus.pendingDepartmentHead ||
+    _LocatorSlipStatus.pendingHr ||
+    _LocatorSlipStatus.pendingMayor => (
+      Colors.blue.shade50,
+      Colors.blue.shade300,
+      Colors.blue.shade900,
+    ),
     _LocatorSlipStatus.returnedForCorrection => (
       Colors.orange.shade50,
       Colors.orange.shade300,
@@ -4342,6 +4370,7 @@ IconData _locatorStatusIcon(_LocatorSlipStatus status) {
     _LocatorSlipStatus.pendingDepartmentHead =>
       Icons.supervisor_account_rounded,
     _LocatorSlipStatus.pendingHr => Icons.hourglass_top_rounded,
+    _LocatorSlipStatus.pendingMayor => Icons.hourglass_top_rounded,
     _LocatorSlipStatus.returnedForCorrection => Icons.assignment_return_rounded,
     _LocatorSlipStatus.approved => Icons.check_circle_rounded,
     _LocatorSlipStatus.revoked => Icons.undo_rounded,

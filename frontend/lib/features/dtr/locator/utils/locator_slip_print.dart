@@ -1,4 +1,6 @@
 import 'dart:typed_data';
+import 'package:hrms_plaridel/features/dtr/leave/models/leave_type_definition.dart';
+import '../presentation/shared/widgets/locator_custom_fields.dart';
 import 'package:dio/dio.dart';
 import 'package:hrms_plaridel/core/api/client.dart';
 
@@ -9,6 +11,8 @@ import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 
 import 'locator_form_signatories.dart';
+import '../models/locator_print_layout.dart';
+import 'locator_layout_pdf.dart';
 
 class LocatorSlipPrint {
   const LocatorSlipPrint._();
@@ -62,6 +66,20 @@ class LocatorSlipPrint {
     amOut = form['am_out'] as bool? ?? amOut;
     pmIn = form['pm_in'] as bool? ?? pmIn;
     pmOut = form['pm_out'] as bool? ?? pmOut;
+    if(form['print_layout'] is Map){
+      final bytes=await buildLocatorLayoutPdf(
+        layout:LocatorPrintLayout.fromJson(Map<String,dynamic>.from(form['print_layout'] as Map)),
+        form:{'employee_name':employeeName,'slip_date':dateText,'request_type_label':requestTypeLabel,'office':office,'reason':remarks,
+          'am_in':amIn,'am_out':amOut,'pm_in':pmIn,'pm_out':pmOut,...form},signatories:signatories,
+      );
+      if(id!=null && form['has_print_background']==true){
+        final response=await ApiClient.instance.post<List<int>>('/api/locator-slips/print/requests/$id/render',
+          data:FormData.fromMap({'version_id':form['print_template_version_id'],'file':MultipartFile.fromBytes(bytes,filename:'locator.pdf')}),
+          options:Options(responseType:ResponseType.bytes));
+        return Uint8List.fromList(response.data!);
+      }
+      return bytes;
+    }
     final doc = pw.Document();
     pw.MemoryImage? logoImage;
     try {
@@ -335,7 +353,10 @@ class LocatorSlipPrint {
                 pw.Padding(
                   padding: const pw.EdgeInsets.only(left: 100),
                   child: pw.Text(
-                    'Noted:',
+                    form['final_review_route'] == 'mayor' ||
+                            form['final_review_route'] == 'mayor_direct'
+                        ? 'Approved by:'
+                        : 'Noted:',
                     style: pw.TextStyle(
                       fontWeight: pw.FontWeight.bold,
                       fontSize: 13,
@@ -358,6 +379,21 @@ class LocatorSlipPrint {
       ),
     );
 
+    final extraLines = locatorAdditionalFieldLines(
+      leaveCustomFieldDefinitionsFromJson(form['employee_detail_schema_snapshot']),
+      Map<String,dynamic>.from(form['additional_details'] as Map? ?? {}),
+    );
+    if(extraLines.isNotEmpty) {
+      doc.addPage(pw.MultiPage(pageFormat:PdfPageFormat.a4,maxPages:100,build:(_)=>[
+        pw.Text('LOCATOR - ADDITIONAL DETAILS',style:pw.TextStyle(fontWeight:pw.FontWeight.bold,fontSize:16)),
+        pw.SizedBox(height:12),pw.Text('$employeeName / $requestTypeLabel / $dateText'),
+        if(id!=null) pw.Text('Request: $id',style:const pw.TextStyle(fontSize:9)),
+        pw.SizedBox(height:16),
+        for(final line in extraLines)
+          for(var offset=0;offset<line.length;offset+=500)
+            pw.Padding(padding:const pw.EdgeInsets.only(bottom:8),child:pw.Text(line.substring(offset,(offset+500).clamp(0,line.length)))),
+      ]));
+    }
     final bytes = await doc.save();
     if (id != null && form['has_print_background'] == true) {
       final response = await ApiClient.instance.post<List<int>>(

@@ -1,4 +1,5 @@
 import 'package:file_picker/file_picker.dart';
+import '../../shared/widgets/locator_custom_fields.dart';
 import 'package:flutter/material.dart';
 
 import 'package:hrms_plaridel/core/api/client.dart';
@@ -20,6 +21,7 @@ class AdminLocatorCorrectionDraft {
     required this.pmOut,
     this.attachmentBytes,
     this.attachmentName,
+    this.additionalDetails = const {},
   });
 
   final String employeeId;
@@ -34,6 +36,7 @@ class AdminLocatorCorrectionDraft {
   final bool pmOut;
   final List<int>? attachmentBytes;
   final String? attachmentName;
+  final Map<String,dynamic> additionalDetails;
 }
 
 class AdminLocatorCorrectionDialog extends StatefulWidget {
@@ -52,6 +55,7 @@ class _AdminLocatorCorrectionDialogState
   final _officeController = TextEditingController();
   final _reasonController = TextEditingController();
   final _correctionController = TextEditingController();
+  final _additionalDetails = <String,dynamic>{};
   List<_EmployeeOption> _employees = const [];
   String? _employeeId;
   late LocatorRequestType _requestType;
@@ -198,6 +202,7 @@ class _AdminLocatorCorrectionDialogState
                     if (value == null) return;
                     setState(() {
                       _requestType = value;
+                      _additionalDetails.clear();
                       if (value.usesWfhCoverage) {
                         _amIn = _amOut = _pmIn = _pmOut = true;
                       }
@@ -241,6 +246,10 @@ class _AdminLocatorCorrectionDialogState
                   validator: _required,
                 ),
                 const SizedBox(height: 12),
+                if(_requestType.employeeDetailSchema.isNotEmpty) ...[
+                  LocatorCustomFieldInputs(key:ValueKey('fields-${_requestType.code}'),fields:_requestType.employeeDetailSchema,values:_additionalDetails),
+                  const SizedBox(height:12),
+                ],
                 TextFormField(
                   controller: _correctionController,
                   minLines: 3,
@@ -383,6 +392,7 @@ class _AdminLocatorCorrectionDialogState
         office: _officeController.text.trim(),
         reason: _reasonController.text.trim(),
         correctionReason: _correctionController.text.trim(),
+        additionalDetails:Map.of(_additionalDetails),
         amIn: _amIn,
         amOut: _amOut,
         pmIn: _pmIn,

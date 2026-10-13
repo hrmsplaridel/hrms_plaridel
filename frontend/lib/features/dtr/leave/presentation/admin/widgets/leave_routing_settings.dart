@@ -4,7 +4,17 @@ import 'package:hrms_plaridel/core/api/client.dart';
 import 'package:hrms_plaridel/features/dtr/management/employees/widgets/employment_type_field.dart';
 
 class LeaveRoutingSettings extends StatefulWidget {
-  const LeaveRoutingSettings({super.key, this.leaveTypeId, this.onChanged});
+  const LeaveRoutingSettings({
+    super.key,
+    this.leaveTypeId,
+    this.onChanged,
+    this.allowDirectMayor = false,
+    this.initialRoute = 'hr',
+    this.initialEmploymentTypes,
+  });
+  final bool allowDirectMayor;
+  final String initialRoute;
+  final List<String>? initialEmploymentTypes;
   final String? leaveTypeId;
   final ValueChanged<Map<String, dynamic>>? onChanged;
   @override
@@ -19,6 +29,8 @@ class _State extends State<LeaveRoutingSettings> {
   @override
   void initState() {
     super.initState();
+    route = widget.initialRoute;
+    types = widget.initialEmploymentTypes;
     if (widget.leaveTypeId != null) _load();
   }
 
@@ -88,26 +100,34 @@ class _State extends State<LeaveRoutingSettings> {
         initialValue: route,
         isExpanded: true,
         decoration: const InputDecoration(labelText: 'Approval route'),
-        items: const [
-          DropdownMenuItem(value: 'hr', child: Text('Department → Final HR')),
-          DropdownMenuItem(
+        items: [
+          const DropdownMenuItem(
+            value: 'hr',
+            child: Text('Department → Final HR'),
+          ),
+          const DropdownMenuItem(
             value: 'mayor',
             child: Text('Department approval → Manual Mayor signing'),
           ),
+          if (widget.allowDirectMayor)
+            const DropdownMenuItem(
+              value: 'mayor_direct',
+              child: Text('Direct Mayor approval'),
+            ),
         ],
         onChanged: busy
             ? null
             : (v) {
                 setState(() {
                   route = v!;
-                  types = route == 'mayor'
+                  types = route != 'hr'
                       ? ['job_order', 'contract_of_service']
                       : null;
                 });
                 changed();
               },
       ),
-      if (route == 'mayor') ...[
+      if (route != 'hr') ...[
         Material(
           type: MaterialType.transparency,
           child: SwitchListTile(
@@ -139,7 +159,9 @@ class _State extends State<LeaveRoutingSettings> {
           ),
         const SizedBox(height: 8),
         Text(
-          types == null
+          route == 'mayor_direct'
+              ? 'Mayor approves in the app. Department and HR review are skipped.'
+              : types == null
               ? 'Department approval for all types; Mayor signs the printed form.'
               : 'Selected types: department approval and manual Mayor signing. Others: Final HR.',
         ),

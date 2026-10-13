@@ -1,4 +1,6 @@
 import 'package:dio/dio.dart';
+import 'dart:convert';
+import 'package:hrms_plaridel/features/dtr/leave/models/leave_type_definition.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hrms_plaridel/core/api/client.dart';
@@ -59,9 +61,11 @@ void main() {
       addTearDown(t.view.resetPhysicalSize);
       addTearDown(t.view.resetDevicePixelRatio);
       await t.pumpWidget(
-        const MaterialApp(
+        MaterialApp(
           home: AdminLocatorFilingDialog(
-            requestTypes: [LocatorRequestType.locator],
+            requestTypes: [LocatorRequestType.locator.copyWith(employeeDetailSchema:const[
+              LeaveCustomFieldDefinition(key:'contact',label:'Contact person',required:true),
+            ])],
           ),
         ),
       );
@@ -80,6 +84,7 @@ void main() {
       );
       await t.enterText(find.byType(TextFormField).at(0), 'Municipal office');
       await t.enterText(find.byType(TextFormField).at(1), 'No electricity');
+      await t.enterText(find.byType(TextFormField).at(2), 'Alice');
       await t.tap(find.text('Select loaded employees (up to 100)'));
       await t.pump();
       await t.tap(find.text('File requests'));
@@ -107,6 +112,7 @@ void main() {
       expect(find.text('1 selected · 2 of 2 employees'), findsOneWidget);
       final post = requests.singleWhere((r) => r.method == 'POST');
       final fields = (post.data as FormData).fields.toMap();
+      expect(jsonDecode(fields['additional_details']!),{'contact':'Alice'});
       expect(fields['employee_ids'], contains('11111111'));
       expect(fields['full_shift'], 'false');
       expect(fields['am_in'], 'true');

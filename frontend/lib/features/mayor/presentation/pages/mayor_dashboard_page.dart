@@ -1,4 +1,6 @@
 import 'package:dio/dio.dart';
+import 'package:hrms_plaridel/features/notifications/models/notification_tap_result.dart';
+import 'package:hrms_plaridel/features/dtr/locator/presentation/admin/pages/admin_locator_management_screen.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 import 'package:hrms_plaridel/core/api/client.dart';
@@ -28,7 +30,7 @@ class MayorDashboardPage extends StatefulWidget {
   State<MayorDashboardPage> createState() => _MayorDashboardPageState();
 }
 
-enum _MayorMenu { dashboard, requests, history, profile }
+enum _MayorMenu { dashboard, requests, history, locator, profile }
 
 class _MayorDashboardPageState extends State<MayorDashboardPage> {
   _MayorMenu _selectedMenu = _MayorMenu.dashboard;
@@ -585,6 +587,12 @@ class _MayorDashboardPageState extends State<MayorDashboardPage> {
     }
   }
 
+  void _onNotificationTap(NotificationTapResult? result) {
+    if (result?.kind == NotificationTapKind.adminDtrLocatorManagement) {
+      _onMenuSelected(_MayorMenu.locator);
+    }
+  }
+
   void _openProfile() {
     if (DashboardContentNavigator.isSettingsOnTop(
       _contentNavKey.currentState,
@@ -610,6 +618,8 @@ class _MayorDashboardPageState extends State<MayorDashboardPage> {
 
   Widget _buildContent() {
     switch (_selectedMenu) {
+      case _MayorMenu.locator:
+        return const AdminLocatorManagementScreen();
       case _MayorMenu.dashboard:
         return _MayorDashboardTab(
           dashboardFuture: _dashboardFuture,
@@ -695,6 +705,7 @@ class _MayorDashboardPageState extends State<MayorDashboardPage> {
       icon: Icons.history_outlined,
       label: 'History',
     ),
+    DashboardMobileNavItem(icon: Icons.location_on_outlined, label: 'Locators'),
   ];
 
   int get _mobileNavIndex {
@@ -703,6 +714,8 @@ class _MayorDashboardPageState extends State<MayorDashboardPage> {
         return 1;
       case _MayorMenu.history:
         return 2;
+      case _MayorMenu.locator:
+        return 3;
       case _MayorMenu.profile:
         return -1;
       case _MayorMenu.dashboard:
@@ -716,6 +729,8 @@ class _MayorDashboardPageState extends State<MayorDashboardPage> {
         _onMenuSelected(_MayorMenu.requests);
       case 2:
         _onMenuSelected(_MayorMenu.history);
+      case 3:
+        _onMenuSelected(_MayorMenu.locator);
       default:
         _onMenuSelected(_MayorMenu.dashboard);
     }
@@ -765,6 +780,7 @@ class _MayorDashboardPageState extends State<MayorDashboardPage> {
                     child: Column(
                       children: [
                         DashboardAppHeaderBar(
+                          onNotificationTap: _onNotificationTap,
                           showBrand: false,
                           showSidebarToggle: true,
                           sidebarCollapsed: _sidebarCollapsed,
@@ -807,6 +823,7 @@ class _MayorDashboardPageState extends State<MayorDashboardPage> {
             : Column(
                 children: [
                   DashboardAppHeaderBar(
+                    onNotificationTap: _onNotificationTap,
                     showBrand: true,
                     compactActions: true,
                     trailing: DashboardAccountMenuButton(
@@ -887,6 +904,12 @@ class _MayorSidebar extends StatelessWidget {
           onTap: () => onTap(_MayorMenu.history),
         ),
         const SizedBox(height: 12),
+        DashboardSidebarNavTile(
+          icon: Icons.location_on_outlined,
+          label: 'Locator approvals',
+          selected: selectedMenu == _MayorMenu.locator,
+          onTap: () => onTap(_MayorMenu.locator),
+        ),
       ],
     );
   }
