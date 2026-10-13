@@ -9,7 +9,7 @@ const { todayInHrmsTimezone } = require('../utils/dateRangeParser');
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const LABELS = { applicant: 'Applicant', department_head: 'Head of Office', hr_approver: 'Noted' };
-const PENDING = new Set(['pending', 'pending_department_head', 'pending_hr']);
+const PENDING = new Set(['pending', 'pending_department_head', 'pending_hr','pending_mayor']);
 function fail(code, message) {
   const statusCode = { FORBIDDEN: 403, NOT_FOUND: 404, VALIDATION: 400, CONFLICT: 409 }[code] || 500;
   throw Object.assign(new Error(message), { code, statusCode, payload: { error: message } });
@@ -35,10 +35,12 @@ async function resolveOfficials(db, row) {
   });
   // Final review eligibility is configured for today, unlike the employee's
   // department assignment, which follows the requested locator date.
-  const final = await resolveFinalLeaveReviewerConfiguration(db);
+  const final = row.final_review_route && row.final_review_route!=='hr'
+    ? await resolveActiveMayor(db,todayInHrmsTimezone()).then(m=>({primary:m?{id:m.employee_id,name:m.name,position_title:m.position_title}:null}))
+    : await resolveFinalLeaveReviewerConfiguration(db);
   return substituteApplicantOfficial(db, row, {
     applicant: { id: row.employee_id, name: row.employee_name },
-    department_head: { id: department.primary?.reviewerId || null, name: department.primary?.reviewerName || '' },
+    department_head: row.final_review_route==='mayor_direct'?{id:null,name:''}:{ id: department.primary?.reviewerId || null, name: department.primary?.reviewerName || '' },
     hr_approver: { id: final.primary?.id || null, name: final.primary?.name || '',
       position_title: final.primary?.position_title || '' },
   });
@@ -63,6 +65,7 @@ async function loadContext(db, user, id, lock = false) {
        COALESCE(ls.request_type_label_snapshot, t.label) AS print_type_label,
        COALESCE(ls.request_type_location_label_snapshot, t.location_label) AS print_location_label,
        (v.background_pdf IS NOT NULL) AS has_print_background,
+       v.print_layout,
        EXISTS (SELECT 1 FROM locator_slip_department_reviewers r
          WHERE r.locator_slip_id = ls.id AND r.reviewer_id = $2::uuid) AS is_reviewer
      FROM locator_slips ls JOIN users u ON u.id = ls.employee_id
@@ -74,7 +77,7 @@ async function loadContext(db, user, id, lock = false) {
   const row = result.rows[0];
   if (!row) fail('NOT_FOUND', 'Locator slip not found');
   const owner = row.employee_id === user.id;
-  const hr = ['hr', 'admin'].includes(user.role);
+  const hr = ['hr', 'admin'].includes(user.role) || (user.role==='mayor' && row.final_review_route==='mayor_direct');
   const reviewer = row.is_reviewer || row.assigned_department_head_id === user.id;
   if (!owner && !hr && !reviewer && row.dept_head_reviewer_id !== user.id) {
     fail('NOT_FOUND', 'Locator slip not found');
@@ -121,7 +124,7 @@ function canSign(context, user, slot) {
     return Boolean(context.reviewer) && context.status === 'pending_department_head';
   }
   if (slot === 'hr_approver') {
-    return Boolean(context.canFinalReview) && ['pending', 'pending_hr'].includes(context.status);
+    return Boolean(context.canFinalReview) && ['pending', 'pending_hr','pending_mayor'].includes(context.status);
   }
   return false;
 }
@@ -170,8 +173,12 @@ async function getLocatorSourceSignatures(db, user, module, table, id) {
       source_module: module, source_table: table, source_record_id: id,
       source_status: context.status, signatures,
       print_form: {
+        employee_detail_schema_snapshot: context.employee_detail_schema_snapshot || [],
+        additional_details: context.additional_details || {},
+        final_review_route: context.final_review_route || 'hr',
         print_template_version_id: context.print_template_version_id || null,
         has_print_background: context.has_print_background === true,
+        print_layout: context.print_layout || null,
         employee_name: context.officials.applicant?.name || context.employee_name,
         slip_date: context.slip_date_text, office: context.office, reason: context.reason,
         request_type_label: context.print_type_label, location_label: context.print_location_label,

@@ -18,8 +18,10 @@ function resolveLocatorAttachmentAccess({
   requestStatus,
   assignedDepartmentHeadId,
   reviewingDepartmentHeadId,
+  finalReviewRoute,
 }) {
   const normalizedRole = String(role || '').trim().toLowerCase();
+  if (normalizedRole==='mayor' && finalReviewRoute==='mayor_direct') return {allowed:true,reason:'mayor_reviewer'};
   if (normalizedRole === 'admin' || normalizedRole === 'hr') {
     return { allowed: true, reason: 'hr_or_admin' };
   }

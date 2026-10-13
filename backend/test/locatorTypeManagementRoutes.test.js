@@ -28,7 +28,8 @@ function rowFromCreateParams(params) {
     is_active: params[9],
     is_system: false,
     sort_order: params[10],
-    filing_access:params[11], auto_approve_admin:params[12],
+    filing_access:params[11], auto_approve_admin:params[12],approval_route:params[13],mayor_employment_types:params[14],
+    employee_detail_schema: params[15] ? JSON.parse(params[15]) : [],
   };
 }
 
@@ -37,7 +38,7 @@ async function withCreateRoute(run) {
   const events = [];
   const query = async (sql, params = []) => {
     const statement = String(sql).replace(/\s+/g, ' ').trim();
-    if (statement.startsWith('INSERT INTO locator_request_types') && params.length === 13) {
+    if (statement.startsWith('INSERT INTO locator_request_types') && params.length >= 15) {
       inserts.push({ statement, params });
       return { rows: [rowFromCreateParams(params)] };
     }
@@ -65,6 +66,21 @@ async function withCreateRoute(run) {
     restoreDb();
   }
 }
+
+test('locator type accepts custom field definitions and rejects invalid dropdown definitions', async () => {
+  await withCreateRoute(async (handle,inserts) => {
+    const schema = [{key:'contact',label:'Contact person',type:'text',required:true,max_length:255}];
+    const response=responseRecorder();
+    await handle({body:{code:'field_visit',label:'Field visit',employee_detail_schema:schema}},response);
+    assert.equal(response.statusCode,201);
+    assert.deepEqual(response.body.employee_detail_schema,schema);
+    assert.deepEqual(JSON.parse(inserts[0].params[15]),schema);
+    const invalid=responseRecorder();
+    await handle({body:{code:'field_visit',label:'Field visit',employee_detail_schema:[{key:'area',label:'Area',type:'select',options:[]}]}},invalid);
+    assert.equal(invalid.statusCode,400);
+    assert.equal(inserts.length,1);
+  });
+});
 
 async function withMutationRoute({ method, used = false, isSystem = false }, run) {
   const events = [];
@@ -143,6 +159,21 @@ const basePayload = {
   code: 'remote_work',
   label: 'Remote Work',
 };
+test('locator type saves direct Mayor routing and rejects HR auto approval on it',async()=>{
+  await withCreateRoute(async(handler,inserts)=>{
+    const res=responseRecorder();
+    await handler({body:{...basePayload,approval_route:'mayor_direct',mayor_employment_types:['job_order']}},res);
+    assert.equal(res.statusCode,201);
+    assert.equal(res.body.approval_route,'mayor_direct');
+    assert.deepEqual(res.body.mayor_employment_types,['job_order']);
+    assert.equal(inserts[0].params[13],'mayor_direct');
+    const invalid=responseRecorder();
+    await handler({body:{...basePayload,filing_access:'both',approval_route:'mayor_direct',auto_approve_admin:true}},invalid);
+    assert.equal(invalid.statusCode,400);
+    assert.match(invalid.body.error,/auto/);
+    assert.equal(inserts.length,1);
+  });
+});
 
 function repeated(length) {
   return 'x'.repeat(length);

@@ -76,14 +76,14 @@ async function notifyAfterSubmit(
     return;
   }
 
-  if (status === 'pending_hr' || status === 'pending') {
+  if (status === 'pending_hr' || status === 'pending' || status === 'pending_mayor') {
     const hrIds = await finalReviewerIds(pool, employeeUserId, slipId);
     if (!hrIds.length) await notifyMissingFinalReviewer(pool, 'locator', slipId);
     const targets = hrIds.filter((id) => id !== employeeUserId);
     await insertNotificationForUsers(pool, targets, {
       category: 'locator',
-      type: 'locator_pending_hr',
-      title: 'New locator request for HR review',
+      type: status==='pending_mayor'?'locator_pending_mayor':'locator_pending_hr',
+      title: status==='pending_mayor'?'Locator request needs Mayor approval':'New locator request for HR review',
       body: bodyBase,
       referenceType: 'locator_slip',
       referenceId: slipId,

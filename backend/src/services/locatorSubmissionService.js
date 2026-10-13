@@ -10,6 +10,7 @@ const {
   captureLocatorTypeSnapshot,
 } = require('./locatorTypeSnapshot');
 const { persistLocatorSignature } = require('./locatorSignatureService');
+const { normalizeLocatorFieldSchema, locatorDetailValues } = require('./locatorCustomFields');
 
 function locatorSubmissionError(statusCode, payload) {
   const error = new Error(payload?.error || 'Failed to submit locator request');
@@ -37,6 +38,7 @@ function createLocatorSubmissionService({
   recordHistory,
   snapshotReviewers,
   assertSubmissionReviewer,
+  resolveRouting = require('./locatorRouting').resolveLocatorRouting,
   canApproveForEmployee = async () => false,
   saveApprovalSignature = persistLocatorSignature,
   saveApplicantSignature = persistLocatorSignature,
@@ -74,6 +76,7 @@ function createLocatorSubmissionService({
     filedBy = null,
     autoApprove = false,
     approvalSignature = null,
+    additionalDetails = null,
   }) {
     const fieldValidation = validateLocatorRequiredFields({
       slipDate,
@@ -111,7 +114,6 @@ function createLocatorSubmissionService({
 
     try {
       await client.query('BEGIN');
-      await assertSubmissionReviewer(client, employeeUserId);
 
       const reviewSnapshot = await getReviewSnapshot(
         client,
@@ -142,14 +144,25 @@ function createLocatorSubmissionService({
       if (!locatorType) {
         throw locatorSubmissionError(400, { error: 'Invalid request_type' });
       }
+      const routing = await resolveRouting(client, employeeUserId, locatorType, departmentHeadUserId);
+      submitStatus = routing.status;
+      if (routing.route === 'hr') await assertSubmissionReviewer(client, employeeUserId);
+      if (routing.route === 'mayor_direct') {
+        departmentHeadUserId = null;
+        departmentReviewerUserIds = [];
+      }
       const access = locatorType.filing_access || 'employee';
       if ((staffFiling && access === 'employee') || (!staffFiling && access === 'admin')) {
         throw locatorSubmissionError(403, {error:staffFiling ? 'This locator type allows employee filing only.' : 'This locator type must be filed by HR/admin.'});
       }
-      const approveNow = staffFiling && autoApprove && locatorType.auto_approve_admin === true &&
+      const approveNow = routing.route === 'hr' && staffFiling && autoApprove && locatorType.auto_approve_admin === true &&
         await canApproveForEmployee(client, employeeUserId, filedBy);
       if (approveNow) submitStatus = 'pending_hr';
       const typeSnapshot = captureLocatorTypeSnapshot(locatorType);
+      const detailSchema = normalizeLocatorFieldSchema(locatorType.employee_detail_schema);
+      let detailValues;
+      try { detailValues = locatorDetailValues(additionalDetails, detailSchema); }
+      catch (error) { throw locatorSubmissionError(400, {error:error.message}); }
       const attachmentError = locatorAttachmentRequiredError(
         locatorType,
         Boolean(attachmentPath)
@@ -201,6 +214,8 @@ function createLocatorSubmissionService({
            attachment_mime_type,
            attachment_uploaded_at,
            status,
+           final_review_route, final_reviewer_user_id,
+           employee_detail_schema_snapshot, additional_details,
            created_at,
            updated_at
          ) VALUES (
@@ -229,6 +244,8 @@ function createLocatorSubmissionService({
            $13::text,
            CASE WHEN $12::text IS NULL THEN NULL ELSE now() END,
            $14::text,
+           $24::text, $25::uuid,
+           $26::jsonb, $27::jsonb,
            now(),
            now()
          )
@@ -259,6 +276,8 @@ function createLocatorSubmissionService({
           typeSnapshot.dtrPrintLabel,
           typeSnapshot.requiresAttachment,
           typeSnapshot.coverageMode,
+          routing.route, routing.mayorId,
+          JSON.stringify(detailSchema), JSON.stringify(detailValues),
         ]
       );
       insertedRow = inserted.rows[0];
@@ -269,7 +288,7 @@ function createLocatorSubmissionService({
         requestType: 'locator',
         requestId: insertedRow.id,
         departmentId,
-        reviewers: reviewSnapshot?.reviewers || [],
+        reviewers: routing.route === 'mayor_direct' ? [] : reviewSnapshot?.reviewers || [],
       });
       await recordHistory(client, {
         locatorSlipId: insertedRow.id,

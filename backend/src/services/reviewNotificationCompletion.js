@@ -7,6 +7,7 @@ const stages = {
   locator_slip: {
     pending_department_head: ['locator_pending_department_head'],
     pending_hr: ['locator_pending_hr', 'locator_forwarded_to_hr'],
+    pending_mayor: ['locator_pending_mayor'],
   },
 };
 

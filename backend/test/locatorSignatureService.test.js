@@ -68,10 +68,12 @@ const context = {
   dept_head_reviewer_id: head, hr_reviewer_id: final,
 };
 test('locator print metadata travels with the same request content and signature response',async()=>{
-  const db=mockDb({...context,print_template_version_id:asset,has_print_background:true});
+  const layout={version:1,orientation:'portrait',elements:[]};
+  const db=mockDb({...context,print_template_version_id:asset,has_print_background:true,print_layout:layout});
   const result=await getLocatorSourceSignatures(db,{id:employee,role:'employee'},'dtr','locator_slips',requestId);
   assert.equal(result.print_form.print_template_version_id,asset);
   assert.equal(result.print_form.has_print_background,true);
+  assert.deepEqual(result.print_form.print_layout,layout);
 });
 function ink(signedBy, slot = 'department_head') {
   return { slot_key: slot, signed_by: signedBy, revision: 2,

@@ -1221,6 +1221,8 @@ CREATE INDEX IF NOT EXISTS idx_user_push_tokens_user_active
 -- LOCATOR REQUESTS
 -- =========================================
 CREATE TABLE IF NOT EXISTS locator_request_types (
+  approval_route TEXT NOT NULL DEFAULT 'hr',
+  mayor_employment_types TEXT[],
   filing_access TEXT NOT NULL DEFAULT 'employee',
   auto_approve_admin BOOLEAN NOT NULL DEFAULT false,
   CONSTRAINT chk_locator_filing_access CHECK (filing_access IN ('employee','admin','both') AND (NOT auto_approve_admin OR filing_access <> 'employee')),
@@ -1326,6 +1328,8 @@ CREATE TABLE IF NOT EXISTS locator_slips (
   hr_reviewer_id UUID REFERENCES users(id) ON DELETE SET NULL,
   hr_reviewed_at TIMESTAMPTZ,
   hr_remarks TEXT,
+  final_review_route TEXT NOT NULL DEFAULT 'hr',
+  final_reviewer_user_id UUID REFERENCES users(id) ON DELETE SET NULL,
   is_retroactive_correction BOOLEAN NOT NULL DEFAULT false,
   retroactive_correction_reason TEXT,
   retroactive_corrected_by UUID REFERENCES users(id) ON DELETE SET NULL,
@@ -3851,3 +3855,6 @@ DROP TRIGGER IF EXISTS trg_snapshot_locator_print_template ON locator_slips;
 CREATE TRIGGER trg_snapshot_locator_print_template BEFORE INSERT OR UPDATE ON locator_slips
  FOR EACH ROW EXECUTE FUNCTION snapshot_locator_print_template();
 COMMIT;
+\ir migrations/dtr/20261013_locator_approval_routing.sql
+\ir migrations/dtr/20261013_locator_custom_fields.sql
+\ir migrations/dtr/20261013_locator_print_layouts.sql

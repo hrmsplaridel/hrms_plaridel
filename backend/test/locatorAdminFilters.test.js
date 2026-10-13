@@ -61,6 +61,7 @@ test('locator history filters group UI statuses and parse paging', () => {
     'pending',
     'pending_department_head',
     'pending_hr',
+    'pending_mayor',
   ]);
   assert.equal(pending.filters.page, 2);
   assert.equal(pending.filters.pageSize, 50);

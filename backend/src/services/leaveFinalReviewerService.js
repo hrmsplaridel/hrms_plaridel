@@ -1,4 +1,5 @@
 const {requestFinalReviewers,chooseLeaveRoute}=require('./leaveRouting');
+const {locatorFinalReviewers}=require('./locatorRouting');
 const {resolveActiveMayor}=require('./officialSignatoryService');
 'use strict';
 
@@ -67,7 +68,7 @@ async function resolveFinalLeaveReviewers(db, date = todayInHrmsTimezone()) {
 
 async function resolveEligibleFinalReviewers(db, applicantId, requestType, requestId) {
   const departmentApprover = await loadDepartmentApprover(db, requestType, requestId);
-  const reviewers = requestType === 'leave' ? await requestFinalReviewers(db, requestId, () => resolveFinalLeaveReviewers(db)) : await resolveFinalLeaveReviewers(db);
+  const reviewers = requestType === 'leave' ? await requestFinalReviewers(db, requestId, () => resolveFinalLeaveReviewers(db)) : await locatorFinalReviewers(db,requestId,()=>resolveFinalLeaveReviewers(db));
   return reviewers.filter(r => String(r.id) !== String(applicantId) &&
     String(r.id) !== String(departmentApprover));
 }
@@ -80,7 +81,7 @@ async function assertFinalLeaveReviewer(db, applicantId, actorId, requestType = 
   if (departmentApprover && String(departmentApprover) === String(actorId)) {
     throw reviewError('A different reviewer must perform final HR review after your department approval.', 403);
   }
-  const reviewers = requestType === 'leave' ? await requestFinalReviewers(db, requestId, () => resolveFinalLeaveReviewers(db)) : await resolveFinalLeaveReviewers(db);
+  const reviewers = requestType === 'leave' ? await requestFinalReviewers(db, requestId, () => resolveFinalLeaveReviewers(db)) : await locatorFinalReviewers(db,requestId,()=>resolveFinalLeaveReviewers(db));
   if (!reviewers.length) {
     throw reviewError(`No final ${requestType} reviewer is configured or available`, 409);
   }

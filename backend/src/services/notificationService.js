@@ -78,7 +78,7 @@ async function insertNotificationForUsers(db, userIds, payload) {
 const reviewNotificationVisibilitySql = `NOT (
   type IN ('leave_pending_mayor', 'leave_forwarded_to_mayor')
 ) AND NOT (
-  type IN ('locator_pending_hr', 'locator_forwarded_to_hr', 'locator_pending_department_head')
+  type IN ('locator_pending_hr', 'locator_forwarded_to_hr', 'locator_pending_department_head','locator_pending_mayor')
   AND EXISTS (
     SELECT 1 FROM locator_slips ls
     WHERE ls.id = user_notifications.reference_id

@@ -5,6 +5,7 @@ const LOCATOR_STATUSES = new Set([
   'pending',
   'pending_department_head',
   'pending_hr',
+  'pending_mayor',
   'returned_for_correction',
   'approved',
   'revoked',
@@ -55,7 +56,7 @@ function parseHistoryStatusFilter(value, { departmentHead = false } = {}) {
   if (status === 'pending') {
     return departmentHead
       ? ['pending_department_head']
-      : ['pending', 'pending_department_head', 'pending_hr'];
+      : ['pending', 'pending_department_head', 'pending_hr','pending_mayor'];
   }
   if (status === 'forwarded') return ['pending', 'pending_hr'];
   if (status === 'returned') return ['returned_for_correction'];

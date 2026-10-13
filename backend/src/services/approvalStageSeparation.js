@@ -13,7 +13,8 @@ function departmentApproverSql(kind, alias) {
 }
 
 function finalQueueVisibilitySql(kind, alias, actorSql) {
-  return `(${alias}.status NOT IN ('pending', 'pending_hr') OR
+  const pending = kind==='locator'?"'pending', 'pending_hr','pending_mayor'":"'pending', 'pending_hr'";
+  return `(${alias}.status NOT IN (${pending}) OR
     ${departmentApproverSql(kind, alias)} IS DISTINCT FROM ${actorSql})`;
 }
 

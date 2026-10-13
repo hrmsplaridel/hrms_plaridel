@@ -8,8 +8,31 @@ const {
 const EMPLOYEE_ID = '00000000-0000-0000-0000-000000000101';
 const DEPARTMENT_ID = '00000000-0000-0000-0000-000000000201';
 const HEAD_ID = '00000000-0000-0000-0000-000000000301';
+test('custom fields are required and snapshot validated answers for employee and staff filing', async () => {
+  const detailSchema = [{key:'vehicle',label:'Vehicle plate number',type:'text',required:true,max_length:20}];
+  for (const filedBy of [null,{id:HEAD_ID,role:'hr'}]) {
+    const {service,state} = createHarness({detailSchema});
+    await assert.rejects(service.submit(validInput({filedBy})), /Vehicle plate number is required/);
+    assert.equal(state.inserts.length,0);
+    await service.submit(validInput({filedBy,additionalDetails:JSON.stringify({vehicle:' ABC 123 ',unknown:'discard'})}));
+    assert.deepEqual(JSON.parse(state.inserts[0].params[25]),detailSchema);
+    assert.deepEqual(JSON.parse(state.inserts[0].params[26]),{vehicle:'ABC 123'});
+  }
+});
+test('direct Mayor submission snapshots routing and cannot be auto approved by HR',async()=>{
+ const {service,state}=createHarness({autoApprove:true,reviewerAvailable:false,
+   routing:{route:'mayor_direct',status:'pending_mayor',mayorId:HEAD_ID}});
+ await service.submit(validInput({filedBy:{id:HEAD_ID,role:'hr'},autoApprove:true}));
+ assert.equal(state.inserts[0].params[13],'pending_mayor');
+ assert.equal(state.inserts[0].params[14],null);
+ assert.equal(state.inserts[0].params[23],'mayor_direct');
+ assert.equal(state.inserts[0].params[24],HEAD_ID);
+ assert.equal(state.history.some(e=>e.action==='hr_approved'),false);
+ assert.equal(state.notifications[0].status,'pending_mayor');
+ assert.deepEqual(state.reviewerSnapshots[0].reviewers,[]);
+});
 
-function createHarness({ reviewerAvailable = true, signatureFailure = false, singleSession = false, autoApprove = false, filingAccess = 'both', approvalAllowed = autoApprove } = {}) {
+function createHarness({ reviewerAvailable = true, signatureFailure = false, singleSession = false, autoApprove = false, filingAccess = 'both', approvalAllowed = autoApprove, routing, detailSchema = [] } = {}) {
   const state = {
     queries: [],
     inserts: [],
@@ -71,6 +94,7 @@ function createHarness({ reviewerAvailable = true, signatureFailure = false, sin
   };
   const service = createLocatorSubmissionService({
     dbPool,
+    resolveRouting: routing ? async()=>routing : undefined,
     getReviewSnapshot: async (_client, _employeeId, effectiveDate) => {
       state.reviewSnapshotDates.push(effectiveDate);
       return {
@@ -88,6 +112,7 @@ function createHarness({ reviewerAvailable = true, signatureFailure = false, sin
     validateWorkingDay: async (_db,_employee,_date,slots) => singleSession && (slots.amOut || slots.pmIn)
       ? {ok:false,error:'Single-session shifts use IN and OUT only.'} : {ok:true},
     getLocatorTypeByCode: async (_client, code) => ({
+      employee_detail_schema: detailSchema,
       code,
       label:
         code === 'work_from_home'
