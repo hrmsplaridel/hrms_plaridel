@@ -54,7 +54,7 @@ async function loadLeaveContext(db, leaveRequestId, user, { forUpdate = false } 
   }
   const result = await db.query(
     `SELECT lr.id,
-            lr.status,lr.final_review_route,lr.final_reviewer_user_id,
+            lr.status,lr.final_review_route,lr.final_reviewer_user_id,lr.signature_revision,
             COALESCE(lr.user_id, lr.employee_id) AS employee_user_id,
             employee.full_name AS employee_name,
             lr.assigned_department_head_id,
@@ -201,9 +201,12 @@ async function getLeaveSourceSignatures(
               encode(a.image_bytes, 'base64') AS signature_image_base64
        FROM docutracker_leave_signatures s
        JOIN docutracker_signature_assets a ON a.id = s.signature_asset_id
+       JOIN leave_requests current_request ON current_request.id = s.leave_request_id
+         AND current_request.signature_revision = s.revision
        WHERE s.leave_request_id = $1::uuid
-         AND s.slot_key = ANY($2::text[])`,
-      [leaveRequestId, [APPLICANT_SLOT, DEPARTMENT_HEAD_SLOT, HR_APPROVER_SLOT]]
+         AND s.slot_key = ANY($2::text[])
+         AND s.revision = $3`,
+      [leaveRequestId, [APPLICANT_SLOT, DEPARTMENT_HEAD_SLOT, HR_APPROVER_SLOT], context.signature_revision]
     );
   } catch (error) {
     if (error?.code === '42P01') {
@@ -219,6 +222,7 @@ async function getLeaveSourceSignatures(
     source_table: sourceTable,
     source_record_id: leaveRequestId,
     source_status: context.status,
+    source_revision: context.signature_revision,
     signatures: [
       mapApplicantSignature(
         context,
@@ -329,25 +333,25 @@ async function signLeaveSourceSlot(
     const previous = await client.query(
       `SELECT id, signature_asset_id
        FROM docutracker_leave_signatures
-       WHERE leave_request_id = $1::uuid AND slot_key = $2
+       WHERE leave_request_id = $1::uuid AND slot_key = $2 AND revision = $3
        FOR UPDATE`,
-      [leaveRequestId, slotKey]
+      [leaveRequestId, slotKey, context.signature_revision]
     );
     const isReplacement = previous.rowCount > 0;
 
     await client.query(
       `INSERT INTO docutracker_leave_signatures
          (leave_request_id, slot_key, assigned_signer_id, signature_asset_id,
-          signed_by, signer_name_snapshot, signed_at, created_by)
-       VALUES ($1::uuid, $2, $3::uuid, $4::uuid, $3::uuid, $5, now(), $3::uuid)
-       ON CONFLICT (leave_request_id, slot_key) DO UPDATE SET
+          signed_by, signer_name_snapshot, signed_at, created_by, revision)
+       VALUES ($1::uuid, $2, $3::uuid, $4::uuid, $3::uuid, $5, now(), $3::uuid, $6)
+       ON CONFLICT (leave_request_id, revision, slot_key) DO UPDATE SET
          assigned_signer_id = EXCLUDED.assigned_signer_id,
          signature_asset_id = EXCLUDED.signature_asset_id,
          signed_by = EXCLUDED.signed_by,
          signer_name_snapshot = EXCLUDED.signer_name_snapshot,
          signed_at = now(),
          updated_at = now()`,
-      [leaveRequestId, slotKey, user.id, assetId, signerName]
+      [leaveRequestId, slotKey, user.id, assetId, signerName, context.signature_revision]
     );
     await client.query(
       `INSERT INTO leave_request_history
@@ -362,7 +366,8 @@ async function signLeaveSourceSlot(
         isReplacement
           ? `${signatureActorLabel(slotKey)} replaced the e-signature`
           : `${signatureActorLabel(slotKey)} added an e-signature`,
-        JSON.stringify({ slot_key: slotKey, source_module: 'dtr' }),
+        JSON.stringify({ slot_key: slotKey, source_module: 'dtr',
+          revision: context.signature_revision, signature_asset_id: assetId }),
       ]
     );
     await client.query('COMMIT');
@@ -461,11 +466,12 @@ async function requireDepartmentHeadApprovalSignature(
 ) {
   const result = await db.query(
     `SELECT 1
-     FROM docutracker_leave_signatures
-     WHERE leave_request_id = $1::uuid
-       AND slot_key = $2
-       AND assigned_signer_id = $3::uuid
-       AND signed_by = $3::uuid
+     FROM docutracker_leave_signatures s
+     JOIN leave_requests lr ON lr.id = s.leave_request_id AND lr.signature_revision = s.revision
+     WHERE s.leave_request_id = $1::uuid
+       AND s.slot_key = $2
+       AND s.assigned_signer_id = $3::uuid
+       AND s.signed_by = $3::uuid
      LIMIT 1`,
     [leaveRequestId, DEPARTMENT_HEAD_SLOT, reviewerId]
   );
@@ -481,11 +487,12 @@ async function requireDepartmentHeadApprovalSignature(
 async function requireHrApprovalSignature(db, leaveRequestId, reviewerId) {
   const result = await db.query(
     `SELECT 1
-     FROM docutracker_leave_signatures
-     WHERE leave_request_id = $1::uuid
-       AND slot_key = $2
-       AND assigned_signer_id = $3::uuid
-       AND signed_by = $3::uuid
+     FROM docutracker_leave_signatures s
+     JOIN leave_requests lr ON lr.id = s.leave_request_id AND lr.signature_revision = s.revision
+     WHERE s.leave_request_id = $1::uuid
+       AND s.slot_key = $2
+       AND s.assigned_signer_id = $3::uuid
+       AND s.signed_by = $3::uuid
      LIMIT 1`,
     [leaveRequestId, HR_APPROVER_SLOT, reviewerId]
   );

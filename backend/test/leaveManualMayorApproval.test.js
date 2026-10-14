@@ -8,9 +8,9 @@ for (const route of ['mayor', 'hr']) {
   const requestId = '33333333-3333-4333-8333-333333333333';
   const row = {id:requestId,user_id:employee,employee_id:employee,final_review_route:route,
    status:'pending_department_head',start_date:'2026-10-12',end_date:'2026-10-12',days:1,
-   leave_type_name:'Wellness',reserved_credit_days:1};
+   leave_type_name:'Wellness',reserved_credit_days:1,signature_revision:3};
   let balance = {earned_days:5,used_days:0,pending_days:1,adjusted_days:0};
-  const statements=[], coverage=[], notices=[];
+  const statements=[], coverage=[], notices=[], history=[];
   const query = async (sql,params=[]) => {
    const s=String(sql).replace(/\s+/g,' ').trim();statements.push(s);
    if (s.includes('FOR UPDATE OF lr')) return {rows:[{...row}]};
@@ -26,6 +26,7 @@ for (const route of ['mayor', 'hr']) {
     return {rows:[{...row}]};
    }
    if (s.startsWith('SELECT lr.*')) return {rows:[{...row}]};
+   if (s.startsWith('INSERT INTO leave_request_history')) history.push(params[6]);
    return {rows:[]};
   };
   const realCoverage=require('../src/services/leaveDtrCoverage');
@@ -51,6 +52,7 @@ for (const route of ['mayor', 'hr']) {
    assert.equal(balance.pending_days,route==='mayor'?0:1);
    assert.equal(coverage.length,route==='mayor'?1:0);
    assert.equal(notices.some(n=>n.type==='forwarded_hr'),route==='hr');
+   assert.equal(history[0].revision,3,'approval history identifies the confirmed request version');
    if(route==='mayor') {
     assert.equal(row.approved_by,actor);
     assert.equal(coverage[0].actorUserId,actor);

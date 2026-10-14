@@ -2168,6 +2168,7 @@ router.post('/draft', protect, async (req, res) => {
         actedBy: userId,
         remarks: reason || null,
         metadataJson: {
+          revision: row.signature_revision,
           leave_type: leave_type || null,
           start_date: startStr,
           end_date: endStr,
@@ -2964,6 +2965,7 @@ router.put('/:id', protect, async (req, res) => {
         actedBy: userId,
         remarks: reason || null,
         metadataJson: {
+          revision: row.signature_revision,
           leave_type: leave_type || null,
           start_date: startStr,
           end_date: endStr,
@@ -4234,6 +4236,7 @@ async function finalizeLeaveApproval(client, r, {id, reviewerId, remarks, depart
     actedBy: reviewerId,
     remarks: remarks || null,
     metadataJson: {
+      revision: row.signature_revision,
       leave_type: leaveTypeName,
       start_date: startStr,
       end_date: endStr,
@@ -4260,7 +4263,7 @@ router.patch('/:id/department-head-approve', protect, async (req, res) => {
     const existing = await client.query(
       `SELECT lr.id, lr.status, lr.user_id, lr.employee_id,
               lr.start_date, lr.end_date, lr.review_department_id,
-              lr.final_review_route, lr.attachment_path, lr.reserved_credit_days,
+              lr.final_review_route, lr.attachment_path, lr.reserved_credit_days, lr.signature_revision,
               COALESCE(lr.number_of_days, lr.total_days) AS days,
               lt.name AS leave_type_name
        FROM leave_requests lr
@@ -4311,7 +4314,7 @@ router.patch('/:id/department-head-approve', protect, async (req, res) => {
         toStatus: nextStatus,
         actedBy: reviewerId,
         remarks,
-        metadataJson: { department_id: r.review_department_id || null },
+        metadataJson: { department_id: r.review_department_id || null, revision: r.signature_revision },
       });
     }
     await client.query('COMMIT');
@@ -4586,7 +4589,7 @@ router.patch('/:id/approve', protect, requireLeaveFinalRole, requireDtrFeatureIf
       await client.query('BEGIN');
       const existing = await client.query(
        `SELECT lr.id, lr.status, lr.user_id, lr.employee_id, lr.start_date, lr.end_date,
-               lr.attachment_path,
+               lr.attachment_path, lr.signature_revision,
                COALESCE(lr.number_of_days, lr.total_days) AS days,
                 lr.reserved_credit_days,
                 lt.name AS leave_type_name
