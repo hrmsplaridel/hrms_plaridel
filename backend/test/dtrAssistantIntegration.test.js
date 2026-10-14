@@ -148,6 +148,7 @@ function assistantContext(dateRange, userId) {
       },
     ],
     leave_types: [
+      { name: 'wellnessLeave', display_name: 'Wellness Leave', employee_can_file: true, is_active: true, employee_detail_schema: [] },
       {
         id: 'sick-type',
         name: 'sickLeave',
@@ -294,6 +295,20 @@ test('DTR assistant service uses employee-self data for real HRMS scenarios', as
     id: '33333333-3333-4333-8333-333333333333',
     role: 'employee',
   };
+  const wellnessUser = { ...user, id: `${user.id}-wellness` };
+  const wellnessGuidelines = await chatWithDtrAssistant(pool, {
+    user: {...user, id: `${user.id}-wellness-guidelines`},
+    message: 'I want to file wellness leave give me the guidelines of it',
+  });
+  assert.match(wellnessGuidelines.message.content, /Wellness leave/i);
+  assert.doesNotMatch(wellnessGuidelines.message.content, /Tell me which one|I can explain these leave guideline sections/);
+  await chatWithDtrAssistant(pool, { user: wellnessUser, message: 'help me file leave', intent: 'leave_guided_filing' });
+  const wellness = await chatWithDtrAssistant(pool, { user: wellnessUser, message: 'wellness leave akong eh file' });
+  assert.doesNotMatch(wellness.message.content, /Unsa nga leave type|Which leave type|Anong leave type/i);
+  const wellnessDate = await chatWithDtrAssistant(pool, { user: wellnessUser, message: 'petsa 15 nako eh file' });
+  assert.doesNotMatch(wellnessDate.message.content, /Unsa nga leave type|Which leave type|Anong leave type/i);
+  assert.doesNotMatch(wellnessDate.message.content, /Para asa nga petsa|For what date|Para sa anong petsa/i);
+  assert.equal(loaded.at(-1).dateRange.startDate, `${parseAssistantDateRange('today').startDate.slice(0, 7)}-15`);
 
   for (const [index, message] of [
     'what is my status?',

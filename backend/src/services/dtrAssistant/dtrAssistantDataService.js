@@ -151,6 +151,7 @@ function assistantContextLoadPlan(intents) {
     if (DTR_RECORD_INTENTS.has(intent)) {
       plan.dtrRecords = true;
       plan.dtrCalendarDays = true;
+      plan.locatorSlips = true;
       continue;
     }
     if (intent === 'dtr_holiday_check' || intent === 'dtr_schedule_context') {
@@ -637,8 +638,7 @@ async function queryLeaveTypes(pool) {
             is_active
      FROM leave_types
      WHERE is_active IS NULL OR is_active = true
-     ORDER BY display_name NULLS LAST, name ASC
-     LIMIT 30`
+     ORDER BY display_name NULLS LAST, name ASC`
   );
 
   return result.rows.map((row) => ({
@@ -670,7 +670,7 @@ function loadLeaveTypes(pool) {
   );
 }
 
-async function loadRecentLocatorSlips(pool, userId, dateRange, requestId = null) {
+async function loadRecentLocatorSlips(pool, userId, dateRange, requestId = null, coverageOnly = false) {
   const result = await runAssistantQuery(
     pool,
     `SELECT ls.id,
@@ -713,6 +713,7 @@ async function loadRecentLocatorSlips(pool, userId, dateRange, requestId = null)
      LEFT JOIN locator_request_types lrt ON lrt.code = ls.request_type
      WHERE ls.employee_id = $1::uuid
      ${requestId ? 'AND ls.id = $4::uuid' : ''}
+     ${coverageOnly ? 'AND ls.slip_date BETWEEN $2::date AND $3::date' : ''}
      ORDER BY
        CASE
          WHEN ls.slip_date BETWEEN $2::date AND $3::date THEN 0
@@ -720,7 +721,7 @@ async function loadRecentLocatorSlips(pool, userId, dateRange, requestId = null)
        END,
        ls.updated_at DESC,
        ls.created_at DESC
-     LIMIT 30`,
+     ${coverageOnly ? '' : 'LIMIT 30'}`,
     [userId, dateRange.startDate, dateRange.endDate, ...(requestId ? [requestId] : [])]
   );
 
@@ -814,6 +815,8 @@ async function loadEmployeeAssistantContext(
     dateRangeOverride || parseAssistantDateRange(message)
   );
   const loadPlan = assistantContextLoadPlan(intents);
+  const needsLocatorCoverage = (Array.isArray(intents) ? intents : [intents])
+    .some((intent) => DTR_RECORD_INTENTS.has(intent) || intent === 'dtr_locator_coverage_check');
   const [
     employee,
     dtrRecords,
@@ -840,7 +843,9 @@ async function loadEmployeeAssistantContext(
         : [],
       loadPlan.leaveTypes ? loadLeaveTypes(pool) : [],
       loadPlan.locatorSlips
-        ? loadRecentLocatorSlips(pool, userId, dateRange, requestReference?.module === 'locator' ? requestReference.id : null)
+        ? loadRecentLocatorSlips(pool, userId, dateRange,
+          needsLocatorCoverage ? null : requestReference?.module === 'locator' ? requestReference.id : null,
+          needsLocatorCoverage)
         : [],
       loadPlan.locatorTypes ? loadLocatorTypes(pool) : [],
     ]);

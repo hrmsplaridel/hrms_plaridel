@@ -1,4 +1,5 @@
 const crypto = require('crypto');
+const { configuredLeaveType } = require('./configuredLeaveType');
 const { assistLeaveField } = require('./leaveFieldAssistant');
 const { requestChoices, choiceActions, isRequestFollowUp, formChatContext } = require('./dtrAssistantRequestFocus');
 const { chatCompletion } = require('../llm/llmClient');
@@ -2894,6 +2895,10 @@ async function chatWithDtrAssistant(
     extractMessageEntities(plannedText, routingMemory),
     plannerExtraction
   );
+  const configuredType = configuredLeaveType(normalizedTextForRules, context.leave_types);
+  if (configuredType) {
+    mergedExtraction.leaveType = configuredType.name || configuredType.display_name;
+  }
   const extractionMemory = memoryWithClarificationPatch(routingMemory, {
     leaveType: mergedExtraction.leaveType,
     locatorType: mergedExtraction.locatorType,

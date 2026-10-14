@@ -19,6 +19,51 @@ const {
 } = require('../src/services/dtrAssistant/dtrAssistantMessageExtraction');
 const { buildFastEmployeeAssistantReply } = require('../src/services/dtrAssistant/dtrAssistantFastReply');
 
+test('custom leave guideline requests answer from configuration without a built-in guide', () => {
+  const context = {leave_types:[{
+    name:'wellnessLeave', display_name:'Wellness Leave',
+    description:'Configured wellness policy for employees.',
+    employee_can_file:true, allows_past_dates:false, requires_attachment:true,
+    minimum_advance_days:2, max_days:5,
+    employee_detail_schema:[{key:'activity',label:'Activity',required:true,instruction:'Describe your planned wellness activity.'}],
+  }]};
+  const reply = buildFastEmployeeAssistantReply('I want to file wellness leave give me the guidelines of it', context, 'leave_guideline_section');
+  assert.match(reply, /Wellness leave/i);
+  assert.match(reply, /Configured wellness policy/);
+  assert.match(reply, /planned wellness activity/);
+  assert.match(reply, /attachment/i);
+  assert.doesNotMatch(reply, /Tell me which one|I can explain these leave guideline sections/);
+  const missing = buildFastEmployeeAssistantReply('wellness leave guidelines', {leave_types:[{name:'wellnessLeave',display_name:'Wellness Leave'}]}, 'leave_guideline_section');
+  assert.match(missing, /No additional written guidelines/);
+});
+
+test('day-of-month answers consume pending dates without treating durations as dates', () => {
+  const {parseAssistantDateRange} = require('../src/utils/dateRangeParser');
+  for (const text of ['petsa 15 nako eh file', 'sa petsa 15', 'ika-15', 'on the 15th', 'date 15']) {
+    assert.equal(parseAssistantDateRange(text, {today:'2026-10-14'}).startDate, '2026-10-15');
+    const patch = applyPendingClarificationAnswer(text, {pendingClarification:{topic:'leave',intent:'leave_guided_filing',field:'date',fieldsRemaining:[],leaveType:'wellnessLeave'}});
+    assert.match(patch.dateRange.startDate, /-15$/);
+    assert.notEqual(patch.pendingClarification?.field, 'date');
+  }
+  const bare = applyPendingClarificationAnswer('15', {pendingClarification:{topic:'leave',intent:'leave_guided_filing',field:'date',fieldsRemaining:[],leaveType:'wellnessLeave'}});
+  assert.match(bare.dateRange.startDate, /-15$/);
+  assert.equal(parseAssistantDateRange('15', {today:'2026-10-14'}).label, 'today');
+  assert.equal(parseAssistantDateRange('sa 2 days', {today:'2026-10-14'}).label, 'today');
+  assert.throws(() => parseAssistantDateRange('petsa 31', {today:'2026-02-10'}));
+});
+
+test('guided filing recognizes configured leave names before stale built-in memory', () => {
+  const context = { leave_types: [{name:'wellnessLeave',display_name:'Wellness Leave'}, {name:'communityServiceLeave',display_name:'Community Service Leave'}] };
+  for (const [message, expected] of [['wellness leave akong eh file', 'wellnessLeave'], ['community service leave', 'communityServiceLeave']]) {
+    const result = evaluateGuidedClarification({intent:'leave_guided_filing', text:message, context, memory:{leaveType:'sick'}});
+    assert.equal(result.pendingClarification.leaveType, expected);
+    assert.equal(result.pendingClarification.field, 'date');
+  }
+  const {configuredLeaveType} = require('../src/services/dtrAssistant/configuredLeaveType');
+  assert.equal(configuredLeaveType('wellness leave', [{name:'other',description:'wellness leave'}]), null);
+  assert.equal(configuredLeaveType('wellness leave', [{name:'wellnessLeave',is_active:false}]), null);
+});
+
 test('semantic intent matching understands paraphrased leave balance questions', () => {
   const scored = scoreSemanticIntents('Do I still have paid sick time I can use?');
   assert.equal(scored.top?.intent, 'leave_balance');
