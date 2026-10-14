@@ -23,6 +23,7 @@ test('changed leave requires current-version signatures while preserving saved i
       await db.query('BEGIN');
       await db.query('CREATE TEMP TABLE fixture_anchor(id int); SET LOCAL search_path = pg_temp');
       await db.query(`CREATE TEMP TABLE users(id uuid PRIMARY KEY, full_name text, is_active boolean, role text DEFAULT 'employee');
+        CREATE TEMP TABLE dtr_admin_access(admin_user_id uuid,leave_allowed boolean,locator_allowed boolean);
         CREATE TEMP TABLE docutracker_signature_assets(id uuid PRIMARY KEY,owner_user_id uuid,mime_type text,image_bytes bytea);
         CREATE TEMP TABLE leave_requests(id uuid PRIMARY KEY,user_id uuid,employee_id uuid,status text,
           leave_type_id uuid,start_date date,end_date date,number_of_days numeric,total_days numeric,

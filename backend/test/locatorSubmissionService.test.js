@@ -32,7 +32,7 @@ test('direct Mayor submission snapshots routing and cannot be auto approved by H
  assert.deepEqual(state.reviewerSnapshots[0].reviewers,[]);
 });
 
-function createHarness({ reviewerAvailable = true, signatureFailure = false, singleSession = false, autoApprove = false, filingAccess = 'both', approvalAllowed = autoApprove, routing, detailSchema = [] } = {}) {
+function createHarness({ reviewerAvailable = true, signatureFailure = false, singleSession = false, autoApprove = false, filingAccess = 'both', approvalAllowed = autoApprove, routing, detailSchema = [], realReviewerCheck = false, finalReviewerIds = [HEAD_ID], departmentReviewerIds = [HEAD_ID] } = {}) {
   const state = {
     queries: [],
     inserts: [],
@@ -48,6 +48,8 @@ function createHarness({ reviewerAvailable = true, signatureFailure = false, sin
     async query(sql, params = []) {
       const text = String(sql);
       state.queries.push(text);
+      if (text.includes('primary_reviewer_designations')) return {rows:finalReviewerIds.slice(0,1).map(id=>({id,role:'hr'}))};
+      if (text.includes('leave_final_reviewer_backups')) return {rows:finalReviewerIds.slice(1).map(id=>({id,role:'hr'}))};
       if (text.includes('INSERT INTO locator_slips')) {
         const row = {
           id: 'locator-' + state.nextId++,
@@ -99,14 +101,14 @@ function createHarness({ reviewerAvailable = true, signatureFailure = false, sin
       state.reviewSnapshotDates.push(effectiveDate);
       return {
         departmentId: DEPARTMENT_ID,
-        departmentHeadUserId: HEAD_ID,
-        reviewerUserIds: [HEAD_ID],
-        reviewers: [{
-          reviewerId: HEAD_ID,
+        departmentHeadUserId: departmentReviewerIds[0] || null,
+        reviewerUserIds: departmentReviewerIds,
+        reviewers: departmentReviewerIds.map((id,index)=>({
+          reviewerId: id,
           reviewerName: 'Department Head',
-          reviewerRole: 'primary',
-          backupRank: null,
-        }],
+          reviewerRole: index===0 ? 'primary' : 'backup',
+          backupRank: index===0 ? null : index,
+        })),
       };
     },
     validateWorkingDay: async (_db,_employee,_date,slots) => singleSession && (slots.amOut || slots.pmIn)
@@ -163,11 +165,14 @@ function createHarness({ reviewerAvailable = true, signatureFailure = false, sin
       assert.ok(state.queries.lastIndexOf('BEGIN') > state.queries.lastIndexOf('COMMIT'));
       if (signatureFailure) throw new Error('Signature required');
     },
-    assertSubmissionReviewer: async () => {
+    assertSubmissionReviewer: async (db, employeeId, snapshot) => {
       if (!reviewerAvailable) {
         const error = new Error('No eligible final reviewer is configured');
         error.statusCode = 409;
         throw error;
+      }
+      if (realReviewerCheck) {
+        await require('../src/services/leaveFinalReviewerService').assertLeaveSubmissionReviewer(db,employeeId,'locator',null,snapshot);
       }
     },
     canApproveForEmployee: async (_db, employeeId, actor) => approvalAllowed && actor.id !== employeeId,
@@ -177,6 +182,31 @@ function createHarness({ reviewerAvailable = true, signatureFailure = false, sin
   });
   return { service, state };
 }
+
+test('locator filing validates distinct stages before insertion, preserving valid backup paths and auto approval', async () => {
+  const alternative = '00000000-0000-0000-0000-000000000302';
+  const blocked = createHarness({realReviewerCheck:true});
+  await assert.rejects(blocked.service.submit(validInput()),{statusCode:409});
+  assert.equal(blocked.state.inserts.length,0);
+  assert.equal(blocked.state.history.length,0);
+  assert.equal(blocked.state.notifications.length,0);
+  for (const config of [
+    {finalReviewerIds:[HEAD_ID,alternative]},
+    {departmentReviewerIds:[HEAD_ID,alternative]},
+    {departmentReviewerIds:[]},
+  ]) {
+    const allowed = createHarness({realReviewerCheck:true,...config});
+    await allowed.service.submit(validInput());
+    assert.equal(allowed.state.inserts.length,1);
+  }
+  const auto = createHarness({realReviewerCheck:true,autoApprove:true});
+  await auto.service.submit(validInput({filedBy:{id:HEAD_ID,role:'hr'},autoApprove:true}));
+  assert.equal(auto.state.inserts[0].row.status,'approved');
+  const manual = createHarness({reviewerAvailable:false,
+    routing:{route:'mayor',status:'pending_department_head',mayorId:alternative}});
+  await manual.service.submit(validInput());
+  assert.equal(manual.state.inserts[0].row.status,'pending_department_head');
+});
 
 test('locator filing is blocked before insertion when no final reviewer is available', async () => {
   const { service, state } = createHarness({ reviewerAvailable: false });

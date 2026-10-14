@@ -14,6 +14,7 @@ const { requireAdminOrHr } = require('../middleware/rbac');
 const {
   assertFinalLeaveReviewer,
   assertLeaveSubmissionReviewer,
+  assertDepartmentApprovalFinalReviewer,
   resolveFinalLeaveReviewers,
 } = require('../services/leaveFinalReviewerService');
 const {
@@ -826,7 +827,7 @@ const locatorSubmissionService = createLocatorSubmissionService({
   broadcastSubmitted: (row) => broadcastLocatorUpdated('submitted', row),
   recordHistory: recordLocatorWorkflowEvent,
   snapshotReviewers: snapshotLocatorReviewers,
-  assertSubmissionReviewer: (db, applicantId) => assertLeaveSubmissionReviewer(db, applicantId, 'locator'),
+  assertSubmissionReviewer: (db, applicantId, snapshot) => assertLeaveSubmissionReviewer(db, applicantId, 'locator', null, snapshot),
   canApproveForEmployee: async (db, employeeId, actor) => {
     if (String(employeeId) === String(actor.id)) return false;
     const reviewers=await resolveFinalLeaveReviewers(db);
@@ -1782,7 +1783,7 @@ router.patch('/:id/resubmit', protect, async (req, res) => {
       correction.slipDate
     );
     const routing = await resolveLocatorRouting(client,userId,locatorType,reviewSnapshot?.departmentHeadUserId);
-    if (routing.route==='hr') await assertLeaveSubmissionReviewer(client, userId, 'locator');
+    if (routing.route==='hr') await assertLeaveSubmissionReviewer(client, userId, 'locator', null, reviewSnapshot);
     const departmentHeadUserId = routing.route==='mayor_direct'?null:reviewSnapshot?.departmentHeadUserId || null;
     const submitStatus = routing.status;
     const typeSnapshot = captureLocatorTypeSnapshot(locatorType);
@@ -2299,9 +2300,12 @@ router.patch('/:id/department-head-approve', protect, async (req, res) => {
       await client.query('ROLLBACK');
       return res.status(409).json(locatorConflictPayload(conflictCheck));
     }
-    await persistLocatorSignature(client, req.user, id, 'department_head', req.body?.signature);
     const routeRow = (await client.query('SELECT final_review_route FROM locator_slips WHERE id=$1::uuid',[id])).rows[0];
     const manualMayor = routeRow?.final_review_route === 'mayor';
+    if (!manualMayor) {
+      await assertDepartmentApprovalFinalReviewer(client, current.rows[0].employee_id, reviewerId, 'locator', id);
+    }
+    await persistLocatorSignature(client, req.user, id, 'department_head', req.body?.signature);
     const departmentNextStatus = manualMayor ? 'approved' : 'pending_hr';
     await client.query(
       `UPDATE locator_slips

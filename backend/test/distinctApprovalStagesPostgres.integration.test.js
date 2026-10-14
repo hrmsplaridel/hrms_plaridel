@@ -25,6 +25,7 @@ test('PostgreSQL queues and old alerts respect the actual approver and resubmiss
         CREATE TEMP TABLE locator_slips(id uuid,employee_id uuid,status text,dept_head_reviewer_id uuid);
         CREATE TEMP TABLE locator_slip_history(locator_slip_id uuid,from_status text,to_status text,created_at timestamptz);
         CREATE TEMP TABLE users(id uuid,full_name text,role text,is_active boolean);
+        CREATE TEMP TABLE dtr_admin_access(admin_user_id uuid,leave_allowed boolean,locator_allowed boolean);
         CREATE TEMP TABLE primary_reviewer_designations(id uuid,employee_id uuid,scope_key text,
           position_title_snapshot text,is_active boolean,effective_from date,effective_to date);
         CREATE TEMP TABLE leave_final_reviewer_backups(employee_id uuid,is_active boolean,

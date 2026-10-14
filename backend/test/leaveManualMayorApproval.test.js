@@ -14,6 +14,7 @@ for (const route of ['mayor', 'hr']) {
   const query = async (sql,params=[]) => {
    const s=String(sql).replace(/\s+/g,' ').trim();statements.push(s);
    if (s.includes('FOR UPDATE OF lr')) return {rows:[{...row}]};
+   if (s.includes('FROM primary_reviewer_designations')) return {rows:[{id:'55555555-5555-4555-8555-555555555555'}]};
    if (s.includes('FROM generate_series')) return {rows:[{attendance_date:'2026-10-12',working_days:[1,2,3,4,5],has_shift:true}]};
    if (s.startsWith('SELECT * FROM leave_types')) return {rows:[{name:'Wellness',requires_attachment:false,credit_policy:'own',balance_ledger_type:'Wellness',affects_dtr_normally:true}]};
    if (s.startsWith('SELECT balance_ledger_type')) return {rows:[{balance_ledger_type:'Wellness'}]};

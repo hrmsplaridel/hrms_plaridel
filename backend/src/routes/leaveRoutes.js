@@ -109,7 +109,7 @@ const {
   resolveActiveMayor,
 } = require('../services/officialSignatoryService');
 const { todayInHrmsTimezone } = require('../utils/dateRangeParser');
-const { assertFinalLeaveReviewer, assertLeaveSubmissionReviewer, resolveFinalLeaveReviewers, resolveFinalLeaveReviewerConfiguration } = require('../services/leaveFinalReviewerService');
+const { assertFinalLeaveReviewer, assertLeaveSubmissionReviewer, assertDepartmentApprovalFinalReviewer, resolveFinalLeaveReviewers, resolveFinalLeaveReviewerConfiguration } = require('../services/leaveFinalReviewerService');
 
 const router = express.Router();
 router.use('/print', authMiddleware, require('./leavePrintTemplates'));
@@ -2225,7 +2225,8 @@ router.post('/submit', protect, async (req, res) => {
       }
       const leaveRule = await getLeaveTypeDefinition(client, leave_type);
       await assertLeaveEmploymentEligibility(client, leaveRule, userId);
-      await assertLeaveSubmissionReviewer(client, userId, 'leave', leaveRule);
+      const reviewSnapshot = await getDepartmentReviewSnapshot(client, userId);
+      await assertLeaveSubmissionReviewer(client, userId, 'leave', leaveRule, reviewSnapshot);
       const customFieldSchema = normalizeEmployeeDetailSchema(
         leaveRule?.employee_detail_schema
       );
@@ -2329,7 +2330,6 @@ router.post('/submit', protect, async (req, res) => {
       const row = q.rows[0];
 
       // Two-stage workflow: determine initial submitted status.
-      const reviewSnapshot = await getDepartmentReviewSnapshot(client, userId);
       if(leaveRule?.approval_route==='mayor') {
         const type=(await client.query('SELECT employment_type FROM users WHERE id=$1',[userId])).rows[0]?.employment_type;
         const {chooseLeaveRoute}=require('../services/leaveRouting');
@@ -2474,7 +2474,8 @@ router.post('/submit-with-attachment', protect, uploadLeaveAttachmentMemoryMw, a
 
       const leaveRule = await getLeaveTypeDefinition(client, leave_type);
       await assertLeaveEmploymentEligibility(client, leaveRule, userId);
-      await assertLeaveSubmissionReviewer(client, userId, 'leave', leaveRule);
+      const reviewSnapshot = await getDepartmentReviewSnapshot(client, userId);
+      await assertLeaveSubmissionReviewer(client, userId, 'leave', leaveRule, reviewSnapshot);
       const customFieldSchema = normalizeEmployeeDetailSchema(
         leaveRule?.employee_detail_schema
       );
@@ -2589,7 +2590,6 @@ router.post('/submit-with-attachment', protect, uploadLeaveAttachmentMemoryMw, a
       );
 
       const row = q.rows[0];
-      const reviewSnapshot = await getDepartmentReviewSnapshot(client, userId);
       if(leaveRule?.approval_route==='mayor') {
         const type=(await client.query('SELECT employment_type FROM users WHERE id=$1',[userId])).rows[0]?.employment_type;
         const {chooseLeaveRoute}=require('../services/leaveRouting');
@@ -2797,7 +2797,10 @@ router.put('/:id', protect, async (req, res) => {
         ? await getLeaveTypeDefinition(client, leave_type)
         : storedTypeRule?.rows[0] ? leaveTypeRowToApi(storedTypeRule.rows[0]) : null;
       await assertLeaveEmploymentEligibility(client, leaveRule, userId);
-      if (submitting) await assertLeaveSubmissionReviewer(client, userId, 'leave', leaveRule);
+      if (submitting) {
+        reviewSnapshot = await getDepartmentReviewSnapshot(client, userId);
+        await assertLeaveSubmissionReviewer(client, userId, 'leave', leaveRule, reviewSnapshot);
+      }
       const customFieldSchema = normalizeEmployeeDetailSchema(
         leaveRule?.employee_detail_schema
       );
@@ -2870,7 +2873,6 @@ router.put('/:id', protect, async (req, res) => {
           }
 
           // Two-stage workflow: resolve actual target status.
-          reviewSnapshot = await getDepartmentReviewSnapshot(client, userId);
           if(leaveRule?.approval_route==='mayor') {
             const emp=(await client.query('SELECT employment_type FROM users WHERE id=$1',[userId])).rows[0]?.employment_type;
             if(require('../services/leaveRouting').chooseLeaveRoute(leaveRule,emp)==='mayor' && !reviewSnapshot?.departmentHeadUserId) {
@@ -4290,6 +4292,9 @@ router.patch('/:id/department-head-approve', protect, async (req, res) => {
       desiredStatus: 'pending_hr',
       finalReviewRoute: r.final_review_route,
     });
+    if (nextStatus === 'pending_hr') {
+      await assertDepartmentApprovalFinalReviewer(client, r.user_id || r.employee_id, reviewerId, 'leave', id);
+    }
     await assertAnnualQuotaLeaveLimit(client, {
       userId: r.user_id || r.employee_id,
       leaveTypeName: r.leave_type_name || null,

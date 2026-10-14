@@ -146,7 +146,6 @@ function createLocatorSubmissionService({
       }
       const routing = await resolveRouting(client, employeeUserId, locatorType, departmentHeadUserId);
       submitStatus = routing.status;
-      if (routing.route === 'hr') await assertSubmissionReviewer(client, employeeUserId);
       if (routing.route === 'mayor_direct') {
         departmentHeadUserId = null;
         departmentReviewerUserIds = [];
@@ -157,6 +156,10 @@ function createLocatorSubmissionService({
       }
       const approveNow = routing.route === 'hr' && staffFiling && autoApprove && locatorType.auto_approve_admin === true &&
         await canApproveForEmployee(client, employeeUserId, filedBy);
+      if (routing.route === 'hr') {
+        // An authorized immediate final decision has no department stage.
+        await assertSubmissionReviewer(client, employeeUserId, approveNow ? null : reviewSnapshot);
+      }
       if (approveNow) submitStatus = 'pending_hr';
       const typeSnapshot = captureLocatorTypeSnapshot(locatorType);
       const detailSchema = normalizeLocatorFieldSchema(locatorType.employee_detail_schema);
