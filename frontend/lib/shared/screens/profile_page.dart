@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:dio/dio.dart';
@@ -153,6 +154,9 @@ class _ProfileContentState extends State<ProfileContent> {
   bool _obscureNew = true;
   bool _obscureConfirm = true;
   bool _loadedFromAuth = false;
+  AuthProvider? _profileAuth;
+  AppUser? _lastProfileUser;
+  bool _requestedProfileRefresh = false;
   String? _sexValue;
   String? _civilStatusValue;
   String? _suffixValue;
@@ -250,6 +254,7 @@ class _ProfileContentState extends State<ProfileContent> {
   }
 
   void _applyUserProfile(AppUser u) {
+    _lastProfileUser = u;
     _capturingBaseline = true;
     _firstNameController.text = u.firstName ?? '';
     _middleNameController.text = u.middleName ?? '';
@@ -277,13 +282,51 @@ class _ProfileContentState extends State<ProfileContent> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+    final auth = context.read<AuthProvider>();
+    if (!identical(_profileAuth, auth)) {
+      _profileAuth?.removeListener(_onAuthProfileChanged);
+      _profileAuth = auth;
+      auth.addListener(_onAuthProfileChanged);
+      _requestedProfileRefresh = false;
+    }
     if (!_loadedFromAuth) {
-      final auth = context.read<AuthProvider>();
       if (auth.user != null) {
         _applyUserProfile(auth.user!);
         _loadedFromAuth = true;
       }
     }
+    _requestProfileRefresh();
+  }
+
+  void _requestProfileRefresh() {
+    final auth = _profileAuth;
+    if (_requestedProfileRefresh ||
+        !widget.showAccountSection ||
+        auth?.user == null) {
+      return;
+    }
+    _requestedProfileRefresh = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !identical(_profileAuth, auth)) return;
+      unawaited(auth!.refreshUser());
+    });
+  }
+
+  void _onAuthProfileChanged() {
+    if (!mounted) return;
+    final user = _profileAuth?.user;
+    if (user == null || identical(user, _lastProfileUser)) return;
+    final differentAccount = _lastProfileUser?.id != user.id;
+    _lastProfileUser = user;
+    if (!_loadedFromAuth ||
+        differentAccount ||
+        (!_isProfileDirty && !_loading)) {
+      setState(() {
+        _applyUserProfile(user);
+        _loadedFromAuth = true;
+      });
+    }
+    _requestProfileRefresh();
   }
 
   String? _avatarDisplayUrl(String userId, {String? pathOverride}) {
@@ -329,6 +372,7 @@ class _ProfileContentState extends State<ProfileContent> {
 
   @override
   void dispose() {
+    _profileAuth?.removeListener(_onAuthProfileChanged);
     _firstNameController.dispose();
     _middleNameController.dispose();
     _lastNameController.dispose();
