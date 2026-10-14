@@ -29,14 +29,34 @@ class _State extends State<LeaveRoutingSettings> {
   String route = 'hr';
   List<String>? types;
   bool busy = false;
+  bool _loading = false;
+  bool _settingsLoaded = false;
+  int _loadGeneration = 0;
   String? error;
-  bool get _blocked => busy || !widget.enabled;
+  bool get _blocked => busy || !widget.enabled || _loading || !_settingsLoaded;
   @override
   void initState() {
     super.initState();
     route = widget.initialRoute;
     types = widget.initialEmploymentTypes;
-    if (widget.leaveTypeId != null) _load();
+    _settingsLoaded = widget.leaveTypeId == null;
+    if (!_settingsLoaded) _load();
+  }
+
+  @override
+  void didUpdateWidget(covariant LeaveRoutingSettings oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.leaveTypeId != widget.leaveTypeId) {
+      // Ignore a previous type's pending load or save, even when state is reused.
+      _loadGeneration++;
+      _loading = false;
+      busy = false;
+      error = null;
+      route = widget.initialRoute;
+      types = widget.initialEmploymentTypes;
+      _settingsLoaded = widget.leaveTypeId == null;
+      if (!_settingsLoaded) _load();
+    }
   }
 
   void changed() {
@@ -47,24 +67,53 @@ class _State extends State<LeaveRoutingSettings> {
   }
 
   Future<void> _load() async {
+    if (_loading || busy || widget.leaveTypeId == null) return;
+    final generation = ++_loadGeneration;
+    final typeId = widget.leaveTypeId;
+    setState(() {
+      _loading = true;
+      _settingsLoaded = false;
+      error = null;
+    });
     try {
       final r = await ApiClient.instance.get<Map<String, dynamic>>(
-        '/api/leave/routing/types/${widget.leaveTypeId}',
+        '/api/leave/routing/types/$typeId',
       );
-      if (!mounted) return;
+      if (!mounted || generation != _loadGeneration) return;
+      final loadedRoute = r.data?['approval_route'];
+      final loadedTypes = r.data?['mayor_employment_types'];
+      if (loadedRoute is! String ||
+          ![
+            'hr',
+            'mayor',
+            if (widget.allowDirectMayor) 'mayor_direct',
+          ].contains(loadedRoute) ||
+          (loadedTypes != null &&
+              (loadedTypes is! List ||
+                  loadedTypes.any((value) => value is! String)))) {
+        throw const FormatException('Invalid routing settings');
+      }
       setState(() {
-        route = r.data!['approval_route']?.toString() ?? 'hr';
-        types = (r.data!['mayor_employment_types'] as List?)?.cast<String>();
+        route = loadedRoute;
+        types = (loadedTypes as List?)?.cast<String>().toList();
+        _settingsLoaded = true;
+        _loading = false;
+        error = null;
       });
     } catch (_) {
-      if (mounted) {
-        setState(() => error = 'Could not load routing. Please retry.');
+      if (mounted && generation == _loadGeneration) {
+        setState(() {
+          _loading = false;
+          _settingsLoaded = false;
+          error = 'Could not load routing. Please retry.';
+        });
       }
     }
   }
 
   Future<void> _save() async {
     if (_blocked) return;
+    final generation = _loadGeneration;
     setState(() {
       busy = true;
       error = null;
@@ -74,7 +123,7 @@ class _State extends State<LeaveRoutingSettings> {
         '/api/leave/routing/types/${widget.leaveTypeId}',
         data: {'approval_route': route, 'mayor_employment_types': types},
       );
-      if (mounted) {
+      if (mounted && generation == _loadGeneration) {
         widget.onSaved?.call();
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -83,7 +132,7 @@ class _State extends State<LeaveRoutingSettings> {
         );
       }
     } on DioException catch (e) {
-      if (mounted) {
+      if (mounted && generation == _loadGeneration) {
         setState(
           () => error =
               (e.response?.data is Map ? e.response?.data['error'] : null)
@@ -92,7 +141,9 @@ class _State extends State<LeaveRoutingSettings> {
         );
       }
     } finally {
-      if (mounted) setState(() => busy = false);
+      if (mounted && generation == _loadGeneration) {
+        setState(() => busy = false);
+      }
     }
   }
 
@@ -105,6 +156,12 @@ class _State extends State<LeaveRoutingSettings> {
         style: TextStyle(fontWeight: FontWeight.bold),
       ),
       const SizedBox(height: 12),
+      if (_loading) ...[
+        const Text('Loading routing…'),
+        const SizedBox(height: 8),
+        const LinearProgressIndicator(),
+        const SizedBox(height: 12),
+      ],
       DropdownButtonFormField<String>(
         key: ValueKey(route),
         initialValue: route,
@@ -190,7 +247,14 @@ class _State extends State<LeaveRoutingSettings> {
           ),
         ),
       if (error != null)
-        TextButton(onPressed: _blocked ? null : _load, child: const Text('Retry')),
+        TextButton(
+          onPressed: busy || _loading || !widget.enabled
+              ? null
+              : _settingsLoaded
+              ? _save
+              : _load,
+          child: const Text('Retry'),
+        ),
     ],
   );
 
@@ -203,6 +267,8 @@ class _State extends State<LeaveRoutingSettings> {
         }).join(', ')} selected';
 
   Future<void> _selectTypes() async {
+    if (_blocked || types == null) return;
+    final generation = _loadGeneration;
     final selected = [...types!];
     final result = await showDialog<List<String>>(
       context: context,
@@ -248,7 +314,10 @@ class _State extends State<LeaveRoutingSettings> {
         ),
       ),
     );
-    if (result != null && mounted) {
+    if (result != null &&
+        mounted &&
+        generation == _loadGeneration &&
+        !_blocked) {
       setState(() => types = result);
       changed();
     }

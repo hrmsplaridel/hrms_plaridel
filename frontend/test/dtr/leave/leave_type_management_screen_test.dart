@@ -41,6 +41,7 @@ void main() {
   var rejectWrite = false;
   var rejectPrint = false;
   var rejectRouting = false;
+  var rejectRoutingLoad = false;
   final routingById = <String, Map<String, dynamic>>{};
   Completer<void>? routingGate;
 
@@ -56,6 +57,7 @@ void main() {
     rejectWrite = false;
     rejectPrint = false;
     rejectRouting = false;
+    rejectRoutingLoad = false;
     routingById.clear();
     routingGate = null;
     LeaveTypeDefinitionCache.instance.invalidate();
@@ -65,6 +67,11 @@ void main() {
         onRequest: (options, handler) async {
           requests.add(options);
           if (options.path.startsWith('/api/leave/routing/types/')) {
+            if (rejectRoutingLoad && options.method == 'GET') {
+              handler.reject(DioException(requestOptions: options,
+                response: Response(requestOptions: options, statusCode: 503)));
+              return;
+            }
             if (options.method == 'POST') await routingGate?.future;
             final id = options.path.split('/').last;
             if (rejectRouting && options.method == 'POST') {
@@ -317,6 +324,22 @@ void main() {
     expect(requests.singleWhere((r) => r.method == 'PUT').path, '/api/leave/types/second');
     expect(requests.where((r) => r.method == 'POST'), isEmpty);
     expect(routingById['second'], {'approval_route': 'mayor', 'mayor_employment_types': ['permanent']});
+  });
+
+  testWidgets('overall settings save cannot overwrite routing after routing load fails', (tester) async {
+    rows = [existingType('existing')];
+    rejectRoutingLoad = true;
+    routingById['existing'] = {'approval_route': 'mayor', 'mayor_employment_types': ['permanent']};
+    await mount(tester);
+    await tester.scrollUntilVisible(stringDropdown('Approval route'), 250,
+      scrollable: formScrollable());
+    await tester.pumpAndSettle();
+    expect(find.text('Could not load routing. Please retry.'), findsOneWidget);
+    expect(tester.widget<DropdownButtonFormField<String>>(stringDropdown('Approval route')).onChanged, isNull);
+    await tester.tap(find.text('Save Changes'));
+    await tester.pumpAndSettle();
+    expect(requests.where((r) => r.method == 'POST'), isEmpty);
+    expect(routingById['existing'], {'approval_route': 'mayor', 'mayor_employment_types': ['permanent']});
   });
 
   testWidgets('standalone routing save clears the pending overall routing save', (tester) async {

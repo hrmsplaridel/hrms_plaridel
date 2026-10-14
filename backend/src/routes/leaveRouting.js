@@ -8,7 +8,13 @@ router.get('/types/:id',async(req,res)=>{
  }catch(e){res.status(500).json({error:'Could not load approval routing'});}
 });
 router.post('/types/:id',async(req,res)=>{
- try{const r=normalizeRouting(req.body||{});
+ try{
+ const body=req.body||{};
+ // Default HR is for creation, not an incomplete update of saved routing.
+ if(!Object.hasOwn(body,'approval_route') || !body.approval_route) {
+  return res.status(400).json({error:'Select an approval route before saving.'});
+ }
+ const r=normalizeRouting(body);
  const q=await pool.query(`UPDATE leave_types SET approval_route=$1,mayor_employment_types=$2::text[],updated_at=now()
  WHERE id=$3::uuid RETURNING approval_route,mayor_employment_types`,[r.approval_route,r.mayor_employment_types,req.params.id]);
  if(!q.rows[0])return res.status(404).json({error:'Leave type not found'});res.json(q.rows[0]);
