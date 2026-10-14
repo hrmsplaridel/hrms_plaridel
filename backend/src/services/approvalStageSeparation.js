@@ -7,7 +7,7 @@ function departmentApproverSql(kind, alias) {
   return `(SELECT CASE WHEN stage.action = 'department_head_approved' THEN stage.acted_by END
     FROM leave_request_history stage
     WHERE stage.leave_request_id = ${alias}.id
-      AND stage.action IN ('submitted', 'department_head_approved',
+      AND stage.action IN ('submitted', 'resubmitted', 'department_head_approved',
                            'department_head_rejected', 'department_head_returned')
     ORDER BY stage.acted_at DESC, stage.id DESC LIMIT 1)`;
 }
