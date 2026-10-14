@@ -92,6 +92,8 @@ Future<Uint8List> buildLocatorLayoutPdf({
   Map<String, LocatorPrintedSignatory> extraSignatories = const {},
   pw.Font? regularFont,
   pw.Font? strongFont,
+  pw.Document? document,
+  void Function(List<pw.Widget>)? onMainPageWidgets,
 }) async {
   final error = layout.validate();
   if (error != null) throw FormatException(error);
@@ -116,12 +118,16 @@ Future<Uint8List> buildLocatorLayoutPdf({
     return bold ? pair.$2 : pair.$1;
   }
 
-  final doc = pw.Document(
-    theme:
-        layout.fontFamily != null || regularFont != null || strongFont != null
-        ? pw.ThemeData.withFont(base: font, bold: boldFont)
-        : null,
-  );
+  final doc =
+      document ??
+      pw.Document(
+        theme:
+            layout.fontFamily != null ||
+                regularFont != null ||
+                strongFont != null
+            ? pw.ThemeData.withFont(base: font, bold: boldFont)
+            : null,
+      );
   final overflow = <String, String>{}, overflowFonts = <String, pw.Font>{};
   final format = PdfPageFormat(layout.pageWidth, layout.pageHeight);
   pw.TextAlign alignment(String value) => switch (value) {
@@ -243,10 +249,15 @@ Future<Uint8List> buildLocatorLayoutPdf({
     }
     if (item.kind == 'signature') {
       final styled = item.fontFamily != null || layout.fontFamily != null;
-      final nameSize = styled
+      final nativeSignature = item.signatureStyle == 'csc';
+      final nameSize = nativeSignature
+          ? item.fontSize
+          : styled
           ? item.fontSize
           : item.fontSize.clamp(8, 12).toDouble();
-      final captionSize = styled
+      final captionSize = nativeSignature
+          ? item.fontSize
+          : styled
           ? (item.fontSize * .75).clamp(6, 54).toDouble()
           : 8.0;
       final person =
@@ -269,18 +280,32 @@ Future<Uint8List> buildLocatorLayoutPdf({
                     fit: pw.BoxFit.contain,
                   ),
           ),
-          pw.SizedBox(
-            height: styled ? nameSize * 1.2 : 14,
-            child: name.isEmpty
-                ? null
-                : pw.FittedBox(
-                    child: pw.Text(
-                      name,
-                      style: pw.TextStyle(font: itemBold, fontSize: nameSize),
+          if (item.signatureStyle != 'csc')
+            pw.SizedBox(
+              height: styled || nativeSignature ? nameSize * 1.2 : 14,
+              child: name.isEmpty
+                  ? null
+                  : pw.FittedBox(
+                      child: pw.Text(
+                        name,
+                        style: pw.TextStyle(font: itemBold, fontSize: nameSize),
+                      ),
                     ),
-                  ),
-          ),
+            ),
           pw.Divider(height: 3, thickness: .7),
+          if (item.signatureStyle == 'csc' && item.source != 'applicant')
+            pw.SizedBox(
+              height: styled || nativeSignature ? nameSize * 1.2 : 14,
+              child: name.isEmpty
+                  ? null
+                  : pw.FittedBox(
+                      child: pw.Text(
+                        name,
+                        style: pw.TextStyle(font: itemBold, fontSize: nameSize),
+                      ),
+                    ),
+            ),
+
           pw.Text(
             locatorSignatureCaption(item, person),
             textAlign: alignment(item.align),
@@ -349,30 +374,46 @@ Future<Uint8List> buildLocatorLayoutPdf({
     for (final item in layout.elements)
       item.id: itemWidget(item, measureContext),
   };
-  doc.addPage(
-    pw.Page(
-      pageFormat: format,
-      margin: pw.EdgeInsets.zero,
-      build: (context) => pw.SizedBox(
-        width: layout.pageWidth,
-        height: layout.pageHeight,
-        child: pw.Stack(
-          children: [
-            for (final item in layout.elements)
-              pw.Positioned(
-                left: item.x,
-                top: item.y,
-                child: pw.SizedBox(
-                  width: item.width,
-                  height: item.height,
-                  child: widgets[item.id]!,
-                ),
-              ),
-          ],
+  final positioned = [
+    for (final item in layout.elements)
+      pw.Positioned(
+        left: item.x,
+        top: item.y,
+        child: pw.SizedBox(
+          width: item.width,
+          height: item.height,
+          child: widgets[item.id]!,
         ),
       ),
-    ),
-  );
+  ];
+  if (onMainPageWidgets != null) {
+    onMainPageWidgets(positioned);
+  } else {
+    doc.addPage(
+      pw.Page(
+        pageFormat: format,
+        margin: pw.EdgeInsets.zero,
+        build: (context) => pw.SizedBox(
+          width: layout.pageWidth,
+          height: layout.pageHeight,
+          child: pw.Stack(
+            children: [
+              for (final item in layout.elements)
+                pw.Positioned(
+                  left: item.x,
+                  top: item.y,
+                  child: pw.SizedBox(
+                    width: item.width,
+                    height: item.height,
+                    child: widgets[item.id]!,
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
   // Unplaced custom answers remain available in the printout as well.
   for (final field
       in (form['employee_detail_schema_snapshot'] as List? ?? [])

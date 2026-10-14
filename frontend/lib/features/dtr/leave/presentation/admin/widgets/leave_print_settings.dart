@@ -1,3 +1,4 @@
+import '../../../utils/leave_design_capture.dart';
 import 'dart:convert';
 import 'dart:typed_data';
 import 'package:dio/dio.dart';
@@ -91,8 +92,9 @@ class _LeavePrintSettingsState extends State<LeavePrintSettings> {
       _busy = false,
       _remove = false,
       _schemaNeedsSave = false;
+  bool _settingsLoaded = false;
   LeavePrintDraft? _restoreDraft;
-  bool get _disabled => _busy || !widget.enabled;
+  bool get _disabled => _busy || !widget.enabled || !_settingsLoaded;
   void _changed() => widget.onChanged?.call(
     LeavePrintDraft(
       layout: _layout,
@@ -114,6 +116,7 @@ class _LeavePrintSettingsState extends State<LeavePrintSettings> {
       _load();
     } else {
       _loading = false;
+      _settingsLoaded = true;
     }
   }
 
@@ -140,6 +143,7 @@ class _LeavePrintSettingsState extends State<LeavePrintSettings> {
         _restoreDraft = null;
         _background = r.data!['background_name']?.toString();
         _loading = false;
+        _settingsLoaded = true;
         _error = null;
       });
     } catch (_) {
@@ -338,6 +342,89 @@ class _LeavePrintSettingsState extends State<LeavePrintSettings> {
         pdf = Uint8List.fromList(response.data!);
       }
       final type = _type;
+      var initial = _layout == 'custom' ? _printLayout : null;
+      final nativeForm =
+          initial?.baseForm ??
+          (widget.leaveTypeId != null && initial == null ? _layout : null);
+      if (nativeForm == 'csc' || nativeForm == 'wellness') {
+        if (initial == null) {
+          final imported = await importLeaveNativeLayout(
+            type,
+            nativeForm!,
+            letterhead: pdf != null || image != null,
+          );
+          initial = imported.layout;
+          final native = imported.background;
+          if (pdf == null && image == null) {
+            pdf = native;
+          } else {
+            final response = await ApiClient.instance.post<List<int>>(
+              '/api/leave/print/preview',
+              data: FormData.fromMap({
+                'layout': nativeForm,
+                'file': MultipartFile.fromBytes(
+                  native,
+                  filename: 'native-preview.pdf',
+                ),
+                if (widget.leaveTypeId != null && _file == null)
+                  'type_id': widget.leaveTypeId,
+                if (_file != null)
+                  'background': MultipartFile.fromBytes(
+                    _file!.bytes!,
+                    filename: _file!.name,
+                    contentType: _fileType(_file!),
+                  ),
+              }),
+              options: Options(responseType: ResponseType.bytes),
+            );
+            pdf = Uint8List.fromList(response.data!);
+            image = null;
+          }
+        } else {
+          final capture = LeaveDesignCapture(
+            fields: leaveLayoutFields(type),
+            renderingLayout: initial,
+          );
+          final request = leaveLayoutSampleRequest(type);
+          final doc = nativeForm == 'wellness'
+              ? await buildWellnessLeavePdf(
+                  request: request,
+                  department: request.officeDepartment ?? '',
+                  designCapture: capture,
+                )
+              : await LeaveRequestPdf.buildPdf(
+                  request: request,
+                  designCapture: capture,
+                );
+          final native = await doc.save();
+          if (pdf == null && image == null) {
+            pdf = native;
+          } else {
+            final response = await ApiClient.instance.post<List<int>>(
+              '/api/leave/print/preview',
+              data: FormData.fromMap({
+                'layout': 'custom',
+                'print_layout': jsonEncode(initial.toJson()),
+                'file': MultipartFile.fromBytes(
+                  native,
+                  filename: 'native-preview.pdf',
+                ),
+                if (widget.leaveTypeId != null && _file == null)
+                  'type_id': widget.leaveTypeId,
+                if (_file != null)
+                  'background': MultipartFile.fromBytes(
+                    _file!.bytes!,
+                    filename: _file!.name,
+                    contentType: _fileType(_file!),
+                  ),
+              }),
+              options: Options(responseType: ResponseType.bytes),
+            );
+            pdf = Uint8List.fromList(response.data!);
+            image = null;
+          }
+        }
+      }
       if (!mounted) return;
       final result = await showDialog<LocatorPrintLayout>(
         context: context,
@@ -346,12 +433,12 @@ class _LeavePrintSettingsState extends State<LeavePrintSettings> {
             label: type.displayName,
             employeeDetailSchema: type.employeeDetailSchema,
           ),
-          initialLayout: _printLayout,
+          initialLayout: initial,
           backgroundPdf: pdf,
           backgroundImage: image,
           bindings: PrintLayoutEditorBindings(
             fields: leaveLayoutFields(type),
-            signatures: leavePrintSignatures,
+            signatures: leaveLayoutSignatures(initial?.baseForm ?? _layout),
             sample: leaveLayoutForm(leaveLayoutSampleRequest(type)),
             defaultLayout: (orientation) =>
                 leavePrintLayoutDefaults(type, orientation: orientation),
@@ -493,7 +580,7 @@ class _LeavePrintSettingsState extends State<LeavePrintSettings> {
               ),
             if (_error != null && widget.leaveTypeId != null)
               TextButton(
-                onPressed: _disabled ? null : _load,
+                onPressed: _busy || !widget.enabled ? null : _load,
                 child: const Text('Retry'),
               ),
           ],

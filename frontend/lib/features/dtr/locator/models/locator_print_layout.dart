@@ -97,8 +97,9 @@ class LocatorPrintElement {
     this.columnWidths = const [],
     this.headerRow = true,
     this.borders = true,
+    this.signatureStyle = 'standard',
   });
-  final String id, kind, source, text, label, align;
+  final String id, kind, source, text, label, align, signatureStyle;
   final double x, y, width, height, fontSize;
   final String? fontFamily;
   final bool bold, showLabel;
@@ -123,6 +124,7 @@ class LocatorPrintElement {
     List<double>? columnWidths,
     bool? headerRow,
     bool? borders,
+    String? signatureStyle,
   }) => LocatorPrintElement(
     id: id ?? this.id,
     kind: kind,
@@ -142,6 +144,7 @@ class LocatorPrintElement {
     columnWidths: columnWidths ?? this.columnWidths,
     headerRow: headerRow ?? this.headerRow,
     borders: borders ?? this.borders,
+    signatureStyle: signatureStyle ?? this.signatureStyle,
   );
   Map<String, dynamic> toJson() => {
     'id': id,
@@ -158,6 +161,7 @@ class LocatorPrintElement {
     'align': align,
     'bold': bold,
     'show_label': showLabel,
+    if (signatureStyle != 'standard') 'signature_style': signatureStyle,
     if (kind == 'table') ...{
       'cells': cells
           .map((row) => row.map((cell) => cell.toJson()).toList())
@@ -180,6 +184,7 @@ class LocatorPrintElement {
         height: (json['height'] as num).toDouble(),
         fontSize: (json['font_size'] as num).toDouble(),
         fontFamily: json['font_family'] as String?,
+        signatureStyle: json['signature_style'] as String? ?? 'standard',
         align: json['align'] as String? ?? 'left',
         bold: json['bold'] == true,
         showLabel: json['show_label'] != false,
@@ -209,9 +214,13 @@ class LocatorPrintLayout {
     this.margins = const PrintLayoutMargins(),
     this.fontFamily,
     this.defaultFontSize = 11,
+    this.baseForm,
+    this.baseFormBox,
     required this.elements,
   });
   final String orientation, paperSize;
+  final String? baseForm;
+  final Map<String, double>? baseFormBox;
   final PrintLayoutMargins margins;
   final String? fontFamily;
   final double defaultFontSize;
@@ -232,6 +241,8 @@ class LocatorPrintLayout {
     bool inheritFont = false,
     double? defaultFontSize,
     List<LocatorPrintElement>? elements,
+    String? baseForm,
+    Map<String, double>? baseFormBox,
   }) => LocatorPrintLayout(
     orientation: orientation ?? this.orientation,
     paperSize: paperSize ?? this.paperSize,
@@ -239,9 +250,13 @@ class LocatorPrintLayout {
     fontFamily: inheritFont ? null : fontFamily ?? this.fontFamily,
     defaultFontSize: defaultFontSize ?? this.defaultFontSize,
     elements: elements ?? this.elements,
+    baseForm: baseForm ?? this.baseForm,
+    baseFormBox: baseFormBox ?? this.baseFormBox,
   );
   Map<String, dynamic> toJson() => {
     'version': 1,
+    if (baseForm != null) 'base_form': baseForm,
+    if (baseFormBox != null) 'base_form_box': baseFormBox,
     'orientation': orientation,
     if (paperSize != 'a4') 'paper_size': paperSize,
     if (!margins.isEmpty) 'margins': margins.toJson(),
@@ -252,6 +267,13 @@ class LocatorPrintLayout {
   factory LocatorPrintLayout.fromJson(Map<String, dynamic> json) =>
       LocatorPrintLayout(
         orientation: json['orientation'] as String,
+        baseForm: json['base_form'] as String?,
+        baseFormBox: json['base_form_box'] is Map
+            ? {
+                for (final e in (json['base_form_box'] as Map).entries)
+                  e.key.toString(): (e.value as num).toDouble(),
+              }
+            : null,
         paperSize: json['paper_size'] as String? ?? 'a4',
         margins: json['margins'] is Map
             ? PrintLayoutMargins.fromJson(
@@ -306,6 +328,14 @@ class LocatorPrintLayout {
     );
     if (next.pageSettingsError() != null) return next;
     return next.copyWith(
+      baseFormBox: baseFormBox == null
+          ? null
+          : {
+              'x': baseFormBox!['x']! * next.pageWidth / pageWidth,
+              'y': baseFormBox!['y']! * next.pageHeight / pageHeight,
+              'width': baseFormBox!['width']! * next.pageWidth / pageWidth,
+              'height': baseFormBox!['height']! * next.pageHeight / pageHeight,
+            },
       elements: [for (final item in elements) _fitElement(item, next)],
     );
   }
@@ -321,11 +351,14 @@ class LocatorPrintLayout {
               item.columnWidths.fold(0.0, (a, b) => a + b) /
               item.columnWidths.reduce(math.min)
         : 20.0;
+    final signatureMinimum = item.signatureStyle == 'csc'
+        ? (item.source == 'applicant' ? 18.0 : 32.0)
+        : 60.0;
     final minHeight = switch (item.kind) {
       'signature' =>
         item.fontFamily != null || next.fontFamily != null
-            ? math.max(60.0, item.fontSize * 3.5 + 12)
-            : 60.0,
+            ? math.max(signatureMinimum, item.fontSize * 3.5 + 12)
+            : signatureMinimum,
       'field' => 20.0,
       'text' => 12.0,
       'table' => item.cells.length * (item.fontSize * 1.5 + 8),
@@ -360,6 +393,27 @@ class LocatorPrintLayout {
   }
 
   String? validate() {
+    if (baseForm != null && !['csc', 'wellness'].contains(baseForm)) {
+      return 'Unknown original form.';
+    }
+    if (baseFormBox != null) {
+      final b = baseFormBox!;
+      if (baseForm == null ||
+          [
+            'x',
+            'y',
+            'width',
+            'height',
+          ].any((k) => b[k] == null || !b[k]!.isFinite) ||
+          b['x']! < 0 ||
+          b['y']! < 0 ||
+          b['width']! < 20 ||
+          b['height']! < 20 ||
+          b['x']! + b['width']! > pageWidth + .1 ||
+          b['y']! + b['height']! > pageHeight + .1) {
+        return 'Keep the original form within the page.';
+      }
+    }
     final pageError = pageSettingsError();
     if (pageError != null) return pageError;
     if (elements.isEmpty || elements.length > 60) {
@@ -424,12 +478,26 @@ class LocatorPrintLayout {
           }
         }
       }
+      if (!['standard', 'csc'].contains(e.signatureStyle)) {
+        return 'Unknown signature style.';
+      }
       if (e.kind == 'signature' &&
           (e.fontFamily != null || fontFamily != null) &&
-          e.height < math.max(60, e.fontSize * 3.5 + 12)) {
+          e.height <
+              math.max(
+                e.signatureStyle == 'csc'
+                    ? (e.source == 'applicant' ? 18 : 32)
+                    : 60,
+                e.fontSize * 3.5 + 12,
+              )) {
         return 'Signature blocks need enough height for their font size. Increase the height or reduce the font size.';
       }
-      if (e.kind == 'signature' && (e.width < 100 || e.height < 60)) {
+      if (e.kind == 'signature' &&
+          (e.width < 100 ||
+              e.height <
+                  (e.signatureStyle == 'csc'
+                      ? (e.source == 'applicant' ? 18 : 32)
+                      : 60))) {
         return 'Signature blocks need at least 100 by 60 points.';
       }
     }

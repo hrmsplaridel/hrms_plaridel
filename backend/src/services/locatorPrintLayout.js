@@ -56,9 +56,10 @@ function normalizeLocatorPrintLayout(value, {fields=FIELDS, signatures=SIGNATURE
       return {...base,source:item.source,label,show_label:item.show_label!==false};
     }
     if(item.kind==='signature'){
-      if((item.font_family!=null||value.font_family!=null)&&item.height<Math.max(60,item.font_size*3.5+12))invalid('Signature blocks need enough height for their font size. Increase the height or reduce the font size.');
-      if(!signatures.has(item.source)||item.height<60||item.width<100)invalid('Signature blocks need a valid signer and at least 100 by 60 points');
-      return {...base,source:item.source,label};
+      const style=item.signature_style??'standard';if(!['standard','csc'].includes(style))invalid('Invalid signature style');const minHeight=style==='csc'?(item.source==='applicant'?18:32):60;
+      if((item.font_family!=null||value.font_family!=null)&&item.height<Math.max(minHeight,item.font_size*3.5+12))invalid('Signature blocks need enough height for their font size. Increase the height or reduce the font size.');
+      if(!signatures.has(item.source)||item.height<minHeight||item.width<100)invalid('Signature blocks need a valid signer and at least 100 by 60 points');
+      return {...base,source:item.source,label,...(item.signature_style!==undefined?{signature_style:style}:{})};
     }
     return base;
   });

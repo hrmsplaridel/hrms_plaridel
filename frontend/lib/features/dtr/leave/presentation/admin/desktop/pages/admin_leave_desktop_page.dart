@@ -954,6 +954,7 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
       final bytes = await saveConfiguredLeavePdf(
         request: target,
         document: document,
+      balances: balances,
         departmentReviewer: formSignatories.recommendationOfficer?.name,
         departmentReviewerTitle: formSignatories.recommendationOfficer?.title,
         approvingAuthorityName: formSignatories.approvingAuthority?.name,

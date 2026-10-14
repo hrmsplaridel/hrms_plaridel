@@ -1,8 +1,9 @@
-import 'dart:typed_data';
+import 'dart:convert';
 import 'dart:math' as math;
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter/gestures.dart';
+import 'package:flutter/services.dart';
 import 'package:printing/printing.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/core/api/user_facing_api_error.dart';
@@ -67,7 +68,7 @@ class _LocatorPrintLayoutEditorState extends State<LocatorPrintLayoutEditor> {
   bool _busy = false, _loadingBackground = false;
   String? _backgroundOrientation, _backgroundPaper;
   final _pagePropertiesKey = GlobalKey<PrintLayoutPagePropertiesState>();
-  double? _zoom;
+  final _zoom = ValueNotifier<double?>(null);
   bool _showGrid = false, _showSettings = false;
   final _workspaceVertical = ScrollController();
   final _workspaceHorizontal = ScrollController();
@@ -78,6 +79,15 @@ class _LocatorPrintLayoutEditorState extends State<LocatorPrintLayoutEditor> {
   };
   final _label = TextEditingController();
   final _customSignatureCaptions = <String>{};
+  final _editorFocus = FocusNode(debugLabel: 'Print layout editor');
+  final _undoStack = <_LayoutEditorSnapshot>[];
+  final _redoStack = <_LayoutEditorSnapshot>[];
+  String? _historyGroup;
+  bool _gestureActive = false;
+  final _fitZoom = ValueNotifier<double>(1);
+  late final _zoomChanges = Listenable.merge([_zoom, _fitZoom]);
+  (Offset, Offset)? _wheelZoomAnchor;
+  bool _wheelZoomPending = false;
   @override
   void initState() {
     super.initState();
@@ -95,6 +105,9 @@ class _LocatorPrintLayoutEditorState extends State<LocatorPrintLayoutEditor> {
     _label.dispose();
     _workspaceVertical.dispose();
     _workspaceHorizontal.dispose();
+    _editorFocus.dispose();
+    _fitZoom.dispose();
+    _zoom.dispose();
     super.dispose();
   }
 
@@ -110,7 +123,7 @@ class _LocatorPrintLayoutEditorState extends State<LocatorPrintLayoutEditor> {
           widget.backgroundPdf!,
           pages: const [0],
           dpi: 72,
-        ).first;
+        ).first.timeout(const Duration(seconds: 15));
         image = await raster.toPng();
       }
       final codec = await ui.instantiateImageCodec(image);
@@ -147,6 +160,7 @@ class _LocatorPrintLayoutEditorState extends State<LocatorPrintLayoutEditor> {
   }
 
   void _select(String? id) {
+    _historyGroup = null;
     _selectedId = id;
     final item = _selected;
     if (item == null) return;
@@ -162,7 +176,105 @@ class _LocatorPrintLayoutEditorState extends State<LocatorPrintLayoutEditor> {
     _label.text = item.kind == 'text' ? item.text : item.label;
   }
 
-  void _replace(LocatorPrintElement next, {bool sync = false}) {
+  _LayoutEditorSnapshot _snapshot() => _LayoutEditorSnapshot(
+    layout: _layout,
+    fields: List.of(_customFields),
+    fieldsChanged: _customFieldsChanged,
+    selectedId: _selectedId,
+    customCaptions: Set.of(_customSignatureCaptions),
+  );
+
+  void _remember({String? group}) {
+    if (group == null || group != _historyGroup) {
+      _undoStack.add(_snapshot());
+      if (_undoStack.length > 100) _undoStack.removeAt(0);
+    }
+    _historyGroup = group;
+    _redoStack.clear();
+  }
+
+  void _restore(_LayoutEditorSnapshot snapshot) {
+    _layout = snapshot.layout;
+    _customFields = List.of(snapshot.fields);
+    _customFieldsChanged = snapshot.fieldsChanged;
+    _customSignatureCaptions
+      ..clear()
+      ..addAll(snapshot.customCaptions);
+    _select(snapshot.selectedId);
+    _error = null;
+  }
+
+  void _undo() {
+    if (_busy || _gestureActive || _undoStack.isEmpty) return;
+    setState(() {
+      _redoStack.add(_snapshot());
+      _restore(_undoStack.removeLast());
+    });
+  }
+
+  void _redo() {
+    if (_busy || _gestureActive || _redoStack.isEmpty) return;
+    setState(() {
+      _undoStack.add(_snapshot());
+      _restore(_redoStack.removeLast());
+    });
+  }
+
+  void _deleteSelected() {
+    if (_busy || _gestureActive || _selected == null) return;
+    _remember();
+    setState(() {
+      _layout = _layout.copyWith(
+        elements: [
+          for (final e in _layout.elements)
+            if (e.id != _selectedId) e,
+        ],
+      );
+      _select(_layout.elements.firstOrNull?.id);
+      _error = null;
+    });
+    _editorFocus.requestFocus();
+  }
+
+  KeyEventResult _onEditorKey(FocusNode node, KeyEvent event) {
+    if (event is! KeyDownEvent || _busy || _gestureActive) {
+      return KeyEventResult.ignored;
+    }
+    // EditableText keeps its own undo, selection, and Delete behavior.
+    final focused = FocusManager.instance.primaryFocus?.context;
+    if (focused?.findAncestorWidgetOfExactType<EditableText>() != null) {
+      return KeyEventResult.ignored;
+    }
+    final keys = HardwareKeyboard.instance;
+    if (keys.isControlPressed || keys.isMetaPressed) {
+      if (event.logicalKey == LogicalKeyboardKey.keyZ) {
+        keys.isShiftPressed ? _redo() : _undo();
+        return KeyEventResult.handled;
+      }
+      if (event.logicalKey == LogicalKeyboardKey.keyY) {
+        _redo();
+        return KeyEventResult.handled;
+      }
+    } else if (event.logicalKey == LogicalKeyboardKey.delete) {
+      _deleteSelected();
+      return KeyEventResult.handled;
+    }
+    return KeyEventResult.ignored;
+  }
+
+  void _replace(
+    LocatorPrintElement next, {
+    bool sync = false,
+    String? historyGroup,
+    bool recordHistory = true,
+  }) {
+    if (jsonEncode(next.toJson()) ==
+        jsonEncode(
+          _layout.elements.firstWhere((e) => e.id == next.id).toJson(),
+        )) {
+      return;
+    }
+    if (recordHistory) _remember(group: historyGroup);
     setState(() {
       _layout = _layout.copyWith(
         elements: [
@@ -320,14 +432,15 @@ class _LocatorPrintLayoutEditorState extends State<LocatorPrintLayoutEditor> {
       ),
     );
     if (field == null || !mounted) return;
+    _remember();
     setState(() {
       _customFields = [..._customFields, field];
       _customFieldsChanged = true;
     });
-    _add('field|custom:${field.key}');
+    _add('field|custom:${field.key}', recordHistory: false);
   }
 
-  void _add(String data, {Offset? point}) {
+  void _add(String data, {Offset? point, bool recordHistory = true}) {
     if (!(_pagePropertiesKey.currentState?.commit(base: _layout) ?? true)) {
       return;
     }
@@ -400,11 +513,13 @@ class _LocatorPrintLayoutEditorState extends State<LocatorPrintLayoutEditor> {
       setState(() => _error = validation);
       return;
     }
+    if (recordHistory) _remember();
     setState(() {
       _layout = _layout.copyWith(elements: [..._layout.elements, item]);
       _select(item.id);
       _error = null;
     });
+    _editorFocus.requestFocus();
   }
 
   Widget _paletteButton(String label, String data) => Draggable<String>(
@@ -504,6 +619,7 @@ class _LocatorPrintLayoutEditorState extends State<LocatorPrintLayoutEditor> {
     layout: _layout,
     enabled: !_busy,
     onChanged: (next) => setState(() {
+      _remember();
       _layout = next;
       _select(_selectedId);
     }),
@@ -562,16 +678,7 @@ class _LocatorPrintLayoutEditorState extends State<LocatorPrintLayoutEditor> {
             ),
             IconButton(
               tooltip: 'Remove element',
-              onPressed: _busy
-                  ? null
-                  : () => setState(() {
-                      _layout = _layout.copyWith(
-                        elements: _layout.elements
-                            .where((e) => e.id != selected.id)
-                            .toList(),
-                      );
-                      _select(_layout.elements.firstOrNull?.id);
-                    }),
+              onPressed: _busy ? null : _deleteSelected,
               icon: const Icon(Icons.delete_outline),
             ),
           ],
@@ -604,9 +711,14 @@ class _LocatorPrintLayoutEditorState extends State<LocatorPrintLayoutEditor> {
             onChanged: _busy
                 ? null
                 : (value) {
+                    _remember();
                     if (value == 'position') {
                       _customSignatureCaptions.remove(selected.id);
-                      _replace(selected.copyWith(label: ''), sync: true);
+                      _replace(
+                        selected.copyWith(label: ''),
+                        sync: true,
+                        recordHistory: false,
+                      );
                     } else if (value == 'custom') {
                       _customSignatureCaptions.add(selected.id);
                       _replace(
@@ -619,6 +731,7 @@ class _LocatorPrintLayoutEditorState extends State<LocatorPrintLayoutEditor> {
                               : selected.label,
                         ),
                         sync: true,
+                        recordHistory: false,
                       );
                     }
                   },
@@ -651,13 +764,11 @@ class _LocatorPrintLayoutEditorState extends State<LocatorPrintLayoutEditor> {
               radius: 8,
             ).copyWith(counterText: ''),
             onChanged: (value) {
-              if (selected.kind == 'signature') {
-                _customSignatureCaptions.add(selected.id);
-              }
               _replace(
                 selected.kind == 'text'
                     ? selected.copyWith(text: value)
                     : selected.copyWith(label: value),
+                historyGroup: 'label-${selected.id}',
               );
             },
           ),
@@ -792,24 +903,27 @@ class _LocatorPrintLayoutEditorState extends State<LocatorPrintLayoutEditor> {
     final family =
         printFontFamilies[item.fontFamily ?? _layout.fontFamily] ??
         AppTheme.fontFamily;
+    final csc = item.signatureStyle == 'csc';
+    Widget name() => SizedBox(
+      height: (styled || csc ? item.fontSize * 1.2 : 14) * scale,
+      child: FittedBox(
+        child: Text(
+          'Sample signer',
+          style: TextStyle(
+            color: Colors.black,
+            fontFamily: family,
+            fontSize: (styled || csc ? item.fontSize : 10) * scale,
+            fontWeight: styled ? FontWeight.bold : FontWeight.normal,
+          ),
+        ),
+      ),
+    );
     return Column(
       children: [
         const Expanded(child: Icon(Icons.draw_outlined, color: Colors.black26)),
-        SizedBox(
-          height: (styled ? item.fontSize * 1.2 : 14) * scale,
-          child: FittedBox(
-            child: Text(
-              'Sample signer',
-              style: TextStyle(
-                color: Colors.black,
-                fontFamily: family,
-                fontSize: (styled ? item.fontSize : 10) * scale,
-                fontWeight: styled ? FontWeight.bold : FontWeight.normal,
-              ),
-            ),
-          ),
-        ),
+        if (!csc) name(),
         Divider(height: 3 * scale),
+        if (csc && item.source != 'applicant') name(),
         Text(
           locatorSignatureCaption(
             item,
@@ -822,7 +936,13 @@ class _LocatorPrintLayoutEditorState extends State<LocatorPrintLayoutEditor> {
           style: TextStyle(
             color: Colors.black,
             fontFamily: family,
-            fontSize: (styled ? (item.fontSize * .75).clamp(6, 54) : 8) * scale,
+            fontSize:
+                (csc
+                    ? item.fontSize
+                    : styled
+                    ? (item.fontSize * .75).clamp(6, 54)
+                    : 8) *
+                scale,
           ),
         ),
       ],
@@ -966,7 +1086,15 @@ class _LocatorPrintLayoutEditorState extends State<LocatorPrintLayoutEditor> {
                     pageSize: Size(_layout.pageWidth, _layout.pageHeight),
                     margins: _layout.margins,
                     enabled: !_busy,
-                    onSelect: () => setState(() => _select(item.id)),
+                    selected: item.id == _selectedId,
+                    zoomChanges: _zoomChanges,
+                    displayZoom: () => _zoom.value ?? _fitZoom.value,
+                    fontFamily: _layout.fontFamily,
+                    onGestureChanged: (active) => _gestureActive = active,
+                    onSelect: () {
+                      setState(() => _select(item.id));
+                      _editorFocus.requestFocus();
+                    },
                     onMoved: (next) => _replace(next, sync: true),
                     child: Container(
                       padding: EdgeInsets.all(item.kind == 'line' ? 0 : scale),
@@ -1041,10 +1169,121 @@ class _LocatorPrintLayoutEditorState extends State<LocatorPrintLayoutEditor> {
   }
 
   void _setZoom(double? zoom) {
-    setState(() => _zoom = zoom);
+    _wheelZoomAnchor = null;
+    _zoom.value = zoom;
     if (_workspaceVertical.hasClients) _workspaceVertical.jumpTo(0);
     if (_workspaceHorizontal.hasClients) _workspaceHorizontal.jumpTo(0);
   }
+
+  void _onCanvasWheel(PointerSignalEvent event) {
+    if (event is! PointerScrollEvent ||
+        event.scrollDelta.dy == 0 ||
+        _busy ||
+        _loadingBackground ||
+        _gestureActive) {
+      return;
+    }
+    // Claim the signal before the enclosing scroll views handle it.
+    GestureBinding.instance.pointerSignalResolver.register(event, (_) {
+      final current = _zoom.value ?? _fitZoom.value;
+      final next = (current * math.pow(1.1, -event.scrollDelta.dy / 100)).clamp(
+        .25,
+        2.0,
+      );
+      if (next == current) return;
+      final canvas =
+          _canvasKey.currentContext?.findRenderObject() as RenderBox?;
+      if (canvas == null) return;
+      _wheelZoomAnchor = (canvas.globalToLocal(event.position), event.position);
+      _zoom.value = next;
+      if (_wheelZoomPending) return;
+      _wheelZoomPending = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _wheelZoomPending = false;
+        final anchor = _wheelZoomAnchor;
+        _wheelZoomAnchor = null;
+        if (!mounted || anchor == null) return;
+        final updated =
+            _canvasKey.currentContext?.findRenderObject() as RenderBox?;
+        if (updated == null) return;
+        final delta = updated.localToGlobal(anchor.$1) - anchor.$2;
+        void adjust(ScrollController controller, double change) {
+          if (!controller.hasClients) return;
+          final position = controller.position;
+          controller.jumpTo(
+            (position.pixels + change).clamp(
+              position.minScrollExtent,
+              position.maxScrollExtent,
+            ),
+          );
+        }
+
+        adjust(_workspaceVertical, delta.dy);
+        adjust(_workspaceHorizontal, delta.dx);
+      });
+    });
+  }
+
+  Widget _zoomDropdown() => ValueListenableBuilder<double?>(
+    valueListenable: _zoom,
+    builder: (_, zoom, _) => Container(
+      height: 36,
+      width: 126,
+      padding: const EdgeInsets.symmetric(horizontal: 10),
+      decoration: BoxDecoration(
+        border: Border.all(color: AppTheme.dashHairlineOf(context)),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: DropdownButtonHideUnderline(
+        child: DropdownButton<double>(
+          key: const ValueKey('layout-zoom'),
+          value: zoom ?? 0,
+          isExpanded: true,
+          isDense: true,
+          style: TextStyle(
+            fontSize: 13,
+            fontFamily: AppTheme.fontFamily,
+            color: AppTheme.dashTextPrimaryOf(context),
+          ),
+          items: [
+            DropdownMenuItem(value: 0, child: Text('Fit page')),
+            DropdownMenuItem(value: .5, child: Text('50%')),
+            DropdownMenuItem(value: .75, child: Text('75%')),
+            DropdownMenuItem(value: 1, child: Text('100%')),
+            DropdownMenuItem(value: 1.25, child: Text('125%')),
+            DropdownMenuItem(value: 1.5, child: Text('150%')),
+            if (zoom != null && ![.5, .75, 1, 1.25, 1.5].contains(zoom))
+              DropdownMenuItem(
+                value: zoom,
+                child: Text('${(zoom * 100).round()}%'),
+              ),
+          ],
+          onChanged: _busy
+              ? null
+              : (value) => _setZoom(value == 0 ? null : value),
+        ),
+      ),
+    ),
+  );
+
+  Widget _zoomSlider(double width) => SizedBox(
+    width: width,
+    height: 36,
+    child: ListenableBuilder(
+      listenable: _zoomChanges,
+      builder: (_, _) => Slider(
+        key: const ValueKey('layout-zoom-slider'),
+        min: .25,
+        max: 2,
+        divisions: 35,
+        value: (_zoom.value ?? _fitZoom.value).clamp(.25, 2),
+        label: '${((_zoom.value ?? _fitZoom.value) * 100).round()}%',
+        semanticFormatterCallback: (value) =>
+            '${(value * 100).round()} percent zoom',
+        onChanged: _busy ? null : _setZoom,
+      ),
+    ),
+  );
 
   Widget _toolbar() => Padding(
     padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -1054,6 +1293,24 @@ class _LocatorPrintLayoutEditorState extends State<LocatorPrintLayoutEditor> {
         runSpacing: 8,
         crossAxisAlignment: WrapCrossAlignment.center,
         children: [
+          IconButton(
+            tooltip: 'Undo (Ctrl+Z)',
+            constraints: const BoxConstraints.tightFor(width: 36, height: 36),
+            onPressed: _busy || _undoStack.isEmpty ? null : _undo,
+            icon: const Icon(Icons.undo, size: 20),
+          ),
+          IconButton(
+            tooltip: 'Redo (Ctrl+Y / Ctrl+Shift+Z)',
+            constraints: const BoxConstraints.tightFor(width: 36, height: 36),
+            onPressed: _busy || _redoStack.isEmpty ? null : _redo,
+            icon: const Icon(Icons.redo, size: 20),
+          ),
+          IconButton(
+            tooltip: 'Delete selected element (Delete)',
+            constraints: const BoxConstraints.tightFor(width: 36, height: 36),
+            onPressed: _busy || _selected == null ? null : _deleteSelected,
+            icon: const Icon(Icons.delete_outline, size: 20),
+          ),
           OutlinedButton.icon(
             onPressed: _busy ? null : () => _add('text'),
             icon: const Icon(Icons.title, size: 18),
@@ -1159,39 +1416,8 @@ class _LocatorPrintLayoutEditorState extends State<LocatorPrintLayoutEditor> {
               ),
             ),
           ),
-          Container(
-            height: 36,
-            width: 126,
-            padding: const EdgeInsets.symmetric(horizontal: 10),
-            decoration: BoxDecoration(
-              border: Border.all(color: AppTheme.dashHairlineOf(context)),
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: DropdownButtonHideUnderline(
-              child: DropdownButton<double>(
-                key: const ValueKey('layout-zoom'),
-                value: _zoom ?? 0,
-                isExpanded: true,
-                isDense: true,
-                style: TextStyle(
-                  fontSize: 13,
-                  fontFamily: AppTheme.fontFamily,
-                  color: AppTheme.dashTextPrimaryOf(context),
-                ),
-                items: const [
-                  DropdownMenuItem(value: 0, child: Text('Fit page')),
-                  DropdownMenuItem(value: .5, child: Text('50%')),
-                  DropdownMenuItem(value: .75, child: Text('75%')),
-                  DropdownMenuItem(value: 1, child: Text('100%')),
-                  DropdownMenuItem(value: 1.25, child: Text('125%')),
-                  DropdownMenuItem(value: 1.5, child: Text('150%')),
-                ],
-                onChanged: _busy
-                    ? null
-                    : (value) => _setZoom(value == 0 ? null : value),
-              ),
-            ),
-          ),
+          _zoomDropdown(),
+          _zoomSlider(constraints.maxWidth < 600 ? 120 : 160),
           IconButton(
             tooltip: 'Fit page',
             constraints: const BoxConstraints.tightFor(width: 36, height: 36),
@@ -1240,7 +1466,7 @@ class _LocatorPrintLayoutEditorState extends State<LocatorPrintLayoutEditor> {
     ),
   );
 
-  Widget _sheet(double scale) {
+  Widget _sheet(double scale, Widget page) {
     final rulerColor = AppTheme.dashTextSecondaryOf(context);
     return Column(
       mainAxisSize: MainAxisSize.min,
@@ -1284,7 +1510,22 @@ class _LocatorPrintLayoutEditorState extends State<LocatorPrintLayoutEditor> {
                 ),
               ),
             ),
-            _page(scale),
+            SizedBox(
+              width: _layout.pageWidth * scale,
+              height: _layout.pageHeight * scale,
+              child: OverflowBox(
+                alignment: Alignment.topLeft,
+                minWidth: _layout.pageWidth,
+                maxWidth: _layout.pageWidth,
+                minHeight: _layout.pageHeight,
+                maxHeight: _layout.pageHeight,
+                child: Transform.scale(
+                  scale: scale,
+                  alignment: Alignment.topLeft,
+                  child: page,
+                ),
+              ),
+            ),
           ],
         ),
         const SizedBox(height: 12),
@@ -1309,28 +1550,41 @@ class _LocatorPrintLayoutEditorState extends State<LocatorPrintLayoutEditor> {
               (constraints.maxHeight - 96) / _layout.pageHeight,
             )
             .clamp(.15, 1.2);
-        final scale = _zoom ?? fit;
-        return Scrollbar(
-          controller: _workspaceVertical,
-          thumbVisibility: true,
-          child: SingleChildScrollView(
+        if (_fitZoom.value != fit) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted && _fitZoom.value != fit) _fitZoom.value = fit;
+          });
+        }
+        return ValueListenableBuilder<double?>(
+          valueListenable: _zoom,
+          // Zoom changes the transform, not the page's text and field widgets.
+          child: RepaintBoundary(child: _page(1)),
+          builder: (context, zoom, page) => Scrollbar(
             controller: _workspaceVertical,
-            child: Scrollbar(
-              controller: _workspaceHorizontal,
-              thumbVisibility: true,
-              scrollbarOrientation: ScrollbarOrientation.bottom,
-              child: SingleChildScrollView(
+            thumbVisibility: true,
+            child: SingleChildScrollView(
+              controller: _workspaceVertical,
+              child: Scrollbar(
                 controller: _workspaceHorizontal,
-                scrollDirection: Axis.horizontal,
-                child: ConstrainedBox(
-                  constraints: BoxConstraints(
-                    minWidth: constraints.maxWidth,
-                    minHeight: constraints.maxHeight,
-                  ),
-                  child: Center(
-                    child: Padding(
-                      padding: const EdgeInsets.all(20),
-                      child: _sheet(scale),
+                thumbVisibility: true,
+                scrollbarOrientation: ScrollbarOrientation.bottom,
+                child: SingleChildScrollView(
+                  controller: _workspaceHorizontal,
+                  scrollDirection: Axis.horizontal,
+                  child: Listener(
+                    behavior: HitTestBehavior.opaque,
+                    onPointerSignal: _onCanvasWheel,
+                    child: ConstrainedBox(
+                      constraints: BoxConstraints(
+                        minWidth: constraints.maxWidth,
+                        minHeight: constraints.maxHeight,
+                      ),
+                      child: Center(
+                        child: Padding(
+                          padding: const EdgeInsets.all(20),
+                          child: _sheet(zoom ?? fit, page!),
+                        ),
+                      ),
                     ),
                   ),
                 ),
@@ -1343,164 +1597,186 @@ class _LocatorPrintLayoutEditorState extends State<LocatorPrintLayoutEditor> {
   );
 
   @override
-  Widget build(BuildContext context) => Dialog.fullscreen(
-    backgroundColor: AppTheme.dashPanelOf(context),
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(20, 12, 8, 12),
-          child: Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: AppTheme.primaryNavy.withValues(alpha: .1),
-                  borderRadius: BorderRadius.circular(10),
+  Widget build(BuildContext context) => Focus(
+    focusNode: _editorFocus,
+    autofocus: true,
+    onKeyEvent: _onEditorKey,
+    child: Dialog.fullscreen(
+      backgroundColor: AppTheme.dashPanelOf(context),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 12, 8, 12),
+            child: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: AppTheme.primaryNavy.withValues(alpha: .1),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: const Icon(
+                    Icons.design_services_outlined,
+                    color: AppTheme.primaryNavy,
+                    size: 22,
+                  ),
                 ),
-                child: const Icon(
-                  Icons.design_services_outlined,
-                  color: AppTheme.primaryNavy,
-                  size: 22,
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text(
-                      'Printed form layout',
-                      style: TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.w700,
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'Printed form layout',
+                        style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w700,
+                        ),
                       ),
+                      Text(
+                        widget.requestType.label,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: AppTheme.dashTextSecondaryOf(context),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                IconButton(
+                  tooltip: 'Close',
+                  onPressed: _busy ? null : () => Navigator.of(context).pop(),
+                  icon: const Icon(Icons.close),
+                ),
+              ],
+            ),
+          ),
+          if (_error != null)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20),
+              child: Text(
+                _error!,
+                style: TextStyle(color: Theme.of(context).colorScheme.error),
+              ),
+            ),
+          if (_loadingBackground) const LinearProgressIndicator(),
+          Divider(height: 1, color: AppTheme.dashHairlineOf(context)),
+          _toolbar(),
+          Divider(height: 1, color: AppTheme.dashHairlineOf(context)),
+          Expanded(
+            child: AbsorbPointer(
+              absorbing: _busy,
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  if (constraints.maxWidth < 850) {
+                    return _showSettings ? _controls() : _workspace();
+                  }
+                  return Row(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Expanded(child: _workspace()),
+                      VerticalDivider(
+                        width: 1,
+                        color: AppTheme.dashHairlineOf(context),
+                      ),
+                      SizedBox(width: 340, child: _controls()),
+                    ],
+                  );
+                },
+              ),
+            ),
+          ),
+          Divider(height: 1, color: AppTheme.dashHairlineOf(context)),
+          Padding(
+            padding: const EdgeInsets.all(12),
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final note = Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(
+                      Icons.description_outlined,
+                      size: 16,
+                      color: AppTheme.primaryNavy,
                     ),
+                    const SizedBox(width: 8),
                     Text(
-                      widget.requestType.label,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
+                      '${_layout.elements.length} elements',
                       style: TextStyle(
                         fontSize: 12,
                         color: AppTheme.dashTextSecondaryOf(context),
                       ),
                     ),
+                    const SizedBox(width: 8),
+                    Tooltip(
+                      message:
+                          'Long or unplaced answers continue on another page.',
+                      child: Icon(
+                        Icons.info_outline,
+                        size: 16,
+                        color: AppTheme.dashTextSecondaryOf(context),
+                      ),
+                    ),
                   ],
-                ),
-              ),
-              IconButton(
-                tooltip: 'Close',
-                onPressed: _busy ? null : () => Navigator.of(context).pop(),
-                icon: const Icon(Icons.close),
-              ),
-            ],
-          ),
-        ),
-        if (_error != null)
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 20),
-            child: Text(
-              _error!,
-              style: TextStyle(color: Theme.of(context).colorScheme.error),
-            ),
-          ),
-        if (_loadingBackground) const LinearProgressIndicator(),
-        Divider(height: 1, color: AppTheme.dashHairlineOf(context)),
-        _toolbar(),
-        Divider(height: 1, color: AppTheme.dashHairlineOf(context)),
-        Expanded(
-          child: AbsorbPointer(
-            absorbing: _busy,
-            child: LayoutBuilder(
-              builder: (context, constraints) {
-                if (constraints.maxWidth < 850) {
-                  return _showSettings ? _controls() : _workspace();
+                );
+                final actions = Wrap(
+                  alignment: WrapAlignment.end,
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    OutlinedButton.icon(
+                      onPressed: _busy || _loadingBackground ? null : _preview,
+                      icon: const Icon(Icons.visibility_outlined, size: 18),
+                      label: const Text('Preview layout'),
+                    ),
+                    FilledButton.icon(
+                      onPressed: _busy || _loadingBackground
+                          ? null
+                          : _useLayout,
+                      icon: const Icon(Icons.check, size: 18),
+                      label: const Text('Use layout'),
+                    ),
+                  ],
+                );
+                if (constraints.maxWidth < 600) {
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Align(alignment: Alignment.centerRight, child: actions),
+                    ],
+                  );
                 }
                 return Row(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    Expanded(child: _workspace()),
-                    VerticalDivider(
-                      width: 1,
-                      color: AppTheme.dashHairlineOf(context),
-                    ),
-                    SizedBox(width: 340, child: _controls()),
+                    Expanded(child: note),
+                    actions,
                   ],
                 );
               },
             ),
           ),
-        ),
-        Divider(height: 1, color: AppTheme.dashHairlineOf(context)),
-        Padding(
-          padding: const EdgeInsets.all(12),
-          child: LayoutBuilder(
-            builder: (context, constraints) {
-              final note = Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const Icon(
-                    Icons.description_outlined,
-                    size: 16,
-                    color: AppTheme.primaryNavy,
-                  ),
-                  const SizedBox(width: 8),
-                  Text(
-                    '${_layout.elements.length} elements',
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: AppTheme.dashTextSecondaryOf(context),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Tooltip(
-                    message:
-                        'Long or unplaced answers continue on another page.',
-                    child: Icon(
-                      Icons.info_outline,
-                      size: 16,
-                      color: AppTheme.dashTextSecondaryOf(context),
-                    ),
-                  ),
-                ],
-              );
-              final actions = Wrap(
-                alignment: WrapAlignment.end,
-                spacing: 8,
-                runSpacing: 8,
-                children: [
-                  OutlinedButton.icon(
-                    onPressed: _busy || _loadingBackground ? null : _preview,
-                    icon: const Icon(Icons.visibility_outlined, size: 18),
-                    label: const Text('Preview layout'),
-                  ),
-                  FilledButton.icon(
-                    onPressed: _busy || _loadingBackground ? null : _useLayout,
-                    icon: const Icon(Icons.check, size: 18),
-                    label: const Text('Use layout'),
-                  ),
-                ],
-              );
-              if (constraints.maxWidth < 600) {
-                return Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    Align(alignment: Alignment.centerRight, child: actions),
-                  ],
-                );
-              }
-              return Row(
-                children: [
-                  Expanded(child: note),
-                  actions,
-                ],
-              );
-            },
-          ),
-        ),
-      ],
+        ],
+      ),
     ),
   );
+}
+
+class _LayoutEditorSnapshot {
+  const _LayoutEditorSnapshot({
+    required this.layout,
+    required this.fields,
+    required this.fieldsChanged,
+    required this.selectedId,
+    required this.customCaptions,
+  });
+  final LocatorPrintLayout layout;
+  final List<LeaveCustomFieldDefinition> fields;
+  final bool fieldsChanged;
+  final String? selectedId;
+  final Set<String> customCaptions;
 }
 
 class _LayoutRulerPainter extends CustomPainter {
@@ -1581,8 +1857,7 @@ class _LayoutGridPainter extends CustomPainter {
       oldDelegate.scale != scale;
 }
 
-// Pointer movement only updates this element's position. The editor model and
-// property inputs are synchronized once the drag ends (including cancellation).
+// Gestures repaint this element locally; model/history updates happen on release.
 class _DraggableLayoutElement extends StatefulWidget {
   const _DraggableLayoutElement({
     super.key,
@@ -1591,75 +1866,229 @@ class _DraggableLayoutElement extends StatefulWidget {
     required this.pageSize,
     required this.margins,
     required this.enabled,
+    required this.selected,
+    required this.zoomChanges,
+    required this.displayZoom,
     required this.onSelect,
     required this.onMoved,
+    required this.onGestureChanged,
     required this.child,
+    this.fontFamily,
   });
-
   final LocatorPrintElement item;
   final double scale;
   final Size pageSize;
   final PrintLayoutMargins margins;
-  final bool enabled;
+  final bool enabled, selected;
+  final Listenable zoomChanges;
+  final double Function() displayZoom;
+  final String? fontFamily;
   final VoidCallback onSelect;
   final ValueChanged<LocatorPrintElement> onMoved;
+  final ValueChanged<bool> onGestureChanged;
   final Widget child;
-
   @override
   State<_DraggableLayoutElement> createState() =>
       _DraggableLayoutElementState();
 }
 
 class _DraggableLayoutElementState extends State<_DraggableLayoutElement> {
-  late final ValueNotifier<Offset> _position;
+  late final ValueNotifier<Rect> _geometry;
   bool _dragging = false;
-
+  String? _resizeHandle;
+  Rect? _resizeOrigin;
+  Rect get _modelRect => Rect.fromLTWH(
+    widget.item.x,
+    widget.item.y,
+    widget.item.width,
+    widget.item.height,
+  );
   @override
   void initState() {
     super.initState();
-    _position = ValueNotifier(Offset(widget.item.x, widget.item.y));
+    _geometry = ValueNotifier(_modelRect);
   }
 
   @override
   void didUpdateWidget(_DraggableLayoutElement oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.item.x != widget.item.x ||
-        oldWidget.item.y != widget.item.y) {
-      _position.value = Offset(widget.item.x, widget.item.y);
+        oldWidget.item.y != widget.item.y ||
+        oldWidget.item.width != widget.item.width ||
+        oldWidget.item.height != widget.item.height) {
+      _geometry.value = _modelRect;
     }
   }
 
   @override
   void dispose() {
-    _position.dispose();
+    _geometry.dispose();
     super.dispose();
   }
 
+  double get _minimumWidth => switch (widget.item.kind) {
+    'signature' => 100,
+    'table' =>
+      20 *
+          widget.item.columnWidths.fold(0.0, (a, b) => a + b) /
+          widget.item.columnWidths.reduce(math.min),
+    _ => 20,
+  };
+  double get _minimumHeight {
+    final item = widget.item;
+    if (item.kind == 'signature') {
+      final minimum = item.signatureStyle == 'csc'
+          ? (item.source == 'applicant' ? 18.0 : 32.0)
+          : 60.0;
+      return item.fontFamily != null || widget.fontFamily != null
+          ? math.max(minimum, item.fontSize * 3.5 + 12)
+          : minimum;
+    }
+    return switch (item.kind) {
+      'field' => 20,
+      'text' => 12,
+      'table' => item.cells.length * (item.fontSize * 1.5 + 8),
+      _ => 2,
+    };
+  }
+
   void _move(DragUpdateDetails details) {
-    final next = _position.value + details.delta / widget.scale;
-    _position.value = Offset(
+    final rect = _geometry.value;
+    final next = rect.topLeft + details.delta / widget.scale;
+    _geometry.value = Rect.fromLTWH(
       next.dx.clamp(
         widget.margins.left,
-        widget.pageSize.width - widget.margins.right - widget.item.width,
+        widget.pageSize.width - widget.margins.right - rect.width,
       ),
       next.dy.clamp(
         widget.margins.top,
-        widget.pageSize.height - widget.margins.bottom - widget.item.height,
+        widget.pageSize.height - widget.margins.bottom - rect.height,
+      ),
+      rect.width,
+      rect.height,
+    );
+  }
+
+  void _resize(DragUpdateDetails details) {
+    final handle = _resizeHandle!;
+    final rect = _geometry.value;
+    final delta = details.delta / widget.scale;
+    var left = rect.left,
+        right = rect.right,
+        top = rect.top,
+        bottom = rect.bottom;
+    if (handle.contains('w')) {
+      left = (left + delta.dx).clamp(
+        widget.margins.left,
+        right - _minimumWidth,
+      );
+    }
+    if (handle.contains('e')) {
+      right = (right + delta.dx).clamp(
+        left + _minimumWidth,
+        widget.pageSize.width - widget.margins.right,
+      );
+    }
+    if (handle.contains('n')) {
+      top = (top + delta.dy).clamp(widget.margins.top, bottom - _minimumHeight);
+    }
+    if (handle.contains('s')) {
+      bottom = (bottom + delta.dy).clamp(
+        top + _minimumHeight,
+        widget.pageSize.height - widget.margins.bottom,
+      );
+    }
+    _geometry.value = Rect.fromLTRB(left, top, right, bottom);
+  }
+
+  void _finishGesture() {
+    if (!_dragging) return;
+    _dragging = false;
+    _resizeHandle = null;
+    widget.onGestureChanged(false);
+    final rect = _geometry.value;
+    widget.onMoved(
+      widget.item.copyWith(
+        x: rect.left,
+        y: rect.top,
+        width: rect.width,
+        height: rect.height,
       ),
     );
   }
 
-  void _finishDrag() {
-    if (!_dragging) return;
+  void _cancelResize() {
+    if (!_dragging || _resizeOrigin == null) return;
+    _geometry.value = _resizeOrigin!;
     _dragging = false;
-    widget.onMoved(
-      widget.item.copyWith(x: _position.value.dx, y: _position.value.dy),
+    _resizeHandle = null;
+    widget.onGestureChanged(false);
+  }
+
+  Widget _handle(String direction, Rect rect) {
+    final hitSize = 14.0 / widget.displayZoom();
+    final x = direction.contains('w')
+        ? 0.0
+        : direction.contains('e')
+        ? rect.width * widget.scale - hitSize
+        : (rect.width * widget.scale - hitSize) / 2;
+    final y = direction.contains('n')
+        ? 0.0
+        : direction.contains('s')
+        ? rect.height * widget.scale - hitSize
+        : (rect.height * widget.scale - hitSize) / 2;
+    return Positioned(
+      left: x,
+      top: y,
+      width: hitSize,
+      height: hitSize,
+      child: MouseRegion(
+        cursor: switch (direction) {
+          'nw' || 'se' => SystemMouseCursors.resizeUpLeftDownRight,
+          'ne' || 'sw' => SystemMouseCursors.resizeUpRightDownLeft,
+          'n' || 's' => SystemMouseCursors.resizeUpDown,
+          _ => SystemMouseCursors.resizeLeftRight,
+        },
+        child: Listener(
+          onPointerCancel: (_) => _cancelResize(),
+          child: GestureDetector(
+            key: ValueKey('layout-resize-${widget.item.id}-$direction'),
+            behavior: HitTestBehavior.opaque,
+            dragStartBehavior: DragStartBehavior.down,
+            onPanStart: widget.enabled
+                ? (_) {
+                    _dragging = true;
+                    _resizeHandle = direction;
+                    _resizeOrigin = _geometry.value;
+                    widget.onGestureChanged(true);
+                    widget.onSelect();
+                  }
+                : null,
+            onPanUpdate: widget.enabled ? _resize : null,
+            onPanEnd: widget.enabled ? (_) => _finishGesture() : null,
+            onPanCancel: widget.enabled ? _cancelResize : null,
+            child: Center(
+              child: Container(
+                width: 7 / widget.displayZoom(),
+                height: 7 / widget.displayZoom(),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  border: Border.all(
+                    color: AppTheme.primaryNavy,
+                    width: 1 / widget.displayZoom(),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
     );
   }
 
   @override
-  Widget build(BuildContext context) => ValueListenableBuilder<Offset>(
-    valueListenable: _position,
+  Widget build(BuildContext context) => ValueListenableBuilder<Rect>(
+    valueListenable: _geometry,
     child: MouseRegion(
       cursor: SystemMouseCursors.move,
       child: GestureDetector(
@@ -1670,21 +2099,46 @@ class _DraggableLayoutElementState extends State<_DraggableLayoutElement> {
         onPanStart: widget.enabled
             ? (_) {
                 _dragging = true;
+                widget.onGestureChanged(true);
                 widget.onSelect();
               }
             : null,
         onPanUpdate: widget.enabled ? _move : null,
-        onPanEnd: widget.enabled ? (_) => _finishDrag() : null,
-        onPanCancel: widget.enabled ? _finishDrag : null,
+        onPanEnd: widget.enabled ? (_) => _finishGesture() : null,
+        onPanCancel: widget.enabled ? _finishGesture : null,
         child: RepaintBoundary(child: widget.child),
       ),
     ),
-    builder: (context, position, child) => Positioned(
-      left: position.dx * widget.scale,
-      top: position.dy * widget.scale,
-      width: widget.item.width * widget.scale,
-      height: widget.item.height * widget.scale,
-      child: child!,
+    builder: (context, rect, child) => Positioned(
+      left: rect.left * widget.scale,
+      top: rect.top * widget.scale,
+      width: rect.width * widget.scale,
+      height: rect.height * widget.scale,
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          child!,
+          if (widget.selected)
+            Positioned.fill(
+              child: ListenableBuilder(
+                listenable: widget.zoomChanges,
+                builder: (_, _) => RepaintBoundary(
+                  child: Stack(
+                    children: [
+                      for (final direction
+                          in widget.item.kind == 'line'
+                              ? ['w', 'e']
+                              : rect.height * widget.displayZoom() < 42
+                              ? ['nw', 'ne', 'e', 'se', 'sw', 'w']
+                              : ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'])
+                        _handle(direction, rect),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
     ),
   );
 }

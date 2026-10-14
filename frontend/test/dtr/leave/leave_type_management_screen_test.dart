@@ -655,7 +655,12 @@ void main() {
         await tester.pumpAndSettle();
         await tester.tap(find.text('Design layout'));
         await tester.pumpAndSettle();
+        await tester.tap(find.byTooltip('Insert field'));
+        await tester.pumpAndSettle();
         expect(find.text('Destination'), findsWidgets);
+        await tester.ensureVisible(find.text('Destination').last);
+        await tester.tap(find.text('Destination').last);
+        await tester.pumpAndSettle();
         await tester.tap(find.text('Use layout'));
         await tester.pumpAndSettle();
         rejectPrint = failPrint;

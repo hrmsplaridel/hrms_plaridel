@@ -1,3 +1,8 @@
+import 'dart:math' as math;
+import 'leave_design_capture.dart';
+import 'leave_request_pdf.dart';
+import 'configured_leave_pdf.dart' show buildWellnessLeavePdf;
+import '../models/leave_balance.dart';
 import 'package:flutter/services.dart';
 import 'package:pdf/widgets.dart' as pw;
 import '../models/leave_request.dart';
@@ -9,6 +14,9 @@ import '../../locator/utils/locator_layout_pdf.dart';
 
 const leavePrintFields = <String, String>{
   'employee_name': 'Employee name',
+  'employee_first_name': 'First name',
+  'employee_middle_name': 'Middle name',
+  'employee_last_name': 'Last name',
   'date': 'Date filed',
   'request_type': 'Leave type',
   'office': 'Office / Department',
@@ -54,14 +62,58 @@ const leavePrintSignatures = <String, String>{
   'hr_approver': 'Final signature',
 };
 
-Map<String, String> leaveLayoutFields(LeaveTypeDefinition type) => {
-  ...leavePrintFields,
-  for (final f in type.employeeDetailSchema) 'custom:${f.key}': f.label,
+const _typeDetails = <String, Set<String>>{
+  'vacationLeave': {'location_option', 'location_details'},
+  'mandatoryForcedLeave': {'location_option', 'location_details'},
+  'specialPrivilegeLeave': {'location_option', 'location_details'},
+  'sickLeave': {'sick_leave_nature', 'sick_illness_details'},
+  'maternityLeave': {'maternity_delivery_type', 'expected_delivery_date'},
+  'paternityLeave': {'child_delivery_date'},
+  'rehabilitationPrivilege': {'accident_date'},
+  'specialEmergencyCalamityLeave': {'calamity_date'},
+  'adoptionLeave': {'adoption_parent_role', 'adoption_placement_date'},
+  'tenDayVawcLeave': {'vawc_support_document_type', 'vawc_case_details'},
+  'soloParentLeave': {'solo_parent_id_number', 'solo_parent_id_expiry_date'},
+  'specialLeaveBenefitsForWomen': {'women_illness_details'},
+  'studyLeave': {'study_purpose', 'study_purpose_details'},
+  'others': {'other_purpose', 'other_purpose_details'},
 };
+Map<String, String> leaveLayoutFields(LeaveTypeDefinition type) {
+  final specialized = _typeDetails.values.expand((e) => e).toSet();
+  final allowed = _typeDetails[type.name] ?? const <String>{};
+  return {
+    for (final e in leavePrintFields.entries)
+      if (!specialized.contains(e.key) || allowed.contains(e.key))
+        e.key: e.value,
+    for (final f in type.employeeDetailSchema) 'custom:${f.key}': f.label,
+  };
+}
+
+(String, String) _nameParts(String? name) {
+  final p = (name ?? '')
+      .trim()
+      .split(RegExp(r'\s+'))
+      .where((e) => e.isNotEmpty)
+      .toList();
+  return (
+    p.length > 2 ? p[1] : '',
+    p.length > 2
+        ? p.skip(2).join(' ')
+        : p.length == 2
+        ? p[1]
+        : '',
+  );
+}
+
 String _date(DateTime? d) => d?.toIso8601String().split('T').first ?? '';
 Map<String, dynamic> leaveLayoutForm(LeaveRequest request) => {
   ...request.toJson(),
   'employee_name': request.employeeName ?? '',
+  'employee_first_name':
+      (request.employeeName ?? '').trim().split(RegExp(r'\s+')).firstOrNull ??
+      '',
+  'employee_middle_name': _nameParts(request.employeeName).$1,
+  'employee_last_name': _nameParts(request.employeeName).$2,
   'slip_date': _date(request.dateFiled),
   'request_type_label': request.leaveTypeLabel,
   'office': request.officeDepartment ?? '',
@@ -96,7 +148,13 @@ LeaveRequest leaveLayoutSampleRequest(LeaveTypeDefinition type) => LeaveRequest(
   startDate: DateTime(2026, 10, 14),
   endDate: DateTime(2026, 10, 15),
   workingDaysApplied: 2,
-  leaveType: LeaveType.others,
+  leaveType: LeaveType.values.firstWhere(
+    (e) => e.name == type.name,
+    orElse: () => LeaveType.others,
+  ),
+  customLeaveTypeText: LeaveType.values.any((e) => e.name == type.name)
+      ? null
+      : type.displayName,
   leaveTypeDisplayName: type.displayName.isEmpty
       ? 'Leave Application'
       : type.displayName,
@@ -203,21 +261,127 @@ LocatorPrintLayout leavePrintLayoutDefaults(
   return LocatorPrintLayout(orientation: orientation, elements: elements);
 }
 
+Map<String, String> leaveLayoutSignatures(String? form) => form == 'wellness'
+    ? {
+        'applicant': 'Employee signature',
+        'department_head': 'Department signature',
+        'hr_approver': 'Mayor signature',
+      }
+    : leavePrintSignatures;
+
+Future<({LocatorPrintLayout layout, Uint8List background})>
+importLeaveNativeLayout(
+  LeaveTypeDefinition type,
+  String form, {
+  bool letterhead = false,
+}) async {
+  final capture = LeaveDesignCapture(
+    fields: leaveLayoutFields(type),
+    signatureStyle: form == 'wellness' ? 'standard' : 'csc',
+  );
+  final request = leaveLayoutSampleRequest(type);
+  final doc = form == 'wellness'
+      ? await buildWellnessLeavePdf(
+          request: request,
+          department: 'Human Resources',
+          designCapture: capture,
+        )
+      : await LeaveRequestPdf.buildPdf(
+          request: request,
+          designCapture: capture,
+        );
+  final bytes = await doc.save();
+  final nativeWidth = form == 'wellness' ? 595.28 : 612.0,
+      nativeHeight = form == 'wellness' ? 841.89 : 1008.0;
+  final scale = form == 'csc' && letterhead
+      ? math.min(491.28 / nativeWidth, 611.89 / nativeHeight)
+      : 1.0;
+  final x = form == 'csc' && letterhead
+      ? (595.28 - nativeWidth * scale) / 2
+      : 0.0;
+  final bottom = form == 'csc' && letterhead ? 120.0 : 0.0;
+  final pageHeight = form == 'csc' && letterhead ? 841.89 : nativeHeight;
+  final top = pageHeight - bottom - nativeHeight * scale;
+  final nativeBox = form == 'wellness'
+      ? {'x': 52.0, 'y': 110.0, 'width': 491.28, 'height': 611.89}
+      : {'x': 16.0, 'y': 16.0, 'width': 580.0, 'height': 976.0};
+  final layout = LocatorPrintLayout(
+    paperSize: form == 'csc' && !letterhead ? 'legal' : 'a4',
+    baseForm: form,
+    baseFormBox: {
+      'x': x + nativeBox['x']! * scale,
+      'y': top + nativeBox['y']! * scale,
+      'width': nativeBox['width']! * scale,
+      'height': nativeBox['height']! * scale,
+    },
+    elements: [
+      for (final item in capture.elements.values)
+        item.copyWith(
+          x: x + item.x * scale,
+          y: top + item.y * scale,
+          width: math.max(
+            item.kind == 'signature' ? 100.0 : 20.0,
+            item.width * scale,
+          ),
+          height: math.max(
+            item.kind == 'signature'
+                ? (item.signatureStyle == 'csc'
+                      ? (item.source == 'applicant' ? 18.0 : 32.0)
+                      : 60.0)
+                : 20.0,
+            item.height * scale,
+          ),
+          fontSize: math.max(6.0, item.fontSize * scale),
+        ),
+    ],
+  );
+  final error = layout.validate();
+  if (error != null) throw FormatException(error);
+  return (layout: layout, background: bytes);
+}
+
 Future<Uint8List> buildLeaveLayoutPdf({
   required LocatorPrintLayout layout,
   required LeaveRequest request,
   LocatorFormSignatories signatories = const LocatorFormSignatories(),
+  List<LeaveBalance>? balances,
   LocatorPrintedSignatory certificationOfficer =
       const LocatorPrintedSignatory(),
-}) async => buildLocatorLayoutPdf(
-  layout: layout,
-  form: leaveLayoutForm(request),
-  signatories: signatories,
-  extraSignatories: {'certification_officer': certificationOfficer},
-  regularFont: pw.Font.ttf(
-    await rootBundle.load('assets/fonts/NotoSans-Regular.ttf'),
-  ),
-  strongFont: pw.Font.ttf(
-    await rootBundle.load('assets/fonts/NotoSans-Bold.ttf'),
-  ),
-);
+}) async {
+  pw.Document? nativeDocument;
+  LeaveDesignCapture? capture;
+  if (layout.baseForm != null) {
+    capture = LeaveDesignCapture(
+      fields: leavePrintFields,
+      renderingLayout: layout,
+      signatureStyle: layout.baseForm == 'wellness' ? 'standard' : 'csc',
+    );
+    nativeDocument = layout.baseForm == 'wellness'
+        ? await buildWellnessLeavePdf(
+            request: request,
+            department: request.officeDepartment ?? '',
+            designCapture: capture,
+          )
+        : await LeaveRequestPdf.buildPdf(
+            request: request,
+            balances: balances,
+            designCapture: capture,
+          );
+  }
+  return buildLocatorLayoutPdf(
+    document: nativeDocument,
+    onMainPageWidgets: capture == null
+        ? null
+        : (widgets) => capture!.overlays = widgets,
+    layout: layout,
+    form: leaveLayoutForm(request),
+    signatories: signatories,
+    extraSignatories: {'certification_officer': certificationOfficer},
+    regularFont: pw.Font.ttf(
+      await rootBundle.load('assets/fonts/NotoSans-Regular.ttf'),
+    ),
+    strongFont: pw.Font.ttf(
+      await rootBundle.load('assets/fonts/NotoSans-Bold.ttf'),
+    ),
+  );
+}

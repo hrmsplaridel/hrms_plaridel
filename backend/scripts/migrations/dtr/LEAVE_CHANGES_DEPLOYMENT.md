@@ -86,3 +86,11 @@ In **Leave Types / Printed Form / Design layout**, upload optional A4 letterhead
 Automatic signature captions use the actual signer position; custom captions remain literal. The employee, department reviewer, certification officer and approving authority use the existing verified signatory flow. Manual Mayor routes print the Mayor's name and title with a blank signature area. Long or unplaced additional answers continue on another page.
 
 To restore the standard template for future filings, select **Standard CSC form** or **Wellness Leave form** and save. Existing filed forms keep their version. Wellness remains restricted to JO/COS; custom designs may be selected for other eligible employment types.
+
+### Editing existing forms (2026-10-14)
+
+Existing CSC and Wellness types now open the designer with their current form structure, editable value slots, and original signature sections. Saved custom designs keep their stored placements. The insert menu offers common leave fields, details applicable to the selected type, and that type's additional fields. Wellness offers its three signature sections; CSC includes the certification officer as well.
+
+CSC uses its original Legal page without a background, or the existing scaled A4 placement when letterhead is present. Wellness retains its A4 placement. Printed labels, borders, checkboxes, and the credit table remain part of the original form structure; request values and signatures can be positioned in the editor. Values, balances, and signatories are populated when rendering the actual request. Insert any additional fields needed on the main page; unplaced or long answers continue on another page.
+
+Opening or previewing does not save a version. **Use layout** stages the design; saving creates a custom template version for future filings. No additional migration is needed for these optional JSON layout properties. Deploy the updated API and Flutter build together.
