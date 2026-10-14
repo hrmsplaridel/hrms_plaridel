@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:async';
 import '../locator/designer_field_test_helpers.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
@@ -39,6 +40,9 @@ void main() {
   var rows = <Map<String, dynamic>>[];
   var rejectWrite = false;
   var rejectPrint = false;
+  var rejectRouting = false;
+  final routingById = <String, Map<String, dynamic>>{};
+  Completer<void>? routingGate;
 
   setUpAll(() {
     TestWidgetsFlutterBinding.ensureInitialized();
@@ -51,14 +55,34 @@ void main() {
     rows = [];
     rejectWrite = false;
     rejectPrint = false;
+    rejectRouting = false;
+    routingById.clear();
+    routingGate = null;
     LeaveTypeDefinitionCache.instance.invalidate();
     ApiClient.instance.dio.interceptors.clear();
     ApiClient.instance.dio.interceptors.add(
       InterceptorsWrapper(
-        onRequest: (options, handler) {
+        onRequest: (options, handler) async {
           requests.add(options);
-          if (options.path.startsWith('/api/leave/print/types/') ||
-              options.path.startsWith('/api/leave/routing/types/')) {
+          if (options.path.startsWith('/api/leave/routing/types/')) {
+            if (options.method == 'POST') await routingGate?.future;
+            final id = options.path.split('/').last;
+            if (rejectRouting && options.method == 'POST') {
+              handler.reject(DioException(
+                requestOptions: options,
+                response: Response(requestOptions: options, statusCode: 503,
+                  data: {'error': 'Routing service unavailable'}),
+              ));
+            } else {
+              if (options.method == 'POST') {
+                routingById[id] = Map<String, dynamic>.from(options.data as Map);
+              }
+              handler.resolve(Response(requestOptions: options, statusCode: 200,
+                data: routingById[id] ?? {'approval_route': 'hr', 'mayor_employment_types': null}));
+            }
+            return;
+          }
+          if (options.path.startsWith('/api/leave/print/types/')) {
             if (rejectPrint && options.method == 'POST') {
               handler.reject(
                 DioException(
@@ -179,6 +203,157 @@ void main() {
     await tester.enterText(textField('Leave type name'), displayName);
     await tester.pump();
   }
+
+  Future<void> changeToMayor(WidgetTester tester) async {
+    await tester.scrollUntilVisible(stringDropdown('Approval route'), 250,
+      scrollable: formScrollable());
+    await Scrollable.ensureVisible(tester.element(stringDropdown('Approval route')), alignment: .5);
+    await tester.pumpAndSettle();
+    await tester.tap(stringDropdown('Approval route'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Department approval → Manual Mayor signing').last);
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Limit to employment types'));
+    await tester.tap(find.text('Limit to employment types'));
+    await tester.pumpAndSettle();
+  }
+
+  Map<String, dynamic> existingType(String id, {bool system = false}) => {
+    'id': id, 'name': system ? 'vacationLeave' : '${id}Leave',
+    'display_name': system ? 'Vacation Leave' : '$id Leave',
+    'is_system': system, 'is_active': true,
+  };
+
+  for (final system in [false, true]) {
+    testWidgets('overall save persists routing edits for existing type; protected=$system', (tester) async {
+      rows = [existingType('existing', system: system)];
+      await mount(tester);
+      await changeToMayor(tester);
+      await tester.tap(find.text(system ? 'Save Eligibility' : 'Save Changes'));
+      await tester.pumpAndSettle();
+      final write = requests.singleWhere((r) => r.method == 'PUT');
+      final routingWrites = requests.where((r) => r.method == 'POST' && r.path.startsWith('/api/leave/routing/types/')).toList();
+      expect(routingWrites, hasLength(1), reason: 'Overall save must persist the routing draft');
+      final routing = routingWrites.single;
+      expect(routing.path, '/api/leave/routing/types/existing');
+      expect(routing.data, {'approval_route': 'mayor', 'mayor_employment_types': null});
+      expect(requests.indexOf(write), lessThan(requests.indexOf(routing)));
+      if (system) expect(write.data, {'eligible_employment_types': null});
+      expect(find.text('Leave type updated.'), findsOneWidget);
+    });
+  }
+
+  testWidgets('routing failure reports partial save and preserves routing and print drafts for retry', (tester) async {
+    rows = [existingType('existing')];
+    await mount(tester);
+    await tester.scrollUntilVisible(stringDropdown('Form layout'), 250, scrollable: formScrollable());
+    await Scrollable.ensureVisible(tester.element(stringDropdown('Form layout')), alignment: .5);
+    await tester.pumpAndSettle();
+    await tester.tap(stringDropdown('Form layout'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Wellness Leave form').last);
+    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(stringDropdown('Approval route'), -250, scrollable: formScrollable());
+    await changeToMayor(tester);
+    rejectRouting = true;
+    await tester.tap(find.text('Save Changes'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Leave type updated, but routing could not be saved.'), findsOneWidget);
+    expect(find.textContaining('Routing service unavailable'), findsOneWidget);
+    expect(find.text('Leave type updated.'), findsNothing);
+    expect(requests.where((r) => r.method == 'POST' && r.path.startsWith('/api/leave/print/types/')), isEmpty);
+    expect(tester.widget<DropdownButtonFormField<String>>(stringDropdown('Approval route')).initialValue, 'mayor');
+    rejectRouting = false;
+    ScaffoldMessenger.of(tester.element(find.byType(LeaveTypeManagementScreen))).hideCurrentSnackBar();
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Save Changes'));
+    await tester.pumpAndSettle();
+    final routingWrites = requests.where((r) => r.method == 'POST' && r.path.startsWith('/api/leave/routing/types/')).toList();
+    expect(routingWrites.length, 2);
+    expect(routingWrites.last.data, {'approval_route': 'mayor', 'mayor_employment_types': null});
+    final print = requests.singleWhere((r) => r.method == 'POST' && r.path.startsWith('/api/leave/print/types/'));
+    expect((print.data as FormData).fields.singleWhere((f) => f.key == 'layout').value, 'wellness');
+    expect(find.text('Leave type updated.'), findsOneWidget);
+  });
+
+  testWidgets('failed type update never attempts routing save', (tester) async {
+    rows = [existingType('existing')];
+    await mount(tester);
+    await changeToMayor(tester);
+    rejectWrite = true;
+    await tester.tap(find.text('Save Changes'));
+    await tester.pumpAndSettle();
+    expect(requests.where((r) => r.method == 'POST'), isEmpty);
+    expect(find.text('Leave type key already exists'), findsOneWidget);
+  });
+
+  testWidgets('overall save persists employment restrictions without changing the selected route', (tester) async {
+    rows = [existingType('existing')];
+    routingById['existing'] = {'approval_route': 'mayor', 'mayor_employment_types': ['permanent']};
+    await mount(tester);
+    await tester.scrollUntilVisible(find.text('Permanent selected'), 250, scrollable: formScrollable());
+    await Scrollable.ensureVisible(tester.element(find.text('Permanent selected')), alignment: .5);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Permanent selected'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Casual'));
+    await tester.tap(find.text('Apply'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Save Changes'));
+    await tester.pumpAndSettle();
+    final routing = requests.singleWhere((r) => r.method == 'POST' && r.path.startsWith('/api/leave/routing/types/'));
+    expect(routing.data, {'approval_route': 'mayor', 'mayor_employment_types': ['permanent', 'casual']});
+  });
+
+  testWidgets('unchanged routing is not overwritten when saving another type', (tester) async {
+    rows = [existingType('first'), existingType('second')];
+    routingById['second'] = {'approval_route': 'mayor', 'mayor_employment_types': ['permanent']};
+    await mount(tester);
+    await changeToMayor(tester);
+    await tester.tap(find.text('second Leave').first);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Save Changes'));
+    await tester.pumpAndSettle();
+    expect(requests.singleWhere((r) => r.method == 'PUT').path, '/api/leave/types/second');
+    expect(requests.where((r) => r.method == 'POST'), isEmpty);
+    expect(routingById['second'], {'approval_route': 'mayor', 'mayor_employment_types': ['permanent']});
+  });
+
+  testWidgets('standalone routing save clears the pending overall routing save', (tester) async {
+    rows = [existingType('existing')];
+    await mount(tester);
+    await changeToMayor(tester);
+    await tester.ensureVisible(find.text('Save routing'));
+    await tester.tap(find.text('Save routing'));
+    await tester.pumpAndSettle();
+    ScaffoldMessenger.of(tester.element(find.byType(LeaveTypeManagementScreen))).hideCurrentSnackBar();
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Save Changes'));
+    await tester.pumpAndSettle();
+    expect(requests.where((r) => r.method == 'POST' && r.path.startsWith('/api/leave/routing/types/')).length, 1);
+  });
+
+  testWidgets('overall save blocks routing edits, duplicate saves and switching types until complete', (tester) async {
+    rows = [existingType('first'), existingType('second')];
+    await mount(tester);
+    await changeToMayor(tester);
+    routingGate = Completer<void>();
+    await tester.tap(find.text('Save Changes'));
+    // Do not settle an intentionally pending request and its progress indicator.
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(tester.widget<DropdownButtonFormField<String>>(stringDropdown('Approval route')).onChanged, isNull);
+    final saveRouting = tester.widget<FilledButton>(find.widgetWithText(FilledButton, 'Save routing'));
+    expect(saveRouting.onPressed, isNull);
+    await tester.tap(find.text('second Leave').first);
+    await tester.pump();
+    expect(tester.widget<DropdownButtonFormField<String>>(stringDropdown('Approval route')).initialValue, 'mayor');
+    expect(requests.where((r) => r.method == 'PUT').length, 1);
+    expect(requests.where((r) => r.method == 'POST').length, 1);
+    routingGate!.complete();
+    await tester.pumpAndSettle();
+    expect(find.text('Leave type updated.'), findsOneWidget);
+  });
 
   for (final access in ['both', 'admin', 'employee']) {
     final adminOnly = access == 'admin';

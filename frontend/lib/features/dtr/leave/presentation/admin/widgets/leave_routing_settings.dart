@@ -8,6 +8,8 @@ class LeaveRoutingSettings extends StatefulWidget {
     super.key,
     this.leaveTypeId,
     this.onChanged,
+    this.onSaved,
+    this.enabled = true,
     this.allowDirectMayor = false,
     this.initialRoute = 'hr',
     this.initialEmploymentTypes,
@@ -17,6 +19,8 @@ class LeaveRoutingSettings extends StatefulWidget {
   final List<String>? initialEmploymentTypes;
   final String? leaveTypeId;
   final ValueChanged<Map<String, dynamic>>? onChanged;
+  final VoidCallback? onSaved;
+  final bool enabled;
   @override
   State<LeaveRoutingSettings> createState() => _State();
 }
@@ -26,6 +30,7 @@ class _State extends State<LeaveRoutingSettings> {
   List<String>? types;
   bool busy = false;
   String? error;
+  bool get _blocked => busy || !widget.enabled;
   @override
   void initState() {
     super.initState();
@@ -59,13 +64,18 @@ class _State extends State<LeaveRoutingSettings> {
   }
 
   Future<void> _save() async {
-    setState(() => busy = true);
+    if (_blocked) return;
+    setState(() {
+      busy = true;
+      error = null;
+    });
     try {
       await ApiClient.instance.post(
         '/api/leave/routing/types/${widget.leaveTypeId}',
         data: {'approval_route': route, 'mayor_employment_types': types},
       );
       if (mounted) {
+        widget.onSaved?.call();
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('Routing saved for future submissions.'),
@@ -115,7 +125,7 @@ class _State extends State<LeaveRoutingSettings> {
               child: Text('Direct Mayor approval'),
             ),
         ],
-        onChanged: busy
+        onChanged: _blocked
             ? null
             : (v) {
                 setState(() {
@@ -134,7 +144,7 @@ class _State extends State<LeaveRoutingSettings> {
             contentPadding: EdgeInsets.zero,
             title: const Text('Limit to employment types'),
             value: types != null,
-            onChanged: busy
+            onChanged: _blocked
                 ? null
                 : (v) {
                     setState(
@@ -148,7 +158,7 @@ class _State extends State<LeaveRoutingSettings> {
         ),
         if (types != null)
           InkWell(
-            onTap: busy ? null : _selectTypes,
+            onTap: _blocked ? null : _selectTypes,
             child: InputDecorator(
               decoration: const InputDecoration(
                 labelText: 'Employment types',
@@ -174,16 +184,15 @@ class _State extends State<LeaveRoutingSettings> {
           child: Align(
             alignment: Alignment.centerRight,
             child: FilledButton(
-              onPressed: busy ? _disabled : () => _save(),
+              onPressed: _blocked ? null : () => _save(),
               child: const Text('Save routing'),
             ),
           ),
         ),
       if (error != null)
-        TextButton(onPressed: _load, child: const Text('Retry')),
+        TextButton(onPressed: _blocked ? null : _load, child: const Text('Retry')),
     ],
   );
-  VoidCallback? get _disabled => null;
 
   String get _selectionLabel => types!.isEmpty
       ? 'Select employment types'

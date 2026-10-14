@@ -45,6 +45,7 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
     'approval_route': 'hr',
     'mayor_employment_types': null,
   };
+  Map<String, dynamic>? _pendingRouting;
   bool _isActive = true;
   bool _employeeCanFile = true;
   bool _adminOnly = false;
@@ -160,6 +161,7 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
     }
     _printDraftEpoch++;
     _selected = item;
+    _pendingRouting = null;
     _nameController.text = item.name;
     _displayNameController.text = item.displayName;
     _descriptionController.text = item.description ?? '';
@@ -216,6 +218,7 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
   void _newCustom() {
     setState(() {
       _selected = null;
+      _pendingRouting = null;
       _creationPrint = const LeavePrintDraft();
       _pendingPrintTypeId = null;
       _printDraftEpoch++;
@@ -268,6 +271,7 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
   }
 
   Future<void> _save() async {
+    if (_saving) return;
     if (!_formKey.currentState!.validate()) return;
     if (_eligibleEmploymentTypes?.isEmpty == true) {
       _showMessage('Select at least one eligible employment type.');
@@ -318,6 +322,29 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
         );
         final body = res.data;
         if (body != null) saved = LeaveTypeDefinition.fromJson(body);
+        final routing = _pendingRouting;
+        if (routing != null) {
+          try {
+            await ApiClient.instance.post(
+              '/api/leave/routing/types/${selected.id}',
+              data: routing,
+            );
+            _pendingRouting = null;
+          } catch (e) {
+            // The ordinary settings are already saved. Keep routing and print
+            // drafts intact so an overall save can safely retry the remaining work.
+            LeaveTypeDefinitionCache.instance.invalidate();
+            if (!mounted) return;
+            final message = e is DioException ? _messageFromDio(e) : '$e';
+            final saveLabel = selected.isSystem
+                ? 'Save Eligibility'
+                : 'Save Changes';
+            _showMessage(
+              'Leave type updated, but routing could not be saved. $message Retry using $saveLabel or Save routing.${_creationPrint.hasChanges ? ' Print changes are still unsaved.' : ''}',
+            );
+            return;
+          }
+        }
         if (_creationPrint.hasChanges) {
           try {
             await _creationPrint.save(selected.id!);
@@ -692,7 +719,9 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
                       return _LeaveTypeListTile(
                         item: item,
                         selected: selected,
-                        onTap: () => setState(() => _select(item)),
+                        onTap: () {
+                          if (!_saving) setState(() => _select(item));
+                        },
                       );
                     },
                   ),
@@ -1103,7 +1132,12 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
                     LeaveRoutingSettings(
                       key: ValueKey('routing-${selected?.id ?? 'new'}'),
                       leaveTypeId: selected?.id,
-                      onChanged: (value) => _creationRouting = value,
+                      enabled: !_saving,
+                      onChanged: (value) {
+                        _creationRouting = value;
+                        if (selected?.id != null) _pendingRouting = value;
+                      },
+                      onSaved: () => _pendingRouting = null,
                     ),
                   ]),
                   const SizedBox(height: 16),
