@@ -61,13 +61,27 @@ test('invalid layouts roll back before a template version is inserted',async()=>
 });
 test('active Mayor can render their direct-route form and inactive Mayor is denied',async()=>{
   const req={params:{id:'request'},body:{version_id:'saved'},file:{buffer:await pdf()},user:{id:'mayor',role:'mayor'}};
-  const res=await route('/requests/:id/render','post',req,async(sql)=>{
+  const res=await route('/requests/:id/render','post',req,async(sql,params)=>{
     if(sql.includes("= 'mayor'"))return {rows:[{employee_id:'mayor',name:'Mayor'}]};
     assert.match(sql,/\$3='mayor' AND ls.final_review_route='mayor_direct'/);
+    assert.match(sql,/AND \$4::boolean=true/);
+    assert.equal(params[3],true);
     return {rows:[{version_id:'saved',background_pdf:null,print_layout:null}]};
   });
   assert.equal(res.code,200);
   const denied=await route('/requests/:id/render','post',req,async()=>({rows:[]}));assert.equal(denied.code,404);
+});
+test('a noncurrent Mayor can still print their own locator through independent owner access',async()=>{
+  const req={params:{id:'own-request'},body:{},user:{id:'former-mayor',role:'mayor'}};
+  const res=await route('/requests/:id/render','post',req,async(sql,params)=>{
+    if(sql.includes("= 'mayor'"))return {rows:[{employee_id:'current-mayor'}]};
+    assert.equal(params[1],'former-mayor');
+    assert.equal(params[3],false);
+    assert.match(sql,/ls\.employee_id=\$2::uuid/);
+    return {rows:[{version_id:'saved'}]};
+  });
+  assert.equal(res.code,400);
+  assert.equal(res.body.error,'Generated PDF required');
 });
 async function route(path,method,req,query) {
   const restore=withMockedModule('../src/config/db',{pool:{query,connect:async()=>({query,release(){}})}});

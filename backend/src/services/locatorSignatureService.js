@@ -5,6 +5,7 @@ const { resolveFinalLeaveReviewerConfiguration, resolveEligibleFinalReviewers } 
 const { createSignatureAsset } = require('./docutrackerDocumentBuilderService');
 const { recordLocatorWorkflowEvent } = require('./locatorWorkflowHistory');
 const { resolveActiveMayor } = require('./officialSignatoryService');
+const { canReadLocatorAsMayor } = require('./locatorMayorAccess');
 const { todayInHrmsTimezone } = require('../utils/dateRangeParser');
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -101,7 +102,8 @@ async function loadContext(db, user, id, lock = false) {
   const row = result.rows[0];
   if (!row) fail('NOT_FOUND', 'Locator slip not found');
   const owner = row.employee_id === user.id;
-  const hr = ['hr', 'admin'].includes(user.role) || (user.role==='mayor' && row.final_review_route==='mayor_direct');
+  const hr = ['hr', 'admin'].includes(user.role) ||
+    await canReadLocatorAsMayor(db, user, row.final_review_route);
   const reviewer = row.is_reviewer || row.assigned_department_head_id === user.id;
   if (!owner && !hr && !reviewer && row.dept_head_reviewer_id !== user.id) {
     fail('NOT_FOUND', 'Locator slip not found');

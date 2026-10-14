@@ -1,6 +1,7 @@
 const { finalQueueVisibilitySql } = require('../services/approvalStageSeparation');
 const {normalizeLocatorRouting,resolveLocatorRouting,requireLocatorFinalRole}=require('../services/locatorRouting');
 const {resolveActiveMayor}=require('../services/officialSignatoryService');
+const {canReadLocatorAsMayor}=require('../services/locatorMayorAccess');
 const {todayInHrmsTimezone}=require('../utils/dateRangeParser');
 const express = require('express');
 const {normalizeLocatorFieldSchema,locatorDetailValues} = require('../services/locatorCustomFields');
@@ -1991,7 +1992,8 @@ router.get('/:id/history', protect, async (req, res) => {
 
     const normalizedRole = String(req.user?.role || '').trim().toLowerCase();
     const isOwner = String(row.employee_id) === String(userId);
-    const isHrOrAdmin = normalizedRole === 'hr' || normalizedRole === 'admin' || (normalizedRole === 'mayor' && row.final_review_route==='mayor_direct');
+    const isHrOrAdmin = normalizedRole === 'hr' || normalizedRole === 'admin' ||
+      await canReadLocatorAsMayor(client, req.user, row.final_review_route);
     let canReadAsDepartmentHead =
       String(row.assigned_department_head_id || '') === String(userId) ||
       String(row.dept_head_reviewer_id || '') === String(userId) ||
@@ -2070,6 +2072,7 @@ router.get('/:id/attachment', protect, async (req, res) => {
     }
     const access = resolveLocatorAttachmentAccess({
       finalReviewRoute: row.final_review_route,
+      canReadAsMayor: await canReadLocatorAsMayor(pool, req.user, row.final_review_route),
       role,
       userId,
       ownerUserId: row.employee_id,
@@ -2587,8 +2590,7 @@ router.patch('/:id/department-head-return', protect, async (req, res) => {
 router.get('/admin', protect, requireLocatorFinalRole, requireDtrFeatureIfAdmin('locator_allowed'), async (req, res) => {
   try {
     if(req.user?.role==='mayor') {
-      const mayor=await resolveActiveMayor(pool,todayInHrmsTimezone());
-      if(!mayor || String(mayor.employee_id)!==String(req.user.id))return res.status(403).json({error:'Only the active Mayor can review these locators.'});
+      if(!await canReadLocatorAsMayor(pool,req.user,'mayor_direct'))return res.status(403).json({error:'Only the active Mayor can review these locators.'});
     }
     const parsedFilters = parseLocatorAdminFilters(req.query);
     if (!parsedFilters.ok) {

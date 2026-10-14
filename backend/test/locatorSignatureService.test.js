@@ -222,6 +222,30 @@ test('unrelated employees cannot read signatures and unsupported sources are rej
   await assert.rejects(getLocatorSourceSignatures(db, { id: employee }, 'dtr', 'leave_requests', requestId), { code: 'NOT_FOUND' });
 });
 
+for (const currentMayor of [asset, null]) {
+  test(`noncurrent Mayor cannot read direct-route signatures or form content (current=${currentMayor})`, async () => {
+    const db = mockDb({ ...context, final_review_route: 'mayor_direct' });
+    const query = db.query.bind(db);
+    db.query = async (sql, params) => sql.includes("= 'mayor'")
+      ? { rows: currentMayor ? [{ employee_id: currentMayor }] : [] }
+      : query(sql, params);
+    await assert.rejects(getLocatorSourceSignatures(db, { id: backup, role: 'mayor' }, 'dtr', 'locator_slips', requestId), { code: 'NOT_FOUND' });
+    assert.equal(db.calls.some(call => call.sql.includes('FROM docutracker_locator_signatures')), false);
+  });
+}
+
+test('current Mayor reads direct-route signatures while other routes require independent access', async () => {
+  for (const [route, actor, allowed] of [['mayor_direct', backup, true], ['hr', backup, false], ['mayor', backup, false], ['hr', employee, true]]) {
+    const db = mockDb({ ...context, final_review_route: route });
+    const query = db.query.bind(db);
+    db.query = async (sql, params) => sql.includes("= 'mayor'")
+      ? { rows: [{ employee_id: backup }] } : query(sql, params);
+    const read = getLocatorSourceSignatures(db, { id: actor, role: 'mayor' }, 'dtr', 'locator_slips', requestId);
+    if (allowed) assert.equal((await read).print_form.employee_name, 'Applicant');
+    else await assert.rejects(read, { code: 'NOT_FOUND' });
+  }
+});
+
 test('signing locks the request, checks asset ownership, and audits before commit', async () => {
   const db = mockDb({ ...context, status: 'pending_department_head', assigned_department_head_id: head });
   const result = await signLocatorSourceSlot(db, { id: head, role: 'employee' }, 'dtr', 'locator_slips', requestId, 'department_head', { signature_asset_id: asset });
