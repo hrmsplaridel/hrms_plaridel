@@ -10,6 +10,36 @@ void main() {
   setUp(() => ApiClient.instance.dio.interceptors.clear());
   tearDown(() => ApiClient.instance.dio.interceptors.clear());
 
+  testWidgets('restricted direct Mayor description explains the HR fallback', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      const MaterialApp(
+        home: Scaffold(
+          body: LeaveRoutingSettings(
+            allowDirectMayor: true,
+            initialRoute: 'mayor_direct',
+            initialEmploymentTypes: ['job_order'],
+          ),
+        ),
+      ),
+    );
+    expect(
+      find.text(
+        'Selected types: Mayor approves in the app; department and HR review are skipped. Other types: Department → Final HR.',
+      ),
+      findsOneWidget,
+    );
+    await tester.tap(find.byType(SwitchListTile));
+    await tester.pumpAndSettle();
+    expect(
+      find.text(
+        'Mayor approves in the app for all employment types. Department and HR review are skipped.',
+      ),
+      findsOneWidget,
+    );
+  });
+
   Future<void> mount(WidgetTester tester, {String? typeId = 'type'}) =>
       tester.pumpWidget(
         MaterialApp(

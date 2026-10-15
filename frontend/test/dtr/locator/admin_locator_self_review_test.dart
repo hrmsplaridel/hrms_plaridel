@@ -22,6 +22,90 @@ class _Signatures extends DocuTrackerProvider {
 
 void main() {
   setUpAll(() => ApiClient.instance.init());
+  testWidgets(
+    'direct Mayor rejection identifies the Mayor in details and legacy history',
+    (tester) async {
+      tester.view.physicalSize = const Size(1600, 1200);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      LocatorSlipDataCache.instance.invalidateAll();
+      ApiClient.instance.dio.interceptors.clear();
+      ApiClient.instance.dio.interceptors.add(
+        InterceptorsWrapper(
+          onRequest: (o, h) {
+            dynamic data = <dynamic>[];
+            if (o.uri.path.endsWith('/final-reviewer/me')) {
+              data = {'can_review': true};
+            }
+            if (o.uri.path.endsWith('/admin')) {
+              data = [
+                {
+                  'id': 'mayor-request',
+                  'employee_id': 'other',
+                  'employee_name': 'Test Applicant',
+                  'status': 'rejected_by_hr',
+                  'final_review_route': 'mayor_direct',
+                  'slip_date': '2026-10-15',
+                  'hr_reviewer_name': 'Current Mayor',
+                  'hr_remarks': 'Destination not permitted',
+                  'hr_reviewed_at': '2026-10-15T08:00:00Z',
+                  'am_in': true,
+                },
+              ];
+            }
+            h.resolve(Response(requestOptions: o, statusCode: 200, data: data));
+          },
+        ),
+      );
+      final auth = AuthProvider()
+        ..replaceUser(
+          const AppUser(
+            id: 'reviewer',
+            email: 'reviewer@test.local',
+            role: 'admin',
+          ),
+        );
+      final realtime = AppRealtimeProvider();
+      final signatures = _Signatures();
+      addTearDown(() async {
+        await tester.pumpWidget(const SizedBox.shrink());
+        ApiClient.instance.dio.interceptors.clear();
+        auth.dispose();
+        realtime.dispose();
+        signatures.dispose();
+      });
+      await tester.pumpWidget(
+        MultiProvider(
+          providers: [
+            ChangeNotifierProvider.value(value: auth),
+            ChangeNotifierProvider.value(value: realtime),
+            ChangeNotifierProvider<DocuTrackerProvider>.value(
+              value: signatures,
+            ),
+          ],
+          child: const MaterialApp(
+            home: Scaffold(
+              body: SingleChildScrollView(
+                child: AdminLocatorManagementScreen(),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('Rejected by Mayor'), findsOneWidget);
+      await tester.tap(find.text('Test Applicant').first);
+      await tester.pumpAndSettle();
+      expect(find.text('Mayor Reviewer'), findsOneWidget);
+      expect(find.text('Mayor Remarks'), findsOneWidget);
+      expect(find.text('HR Reviewer'), findsNothing);
+      await tester.tap(find.text('History'));
+      await tester.pumpAndSettle();
+      expect(find.text('Rejected by Mayor'), findsWidgets);
+      expect(find.text('Rejected by HR'), findsNothing);
+    },
+  );
   for (final policy in [
     ('employee', true, false),
     ('admin', true, true),

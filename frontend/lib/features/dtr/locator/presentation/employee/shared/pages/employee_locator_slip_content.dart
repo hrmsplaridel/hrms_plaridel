@@ -27,6 +27,7 @@ import 'package:hrms_plaridel/providers/auth_provider.dart';
 import 'package:hrms_plaridel/core/services/app_realtime_provider.dart';
 import 'package:hrms_plaridel/features/dtr/locator/utils/locator_slip_print.dart';
 import 'package:hrms_plaridel/features/dtr/locator/utils/locator_form_signatories.dart';
+import 'package:hrms_plaridel/features/dtr/locator/utils/locator_workflow_labels.dart';
 import 'package:hrms_plaridel/features/dtr/locator/utils/locator_signature_prompt.dart';
 import 'package:hrms_plaridel/features/dtr/locator/presentation/shared/widgets/locator_signature_section.dart';
 import 'package:hrms_plaridel/features/dtr/locator/utils/open_locator_attachment_io.dart'
@@ -50,7 +51,7 @@ const _locatorApprovalFilterOptions = <RequestFilterOption<String>>[
   RequestFilterOption(value: 'pending', label: 'Pending'),
   RequestFilterOption(value: 'returned', label: 'Returned'),
   RequestFilterOption(value: 'forwarded', label: 'Forwarded to HR'),
-  RequestFilterOption(value: 'approved', label: 'Approved by HR'),
+  RequestFilterOption(value: 'approved', label: 'Approved'),
   RequestFilterOption(value: 'revoked', label: 'Revoked'),
   RequestFilterOption(value: 'rejected', label: 'Rejected'),
   RequestFilterOption(value: 'cancelled', label: 'Cancelled'),
@@ -787,7 +788,7 @@ class EmployeeLocatorSlipContentState extends State<EmployeeLocatorSlipContent>
               ),
               const SizedBox(height: 12),
               EmployeeLocatorMobileStatusPanel(
-                statusLabel: item.status.label,
+                statusLabel: item.displayStatusLabel,
                 statusIcon: _locatorStatusIcon(item.status),
                 statusSubtitle: statusSubtitle,
                 statusBg: statusBg,
@@ -2473,7 +2474,7 @@ class EmployeeLocatorSlipContentState extends State<EmployeeLocatorSlipContent>
       if (signature == null || !_isCurrentAuthSession(userId, authGeneration)) {
         return;
       }
-      await ApiClient.instance.patch<Map<String, dynamic>>(
+      final response = await ApiClient.instance.patch<Map<String, dynamic>>(
         '/api/locator-slips/${item.id}/department-head-approve',
         data: signature.isEmpty ? const {} : {'signature': signature},
       );
@@ -2482,7 +2483,7 @@ class EmployeeLocatorSlipContentState extends State<EmployeeLocatorSlipContent>
       await _loadDepartmentHeadRequests(forceRefresh: true);
       await _loadMyRequests(forceRefresh: true);
       if (!_isCurrentAuthSession(userId, authGeneration)) return;
-      _showLocatorSnack('Approved and sent to HR for final approval.');
+      _showLocatorSnack(locatorDepartmentApprovalMessage(response.data));
     } catch (e) {
       if (!_isCurrentAuthSession(userId, authGeneration)) return;
       setState(
@@ -3745,6 +3746,7 @@ class _LocatorSlipDraft {
     required this.remarks,
     this.additionalDetails = const {},
     this.rawStatus,
+    this.finalReviewRoute,
     this.departmentHeadName,
     this.departmentHeadReviewedAt,
     this.departmentHeadRemarks,
@@ -3776,6 +3778,7 @@ class _LocatorSlipDraft {
   final String remarks;
   final Map<String, dynamic> additionalDetails;
   final String? rawStatus;
+  final String? finalReviewRoute;
   final String? departmentHeadName;
   final DateTime? departmentHeadReviewedAt;
   final String? departmentHeadRemarks;
@@ -3798,6 +3801,12 @@ class _LocatorSlipDraft {
   final String? pendingAttachmentName;
   final _LocatorSlipStatus status;
 
+  String get displayStatusLabel => status == _LocatorSlipStatus.approved
+      ? locatorApprovedStatusLabel(finalReviewRoute)
+      : rawStatus == 'rejected_by_hr'
+      ? locatorFinalRejectionLabel(finalReviewRoute)
+      : status.label;
+
   _LocatorSlipDraft copyWith({
     String? id,
     DateTime? date,
@@ -3806,6 +3815,7 @@ class _LocatorSlipDraft {
     String? office,
     String? remarks,
     String? rawStatus,
+    String? finalReviewRoute,
     String? departmentHeadName,
     DateTime? departmentHeadReviewedAt,
     String? departmentHeadRemarks,
@@ -3836,6 +3846,7 @@ class _LocatorSlipDraft {
       office: office ?? this.office,
       remarks: remarks ?? this.remarks,
       rawStatus: rawStatus ?? this.rawStatus,
+      finalReviewRoute: finalReviewRoute ?? this.finalReviewRoute,
       departmentHeadName: departmentHeadName ?? this.departmentHeadName,
       departmentHeadReviewedAt:
           departmentHeadReviewedAt ?? this.departmentHeadReviewedAt,
@@ -3903,6 +3914,7 @@ class _LocatorSlipDraft {
       ),
       attachmentName: json['attachment_name']?.toString(),
       rawStatus: rawStatus,
+      finalReviewRoute: json['final_review_route']?.toString(),
       departmentHeadName:
           readName([
             'dept_head_reviewer_name',
@@ -4400,14 +4412,16 @@ String _departmentHeadStatusLabel(_LocatorSlipDraft item) {
     case 'pending_hr':
     case 'pending':
       return 'Forwarded to HR';
+    case 'pending_mayor':
+      return 'Pending Mayor';
     case 'returned_for_correction':
       return 'Returned for Correction';
     case 'approved':
-      return 'Approved by HR';
+      return locatorApprovedStatusLabel(item.finalReviewRoute);
     case 'revoked':
       return 'Approval Revoked';
     case 'rejected_by_hr':
-      return 'Rejected by HR';
+      return locatorFinalRejectionLabel(item.finalReviewRoute);
     case 'rejected_by_department_head':
       return 'Rejected';
     case 'cancelled':

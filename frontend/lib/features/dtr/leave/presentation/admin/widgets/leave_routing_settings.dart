@@ -227,7 +227,9 @@ class _State extends State<LeaveRoutingSettings> {
         const SizedBox(height: 8),
         Text(
           route == 'mayor_direct'
-              ? 'Mayor approves in the app. Department and HR review are skipped.'
+              ? types == null
+                    ? 'Mayor approves in the app for all employment types. Department and HR review are skipped.'
+                    : 'Selected types: Mayor approves in the app; department and HR review are skipped. Other types: Department → Final HR.'
               : types == null
               ? 'Department approval for all types; Mayor signs the printed form.'
               : 'Selected types: department approval and manual Mayor signing. Others: Final HR.',

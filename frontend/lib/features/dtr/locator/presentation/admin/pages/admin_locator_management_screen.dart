@@ -22,6 +22,7 @@ import 'package:hrms_plaridel/features/dtr/locator/presentation/admin/widgets/ad
 import 'package:hrms_plaridel/features/dtr/locator/presentation/admin/widgets/admin_locator_filing_dialog.dart';
 import 'package:hrms_plaridel/features/dtr/locator/utils/locator_slip_print.dart';
 import 'package:hrms_plaridel/features/dtr/locator/utils/locator_form_signatories.dart';
+import 'package:hrms_plaridel/features/dtr/locator/utils/locator_workflow_labels.dart';
 import 'package:hrms_plaridel/features/dtr/locator/utils/locator_signature_prompt.dart';
 import 'package:hrms_plaridel/features/dtr/locator/presentation/shared/widgets/locator_signature_section.dart';
 import 'package:hrms_plaridel/features/dtr/locator/utils/open_locator_attachment_io.dart'
@@ -185,7 +186,7 @@ class _AdminLocatorManagementScreenState
         ),
         const SizedBox(height: 8),
         Text(
-          'Manage locator, pass slip, and work-from-home requests from endorsement to HR approval.',
+          'Manage locator, pass slip, and work-from-home requests through their configured approval routes.',
           style: TextStyle(color: _mutedColor(context), fontSize: 14),
         ),
         const SizedBox(height: 16),
@@ -1078,7 +1079,9 @@ class _AdminLocatorManagementScreenState
                                 item.deptHeadReviewerName ?? '—',
                               ),
                               MapEntry(
-                                'HR Reviewer',
+                                item.finalReviewRoute == 'mayor_direct'
+                                    ? 'Mayor Reviewer'
+                                    : 'HR Reviewer',
                                 item.hrReviewerName ?? '—',
                               ),
                             ]),
@@ -1096,7 +1099,9 @@ class _AdminLocatorManagementScreenState
                                 padding: const EdgeInsets.only(top: 12),
                                 child: _locatorDetailField(
                                   dialogContext,
-                                  'HR Remarks',
+                                  item.finalReviewRoute == 'mayor_direct'
+                                      ? 'Mayor Remarks'
+                                      : 'HR Remarks',
                                   item.hrRemarks!,
                                 ),
                               ),
@@ -1723,11 +1728,7 @@ class _AdminLocatorManagementScreenState
         ),
       if (item.status == 'approved' || item.status == 'revoked')
         (
-          title: item.finalReviewRoute == 'mayor_direct'
-              ? 'Approved by Mayor'
-              : item.finalReviewRoute == 'mayor'
-              ? 'Approved for manual Mayor signing'
-              : 'Approved by HR',
+          title: locatorApprovedStatusLabel(item.finalReviewRoute),
           actor: item.finalReviewRoute == 'mayor'
               ? item.deptHeadReviewerName
               : item.hrReviewerName,
@@ -1747,7 +1748,7 @@ class _AdminLocatorManagementScreenState
         ),
       if (item.status == 'rejected_by_hr')
         (
-          title: 'Rejected by HR',
+          title: locatorFinalRejectionLabel(item.finalReviewRoute),
           actor: item.hrReviewerName,
           date: item.hrReviewedAt,
           remarks: item.hrRemarks,
@@ -1755,7 +1756,9 @@ class _AdminLocatorManagementScreenState
         ),
       if (item.status == 'returned_for_correction' && item.hrReviewedAt != null)
         (
-          title: 'Returned by HR',
+          title: item.finalReviewRoute == 'mayor_direct'
+              ? 'Returned by Mayor'
+              : 'Returned by HR',
           actor: item.hrReviewerName,
           date: item.hrReviewedAt,
           remarks: item.hrRemarks,
@@ -2436,7 +2439,7 @@ class _LocatorAdminRecord {
       case 'rejected_by_department_head':
         return 'Rejected by Dept Head';
       case 'rejected_by_hr':
-        return 'Rejected by HR';
+        return locatorFinalRejectionLabel(finalReviewRoute);
       case 'cancelled':
         return 'Cancelled';
     }
