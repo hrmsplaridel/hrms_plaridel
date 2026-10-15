@@ -1348,6 +1348,7 @@ router.post(
   '/admin/corrections',
   protect,
   requireAdminOrHr,
+  requireDtrFeatureIfAdmin('locator_allowed'),
   uploadLocatorAttachmentMw,
   async (req, res) => {
     const reviewerId = req.user?.id;
