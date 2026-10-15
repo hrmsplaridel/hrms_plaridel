@@ -52,6 +52,7 @@ const {
 const {
   createLocatorSubmissionService,
 } = require('../services/locatorSubmissionService');
+const { getLocatorSubmissionAvailability } = require('../services/locatorSubmissionAvailability');
 const {
   currentHrmsDate,
   evaluateEmployeeLocatorDateWindow,
@@ -851,16 +852,14 @@ router.get('/final-reviewer/me', protect, requireLocatorFinalRole, async (req, r
 });
 
 router.get('/submission-availability', protect, async (req, res) => {
+  const userId = req.user?.id;
+  if (!userId) return res.status(401).json({ error: 'Not authenticated' });
+  const date = req.query?.slip_date ?? currentHrmsDate();
+  const dateInfo = typeof date === 'string' ? parseLocatorDateOnly(date) : null;
+  if (!dateInfo) return res.status(400).json({ error: 'Invalid slip_date' });
   try {
-    await assertLeaveSubmissionReviewer(pool, req.user.id, 'locator');
-    res.json({ can_submit: true });
+    res.json(await getLocatorSubmissionAvailability(pool, userId, dateInfo.dateStr));
   } catch (err) {
-    if (err.statusCode === 409) {
-      const mayor = await resolveActiveMayor(pool,todayInHrmsTimezone());
-      const configured = await pool.query("SELECT 1 FROM locator_request_types WHERE is_active=true AND approval_route <> 'hr' LIMIT 1");
-      if (mayor && String(mayor.employee_id)!==String(req.user.id) && configured.rows.length) return res.json({can_submit:true});
-      return res.json({ can_submit: false, reason: err.message });
-    }
     console.error('[locator GET submission-availability]', err);
     res.status(500).json({ error: 'Failed to check locator reviewer availability' });
   }
