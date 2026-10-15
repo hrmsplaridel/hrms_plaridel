@@ -12,4 +12,6 @@ Mayor routes can be restricted to employment types; other employment types follo
 
 Request routing is saved at submission. Later type changes do not reroute existing requests. Returned requests are re-evaluated when the employee corrects and resubmits them.
 
+If the Mayor account is replaced, deactivate the previous Mayor before activating the replacement; the single-active-Mayor rule still applies. For an existing pending direct-Mayor request, the current Mayor's valid signing/approval transaction updates the saved final reviewer and printed Mayor identity together and records a `mayor_reassigned` history event. Approval may also use that Mayor's already saved signature on the current request revision. Missing or invalid signatures do not trigger reassignment. Reads/previews and already approved forms retain their saved identities and signatures. This handover behavior uses the existing schema and requires no additional migration; deploy the updated backend and restart its existing service.
+
 Rollback requires checking for any newly submitted Mayor requests before removing the new columns or restoring the old status constraint. Do not roll back code alone while those requests remain pending.

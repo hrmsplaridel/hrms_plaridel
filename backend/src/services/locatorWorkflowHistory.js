@@ -12,6 +12,7 @@ const LOCATOR_HISTORY_ACTION_TITLES = Object.freeze({
   mayor_approved: 'Approved by Mayor',
   mayor_rejected: 'Rejected by Mayor',
   mayor_returned: 'Returned by Mayor',
+  mayor_reassigned: 'Reassigned to Current Mayor',
   approval_revoked: 'Approval Revoked',
   hr_rejected: 'Rejected by HR',
   attachment_replaced: 'Supporting Attachment Replaced',

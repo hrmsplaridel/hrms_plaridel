@@ -121,7 +121,8 @@ async function loadContext(db, user, id, lock = false) {
     }
   }
   // Also correct older snapshots that printed the applicant as their own
-  // official. Existing Mayor snapshots remain frozen for later printing.
+  // official. Reads keep Mayor snapshots frozen; pending handovers are recorded
+  // explicitly during valid signing/approval, never while previewing a form.
   officials = await substituteApplicantOfficial(db, row, officials);
   officials = await resolveMissingPositionTitles(db, officials, row.slip_date_text);
   const finalReviewers = hr && !owner && PENDING.has(row.status)
@@ -226,6 +227,42 @@ async function signLocatorSourceSlot(pool, user, module, table, id, slot, input)
   return getLocatorSourceSignatures(pool, user, module, table, id);
 }
 
+// Called only after this actor has supplied (or already saved) a valid signature,
+// with the pending request locked by loadContext inside the caller's transaction.
+async function reassignPendingMayor(db, user, context, slot) {
+  if (context.final_review_route !== 'mayor_direct' || slot !== 'hr_approver') return;
+  if (!context.canFinalReview || context.owner ||
+      !['pending', 'pending_hr', 'pending_mayor'].includes(context.status)) {
+    fail('FORBIDDEN', 'Only the current Mayor can sign this pending locator');
+  }
+  // Hold authority until commit: deactivation/role changes must not race signing.
+  const locked = await db.query(
+    `SELECT id FROM users WHERE id = $1::uuid AND role='mayor' AND is_active=true FOR SHARE`, [user.id]
+  );
+  const mayor = locked.rows.length ? await resolveActiveMayor(db, todayInHrmsTimezone()) : null;
+  if (!mayor || String(mayor.employee_id) !== String(user.id)) {
+    fail('FORBIDDEN', 'The current Mayor has changed. Refresh this locator before signing.');
+  }
+  if (String(context.final_reviewer_user_id || '') === String(user.id) &&
+      String(context.print_signatories?.hr_approver?.id || '') === String(user.id)) return;
+
+  const approver = { id: mayor.employee_id, name: mayor.name, position_title: mayor.position_title || 'Municipal Mayor' };
+  const officials = { ...(context.print_signatories || context.officials), hr_approver: approver };
+  await db.query(
+    `UPDATE locator_slips SET final_reviewer_user_id = $2::uuid, print_signatories = $3::jsonb
+     WHERE id = $1::uuid`, [context.id, mayor.employee_id, JSON.stringify(officials)]
+  );
+  await recordLocatorWorkflowEvent(db, { locatorSlipId: context.id, action: 'mayor_reassigned',
+    fromStatus: context.status, toStatus: context.status, actorId: user.id, actorRole: user.role,
+    metadata: { reason: 'current_mayor_handover', revision: context.signature_revision,
+      previous_final_reviewer_user_id: context.final_reviewer_user_id || null,
+      previous_printed_approver: context.print_signatories?.hr_approver || null,
+      new_final_reviewer_user_id: mayor.employee_id, new_printed_approver: approver } });
+  context.final_reviewer_user_id = mayor.employee_id;
+  context.print_signatories = officials;
+  context.officials = { ...context.officials, hr_approver: approver };
+}
+
 // Called inside the submission/decision transaction, before the workflow moves.
 async function persistLocatorSignature(db, user, id, slot, input, { requireInput = false } = {}) {
     if (!Object.hasOwn(LABELS, slot)) fail('NOT_FOUND', 'Signature field not found');
@@ -241,7 +278,10 @@ async function persistLocatorSignature(db, user, id, slot, input, { requireInput
            WHERE locator_slip_id = $1::uuid AND revision = $2 AND slot_key = $3 AND signed_by = $4::uuid`,
           [id, context.signature_revision, slot, user.id]
         );
-        if (existing.rowCount) return;
+        if (existing.rowCount) {
+          await reassignPendingMayor(db, user, context, slot);
+          return;
+        }
       }
       fail('CONFLICT', 'Add your signature before submitting or approving this locator request.');
     }
@@ -256,6 +296,7 @@ async function persistLocatorSignature(db, user, id, slot, input, { requireInput
     } else {
       assetId = (await createSignatureAsset(db, user, input)).id;
     }
+    await reassignPendingMayor(db, user, context, slot);
     // Freeze legacy names when first signed so future configuration cannot relabel ink.
     if (!context.print_signatories) {
       await db.query('UPDATE locator_slips SET print_signatories = $2::jsonb WHERE id = $1::uuid', [id, JSON.stringify(context.officials)]);
