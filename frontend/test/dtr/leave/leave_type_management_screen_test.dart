@@ -733,6 +733,46 @@ void main() {
     expect(find.text('Leave type updated.'), findsOneWidget);
   });
 
+  testWidgets('new type restores its designed layout and background after editing fields above', (tester) async {
+    await mount(tester);
+    await enterRequiredName(tester, 'Wellness Leave');
+    await tester.scrollUntilVisible(find.text('Design layout'), 250, scrollable: formScrollable());
+    await Scrollable.ensureVisible(tester.element(find.text('Design layout')), alignment: .5);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Design layout'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Use layout'));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Upload background'));
+    await tester.tap(find.text('Upload background'));
+    await tester.pumpAndSettle();
+    expect(find.text('Custom designed form'), findsOneWidget);
+    expect(find.text('letterhead.pdf'), findsOneWidget);
+
+    await tester.scrollUntilVisible(textField('Leave type name'), -250, scrollable: formScrollable());
+    await tester.pumpAndSettle();
+    await tester.enterText(textField('Leave type name'), 'Wellness Leave Updated');
+    await tester.tap(stringDropdown('Entitlement basis'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Annual entitlement').last);
+    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(find.text('Preview'), 250, scrollable: formScrollable());
+    await tester.pumpAndSettle();
+    expect(find.text('Custom designed form'), findsOneWidget);
+    expect(find.text('Edit layout'), findsOneWidget);
+    expect(find.text('letterhead.pdf'), findsOneWidget);
+
+    await tester.tap(find.text('Create Leave Type'));
+    await tester.pumpAndSettle();
+    final create = requests.singleWhere((r) => r.method == 'POST' && r.path == '/api/leave/types');
+    expect(create.data['display_name'], 'Wellness Leave Updated');
+    expect(create.data['entitlement_basis'], 'annual');
+    final print = requests.singleWhere((r) => r.method == 'POST' && r.path.startsWith('/api/leave/print/types/')).data as FormData;
+    expect(print.fields.singleWhere((f) => f.key == 'layout').value, 'custom');
+    expect(print.fields.singleWhere((f) => f.key == 'print_layout').value, contains('WELLNESS LEAVE'));
+    expect(print.files.single.value.filename, 'letterhead.pdf');
+  });
+
   for (final failUpload in [false, true]) {
     testWidgets(
       'new type saves a designed leave layout after creation; failure=$failUpload',

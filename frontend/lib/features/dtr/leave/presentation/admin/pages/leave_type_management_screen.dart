@@ -1177,9 +1177,7 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
                           _creationPrint = const LeavePrintDraft();
                         });
                       },
-                      initialDraft:
-                          selected?.id != null &&
-                              selected?.id == _pendingPrintTypeId
+                      initialDraft: _creationPrint.hasChanges
                           ? _creationPrint
                           : null,
                       onChanged: (value) => _creationPrint = value,
