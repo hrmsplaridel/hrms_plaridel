@@ -24,7 +24,7 @@ function key(row) {
 
 /**
  * Role rows seeded by a fresh install: the baseline block plus the release
- * default inserted after the DocuTracker rollup.
+ * default included directly in the standalone schema.
  */
 function initSchemaBaseline() {
   const sql = fs.readFileSync(path.join(SCRIPTS, 'init-schema.sql'), 'utf8');
@@ -32,14 +32,12 @@ function initSchemaBaseline() {
     /WITH baseline\(role_id, document_type, action, granted\) AS \(\s*VALUES([\s\S]*?)\)\s*INSERT INTO docutracker_permissions/
   );
   assert.ok(block, 'init-schema baseline seed block not found');
-  const rollupAt = sql.indexOf('\\ir migrations/docutracker/docutracker-install-all-in-order.sql');
-  assert.ok(rollupAt > 0, 'DocuTracker rollup include not found');
   const releaseSeeds = [
-    ...sql.slice(rollupAt).matchAll(
+    ...sql.matchAll(
       /INSERT INTO docutracker_permissions \(role_id, user_id, document_type, action, granted\)\s*VALUES ([^;]*?)\s*ON CONFLICT/g
     ),
   ].map((match) => match[1]);
-  assert.equal(releaseSeeds.length, 1, 'expected one post-rollup permission seed');
+  assert.equal(releaseSeeds.length, 1, 'expected one default release permission seed');
   const tuple = /\('(\w+)',\s*(?:NULL::uuid,\s*)?'([\w*]+)',\s*'(\w+)',\s*(true|false)\)/g;
   return [block[1], ...releaseSeeds].flatMap((values) =>
     [...values.matchAll(tuple)].map(([, role_id, document_type, action, granted]) => ({
@@ -51,11 +49,12 @@ function initSchemaBaseline() {
   );
 }
 
-test('fresh install seeds release only after the rollup widens the action check', () => {
+test('fresh permission table allows release before seeding its default', () => {
   const sql = fs.readFileSync(path.join(SCRIPTS, 'init-schema.sql'), 'utf8');
-  const rollupAt = sql.indexOf('\\ir migrations/docutracker/docutracker-install-all-in-order.sql');
-  const beforeRollup = sql.slice(0, rollupAt);
-  assert.doesNotMatch(beforeRollup, /'release',\s*true\)/);
+  const table = sql.match(/CREATE TABLE IF NOT EXISTS docutracker_permissions \(([\s\S]*?)\n\);/);
+  assert.ok(table, 'permissions table is defined directly');
+  assert.match(table[1], /CHECK \(action IN \([\s\S]*?'release'/);
+  assert.ok(sql.indexOf(table[0]) < sql.indexOf("VALUES ('hr', NULL::uuid, 'memo', 'release', true)"));
 });
 
 /** In-memory docutracker_permissions table behind the admin service SQL. */

@@ -1,11 +1,13 @@
 -- HRMS Plaridel complete fresh-install schema
 -- Core HR + DTR + L&D + RSP + DocuTracker modules and policies
 -- PostgreSQL
--- Run with psql so the relative include commands at the end are processed:
---   psql -d hrms_plaridel -v ON_ERROR_STOP=1 -f scripts/init-schema.sql
+-- Run this entire file in pgAdmin Query Tool against an empty database, or:
+--   psql -d YOUR_EMPTY_DATABASE -v ON_ERROR_STOP=1 -f scripts/init-schema.sql
 --
--- This is the single entry point for a new database. Existing databases should
--- continue to use the targeted migration scripts under scripts/migrations/.
+-- Fresh databases only. All required definitions are included in this file.
+-- Existing databases use targeted scripts under scripts/migrations/.
+
+BEGIN;
 
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 CREATE EXTENSION IF NOT EXISTS btree_gist;
@@ -73,6 +75,7 @@ CREATE TABLE IF NOT EXISTS users (
 
   biometric_user_id TEXT UNIQUE,
 
+  auth_version INTEGER NOT NULL DEFAULT 0,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
 
@@ -153,6 +156,23 @@ CREATE TABLE IF NOT EXISTS auth_refresh_tokens (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- Password reset assistance requests handled by an administrator.
+CREATE TABLE IF NOT EXISTS password_reset_requests (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'sent', 'closed')),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  sent_at TIMESTAMPTZ,
+  handled_by UUID REFERENCES users(id) ON DELETE SET NULL,
+  closed_at TIMESTAMPTZ,
+  completed_at TIMESTAMPTZ
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS password_reset_requests_open_user
+  ON password_reset_requests(user_id) WHERE status IN ('pending', 'sent');
+CREATE INDEX IF NOT EXISTS password_reset_requests_created
+  ON password_reset_requests(created_at DESC);
+
 -- =========================================
 -- AUTH PASSWORD RESET OTPs (SEMAPHORE SMS)
 -- =========================================
@@ -165,7 +185,9 @@ CREATE TABLE IF NOT EXISTS auth_password_reset_otps (
   consumed_at TIMESTAMPTZ,
   failed_attempts INT NOT NULL DEFAULT 0,
   ip_address INET,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  assistance_request_id UUID,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT auth_password_reset_otps_assistance_request_id_fkey FOREIGN KEY (assistance_request_id) REFERENCES password_reset_requests(id) ON DELETE SET NULL
 );
 
 -- =========================================
@@ -642,10 +664,37 @@ CREATE TABLE IF NOT EXISTS holiday_default_template_items (
 );
 
 -- =========================================
+-- SHARED LEAVE / LOCATOR APPROVAL WORKFLOWS
+-- =========================================
+CREATE TABLE IF NOT EXISTS approval_workflows (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  name TEXT NOT NULL CHECK (length(trim(name)) BETWEEN 1 AND 100),
+  current_version INTEGER NOT NULL DEFAULT 1 CHECK (current_version > 0),
+  is_active BOOLEAN NOT NULL DEFAULT true,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS approval_workflows_name_unique
+  ON approval_workflows (lower(name));
+
+CREATE TABLE IF NOT EXISTS approval_workflow_versions (
+  workflow_id UUID NOT NULL REFERENCES approval_workflows(id),
+  version INTEGER NOT NULL CHECK (version > 0),
+  steps JSONB NOT NULL CHECK (
+    jsonb_typeof(steps) = 'array' AND jsonb_array_length(steps) BETWEEN 1 AND 20
+  ),
+  employment_types TEXT[],
+  created_by UUID REFERENCES users(id),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (workflow_id, version)
+);
+
+-- =========================================
 -- LEAVE TYPES
 -- =========================================
 CREATE TABLE IF NOT EXISTS leave_types (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  approval_workflow_id UUID REFERENCES approval_workflows(id),
   name TEXT NOT NULL UNIQUE,
   display_name TEXT,
   description TEXT,
@@ -838,6 +887,8 @@ CREATE TABLE IF NOT EXISTS leave_requests (
   employee_official_snapshot JSONB NOT NULL DEFAULT '{}'::jsonb,
   -- Field labels/types frozen with the request for reliable historical display.
   employee_detail_schema_snapshot JSONB NOT NULL DEFAULT '[]'::jsonb,
+  workflow_snapshot JSONB,
+  signature_revision INTEGER NOT NULL DEFAULT 1 CHECK (signature_revision > 0),
   status TEXT NOT NULL DEFAULT 'pending'
     CHECK (status IN (
       'draft',
@@ -1223,8 +1274,14 @@ CREATE INDEX IF NOT EXISTS idx_user_push_tokens_user_active
 CREATE TABLE IF NOT EXISTS locator_request_types (
   approval_route TEXT NOT NULL DEFAULT 'hr',
   mayor_employment_types TEXT[],
+  approval_workflow_id UUID REFERENCES approval_workflows(id),
+  employee_detail_schema JSONB NOT NULL DEFAULT '[]'::jsonb,
   filing_access TEXT NOT NULL DEFAULT 'employee',
   auto_approve_admin BOOLEAN NOT NULL DEFAULT false,
+  CONSTRAINT chk_locator_approval_route CHECK (
+    approval_route IN ('hr','mayor','mayor_direct')
+    AND (approval_route = 'hr' OR NOT auto_approve_admin)
+  ),
   CONSTRAINT chk_locator_filing_access CHECK (filing_access IN ('employee','admin','both') AND (NOT auto_approve_admin OR filing_access <> 'employee')),
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   code TEXT NOT NULL
@@ -1279,6 +1336,9 @@ ON CONFLICT (code) DO UPDATE SET
 
 CREATE TABLE IF NOT EXISTS locator_slips (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  workflow_snapshot JSONB,
+  employee_detail_schema_snapshot JSONB NOT NULL DEFAULT '[]'::jsonb,
+  additional_details JSONB NOT NULL DEFAULT '{}'::jsonb,
   employee_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   department_id UUID REFERENCES departments(id) ON DELETE SET NULL,
   assigned_department_head_id UUID REFERENCES users(id) ON DELETE SET NULL,
@@ -1315,6 +1375,7 @@ CREATE TABLE IF NOT EXISTS locator_slips (
       'pending',
       'pending_department_head',
       'pending_hr',
+      'pending_mayor',
       'returned_for_correction',
       'approved',
       'revoked',
@@ -1744,11 +1805,32 @@ CREATE TABLE IF NOT EXISTS audit_logs (
   entity_type TEXT NOT NULL,
   entity_id UUID,
   details TEXT,
+  actor_snapshot JSONB,
+  target_snapshot JSONB,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-\ir migrations/20261004_audit_identity_snapshots.sql
-\ir migrations/20261004_password_reset_assistance.sql
+
+CREATE OR REPLACE FUNCTION capture_audit_identities()
+RETURNS trigger LANGUAGE plpgsql SET search_path FROM CURRENT AS $$
+BEGIN
+  SELECT jsonb_build_object('id', u.id, 'name', u.full_name, 'email', u.email)
+    INTO NEW.actor_snapshot FROM users u WHERE u.id = NEW.user_id;
+  NEW.actor_snapshot := COALESCE(NEW.actor_snapshot,
+    jsonb_build_object('id', NEW.user_id, 'name', NULL, 'email', NULL));
+  NEW.target_snapshot := NULL;
+  IF NEW.entity_type IN ('user', 'system_account', 'employee_account', 'auth') THEN
+    SELECT jsonb_build_object('id', u.id, 'name', u.full_name, 'email', u.email)
+      INTO NEW.target_snapshot FROM users u WHERE u.id = NEW.entity_id;
+    NEW.target_snapshot := COALESCE(NEW.target_snapshot,
+      jsonb_build_object('id', NEW.entity_id, 'name', NULL, 'email', NULL));
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER audit_identity_capture BEFORE INSERT ON audit_logs
+FOR EACH ROW EXECUTE FUNCTION capture_audit_identities();
 
 -- =========================================
 -- L&D — RSP SAVED FORMS
@@ -1778,9 +1860,12 @@ CREATE TABLE IF NOT EXISTS bi_form_entries (
   challenges_coping TEXT,
   compliance_attendance TEXT,
   other_relevant_information TEXT,
+  application_id UUID,
   created_at TIMESTAMPTZ DEFAULT now(),
   updated_at TIMESTAMPTZ DEFAULT now()
 );
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_bi_form_entries_application ON public.bi_form_entries USING btree (application_id) WHERE (application_id IS NOT NULL);
 
 CREATE TABLE IF NOT EXISTS performance_evaluation_entries (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -1901,9 +1986,12 @@ CREATE TABLE IF NOT EXISTS ojt_work_immersion_evaluation_entries (
   key_strengths TEXT,
   key_concerns TEXT,
   interviewer TEXT,
+  application_id UUID,
   created_at TIMESTAMPTZ DEFAULT now(),
   updated_at TIMESTAMPTZ DEFAULT now()
 );
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_ojt_entries_application ON public.ojt_work_immersion_evaluation_entries USING btree (application_id) WHERE (application_id IS NOT NULL);
 
 -- Official print backgrounds uploaded per RSP/L&D form.
 CREATE TABLE IF NOT EXISTS form_print_templates (
@@ -2037,13 +2125,56 @@ CREATE TABLE IF NOT EXISTS recruitment_applications (
   hire_credentials_email_sent_at TIMESTAMPTZ,
   hire_login_username TEXT,
   hire_login_password TEXT,
+  -- HR-issued form before assessment.
+  step2_gate_required BOOLEAN NOT NULL DEFAULT false,
+  required_form_type TEXT,
+  required_form_status TEXT,
+  required_form_entry_id UUID,
+  required_form_assigned_by UUID,
+  required_form_assigned_at TIMESTAMPTZ,
+  required_form_submitted_at TIMESTAMPTZ,
+  required_form_reviewed_by UUID,
+  required_form_reviewed_at TIMESTAMPTZ,
+  required_form_review_comment TEXT,
+  required_form_review_log JSONB NOT NULL DEFAULT '[]'::jsonb,
+  -- Pre-deliberation requirements.
+  step4_gate_required BOOLEAN NOT NULL DEFAULT false,
+  wes_status TEXT,
+  wes_entry_id UUID,
+  wes_assigned_by UUID,
+  wes_assigned_at TIMESTAMPTZ,
+  wes_submitted_at TIMESTAMPTZ,
+  wes_reviewed_by UUID,
+  wes_reviewed_at TIMESTAMPTZ,
+  wes_review_comment TEXT,
+  applicants_profile_entry_id UUID,
+  applicants_profile_status TEXT,
+  applicants_profile_completed_by UUID,
+  applicants_profile_completed_at TIMESTAMPTZ,
+  selection_lineup_entry_id UUID,
+  selection_lineup_status TEXT,
+  selection_lineup_completed_by UUID,
+  selection_lineup_completed_at TIMESTAMPTZ,
+  -- Final hiring preparation.
+  step5_gate_required BOOLEAN NOT NULL DEFAULT false,
+  tat_entry_id UUID,
+  tat_status TEXT,
+  tat_completed_by UUID,
+  tat_completed_at TIMESTAMPTZ,
+  csc_approval_status TEXT,
+  csc_approved_by UUID,
+  csc_approved_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ DEFAULT now(),
-  updated_at TIMESTAMPTZ DEFAULT now()
+  updated_at TIMESTAMPTZ DEFAULT now(),
+  CONSTRAINT recruitment_applications_csc_approval_status_check CHECK (((csc_approval_status IS NULL) OR (csc_approval_status = ANY (ARRAY['waiting'::text, 'approved'::text])))),
+  CONSTRAINT recruitment_applications_lineup_status_check CHECK (((selection_lineup_status IS NULL) OR (selection_lineup_status = ANY (ARRAY['waiting'::text, 'in_progress'::text, 'completed'::text])))),
+  CONSTRAINT recruitment_applications_profile_status_check CHECK (((applicants_profile_status IS NULL) OR (applicants_profile_status = ANY (ARRAY['waiting'::text, 'in_progress'::text, 'completed'::text])))),
+  CONSTRAINT recruitment_applications_required_form_status_check CHECK (((required_form_status IS NULL) OR (required_form_status = ANY (ARRAY['waiting_for_hr_form'::text, 'assigned'::text, 'in_progress'::text, 'submitted_for_review'::text, 'needs_revision'::text, 'resubmitted_for_review'::text, 'approved'::text])))),
+  CONSTRAINT recruitment_applications_required_form_type_check CHECK (((required_form_type IS NULL) OR (required_form_type = ANY (ARRAY['bi'::text, 'ojt'::text])))),
+  CONSTRAINT recruitment_applications_tat_status_check CHECK (((tat_status IS NULL) OR (tat_status = ANY (ARRAY['waiting'::text, 'in_progress'::text, 'completed'::text])))),
+  CONSTRAINT recruitment_applications_wes_status_check CHECK (((wes_status IS NULL) OR (wes_status = ANY (ARRAY['waiting_for_work_experience_sheet'::text, 'assigned'::text, 'in_progress'::text, 'submitted_for_review'::text, 'needs_revision'::text, 'resubmitted_for_review'::text, 'approved'::text]))))
 );
 
--- Existing databases apply this file directly. Fresh installs include it here.
-\ir migrations/20261006_rsp_issued_form_gate.sql
-\ir migrations/20261008_rsp_final_hiring_gate.sql
 
 CREATE TABLE IF NOT EXISTS recruitment_exam_results (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -2102,8 +2233,6 @@ INSERT INTO job_vacancy_announcement (id, has_vacancies, headline, body)
 VALUES ('default', true, NULL, NULL)
 ON CONFLICT (id) DO NOTHING;
 
--- Existing databases apply this file directly. Fresh installs include it here.
-\ir migrations/20261010_vacancy_age_requirements.sql
 
 CREATE TABLE IF NOT EXISTS selection_lineup_entries (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -2115,9 +2244,12 @@ CREATE TABLE IF NOT EXISTS selection_lineup_entries (
   applicants JSONB DEFAULT '[]',
   prepared_by_name TEXT,
   prepared_by_title TEXT,
+  application_id UUID,
   created_at TIMESTAMPTZ DEFAULT now(),
   updated_at TIMESTAMPTZ DEFAULT now()
 );
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_selection_lineup_application ON public.selection_lineup_entries USING btree (application_id) WHERE (application_id IS NOT NULL);
 
 CREATE TABLE IF NOT EXISTS computation_of_points_entries (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -2148,9 +2280,12 @@ CREATE TABLE IF NOT EXISTS work_experience_sheet_entries (
   min_eligibility TEXT,
   job_description_last_work TEXT,
   applicant_name TEXT,
+  application_id UUID,
   created_at TIMESTAMPTZ DEFAULT now(),
   updated_at TIMESTAMPTZ DEFAULT now()
 );
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_work_experience_sheet_application ON public.work_experience_sheet_entries USING btree (application_id) WHERE (application_id IS NOT NULL);
 
 CREATE TABLE IF NOT EXISTS applicants_profile_entries (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -2162,12 +2297,13 @@ CREATE TABLE IF NOT EXISTS applicants_profile_entries (
   applicants JSONB DEFAULT '[]',
   prepared_by TEXT,
   checked_by TEXT,
+  application_id UUID,
   created_at TIMESTAMPTZ DEFAULT now(),
   updated_at TIMESTAMPTZ DEFAULT now()
 );
 
--- Existing databases apply this file directly. Fresh installs include it here.
-\ir migrations/20261007_rsp_pre_deliberation_gate.sql
+CREATE UNIQUE INDEX IF NOT EXISTS uq_applicants_profile_application ON public.applicants_profile_entries USING btree (application_id) WHERE (application_id IS NOT NULL);
+
 
 CREATE TABLE IF NOT EXISTS comparative_assessment_entries (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -2292,7 +2428,7 @@ ON CONFLICT (alias) DO NOTHING;
 
 CREATE TABLE IF NOT EXISTS docutracker_documents (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  document_number TEXT UNIQUE,
+  document_number TEXT NOT NULL UNIQUE,
   document_type TEXT NOT NULL DEFAULT 'memo',
   title TEXT NOT NULL,
   description TEXT,
@@ -2367,11 +2503,14 @@ CREATE TABLE IF NOT EXISTS docutracker_routing_configs (
   CONSTRAINT docutracker_routing_configs_steps_is_array_check_prod_v1
     CHECK (jsonb_typeof(steps) = 'array'),
   CONSTRAINT docutracker_routing_configs_review_deadline_hours_check_prod_v1
-    CHECK (review_deadline_hours > 0)
+    CHECK (review_deadline_hours > 0),
+  CONSTRAINT docutracker_routing_configs_review_deadline_hours_check CHECK ((review_deadline_hours > 0))
 );
 
 CREATE TABLE IF NOT EXISTS docutracker_routing_config_versions (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  shared_workflow_id UUID REFERENCES approval_workflows(id),
+  shared_workflow_version INTEGER,
   document_type TEXT NOT NULL,
   version INT NOT NULL,
   steps JSONB NOT NULL,
@@ -2391,7 +2530,9 @@ CREATE TABLE IF NOT EXISTS docutracker_workflow_steps (
     CHECK (assignee_source IN (
       'specific_users',
       'department_reviewers',
-      'submitter_department_reviewers'
+      'submitter_department_reviewers',
+      'final_hr_reviewers',
+      'active_mayor'
     )),
   label TEXT,
   enabled BOOLEAN NOT NULL DEFAULT true,
@@ -2511,8 +2652,12 @@ CREATE TABLE IF NOT EXISTS docutracker_permissions (
     CHECK (action IN (
       'view', 'create', 'create_draft', 'submit', 'download', 'edit', 'delete',
       'forward', 'approve', 'reject', 'return', 'release'
-    ))
+    )),
+  CONSTRAINT docutracker_permissions_role_fk_prod_v1 FOREIGN KEY (role_id) REFERENCES docutracker_roles(role_id) DEFERRABLE INITIALLY DEFERRED,
+  CONSTRAINT docutracker_permissions_scope_check_prod_v2 CHECK (((user_id IS NOT NULL) <> (role_id IS NOT NULL)))
 );
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_docutracker_permissions_unique ON public.docutracker_permissions USING btree (user_id, document_type, action) WHERE (user_id IS NOT NULL);
 
 CREATE TABLE IF NOT EXISTS docutracker_escalation_configs (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -2527,7 +2672,9 @@ CREATE TABLE IF NOT EXISTS docutracker_escalation_configs (
   CONSTRAINT docutracker_escalation_configs_escalation_delay_minutes_check
     CHECK (escalation_delay_minutes > 0),
   CONSTRAINT docutracker_escalation_configs_max_escalation_level_check
-    CHECK (max_escalation_level >= 1)
+    CHECK (max_escalation_level >= 1),
+  CONSTRAINT docutracker_escalation_configs_escalation_delay_minutes_check_p CHECK ((escalation_delay_minutes > 0)),
+  CONSTRAINT docutracker_escalation_configs_max_escalation_level_check_prod_ CHECK ((max_escalation_level >= 1))
 );
 
 CREATE TABLE IF NOT EXISTS docutracker_document_contents (
@@ -2595,6 +2742,7 @@ CREATE TABLE IF NOT EXISTS docutracker_signature_fields (
 -- Linked DTR leave e-signatures (final slots: applicant / dept head / HR).
 CREATE TABLE IF NOT EXISTS docutracker_leave_signatures (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  revision INTEGER NOT NULL DEFAULT 1 CHECK (revision > 0),
   leave_request_id UUID NOT NULL
     REFERENCES leave_requests(id) ON DELETE CASCADE,
   slot_key TEXT NOT NULL,
@@ -2613,8 +2761,8 @@ CREATE TABLE IF NOT EXISTS docutracker_leave_signatures (
     CHECK (assigned_signer_id = signed_by),
   CONSTRAINT docutracker_leave_signatures_name_check
     CHECK (length(btrim(signer_name_snapshot)) BETWEEN 1 AND 200),
-  CONSTRAINT docutracker_leave_signatures_request_slot_unique
-    UNIQUE (leave_request_id, slot_key)
+  CONSTRAINT docutracker_leave_signatures_request_revision_slot_unique
+    UNIQUE (leave_request_id, revision, slot_key)
 );
 
 CREATE INDEX IF NOT EXISTS idx_docutracker_leave_signatures_signer
@@ -2622,14 +2770,14 @@ CREATE INDEX IF NOT EXISTS idx_docutracker_leave_signatures_signer
 
 CREATE TABLE IF NOT EXISTS docutracker_rsp_source_signatures (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  source_table TEXT NOT NULL CHECK (source_table IN (
+  source_table TEXT NOT NULL CONSTRAINT docutracker_rsp_source_signatures_source_check CHECK (source_table IN (
     'applicants_profile_entries', 'selection_lineup_entries',
     'computation_of_points_entries', 'work_experience_sheet_entries',
     'turn_around_time_entries', 'idp_entries',
     'action_brainstorming_coaching_entries'
   )),
   source_record_id UUID NOT NULL,
-  slot_key TEXT NOT NULL CHECK (slot_key IN (
+  slot_key TEXT NOT NULL CONSTRAINT docutracker_rsp_source_signatures_slot_check CHECK (slot_key IN (
     'prepared_by', 'checked_by', 'applicant', 'noted_by',
     'reviewed_by', 'approved_by', 'certified_by'
   )),
@@ -2862,7 +3010,7 @@ CREATE TABLE IF NOT EXISTS docutracker_official_signatories (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   CONSTRAINT docutracker_official_signatories_role_check
-    CHECK (role_key IN ('leave_credit_certifier', 'dtr_office_hours_verifier', 'dtr_hr_officer')),
+    CHECK (role_key = 'leave_credit_certifier'),
   CONSTRAINT docutracker_official_signatories_period_check
     CHECK (effective_to IS NULL OR effective_to >= effective_from),
   CONSTRAINT docutracker_official_signatories_name_check
@@ -3125,7 +3273,8 @@ RETURNS TRIGGER LANGUAGE plpgsql AS $$
 BEGIN
   NEW.updated_at = now();
   RETURN NEW;
-END $$;
+END;
+$$;
 
 CREATE OR REPLACE FUNCTION docutracker_enforce_step_assignees_invariants()
 RETURNS trigger
@@ -3590,16 +3739,9 @@ FOR EACH ROW
 EXECUTE PROCEDURE set_updated_at();
 
 -- =========================================
--- COMPLETE FRESH-INSTALL COMPONENTS
+-- DEFAULT RELEASE AUTHORITY
 -- =========================================
--- \ir resolves paths relative to this file. Keep the component scripts usable
--- independently for upgrades while making this file the one-command installer.
-\ir migrations/docutracker/docutracker-install-all-in-order.sql
-\ir rsp-storage-attachment-policy.sql
-
--- Default release authority (part of the baseline role policy). Seeded after
--- the DocuTracker rollup: its earlier sections re-create narrower permission
--- action checks that only the release section widens to include 'release'.
+-- HR may release approved memos under the current baseline role policy.
 INSERT INTO docutracker_permissions (role_id, user_id, document_type, action, granted)
 VALUES ('hr', NULL::uuid, 'memo', 'release', true)
 ON CONFLICT (role_id, document_type, action)
@@ -3610,12 +3752,7 @@ DO UPDATE SET
 
 -- =========================================
 -- DOCUTRACKER WORKFLOW VERSIONING TABLES
--- Added 2026-09-22: docutracker_workflows, docutracker_workflow_versions,
--- and docutracker_workflow_step_assignments were applied via targeted
--- migrations but were not yet in the fresh-install path.
--- These depend on docutracker_document_types (created above via
--- docutracker-install-post-production-hardening.sql), docutracker_roles
--- and docutracker_workflow_steps (created inline above).
+-- Normalized document workflow versions and assignees.
 -- =========================================
 
 CREATE TABLE IF NOT EXISTS docutracker_workflows (
@@ -3703,16 +3840,22 @@ BEFORE UPDATE ON docutracker_workflow_step_assignments
 FOR EACH ROW EXECUTE FUNCTION docutracker_set_updated_at();
 
 -- Versioned printed leave forms
-BEGIN;
+
 CREATE TABLE IF NOT EXISTS leave_print_template_versions (
  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
  leave_type_id UUID NOT NULL REFERENCES leave_types(id) ON DELETE RESTRICT,
- layout TEXT NOT NULL DEFAULT 'csc' CHECK(layout IN ('csc','wellness')),
+ layout TEXT NOT NULL DEFAULT 'csc' CHECK(layout IN ('csc','wellness','custom')),
+ print_layout JSONB,
  background_pdf BYTEA,
  background_name TEXT,
  created_by UUID REFERENCES users(id),
  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
- CHECK(background_pdf IS NULL OR octet_length(background_pdf) <= 5242880)
+ CHECK(background_pdf IS NULL OR octet_length(background_pdf) <= 5242880),
+ CONSTRAINT chk_leave_print_layout CHECK (
+  (layout <> 'custom' AND print_layout IS NULL) OR
+  (layout = 'custom' AND print_layout IS NOT NULL
+   AND jsonb_typeof(print_layout) = 'object' AND octet_length(print_layout::text) <= 100000)
+ )
 );
 ALTER TABLE leave_types ADD COLUMN IF NOT EXISTS print_template_version_id UUID REFERENCES leave_print_template_versions(id);
 ALTER TABLE leave_requests ADD COLUMN IF NOT EXISTS print_template_version_id UUID REFERENCES leave_print_template_versions(id);
@@ -3745,17 +3888,16 @@ END; $$ LANGUAGE plpgsql;
 DROP TRIGGER IF EXISTS trg_snapshot_leave_print_template ON leave_requests;
 CREATE TRIGGER trg_snapshot_leave_print_template BEFORE INSERT OR UPDATE OF status,leave_type_id ON leave_requests
  FOR EACH ROW EXECUTE FUNCTION snapshot_leave_print_template();
-COMMIT;
 
 -- Per-leave-type approval routing and request snapshots
-BEGIN;
+
 ALTER TABLE leave_types ADD COLUMN IF NOT EXISTS approval_route TEXT NOT NULL DEFAULT 'hr' CHECK(approval_route IN ('hr','mayor'));
 ALTER TABLE leave_types ADD COLUMN IF NOT EXISTS mayor_employment_types TEXT[];
 ALTER TABLE leave_types DROP CONSTRAINT IF EXISTS chk_leave_mayor_employment_types;
 ALTER TABLE leave_types ADD CONSTRAINT chk_leave_mayor_employment_types CHECK(mayor_employment_types IS NULL OR
  (cardinality(mayor_employment_types)>0 AND array_position(mayor_employment_types,NULL) IS NULL AND
  mayor_employment_types <@ ARRAY['permanent','temporary','casual','contractual','coterminous','job_order','contract_of_service','regular']::text[]));
-ALTER TABLE leave_requests ADD COLUMN IF NOT EXISTS final_review_route TEXT NOT NULL DEFAULT 'hr' CHECK(final_review_route IN ('hr','mayor'));
+ALTER TABLE leave_requests ADD COLUMN IF NOT EXISTS final_review_route TEXT NOT NULL DEFAULT 'hr' CHECK(final_review_route IN ('hr','mayor','mayor_direct'));
 ALTER TABLE leave_requests ADD COLUMN IF NOT EXISTS final_reviewer_user_id UUID REFERENCES users(id);
 ALTER TABLE leave_requests ADD COLUMN IF NOT EXISTS routing_employment_type TEXT;
 ALTER TABLE leave_requests DROP CONSTRAINT IF EXISTS leave_requests_status_check;
@@ -3765,6 +3907,7 @@ ALTER TABLE leave_requests ADD CONSTRAINT leave_requests_status_check CHECK(stat
 CREATE OR REPLACE FUNCTION snapshot_leave_approval_route() RETURNS trigger AS $$
 DECLARE rule leave_types%ROWTYPE; emp_type TEXT; mayor_id UUID; recapture BOOLEAN;
 BEGIN
+ IF NEW.workflow_snapshot IS NOT NULL THEN RETURN NEW; END IF;
  recapture:=TG_OP='INSERT';
  IF TG_OP='UPDATE' THEN recapture:=OLD.status IN ('draft','returned','rejected_by_department_head','rejected_by_hr') AND NEW.status IN ('pending','pending_department_head','pending_hr'); END IF;
  IF recapture THEN
@@ -3810,18 +3953,23 @@ END;$$ LANGUAGE plpgsql;
 -- Mayor workflow. Complete accounting through the department approval API.
 UPDATE leave_requests SET status='pending_department_head'
 WHERE final_review_route='mayor' AND status='pending_mayor';
-COMMIT;
 
 -- Versioned locator letterheads. Existing slips retain the empty/default template.
-BEGIN;
+
 CREATE TABLE IF NOT EXISTS locator_print_template_versions (
  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
  locator_type_id UUID NOT NULL REFERENCES locator_request_types(id) ON DELETE CASCADE,
  background_pdf BYTEA,
  background_name TEXT,
+ print_layout JSONB,
  created_by UUID REFERENCES users(id),
  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
- CHECK(background_pdf IS NULL OR octet_length(background_pdf) <= 5242880)
+ CHECK(background_pdf IS NULL OR octet_length(background_pdf) <= 5242880),
+ CONSTRAINT chk_locator_print_layout CHECK (
+  print_layout IS NULL OR (
+   jsonb_typeof(print_layout) = 'object' AND octet_length(print_layout::text) <= 100000
+  )
+ )
 );
 ALTER TABLE locator_request_types ADD COLUMN IF NOT EXISTS print_template_version_id UUID REFERENCES locator_print_template_versions(id);
 ALTER TABLE locator_slips ADD COLUMN IF NOT EXISTS print_template_version_id UUID REFERENCES locator_print_template_versions(id);
@@ -3854,11 +4002,92 @@ END; $$ LANGUAGE plpgsql;
 DROP TRIGGER IF EXISTS trg_snapshot_locator_print_template ON locator_slips;
 CREATE TRIGGER trg_snapshot_locator_print_template BEFORE INSERT OR UPDATE ON locator_slips
  FOR EACH ROW EXECUTE FUNCTION snapshot_locator_print_template();
+
+CREATE TABLE IF NOT EXISTS approval_workflow_document_types (
+  document_type TEXT PRIMARY KEY REFERENCES docutracker_document_types(document_type),
+  workflow_id UUID NOT NULL REFERENCES approval_workflows(id),
+  workflow_version INTEGER NOT NULL,
+  docutracker_version INTEGER NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  FOREIGN KEY (workflow_id, workflow_version)
+    REFERENCES approval_workflow_versions(workflow_id, version),
+  FOREIGN KEY (document_type, docutracker_version)
+    REFERENCES docutracker_routing_config_versions(document_type, version)
+);
+
+-- Fresh built-in types start with Department -> Final HR.
+INSERT INTO approval_workflows(name)
+ VALUES ('Department - Final HR') ON CONFLICT DO NOTHING;
+INSERT INTO approval_workflow_versions(workflow_id, version, steps)
+ SELECT id, 1, '["department","hr"]'::jsonb
+ FROM approval_workflows WHERE name = 'Department - Final HR'
+ ON CONFLICT DO NOTHING;
+UPDATE leave_types SET approval_workflow_id = (
+ SELECT id FROM approval_workflows WHERE name = 'Department - Final HR'
+) WHERE approval_workflow_id IS NULL;
+UPDATE locator_request_types SET approval_workflow_id = (
+ SELECT id FROM approval_workflows WHERE name = 'Department - Final HR'
+) WHERE approval_workflow_id IS NULL;
+
+-- Signature confirmations belong to the current filed revision.
+CREATE OR REPLACE FUNCTION invalidate_leave_signatures() RETURNS trigger AS $$
+BEGIN
+  NEW.signature_revision := OLD.signature_revision;
+  IF ROW(NEW.leave_type_id, NEW.start_date, NEW.end_date, NEW.number_of_days,
+         NEW.total_days, NEW.reason, NEW.details, NEW.user_id, NEW.employee_id,
+         NEW.attachment_name, NEW.attachment_path, NEW.attachment_mime_type,
+         NEW.attachment_uploaded_at, NEW.employee_official_snapshot,
+         NEW.employee_detail_schema_snapshot, NEW.print_template_version_id,
+         NEW.review_department_id, NEW.assigned_department_head_id,
+         NEW.final_review_route, NEW.final_reviewer_user_id)
+     IS DISTINCT FROM
+     ROW(OLD.leave_type_id, OLD.start_date, OLD.end_date, OLD.number_of_days,
+         OLD.total_days, OLD.reason, OLD.details, OLD.user_id, OLD.employee_id,
+         OLD.attachment_name, OLD.attachment_path, OLD.attachment_mime_type,
+         OLD.attachment_uploaded_at, OLD.employee_official_snapshot,
+         OLD.employee_detail_schema_snapshot, OLD.print_template_version_id,
+         OLD.review_department_id, OLD.assigned_department_head_id,
+         OLD.final_review_route, OLD.final_reviewer_user_id)
+     OR (NEW.status IS DISTINCT FROM OLD.status AND NEW.status IN
+         ('returned', 'rejected', 'rejected_by_department_head', 'rejected_by_hr', 'cancelled'))
+     OR (OLD.status IN ('returned', 'rejected', 'rejected_by_department_head', 'rejected_by_hr')
+         AND NEW.status IN ('pending', 'pending_department_head', 'pending_hr', 'pending_mayor'))
+  THEN
+    NEW.signature_revision := OLD.signature_revision + 1;
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER zz_leave_signature_revision BEFORE UPDATE ON leave_requests
+FOR EACH ROW EXECUTE FUNCTION invalidate_leave_signatures();
+
+-- Recruitment attachment path access policy.
+CREATE OR REPLACE FUNCTION public.rsp_storage_path_allowed(p_path text)
+RETURNS boolean
+LANGUAGE sql
+STABLE
+AS $$
+  SELECT EXISTS (
+    SELECT 1
+    FROM public.recruitment_applications ra
+    WHERE p_path IS NOT NULL
+      AND btrim(p_path) <> ''
+      AND (
+        btrim(p_path) = btrim(COALESCE(ra.attachment_path, ''))
+        OR btrim(p_path) = btrim(COALESCE(ra.doc_application_letter_path, ''))
+        OR btrim(p_path) = btrim(COALESCE(ra.doc_resume_path, ''))
+        OR btrim(p_path) = btrim(COALESCE(ra.doc_tor_path, ''))
+        OR btrim(p_path) = btrim(COALESCE(ra.doc_eligibility_trainings_path, ''))
+        OR btrim(p_path) = btrim(COALESCE(ra.doc_medical_certificate_path, ''))
+        OR btrim(p_path) = btrim(COALESCE(ra.doc_drug_test_path, ''))
+        OR btrim(p_path) = btrim(COALESCE(ra.doc_nbi_clearance_path, ''))
+        OR btrim(p_path) LIKE ra.id::text || '/%'
+      )
+  );
+$$;
+
+COMMENT ON FUNCTION public.rsp_storage_path_allowed(text) IS
+  'True if storage object path belongs to a recruitment application (preview/download via HRMS API).';
+
 COMMIT;
-\ir migrations/dtr/20261013_locator_approval_routing.sql
-\ir migrations/dtr/20261013_locator_custom_fields.sql
-\ir migrations/dtr/20261013_locator_print_layouts.sql
-\ir migrations/dtr/20261013_leave_print_layouts.sql
-\ir migrations/dtr/20261015_leave_signature_revisions.sql
-\ir migrations/dtr/20261015_named_approval_workflows.sql
-\ir migrations/dtr/20261016_shared_workflow_assignments.sql

@@ -85,9 +85,10 @@ createdb hrms_plaridel
 psql -d hrms_plaridel -v ON_ERROR_STOP=1 -f scripts/init-schema.sql
 ```
 
-The initialization script is the single fresh-install entry point and includes
-the DocuTracker schema plus the RSP attachment access policy. Run it with
-`psql` so its relative include commands are processed.
+The initialization script contains the complete fresh-install schema, including
+DocuTracker and the RSP attachment access policy. Run it with `psql`, or open
+`backend/scripts/init-schema.sql` in pgAdmin Query Tool and execute the entire
+file against an empty database. Existing databases use targeted migrations.
 
 Start the API:
 
