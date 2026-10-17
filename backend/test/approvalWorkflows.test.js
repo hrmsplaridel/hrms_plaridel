@@ -59,6 +59,27 @@ test('resubmission uses the original workflow even when the template was edited 
   assert.equal(snapshot.version,1);assert.deepEqual(snapshot.steps,['department']);assert.equal(workflowStatus(snapshot),'pending_department_head');
 });
 
+for(const kind of ['leave','locator'])test(`${kind} always follows its selected workflow despite legacy employment restrictions`,async()=>{
+  const {withMockedModule}=require('./helpers/moduleMocks');
+  const restore=withMockedModule('../src/services/leaveFinalReviewerService',{
+    resolveFinalLeaveReviewerConfiguration:async()=>({reviewers:[{id:'hr',role:'hr'}]}),
+  });
+  try{
+    for(const employmentType of ['permanent','job_order']){
+      const db={query:async(sql)=>{
+        if(sql.includes('FROM approval_workflows'))return {rows:[{id:'selected',name:'Department only',version:1,
+          is_active:true,steps:['department'],employment_types:['job_order']}]};
+        if(sql.startsWith('SELECT employment_type'))return {rows:[{employment_type:employmentType}]};
+        throw Error(`Unexpected query: ${sql}`);
+      }};
+      const snapshot=await prepareWorkflow(db,kind,{approval_workflow_id:'selected'},'applicant',
+        {departmentHeadUserId:'head',reviewerUserIds:['head']});
+      assert.deepEqual(snapshot.steps,['department']);
+      assert.equal(snapshot.version,1);
+    }
+  }finally{restore();}
+});
+
 test('an endorsement cannot leave a later Mayor step assigned to the same approving actor',async()=>{
   const {withMockedModule}=require('./helpers/moduleMocks');
   const {workflowDecision}=require('../src/services/approvalWorkflows');

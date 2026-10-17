@@ -137,15 +137,11 @@ async function resolveWorkflowReviewers(db, kind, row, dependencies = {}) {
 async function prepareWorkflow(db, kind, rule, applicantId, reviewSnapshot) {
   if (!rule?.approval_workflow_id) return null;
   const saved=rule.approval_workflow_snapshot;
-  const workflow = saved ? {...saved,is_active:true} : (await db.query(`SELECT w.id,w.name,w.is_active,v.version,v.steps,v.employment_types
+  const workflow = saved ? {...saved,is_active:true} : (await db.query(`SELECT w.id,w.name,w.is_active,v.version,v.steps
     FROM approval_workflows w JOIN approval_workflow_versions v ON v.workflow_id=w.id AND v.version=w.current_version
     WHERE w.id=$1::uuid`,[rule.approval_workflow_id])).rows[0];
   if (!workflow?.is_active) throw error('The selected approval workflow is inactive or unavailable. Contact HR.',409);
   let steps = workflow.steps;
-  if (!saved && workflow.employment_types) {
-    const profile = (await db.query('SELECT employment_type FROM users WHERE id=$1::uuid',[applicantId])).rows[0];
-    if (!workflow.employment_types.includes(profile?.employment_type)) steps = ['department','hr'];
-  }
   const configuredSteps=[...steps];
   if(rule.authorized_staff_auto_approval && !isShared({steps}) && steps.at(-1)==='hr')steps=['hr'];
   const snapshot = {id:workflow.id,name:workflow.name,version:workflow.version,steps:[...steps],current_step:0,decisions:[]};

@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:hrms_plaridel/core/api/client.dart';
 import 'package:hrms_plaridel/core/api/user_facing_api_error.dart';
-import 'package:hrms_plaridel/features/dtr/management/employees/widgets/employment_type_field.dart';
 import 'approval_workflow_picker.dart';
 import 'package:hrms_plaridel/features/docutracker/models/workflow_step.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/admin/widgets/workflow_step_editor_panel.dart';
@@ -258,9 +257,6 @@ class _WorkflowCard extends StatelessWidget {
     final theme = Theme.of(context);
     final colors = theme.colorScheme;
     final active = workflow['is_active'] == true;
-    final employmentTypes = (workflow['employment_types'] as List? ?? [])
-        .map((type) => employmentTypeLabels[type] ?? type.toString())
-        .join(', ');
     final statusColor = active
         ? theme.brightness == Brightness.dark
               ? const Color(0xFF81C784)
@@ -347,17 +343,6 @@ class _WorkflowCard extends StatelessWidget {
                     approvalStepsLabel(workflow['steps']),
                     style: TextStyle(color: colors.onSurface, height: 1.5),
                   ),
-                  if (employmentTypes.isNotEmpty) ...[
-                    const SizedBox(height: 10),
-                    Text(
-                      'Applies to: $employmentTypes',
-                      style: TextStyle(
-                        color: colors.onSurfaceVariant,
-                        fontSize: 13,
-                        height: 1.5,
-                      ),
-                    ),
-                  ],
                 ],
               ),
             ),
@@ -492,8 +477,6 @@ class _WorkflowEditorState extends State<_WorkflowEditor> {
         'Choose reviewers';
   }
 
-  late List<String>? _employmentTypes =
-      (widget.workflow?['employment_types'] as List?)?.cast<String>().toList();
   late bool _active = widget.workflow?['is_active'] != false;
   bool _saving = false;
   String? _error;
@@ -519,7 +502,6 @@ class _WorkflowEditorState extends State<_WorkflowEditor> {
             ? [for (var i = 0; i < _steps.length; i++) _stepJson(_steps[i], i)]
             : _steps,
         'is_active': _active,
-        'employment_types': _employmentTypes,
         if (widget.workflow != null)
           'current_version': widget.workflow!['current_version'],
       };
@@ -642,49 +624,14 @@ class _WorkflowEditorState extends State<_WorkflowEditor> {
                 ),
               SwitchListTile(
                 contentPadding: EdgeInsets.zero,
-                title: const Text('Limit to employment types'),
-                value: _employmentTypes != null,
-                onChanged: _saving
-                    ? null
-                    : (value) => setState(
-                        () => _employmentTypes = value
-                            ? ['job_order', 'contract_of_service']
-                            : null,
-                      ),
-              ),
-              if (_employmentTypes != null) ...[
-                Wrap(
-                  spacing: 8,
-                  children: employmentTypeLabels.entries
-                      .map(
-                        (entry) => FilterChip(
-                          label: Text(entry.value),
-                          selected: _employmentTypes!.contains(entry.key),
-                          onSelected: _saving
-                              ? null
-                              : (selected) => setState(() {
-                                  if (selected) {
-                                    _employmentTypes!.add(entry.key);
-                                  } else {
-                                    _employmentTypes!.remove(entry.key);
-                                  }
-                                }),
-                        ),
-                      )
-                      .toList(),
-                ),
-                const Text(
-                  'Other employment types follow Department Review → HR Review.',
-                ),
-              ],
-              SwitchListTile(
-                contentPadding: EdgeInsets.zero,
-                title: const Text('Available for filing'),
+                title: const Text('Active workflow'),
                 value: _active,
                 onChanged: _saving ? null : (v) => setState(() => _active = v),
               ),
-              const Text(
-                'Publishing creates a new version for future filings. Existing requests retain their saved version.',
+              Text(
+                widget.workflow == null
+                    ? 'Publishing creates a new version for future filings. Existing requests retain their saved version.'
+                    : 'Updating creates a new version for future filings. Existing requests retain their saved version.',
               ),
               if (_error != null)
                 Text(
@@ -702,7 +649,11 @@ class _WorkflowEditorState extends State<_WorkflowEditor> {
         ),
         FilledButton(
           onPressed: _saving ? null : _publish,
-          child: Text(_saving ? 'Publishing…' : 'Publish workflow'),
+          child: Text(
+            widget.workflow == null
+                ? (_saving ? 'Publishing…' : 'Publish workflow')
+                : (_saving ? 'Updating…' : 'Update workflow'),
+          ),
         ),
       ],
     ),

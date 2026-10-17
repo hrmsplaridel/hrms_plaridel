@@ -28,6 +28,7 @@ void main() {
                         'name': 'Full approval',
                         'current_version': 2,
                         'steps': ['department', 'hr', 'mayor'],
+                        'employment_types': ['job_order'],
                         'is_active': true,
                       },
                       {
@@ -65,31 +66,66 @@ void main() {
       await tester.tap(find.text('Full approval · v2').last);
       await tester.pumpAndSettle();
       expect(selected?['approval_workflow_id'], 'full');
+      expect(find.textContaining('Other employment types:'), findsNothing);
       expect(
         find.text('Department Review → HR Review → Mayor Approval'),
         findsOneWidget,
       );
     },
   );
+  testWidgets('new workflow controls describe workflow activation only', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      const MaterialApp(home: Scaffold(body: ApprovalWorkflowsPanel())),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('New workflow'));
+    await tester.pumpAndSettle();
+    expect(find.text('Active workflow'), findsOneWidget);
+    expect(find.text('Available for filing'), findsNothing);
+    expect(find.text('Limit to employment types'), findsNothing);
+    expect(find.text('Publish workflow'), findsOneWidget);
+  });
   testWidgets(
-    'central editor publishes named ordered steps and preserves concurrency version',
+    'central editor updates named ordered steps and preserves concurrency version',
     (tester) async {
+      tester.view.physicalSize = const Size(1400, 1100);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
       await tester.pumpWidget(
         const MaterialApp(home: Scaffold(body: ApprovalWorkflowsPanel())),
       );
       await tester.pumpAndSettle();
       await tester.tap(find.byTooltip('Edit Full approval'));
       await tester.pumpAndSettle();
+      expect(find.text('Update workflow'), findsOneWidget);
+      expect(find.text('Publish workflow'), findsNothing);
+      expect(find.text('Limit to employment types'), findsNothing);
+      expect(find.text('Available for filing'), findsNothing);
+      expect(find.text('Active workflow'), findsOneWidget);
+      expect(
+        find.text(
+          'Updating creates a new version for future filings. Existing requests retain their saved version.',
+        ),
+        findsOneWidget,
+      );
       await tester.enterText(
         find.widgetWithText(TextFormField, 'Full approval'),
         'Full approval updated',
       );
-      await tester.tap(find.text('Publish workflow'));
+      await tester.ensureVisible(find.text('Active workflow'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Active workflow'));
+      await tester.tap(find.text('Update workflow'));
       await tester.pumpAndSettle();
       final write = requests.singleWhere((r) => r.method == 'PUT');
       expect(write.data['current_version'], 2);
       expect(write.data['steps'], ['department', 'hr', 'mayor']);
       expect(write.data['name'], 'Full approval updated');
+      expect(write.data['is_active'], false);
+      expect((write.data as Map).containsKey('employment_types'), false);
     },
   );
   testWidgets('linked document opens its selected shared workflow editor', (
@@ -145,7 +181,7 @@ void main() {
       }
     });
   }
-  testWidgets('long workflow names and employment labels wrap on mobile', (
+  testWidgets('long workflow names wrap without obsolete employment badges', (
     tester,
   ) async {
     tester.view.physicalSize = const Size(390, 1100);
@@ -188,7 +224,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(
       find.text('Applies to: Job Order (JO), Contract of Service (COS)'),
-      findsOneWidget,
+      findsNothing,
     );
     await tester.ensureVisible(
       find.byTooltip(

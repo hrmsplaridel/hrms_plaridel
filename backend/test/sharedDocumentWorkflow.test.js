@@ -15,6 +15,7 @@ test('DocuTracker resolves current Mayor and HR primary/backups from shared auth
 });
 test('shared document workflows support the same current Mayor and configured HR authorities',()=>{
  assert.doesNotThrow(()=>require('../src/services/sharedDocumentWorkflows').validateForDocuments({is_active:true,
+  employment_types:['job_order'],
   steps:[{assignee_source:'final_hr_reviewers'},{assignee_source:'active_mayor'}]}));
 });
 test('publishing a shared workflow creates a new pinned DocuTracker version with ordered backups',async()=>{

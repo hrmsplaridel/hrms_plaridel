@@ -4,7 +4,6 @@ const {pool}=require('../config/db');
 const {requireAdminOrHr}=require('../middleware/rbac');
 const {requireDtrFeatureIfAdmin}=require('../middleware/dtrAccess');
 const {normalizeWorkflow}=require('../services/approvalWorkflows');
-const {normalizeEligibleEmploymentTypes}=require('../services/leaveEmploymentEligibility');
 const router=express.Router();
 // Assigned reviewers use this inbox regardless of their global account role.
 router.get('/inbox',async(req,res)=>{
@@ -39,7 +38,7 @@ router.post('/requests/:kind/:id/:action',async(req,res)=>{
 // Authentication is applied at the mount. Type editors need the read-only catalog.
 router.get('/', requireAdminOrHr, async(req,res)=>{
   try {
-    const result=await pool.query(`SELECT w.*,v.steps,v.employment_types FROM approval_workflows w
+    const result=await pool.query(`SELECT w.*,v.steps FROM approval_workflows w
       JOIN approval_workflow_versions v ON v.workflow_id=w.id AND v.version=w.current_version
       ORDER BY w.name,w.id`);
     res.json(result.rows);
@@ -63,7 +62,7 @@ router.post('/:id/document-types/:documentType',async(req,res)=>{
  try {
   client=await pool.connect();
   await client.query('BEGIN');
-  const workflow=(await client.query(`SELECT w.*,v.version,v.steps,v.employment_types FROM approval_workflows w
+  const workflow=(await client.query(`SELECT w.*,v.version,v.steps FROM approval_workflows w
     JOIN approval_workflow_versions v ON v.workflow_id=w.id AND v.version=w.current_version WHERE w.id=$1::uuid FOR UPDATE OF w`,[req.params.id])).rows[0];
   if(!workflow)throw Object.assign(new Error('Workflow not found.'),{statusCode:404});
   if(['dtr','ld','rsp'].includes(req.params.documentType))throw Object.assign(new Error('Source modules keep their own filing rules.'),{statusCode:400});
@@ -81,7 +80,8 @@ async function write(req,res) {
   let client;
   try {
     const input=normalizeWorkflow(req.body);
-    const employmentTypes=normalizeEligibleEmploymentTypes(req.body.employment_types);
+    // Keep the nullable legacy column for history; filing rules belong to types.
+    const employmentTypes=null;
     client=await pool.connect();
     await client.query('BEGIN');
     await require('../services/approvalWorkflows').assertActiveSelectedReviewers(client,input.steps);

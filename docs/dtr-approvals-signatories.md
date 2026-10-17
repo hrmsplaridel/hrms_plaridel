@@ -26,10 +26,12 @@ It completes the system approval at the preceding step and prints a blank Mayor
 signature area for signing on paper. Electronic Mayor approval requires an
 actual Mayor decision in the approval queue.
 
-An optional employment-type restriction applies the configured workflow to the
-selected types. Other employees use Department Review → HR Review. Leave and
-Locator types have an **Approval workflow** dropdown for choosing the saved
-workflow; they no longer need their own step editor.
+Leave and Locator types have an **Approval workflow** dropdown for choosing the
+saved workflow. Filing eligibility and availability are configured on the request
+type; the workflow defines approval steps and reviewers. **Active workflow**
+controls whether the workflow can be selected. New filings follow the selected
+workflow without employment-based route substitution. Legacy workflow employment
+metadata is retained for history and no longer controls routing.
 
 ## Review requests
 
@@ -172,8 +174,8 @@ normalized assignees, so it cannot drift from the shared catalog. Editing a link
 workflow card opens the shared catalog.
 
 Electronic approval workflows can be shared with DocuTracker documents. Manual
-Mayor signing and employment-type restrictions are Leave/Locator filing features;
-remove those options before linking that workflow to a general document type.
+Mayor signing remains specific to Leave/Locator; remove manual signing steps
+before linking that workflow to a general document type.
 Existing independent DocuTracker document workflows remain unchanged until a
 shared workflow is selected for their type. DocuTracker's document permissions,
 holder/escalation rules, and Admin Recovery continue to apply to documents.

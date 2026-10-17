@@ -297,13 +297,13 @@ void main() {
     expect(find.text('Leave type key already exists'), findsOneWidget);
   });
 
-  testWidgets('type settings display workflow employment conditions without duplicating the editor', (tester) async {
+  testWidgets('type settings do not display obsolete workflow employment conditions', (tester) async {
     rows=[existingType('existing')];
     routingById['existing']={'approval_workflow_id':'restricted'};
     await mount(tester);
     await tester.scrollUntilVisible(stringDropdown('Select workflow'),250,scrollable:formScrollable());
     await tester.pumpAndSettle();
-    expect(find.textContaining('Applies to: permanent, casual.'),findsOneWidget);
+    expect(find.textContaining('Applies to: permanent, casual.'),findsNothing);
     expect(find.text('Limit to employment types'),findsNothing);
     await tester.tap(find.text('Save Changes'));await tester.pumpAndSettle();
     expect(requests.where((r)=>r.method=='POST' && r.path.startsWith('/api/leave/routing/')),isEmpty);

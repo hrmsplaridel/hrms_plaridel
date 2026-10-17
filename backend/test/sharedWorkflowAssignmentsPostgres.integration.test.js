@@ -38,11 +38,12 @@ test('shared migration, DocuTracker version pinning, employee backups and inbox 
   const steps=Array.from({length:4},(_,index)=>({step_order:index+1,label:`Approval ${index+1}`,assignee_type:'user',assignee_source:'specific_users',
     user_ids:[id(index+1),id(6)],requires_signature:true,allowed_actions:['approve','return','reject'],enabled:true}));
   const workflow=(await db.query("INSERT INTO approval_workflows(name) VALUES('Shared test') RETURNING *")).rows[0];
-  await db.query('INSERT INTO approval_workflow_versions(workflow_id,version,steps) VALUES($1,1,$2)',[workflow.id,JSON.stringify(steps)]);
-  const native=await publishDocumentVersion(db,'memo',{...workflow,version:1,steps},id(1));
+  await db.query("INSERT INTO approval_workflow_versions(workflow_id,version,steps,employment_types) VALUES($1,1,$2,ARRAY['job_order'])",[workflow.id,JSON.stringify(steps)]);
+  const native=await publishDocumentVersion(db,'memo',{...workflow,version:1,steps,employment_types:['job_order']},id(1));
   const previous=(await db.query('SELECT steps FROM docutracker_routing_config_versions WHERE document_type=$1 AND version=$2',['memo',native])).rows[0].steps;
   await db.query("INSERT INTO leave_requests(id,employee_id,status,signature_revision) VALUES($1,$2,'draft',1)",[id(8),id(7)]);
   const prepared=await engine.prepareWorkflow(db,'leave',{approval_workflow_id:workflow.id},id(7),null);
+  assert.deepEqual(prepared.steps,steps,'Legacy employment metadata does not replace the configured steps for a permanent employee');
   await engine.initialWorkflow(db,'leave',id(8),prepared);
   const inbox=await require('../src/services/sharedWorkflowInbox').listInbox(db,{id:id(6),role:'employee'});
   assert.equal(inbox.length,1);assert.equal(inbox[0].step_label,'Approval 1');

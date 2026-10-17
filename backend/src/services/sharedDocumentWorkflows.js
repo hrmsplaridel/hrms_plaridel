@@ -2,9 +2,9 @@
 function invalid(message){throw Object.assign(new Error(message),{statusCode:400});}
 function validateForDocuments(workflow) {
  if(workflow.is_active===false)invalid('Assign linked document types to another workflow before deactivating this one.');
- if(workflow.employment_types || workflow.steps.some(s=>!s || typeof s!=='object' ||
+ if(workflow.steps.some(s=>!s || typeof s!=='object' ||
    !['specific_users','department_reviewers','submitter_department_reviewers','final_hr_reviewers','active_mayor'].includes(s.assignee_source)))
-   invalid('DocuTracker document workflows must use electronic approval steps with no employment-type restriction. Manual signing and employment exceptions remain available for Leave/Locator.');
+   invalid('DocuTracker document workflows must use electronic approval steps. Manual signing is available only for Leave/Locator.');
 }
 async function publishDocumentVersion(db,documentType,workflow,actorId) {
  validateForDocuments(workflow);

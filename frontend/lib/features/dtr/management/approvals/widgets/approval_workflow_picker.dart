@@ -92,7 +92,6 @@ class _ApprovalWorkflowPickerState extends State<ApprovalWorkflowPicker> {
                 .where(
                   (w) =>
                       w['is_active'] == true &&
-                      w['employment_types'] == null &&
                       w['steps'] is List &&
                       (w['steps'] as List).length == 2 &&
                       (w['steps'] as List)[0] == 'department' &&
@@ -185,10 +184,6 @@ class _ApprovalWorkflowPickerState extends State<ApprovalWorkflowPicker> {
         ),
         const SizedBox(height: 8),
         if (selected != null) Text(approvalStepsLabel(selected['steps'])),
-        if (selected?['employment_types'] != null)
-          Text(
-            'Applies to: ${(selected!['employment_types'] as List).join(', ')}. Other employment types: Department Review → HR Review.',
-          ),
         const SizedBox(height: 8),
         const Text(
           'Manage workflows in Approvals & Signatories → Workflows. Filed requests keep their saved workflow version.',

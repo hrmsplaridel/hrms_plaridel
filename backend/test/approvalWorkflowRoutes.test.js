@@ -18,7 +18,8 @@ for(const scenario of ['create','edit','stale','invalid'])test(`workflow publish
     const handler=router.stack.find(s=>s.route?.path===path && (s.route.methods.post || s.route.methods.put)).route.stack.at(-1).handle;
     const res={code:200,status(c){this.code=c;return this;},json(data){this.data=data;return this;}};
     await handler({user:{id:'admin'},params:scenario==='create'?{}:{id:'workflow'},body:{name:'Full approval',
-      steps:scenario==='invalid'?['mayor','hr']:['department','hr','mayor'],current_version:scenario==='stale'?1:2}},res);
+      steps:scenario==='invalid'?['mayor','hr']:['department','hr','mayor'],current_version:scenario==='stale'?1:2,
+      employment_types:['job_order']}},res);
     if(scenario==='stale' || scenario==='invalid') {
       assert.equal(res.code,scenario==='stale'?409:400);
       assert.ok(!calls.some(c=>c.sql.startsWith('INSERT INTO approval_workflow_versions')));
@@ -27,6 +28,8 @@ for(const scenario of ['create','edit','stale','invalid'])test(`workflow publish
       const insert=calls.find(c=>c.sql.startsWith('INSERT INTO approval_workflow_versions'));
       assert.equal(insert.params[1],scenario==='create'?1:3);
       assert.deepEqual(JSON.parse(insert.params[2]),['department','hr','mayor']);
+      assert.equal(insert.params[3],null,'Workflow versions do not store filing eligibility from old clients');
+      assert.equal(res.data.employment_types,null);
       assert.ok(calls.some(c=>c.sql==='COMMIT'));
     }
   }finally{clearModule('../src/routes/approvalWorkflows');restore();}
