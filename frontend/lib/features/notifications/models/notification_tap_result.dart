@@ -67,12 +67,27 @@ class NotificationTapResult {
     final cat = n.category.toLowerCase();
     final t = n.type.toLowerCase();
     final isPrivileged = role == 'admin' || role == 'hr';
+    if ((cat == 'leave' || cat == 'locator') && n.metadata?['workflow_approval'] == true) {
+      return NotificationTapResult(
+        cat == 'leave'
+          ? (isPrivileged || role == 'mayor' ? NotificationTapKind.adminDtrLeaveManagement : NotificationTapKind.employeeLeaveApprovals)
+          : (isPrivileged || role == 'mayor' ? NotificationTapKind.adminDtrLocatorManagement : NotificationTapKind.employeeLocatorApprovals),
+        referenceId: n.referenceId,
+      );
+    }
     if (cat == 'locator' && role == 'mayor' && t == 'locator_pending_mayor') {
       return const NotificationTapResult(
         NotificationTapKind.adminDtrLocatorManagement,
       );
     }
 
+    if (cat == 'leave' && role == 'mayor' &&
+        (t == 'leave_pending_mayor' || t == 'leave_forwarded_to_mayor')) {
+      return NotificationTapResult(
+        NotificationTapKind.adminDtrLeaveManagement,
+        referenceId: n.referenceId,
+      );
+    }
     if (cat == 'leave' && role == 'mayor') {
       return const NotificationTapResult(NotificationTapKind.none);
     }

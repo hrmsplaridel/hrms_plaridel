@@ -91,7 +91,7 @@ class EmployeeLocatorMobileRequestCard extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(width: 8),
-                  statusPill,
+                  Flexible(flex: 2, child: statusPill),
                 ],
               ),
               const SizedBox(height: 6),

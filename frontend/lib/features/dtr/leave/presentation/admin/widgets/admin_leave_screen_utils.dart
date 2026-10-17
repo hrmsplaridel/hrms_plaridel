@@ -1,3 +1,4 @@
+import 'package:hrms_plaridel/features/dtr/management/approvals/pages/workflow_approval_inbox_page.dart';
 import 'package:flutter/material.dart';
 
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
@@ -68,7 +69,10 @@ String adminLeaveStatusLabel(
   LeaveRequestStatus status, {
   required bool isDepartmentHead,
   String finalReviewRoute = 'hr',
+  Map<String, dynamic>? workflowSnapshot,
 }) {
+  final named = pendingWorkflowStepLabel(workflowSnapshot);
+  if (status.isPending && named != null) return 'Pending $named';
   if (!isDepartmentHead) return status.displayName;
   return switch (status) {
     LeaveRequestStatus.pendingDepartmentHead => 'Pending',

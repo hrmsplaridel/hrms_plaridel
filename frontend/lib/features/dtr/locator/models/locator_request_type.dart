@@ -13,6 +13,7 @@ class LocatorRequestType {
     this.filingAccess = 'employee',
     this.autoApproveAdmin = false,
     this.approvalRoute = 'hr',
+    this.approvalWorkflowId,
     this.mayorEmploymentTypes,
     this.employeeDetailSchema = const [],
     this.coverageMode = 'manual',
@@ -60,6 +61,7 @@ class LocatorRequestType {
   final String filingAccess;
   final bool autoApproveAdmin;
   final String approvalRoute;
+  final String? approvalWorkflowId;
   final List<String>? mayorEmploymentTypes;
   final List<LeaveCustomFieldDefinition> employeeDetailSchema;
   bool get employeeCanFile => filingAccess != 'admin';
@@ -84,6 +86,7 @@ class LocatorRequestType {
     String? filingAccess,
     bool? autoApproveAdmin,
     String? approvalRoute,
+    String? approvalWorkflowId,
     List<String>? mayorEmploymentTypes,
     List<LeaveCustomFieldDefinition>? employeeDetailSchema,
     String? coverageMode,
@@ -104,6 +107,7 @@ class LocatorRequestType {
       filingAccess: filingAccess ?? this.filingAccess,
       autoApproveAdmin: autoApproveAdmin ?? this.autoApproveAdmin,
       approvalRoute: approvalRoute ?? this.approvalRoute,
+      approvalWorkflowId: approvalWorkflowId ?? this.approvalWorkflowId,
       mayorEmploymentTypes: mayorEmploymentTypes ?? this.mayorEmploymentTypes,
       employeeDetailSchema: employeeDetailSchema ?? this.employeeDetailSchema,
       coverageMode: coverageMode ?? this.coverageMode,
@@ -127,6 +131,7 @@ class LocatorRequestType {
       'filing_access': filingAccess,
       'auto_approve_admin': autoApproveAdmin,
       'approval_route': approvalRoute,
+      'approval_workflow_id': approvalWorkflowId,
       'mayor_employment_types': mayorEmploymentTypes,
       'employee_detail_schema': employeeDetailSchema.map((field)=>field.toJson()).toList(),
       'coverage_mode': coverageMode,
@@ -144,6 +149,7 @@ class LocatorRequestType {
       filingAccess: _read(json, ['filing_access'], 'employee'),
       autoApproveAdmin: _readBool(json, ['auto_approve_admin']),
       approvalRoute: _read(json, ['approval_route'], 'hr'),
+      approvalWorkflowId: json['approval_workflow_id'] as String?,
       mayorEmploymentTypes: (json['mayor_employment_types'] as List?)
           ?.cast<String>(),
       code: code == null || code.isEmpty ? fallback.code : code,

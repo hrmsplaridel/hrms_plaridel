@@ -80,4 +80,79 @@ void main() {
     await tester.tap(find.text('View details'));
     expect(viewed, isTrue);
   });
+
+  for (final width in [1100.0, 380.0]) {
+    testWidgets('shared workflow card summarizes its types at width $width', (
+      tester,
+    ) async {
+      await tester.binding.setSurfaceSize(Size(width, 900));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final workflow = HrWorkflowMirror.fromJson({
+        ...payload,
+        'key': 'workflow:standard:v1',
+        'title': 'Department - Final HR v1',
+        'used_by': [
+          {'module': 'leave', 'type_id': 'sick', 'type_name': 'Sick Leave'},
+          {
+            'module': 'leave',
+            'type_id': 'vacation',
+            'type_name': 'Vacation Leave',
+          },
+          {
+            'module': 'locator',
+            'type_id': 'business',
+            'type_name': 'Official Business',
+          },
+        ],
+      });
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: SingleChildScrollView(
+              child: DocuTrackerMirroredWorkflowCard(
+                workflow: workflow,
+                onView: () {},
+              ),
+            ),
+          ),
+        ),
+      );
+      expect(find.text('Department - Final HR v1'), findsOneWidget);
+      expect(
+        find.text('Used by 2 leave types · 1 locator type'),
+        findsOneWidget,
+      );
+      expect(find.text('Sick Leave'), findsNothing);
+      expect(tester.takeException(), isNull);
+    });
+  }
+
+  testWidgets('workflow details expand the complete list of types using it', (
+    tester,
+  ) async {
+    final workflow = HrWorkflowMirror.fromJson({
+      ...payload,
+      'used_by': [
+        {'module': 'leave', 'type_id': 'sick', 'type_name': 'Sick Leave'},
+        {'module': 'locator', 'type_id': 'travel', 'type_name': 'Travel Order'},
+      ],
+    });
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SingleChildScrollView(
+            child: DocuTrackerWorkflowUsageDetails(workflow: workflow),
+          ),
+        ),
+      ),
+    );
+    expect(find.text('Sick Leave'), findsNothing);
+    await tester.tap(find.text('Used by'));
+    await tester.pumpAndSettle();
+    expect(find.text('Sick Leave'), findsOneWidget);
+    expect(find.text('Travel Order'), findsOneWidget);
+    expect(find.text('Leave type'), findsOneWidget);
+    expect(find.text('Locator type'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
 }

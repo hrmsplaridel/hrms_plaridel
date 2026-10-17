@@ -1,4 +1,4 @@
-import '../widgets/leave_routing_settings.dart';
+import 'package:hrms_plaridel/features/dtr/management/approvals/widgets/approval_workflow_picker.dart';
 import '../widgets/leave_print_settings.dart';
 import '../widgets/leave_employment_eligibility_field.dart';
 import 'package:dio/dio.dart';
@@ -284,6 +284,11 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
             'eligible_employment_types': _eligibleEmploymentTypes,
           }
         : _payloadFromForm();
+    if (selected?.id == null && _creationRouting['approval_workflow_id']==null) {
+      setState(() => _saving = false);
+      _showMessage('Select an approval workflow before creating the leave type.');
+      return;
+    }
     if (selected?.id == null) data.addAll(_creationRouting);
     try {
       LeaveTypeDefinition? saved;
@@ -340,7 +345,7 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
                 ? 'Save Eligibility'
                 : 'Save Changes';
             _showMessage(
-              'Leave type updated, but routing could not be saved. $message Retry using $saveLabel or Save routing.${_creationPrint.hasChanges ? ' Print changes are still unsaved.' : ''}',
+              'Leave type updated, but routing could not be saved. $message Retry using $saveLabel or Save workflow.${_creationPrint.hasChanges ? ' Print changes are still unsaved.' : ''}',
             );
             return;
           }
@@ -1129,7 +1134,7 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
                   ]),
                   const SizedBox(height: 16),
                   _settingsSection([
-                    LeaveRoutingSettings(
+                    ApprovalWorkflowPicker(
                       key: ValueKey('routing-${selected?.id ?? 'new'}'),
                       leaveTypeId: selected?.id,
                       enabled: !_saving,

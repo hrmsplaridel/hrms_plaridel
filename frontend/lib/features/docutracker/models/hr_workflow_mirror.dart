@@ -92,6 +92,25 @@ class HrWorkflowMirrorStep {
   }
 }
 
+class HrWorkflowMirrorUsage {
+  const HrWorkflowMirrorUsage({
+    required this.module,
+    required this.typeId,
+    required this.typeName,
+  });
+
+  final String module;
+  final String typeId;
+  final String typeName;
+
+  factory HrWorkflowMirrorUsage.fromJson(Map<String, dynamic> json) =>
+      HrWorkflowMirrorUsage(
+        module: json['module']?.toString() ?? '',
+        typeId: json['type_id']?.toString() ?? '',
+        typeName: json['type_name']?.toString() ?? '',
+      );
+}
+
 class HrWorkflowMirror {
   const HrWorkflowMirror({
     required this.key,
@@ -100,6 +119,7 @@ class HrWorkflowMirror {
     required this.effectiveDate,
     required this.systemManaged,
     required this.steps,
+    this.usedBy = const [],
   });
 
   final String key;
@@ -108,6 +128,19 @@ class HrWorkflowMirror {
   final DateTime? effectiveDate;
   final bool systemManaged;
   final List<HrWorkflowMirrorStep> steps;
+  final List<HrWorkflowMirrorUsage> usedBy;
+
+  String get usageSummary {
+    if (usedBy.isEmpty) return '';
+    final parts = <String>[];
+    for (final module in ['leave', 'locator']) {
+      final count = usedBy.where((type) => type.module == module).length;
+      if (count > 0) {
+        parts.add('$count $module ${count == 1 ? 'type' : 'types'}');
+      }
+    }
+    return 'Used by ${parts.join(' · ')}';
+  }
 
   factory HrWorkflowMirror.fromJson(Map<String, dynamic> json) {
     final effectiveDate = json['effective_date']?.toString();
@@ -120,6 +153,13 @@ class HrWorkflowMirror {
           ? null
           : DateTime.tryParse(effectiveDate),
       systemManaged: json['system_managed'] != false,
+      usedBy: (json['used_by'] as List? ?? const [])
+          .whereType<Map>()
+          .map(
+            (type) =>
+                HrWorkflowMirrorUsage.fromJson(Map<String, dynamic>.from(type)),
+          )
+          .toList(growable: false),
       steps: steps is List
           ? steps
                 .whereType<Map>()

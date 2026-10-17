@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_type_definition.dart';
 import '../../shared/widgets/locator_custom_fields.dart';
-import 'package:hrms_plaridel/features/dtr/leave/presentation/admin/widgets/leave_routing_settings.dart';
+import 'package:hrms_plaridel/features/dtr/management/approvals/widgets/approval_workflow_picker.dart';
 
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
@@ -55,6 +55,7 @@ class _LocatorTypeManagementScreenState
   String _filingAccess = 'employee';
   bool _autoApproveAdmin = false;
   String _approvalRoute = 'hr';
+  String? _workflowId;
   List<String>? _mayorEmploymentTypes;
   List<LeaveCustomFieldDefinition> _customFields = const [];
   bool _isActive = true;
@@ -156,6 +157,7 @@ class _LocatorTypeManagementScreenState
       _filingAccess = 'employee';
       _autoApproveAdmin = false;
       _approvalRoute = 'hr';
+      _workflowId = null;
       _mayorEmploymentTypes = null;
       _customFields = const [];
       _isActive = true;
@@ -186,6 +188,7 @@ class _LocatorTypeManagementScreenState
       _filingAccess = item.filingAccess;
       _autoApproveAdmin = item.autoApproveAdmin;
       _approvalRoute = item.approvalRoute;
+      _workflowId = item.approvalWorkflowId;
       _mayorEmploymentTypes = item.mayorEmploymentTypes;
       _customFields = List.of(item.employeeDetailSchema);
       _isActive = item.isActive;
@@ -195,6 +198,7 @@ class _LocatorTypeManagementScreenState
 
   Future<void> _save() async {
     if (!_formKey.currentState!.validate()) return;
+    if (_workflowId==null) {_showMessage('Select an approval workflow before saving.');return;}
     setState(() => _saving = true);
     try {
       final data = {
@@ -208,6 +212,7 @@ class _LocatorTypeManagementScreenState
         'requires_attachment': _requiresAttachment,
         'filing_access': _filingAccess,
         'auto_approve_admin': _autoApproveAdmin,
+        'approval_workflow_id': _workflowId,
         'approval_route': _approvalRoute,
         'mayor_employment_types': _mayorEmploymentTypes,
         'employee_detail_schema': _customFields.map((field)=>field.toJson()).toList(),
@@ -726,16 +731,18 @@ class _LocatorTypeManagementScreenState
                       _rulesSection(),
                       const SizedBox(height: 16),
                       FormSettingsSection(
-                        child: LeaveRoutingSettings(
+                        child: ApprovalWorkflowPicker(
                           key: ValueKey(
                             'routing-${_selected?.id ?? 'new'}-$_printEpoch',
                           ),
-                          allowDirectMayor: true,
-                          initialRoute: _approvalRoute,
-                          initialEmploymentTypes: _mayorEmploymentTypes,
+                          enabled: !_saving,
+                          initialWorkflowId: _workflowId,
                           onChanged: (routing) => setState(() {
-                            _approvalRoute =
-                                routing['approval_route'] as String;
+                            _workflowId = routing['approval_workflow_id'] as String?;
+                            final steps=routing['workflow_steps'] as List? ?? [];
+                            _approvalRoute = steps.any((step) => step == 'mayor' || step is Map && step['assignee_source'] == 'active_mayor') ? 'mayor_direct'
+                                : steps.any((step) => step == 'manual_mayor' || step is Map && step['assignee_source'] == 'manual_mayor') ? 'mayor' : 'hr';
+                            _autoApproveAdmin = false;
                             _mayorEmploymentTypes =
                                 routing['mayor_employment_types']
                                     as List<String>?;

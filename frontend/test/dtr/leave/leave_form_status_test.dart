@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
@@ -14,6 +15,7 @@ import 'package:hrms_plaridel/features/dtr/leave/models/leave_request.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_type.dart';
 import 'package:hrms_plaridel/features/dtr/leave/presentation/shared/pages/leave_request_form_screen.dart';
 import 'package:hrms_plaridel/core/api/client.dart';
+import 'package:hrms_plaridel/core/api/app_user.dart';
 
 const draft = LeaveRequest(
   id: 'leave-1',
@@ -26,8 +28,7 @@ DateTime _futureWorkingDate() {
   final now = DateTime.now();
   var date = DateTime(now.year, now.month, now.day + 2);
   // These tests exercise submission, so their single-day leave must be a weekday.
-  while (date.weekday == DateTime.saturday ||
-      date.weekday == DateTime.sunday) {
+  while (date.weekday == DateTime.saturday || date.weekday == DateTime.sunday) {
     date = DateTime(date.year, date.month, date.day + 1);
   }
   return date;
@@ -41,9 +42,10 @@ class _Repository extends MockLeaveRepository {
 }
 
 class _Signatures extends DocuTrackerProvider {
-  _Signatures({this.canSign = false});
+  _Signatures({this.canSign = false, this.signed = false});
 
   final bool canSign;
+  final bool signed;
 
   @override
   Future<List<DocuTrackerSignatureAsset>> listSavedSignatures() async => [];
@@ -58,7 +60,22 @@ class _Signatures extends DocuTrackerProvider {
     sourceTable: sourceTable,
     sourceRecordId: sourceRecordId,
     sourceStatus: 'pending_hr',
-    signatures: canSign
+    signatures: signed
+        ? [
+            DocuTrackerSourceSignature(
+              slotKey: 'applicant',
+              label: 'Applicant',
+              assignedSignerId: 'employee-1',
+              canSign: true,
+              signatureAssetId: 'chosen-asset',
+              signatureImageBytes: base64Decode(
+                'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+              ),
+              signedBy: 'employee-1',
+              signedAt: DateTime.utc(2026, 10, 17),
+            ),
+          ]
+        : canSign
         ? const [
             DocuTrackerSourceSignature(
               slotKey: 'applicant',
@@ -77,6 +94,8 @@ Future<void> _openForm(
   LeaveRequest initial = draft,
   bool loadOfficialDate = false,
   bool canSign = false,
+  bool signed = false,
+  LeaveRequestAction? onSubmit,
 }) async {
   ApiClient.instance.init();
   ApiClient.instance.dio.interceptors.insert(
@@ -103,7 +122,17 @@ Future<void> _openForm(
   await tester.pumpWidget(
     MultiProvider(
       providers: [
-        ChangeNotifierProvider(create: (_) => AuthProvider()),
+        ChangeNotifierProvider(
+          create: (_) => AuthProvider()
+            ..replaceUser(
+              const AppUser(
+                id: 'employee-1',
+                email: 'employee@example.test',
+                role: 'employee',
+                fullName: 'Employee One',
+              ),
+            ),
+        ),
         ChangeNotifierProvider(
           lazy: false,
           create: (_) {
@@ -113,15 +142,16 @@ Future<void> _openForm(
           },
         ),
         ChangeNotifierProvider<DocuTrackerProvider>(
-          create: (_) => _Signatures(canSign: canSign),
+          create: (_) => _Signatures(canSign: canSign, signed: signed),
         ),
       ],
       child: MaterialApp(
         home: LeaveRequestFormScreen(
           initialRequest: initial,
           onSaveDraft: (_) async => throw StateError('Unexpected draft write'),
-          onSubmitRequest: (_) async =>
-              throw StateError('Unexpected submission'),
+          onSubmitRequest:
+              onSubmit ??
+              (_) async => throw StateError('Unexpected submission'),
         ),
       ),
     ),
@@ -129,6 +159,58 @@ Future<void> _openForm(
 }
 
 void main() {
+  testWidgets(
+    'Submit explicitly confirms the chosen applicant asset for the final submitted form',
+    (tester) async {
+      final date = _futureWorkingDate();
+      final validDraft = draft.copyWith(
+        startDate: date,
+        endDate: date,
+        workingDaysApplied: 1,
+        sickLeaveNature: SickLeaveNature.outPatient,
+        sickIllnessDetails: 'Fever',
+      );
+      final repository = _Repository()..read = () async => validDraft;
+      ApiClient.instance.init();
+      ApiClient.instance.dio.interceptors.clear();
+      ApiClient.instance.dio.interceptors.add(
+        InterceptorsWrapper(
+          onRequest: (o, h) {
+            if (o.path == '/api/leave/submission-availability') {
+              h.resolve(
+                Response(
+                  requestOptions: o,
+                  statusCode: 200,
+                  data: {'can_submit': true},
+                ),
+              );
+            } else {
+              h.reject(DioException(requestOptions: o));
+            }
+          },
+        ),
+      );
+      LeaveRequest? submitted;
+      await _openForm(
+        tester,
+        repository,
+        initial: validDraft,
+        loadOfficialDate: true,
+        signed: true,
+        onSubmit: (request) async {
+          submitted = request;
+          return false;
+        },
+      );
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.text('Submit Request'));
+      await tester.tap(find.text('Submit Request'));
+      await tester.pumpAndSettle();
+      expect(submitted, isNotNull);
+      expect(submitted?.applicantSignatureAssetId, 'chosen-asset');
+      expect(submitted?.status, LeaveRequestStatus.pending);
+    },
+  );
   testWidgets('deactivated draft type is not offered for a new filing', (
     tester,
   ) async {

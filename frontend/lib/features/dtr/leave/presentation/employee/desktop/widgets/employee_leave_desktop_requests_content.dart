@@ -205,7 +205,10 @@ class _LeaveTableRow extends StatelessWidget {
                 flex: _columnFlex[4],
                 child: Align(
                   alignment: Alignment.centerRight,
-                  child: LeaveStatusChip(status: request.status),
+                  child: LeaveStatusChip(
+                    status: request.status,
+                    label: request.statusLabel,
+                  ),
                 ),
               ),
             ],

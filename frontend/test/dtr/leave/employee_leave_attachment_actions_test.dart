@@ -40,7 +40,7 @@ void main() {
     expect(find.byType(Dialog), findsNothing);
     expect(find.text('Employee Information'), findsOneWidget);
     expect(find.text('Leave Details'), findsOneWidget);
-    expect(find.text('Additional Context'), findsOneWidget);
+    expect(find.text('Additional Context'), findsNothing);
     expect(find.text('Office / Department'), findsOneWidget);
     expect(find.text('Position Title'), findsOneWidget);
     expect(tester.takeException(), isNull);

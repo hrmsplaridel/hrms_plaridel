@@ -1,3 +1,4 @@
+import '../approvals/workflow_test_fixtures.dart';
 import 'designer_field_test_helpers.dart';
 import 'dart:async';
 import 'dart:convert';
@@ -35,6 +36,7 @@ void main() {
       InterceptorsWrapper(
         onRequest: (options, handler) {
           requests.add(options);
+          if(options.path=='/api/approval-workflows'){handler.resolve(Response(requestOptions:options,statusCode:200,data:workflowTestCatalog));return;}
           if (options.method == 'GET' &&
               options.path ==
                   '/api/locator-slips/types?include_inactive=true') {
@@ -160,6 +162,7 @@ void main() {
     await mount(tester);await enterRequiredFields(tester);
     final scrollable=find.descendant(of:find.byType(ListView).last,matching:find.byType(Scrollable)).first;
     await tester.scrollUntilVisible(find.text('Design layout'),250,scrollable:scrollable);
+    await Scrollable.ensureVisible(tester.element(find.text('Design layout')),alignment:.5);await tester.pumpAndSettle();
     await tester.tap(find.text('Design layout'));await tester.pumpAndSettle();
     await createDesignerField(tester,'Arrival date');
     await tester.tap(find.byTooltip('Insert field'));await tester.pumpAndSettle();
@@ -180,6 +183,7 @@ void main() {
     await mount(tester);await enterRequiredFields(tester);
     final scrollable=find.descendant(of:find.byType(ListView).last,matching:find.byType(Scrollable)).first;
     await tester.scrollUntilVisible(find.text('Design layout'),250,scrollable:scrollable);
+    await Scrollable.ensureVisible(tester.element(find.text('Design layout')),alignment:.5);await tester.pumpAndSettle();
     await tester.tap(find.text('Design layout'));await tester.pumpAndSettle();
     expect(find.text('Printed form layout'),findsOneWidget);
     await tester.tap(find.text('Use layout'));await tester.pumpAndSettle();
@@ -203,6 +207,7 @@ void main() {
     await tester.scrollUntilVisible(find.text('Design layout'),250,scrollable:scrollable);
     await tester.drag(find.byType(ListView).last,const Offset(0,-300));
     await tester.pumpAndSettle();
+    await Scrollable.ensureVisible(tester.element(find.text('Design layout')),alignment:.5);await tester.pumpAndSettle();
     await tester.tap(find.text('Design layout'));await tester.pumpAndSettle();
     await tester.tap(find.text('Use layout'));await tester.pumpAndSettle();
     await tester.tap(find.text('Save Changes'));await tester.pumpAndSettle();
@@ -222,6 +227,7 @@ void main() {
     final scrollable=find.descendant(of:find.byType(ListView).last,matching:find.byType(Scrollable)).first;
     await tester.scrollUntilVisible(find.text('Design layout'),250,scrollable:scrollable);
     await tester.drag(find.byType(ListView).last,const Offset(0,-300));await tester.pumpAndSettle();
+    await Scrollable.ensureVisible(tester.element(find.text('Design layout')),alignment:.5);await tester.pumpAndSettle();
     await tester.tap(find.text('Design layout'));await tester.pumpAndSettle();
     await createDesignerField(tester,'Processing date');
     await tester.tap(find.text('Use layout'));await tester.pumpAndSettle();
@@ -269,7 +275,7 @@ void main() {
     (tester) async {
       await mount(tester);
       await tester.scrollUntilVisible(
-        find.text('Approval routing'),
+        find.text('Approval workflow'),
         250,
         scrollable: find
             .descendant(
@@ -278,7 +284,7 @@ void main() {
             )
             .first,
       );
-      expect(find.text('Approval routing'), findsOneWidget);
+      expect(find.text('Approval workflow'), findsOneWidget);
 
       expect(find.text('0 locator types'), findsOneWidget);
       expect(find.text('No locator types configured'), findsOneWidget);
@@ -328,6 +334,7 @@ void main() {
         InterceptorsWrapper(
           onRequest: (options, handler) {
             requests.add(options);
+            if(options.path=='/api/approval-workflows'){handler.resolve(Response(requestOptions:options,statusCode:200,data:workflowTestCatalog));return;}
             attempts += 1;
             if (attempts == 1) {
               handler.reject(
@@ -503,7 +510,7 @@ void main() {
     final route = find.byWidgetPredicate(
       (w) =>
           w is DropdownButtonFormField<String> &&
-          w.decoration.labelText == 'Approval route',
+          w.decoration.labelText == 'Select workflow',
     );
     await tester.scrollUntilVisible(
       route,
@@ -517,7 +524,7 @@ void main() {
     );
     await tester.tap(route);
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Direct Mayor approval').last);
+    await tester.tap(find.text('Direct Mayor approval · v1').last);
     await tester.pumpAndSettle();
     await tester.tap(find.text('Create Type'));
     await tester.pumpAndSettle();
@@ -531,10 +538,8 @@ void main() {
                 .data
             as Map;
     expect(data['approval_route'], 'mayor_direct');
-    expect(data['mayor_employment_types'], [
-      'job_order',
-      'contract_of_service',
-    ]);
+    expect(data['approval_workflow_id'],'direct');
+    expect(data['mayor_employment_types'],isNull);
     expect(data['auto_approve_admin'], false);
   });
 

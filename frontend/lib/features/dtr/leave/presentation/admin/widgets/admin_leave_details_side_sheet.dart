@@ -46,6 +46,71 @@ class AdminLeaveDetailsSideSheet extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    return AdminLeaveDetailsFrame(
+      child: Consumer<LeaveProvider>(
+        builder: (context, provider, _) {
+          var req = initial;
+          final id = initial.id;
+          if (id != null && id.isNotEmpty) {
+            final hit =
+                (isDepartmentHead
+                        ? provider.departmentHeadRequests
+                        : provider.requests)
+                    .where((r) => r.id == id)
+                    .toList();
+            if (hit.isNotEmpty) req = hit.first;
+          }
+          final isOwnRequest =
+              currentReviewerId != null && currentReviewerId == req.userId;
+          final canReview =
+              !isOwnRequest &&
+              (isDepartmentHead
+                  ? canReviewPending &&
+                        req.status == LeaveRequestStatus.pendingDepartmentHead
+                  : canReviewPending && req.status.isPending);
+          final approved = req.status == LeaveRequestStatus.approved;
+          final revokeDisabledReason = approved && onRevoke != null
+              ? adminLeaveRevokeDisabledReason(req)
+              : null;
+          return SingleChildScrollView(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+            child: AdminLeaveRequestDetailsPanel(
+              request: req,
+              isDepartmentHead: isDepartmentHead,
+              reviewing: provider.reviewing,
+              onApprove: canReview ? () => onApprove(req) : null,
+              onReturn: canReview ? () => onReturn(req) : null,
+              onReject: canReview ? () => onReject(req) : null,
+              onPreview: onPreview == null ? null : () => onPreview!(req),
+              onRevoke:
+                  approved && onRevoke != null && revokeDisabledReason == null
+                  ? () => onRevoke!(req)
+                  : null,
+              revokeDisabledReason: approved && onRevoke != null
+                  ? revokeDisabledReason
+                  : null,
+              onPrint: () => onPrint(req),
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
+/// The existing leave details header and body host, shared by every route.
+class AdminLeaveDetailsFrame extends StatelessWidget {
+  const AdminLeaveDetailsFrame({
+    super.key,
+    required this.child,
+    this.canClose = true,
+  });
+
+  final Widget child;
+  final bool canClose;
+
+  @override
+  Widget build(BuildContext context) {
     return SafeArea(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -69,7 +134,9 @@ class AdminLeaveDetailsSideSheet extends StatelessWidget {
                   ),
                   IconButton(
                     tooltip: 'Close',
-                    onPressed: () => Navigator.of(context).pop(),
+                    onPressed: canClose
+                        ? () => Navigator.of(context).pop()
+                        : null,
                     icon: Icon(
                       Icons.close_rounded,
                       color: AppTheme.dashTextSecondaryOf(context),
@@ -79,67 +146,16 @@ class AdminLeaveDetailsSideSheet extends StatelessWidget {
               ),
             ),
           ),
-          Expanded(
-            child: Consumer<LeaveProvider>(
-              builder: (context, provider, _) {
-                var req = initial;
-                final id = initial.id;
-                if (id != null && id.isNotEmpty) {
-                  final hit =
-                      (isDepartmentHead
-                              ? provider.departmentHeadRequests
-                              : provider.requests)
-                          .where((r) => r.id == id)
-                          .toList();
-                  if (hit.isNotEmpty) req = hit.first;
-                }
-                final isOwnRequest =
-                    currentReviewerId != null &&
-                    currentReviewerId == req.userId;
-                final canReview =
-                    !isOwnRequest &&
-                    (isDepartmentHead
-                        ? canReviewPending &&
-                              req.status ==
-                                  LeaveRequestStatus.pendingDepartmentHead
-                        : canReviewPending && req.status.isPending);
-                final approved = req.status == LeaveRequestStatus.approved;
-                final revokeDisabledReason = approved && onRevoke != null
-                    ? adminLeaveRevokeDisabledReason(req)
-                    : null;
-                return SingleChildScrollView(
-                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
-                  child: _AdminLeaveRequestDetailsPanel(
-                    request: req,
-                    isDepartmentHead: isDepartmentHead,
-                    reviewing: provider.reviewing,
-                    onApprove: canReview ? () => onApprove(req) : null,
-                    onReturn: canReview ? () => onReturn(req) : null,
-                    onReject: canReview ? () => onReject(req) : null,
-                    onPreview: onPreview == null ? null : () => onPreview!(req),
-                    onRevoke:
-                        approved &&
-                            onRevoke != null &&
-                            revokeDisabledReason == null
-                        ? () => onRevoke!(req)
-                        : null,
-                    revokeDisabledReason: approved && onRevoke != null
-                        ? revokeDisabledReason
-                        : null,
-                    onPrint: () => onPrint(req),
-                  ),
-                );
-              },
-            ),
-          ),
+          Expanded(child: child),
         ],
       ),
     );
   }
 }
 
-class _AdminLeaveRequestDetailsPanel extends StatelessWidget {
-  const _AdminLeaveRequestDetailsPanel({
+class AdminLeaveRequestDetailsPanel extends StatelessWidget {
+  const AdminLeaveRequestDetailsPanel({
+    super.key,
     required this.request,
     required this.isDepartmentHead,
     required this.reviewing,
@@ -150,6 +166,11 @@ class _AdminLeaveRequestDetailsPanel extends StatelessWidget {
     this.onPreview,
     this.revokeDisabledReason,
     this.onPrint,
+    this.historyEvents,
+    this.reviewFields,
+    this.approvalEnabled = true,
+    this.statusLabel,
+    this.onOpenAttachment,
   });
 
   final LeaveRequest? request;
@@ -162,6 +183,11 @@ class _AdminLeaveRequestDetailsPanel extends StatelessWidget {
   final VoidCallback? onPreview;
   final String? revokeDisabledReason;
   final VoidCallback? onPrint;
+  final List<LeaveHistoryEvent>? historyEvents;
+  final Widget? reviewFields;
+  final bool approvalEnabled;
+  final String? statusLabel;
+  final VoidCallback? onOpenAttachment;
 
   @override
   Widget build(BuildContext context) {
@@ -196,11 +222,13 @@ class _AdminLeaveRequestDetailsPanel extends StatelessWidget {
             ),
             LeaveStatusChip(
               status: request!.status,
-              label: adminLeaveStatusLabel(
-                request!.status,
-                finalReviewRoute: request!.finalReviewRoute,
-                isDepartmentHead: isDepartmentHead,
-              ),
+              label:
+                  statusLabel ??
+                  adminLeaveStatusLabel(
+                    request!.status,
+                    finalReviewRoute: request!.finalReviewRoute,
+                    isDepartmentHead: isDepartmentHead,
+                  ),
             ),
           ],
         ),
@@ -213,13 +241,18 @@ class _AdminLeaveRequestDetailsPanel extends StatelessWidget {
             requestId: request!.id,
             attachmentName: request!.attachmentName,
             hasAttachment: true,
+            onOpen: onOpenAttachment,
           ),
           const SizedBox(height: 16),
         ],
         AdminLeaveSubsectionTitle(title: 'Approval History'),
         const SizedBox(height: 8),
-        HistoryTimeline(events: _buildHistoryEvents(request!)),
+        HistoryTimeline(events: historyEvents ?? _buildHistoryEvents(request!)),
         const SizedBox(height: 10),
+        if (reviewFields != null) ...[
+          reviewFields!,
+          const SizedBox(height: 16),
+        ],
         AdminLeaveSubsectionTitle(title: 'Actions'),
         const SizedBox(height: 10),
         Wrap(
@@ -228,7 +261,7 @@ class _AdminLeaveRequestDetailsPanel extends StatelessWidget {
           children: [
             if (onApprove != null)
               FilledButton.icon(
-                onPressed: reviewing ? null : onApprove,
+                onPressed: reviewing || !approvalEnabled ? null : onApprove,
                 icon: const Icon(Icons.check_circle_rounded),
                 label: const Text('Approve'),
               ),
@@ -406,11 +439,13 @@ class _AdminLeaveAttachmentTile extends StatelessWidget {
     required this.requestId,
     required this.attachmentName,
     required this.hasAttachment,
+    this.onOpen,
   });
 
   final String? requestId;
   final String? attachmentName;
   final bool hasAttachment;
+  final VoidCallback? onOpen;
 
   @override
   Widget build(BuildContext context) {
@@ -455,9 +490,11 @@ class _AdminLeaveAttachmentTile extends StatelessWidget {
                   ),
                 ),
                 TextButton.icon(
-                  onPressed: requestId != null && requestId!.isNotEmpty
-                      ? () => _previewAttachment(context)
-                      : null,
+                  onPressed:
+                      onOpen ??
+                      (requestId != null && requestId!.isNotEmpty
+                          ? () => _previewAttachment(context)
+                          : null),
                   icon: const Icon(Icons.visibility_rounded, size: 18),
                   label: const Text('Preview'),
                   style: TextButton.styleFrom(

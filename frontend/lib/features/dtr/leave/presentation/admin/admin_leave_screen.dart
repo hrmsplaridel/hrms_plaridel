@@ -6,16 +6,19 @@ class AdminLeaveScreen extends StatelessWidget {
   const AdminLeaveScreen({
     super.key,
     this.isDepartmentHead = false,
+    this.isMayor = false,
     this.canReviewPending = true,
   });
 
   final bool isDepartmentHead;
+  final bool isMayor;
   final bool canReviewPending;
 
   @override
   Widget build(BuildContext context) {
     return desktop.AdminLeaveScreen(
       isDepartmentHead: isDepartmentHead,
+      isMayor: isMayor,
       canReviewPending: canReviewPending,
     );
   }

@@ -21,6 +21,7 @@ Future<WorkflowStep?> showWorkflowStepEditor(
   BuildContext context, {
   required String title,
   required WorkflowStep initial,
+  bool approvalOnly = false,
 }) async {
   final width = MediaQuery.sizeOf(context).width;
   final useSheet = width < 720;
@@ -38,7 +39,11 @@ Future<WorkflowStep?> showWorkflowStepEditor(
           padding: EdgeInsets.only(bottom: viewInsets),
           child: SizedBox(
             height: h,
-            child: SimplifiedWorkflowStepEditor(title: title, initial: initial),
+            child: SimplifiedWorkflowStepEditor(
+              title: title,
+              initial: initial,
+              approvalOnly: approvalOnly,
+            ),
           ),
         );
       },
@@ -54,7 +59,11 @@ Future<WorkflowStep?> showWorkflowStepEditor(
       child: SizedBox(
         width: 520,
         height: MediaQuery.sizeOf(ctx).height * 0.78,
-        child: SimplifiedWorkflowStepEditor(title: title, initial: initial),
+        child: SimplifiedWorkflowStepEditor(
+          title: title,
+          initial: initial,
+          approvalOnly: approvalOnly,
+        ),
       ),
     ),
   );

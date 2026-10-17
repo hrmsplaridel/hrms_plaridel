@@ -1,3 +1,4 @@
+import 'package:hrms_plaridel/features/dtr/leave/presentation/admin/admin_leave_screen.dart';
 import 'package:dio/dio.dart';
 import 'package:hrms_plaridel/features/notifications/models/notification_tap_result.dart';
 import 'package:hrms_plaridel/features/dtr/locator/presentation/admin/pages/admin_locator_management_screen.dart';
@@ -30,7 +31,7 @@ class MayorDashboardPage extends StatefulWidget {
   State<MayorDashboardPage> createState() => _MayorDashboardPageState();
 }
 
-enum _MayorMenu { dashboard, requests, history, locator, profile }
+enum _MayorMenu { dashboard, requests, history, locator, leave, profile }
 
 class _MayorDashboardPageState extends State<MayorDashboardPage> {
   _MayorMenu _selectedMenu = _MayorMenu.dashboard;
@@ -590,6 +591,8 @@ class _MayorDashboardPageState extends State<MayorDashboardPage> {
   void _onNotificationTap(NotificationTapResult? result) {
     if (result?.kind == NotificationTapKind.adminDtrLocatorManagement) {
       _onMenuSelected(_MayorMenu.locator);
+    } else if(result?.kind == NotificationTapKind.adminDtrLeaveManagement) {
+      _onMenuSelected(_MayorMenu.leave);
     }
   }
 
@@ -618,6 +621,8 @@ class _MayorDashboardPageState extends State<MayorDashboardPage> {
 
   Widget _buildContent() {
     switch (_selectedMenu) {
+      case _MayorMenu.leave:
+        return const AdminLeaveScreen(isMayor:true);
       case _MayorMenu.locator:
         return const AdminLocatorManagementScreen();
       case _MayorMenu.dashboard:
@@ -706,6 +711,7 @@ class _MayorDashboardPageState extends State<MayorDashboardPage> {
       label: 'History',
     ),
     DashboardMobileNavItem(icon: Icons.location_on_outlined, label: 'Locators'),
+    DashboardMobileNavItem(icon: Icons.event_note_outlined, label: 'Leave'),
   ];
 
   int get _mobileNavIndex {
@@ -716,6 +722,8 @@ class _MayorDashboardPageState extends State<MayorDashboardPage> {
         return 2;
       case _MayorMenu.locator:
         return 3;
+      case _MayorMenu.leave:
+        return 4;
       case _MayorMenu.profile:
         return -1;
       case _MayorMenu.dashboard:
@@ -731,6 +739,8 @@ class _MayorDashboardPageState extends State<MayorDashboardPage> {
         _onMenuSelected(_MayorMenu.history);
       case 3:
         _onMenuSelected(_MayorMenu.locator);
+      case 4:
+        _onMenuSelected(_MayorMenu.leave);
       default:
         _onMenuSelected(_MayorMenu.dashboard);
     }
@@ -909,6 +919,12 @@ class _MayorSidebar extends StatelessWidget {
           label: 'Locator approvals',
           selected: selectedMenu == _MayorMenu.locator,
           onTap: () => onTap(_MayorMenu.locator),
+        ),
+        DashboardSidebarNavTile(
+          icon: Icons.event_note_outlined,
+          label: 'Leave approvals',
+          selected: selectedMenu == _MayorMenu.leave,
+          onTap: () => onTap(_MayorMenu.leave),
         ),
       ],
     );

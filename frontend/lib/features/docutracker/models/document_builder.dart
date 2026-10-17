@@ -169,6 +169,7 @@ class DocuTrackerSourceSignatureBundle {
     required this.sourceStatus,
     required this.signatures,
     this.canAssign = false,
+    this.workflowSnapshot,
   });
 
   final String sourceModule;
@@ -177,6 +178,7 @@ class DocuTrackerSourceSignatureBundle {
   final String sourceStatus;
   final List<DocuTrackerSourceSignature> signatures;
   final bool canAssign;
+  final Map<String,dynamic>? workflowSnapshot;
 
   DocuTrackerSourceSignature? signatureFor(String slotKey) {
     for (final signature in signatures) {
@@ -193,6 +195,7 @@ class DocuTrackerSourceSignatureBundle {
       sourceRecordId: json['source_record_id']?.toString() ?? '',
       sourceStatus: json['source_status']?.toString() ?? '',
       canAssign: json['can_assign'] == true,
+      workflowSnapshot: json['workflow_snapshot'] is Map ? Map<String,dynamic>.from(json['workflow_snapshot']) : null,
       signatures: rawSignatures is List
           ? rawSignatures
                 .whereType<Map>()

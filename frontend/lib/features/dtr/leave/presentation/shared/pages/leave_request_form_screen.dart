@@ -1417,6 +1417,9 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
         attachmentPath:
             _savedRequest?.attachmentPath ?? initial?.attachmentPath,
         status: isDraft ? LeaveRequestStatus.draft : LeaveRequestStatus.pending,
+        applicantSignatureAssetId: isDraft
+            ? null
+            : _leaveSignatures?.signatureFor('applicant')?.signatureAssetId,
       );
 
       if (isDraft) {

@@ -95,7 +95,9 @@ void main() {
         onRequest: (options, handler) {
           final path = options.uri.path;
           final dynamic data;
-          if (path.endsWith('/department-head-approve')) {
+          if (path.endsWith('/approval-workflows/inbox')) {
+            data = <dynamic>[];
+          } else if (path.endsWith('/department-head-approve')) {
             data = decision;
           } else if (path.endsWith('/types')) {
             // A current type configuration must not override a request's saved route.

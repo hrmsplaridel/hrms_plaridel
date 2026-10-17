@@ -16,11 +16,12 @@ void main() {
     );
     expect(result.kind, NotificationTapKind.adminDtrLocatorManagement);
   });
-  test('obsolete Mayor approval notifications have no approval destination', () {
+  test('Mayor leave approval notifications open leave approval management', () {
     for (final type in ['leave_pending_mayor','leave_forwarded_to_mayor']) {
       final result=NotificationTapResult.fromNotification(AppNotification(id:'notice',category:'leave',type:type,
-        title:'Mayor approval',createdAt:DateTime(2026,10,10)),role:'mayor');
-      expect(result.kind,NotificationTapKind.none);
+        title:'Mayor approval',referenceId:'request',createdAt:DateTime(2026,10,10)),role:'mayor');
+      expect(result.kind,NotificationTapKind.adminDtrLeaveManagement);
+      expect(result.referenceId,'request');
     }
   });
   test('admin department leave review opens personal department approvals', () {

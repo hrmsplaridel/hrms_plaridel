@@ -634,6 +634,7 @@ class _AdminLeaveRequestQueuePanelState
                                 widget.selectedRequest?.id,
                             statusLabel: adminLeaveStatusLabel(
                               pageRequests[index].status,
+                              workflowSnapshot: pageRequests[index].workflowSnapshot,
                               finalReviewRoute:
                                   pageRequests[index].finalReviewRoute,
                               isDepartmentHead: widget.isDepartmentHead,
@@ -683,6 +684,7 @@ class _AdminLeaveRequestQueuePanelState
                                       request: request,
                                       statusLabel: adminLeaveStatusLabel(
                                         request.status,
+                                        workflowSnapshot: request.workflowSnapshot,
                                         finalReviewRoute:
                                             request.finalReviewRoute,
                                         isDepartmentHead:

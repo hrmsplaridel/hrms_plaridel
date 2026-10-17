@@ -73,7 +73,10 @@ class LeaveRequestCard extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: 12),
-              LeaveStatusChip(status: request.status),
+              LeaveStatusChip(
+                status: request.status,
+                label: request.statusLabel,
+              ),
             ],
           ),
           const SizedBox(height: 12),

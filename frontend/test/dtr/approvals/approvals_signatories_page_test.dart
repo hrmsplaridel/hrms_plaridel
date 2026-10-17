@@ -1,26 +1,46 @@
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
+import 'dart:async';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hrms_plaridel/core/api/client.dart';
 import 'package:hrms_plaridel/features/dtr/management/approvals/pages/approvals_signatories_page.dart';
+import 'package:hrms_plaridel/features/dtr/management/approvals/widgets/workflow_reviewer_configuration.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   final requests = <RequestOptions>[];
   var backups = <Map<String, dynamic>>[];
   var periods = <Map<String, dynamic>>[];
+  var failDepartments = false;
+  Completer<void>? backupSaveGate;
   setUp(() {
     ApiClient.instance.init();
     requests.clear();
     backups = [];
     periods = [];
+    failDepartments = false;
+    backupSaveGate = null;
     ApiClient.instance.dio.interceptors.clear();
     ApiClient.instance.dio.interceptors.add(
       InterceptorsWrapper(
-        onRequest: (options, handler) {
+        onRequest: (options, handler) async {
           requests.add(options);
+          if (failDepartments && options.path == '/api/departments') {
+            handler.reject(DioException(requestOptions: options));
+            return;
+          }
           dynamic data;
           switch (options.path) {
+            case '/api/approval-workflows':
+              data = [
+                {
+                  'id': 'workflow',
+                  'name': 'Shared workflow',
+                  'current_version': 1,
+                  'steps': ['department', 'hr'],
+                  'is_active': true,
+                },
+              ];
             case '/api/departments':
               data = [
                 {'id': 'department', 'name': 'Human Resources'},
@@ -80,6 +100,7 @@ void main() {
             case '/api/positions/leave-final-reviewer-primary':
               data = {};
             case '/api/departments/department/reviewer-backups':
+              if (backupSaveGate != null) await backupSaveGate!.future;
               backups = [
                 {'reviewerId': 'backup', 'reviewerName': 'Backup Employee'},
               ];
@@ -130,6 +151,7 @@ void main() {
     WidgetTester tester, {
     bool savedScroll = false,
     double width = 1100,
+    String? reviewerStep = 'Department Review',
   }) async {
     tester.view.physicalSize = Size(width, 1000);
     tester.view.devicePixelRatio = 1;
@@ -155,19 +177,146 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
+    if (reviewerStep != null) {
+      await tester.tap(find.byTooltip('Edit Shared workflow'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip('Configure $reviewerStep reviewers'));
+      await tester.pumpAndSettle();
+    }
   }
+
+  testWidgets('workflows is the single approval configuration entry', (
+    tester,
+  ) async {
+    await mount(tester, reviewerStep: null);
+    expect(find.text('Reviewer Assignments'), findsNothing);
+    expect(find.text('Workflows'), findsOneWidget);
+    expect(find.text('Shared workflow'), findsOneWidget);
+    expect(requests.any((r) => r.path == '/api/departments'), isFalse);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('missing fixed department cannot open Final HR configuration', (
+    tester,
+  ) async {
+    await mount(tester, reviewerStep: null);
+    unawaited(
+      showWorkflowReviewerConfiguration(
+        tester.element(find.text('Workflows')),
+        source: 'department_reviewers',
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(
+      requests.any((r) => r.path == '/api/positions/leave-final-reviewers'),
+      isFalse,
+    );
+    expect(
+      find.text('Select a department before configuring reviewers.'),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets(
+    'department setup retries a failed load from the workflow editor',
+    (tester) async {
+      failDepartments = true;
+      await mount(tester);
+      expect(find.text('Retry'), findsOneWidget);
+      failDepartments = false;
+      await tester.tap(find.text('Retry'));
+      await tester.pumpAndSettle();
+      expect(find.text('Department Primary'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
+    'unsaved backups cannot be closed with Done and can be discarded',
+    (tester) async {
+      await mount(tester);
+      await tester.tap(find.text('Add backup reviewer'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Backup Employee').last);
+      await tester.pumpAndSettle();
+      expect(
+        tester
+            .widget<FilledButton>(find.widgetWithText(FilledButton, 'Done'))
+            .onPressed,
+        isNull,
+      );
+      await tester.tap(find.text('Close without saving'));
+      await tester.pumpAndSettle();
+      expect(requests.any((r) => r.method == 'PUT'), isFalse);
+      await tester.tap(find.byTooltip('Configure Department Review reviewers'));
+      await tester.pumpAndSettle();
+      expect(find.text('Backup Employee'), findsNothing);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets('reviewer setup cannot close while backup changes are saving', (
+    tester,
+  ) async {
+    await mount(tester);
+    await tester.tap(find.text('Add backup reviewer'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Backup Employee').last);
+    await tester.pumpAndSettle();
+    backupSaveGate = Completer<void>();
+    await tester.tap(find.text('Save backups'));
+    await tester.pump();
+    expect(
+      tester
+          .widget<TextButton>(
+            find.widgetWithText(TextButton, 'Close without saving'),
+          )
+          .onPressed,
+      isNull,
+    );
+    expect(
+      tester
+          .widget<FilledButton>(find.widgetWithText(FilledButton, 'Done'))
+          .onPressed,
+      isNull,
+    );
+    backupSaveGate!.complete();
+    await tester.pumpAndSettle();
+    expect(
+      tester
+          .widget<FilledButton>(find.widgetWithText(FilledButton, 'Done'))
+          .onPressed,
+      isNotNull,
+    );
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets(
+    'reviewer group can be configured while editing the approval step',
+    (tester) async {
+      await mount(tester, reviewerStep: null);
+      await tester.tap(find.byTooltip('Edit Shared workflow'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Department Review').last);
+      await tester.pumpAndSettle();
+      final configure = find.widgetWithText(TextButton, 'Configure reviewers');
+      await tester.ensureVisible(configure);
+      await tester.tap(configure);
+      await tester.pumpAndSettle();
+      expect(find.text('Department Primary'), findsOneWidget);
+      expect(find.textContaining('shared by every workflow'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    },
+  );
 
   for (final finalReview in [false, true]) {
     testWidgets('primary designation chooses an employee: final=$finalReview', (
       tester,
     ) async {
-      await mount(tester);
-      if (finalReview) {
-        await tester.tap(
-          find.byKey(const ValueKey('settings-entry-office-wide')),
-        );
-        await tester.pumpAndSettle();
-      }
+      await mount(
+        tester,
+        reviewerStep: finalReview ? 'HR Review' : 'Department Review',
+      );
       await tester.tap(find.text('Primary designation'));
       await tester.pumpAndSettle();
       expect(
@@ -222,9 +371,14 @@ void main() {
         'effective_from': '2026-09-30',
         'employee_ids': ['backup'],
       });
-      await tester.tap(find.text('Locator Workflow'));
+      await tester.tap(find.text('Done'));
       await tester.pumpAndSettle();
-      expect(find.text('Shared with Leave Workflow'), findsOneWidget);
+      await tester.tap(find.byTooltip('Configure Department Review reviewers'));
+      await tester.pumpAndSettle();
+      expect(
+        find.text('Shared reviewer assignments for Leave and Locator'),
+        findsOneWidget,
+      );
       expect(find.text('Backup Employee'), findsOneWidget);
       expect(tester.takeException(), isNull);
     },
@@ -249,7 +403,7 @@ void main() {
             'is_effective': true,
           },
       ];
-      await mount(tester, savedScroll: true);
+      await mount(tester, savedScroll: true, reviewerStep: null);
       expect(tester.takeException(), isNull);
       final tabScroll = tester.state<ScrollableState>(
         find.descendant(
@@ -302,7 +456,7 @@ void main() {
   testWidgets('report tab no longer offers a separate leave certifier', (
     tester,
   ) async {
-    await mount(tester);
+    await mount(tester, reviewerStep: null);
     await tester.tap(find.text('Report Signatories').first);
     await tester.pumpAndSettle();
     expect(
@@ -324,11 +478,13 @@ void main() {
   testWidgets('office-wide review opens separately from department review', (
     tester,
   ) async {
-    await mount(tester);
-    await tester.tap(find.byKey(const ValueKey('settings-entry-office-wide')));
-    await tester.pumpAndSettle();
+    await mount(tester, reviewerStep: 'HR Review');
     expect(find.text('Final Primary'), findsOneWidget);
     expect(find.text('Department Primary'), findsNothing);
+    await tester.tap(find.text('Done'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Configure Department Review reviewers'));
+    await tester.pumpAndSettle();
     await tester.enterText(find.byType(TextField).first, 'Human');
     await tester.pumpAndSettle();
     expect(
@@ -353,7 +509,7 @@ void main() {
     await tester.tap(find.text('Back to list'));
     await tester.pumpAndSettle();
     expect(
-      find.byKey(const ValueKey('settings-entry-office-wide')),
+      find.byKey(const ValueKey('settings-entry-department')),
       findsOneWidget,
     );
     expect(find.text('Department Primary'), findsNothing);
@@ -363,13 +519,13 @@ void main() {
   testWidgets('retired correction reviewer settings are not exposed', (
     tester,
   ) async {
-    await mount(tester);
+    await mount(tester, reviewerStep: null);
     expect(find.text('DTR Corrections'), findsNothing);
     expect(
       requests.any((r) => r.path == '/api/dtr-corrections/reviewers'),
       isFalse,
     );
-    expect(find.text('Leave Workflow'), findsOneWidget);
-    expect(find.text('Locator Workflow'), findsOneWidget);
+    expect(find.text('Reviewer Assignments'), findsNothing);
+    expect(find.text('Workflows'), findsOneWidget);
   });
 }

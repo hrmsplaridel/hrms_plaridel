@@ -55,6 +55,7 @@ LeaveFormSignatories composeLeaveFormSignatories({
   DocuTrackerSourceSignature? applicantSignature,
   DocuTrackerSourceSignature? departmentHeadSignature,
   DocuTrackerSourceSignature? hrApproverSignature,
+  DocuTrackerSourceSignature? certificationOfficerSignature,
 }) {
   DocuTrackerSourceSignature? officialSignature(
     LeaveFormSignatoryInfo? official,
@@ -74,7 +75,7 @@ LeaveFormSignatories composeLeaveFormSignatories({
         : null,
     certificationOfficerSignature: officialSignature(
       certificationOfficer,
-      hrApproverSignature,
+      certificationOfficerSignature ?? hrApproverSignature,
     ),
     recommendationOfficer: recommendationOfficer,
     approvingAuthority: approvingAuthority,
@@ -112,11 +113,20 @@ Future<LeaveFormSignatories> loadLeaveFormSignatories({
   DocuTrackerSourceSignature? applicantSignature;
   DocuTrackerSourceSignature? departmentHeadSignature;
   DocuTrackerSourceSignature? hrApproverSignature;
+  DocuTrackerSourceSignature? certificationSignature;
   final sigResult = results[1];
   if (sigResult is DocuTrackerSuccess<DocuTrackerSourceSignatureBundle>) {
     applicantSignature = sigResult.value.signatureFor('applicant');
     departmentHeadSignature = sigResult.value.signatureFor('department_head');
     hrApproverSignature = sigResult.value.signatureFor('hr_approver');
+    certificationSignature = sigResult.value.signatureFor('certification_officer');
+    final shared = (sigResult.value.workflowSnapshot?['steps'] as List? ?? []).any((step) => step is Map);
+    if (shared) {
+      departmentHeadSignature = sigResult.value.signatureFor('workflow_step_1');
+      certificationSignature = sigResult.value.signatures.where(
+        (signature) => signature.slotKey.startsWith('workflow_step_') && signature.signedBy == roles.certification?.userId,
+      ).firstOrNull ?? certificationSignature;
+    }
   }
 
   return composeLeaveFormSignatories(
@@ -126,6 +136,7 @@ Future<LeaveFormSignatories> loadLeaveFormSignatories({
     applicantSignature: applicantSignature,
     departmentHeadSignature: departmentHeadSignature,
     hrApproverSignature: hrApproverSignature,
+    certificationOfficerSignature: certificationSignature,
   );
 }
 

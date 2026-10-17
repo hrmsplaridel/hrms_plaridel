@@ -72,6 +72,7 @@ void main() {
 
     expect(find.text('Preview'), findsOneWidget);
     expect(find.text('Print'), findsOneWidget);
+    expect(find.text('History'), findsOneWidget);
     await tester.tap(find.text('Preview'));
     expect(previews, 1);
     expect(prints, 0);
