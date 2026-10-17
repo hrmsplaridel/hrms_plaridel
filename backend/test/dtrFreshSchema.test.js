@@ -91,6 +91,32 @@ test('fresh DTR installation resolves configured reviewers and preserves current
   }
   const applicant=(await db.query("INSERT INTO users(email,password_hash,full_name) VALUES('fresh-applicant@test.invalid','test-hash','Fresh Applicant') RETURNING id")).rows[0].id;
   const reviewer=(await db.query("INSERT INTO users(email,password_hash,full_name) VALUES('fresh-reviewer@test.invalid','test-hash','Fresh Reviewer') RETURNING id")).rows[0].id;
+  const {ROLE_KEYS}=require('../src/services/officialSignatoryService');
+  for(const role of Object.values(ROLE_KEYS)){
+   await db.query(`INSERT INTO docutracker_official_signatories
+    (role_key,employee_id,employee_name_snapshot,effective_from)
+    VALUES($1,$2,'Fresh Reviewer',CURRENT_DATE)`,[role,reviewer]);
+  }
+  assert.equal((await db.query('SELECT count(*)::int AS n FROM docutracker_official_signatories')).rows[0].n,3,
+   'Fresh databases accept both DTR print signatories and the leave credit certifier');
+  await assert.rejects(db.query(`INSERT INTO docutracker_official_signatories
+   (role_key,employee_id,employee_name_snapshot,effective_from)
+   VALUES('invalid_role',$1,'Fresh Reviewer',CURRENT_DATE)`,[reviewer]),
+   error=>error.code==='23514'&&error.constraint==='docutracker_official_signatories_role_check');
+  // Verify the targeted upgrade repairs the old restriction without removing
+  // an existing leave designation.
+  const existingCertifier=(await db.query("SELECT id FROM docutracker_official_signatories WHERE role_key='leave_credit_certifier'")).rows[0].id;
+  await db.query("DELETE FROM docutracker_official_signatories WHERE role_key<>'leave_credit_certifier'");
+  await db.query(`ALTER TABLE docutracker_official_signatories DROP CONSTRAINT docutracker_official_signatories_role_check;
+   ALTER TABLE docutracker_official_signatories ADD CONSTRAINT docutracker_official_signatories_role_check CHECK(role_key='leave_credit_certifier')`);
+  await db.query(fs.readFileSync(path.join(root,'scripts/migrations/dtr/20260930_dtr_report_signatories.sql'),'utf8'));
+  for(const role of [ROLE_KEYS.DTR_OFFICE_HOURS_VERIFIER,ROLE_KEYS.DTR_HR_OFFICER]){
+   await db.query(`INSERT INTO docutracker_official_signatories
+    (role_key,employee_id,employee_name_snapshot,effective_from)
+    VALUES($1,$2,'Fresh Reviewer',CURRENT_DATE)`,[role,reviewer]);
+  }
+  assert.equal((await db.query('SELECT count(*)::int AS n FROM docutracker_official_signatories')).rows[0].n,3);
+  assert.equal((await db.query("SELECT id FROM docutracker_official_signatories WHERE role_key='leave_credit_certifier'")).rows[0].id,existingCertifier);
   const snapshot={name:'Configured fresh route',version:1,current_step:0,decisions:[],steps:[
    {label:'Specific review',assignee_source:'specific_users',user_ids:[reviewer],allowed_actions:['approve']},
    {label:'Mayor review',assignee_source:'active_mayor',user_ids:[],allowed_actions:['approve']},
