@@ -25,6 +25,8 @@ test('PostgreSQL readiness requires a distinct active reviewer with the relevant
           final_review_route text,final_reviewer_user_id uuid);
         CREATE TEMP TABLE locator_slips(id uuid,employee_id uuid,status text,final_review_route text,dept_head_reviewer_id uuid);
         CREATE TEMP TABLE leave_request_history(id uuid,leave_request_id uuid,action text,acted_by uuid,acted_at timestamptz);`);
+      await db.query('ALTER TABLE pg_temp.leave_requests ADD COLUMN IF NOT EXISTS workflow_snapshot jsonb');
+      await db.query('ALTER TABLE pg_temp.locator_slips ADD COLUMN IF NOT EXISTS workflow_snapshot jsonb');
       await db.query("INSERT INTO users VALUES($1,'Applicant','employee',true),($2,'Head','admin',true),($3,'Backup','hr',false)",
         [applicant,head,backup]);
       await db.query('INSERT INTO dtr_admin_access VALUES($1,true,true)',[head]);

@@ -24,14 +24,20 @@ async function typeVersion(db,id,lock=false){
 }
 async function requestVersion(db,id,user){
  const mayorAccess=await canReadLocatorAsMayor(db,user,'mayor_direct');
- const q=await db.query(`SELECT ls.print_template_version_id AS version_id,v.background_pdf,v.print_layout
+ const loadVersion=(sharedRead=false)=>db.query(`SELECT ls.*,ls.print_template_version_id AS version_id,v.background_pdf,v.print_layout
  FROM locator_slips ls LEFT JOIN locator_print_template_versions v ON v.id=ls.print_template_version_id
- WHERE ls.id=$1::uuid AND (ls.employee_id=$2::uuid OR $3='hr'
+ WHERE ls.id=$1::uuid AND ($5::boolean OR ls.employee_id=$2::uuid OR $3='hr'
  OR ($3='admin' AND EXISTS(SELECT 1 FROM dtr_admin_access p WHERE p.admin_user_id=$2::uuid AND p.locator_allowed=true))
  OR ($3='mayor' AND ls.final_review_route='mayor_direct' AND $4::boolean=true)
  OR ls.assigned_department_head_id=$2::uuid OR ls.dept_head_reviewer_id=$2::uuid
- OR EXISTS(SELECT 1 FROM locator_slip_department_reviewers r WHERE r.locator_slip_id=ls.id AND r.reviewer_id=$2::uuid))`,[id,user.id,user.role,mayorAccess]);
- if(!q.rows[0])throw Object.assign(new Error('Locator request not found or access denied'),{status:404});return q.rows[0];
+ OR EXISTS(SELECT 1 FROM locator_slip_department_reviewers r WHERE r.locator_slip_id=ls.id AND r.reviewer_id=$2::uuid))`,[id,user.id,user.role,mayorAccess,sharedRead]);
+ const inbox=require('../services/sharedWorkflowInbox');
+ let q=await loadVersion();
+ if(!q.rows[0]) {
+  const row=(await db.query('SELECT * FROM locator_slips WHERE id=$1::uuid',[id])).rows[0];
+  if(await inbox.canRead(db,'locator',row,user))q=await loadVersion(true);
+ }
+ if(!q.rows[0]||await inbox.pendingReadAccess(db,'locator',q.rows[0],user)===false)throw Object.assign(new Error('Locator request not found or access denied'),{status:404});return q.rows[0];
 }
 router.get('/types/:id',...manage,async(req,res)=>{
  try{res.json(metadata(await typeVersion(pool,req.params.id)));}catch(e){failure(res,e);}

@@ -38,6 +38,10 @@ test('PostgreSQL queues and old alerts respect the actual approver and resubmiss
       await db.query("INSERT INTO leave_final_reviewer_backups VALUES($1,true,'2000-01-01',null,1)",[other]);
       await db.query("INSERT INTO leave_requests(id,user_id,employee_id,status) VALUES($1,$2,$2,'pending_hr')",[request,applicant]);
       await db.query("INSERT INTO locator_slips VALUES($1,$2,'pending_hr',$3)",[request,applicant,earl]);
+      await db.query('ALTER TABLE pg_temp.leave_requests ADD COLUMN IF NOT EXISTS workflow_snapshot jsonb');
+      await db.query('ALTER TABLE pg_temp.locator_slips ADD COLUMN IF NOT EXISTS workflow_snapshot jsonb');
+      await db.query('ALTER TABLE pg_temp.leave_requests ADD COLUMN signature_revision integer');
+      await db.query('ALTER TABLE pg_temp.locator_slips ADD COLUMN signature_revision integer');
       await db.query(`INSERT INTO leave_request_history(id,leave_request_id,action,acted_by,acted_at) VALUES
         (gen_random_uuid(),$1,'submitted',$2,'2026-10-09 08:00+08'),
         (gen_random_uuid(),$1,'department_head_approved',$3,'2026-10-09 09:00+08')`,[request,applicant,earl]);

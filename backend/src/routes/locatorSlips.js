@@ -1,3 +1,4 @@
+const workflowEngine = require('../services/approvalWorkflows');
 const { finalQueueVisibilitySql } = require('../services/approvalStageSeparation');
 const {normalizeLocatorRouting,resolveLocatorRouting,requireLocatorFinalRole}=require('../services/locatorRouting');
 const {resolveActiveMayor}=require('../services/officialSignatoryService');
@@ -306,7 +307,7 @@ function locatorTypePayloadFromBody(body, existing = null) {
 function mapLocatorTypeRow(row) {
   return {
     filing_access:row.filing_access || 'employee',auto_approve_admin:row.auto_approve_admin === true,
-    approval_route:row.approval_route||'hr',mayor_employment_types:row.mayor_employment_types||null,
+    approval_workflow_id:row.approval_workflow_id||null,approval_route:row.approval_route||'hr',mayor_employment_types:row.mayor_employment_types||null,
     id: row.id,
     code: row.code,
     employee_detail_schema: normalizeLocatorFieldSchema(row.employee_detail_schema),
@@ -749,6 +750,8 @@ function mapLocatorRow(row) {
     attachment_mime_type: row.attachment_mime_type || null,
     attachment_uploaded_at: row.attachment_uploaded_at || null,
     status: row.status,
+    final_review_route:row.final_review_route || 'hr',
+    workflow_snapshot:row.workflow_snapshot || null,
     dept_head_reviewer_id: row.dept_head_reviewer_id || null,
     dept_head_reviewer_name: row.dept_head_reviewer_name || null,
     dept_head_reviewed_at: row.dept_head_reviewed_at || null,
@@ -990,14 +993,15 @@ router.get('/types', protect, async (req, res) => {
 router.post('/types', protect, requireAdminOrHr, requireDtrFeatureIfAdmin('locator_allowed'), async (req, res) => {
   try {
     const payload = locatorTypePayloadFromBody(req.body || {});
+    const workflowId = await workflowEngine.selectedWorkflowId(pool,req.body?.approval_workflow_id);
     const inserted = await pool.query(
       `INSERT INTO locator_request_types (
          code, label, short_label, location_label, location_hint,
          dtr_slot_label, dtr_print_label, requires_attachment,
-         coverage_mode, is_active, is_system, sort_order, filing_access, auto_approve_admin, approval_route, mayor_employment_types, employee_detail_schema
+         coverage_mode, is_active, is_system, sort_order, filing_access, auto_approve_admin, approval_route, mayor_employment_types, employee_detail_schema, approval_workflow_id
        ) VALUES (
          $1::text, $2::text, $3::text, $4::text, $5::text,
-         $6::text, $7::text, $8::boolean, $9::text, $10::boolean, false, $11::integer, $12::text, $13::boolean, $14::text, $15::text[], $16::jsonb
+         $6::text, $7::text, $8::boolean, $9::text, $10::boolean, false, $11::integer, $12::text, $13::boolean, $14::text, $15::text[], $16::jsonb, $17::uuid
        )
        RETURNING *`,
       [
@@ -1014,7 +1018,7 @@ router.post('/types', protect, requireAdminOrHr, requireDtrFeatureIfAdmin('locat
         payload.sort_order,
         payload.filing_access,payload.auto_approve_admin,
         payload.approval_route,payload.mayor_employment_types,
-        JSON.stringify(payload.employee_detail_schema),
+        JSON.stringify(payload.employee_detail_schema), workflowId,
       ]
     );
     const item = mapLocatorTypeRow(inserted.rows[0]);
@@ -1036,6 +1040,7 @@ router.put('/types/:id', protect, requireAdminOrHr, requireDtrFeatureIfAdmin('lo
     const existing = existingQ.rows[0];
     if (!existing) return res.status(404).json({ error: 'Locator type not found' });
     const payload = locatorTypePayloadFromBody(req.body || {}, existing);
+    const workflowId = await workflowEngine.selectedWorkflowId(pool,req.body?.approval_workflow_id === undefined ? existing.approval_workflow_id : req.body.approval_workflow_id);
     const updated = await pool.query(
       `UPDATE locator_request_types
        SET label = $1,
@@ -1050,7 +1055,7 @@ router.put('/types/:id', protect, requireAdminOrHr, requireDtrFeatureIfAdmin('lo
            sort_order = $10,
            filing_access = $12, auto_approve_admin = $13,
            approval_route = $14, mayor_employment_types = $15::text[],
-           employee_detail_schema = $16::jsonb,
+           employee_detail_schema = $16::jsonb, approval_workflow_id = $17::uuid,
            updated_at = now()
        WHERE id = $11::uuid
        RETURNING *`,
@@ -1068,7 +1073,7 @@ router.put('/types/:id', protect, requireAdminOrHr, requireDtrFeatureIfAdmin('lo
         req.params.id,
         payload.filing_access,payload.auto_approve_admin,
         payload.approval_route,payload.mayor_employment_types,
-        JSON.stringify(payload.employee_detail_schema),
+        JSON.stringify(payload.employee_detail_schema), workflowId,
       ]
     );
     const item = mapLocatorTypeRow(updated.rows[0]);
@@ -1783,9 +1788,10 @@ router.patch('/:id/resubmit', protect, async (req, res) => {
       userId,
       correction.slipDate
     );
-    const routing = await resolveLocatorRouting(client,userId,locatorType,reviewSnapshot?.departmentHeadUserId);
-    if (routing.route==='hr') await assertLeaveSubmissionReviewer(client, userId, 'locator', null, reviewSnapshot);
-    const departmentHeadUserId = routing.route==='mayor_direct'?null:reviewSnapshot?.departmentHeadUserId || null;
+    if(row.request_type===correction.requestType)locatorType.approval_workflow_snapshot=row.workflow_snapshot;
+    const routing = await resolveLocatorRouting(client,userId,locatorType,reviewSnapshot?.departmentHeadUserId,reviewSnapshot);
+    if (!routing.workflow && routing.route==='hr') await assertLeaveSubmissionReviewer(client, userId, 'locator', null, reviewSnapshot);
+    const departmentHeadUserId = (routing.workflow ? !routing.workflow.steps.includes('department') : routing.route==='mayor_direct')?null:reviewSnapshot?.departmentHeadUserId || null;
     const submitStatus = routing.status;
     const typeSnapshot = captureLocatorTypeSnapshot(locatorType);
     const changes = locatorCorrectionChanges(row, correction);
@@ -1852,11 +1858,12 @@ router.patch('/:id/resubmit', protect, async (req, res) => {
         JSON.stringify(detailSchema),JSON.stringify(detailValues),
       ]
     );
+    await workflowEngine.initialWorkflow(client,'locator',id,routing.workflow);
     await snapshotLocatorReviewers(client, {
       requestType: 'locator',
       requestId: id,
       departmentId: reviewSnapshot?.departmentId || null,
-      reviewers: routing.route==='mayor_direct'?[]:reviewSnapshot?.reviewers || [],
+      reviewers: routing.workflow ? (routing.workflow.steps.includes('department') ? reviewSnapshot?.reviewers || [] : []) : routing.route==='mayor_direct'?[]:reviewSnapshot?.reviewers || [],
     });
     await recordLocatorWorkflowEvent(client, {
       locatorSlipId: id,
@@ -1977,7 +1984,7 @@ router.get('/:id/history', protect, async (req, res) => {
   try {
     const current = await client.query(
       `SELECT ls.id, ls.employee_id, ls.department_id,
-              ls.assigned_department_head_id, ls.dept_head_reviewer_id, ls.status, ls.final_review_route,
+              ls.assigned_department_head_id, ls.dept_head_reviewer_id, ls.status, ls.final_review_route, ls.workflow_snapshot,
               EXISTS (
                 SELECT 1 FROM locator_slip_department_reviewers lsr
                 WHERE lsr.locator_slip_id = ls.id
@@ -1990,6 +1997,8 @@ router.get('/:id/history', protect, async (req, res) => {
     const row = current.rows[0];
     if (!row) return res.status(404).json({ error: 'Locator slip not found' });
 
+    const workflowRead = await require('../services/sharedWorkflowInbox').pendingReadAccess(client,'locator',row,req.user);
+    if (workflowRead === false) return res.status(404).json({error:'Locator slip not found'});
     const normalizedRole = String(req.user?.role || '').trim().toLowerCase();
     const isOwner = String(row.employee_id) === String(userId);
     const isHrOrAdmin = normalizedRole === 'hr' || normalizedRole === 'admin' ||
@@ -2013,7 +2022,7 @@ router.get('/:id/history', protect, async (req, res) => {
           String(row.department_id || '');
     }
 
-    if (!isOwner && !isHrOrAdmin && !canReadAsDepartmentHead) {
+    if (!isOwner && !isHrOrAdmin && !canReadAsDepartmentHead && workflowRead !== true) {
       return res.status(404).json({ error: 'Locator slip not found' });
     }
 
@@ -2041,6 +2050,7 @@ router.get('/:id/attachment', protect, async (req, res) => {
               ls.status,
               ls.dept_head_reviewer_id,
               ls.final_review_route,
+              ls.workflow_snapshot,
               ls.attachment_name,
               ls.attachment_path,
               ls.attachment_mime_type,
@@ -2070,7 +2080,9 @@ router.get('/:id/attachment', protect, async (req, res) => {
     ) {
       assignedDepartmentHeadId = await findDepartmentHeadUserId(pool, row.department_id);
     }
-    const access = resolveLocatorAttachmentAccess({
+    const workflowRead = await require('../services/sharedWorkflowInbox').pendingReadAccess(pool,'locator',row,req.user);
+    const access = workflowRead === false ? {allowed:false,reason:'not_authorized'}
+      : workflowRead === true || req.sharedWorkflowRead ? {allowed:true,reason:'assigned_workflow_reviewer'} : resolveLocatorAttachmentAccess({
       finalReviewRoute: row.final_review_route,
       canReadAsMayor: await canReadLocatorAsMayor(pool, req.user, row.final_review_route),
       role,
@@ -2304,12 +2316,13 @@ router.patch('/:id/department-head-approve', protect, async (req, res) => {
       return res.status(409).json(locatorConflictPayload(conflictCheck));
     }
     const routeRow = (await client.query('SELECT final_review_route FROM locator_slips WHERE id=$1::uuid',[id])).rows[0];
-    const manualMayor = routeRow?.final_review_route === 'mayor';
-    if (!manualMayor) {
+    const workflowDecision=await workflowEngine.workflowDecision(client,'locator',id,reviewerId,'approve',req.sharedWorkflowExpected);
+    const manualMayor = workflowDecision ? workflowDecision.status==='approved' : routeRow?.final_review_route === 'mayor';
+    if (!workflowDecision && !manualMayor) {
       await assertDepartmentApprovalFinalReviewer(client, current.rows[0].employee_id, reviewerId, 'locator', id);
     }
     await persistLocatorSignature(client, req.user, id, 'department_head', req.body?.signature);
-    const departmentNextStatus = manualMayor ? 'approved' : 'pending_hr';
+    const departmentNextStatus = workflowDecision?.status || (manualMayor ? 'approved' : 'pending_hr');
     await client.query(
       `UPDATE locator_slips
        SET status = $4::text,
@@ -2320,6 +2333,7 @@ router.patch('/:id/department-head-approve', protect, async (req, res) => {
        WHERE id = $1::uuid`,
       [id, reviewerId, remarks, departmentNextStatus]
     );
+    await workflowEngine.saveWorkflow(client,'locator',id,workflowDecision?.snapshot);
     await recordLocatorWorkflowEvent(client, {
       locatorSlipId: id,
       action: 'department_head_approved',
@@ -2334,7 +2348,7 @@ router.patch('/:id/department-head-approve', protect, async (req, res) => {
     if (manualMayor) {
       const mapped = await fetchLocatorSlipDetails(pool,id);
       notifySafe(()=>locatorNotifications.notifyEmployee(pool,{slipId:id,employeeUserId:current.rows[0].employee_id,
-        type:'locator_approved_department_head',title:'Locator approved for manual Mayor signing',body:'Your department approved the locator. Obtain the Mayor signature on the printed form.'}));
+        type:'locator_approved_department_head',title:(!workflowDecision || workflowDecision.snapshot.manual_signing_required)?'Locator approved for manual Mayor signing':'Locator request approved',body:(!workflowDecision || workflowDecision.snapshot.manual_signing_required)?'Your department approved the locator. Obtain the Mayor signature on the printed form.':'Your department reviewer approved the locator.'}));
       broadcastLocatorUpdated('department_head_approved',mapped);
       return res.json(mapped);
     }
@@ -2416,6 +2430,8 @@ router.patch('/:id/department-head-reject', protect, async (req, res) => {
         error: `Cannot reject locator slip with status '${current.rows[0].status}'`,
       });
     }
+    const workflowAction=await workflowEngine.workflowDecision(client,'locator',id,reviewerId,'reject',req.sharedWorkflowExpected);
+    await workflowEngine.saveWorkflow(client,'locator',id,workflowAction?.snapshot);
     await client.query(
       `UPDATE locator_slips
        SET status = 'rejected_by_department_head',
@@ -2541,6 +2557,8 @@ router.patch('/:id/department-head-return', protect, async (req, res) => {
       });
     }
 
+    const workflowAction=await workflowEngine.workflowDecision(client,'locator',id,reviewerId,'return',req.sharedWorkflowExpected);
+    await workflowEngine.saveWorkflow(client,'locator',id,workflowAction?.snapshot);
     await client.query(
       `UPDATE locator_slips
        SET status = 'returned_for_correction',
@@ -2632,8 +2650,15 @@ router.get('/admin', protect, requireLocatorFinalRole, requireDtrFeatureIfAdmin(
       LEFT JOIN users corrector ON corrector.id = ls.retroactive_corrected_by
       LEFT JOIN users revoker ON revoker.id = ls.revoked_by
       WHERE ($1::text[] IS NULL OR ls.status = ANY($1::text[]))
-        AND (COALESCE(ls.final_review_route,'hr') = '${req.user?.role==='mayor'?'mayor_direct':'hr'}' OR
-          ('${req.user?.role==='mayor'?'mayor':'staff'}' <> 'mayor' AND ls.final_review_route='mayor'))
+        AND ((ls.workflow_snapshot IS NOT NULL AND (
+          ls.status = '${req.user?.role==='mayor'?'pending_mayor':'pending_hr'}'
+          OR (ls.status NOT IN ('pending_department_head','pending_hr','pending_mayor','pending') AND EXISTS (
+            SELECT 1 FROM locator_slip_history stage WHERE stage.locator_slip_id=ls.id
+              AND (stage.from_status='${req.user?.role==='mayor'?'pending_mayor':'pending_hr'}'
+                OR stage.to_status='${req.user?.role==='mayor'?'pending_mayor':'pending_hr'}')
+          ))
+        )) OR (ls.workflow_snapshot IS NULL AND (COALESCE(ls.final_review_route,'hr') = '${req.user?.role==='mayor'?'mayor_direct':'hr'}' OR
+          ('${req.user?.role==='mayor'?'mayor':'staff'}' <> 'mayor' AND ls.final_review_route='mayor'))))
         AND ls.employee_id <> $8::uuid
         AND ${finalQueueVisibilitySql('locator', 'ls', '$8::uuid')}
         AND (
@@ -2790,6 +2815,8 @@ router.patch('/:id/return-for-correction', protect, requireLocatorFinalRole, req
       });
     }
 
+    const workflowAction=await workflowEngine.workflowDecision(client,'locator',id,reviewerId,'return',req.sharedWorkflowExpected);
+    await workflowEngine.saveWorkflow(client,'locator',id,workflowAction?.snapshot);
     await client.query(
       `UPDATE locator_slips
        SET status = 'returned_for_correction',
@@ -2890,35 +2917,41 @@ router.patch('/:id/approve', protect, requireLocatorFinalRole, requireDtrFeature
       await client.query('ROLLBACK');
       return res.status(409).json(locatorConflictPayload(conflictCheck));
     }
+    const workflowDecision=await workflowEngine.workflowDecision(client,'locator',id,reviewerId,'approve',req.sharedWorkflowExpected);
     await persistLocatorSignature(client, req.user, id, 'hr_approver', req.body?.signature);
+    await workflowEngine.saveWorkflow(client,'locator',id,workflowDecision?.snapshot);
     await client.query(
       `UPDATE locator_slips
-       SET status = 'approved',
+       SET status = $4,
            hr_reviewer_id = $2::uuid,
            hr_reviewed_at = now(),
            hr_remarks = $3::text,
            updated_at = now()
        WHERE id = $1::uuid`,
-      [id, reviewerId, remarks]
+      [id, reviewerId, remarks,workflowDecision?.status || 'approved']
     );
     await recordLocatorWorkflowEvent(client, {
       locatorSlipId: id,
       action: req.user.role==='mayor'?'mayor_approved':'hr_approved',
       fromStatus: current.rows[0].status,
-      toStatus: 'approved',
+      toStatus: workflowDecision?.status || 'approved',
       actorId: reviewerId,
       actorRole: req.user?.role || 'hr',
       remarks,
     });
     await client.query('COMMIT');
 
+    if (workflowDecision && workflowDecision.status !== 'approved') notifySafe(()=>locatorNotifications.notifyAfterSubmit(pool,{
+      slipId:id,status:workflowDecision.status,employeeUserId:current.rows[0].employee_id,
+      slipDate:current.rows[0].slip_date,
+    }));
     notifySafe(() =>
       locatorNotifications.notifyEmployee(pool, {
         employeeUserId: current.rows[0].employee_id,
         slipId: id,
-        type: 'locator_approved_hr',
-        title: 'Locator request approved',
-        body: remarks
+        type: workflowDecision && workflowDecision.status !== 'approved' ? 'locator_workflow_step_approved' : 'locator_approved_hr',
+        title: workflowDecision && workflowDecision.status !== 'approved' ? 'Locator request forwarded for approval' : 'Locator request approved',
+        body: workflowDecision && workflowDecision.status !== 'approved' ? `Your request passed review and is awaiting ${workflowEngine.stepLabel(workflowDecision.snapshot.steps[workflowDecision.snapshot.current_step])}.` : remarks
           ? `Your locator request was approved. ${remarks}`
           : req.user.role==='mayor'?'Your locator request was approved by the Mayor.':'Your locator request was approved by HR.',
         metadata: { reviewer_remarks: remarks },
@@ -3116,6 +3149,8 @@ router.patch('/:id/reject', protect, requireLocatorFinalRole, requireDtrFeatureI
       });
     }
     await assertFinalLeaveReviewer(client, current.rows[0].employee_id, reviewerId, 'locator', id);
+    const workflowAction=await workflowEngine.workflowDecision(client,'locator',id,reviewerId,'reject',req.sharedWorkflowExpected);
+    await workflowEngine.saveWorkflow(client,'locator',id,workflowAction?.snapshot);
     await client.query(
       `UPDATE locator_slips
        SET status = 'rejected_by_hr',

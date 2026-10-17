@@ -53,6 +53,7 @@ async function notifyAfterSubmit(
     departmentReviewerUserIds = [],
   }
 ) {
+  if (await require('./workflowReviewNotifications').notifySharedWorkflowReview(pool,'locator',slipId)) return;
   const dateLabel = fmtDate(slipDate);
   const segmentLabel = fmtSegmentLabel({ amIn, amOut, pmIn, pmOut });
   const who = employeeName || 'An employee';
@@ -96,13 +97,16 @@ async function notifyDepartmentHeadApprovedForHr(
   pool,
   { slipId, employeeUserId, employeeName, slipDate, requestType }
 ) {
+  if (await require('./workflowReviewNotifications').notifySharedWorkflowReview(pool,'locator',slipId)) return;
+  const snapshot=await require('./approvalWorkflows').loadRequestWorkflow(pool,'locator',slipId);
+  const mayorStage=snapshot && require('./approvalWorkflows').workflowStatus(snapshot)==='pending_mayor';
   const requestLabel = requestTypeLabel(requestType);
   const hrIds = await finalReviewerIds(pool, employeeUserId, slipId);
   if (!hrIds.length) await notifyMissingFinalReviewer(pool, 'locator', slipId);
   await insertNotificationForUsers(pool, hrIds, {
     category: 'locator',
-    type: 'locator_forwarded_to_hr',
-    title: 'Locator request ready for HR approval',
+    type: mayorStage?'locator_pending_mayor':'locator_forwarded_to_hr',
+    title: mayorStage?'Locator request ready for Mayor approval':'Locator request ready for HR approval',
     body: `${employeeName || 'An employee'} ${requestLabel} (${fmtDate(
       slipDate
     )}) was endorsed by the department head.`,
@@ -125,7 +129,7 @@ async function notifyDepartmentHeadApprovedForEmployee(
     title: 'Locator request endorsed',
     body: `Your ${requestLabel} for ${fmtDate(
       slipDate
-    )} was endorsed by your department head and forwarded to HR.`,
+    )} was endorsed by your department head and forwarded to the next configured reviewer.`,
     referenceType: 'locator_slip',
     referenceId: slipId,
     metadata,

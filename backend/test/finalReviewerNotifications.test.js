@@ -26,7 +26,8 @@ for (const kind of ['leave', 'locator']) {
           assert.match(sql, /b.effective_to/);
           return { rows: configured ? [{ id: 'backup' }, { id: 'applicant' }, { id: 'backup' }] : [] };
         }
-        if (sql.startsWith('SELECT final_review_route')) return {rows:[{final_review_route:'hr'}]};
+        if (sql.startsWith('SELECT workflow_snapshot')) return {rows:[{workflow_snapshot:null}]};
+    if (sql.startsWith('SELECT final_review_route')) return {rows:[{final_review_route:'hr'}]};
         if (sql.includes('department_approver_id')) return { rows: [{ department_approver_id: 'primary' }] };
         throw new Error(`Unexpected query: ${sql}`);
       } };

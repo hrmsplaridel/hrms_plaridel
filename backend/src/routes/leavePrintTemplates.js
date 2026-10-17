@@ -23,7 +23,8 @@ async function typeVersion(db,id,lock=false){
  if(!q.rows[0])throw Object.assign(new Error('Leave type not found'),{status:404});return q.rows[0];
 }
 async function requestVersion(db,id,user){
- const q=await db.query(`SELECT lr.*,v.id AS version_id,v.layout,v.background_pdf,v.background_name,v.print_layout,
+ const currentMayor=await require('../services/approvalWorkflows').isCurrentMayor(db,user);
+ const loadVersion=(sharedRead=false)=>db.query(`SELECT lr.*,v.id AS version_id,v.layout,v.background_pdf,v.background_name,v.print_layout,
  COALESCE(lr.routing_employment_type,NULLIF(lr.employee_official_snapshot->>'employment_type',''),employee.employment_type) AS employment_type,
  COALESCE(lr.employee_official_snapshot->>'department_name',lr.employee_official_snapshot->'department'->>'name','') AS department_name
  FROM leave_requests lr JOIN leave_types lt ON lt.id=lr.leave_type_id
@@ -31,15 +32,22 @@ async function requestVersion(db,id,user){
  LEFT JOIN leave_print_template_versions v ON v.id=CASE WHEN lr.status='draft'
  THEN lt.print_template_version_id ELSE lr.print_template_version_id END
  WHERE lr.id=$1::uuid AND (
- COALESCE(lr.employee_id,lr.user_id)=$2::uuid OR $3='hr'
- OR ($3='mayor' AND lr.final_reviewer_user_id=$2::uuid)
+ $5::boolean OR COALESCE(lr.employee_id,lr.user_id)=$2::uuid OR $3='hr'
+ OR ($4::boolean AND lr.final_review_route IN ('mayor','mayor_direct'))
  OR ($3='admin' AND EXISTS(SELECT 1 FROM dtr_admin_access p WHERE p.admin_user_id=$2::uuid AND p.leave_allowed=true))
  OR EXISTS(SELECT 1 FROM leave_request_department_reviewers r WHERE r.leave_request_id=lr.id AND r.reviewer_id=$2::uuid)
  OR EXISTS(SELECT 1 FROM leave_request_history h WHERE h.leave_request_id=lr.id AND h.acted_by=$2::uuid
  AND h.action IN ('department_head_approved','department_head_rejected','department_head_returned')))
- `,[id,user.id,user.role]);
+ `,[id,user.id,user.role,currentMayor,sharedRead]);
+ let q=await loadVersion();
+ if(!q.rows.length && await require('../services/leaveWorkflowReadAccess').canReadSharedLeaveRequest(db,id,user)) {
+  q=await loadVersion(true);
+ }
  if(!q.rows[0])throw Object.assign(new Error('Leave request not found or access denied'),{status:404});
  const row=q.rows[0];
+ if(await require('../services/sharedWorkflowInbox').pendingReadAccess(db,'leave',row,user)===false) {
+  throw Object.assign(new Error('Leave request not found or access denied'),{status:404});
+ }
  // The JO/COS-specific Wellness form must never label other employees JO/COS.
  if(row.layout==='wellness' && !['job_order','contract_of_service'].includes(row.employment_type)) {
   return {...row,layout:'csc',background_pdf:null,background_name:null};

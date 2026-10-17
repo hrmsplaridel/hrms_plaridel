@@ -15,6 +15,18 @@ async function requestFinalReviewers(db,requestId,fallback){
  return [];
 }
 function requireLeaveFinalRole(req,res,next){
- return ['admin','hr'].includes(req.user?.role)?next():res.status(403).json({error:'Final reviewer access required'});
+ if(['admin','hr'].includes(req.user?.role)) return next();
+ if(req.user?.role!=='mayor' || !req.params?.id && !['/','/pending','/filter-options','/final-reviewer/me'].includes(req.path))
+  return res.status(403).json({error:'Final reviewer access required'});
+ return (async()=>{
+  const db=require('../config/db').pool;
+  const mayor=await require('./officialSignatoryService').resolveActiveMayor(db,require('../utils/dateRangeParser').todayInHrmsTimezone());
+  if(String(mayor?.employee_id)!==String(req.user.id))return res.status(403).json({error:'Current Mayor access required'});
+  if(req.params?.id){
+   const snapshot=await require('./approvalWorkflows').loadRequestWorkflow(db,'leave',req.params.id);
+   if(!snapshot || require('./approvalWorkflows').stepKind(snapshot.steps[snapshot.current_step])!=='mayor')return res.status(403).json({error:'This request is not awaiting Mayor approval.'});
+  }
+  return next();
+ })().catch(()=>res.status(503).json({error:'Approval authority could not be verified'}));
 }
 module.exports={normalizeRouting,chooseLeaveRoute,requestFinalReviewers,requireLeaveFinalRole};

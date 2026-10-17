@@ -3860,3 +3860,5 @@ COMMIT;
 \ir migrations/dtr/20261013_locator_print_layouts.sql
 \ir migrations/dtr/20261013_leave_print_layouts.sql
 \ir migrations/dtr/20261015_leave_signature_revisions.sql
+\ir migrations/dtr/20261015_named_approval_workflows.sql
+\ir migrations/dtr/20261016_shared_workflow_assignments.sql

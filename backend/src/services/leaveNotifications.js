@@ -34,6 +34,7 @@ async function notifyAfterSubmit(pool, {
   departmentHeadUserId,
   departmentReviewerUserIds = [],
 }) {
+  if (await require('./workflowReviewNotifications').notifySharedWorkflowReview(pool,'leave',leaveRequestId)) return;
   const range = fmtRange(startDateStr, endDateStr);
   const who = employeeName || 'An employee';
   const lt = leaveLabel(leaveTypeName);
@@ -55,8 +56,9 @@ async function notifyAfterSubmit(pool, {
     return;
   }
 
-  if (status === 'pending_mayor') return;
-  if (status === 'pending_hr' || status === 'pending') {
+
+  if (status === 'pending_mayor' && !(await require('./approvalWorkflows').loadRequestWorkflow(pool,'leave',leaveRequestId))) return;
+  if (status === 'pending_hr' || status === 'pending' || status === 'pending_mayor') {
     const hrIds = await finalReviewerIds(pool, employeeUserId, leaveRequestId);
     if (!hrIds.length) await notifyMissingFinalReviewer(pool, 'leave', leaveRequestId);
     const targets = hrIds.filter((id) => id !== employeeUserId);
@@ -81,8 +83,11 @@ async function notifyDepartmentHeadApprovedForHr(pool, {
   startDateStr,
   endDateStr,
 }) {
+  if (await require('./workflowReviewNotifications').notifySharedWorkflowReview(pool,'leave',leaveRequestId)) return;
   const route=(await pool.query('SELECT final_review_route FROM leave_requests WHERE id=$1',[leaveRequestId])).rows[0]?.final_review_route;
-  if (route === 'mayor') return;
+  const snapshot=await require('./approvalWorkflows').loadRequestWorkflow(pool,'leave',leaveRequestId);
+  const mayorStage=snapshot && require('./approvalWorkflows').workflowStatus(snapshot)==='pending_mayor';
+  if (route === 'mayor' && !snapshot) return;
   const hrIds = await finalReviewerIds(pool, employeeUserId, leaveRequestId);
   if (!hrIds.length) await notifyMissingFinalReviewer(pool, 'leave', leaveRequestId);
   const range = fmtRange(startDateStr, endDateStr);
@@ -90,8 +95,8 @@ async function notifyDepartmentHeadApprovedForHr(pool, {
   const lt = leaveLabel(leaveTypeName);
   await insertNotificationForUsers(pool, hrIds, {
     category: 'leave',
-    type: route==='mayor'?'leave_forwarded_to_mayor':'leave_forwarded_to_hr',
-    title: route==='mayor'?'Leave request ready for Mayor approval':'Leave request ready for HR approval',
+    type: mayorStage?'leave_forwarded_to_mayor':'leave_forwarded_to_hr',
+    title: mayorStage?'Leave request ready for Mayor approval':'Leave request ready for HR approval',
     body: `${who} — ${lt} (${range}) was endorsed by the department head.`,
     referenceType: 'leave_request',
     referenceId: leaveRequestId,

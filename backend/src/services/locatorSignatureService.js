@@ -61,13 +61,15 @@ async function resolveOfficials(db, row) {
     : await resolveFinalLeaveReviewerConfiguration(db);
   const officials = await substituteApplicantOfficial(db, row, {
     applicant: { id: row.employee_id, name: row.employee_name },
-    department_head: row.final_review_route==='mayor_direct'?{id:null,name:''}:{
+    department_head: row.final_review_route==='mayor_direct' && !row.workflow_snapshot?.steps?.includes('department')?{id:null,name:''}:{
       id: department.primary?.reviewerId || null, name: department.primary?.reviewerName || '',
       ...(department.primary?.position_title ? { position_title: department.primary.position_title } : {}),
     },
     hr_approver: { id: final.primary?.id || null, name: final.primary?.name || '',
       position_title: final.primary?.position_title || '' },
   });
+  const shared=await require('./approvalWorkflows').printOfficials(db,'locator',row);
+  if(shared)Object.assign(officials,shared);
   return resolveMissingPositionTitles(db, officials, date);
 }
 
@@ -102,7 +104,12 @@ async function loadContext(db, user, id, lock = false) {
   const row = result.rows[0];
   if (!row) fail('NOT_FOUND', 'Locator slip not found');
   const owner = row.employee_id === user.id;
-  const hr = ['hr', 'admin'].includes(user.role) ||
+  const sharedAccess=require('./approvalWorkflows').isShared(row.workflow_snapshot) &&
+    await require('./sharedWorkflowInbox').canRead(db,'locator',row,user);
+  if(require('./approvalWorkflows').isShared(row.workflow_snapshot) && PENDING.has(row.status) && !sharedAccess) {
+    fail('NOT_FOUND', 'Locator slip not found');
+  }
+  const hr = sharedAccess || ['hr', 'admin'].includes(user.role) ||
     await canReadLocatorAsMayor(db, user, row.final_review_route);
   const reviewer = row.is_reviewer || row.assigned_department_head_id === user.id;
   if (!owner && !hr && !reviewer && row.dept_head_reviewer_id !== user.id) {
@@ -111,6 +118,8 @@ async function loadContext(db, user, id, lock = false) {
   // Legacy forms have no historical official snapshot. Resolve primary roles only,
   // never the routing fallback or the person who happened to approve.
   let officials = { ...(row.print_signatories || await resolveOfficials(db, row)) };
+  const shared=await require('./approvalWorkflows').printOfficials(db,'locator',row);
+  if(shared)Object.assign(officials,shared);
   if (!row.print_signatories) {
     const primary = await db.query(
       `SELECT reviewer_id, reviewer_name_snapshot FROM locator_slip_department_reviewers
@@ -128,6 +137,7 @@ async function loadContext(db, user, id, lock = false) {
   const finalReviewers = hr && !owner && PENDING.has(row.status)
     ? await resolveEligibleFinalReviewers(db, row.employee_id, 'locator', id) : [];
   return { ...row, officials, owner, hr, reviewer,
+    activeReviewer: finalReviewers.find((r) => r.id === user.id),
     canFinalReview: finalReviewers.some((r) => r.id === user.id) };
 }
 
@@ -148,7 +158,7 @@ function printableSignature(context, slot, signature) {
   if (!id || signature?.signed_by !== id || signature.revision !== context.signature_revision) return null;
   if (!PENDING.has(context.status) && context.status !== 'approved') return null;
   if (slot === 'department_head' &&
-      (!['pending_hr', 'approved'].includes(context.status) || context.dept_head_reviewer_id !== id)) return null;
+      (!['pending_hr', 'pending_mayor', 'approved'].includes(context.status) || context.dept_head_reviewer_id !== id)) return null;
   if (slot === 'hr_approver' && (context.status !== 'approved' || context.hr_reviewer_id !== id)) return null;
   return signature;
 }
@@ -176,16 +186,26 @@ async function getLocatorSourceSignatures(db, user, module, table, id) {
     );
     const signatures = Object.entries(LABELS).map(([slot, label]) => {
       const official = context.officials[slot];
-      const signature = result.rows.find((s) => s.slot_key === slot);
+      const engine=require('./approvalWorkflows');
+      const sharedPending=engine.isShared(context.workflow_snapshot) && !context.workflow_snapshot.outcome &&
+        ['pending','pending_hr','pending_mayor'].includes(context.status) && slot==='hr_approver';
+      const stored=result.rows.find((s) => s.slot_key === slot);
+      const signature=sharedPending?engine.currentStepSignature(context,stored):stored;
       return {
         ...signature, slot_key: slot, label,
         assigned_signer_id: official?.id || null, assigned_signer_name: official?.name || '',
+        ...(sharedPending?{
+          label:`${engine.stepLabel(context.workflow_snapshot.steps[context.workflow_snapshot.current_step])} Signature`,
+          assigned_signer_id:signature?.assigned_signer_id || context.activeReviewer?.id || null,
+          assigned_signer_name:signature?.signer_name_snapshot || context.activeReviewer?.name || '',
+        }:{}),
         can_sign: canSign(context, user, slot), can_assign: false, assignment_source: 'automatic',
       };
     });
+    const workflowSignatures=await require('./approvalWorkflows').decisionSignatures(db,context);
     return {
       source_module: module, source_table: table, source_record_id: id,
-      source_status: context.status, signatures,
+      source_status: context.status, workflow_snapshot:context.workflow_snapshot || null, signatures:[...signatures,...workflowSignatures],
       print_form: {
         employee_detail_schema_snapshot: context.employee_detail_schema_snapshot || [],
         additional_details: context.additional_details || {},
@@ -199,7 +219,10 @@ async function getLocatorSourceSignatures(db, user, module, table, id) {
         am_in: context.am_in, am_out: context.am_out, pm_in: context.pm_in, pm_out: context.pm_out,
       },
       print_signatories: Object.fromEntries(Object.keys(LABELS).map((slot) => {
-        const signature = printableSignature(context, slot, result.rows.find((s) => s.slot_key === slot));
+        const shared=require('./approvalWorkflows').isShared(context.workflow_snapshot);
+        const first=workflowSignatures.find(s=>s.slot_key==='workflow_step_1');
+        const signature = shared && slot==='department_head' && first && context.officials.department_head?.id===first.signed_by ? first
+          : printableSignature(context, slot, result.rows.find((s) => s.slot_key === slot));
         return [slot, {
           name: context.officials[slot]?.name || '',
           position_title: context.officials[slot]?.position_title || '',
@@ -230,7 +253,8 @@ async function signLocatorSourceSlot(pool, user, module, table, id, slot, input)
 // Called only after this actor has supplied (or already saved) a valid signature,
 // with the pending request locked by loadContext inside the caller's transaction.
 async function reassignPendingMayor(db, user, context, slot) {
-  if (context.final_review_route !== 'mayor_direct' || slot !== 'hr_approver') return;
+  if (context.final_review_route !== 'mayor_direct' || slot !== 'hr_approver' ||
+      (context.workflow_snapshot && require('./approvalWorkflows').stepKind(context.workflow_snapshot.steps[context.workflow_snapshot.current_step]) !== 'mayor')) return;
   if (!context.canFinalReview || context.owner ||
       !['pending', 'pending_hr', 'pending_mayor'].includes(context.status)) {
     fail('FORBIDDEN', 'Only the current Mayor can sign this pending locator');

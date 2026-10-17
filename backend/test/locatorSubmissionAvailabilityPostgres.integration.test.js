@@ -35,6 +35,7 @@ test('Locator availability resolves employee-fileable routes and dated reviewer 
         CREATE TEMP TABLE locator_request_types(code text,label text,filing_access text,approval_route text,
           mayor_employment_types text[],is_active boolean,sort_order int);
       `);
+      await db.query('ALTER TABLE pg_temp.locator_request_types ADD COLUMN IF NOT EXISTS approval_workflow_id uuid');
       await db.query(`INSERT INTO users(id,full_name,role,is_active,employment_type,employment_status) VALUES
         ($1,'Employee','employee',true,'regular','active'),($2,'Head','hr',true,'permanent','active'),
         ($3,'Backup','admin',true,'permanent','active'),($4,'Mayor','mayor',true,'permanent','active')`, [employee, head, backup, mayor]);

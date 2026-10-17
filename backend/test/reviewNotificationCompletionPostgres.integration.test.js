@@ -6,9 +6,9 @@ test('review alerts close by stage, rollback atomically, and repair older rounds
  const schema='review_notification_test_'+randomUUID().replaceAll('-','');
  try{
   await db.query(`CREATE SCHEMA ${schema}`);await db.query(`SET search_path TO ${schema},public`);
-  await db.query(`CREATE TABLE user_notifications(id UUID PRIMARY KEY DEFAULT gen_random_uuid(),user_id UUID,type TEXT,reference_type TEXT,reference_id UUID,read_at TIMESTAMPTZ,created_at TIMESTAMPTZ DEFAULT now());
-   CREATE TABLE leave_requests(id UUID PRIMARY KEY,status TEXT);
-   CREATE TABLE locator_slips(id UUID PRIMARY KEY,status TEXT);
+  await db.query(`CREATE TABLE user_notifications(id UUID PRIMARY KEY DEFAULT gen_random_uuid(),user_id UUID,type TEXT,reference_type TEXT,reference_id UUID,read_at TIMESTAMPTZ,created_at TIMESTAMPTZ DEFAULT now(),metadata JSONB);
+   CREATE TABLE leave_requests(id UUID PRIMARY KEY,status TEXT,workflow_snapshot JSONB,signature_revision integer);
+   CREATE TABLE locator_slips(id UUID PRIMARY KEY,status TEXT,workflow_snapshot JSONB,signature_revision integer);
    CREATE TABLE leave_request_history(leave_request_id UUID,from_status TEXT,to_status TEXT,acted_at TIMESTAMPTZ);
    CREATE TABLE locator_slip_history(locator_slip_id UUID,from_status TEXT,to_status TEXT,created_at TIMESTAMPTZ);`);
   const request=randomUUID(), user=randomUUID(), backup=randomUUID();

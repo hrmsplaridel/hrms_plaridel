@@ -54,7 +54,7 @@ async function loadLeaveContext(db, leaveRequestId, user, { forUpdate = false } 
   }
   const result = await db.query(
     `SELECT lr.id,
-            lr.status,lr.final_review_route,lr.final_reviewer_user_id,lr.signature_revision,
+            lr.status,lr.workflow_snapshot,lr.final_review_route,lr.final_reviewer_user_id,lr.signature_revision,
             COALESCE(lr.user_id, lr.employee_id) AS employee_user_id,
             employee.full_name AS employee_name,
             lr.assigned_department_head_id,
@@ -94,7 +94,15 @@ async function loadLeaveContext(db, leaveRequestId, user, { forUpdate = false } 
   const userId = String(user.id || '');
   const role = String(user.role || '').toLowerCase();
   const isOwner = String(row.employee_user_id || '') === userId;
-  const isHrOrAdmin = role === 'admin' || role === 'hr' || (role==='mayor' && String(row.final_reviewer_user_id)===userId);
+  const mayorAccess=row.workflow_snapshot ? row.final_review_route==='mayor_direct' &&
+    await require('./approvalWorkflows').isCurrentMayor(db,user) : role==='mayor' && String(row.final_reviewer_user_id)===userId;
+  const sharedAccess=require('./approvalWorkflows').isShared(row.workflow_snapshot) &&
+    await require('./sharedWorkflowInbox').canRead(db,'leave',{...row,employee_id:row.employee_user_id},user);
+  if(require('./approvalWorkflows').isShared(row.workflow_snapshot) &&
+    canApplicantSignStatus(row.status) && !sharedAccess) {
+    throw serviceError('FORBIDDEN', 'You do not have access to this leave form');
+  }
+  const isHrOrAdmin = role === 'admin' || role === 'hr' || mayorAccess || sharedAccess;
   const isReviewer =
     String(row.assigned_department_head_id || '') === userId ||
     row.is_snapshotted_reviewer === true ||
@@ -157,7 +165,9 @@ function mapHrApproverSignature(context, row, user, canReview) {
   return {
     id: row?.id || null,
     slot_key: HR_APPROVER_SLOT,
-    label: context.final_review_route==='mayor'?'Mayor Signature':'Final Approver Signature',
+    label: require('./approvalWorkflows').isShared(context.workflow_snapshot) ?
+      `${require('./approvalWorkflows').stepLabel(context.workflow_snapshot.steps[context.workflow_snapshot.current_step]) || 'Final approval'} Signature` :
+      context.workflow_snapshot ? context.status==='pending_hr'?'HR Review Signature':context.final_review_route==='mayor_direct'?'Mayor Signature':'Final Approver Signature' : context.final_review_route==='mayor'?'Mayor Signature':'Final Approver Signature',
     assigned_signer_id:
       row?.assigned_signer_id || (canReview ? user.id : null),
     assigned_signer_name:
@@ -217,13 +227,26 @@ async function getLeaveSourceSignatures(
     }
     throw error;
   }
+  let certification=null;
+  const snapshot=context.workflow_snapshot;
+  const hrDecision=snapshot?.decisions?.find(d=>(snapshot.steps[d.step]==='hr' ||
+    snapshot.steps[d.step]?.assignee_source==='final_hr_reviewers' || d.reviewer?.role==='hr') && d.action==='approve');
+  if(hrDecision?.signature && hrDecision.signature.revision===context.signature_revision && ['pending_mayor','approved'].includes(context.status)) {
+    const asset=(await pool.query(`SELECT mime_type,encode(image_bytes,'base64') AS signature_image_base64
+      FROM docutracker_signature_assets WHERE id=$1::uuid AND owner_user_id=$2::uuid`,
+      [hrDecision.signature.signature_asset_id,hrDecision.actor_id])).rows[0];
+    if(asset)certification={...hrDecision.signature,...asset,slot_key:'certification_officer',label:'HR Certification Signature',can_sign:false};
+  }
   return {
     source_module: sourceModule,
     source_table: sourceTable,
     source_record_id: leaveRequestId,
     source_status: context.status,
     source_revision: context.signature_revision,
+    workflow_snapshot: context.workflow_snapshot || null,
     signatures: [
+      ...await require('./approvalWorkflows').decisionSignatures(pool,context),
+      ...(certification?[certification]:[]),
       mapApplicantSignature(
         context,
         result.rows.find((row) => row.slot_key === APPLICANT_SLOT),
@@ -236,7 +259,8 @@ async function getLeaveSourceSignatures(
       ),
       mapHrApproverSignature(
         context,
-        result.rows.find((row) => row.slot_key === HR_APPROVER_SLOT),
+        require('./approvalWorkflows').currentStepSignature(context,
+          result.rows.find((row) => row.slot_key === HR_APPROVER_SLOT)),
         user,
         canReview
       ),
@@ -459,6 +483,51 @@ function signLeaveSourceHrApprover(
   );
 }
 
+// Called within the submission transaction after all content/routing updates.
+// The applicant explicitly selects this owned asset for the submitted form;
+// historical confirmations are never promoted to a newer revision on reads.
+async function confirmSubmittedApplicantSignature(db, user, requestId, assetId) {
+  if (assetId == null) return;
+  if (!isUuid(assetId)) {
+    throw Object.assign(
+      serviceError('VALIDATION', 'Select a valid applicant signature.'),
+      { statusCode: 400 }
+    );
+  }
+  const result = await db.query(
+    `INSERT INTO docutracker_leave_signatures
+    (leave_request_id,slot_key,assigned_signer_id,signature_asset_id,signed_by,signer_name_snapshot,signed_at,created_by,revision)
+    SELECT lr.id,'applicant',u.id,a.id,u.id,u.full_name,now(),u.id,lr.signature_revision
+    FROM leave_requests lr JOIN users u ON u.id=$2::uuid AND u.is_active=true
+    JOIN docutracker_signature_assets a ON a.id=$3::uuid AND a.owner_user_id = u.id
+    WHERE lr.id=$1::uuid AND COALESCE(lr.user_id, lr.employee_id) = u.id
+      AND lr.status IN ('pending','pending_department_head','pending_hr','pending_mayor')
+    ON CONFLICT (leave_request_id,revision,slot_key) DO UPDATE SET
+      assigned_signer_id=EXCLUDED.assigned_signer_id,signature_asset_id=EXCLUDED.signature_asset_id,
+      signed_by=EXCLUDED.signed_by,signer_name_snapshot=EXCLUDED.signer_name_snapshot,signed_at=now(),updated_at=now()
+    RETURNING revision`,
+    [requestId, user.id, assetId]
+  );
+  if (!result.rowCount) {
+    throw Object.assign(
+      serviceError('FORBIDDEN', 'Applicant signature is not owned by this employee or the request cannot be signed.'),
+      { statusCode: 403 }
+    );
+  }
+  await db.query(
+    `INSERT INTO leave_request_history
+    (leave_request_id,action,from_status,to_status,acted_by,remarks,metadata_json,acted_at)
+    SELECT id,'signed',status,status,$2::uuid,'Applicant confirmed the submitted form signature',$3::jsonb,now()
+    FROM leave_requests WHERE id=$1::uuid`,
+    [requestId, user.id, JSON.stringify({
+      slot_key: 'applicant',
+      revision: result.rows[0].revision,
+      signature_asset_id: assetId,
+      confirmation: 'submission',
+    })]
+  );
+}
+
 async function requireDepartmentHeadApprovalSignature(
   db,
   leaveRequestId,
@@ -506,6 +575,7 @@ async function requireHrApprovalSignature(db, leaveRequestId, reviewerId) {
 }
 
 module.exports = {
+  confirmSubmittedApplicantSignature,
   APPLICANT_SLOT,
   DEPARTMENT_HEAD_SLOT,
   HR_APPROVER_SLOT,

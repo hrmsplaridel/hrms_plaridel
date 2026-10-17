@@ -77,6 +77,12 @@ async function insertNotificationForUsers(db, userIds, payload) {
 // Obsolete self-review alerts may exist from older notification routing.
 const reviewNotificationVisibilitySql = `NOT (
   type IN ('leave_pending_mayor', 'leave_forwarded_to_mayor')
+  AND NOT EXISTS (
+    SELECT 1 FROM leave_requests mayor_request
+    WHERE mayor_request.id = user_notifications.reference_id
+      AND mayor_request.final_review_route = 'mayor_direct'
+      AND mayor_request.workflow_snapshot IS NOT NULL
+  )
 ) AND NOT (
   type IN ('locator_pending_hr', 'locator_forwarded_to_hr', 'locator_pending_department_head','locator_pending_mayor')
   AND EXISTS (

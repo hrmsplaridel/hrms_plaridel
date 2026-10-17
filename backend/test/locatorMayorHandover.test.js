@@ -44,7 +44,8 @@ function fixture(overrides = {}, signatures = []) {
         return { rows: params[0] === db.activeMayor ? [{ id: params[0] }] : [], rowCount: params[0] === db.activeMayor ? 1 : 0 };
       }
       if (sql.includes('FROM locator_slips ls')) return { rows: [structuredClone(state.row)], rowCount: 1 };
-      if (sql.startsWith('SELECT final_review_route')) return { rows: [{ final_review_route: state.row.final_review_route }] };
+      if (sql.startsWith('SELECT workflow_snapshot')) return {rows:[{workflow_snapshot:null}]};
+    if (sql.startsWith('SELECT final_review_route')) return { rows: [{ final_review_route: state.row.final_review_route }] };
       if (sql.includes('AS department_approver_id')) return { rows: [{ department_approver_id: null }] };
       if (sql.startsWith('SELECT full_name FROM users')) return { rows: [{ full_name: 'Replacement Mayor' }], rowCount: 1 };
       if (sql.includes('FROM docutracker_signature_assets')) return { rows: [], rowCount: params[0] === asset ? 1 : 0 };
@@ -64,7 +65,7 @@ function fixture(overrides = {}, signatures = []) {
         state.row.print_signatories = JSON.parse(params[2]);
         return { rows: [structuredClone(state.row)], rowCount: 1 };
       }
-      if (sql.includes('UPDATE locator_slips') && sql.includes("status = 'approved'")) {
+      if (sql.includes('UPDATE locator_slips') && (sql.includes("status = 'approved'") || sql.includes("status = $4"))) {
         Object.assign(state.row, { status: 'approved', hr_reviewer_id: params[1] });
         return { rows: [structuredClone(state.row)], rowCount: 1 };
       }

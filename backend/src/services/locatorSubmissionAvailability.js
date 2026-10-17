@@ -8,7 +8,7 @@ const { assertLeaveSubmissionReviewer } = require('./leaveFinalReviewerService')
 // in its transaction, along with date/shift, attachment, signature and conflict checks.
 async function getLocatorSubmissionAvailability(db, employeeId, effectiveDate) {
   const configured = await db.query(
-    `SELECT code, label, filing_access, approval_route, mayor_employment_types
+    `SELECT code, label, filing_access, approval_route, mayor_employment_types, approval_workflow_id
      FROM locator_request_types WHERE is_active = true
      ORDER BY sort_order, label, code`
   );
@@ -23,8 +23,8 @@ async function getLocatorSubmissionAvailability(db, employeeId, effectiveDate) {
   for (const type of fileable) {
     let routing;
     try {
-      routing = await resolveLocatorRouting(db, employeeId, type, snapshot?.departmentHeadUserId);
-      if (routing.route === 'hr') {
+      routing = await resolveLocatorRouting(db, employeeId, type, snapshot?.departmentHeadUserId,snapshot);
+      if (!routing.workflow && routing.route === 'hr') {
         await assertLeaveSubmissionReviewer(db, employeeId, 'locator', null, snapshot);
       }
       types.push({ code: type.code, label: type.label, route: routing.route, can_submit: true });

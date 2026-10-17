@@ -109,6 +109,13 @@ function finalDeciderId(history) {
 /** Mirrors the DocuTracker leave list relationship rule. */
 async function canViewLeaveSource(db, user, leaveRequestId) {
   const role = String(user?.role || '').trim().toLowerCase();
+  if (role === 'mayor') {
+    const mayor=await require('./officialSignatoryService').resolveActiveMayor(db,require('../utils/dateRangeParser').todayInHrmsTimezone());
+    if(String(mayor?.employee_id)===String(user.id)) {
+      const visible=await db.query("SELECT 1 FROM leave_requests WHERE id=$1::uuid AND workflow_snapshot->'steps' ? 'mayor'",[leaveRequestId]);
+      if(visible.rowCount>0)return true;
+    }
+  }
   if (role === 'admin' || role === 'hr') {
     const exists = await db.query(
       'SELECT 1 FROM leave_requests WHERE id = $1::uuid LIMIT 1',
@@ -153,10 +160,13 @@ async function getLeaveSourceWorkflow(
 ) {
   const id = String(leaveRequestId || '').trim();
   if (!id || !user?.id) return null;
-  if (!(await canViewLeaveSource(db, user, id))) return null;
+  if (!(await canViewLeaveSource(db, user, id))) {
+    try {await require('./sharedWorkflowInbox').getRequest(db,'leave',id,user);}
+    catch(error){if(error.statusCode===403)return null;throw error;}
+  }
 
   const leave = await db.query(
-    `SELECT l.status,
+    `SELECT l.status,l.workflow_snapshot,COALESCE(l.employee_id,l.user_id) AS employee_user_id,
             l.assigned_department_head_id::text AS assigned_department_head_id,
             head.full_name AS assigned_department_head_name
      FROM leave_requests l
@@ -184,6 +194,28 @@ async function getLeaveSourceWorkflow(
     [id]
   );
   const history = historyResult.rows;
+  if(leave.rows[0].workflow_snapshot) {
+    const snapshot=leave.rows[0].workflow_snapshot;
+    const engine=require('./approvalWorkflows');
+    const steps=[];
+    for(let i=0;i<snapshot.steps.length;i++) {
+      const kind=snapshot.steps[i];
+      const decision=(snapshot.decisions||[]).find(d=>d.step===i && d.action==='approve');
+      const current=i===snapshot.current_step;
+      const state=decision?'approved':engine.stepKind(kind)==='manual_mayor' && status==='approved'?'manual_signing_required':current?
+        status==='returned'?'returned':String(status).startsWith('rejected')?'rejected':status==='cancelled'?'cancelled':'current':'upcoming';
+      const reviewers=decision?[{id:decision.actor_id,name:decision.signature?.signer_name_snapshot || history.find(h=>h.acted_by===decision.actor_id)?.actor_name || 'Reviewer',role:'actual_reviewer'}]:
+        engine.stepKind(kind)==='manual_mayor'?[]:await engine.resolveWorkflowReviewers(db,'leave',{id,employee_id:leave.rows[0].employee_user_id,workflow_snapshot:{...snapshot,current_step:i}});
+      steps.push({step_order:i+1,label:engine.stepLabel(kind),indicator:{kind:state,label:state.replaceAll('_',' ').toUpperCase()},reviewers});
+    }
+    return {source_status:status,status:mapSourceStatusToDocuTracker('dtr',status),
+      workflow_name:snapshot.name,workflow_version:snapshot.version,current_step:snapshot.current_step<snapshot.steps.length?snapshot.current_step+1:null,steps,
+      history:history.map(h=>({id:h.id,document_id:`source:dtr:${id}`,action:h.action,actor_id:h.acted_by,actor_name:h.actor_name,
+        from_status:historyStatus(h.from_status),to_status:historyStatus(h.to_status),remarks:h.remarks,
+        created_at:h.acted_at instanceof Date?h.acted_at.toISOString():h.acted_at})),
+    };
+  }
+
 
   const departmentReviewers = await db.query(
     `SELECT reviewer_id::text AS id,

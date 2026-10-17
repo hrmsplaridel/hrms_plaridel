@@ -13,7 +13,14 @@ function chooseLocatorRoute(rule,type) {
  return rule?.approval_route && rule.approval_route!=='hr' &&
    (rule.mayor_employment_types==null || rule.mayor_employment_types.includes(type))?rule.approval_route:'hr';
 }
-async function resolveLocatorRouting(db,applicantId,rule,headId) {
+async function resolveLocatorRouting(db,applicantId,rule,headId,reviewSnapshot=null) {
+ if(rule?.approval_workflow_id) {
+  const engine=require('./approvalWorkflows');
+  const snapshot=await engine.prepareWorkflow(db,'locator',rule,applicantId,reviewSnapshot || {departmentHeadUserId:headId,reviewerUserIds:headId?[headId]:[]});
+  const route=engine.workflowRoute(snapshot);
+  const mayor=route!=='hr'?await resolveActiveMayor(db,todayInHrmsTimezone()):null;
+  return {route,mayorId:mayor?.employee_id||null,status:engine.workflowStatus(snapshot),workflow:snapshot};
+ }
  if(!rule?.approval_route || rule.approval_route==='hr')return {route:'hr',mayorId:null,status:headId?'pending_department_head':'pending_hr'};
  const profile=(await db.query('SELECT employment_type FROM users WHERE id=$1::uuid',[applicantId])).rows[0];
  const route=chooseLocatorRoute(rule,profile?.employment_type);

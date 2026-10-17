@@ -56,6 +56,7 @@ test('changed leave requires current-version signatures while preserving saved i
       await db.query("INSERT INTO primary_reviewer_designations VALUES(gen_random_uuid(),$1,'final_hr','HR Officer','2000-01-01',null,true)", [hrReviewer]);
       await db.query("INSERT INTO docutracker_signature_assets VALUES($1,$2,'image/png',decode('aW1hZ2U=','base64'))", [asset, reviewer]);
       await db.query("INSERT INTO docutracker_signature_assets VALUES($1,$2,'image/png',decode('aW1hZ2U=','base64'))", [hrAsset, hrReviewer]);
+      await db.query('ALTER TABLE pg_temp.leave_requests ADD COLUMN IF NOT EXISTS workflow_snapshot jsonb');
       await db.query(`INSERT INTO leave_requests(id,user_id,employee_id,status,start_date,end_date,
         assigned_department_head_id,signature_revision) VALUES($1,$2,$2,'pending_department_head','2026-10-20','2026-10-20',$3,2)`,
       [request, employee, reviewer]);

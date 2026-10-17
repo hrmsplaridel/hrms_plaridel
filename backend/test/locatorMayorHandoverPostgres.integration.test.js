@@ -57,6 +57,7 @@ test('one-active-Mayor handover persists matching approval ink and history witho
         .replace('FUNCTION invalidate_locator_signatures()', 'FUNCTION pg_temp.invalidate_locator_signatures()');
       await db.query(revisionFunction);
       await db.query('CREATE TRIGGER fixture_revision BEFORE UPDATE ON locator_slips FOR EACH ROW EXECUTE FUNCTION pg_temp.invalidate_locator_signatures()');
+      await db.query('ALTER TABLE pg_temp.locator_slips ADD COLUMN IF NOT EXISTS workflow_snapshot jsonb');
       await db.query(`INSERT INTO users(id,full_name,role,is_active) VALUES
         ($1,'Employee','employee',true),($2,'Former Mayor','mayor',true),($3,'Replacement Mayor','mayor',false)`, [employee, former, current]);
       const officials = { applicant: { id: employee, name: 'Employee', position_title: 'Administrative Aide' },

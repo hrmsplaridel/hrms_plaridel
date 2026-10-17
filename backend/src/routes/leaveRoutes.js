@@ -1,3 +1,4 @@
+const workflowEngine = require('../services/approvalWorkflows');
 const {requireLeaveFinalRole}=require('../services/leaveRouting');
 const { normalizeEligibleEmploymentTypes, assertLeaveEmploymentEligibility } = require('../services/leaveEmploymentEligibility');
 const { finalQueueVisibilitySql } = require('../services/approvalStageSeparation');
@@ -176,25 +177,10 @@ router.get('/final-reviewer/me', protect, requireLeaveFinalRole, async (req, res
 
 router.get('/submission-availability', protect, async (req, res) => {
   try {
-    try { await assertLeaveSubmissionReviewer(pool, req.user.id); }
-    catch(error) {
-      if(error.statusCode!==409) throw error;
-      const rules=await pool.query(`SELECT lt.* FROM leave_types lt JOIN users u ON u.id=$1
-       WHERE lt.is_active=true AND lt.approval_route='mayor'
-       AND (lt.eligible_employment_types IS NULL OR u.employment_type=ANY(lt.eligible_employment_types))`,[req.user.id]);
-      let available=false;
-      for(const rule of rules.rows) {
-        try {await assertLeaveSubmissionReviewer(pool,req.user.id,'leave',rule);available=true;break;} catch(_){}
-      }
-      if(!available)throw error;
-    }
-    return res.json({ can_submit: true });
+    res.json(await require('../services/leaveSubmissionAvailability').getLeaveSubmissionAvailability(pool,req.user.id));
   } catch (err) {
-    if (err.statusCode === 409) {
-      return res.json({ can_submit: false, reason: err.message });
-    }
     console.error('[leave GET submission-availability]', err);
-    return res.status(500).json({ error: 'Failed to check leave reviewer availability' });
+    res.status(500).json({ error: 'Failed to check leave reviewer availability' });
   }
 });
 
@@ -992,6 +978,7 @@ function leaveTypeRowToApi(row = {}) {
       name
     ),
     eligible_employment_types: row.eligible_employment_types ?? null,
+    approval_workflow_id: row.approval_workflow_id || null,
     approval_route: row.approval_route || 'hr',
     mayor_employment_types: row.mayor_employment_types ?? null,
     employee_detail_schema: normalizeEmployeeDetailSchema(
@@ -1194,6 +1181,7 @@ function mapLeaveRowToApi(row) {
       details.custom_leave_type_text ||
       details.customLeaveTypeText ||
       systemLeaveTypeDisplayName(row.leave_type_name || row.leave_type),
+    workflow_snapshot: row.workflow_snapshot || null,
     final_review_route: row.final_review_route || 'hr',
     final_reviewer_user_id: row.final_reviewer_user_id || null,
     attachment_name: row.attachment_name || null,
@@ -1523,6 +1511,7 @@ router.post('/types', protect, requireAdminOrHr, requireDtrFeatureIfAdmin('leave
       });
     }
     const routing=require('../services/leaveRouting').normalizeRouting(req.body||{});
+    const workflowId = await workflowEngine.selectedWorkflowId(pool,req.body?.approval_workflow_id);
     const q = await pool.query(
       `INSERT INTO leave_types (
           name, display_name, description, is_active, is_system,
@@ -1530,7 +1519,7 @@ router.post('/types', protect, requireAdminOrHr, requireDtrFeatureIfAdmin('leave
           requires_attachment, requires_attachment_when_over_days,
           max_days, minimum_advance_days, affects_dtr_normally, balance_ledger_type,
           entitlement_basis, sex_eligibility, employee_detail_schema, eligible_employment_types, approval_route, mayor_employment_types,
-          admin_can_file, created_at, updated_at
+          admin_can_file, approval_workflow_id, created_at, updated_at
         )
         VALUES (
           $1, $2, $3, $4, false,
@@ -1538,7 +1527,7 @@ router.post('/types', protect, requireAdminOrHr, requireDtrFeatureIfAdmin('leave
           $8, $9,
           $10, $11, $12, $13,
           $14, $15, $16::jsonb, $17::text[], $18, $19::text[],
-          $20, now(), now()
+          $20, $21::uuid, now(), now()
         )
         RETURNING *`,
       [
@@ -1560,7 +1549,7 @@ router.post('/types', protect, requireAdminOrHr, requireDtrFeatureIfAdmin('leave
         serializeEmployeeDetailSchema(payload.employeeDetailSchema),
         payload.eligibleEmploymentTypes,
         routing.approval_route,routing.mayor_employment_types,
-        payload.adminCanFile,
+        payload.adminCanFile, workflowId,
       ]
     );
     res.status(201).json(leaveTypeRowToApi(q.rows[0]));
@@ -2226,6 +2215,7 @@ router.post('/submit', protect, async (req, res) => {
       const leaveRule = await getLeaveTypeDefinition(client, leave_type);
       await assertLeaveEmploymentEligibility(client, leaveRule, userId);
       const reviewSnapshot = await getDepartmentReviewSnapshot(client, userId);
+      const preparedWorkflow = await workflowEngine.prepareWorkflow(client,'leave',leaveRule,userId,reviewSnapshot);
       await assertLeaveSubmissionReviewer(client, userId, 'leave', leaveRule, reviewSnapshot);
       const customFieldSchema = normalizeEmployeeDetailSchema(
         leaveRule?.employee_detail_schema
@@ -2330,16 +2320,17 @@ router.post('/submit', protect, async (req, res) => {
       const row = q.rows[0];
 
       // Two-stage workflow: determine initial submitted status.
-      if(leaveRule?.approval_route==='mayor') {
+      if(!leaveRule?.approval_workflow_id && leaveRule?.approval_route==='mayor') {
         const type=(await client.query('SELECT employment_type FROM users WHERE id=$1',[userId])).rows[0]?.employment_type;
         const {chooseLeaveRoute}=require('../services/leaveRouting');
         if(chooseLeaveRoute(leaveRule,type)==='mayor' && !reviewSnapshot?.departmentHeadUserId) {
           const error=new Error('Configure a different department reviewer before submitting a Mayor-routed leave request.');error.statusCode=409;throw error;
         }
       }
-      const submitStatus = reviewSnapshot?.departmentHeadUserId
+      const submitStatus = preparedWorkflow ? workflowEngine.workflowStatus(preparedWorkflow) : reviewSnapshot?.departmentHeadUserId
         ? 'pending_department_head'
         : 'pending_hr';
+      await workflowEngine.initialWorkflow(client,'leave',row.id,preparedWorkflow);
 
       await client.query(
         `UPDATE leave_requests
@@ -2351,11 +2342,12 @@ router.post('/submit', protect, async (req, res) => {
         [
           submitStatus,
           reviewSnapshot?.departmentId || null,
-          reviewSnapshot?.departmentHeadUserId || null,
+          preparedWorkflow && !preparedWorkflow.steps.includes('department') ? null : reviewSnapshot?.departmentHeadUserId || null,
           row.id,
         ]
       );
       row.status = submitStatus;
+      if(preparedWorkflow) {row.workflow_snapshot=preparedWorkflow;row.final_review_route=workflowEngine.workflowRoute(preparedWorkflow);}
       row.review_department_id = reviewSnapshot?.departmentId || null;
       row.assigned_department_head_id =
         reviewSnapshot?.departmentHeadUserId || null;
@@ -2363,7 +2355,7 @@ router.post('/submit', protect, async (req, res) => {
         requestType: 'leave',
         requestId: row.id,
         departmentId: reviewSnapshot?.departmentId || null,
-        reviewers: reviewSnapshot?.reviewers || [],
+        reviewers: preparedWorkflow && !preparedWorkflow.steps.includes('department') ? [] : reviewSnapshot?.reviewers || [],
       });
 
       await insertLeaveRequestHistory(client, {
@@ -2401,6 +2393,8 @@ router.post('/submit', protect, async (req, res) => {
         }
       }
       const typeName = leave_type ? String(leave_type) : null;
+      await require('../services/docutrackerLeaveSignatureService').confirmSubmittedApplicantSignature(
+        client, req.user, row.id, req.body?.applicant_signature_asset_id);
       await client.query('COMMIT');
       const nameRow = await pool.query('SELECT full_name FROM users WHERE id = $1', [userId]);
       const submitEmpName = nameRow.rows[0]?.full_name || 'Employee';
@@ -2475,6 +2469,7 @@ router.post('/submit-with-attachment', protect, uploadLeaveAttachmentMemoryMw, a
       const leaveRule = await getLeaveTypeDefinition(client, leave_type);
       await assertLeaveEmploymentEligibility(client, leaveRule, userId);
       const reviewSnapshot = await getDepartmentReviewSnapshot(client, userId);
+      const preparedWorkflow = await workflowEngine.prepareWorkflow(client,'leave',leaveRule,userId,reviewSnapshot);
       await assertLeaveSubmissionReviewer(client, userId, 'leave', leaveRule, reviewSnapshot);
       const customFieldSchema = normalizeEmployeeDetailSchema(
         leaveRule?.employee_detail_schema
@@ -2590,16 +2585,17 @@ router.post('/submit-with-attachment', protect, uploadLeaveAttachmentMemoryMw, a
       );
 
       const row = q.rows[0];
-      if(leaveRule?.approval_route==='mayor') {
+      if(!leaveRule?.approval_workflow_id && leaveRule?.approval_route==='mayor') {
         const type=(await client.query('SELECT employment_type FROM users WHERE id=$1',[userId])).rows[0]?.employment_type;
         const {chooseLeaveRoute}=require('../services/leaveRouting');
         if(chooseLeaveRoute(leaveRule,type)==='mayor' && !reviewSnapshot?.departmentHeadUserId) {
           const error=new Error('Configure a different department reviewer before submitting a Mayor-routed leave request.');error.statusCode=409;throw error;
         }
       }
-      const submitStatus = reviewSnapshot?.departmentHeadUserId
+      const submitStatus = preparedWorkflow ? workflowEngine.workflowStatus(preparedWorkflow) : reviewSnapshot?.departmentHeadUserId
         ? 'pending_department_head'
         : 'pending_hr';
+      await workflowEngine.initialWorkflow(client,'leave',row.id,preparedWorkflow);
 
       await client.query(
         `UPDATE leave_requests
@@ -2611,11 +2607,12 @@ router.post('/submit-with-attachment', protect, uploadLeaveAttachmentMemoryMw, a
         [
           submitStatus,
           reviewSnapshot?.departmentId || null,
-          reviewSnapshot?.departmentHeadUserId || null,
+          preparedWorkflow && !preparedWorkflow.steps.includes('department') ? null : reviewSnapshot?.departmentHeadUserId || null,
           row.id,
         ]
       );
       row.status = submitStatus;
+      if(preparedWorkflow) {row.workflow_snapshot=preparedWorkflow;row.final_review_route=workflowEngine.workflowRoute(preparedWorkflow);}
       row.review_department_id = reviewSnapshot?.departmentId || null;
       row.assigned_department_head_id =
         reviewSnapshot?.departmentHeadUserId || null;
@@ -2623,7 +2620,7 @@ router.post('/submit-with-attachment', protect, uploadLeaveAttachmentMemoryMw, a
         requestType: 'leave',
         requestId: row.id,
         departmentId: reviewSnapshot?.departmentId || null,
-        reviewers: reviewSnapshot?.reviewers || [],
+        reviewers: preparedWorkflow && !preparedWorkflow.steps.includes('department') ? [] : reviewSnapshot?.reviewers || [],
       });
 
       await insertLeaveRequestHistory(client, {
@@ -2665,6 +2662,8 @@ router.post('/submit-with-attachment', protect, uploadLeaveAttachmentMemoryMw, a
       }
 
       const typeName = leave_type ? String(leave_type) : null;
+      await require('../services/docutrackerLeaveSignatureService').confirmSubmittedApplicantSignature(
+        client, req.user, row.id, req.body?.applicant_signature_asset_id);
       await client.query('COMMIT');
       storedAttachmentRelPath = null;
 
@@ -2711,7 +2710,7 @@ router.put('/:id', protect, async (req, res) => {
   const { id } = req.params;
   try {
     const existing = await pool.query(
-      `SELECT id, status, employee_official_snapshot, leave_type_id
+      `SELECT id, status, employee_official_snapshot, leave_type_id, workflow_snapshot
        FROM leave_requests
        WHERE id = $1 AND (user_id = $2 OR employee_id = $2)
          AND discarded_at IS NULL`,
@@ -2746,6 +2745,7 @@ router.put('/:id', protect, async (req, res) => {
     let effectiveDays = days;
     let refreshReviewSnapshot = false;
     let reviewSnapshot = null;
+    let preparedWorkflow = null;
 
     const client = await pool.connect();
     try {
@@ -2753,7 +2753,7 @@ router.put('/:id', protect, async (req, res) => {
       await lockEmployeeLeaveFiling(client, userId);
       // Serialize edits/submissions of this request before any write or reservation.
       const lockedRequest = await client.query(
-        `SELECT id, status, employee_official_snapshot, leave_type_id
+        `SELECT id, status, employee_official_snapshot, leave_type_id, workflow_snapshot
          FROM leave_requests
          WHERE id = $1 AND (user_id = $2 OR employee_id = $2)
            AND discarded_at IS NULL
@@ -2797,8 +2797,10 @@ router.put('/:id', protect, async (req, res) => {
         ? await getLeaveTypeDefinition(client, leave_type)
         : storedTypeRule?.rows[0] ? leaveTypeRowToApi(storedTypeRule.rows[0]) : null;
       await assertLeaveEmploymentEligibility(client, leaveRule, userId);
+      if (leaveRule && lockedRequest.rows[0].leave_type_id === leaveTypeId) leaveRule.approval_workflow_snapshot=lockedRequest.rows[0].workflow_snapshot;
       if (submitting) {
         reviewSnapshot = await getDepartmentReviewSnapshot(client, userId);
+        preparedWorkflow = await workflowEngine.prepareWorkflow(client,'leave',leaveRule,userId,reviewSnapshot);
         await assertLeaveSubmissionReviewer(client, userId, 'leave', leaveRule, reviewSnapshot);
       }
       const customFieldSchema = normalizeEmployeeDetailSchema(
@@ -2848,10 +2850,7 @@ router.put('/:id', protect, async (req, res) => {
           adoptionParentRole,
           eventDates,
           details: payloadDetails,
-          enforceEventDateRules:
-            nextStatus === 'pending' ||
-            nextStatus === 'pending_department_head' ||
-            nextStatus === 'pending_hr',
+          enforceEventDateRules: submitting,
         });
         if (!validation.valid) {
           await client.query('ROLLBACK');
@@ -2859,7 +2858,7 @@ router.put('/:id', protect, async (req, res) => {
         }
 
         // FIX #6 (backend): When transitioning to a pending status via PUT, check attachment.
-        if (nextStatus === 'pending' || nextStatus === 'pending_department_head' || nextStatus === 'pending_hr') {
+        if (submitting) {
           const existingRow = await client.query(
             'SELECT attachment_path FROM leave_requests WHERE id = $1',
             [id]
@@ -2873,16 +2872,17 @@ router.put('/:id', protect, async (req, res) => {
           }
 
           // Two-stage workflow: resolve actual target status.
-          if(leaveRule?.approval_route==='mayor') {
+          if(!leaveRule?.approval_workflow_id && leaveRule?.approval_route==='mayor') {
             const emp=(await client.query('SELECT employment_type FROM users WHERE id=$1',[userId])).rows[0]?.employment_type;
             if(require('../services/leaveRouting').chooseLeaveRoute(leaveRule,emp)==='mayor' && !reviewSnapshot?.departmentHeadUserId) {
               const error=new Error('Configure a different department reviewer before submitting a Mayor-routed leave request.');error.statusCode=409;throw error;
             }
           }
           refreshReviewSnapshot = true;
-          nextStatus = reviewSnapshot?.departmentHeadUserId
+          nextStatus = preparedWorkflow ? workflowEngine.workflowStatus(preparedWorkflow) : reviewSnapshot?.departmentHeadUserId
             ? 'pending_department_head'
             : 'pending_hr';
+          await workflowEngine.initialWorkflow(client,'leave',id,preparedWorkflow);
         }
       }
       // Prevent overlapping ranges when dates are being set/changed.
@@ -2895,7 +2895,7 @@ router.put('/:id', protect, async (req, res) => {
       }
 
       if (
-        (nextStatus === 'pending' || nextStatus === 'pending_department_head' || nextStatus === 'pending_hr') &&
+        (nextStatus === 'pending' || nextStatus === 'pending_department_head' || nextStatus === 'pending_hr' || nextStatus === 'pending_mayor') &&
         leave_type &&
         startStr &&
         endStr
@@ -2944,7 +2944,7 @@ router.put('/:id', protect, async (req, res) => {
           nextStatus,
           refreshReviewSnapshot,
           reviewSnapshot?.departmentId || null,
-          reviewSnapshot?.departmentHeadUserId || null,
+          preparedWorkflow && !preparedWorkflow.steps.includes('department') ? null : reviewSnapshot?.departmentHeadUserId || null,
           officialSnapshot,
           serializeEmployeeDetailSchema(customFieldSchema),
           savingDraft,
@@ -2956,7 +2956,7 @@ router.put('/:id', protect, async (req, res) => {
           requestType: 'leave',
           requestId: row.id,
           departmentId: reviewSnapshot?.departmentId || null,
-          reviewers: reviewSnapshot?.reviewers || [],
+          reviewers: preparedWorkflow && !preparedWorkflow.steps.includes('department') ? [] : reviewSnapshot?.reviewers || [],
         });
       }
       await insertLeaveRequestHistory(client, {
@@ -3001,6 +3001,10 @@ router.put('/:id', protect, async (req, res) => {
           });
           row.reserved_credit_days = reservation?.reservedDays ?? null;
         }
+      }
+      if (submitting) {
+        await require('../services/docutrackerLeaveSignatureService').confirmSubmittedApplicantSignature(
+          client, req.user, row.id, req.body?.applicant_signature_asset_id);
       }
       await client.query('COMMIT');
       if (
@@ -3369,7 +3373,7 @@ router.get('/signatories', protect, async (req, res) => {
                 )::date::text AS submitted_on,
                 lr.review_department_id,
                 lr.approved_at::date::text AS approved_on,
-                lr.approving_authority_snapshot,lr.final_review_route,lr.final_reviewer_user_id,
+                lr.approving_authority_snapshot,lr.final_review_route,lr.final_reviewer_user_id,lr.workflow_snapshot,
                 lr.assigned_department_head_id,
                 d.name AS review_department_name,
                 EXISTS (
@@ -3402,8 +3406,12 @@ router.get('/signatories', protect, async (req, res) => {
       if (String(requestContext.employee_id) !== employeeId) {
         return res.status(400).json({ error: 'employee_id does not match the leave request' });
       }
+      if (await require('../services/sharedWorkflowInbox').pendingReadAccess(pool,'leave',requestContext,req.user) === false) {
+        return res.status(403).json({ error: 'Not authorized to view leave form signatories' });
+      }
       const canReviewRequest =
-        (req.user.role==='mayor' && requestContext.final_reviewer_user_id===requesterId) ||
+        (workflowEngine.isShared(requestContext.workflow_snapshot) && await require('../services/sharedWorkflowInbox').canRead(pool,'leave',requestContext,req.user)) ||
+        (['mayor','mayor_direct'].includes(requestContext.final_review_route) && await workflowEngine.isCurrentMayor(pool,req.user)) ||
         requestContext.assigned_department_head_id === requesterId ||
         requestContext.requester_reviewed === true ||
         requestContext.requester_snapshotted_reviewer === true;
@@ -3467,6 +3475,14 @@ router.get('/signatories', protect, async (req, res) => {
     const replacement = applicantIsHead || applicantIsHr
       ? mapOfficialSignatoryProfile(await resolveActiveMayor(pool, todayInHrmsTimezone()))
       : null;
+    if(workflowEngine.isShared(requestContext?.workflow_snapshot)) {
+      const officials=await workflowEngine.printOfficials(pool,'leave',{...requestContext,employee_id:employeeId});
+      return res.json({
+        hr_certification_officer:hrCertifier?mapOfficialSignatoryProfile({...hrCertifier,employee_id:hrCertifier.id}):null,
+        recommendation_officer:mapOfficialSignatoryProfile(officials.department_head),
+        approving_authority:mapOfficialSignatoryProfile(officials.hr_approver),
+      });
+    }
     res.json({
       hr_certification_officer: applicantIsHr ? replacement : hrCertifier
         ? mapOfficialSignatoryProfile({ ...hrCertifier, employee_id: hrCertifier.id })
@@ -3747,10 +3763,10 @@ const HR_REVIEW_SCOPE_SQL = `(
 )`;
 
 function finalReviewScope(req, actor) {
- if(req.user?.role==='mayor') return `(lr.final_review_route='mayor' AND lr.final_reviewer_user_id=${actor}
+ if(req.user?.role==='mayor') return `(lr.workflow_snapshot IS NOT NULL AND lr.final_review_route='mayor_direct'
  AND (lr.status='pending_mayor' OR EXISTS(SELECT 1 FROM leave_request_history mh WHERE mh.leave_request_id=lr.id
  AND (mh.from_status='pending_mayor' OR mh.to_status='pending_mayor'))))`;
- return `(COALESCE(lr.final_review_route,'hr')='hr' AND ${HR_REVIEW_SCOPE_SQL})`;
+ return `((COALESCE(lr.final_review_route,'hr')='hr' OR (lr.workflow_snapshot IS NOT NULL AND ${HR_REVIEW_SCOPE_SQL})) AND ${HR_REVIEW_SCOPE_SQL})`;
 }
 
 async function listLeaveReviewFilterOptions(db, scopeSql, params) {
@@ -4140,10 +4156,12 @@ async function finalizeLeaveApproval(client, r, {id, reviewerId, remarks, depart
     approvedDaysWithoutPay: departmentFinal ? 0 : approvedDaysWithoutPayRaw,
   });
   const { historyAction } = departmentFinal
-    ? validateDepartmentHeadTransition({currentStatus: r.status, desiredStatus: 'pending_hr', finalReviewRoute: r.final_review_route})
+    ? validateDepartmentHeadTransition({currentStatus: r.status, desiredStatus: 'pending_hr', finalReviewRoute: 'mayor'})
     : validateAdminTransition({currentStatus: r.status, desiredStatus: 'approved'});
   if (!departmentFinal) await requireHrApprovalSignature(client, id, reviewerId);
-  const approvingAuthority = await resolveActiveMayor(
+  const requestWorkflow=await workflowEngine.loadRequestWorkflow(client,'leave',id);
+  const approvingAuthority = workflowEngine.isShared(requestWorkflow) && workflowEngine.workflowRoute(requestWorkflow)!=='mayor'
+    ? await workflowEngine.reviewerProfile(client,reviewerId) : await resolveActiveMayor(
     client,
     todayInHrmsTimezone()
   );
@@ -4219,7 +4237,7 @@ async function finalizeLeaveApproval(client, r, {id, reviewerId, remarks, depart
         action: 'leave_approved',
         leaveRequestId: id,
         actorUserId: reviewerId,
-        actorKind: departmentFinal ? 'department_reviewer' : 'admin',
+        actorKind: departmentFinal ? 'department_reviewer' : workflowEngine.isShared(requestWorkflow) ? 'user' : 'admin',
         metadataJson: {
           requested_days: allocation.requestedDays,
           approved_days_with_pay: allocation.approvedDaysWithPay,
@@ -4244,6 +4262,7 @@ async function finalizeLeaveApproval(client, r, {id, reviewerId, remarks, depart
       end_date: endStr,
       number_of_days: days,
       covered_work_dates: approvalDates,
+      ...(workflowEngine.isShared(requestWorkflow)?{workflow_step:requestWorkflow.steps[requestWorkflow.current_step]}:{}),
       approved_days_with_pay: allocation.approvedDaysWithPay,
       approved_days_without_pay: allocation.approvedDaysWithoutPay,
     },
@@ -4287,12 +4306,15 @@ router.patch('/:id/department-head-approve', protect, async (req, res) => {
       return res.status(404).json({ error: 'Leave request not found or not assigned to you' });
     }
     const r = existing.rows[0];
-    const { nextStatus, historyAction } = validateDepartmentHeadTransition({
+    const workflowDecision=await workflowEngine.workflowDecision(client,'leave',id,reviewerId,'approve',req.sharedWorkflowExpected);
+    const legacyTransition = validateDepartmentHeadTransition({
       currentStatus: r.status,
       desiredStatus: 'pending_hr',
       finalReviewRoute: r.final_review_route,
     });
-    if (nextStatus === 'pending_hr') {
+    const nextStatus=workflowDecision?.status || legacyTransition.nextStatus;
+    const historyAction=legacyTransition.historyAction;
+    if (!workflowDecision && nextStatus === 'pending_hr') {
       await assertDepartmentApprovalFinalReviewer(client, r.user_id || r.employee_id, reviewerId, 'leave', id);
     }
     await assertAnnualQuotaLeaveLimit(client, {
@@ -4322,6 +4344,7 @@ router.patch('/:id/department-head-approve', protect, async (req, res) => {
         metadataJson: { department_id: r.review_department_id || null, revision: r.signature_revision },
       });
     }
+    await workflowEngine.saveWorkflow(client,'leave',id,workflowDecision?.snapshot);
     await client.query('COMMIT');
     const out = await pool.query(
       `SELECT lr.*, lt.name AS leave_type_name, u.full_name AS employee_full_name
@@ -4349,10 +4372,10 @@ router.patch('/:id/department-head-approve', protect, async (req, res) => {
         type: nextStatus === 'approved' ? 'leave_approved' : 'leave_endorsed_department_head',
         title: nextStatus === 'approved' ? 'Leave request approved' : 'Leave request endorsed by department head',
         body: nextStatus === 'approved'
-          ? `Your leave request was approved by the department reviewer. The Mayor signs the printed form manually.${remarks ? ` ${remarks}` : ''}`
+          ? `Your leave request was approved by the department reviewer.${(!workflowDecision || workflowDecision.snapshot.manual_signing_required)?' The Mayor signs the printed form manually.':''}${remarks ? ` ${remarks}` : ''}`
           : remarks
           ? `Your leave request has been endorsed by your department head and forwarded to HR for final approval. ${remarks}`
-          : 'Your leave request has been endorsed by your department head and forwarded to HR for final approval.',
+          : nextStatus==='pending_mayor'?'Your request passed department review and is awaiting Mayor approval.':'Your leave request has been endorsed by your department head and forwarded to HR for final approval.',
         metadata: { reviewer_remarks: remarks },
       })
     );
@@ -4409,6 +4432,8 @@ router.patch('/:id/department-head-reject', protect, async (req, res) => {
       currentStatus: r.status,
       desiredStatus: 'rejected_by_department_head',
     });
+    const workflowAction=await workflowEngine.workflowDecision(client,'leave',id,reviewerId,'reject',req.sharedWorkflowExpected);
+    await workflowEngine.saveWorkflow(client,'leave',id,workflowAction?.snapshot);
     await client.query(
       `UPDATE leave_requests
        SET status = $2, reviewer_id = $3, reviewer_remarks = $4,
@@ -4512,6 +4537,8 @@ router.patch('/:id/department-head-return', protect, async (req, res) => {
       currentStatus: r.status,
       desiredStatus: 'returned',
     });
+    const workflowAction=await workflowEngine.workflowDecision(client,'leave',id,reviewerId,'return',req.sharedWorkflowExpected);
+    await workflowEngine.saveWorkflow(client,'leave',id,workflowAction?.snapshot);
     await client.query(
       `UPDATE leave_requests
        SET status = $2, reviewer_id = $3, reviewer_remarks = $4,
@@ -4625,11 +4652,41 @@ router.patch('/:id/approve', protect, requireLeaveFinalRole, requireDtrFeatureIf
         return res.json(mapLeaveRowToApi(out.rows[0]));
       }
 
+      const workflowDecision=await workflowEngine.workflowDecision(client,'leave',id,reviewerId,'approve',req.sharedWorkflowExpected);
+      if (workflowDecision && workflowDecision.status !== 'approved') {
+        const allocation=resolveApprovalAllocation({requestedDays:r.days,approvedDaysWithPay:approvedDaysWithPayRaw,approvedDaysWithoutPay:approvedDaysWithoutPayRaw});
+        await requireHrApprovalSignature(client,id,reviewerId);
+        await workflowEngine.saveWorkflow(client,'leave',id,workflowDecision.snapshot);
+        await client.query('UPDATE leave_requests SET status=$2,approved_days_with_pay=$3,approved_days_without_pay=$4,updated_at=now() WHERE id=$1::uuid',[id,workflowDecision.status,allocation.approvedDaysWithPay,allocation.approvedDaysWithoutPay]);
+        await insertLeaveRequestHistory(client,{leaveRequestId:id,action:'workflow_step_approved',fromStatus:r.status,toStatus:workflowDecision.status,actedBy:reviewerId,remarks,metadataJson:{workflow_step:workflowDecision.step}});
+        await client.query('COMMIT');
+        const out = await pool.query(
+          `SELECT lr.*, lt.name AS leave_type_name, u.full_name AS employee_full_name
+           FROM leave_requests lr
+           LEFT JOIN leave_types lt ON lt.id = lr.leave_type_id
+           LEFT JOIN users u ON u.id = COALESCE(lr.employee_id, lr.user_id)
+           WHERE lr.id = $1`,
+          [id]
+        );
+        const mapped = mapLeaveRowToApi(out.rows[0]);
+        notifySafe(() => leaveNotifications.notifyAfterSubmit(pool, {
+          leaveRequestId: id,
+          status: workflowDecision.status,
+          employeeUserId: targetUserId,
+          employeeName: mapped.employee_name,
+          leaveTypeName: mapped.leave_type_name || mapped.leave_type,
+          startDateStr: mapped.start_date,
+          endDateStr: mapped.end_date,
+        }));
+        broadcastLeaveUpdated('workflow_step_approved', mapped);
+        return res.json(mapped);
+      }
       const {row, leaveTypeName, startStr, endStr} = await finalizeLeaveApproval(client, r, {
         id, reviewerId, remarks, recommendationRemarks, approvedOtherDetails,
         approvedDaysWithPayRaw, approvedDaysWithoutPayRaw,
       });
 
+      await workflowEngine.saveWorkflow(client,'leave',id,workflowDecision?.snapshot);
       await client.query('COMMIT');
       notifySafe(() =>
         leaveNotifications.notifyEmployee(pool, {
@@ -4709,6 +4766,8 @@ router.patch('/:id/reject', protect, requireLeaveFinalRole, requireDtrFeatureIfA
       desiredStatus: 'rejected',
     });
 
+    const workflowAction=await workflowEngine.workflowDecision(client,'leave',id,reviewerId,'reject',req.sharedWorkflowExpected);
+    await workflowEngine.saveWorkflow(client,'leave',id,workflowAction?.snapshot);
     await client.query(
       `UPDATE leave_requests
        SET status = $4::text,
@@ -4729,7 +4788,7 @@ router.patch('/:id/reject', protect, requireLeaveFinalRole, requireDtrFeatureIfA
       toStatus: rejectNextStatus,
       actedBy: reviewerId,
       remarks: remarks || null,
-      metadataJson: null,
+      metadataJson: workflowEngine.isShared(workflowAction?.snapshot)?{workflow_step:workflowAction.step}:null,
     });
 
     // FIX #5d: Decrement pending_days on reject.
@@ -5021,6 +5080,8 @@ router.patch('/:id/return', protect, requireLeaveFinalRole, requireDtrFeatureIfA
     await assertFinalLeaveReviewer(client, currentRow.user_id || currentRow.employee_id, reviewerId, 'leave', id);
     const historyAction = 'returned';
 
+    const workflowAction=await workflowEngine.workflowDecision(client,'leave',id,reviewerId,'return',req.sharedWorkflowExpected);
+    await workflowEngine.saveWorkflow(client,'leave',id,workflowAction?.snapshot);
     await client.query(
       `UPDATE leave_requests
        SET status = 'returned',
@@ -5040,7 +5101,7 @@ router.patch('/:id/return', protect, requireLeaveFinalRole, requireDtrFeatureIfA
       toStatus: 'returned',
       actedBy: reviewerId,
       remarks: remarks || null,
-      metadataJson: null,
+      metadataJson: workflowEngine.isShared(workflowAction?.snapshot)?{workflow_step:workflowAction.step}:null,
     });
 
     // FIX #5e: Decrement pending_days when a request is returned to employee.
@@ -5250,10 +5311,10 @@ router.get('/:id/form-credits', protect, async (req, res) => {
   try {
     const privileged = req.user.role === 'admin' || req.user.role === 'hr';
     const access = await pool.query(
-      `SELECT COALESCE(lr.user_id, lr.employee_id) AS employee_id,
+      `SELECT lr.id,lr.status,lr.workflow_snapshot,COALESCE(lr.user_id, lr.employee_id) AS employee_id,
               ($2::boolean = true
                 OR lr.user_id = $3::uuid OR lr.employee_id = $3::uuid
-                OR (lr.final_review_route='mayor' AND lr.final_reviewer_user_id=$3::uuid)
+                OR ($4::boolean AND lr.final_review_route IN ('mayor','mayor_direct'))
                 OR (lr.status = 'pending_department_head'
                     AND lr.assigned_department_head_id = $3::uuid)
                 OR EXISTS (
@@ -5263,11 +5324,17 @@ router.get('/:id/form-credits', protect, async (req, res) => {
                       'department_head_rejected', 'department_head_returned')
                 )) AS can_view
        FROM leave_requests lr WHERE lr.id = $1::uuid LIMIT 1`,
-      [req.params.id, privileged, viewerId]
+      [req.params.id, privileged, viewerId, await workflowEngine.isCurrentMayor(pool,req.user)]
     );
     const request = access.rows[0];
     if (!request) return res.status(404).json({ error: 'Leave request not found' });
-    if (!request.can_view) return res.status(403).json({ error: 'Not allowed to view this leave form' });
+    if (await require('../services/sharedWorkflowInbox').pendingReadAccess(pool,'leave',request,req.user) === false) {
+      return res.status(403).json({error:'Not allowed to view this leave form'});
+    }
+    if (!request.can_view && !await require('../services/leaveWorkflowReadAccess')
+      .canReadSharedLeaveRequest(pool, req.params.id, req.user)) {
+      return res.status(403).json({ error: 'Not allowed to view this leave form' });
+    }
 
     const result = await pool.query(
       `SELECT lb.id, lb.user_id, lb.leave_type, lb.earned_days,
@@ -5593,7 +5660,7 @@ router.post('/:id/attachment', protect, uploadLeaveAttachmentMw, async (req, res
        FROM leave_requests
        WHERE id = $1 AND ($2 = true OR user_id = $3 OR employee_id = $3)
        FOR UPDATE`,
-      [id, isAdmin, userId]
+      [id, isAdmin, userId, await workflowEngine.isCurrentMayor(pool,req.user)]
     );
     if (existing.rows.length === 0) {
       await client.query('ROLLBACK');
@@ -5714,8 +5781,8 @@ router.get('/:id/attachment', protect, async (req, res) => {
   const { id } = req.params;
   try {
     const rows = await pool.query(
-      `SELECT lr.user_id, lr.employee_id, lr.status,
-              lr.assigned_department_head_id,lr.final_reviewer_user_id,
+      `SELECT lr.user_id, lr.employee_id, lr.status, lr.workflow_snapshot,
+              lr.assigned_department_head_id,lr.final_reviewer_user_id,lr.final_review_route,
               lr.attachment_path, lr.attachment_name, lr.attachment_mime_type,
               EXISTS (
                 SELECT 1 FROM leave_request_department_reviewers lrr
@@ -5749,8 +5816,10 @@ router.get('/:id/attachment', protect, async (req, res) => {
       );
       historicalDepartmentHeadAction = history.rows[0]?.action || null;
     }
-    const access = resolveLeaveAttachmentAccess({
-      role: role==='mayor' && row.final_reviewer_user_id===userId ? 'hr' : role,
+    const workflowRead = await require('../services/sharedWorkflowInbox').pendingReadAccess(pool,'leave',row,req.user);
+    const access = workflowRead === false ? {allowed:false,reason:'not_authorized'}
+      : workflowRead === true || req.sharedWorkflowRead ? {allowed:true,reason:'assigned_workflow_reviewer'} : resolveLeaveAttachmentAccess({
+      role: ['mayor','mayor_direct'].includes(row.final_review_route) && await workflowEngine.isCurrentMayor(pool,req.user) ? 'hr' : role,
       userId,
       ownerUserId: targetUserId,
       requestStatus: row.status,
@@ -5817,7 +5886,7 @@ router.get('/:id', protect, async (req, res) => {
   const { id } = req.params;
   try {
     const isAdmin = role === 'admin' || role === 'hr';
-    const rows = await pool.query(
+    const loadRequest = (sharedRead = false) => pool.query(
       `SELECT lr.*, lt.name AS leave_type_name, u.full_name AS employee_full_name,
               d.name AS assignment_department_name,
               rv.full_name AS reviewer_name,
@@ -5855,7 +5924,7 @@ router.get('/:id', protect, async (req, res) => {
          AND (
            $2::boolean = true
            OR (lr.user_id = $3 OR lr.employee_id = $3)
-           OR (lr.final_review_route='mayor' AND lr.final_reviewer_user_id=$3::uuid)
+           OR ($4::boolean AND lr.final_review_route IN ('mayor','mayor_direct'))
             OR (
               lr.status = 'pending_department_head'
               AND lr.assigned_department_head_id = $3::uuid
@@ -5863,9 +5932,17 @@ router.get('/:id', protect, async (req, res) => {
             OR dhh.department_head_reviewer_id IS NOT NULL
           )
         LIMIT 1`,
-      [id, isAdmin, userId]
+      [id, isAdmin || sharedRead, userId, role === 'mayor']
     );
+    let rows = await loadRequest();
+    if (!rows.rows.length && await require('../services/leaveWorkflowReadAccess')
+      .canReadSharedLeaveRequest(pool, id, req.user)) {
+      rows = await loadRequest(true);
+    }
     if (rows.rows.length === 0) return res.status(404).json({ error: 'Leave request not found' });
+    if (await require('../services/sharedWorkflowInbox').pendingReadAccess(pool,'leave',rows.rows[0],req.user) === false) {
+      return res.status(404).json({error:'Leave request not found'});
+    }
     res.json(mapLeaveRowToApi(rows.rows[0]));
   } catch (err) {
     console.error('[leave GET /:id]', err);

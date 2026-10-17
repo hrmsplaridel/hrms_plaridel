@@ -144,9 +144,11 @@ function createLocatorSubmissionService({
       if (!locatorType) {
         throw locatorSubmissionError(400, { error: 'Invalid request_type' });
       }
-      const routing = await resolveRouting(client, employeeUserId, locatorType, departmentHeadUserId);
+      const authorizedStaffAutoApproval=Boolean(staffFiling && autoApprove && locatorType.auto_approve_admin === true &&
+        await canApproveForEmployee(client,employeeUserId,filedBy));
+      const routing = await resolveRouting(client, employeeUserId, {...locatorType,authorized_staff_auto_approval:authorizedStaffAutoApproval}, departmentHeadUserId,reviewSnapshot);
       submitStatus = routing.status;
-      if (routing.route === 'mayor_direct') {
+      if (routing.workflow ? !routing.workflow.steps.includes('department') : routing.route === 'mayor_direct') {
         departmentHeadUserId = null;
         departmentReviewerUserIds = [];
       }
@@ -154,9 +156,8 @@ function createLocatorSubmissionService({
       if ((staffFiling && access === 'employee') || (!staffFiling && access === 'admin')) {
         throw locatorSubmissionError(403, {error:staffFiling ? 'This locator type allows employee filing only.' : 'This locator type must be filed by HR/admin.'});
       }
-      const approveNow = routing.route === 'hr' && staffFiling && autoApprove && locatorType.auto_approve_admin === true &&
-        await canApproveForEmployee(client, employeeUserId, filedBy);
-      if (routing.route === 'hr') {
+      const approveNow = routing.route === 'hr' && authorizedStaffAutoApproval && (!routing.workflow || routing.workflow.steps.length===1 && routing.workflow.steps[0]==='hr');
+      if (!routing.workflow && routing.route === 'hr') {
         // An authorized immediate final decision has no department stage.
         await assertSubmissionReviewer(client, employeeUserId, approveNow ? null : reviewSnapshot);
       }
@@ -287,11 +288,12 @@ function createLocatorSubmissionService({
       if (!insertedRow?.id) {
         throw new Error('Locator request insert did not return a saved record.');
       }
+      await require('./approvalWorkflows').initialWorkflow(client,'locator',insertedRow.id,routing.workflow);
       await snapshotReviewers(client, {
         requestType: 'locator',
         requestId: insertedRow.id,
         departmentId,
-        reviewers: routing.route === 'mayor_direct' ? [] : reviewSnapshot?.reviewers || [],
+        reviewers: routing.workflow ? (routing.workflow.steps.includes('department') ? reviewSnapshot?.reviewers || [] : []) : routing.route === 'mayor_direct' ? [] : reviewSnapshot?.reviewers || [],
       });
       await recordHistory(client, {
         locatorSlipId: insertedRow.id,
@@ -311,6 +313,8 @@ function createLocatorSubmissionService({
           [insertedRow.id,filedBy.id]);
         await recordHistory(client,{locatorSlipId:insertedRow.id,action:'hr_approved',fromStatus:submitStatus,
           toStatus:'approved',actorId:filedBy.id,actorRole:filedBy.role,metadata:{filed_for_employee:true,auto_approval:true}});
+        if(routing.workflow)await require('./approvalWorkflows').saveWorkflow(client,'locator',insertedRow.id,
+          require('./approvalWorkflows').nextWorkflowStep(routing.workflow,filedBy,'approve'));
         submitStatus='approved';
         insertedRow.status='approved';
       }

@@ -108,6 +108,7 @@ test('locator background replacement appends a version without updating filed re
 });
 test('unauthorized locator background access returns not found',async()=>{
   const res=await route('/requests/:id/render','post',{params:{id:'request'},body:{},user:{id:'other',role:'employee'}},async(sql)=>{
+    if(sql.startsWith('SELECT * FROM locator_slips WHERE id='))return {rows:[]};
     assert.match(sql,/locator_allowed/);assert.match(sql,/locator_slip_department_reviewers/);return {rows:[]};
   });assert.equal(res.code,404);
 });

@@ -1616,7 +1616,8 @@ router.get('/routing-configs', protect, async (req, res) => {
       `SELECT v.document_type,
               v.steps,
               v.review_deadline_hours,
-              v.version
+              v.version,
+              v.shared_workflow_id
        FROM docutracker_routing_config_versions v
        JOIN (
          SELECT document_type, MAX(version) AS version
@@ -1670,7 +1671,6 @@ router.post('/routing-configs', protect, requireAdmin, async (req, res) => {
     if (!document_type || !Array.isArray(steps)) {
       return res.status(400).json({ error: 'document_type and steps[] are required' });
     }
-
     // Validate step structure before saving (basic guards).
     const normalizedSteps = steps
       .map((s) => ({
@@ -1727,6 +1727,8 @@ router.post('/routing-configs', protect, requireAdmin, async (req, res) => {
         'specific_users',
         'department_reviewers',
         'submitter_department_reviewers',
+        'final_hr_reviewers',
+        'active_mayor',
       ].includes(s.assignee_source)) {
         return res.status(400).json({ error: `Invalid assignee_source for step ${s.step_order}.` });
       }
@@ -1783,6 +1785,12 @@ router.post('/routing-configs', protect, requireAdmin, async (req, res) => {
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
+      await client.query("SELECT pg_advisory_xact_lock(hashtext('document-workflow:' || $1::text))",[document_type]);
+      const shared=(await client.query('SELECT workflow_id FROM approval_workflow_document_types WHERE document_type=$1',[document_type])).rows[0];
+      if(shared) {
+        await client.query('ROLLBACK');
+        return res.status(409).json({error:'This document type uses a shared approval workflow. Edit it in Shared approval workflows so Leave, Locator and DocuTracker keep the same configuration.'});
+      }
 
       // If a "user" step provides a department_id, enforce that the PRIMARY user
       // currently belongs to that department (active assignment).
@@ -2134,9 +2142,12 @@ router.put('/workflow-steps/:stepId/assignees', protect, requireAdmin, async (re
     try {
       await client.query('BEGIN');
       const stepExists = await client.query(
-        `SELECT id, department_id, assignee_source
-         FROM docutracker_workflow_steps
-         WHERE id = $1::uuid
+        `SELECT id, department_id, assignee_source,
+            EXISTS(SELECT 1 FROM docutracker_routing_config_versions v
+              WHERE v.document_type=s.document_type AND v.version=s.workflow_version
+                AND v.shared_workflow_id IS NOT NULL) AS shared_version
+         FROM docutracker_workflow_steps s
+         WHERE s.id = $1::uuid
          LIMIT 1`,
         [stepId]
       );
@@ -2144,9 +2155,14 @@ router.put('/workflow-steps/:stepId/assignees', protect, requireAdmin, async (re
         await client.query('ROLLBACK');
         return res.status(404).json({ error: 'Workflow step not found' });
       }
+      if(stepExists.rows[0]?.shared_version) {
+        await client.query('ROLLBACK');
+        return res.status(409).json({error:'Publish changes through Shared approval workflows. A shared workflow version cannot be edited in place.'});
+      }
       if (
         stepExists.rows[0]?.assignee_source === 'department_reviewers' ||
-        stepExists.rows[0]?.assignee_source === 'submitter_department_reviewers'
+        stepExists.rows[0]?.assignee_source === 'submitter_department_reviewers' ||
+        ['final_hr_reviewers','active_mayor'].includes(stepExists.rows[0]?.assignee_source)
       ) {
         await client.query('ROLLBACK');
         return res.status(409).json({

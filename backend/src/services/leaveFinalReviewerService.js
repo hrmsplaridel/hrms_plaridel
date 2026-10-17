@@ -74,6 +74,11 @@ async function resolveFinalLeaveReviewers(db, date = todayInHrmsTimezone()) {
 }
 
 async function resolveEligibleFinalReviewers(db, applicantId, requestType, requestId) {
+  if (requestId) {
+    const engine=require('./approvalWorkflows');
+    const snapshot=await engine.loadRequestWorkflow(db,requestType,requestId);
+    if (snapshot) return engine.resolveWorkflowReviewers(db,requestType,{id:requestId,employee_id:applicantId,workflow_snapshot:snapshot});
+  }
   const departmentApprover = await loadDepartmentApprover(db, requestType, requestId);
   const reviewers = requestType === 'leave' ? await requestFinalReviewers(db, requestId, () => resolveFinalLeaveReviewers(db)) : await locatorFinalReviewers(db,requestId,()=>resolveFinalLeaveReviewers(db));
   return reviewers.filter(r => String(r.id) !== String(applicantId) &&
@@ -83,6 +88,11 @@ async function resolveEligibleFinalReviewers(db, applicantId, requestType, reque
 async function assertFinalLeaveReviewer(db, applicantId, actorId, requestType = 'leave', requestId = null) {
   if (String(applicantId) === String(actorId)) {
     throw reviewError(`You cannot review your own ${requestType} request`, 403);
+  }
+  if(requestId && await require('./approvalWorkflows').loadRequestWorkflow(db,requestType,requestId)) {
+    const eligible=await resolveEligibleFinalReviewers(db,applicantId,requestType,requestId);
+    if(!eligible.some(r=>String(r.id)===String(actorId))) throw reviewError('Only a different eligible reviewer for the current workflow step can decide this request.',403);
+    return;
   }
   const departmentApprover = await loadDepartmentApprover(db, requestType, requestId);
   if (departmentApprover && String(departmentApprover) === String(actorId)) {
@@ -98,6 +108,10 @@ async function assertFinalLeaveReviewer(db, applicantId, actorId, requestType = 
 }
 
 async function assertLeaveSubmissionReviewer(db, applicantId, requestType = 'leave', rule = null, reviewSnapshot = null) {
+  if(rule?.approval_workflow_id) {
+    await require('./approvalWorkflows').prepareWorkflow(db,requestType,rule,applicantId,reviewSnapshot);
+    return;
+  }
   if(requestType==='leave' && rule?.approval_route==='mayor') {
     const profile=(await db.query('SELECT employment_type FROM users WHERE id=$1::uuid',[applicantId])).rows[0];
     if(chooseLeaveRoute(rule,profile?.employment_type)==='mayor') {

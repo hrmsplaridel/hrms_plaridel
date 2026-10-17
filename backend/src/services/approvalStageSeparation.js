@@ -14,8 +14,10 @@ function departmentApproverSql(kind, alias) {
 
 function finalQueueVisibilitySql(kind, alias, actorSql) {
   const pending = kind==='locator'?"'pending', 'pending_hr','pending_mayor'":"'pending', 'pending_hr'";
-  return `(${alias}.status NOT IN (${pending}) OR
-    ${departmentApproverSql(kind, alias)} IS DISTINCT FROM ${actorSql})`;
+  return `((jsonb_typeof(${alias}.workflow_snapshot->'steps'->0) IS DISTINCT FROM 'object'
+    OR ${alias}.status NOT IN ('pending_department_head', 'pending_hr', 'pending_mayor', 'pending'))
+    AND (${alias}.status NOT IN (${pending}) OR
+    ${departmentApproverSql(kind, alias)} IS DISTINCT FROM ${actorSql}))`;
 }
 
 async function loadDepartmentApprover(db, kind, requestId) {
