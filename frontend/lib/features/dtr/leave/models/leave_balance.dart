@@ -22,6 +22,7 @@ class LeaveBalance {
     this.eligibleFrom,
     this.prorated = false,
     this.calculatedDays,
+    this.fullLimitDays,
     this.employeeName,
     this.earnedDays = 0,
     this.usedDays = 0,
@@ -47,10 +48,15 @@ class LeaveBalance {
   final bool prorated;
   final double? calculatedDays;
 
+  /// Full-year policy limit, before any hiring-year proration.
+  final double? fullLimitDays;
+
+  double get annualEntitlementDays => fullLimitDays ?? earnedDays;
+
   /// Optional display snapshot for admin tables/cards.
   final String? employeeName;
 
-  /// Earned credits for a credit row, or annual limit for an entitlement row.
+  /// Earned credits, or the usable annual allowance after any proration.
   final double earnedDays;
 
   /// Approved/consumed leave days already deducted.
@@ -135,6 +141,7 @@ class LeaveBalance {
       eligibleFrom: json['eligible_from']?.toString(),
       prorated: json['prorated'] == true,
       calculatedDays: _parseDouble(json['calculated_days']),
+      fullLimitDays: _parseDouble(json['full_limit_days']),
       employeeName: json['employee_name']?.toString(),
       earnedDays: _parseDouble(json['earned_days']) ?? 0,
       usedDays: _parseDouble(json['used_days']) ?? 0,
@@ -161,6 +168,7 @@ class LeaveBalance {
       'eligible_from': eligibleFrom,
       'prorated': prorated,
       'calculated_days': calculatedDays,
+      'full_limit_days': fullLimitDays,
       'employee_name': _trimOrNull(employeeName),
       'earned_days': earnedDays,
       'used_days': usedDays,
@@ -186,6 +194,7 @@ class LeaveBalance {
     String? eligibleFrom,
     bool? prorated,
     double? calculatedDays,
+    double? fullLimitDays,
     String? employeeName,
     double? earnedDays,
     double? usedDays,
@@ -210,6 +219,7 @@ class LeaveBalance {
       eligibleFrom: eligibleFrom ?? this.eligibleFrom,
       prorated: prorated ?? this.prorated,
       calculatedDays: calculatedDays ?? this.calculatedDays,
+      fullLimitDays: fullLimitDays ?? this.fullLimitDays,
       employeeName: employeeName ?? this.employeeName,
       earnedDays: earnedDays ?? this.earnedDays,
       usedDays: usedDays ?? this.usedDays,

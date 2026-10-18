@@ -848,13 +848,43 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
   );
 
   /// Same UX as filing leave: wide = resizable right sheet; narrow = full-screen route.
-  /// Opens immediately; refresh runs in background so tap is not blocked on the network.
+  /// Assigned requests refresh before review controls open.
   void _openRequestDetailsPanel(LeaveRequest request) {
     final assigned = _assignedRequests[request.id];
     if (assigned != null) {
-      unawaited(_reviewAssigned(assigned));
+      unawaited(_openCurrentAssignedRequest(request));
       return;
     }
+    _openHistoryDetailsPanel(request);
+  }
+
+  Future<void> _openCurrentAssignedRequest(LeaveRequest request) async {
+    // Another primary/backup may have completed this step since the queue loaded.
+    await _loadRequests(forceRefresh: true);
+    if (!mounted) return;
+    final assigned = _assignedRequests[request.id];
+    if (assigned != null) {
+      await _reviewAssigned(assigned);
+      return;
+    }
+    final id = request.id;
+    if (id == null) return;
+    final fresh = await context.read<LeaveProvider>().refreshRequestById(id);
+    if (!mounted) return;
+    if (fresh == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'This request is no longer assigned to you, or could not be refreshed.',
+          ),
+        ),
+      );
+      return;
+    }
+    _openHistoryDetailsPanel(fresh);
+  }
+
+  void _openHistoryDetailsPanel(LeaveRequest request) {
     final id = request.id;
     if (id != null && id.isNotEmpty) {
       unawaited(context.read<LeaveProvider>().refreshRequestById(id));

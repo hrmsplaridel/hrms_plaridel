@@ -7,6 +7,7 @@ import 'package:provider/provider.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/features/dtr/leave/data/providers/leave_provider.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_request.dart';
+import 'package:hrms_plaridel/features/dtr/leave/utils/leave_workflow_history.dart';
 import 'package:hrms_plaridel/features/dtr/leave/utils/open_attachment_io.dart'
     if (dart.library.html) 'package:hrms_plaridel/features/dtr/leave/utils/open_attachment_web.dart'
     as open_attachment;
@@ -62,8 +63,11 @@ class AdminLeaveDetailsSideSheet extends StatelessWidget {
           }
           final isOwnRequest =
               currentReviewerId != null && currentReviewerId == req.userId;
+          final sharedWorkflow = (req.workflowSnapshot?['steps'] as List? ?? [])
+              .any((step) => step is Map);
           final canReview =
               !isOwnRequest &&
+              !sharedWorkflow &&
               (isDepartmentHead
                   ? canReviewPending &&
                         req.status == LeaveRequestStatus.pendingDepartmentHead
@@ -310,6 +314,11 @@ class AdminLeaveRequestDetailsPanel extends StatelessWidget {
   }
 
   List<LeaveHistoryEvent> _buildHistoryEvents(LeaveRequest request) {
+    if ((request.workflowSnapshot?['steps'] as List? ?? []).any(
+      (step) => step is Map,
+    )) {
+      return leaveWorkflowHistory(request);
+    }
     final reviewer = (request.reviewerName ?? '').trim().isNotEmpty
         ? request.reviewerName!.trim()
         : 'HR/Admin';
@@ -325,7 +334,9 @@ class AdminLeaveRequestDetailsPanel extends StatelessWidget {
     final submittedAt = request.dateFiled ?? request.createdAt;
     final reviewedAt = request.reviewedAt;
     final status = request.status;
-    final finalStage = request.finalReviewRoute == 'mayor' ? 'Department' : 'HR';
+    final finalStage = request.finalReviewRoute == 'mayor'
+        ? 'Department'
+        : 'HR';
     final departmentHeadAction = request.departmentHeadAction;
 
     final deptHeadApprovedStage =
@@ -400,7 +411,8 @@ class AdminLeaveRequestDetailsPanel extends StatelessWidget {
           actor: finalStage,
           completed: false,
         ),
-      if (hrApproved && (!deptHeadApprovedStage || request.finalReviewRoute != 'mayor'))
+      if (hrApproved &&
+          (!deptHeadApprovedStage || request.finalReviewRoute != 'mayor'))
         LeaveHistoryEvent(
           label: 'Approved by $finalStage',
           dateTime: reviewedAt,

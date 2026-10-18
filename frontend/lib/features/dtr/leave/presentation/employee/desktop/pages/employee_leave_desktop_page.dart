@@ -719,8 +719,15 @@ class _CompactBalanceRow extends StatelessWidget {
               ),
               _BalanceAmount(
                 label: annual ? 'Entitled' : 'Earned',
-                value: _days(balance.earnedDays),
+                value: _days(
+                  annual ? balance.annualEntitlementDays : balance.earnedDays,
+                ),
               ),
+              if (annual && balance.prorated)
+                _BalanceAmount(
+                  label: 'Prorated',
+                  value: _days(balance.earnedDays),
+                ),
               _BalanceAmount(label: 'Used', value: _days(balance.usedDays)),
               _BalanceAmount(
                 label: 'Pending',

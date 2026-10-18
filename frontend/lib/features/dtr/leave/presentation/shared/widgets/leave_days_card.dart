@@ -70,22 +70,27 @@ class LeaveDaysCard extends StatelessWidget {
                       fontSize: 10,
                     ),
                   ),
-                Row(
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 4,
                   children: [
                     _Pip(
                       label: 'Entitlement',
-                      value: _fmt(total),
+                      value: _fmt(balance.annualEntitlementDays),
                       context: context,
                     ),
-                    const SizedBox(width: 8),
-                    if (balance.usedDays > 0) ...[
+                    if (balance.prorated)
+                      _Pip(
+                        label: 'Prorated',
+                        value: _fmt(total),
+                        context: context,
+                      ),
+                    if (balance.usedDays > 0)
                       _Pip(
                         label: 'Used',
                         value: _fmt(balance.usedDays),
                         context: context,
                       ),
-                      const SizedBox(width: 8),
-                    ],
                     if (balance.pendingDays > 0)
                       _Pip(
                         label: 'Pending',

@@ -1,13 +1,16 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:dio/dio.dart';
 import 'package:provider/provider.dart';
 import 'package:hrms_plaridel/core/api/client.dart';
+import 'package:hrms_plaridel/core/services/app_realtime_provider.dart';
 import 'package:hrms_plaridel/core/api/user_facing_api_error.dart';
 import 'package:hrms_plaridel/providers/auth_provider.dart';
 import 'package:hrms_plaridel/features/docutracker/data/providers/docutracker_provider.dart';
 import 'package:hrms_plaridel/features/docutracker/utils/docutracker_open_attachment.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_request.dart';
+import 'package:hrms_plaridel/features/dtr/leave/utils/leave_workflow_history.dart';
 import 'package:hrms_plaridel/features/dtr/leave/presentation/admin/widgets/admin_leave_details_side_sheet.dart';
 import 'package:hrms_plaridel/features/dtr/leave/presentation/shared/widgets/history_timeline.dart';
 import 'package:hrms_plaridel/core/utils/responsive_right_side_panel.dart';
@@ -127,6 +130,86 @@ class _WorkflowDecisionDialog extends StatefulWidget {
 }
 
 class _WorkflowDecisionDialogState extends State<_WorkflowDecisionDialog> {
+  late Map<String, dynamic> _request = Map<String, dynamic>.from(
+    widget.request,
+  );
+  StreamSubscription<AppRealtimeEvent>? _realtime;
+  Timer? _refreshTimer;
+  bool _listening = false, _refreshing = false;
+  String? _refreshError;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_listening || _request['kind'] != 'leave') return;
+    _listening = true;
+    try {
+      _realtime = context.read<AppRealtimeProvider>().events.listen((event) {
+        if (event.name != 'leave_updated' && event.name != 'connected') return;
+        final id =
+            event.payloadString('leaveRequestId') ??
+            event.payloadString('requestId');
+        if (id == null || id == _request['id']) {
+          unawaited(_refreshCurrentRequest());
+        }
+      });
+    } on ProviderNotFoundException {
+      // Standalone review hosts still use the periodic fallback.
+    }
+    _refreshTimer = Timer.periodic(const Duration(seconds: 20), (_) {
+      unawaited(_refreshCurrentRequest());
+    });
+  }
+
+  Future<void> _refreshCurrentRequest() async {
+    if (!mounted || _saving || _refreshing) return;
+    setState(() {
+      _refreshing = true;
+      _refreshError = null;
+    });
+    try {
+      final assigned = await loadAssignedWorkflowRequests('leave');
+      var current = assigned[_request['id']];
+      if (current == null) {
+        // Backups who did not act disappear from the assigned inbox after completion.
+        // Load the authorized source record for the final status and complete history.
+        final response = await ApiClient.instance.get<Map<String, dynamic>>(
+          '/api/leave/${_request['id']}',
+        );
+        final data = response.data;
+        if (data == null || data['id'] != _request['id']) {
+          throw const FormatException('Request unavailable');
+        }
+        current = {
+          ..._request,
+          'can_review': false,
+          'allowed_actions': <String>[],
+          'request_data': data,
+          'decisions': null,
+          'status': data['status'],
+          'current_step': (data['workflow_snapshot'] as Map?)?['current_step'],
+        };
+      }
+      if (!mounted) return;
+      setState(() {
+        if (current!['current_step'] != _request['current_step'] ||
+            current['signature_revision'] != _request['signature_revision']) {
+          _signed = false;
+        }
+        _request = current;
+      });
+    } catch (_) {
+      if (mounted) {
+        setState(
+          () => _refreshError =
+              'Could not verify this request. Refresh before reviewing.',
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _refreshing = false);
+    }
+  }
+
   String _locatorDateLabel(DateTime? date) {
     if (date == null) return '—';
     const months = [
@@ -154,7 +237,14 @@ class _WorkflowDecisionDialogState extends State<_WorkflowDecisionDialog> {
   bool _signed = false, _saving = false;
   String? _error;
   final _feedbackMessenger = GlobalKey<ScaffoldMessengerState>();
-  bool get _canReview => widget.request['can_review'] != false;
+  bool get _canReview {
+    final data = _request['request_data'] as Map?;
+    final status = data?['status'] ?? _request['status'];
+    return !_refreshing &&
+        _refreshError == null &&
+        _request['can_review'] != false &&
+        (status == null || ['pending_hr', 'pending_mayor'].contains(status));
+  }
 
   Future<void> _openForm(Future<void> Function() action) async {
     if (_saving) return;
@@ -168,6 +258,8 @@ class _WorkflowDecisionDialogState extends State<_WorkflowDecisionDialog> {
 
   @override
   void dispose() {
+    _realtime?.cancel();
+    _refreshTimer?.cancel();
     _remarks.dispose();
     _paid.dispose();
     _unpaid.dispose();
@@ -176,10 +268,10 @@ class _WorkflowDecisionDialogState extends State<_WorkflowDecisionDialog> {
 
   Future<void> _decide(String action) async {
     if (_saving || !_canReview) return;
-    if (action == 'approve' && widget.request['kind'] == 'leave') {
+    if (action == 'approve' && _request['kind'] == 'leave') {
       final paid = double.tryParse(_paid.text);
       final unpaid = double.tryParse(_unpaid.text);
-      final requested = double.tryParse(widget.request['days'].toString());
+      final requested = double.tryParse(_request['days'].toString());
       if (paid == null ||
           unpaid == null ||
           !paid.isFinite ||
@@ -206,7 +298,7 @@ class _WorkflowDecisionDialogState extends State<_WorkflowDecisionDialog> {
       _saving = true;
       _error = null;
     });
-    final request = widget.request;
+    final request = _request;
     try {
       final response = await ApiClient.instance.post(
         '/api/approval-workflows/requests/${request['kind']}/${request['id']}/$action',
@@ -252,7 +344,7 @@ class _WorkflowDecisionDialogState extends State<_WorkflowDecisionDialog> {
       _error = null;
     });
     try {
-      final request = widget.request;
+      final request = _request;
       final response = await ApiClient.instance.dio.get<List<int>>(
         '/api/approval-workflows/requests/${request['kind']}/${request['id']}/attachment',
         options: Options(responseType: ResponseType.bytes),
@@ -274,12 +366,24 @@ class _WorkflowDecisionDialogState extends State<_WorkflowDecisionDialog> {
 
   @override
   Widget build(BuildContext context) {
-    final request = widget.request;
+    final request = _request;
     final actions = (request['allowed_actions'] as List? ?? []).cast<String>();
     final isLeave = request['kind'] == 'leave';
     final reviewFields = Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        if (_refreshing) const LinearProgressIndicator(),
+        if (_refreshError != null)
+          Row(
+            children: [
+              Expanded(child: Text(_refreshError!)),
+              IconButton(
+                tooltip: 'Refresh request',
+                onPressed: _refreshCurrentRequest,
+                icon: const Icon(Icons.refresh),
+              ),
+            ],
+          ),
         if (_canReview && request['kind'] == 'leave') ...[
           Text('Requested days: ${request['days']}'),
           const SizedBox(height: 12),
@@ -373,7 +477,7 @@ class _WorkflowDecisionDialogState extends State<_WorkflowDecisionDialog> {
   }
 
   Widget _locatorDetails(Widget reviewFields, List<String> actions) {
-    final request = widget.request;
+    final request = _request;
     final data = Map<String, dynamic>.from(
       request['request_data'] as Map? ?? {},
     );
@@ -620,7 +724,7 @@ class _WorkflowDecisionDialogState extends State<_WorkflowDecisionDialog> {
   }
 
   Future<void> _openLocatorForm({required bool print}) async {
-    final request = widget.request;
+    final request = _request;
     final data = Map<String, dynamic>.from(
       request['request_data'] as Map? ?? {},
     );
@@ -688,7 +792,7 @@ class _WorkflowDecisionDialogState extends State<_WorkflowDecisionDialog> {
   }
 
   Widget _leaveDetails(Widget reviewFields, List<String> actions) {
-    final request = widget.request;
+    final request = _request;
     final data = Map<String, dynamic>.from(
       request['request_data'] as Map? ?? {},
     );
@@ -703,24 +807,10 @@ class _WorkflowDecisionDialogState extends State<_WorkflowDecisionDialog> {
       'reason': data['reason'] ?? request['reason'],
       'attachment_name': data['attachment_name'] ?? request['attachment_name'],
     });
-    final events = <LeaveHistoryEvent>[
-      LeaveHistoryEvent(
-        label: 'Submitted',
-        dateTime:
-            DateTime.tryParse(request['created_at']?.toString() ?? '') ??
-            leave.dateFiled,
-        actor: leave.employeeName ?? 'Applicant',
-        remarks: leave.reason,
-      ),
-      for (final decision
-          in (request['decisions'] as List? ?? []).whereType<Map>())
-        LeaveHistoryEvent(
-          label:
-              '${decision['step_label']} · ${decision['action'] == 'approve' ? 'Approved' : decision['action']}',
-          dateTime: DateTime.tryParse(decision['acted_at']?.toString() ?? ''),
-          actor: decision['reviewer_name']?.toString() ?? 'Reviewer',
-        ),
-    ];
+    final events = leaveWorkflowHistory(
+      leave,
+      decisions: request['decisions'] as List?,
+    );
     return AdminLeaveRequestDetailsPanel(
       request: leave,
       isDepartmentHead: false,
