@@ -17,6 +17,11 @@ class LeaveBalance {
     this.recordKind = 'credit_balance',
     this.entitlementBasis = LeaveEntitlementBasis.accrual,
     this.entitlementYear,
+    this.eligible = true,
+    this.eligibilityMessage,
+    this.eligibleFrom,
+    this.prorated = false,
+    this.calculatedDays,
     this.employeeName,
     this.earnedDays = 0,
     this.usedDays = 0,
@@ -36,6 +41,11 @@ class LeaveBalance {
   final String recordKind;
   final String entitlementBasis;
   final int? entitlementYear;
+  final bool eligible;
+  final String? eligibilityMessage;
+  final String? eligibleFrom;
+  final bool prorated;
+  final double? calculatedDays;
 
   /// Optional display snapshot for admin tables/cards.
   final String? employeeName;
@@ -69,7 +79,13 @@ class LeaveBalance {
 
   /// Days still free to **reserve** with new requests: [remainingDays] minus [pendingDays].
   /// Matches backend `assertEnoughAvailableForPendingReservation` and forced-deduct `available` checks.
-  double get availableDays => remainingDays - pendingDays;
+  double get availableDays {
+    final available = remainingDays - pendingDays;
+    if (isAnnualEntitlement) {
+      return eligible ? available.clamp(0, double.infinity).toDouble() : 0;
+    }
+    return available;
+  }
 
   bool get hasInsufficientBalance => availableDays < 0;
 
@@ -114,6 +130,11 @@ class LeaveBalance {
         rawLeaveType,
       ),
       entitlementYear: _parseInt(json['entitlement_year']),
+      eligible: json['eligible'] != false,
+      eligibilityMessage: json['eligibility_message']?.toString(),
+      eligibleFrom: json['eligible_from']?.toString(),
+      prorated: json['prorated'] == true,
+      calculatedDays: _parseDouble(json['calculated_days']),
       employeeName: json['employee_name']?.toString(),
       earnedDays: _parseDouble(json['earned_days']) ?? 0,
       usedDays: _parseDouble(json['used_days']) ?? 0,
@@ -135,6 +156,11 @@ class LeaveBalance {
       'record_kind': recordKind,
       'entitlement_basis': entitlementBasis,
       if (entitlementYear != null) 'entitlement_year': entitlementYear,
+      'eligible': eligible,
+      'eligibility_message': eligibilityMessage,
+      'eligible_from': eligibleFrom,
+      'prorated': prorated,
+      'calculated_days': calculatedDays,
       'employee_name': _trimOrNull(employeeName),
       'earned_days': earnedDays,
       'used_days': usedDays,
@@ -155,6 +181,11 @@ class LeaveBalance {
     String? recordKind,
     String? entitlementBasis,
     int? entitlementYear,
+    bool? eligible,
+    String? eligibilityMessage,
+    String? eligibleFrom,
+    bool? prorated,
+    double? calculatedDays,
     String? employeeName,
     double? earnedDays,
     double? usedDays,
@@ -174,6 +205,11 @@ class LeaveBalance {
       recordKind: recordKind ?? this.recordKind,
       entitlementBasis: entitlementBasis ?? this.entitlementBasis,
       entitlementYear: entitlementYear ?? this.entitlementYear,
+      eligible: eligible ?? this.eligible,
+      eligibilityMessage: eligibilityMessage ?? this.eligibilityMessage,
+      eligibleFrom: eligibleFrom ?? this.eligibleFrom,
+      prorated: prorated ?? this.prorated,
+      calculatedDays: calculatedDays ?? this.calculatedDays,
       employeeName: employeeName ?? this.employeeName,
       earnedDays: earnedDays ?? this.earnedDays,
       usedDays: usedDays ?? this.usedDays,

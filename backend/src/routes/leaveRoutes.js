@@ -1,6 +1,7 @@
 const workflowEngine = require('../services/approvalWorkflows');
 const {requireLeaveFinalRole}=require('../services/leaveRouting');
 const { normalizeEligibleEmploymentTypes, assertLeaveEmploymentEligibility } = require('../services/leaveEmploymentEligibility');
+const { serviceEligibility, assertLeaveServiceEligibility } = require('../services/leaveServiceEligibility');
 const { finalQueueVisibilitySql } = require('../services/approvalStageSeparation');
 const express = require('express');
 const multer = require('multer');
@@ -96,6 +97,7 @@ const {
 const {
   ENTITLEMENT_BASES,
   buildAnnualEntitlementYearSummary,
+  annualAllowance,
   countedDatesForCalendarYear,
   defaultEntitlementBasisForLeaveType,
   normalizeEntitlementBasis,
@@ -720,6 +722,7 @@ async function computeAnnualQuotaLeavePreview(
   const typeQ = await client.query(
     `SELECT COALESCE(display_name, description, name) AS display_name,
             max_days,
+            first_year_allowance,
             entitlement_basis
      FROM leave_types
      WHERE name = $1
@@ -738,6 +741,11 @@ async function computeAnnualQuotaLeavePreview(
   if (!Number.isFinite(limit) || limit <= 0) return null;
   const label = typeRow.display_name || systemLeaveTypeDisplayName(leaveTypeKey);
 
+  let hireDate = null;
+  if (typeRow.first_year_allowance === 'prorated') {
+    const employee = await client.query('SELECT date_hired::text AS date_hired FROM users WHERE id = $1::uuid LIMIT 1', [userId]);
+    hireDate = employee.rows[0]?.date_hired;
+  }
   const years = calendarYearsForDateRange(startStr, endStr);
   if (years.length === 0) return null;
 
@@ -792,17 +800,18 @@ async function computeAnnualQuotaLeavePreview(
       else pendingDays += days;
     }
 
+    const allowance = annualAllowance(typeRow, hireDate, year);
     const summary = buildAnnualEntitlementYearSummary({
       year,
-      limitDays: limit,
+      limitDays: allowance.limit_days,
       approvedDays,
       pendingDays,
       requestedDays,
       requestedCountedDates: requestedDatesForYear || [],
     });
-    summary.error_message = summary.allowed
-      ? null
-      : annualQuotaLimitErrorMessage(label, summary);
+    Object.assign(summary, {full_limit_days:allowance.full_limit_days, calculated_days:allowance.calculated_days, prorated:allowance.prorated});
+    summary.allowed = summary.allowed && !allowance.error_message;
+    summary.error_message = allowance.error_message || (summary.allowed ? null : annualQuotaLimitErrorMessage(label, summary));
     yearSummaries.push(summary);
   }
 
@@ -978,6 +987,8 @@ function leaveTypeRowToApi(row = {}) {
       name
     ),
     eligible_employment_types: row.eligible_employment_types ?? null,
+    minimum_service_months: Number(row.minimum_service_months || 0),
+    first_year_allowance: row.first_year_allowance || 'full',
     approval_workflow_id: row.approval_workflow_id || null,
     approval_route: row.approval_route || 'hr',
     mayor_employment_types: row.mayor_employment_types ?? null,
@@ -1400,7 +1411,7 @@ function leaveTypePayloadFromBody(body = {}, existing = null) {
     return n;
   }
 
-  return {
+  const payload = {
     id: existing?.id || null,
     name,
     displayName: displayName || existing?.display_name || existing?.description || systemLeaveTypeDisplayName(name),
@@ -1430,6 +1441,9 @@ function leaveTypePayloadFromBody(body = {}, existing = null) {
       existing?.minimum_advance_days ?? base.minimum_advance_days ?? null,
       { label: 'Minimum advance days', minimum: 0 }
     ),
+    firstYearAllowance: bodyField('first_year_allowance') ?? existing?.first_year_allowance ?? 'full',
+    minimumServiceMonths: integerField('minimum_service_months', existing?.minimum_service_months ?? 0,
+      {label:'Minimum months of service', minimum:0}) ?? 0,
     affectsDtrNormally: boolField('affects_dtr_normally', existing?.affects_dtr_normally ?? base.affects_dtr_normally !== false),
     balanceLedgerType: normalizeLedgerType(body.balance_ledger_type ?? body.balanceLedgerType ?? existing?.balance_ledger_type, name),
     entitlementBasis: normalizeEntitlementBasis(
@@ -1456,6 +1470,12 @@ function leaveTypePayloadFromBody(body = {}, existing = null) {
       { strict: true }
     ),
   };
+  if (payload.minimumServiceMonths > 1200) invalidNumericField('Minimum months of service', 'must be 1200 or less');
+  if (!['full', 'prorated'].includes(payload.firstYearAllowance)) invalidNumericField('First-year allowance', 'must be full or prorated');
+  if (payload.firstYearAllowance === 'prorated' && (payload.entitlementBasis !== 'annual' || !payload.maxDays || payload.balanceLedgerType !== 'none')) {
+    throw Object.assign(new Error('First-year proration requires an annual entitlement with a positive maximum and no credit ledger.'), {statusCode:400});
+  }
+  return payload;
 }
 
 function sendLeaveTypeWriteError(res, err, action) {
@@ -1519,7 +1539,7 @@ router.post('/types', protect, requireAdminOrHr, requireDtrFeatureIfAdmin('leave
           requires_attachment, requires_attachment_when_over_days,
           max_days, minimum_advance_days, affects_dtr_normally, balance_ledger_type,
           entitlement_basis, sex_eligibility, employee_detail_schema, eligible_employment_types, approval_route, mayor_employment_types,
-          admin_can_file, approval_workflow_id, created_at, updated_at
+          admin_can_file, approval_workflow_id, minimum_service_months, first_year_allowance, created_at, updated_at
         )
         VALUES (
           $1, $2, $3, $4, false,
@@ -1527,7 +1547,7 @@ router.post('/types', protect, requireAdminOrHr, requireDtrFeatureIfAdmin('leave
           $8, $9,
           $10, $11, $12, $13,
           $14, $15, $16::jsonb, $17::text[], $18, $19::text[],
-          $20, $21::uuid, now(), now()
+          $20, $21::uuid, $22, $23, now(), now()
         )
         RETURNING *`,
       [
@@ -1550,6 +1570,8 @@ router.post('/types', protect, requireAdminOrHr, requireDtrFeatureIfAdmin('leave
         payload.eligibleEmploymentTypes,
         routing.approval_route,routing.mayor_employment_types,
         payload.adminCanFile, workflowId,
+        payload.minimumServiceMonths,
+        payload.firstYearAllowance,
       ]
     );
     res.status(201).json(leaveTypeRowToApi(q.rows[0]));
@@ -1570,16 +1592,17 @@ router.put('/types/:id', protect, requireAdminOrHr, requireDtrFeatureIfAdmin('le
     const isSystem = existing.is_system === true || SYSTEM_LEAVE_TYPE_NAMES.includes(existing.name);
     if (isSystem) {
       const body = req.body || {};
-      if (Object.keys(body).some(key => key !== 'eligible_employment_types')) {
-        return res.status(400).json({ error: 'Built-in leave rules are protected. Only employment-type eligibility can be configured.' });
+      if (Object.keys(body).some(key => !['eligible_employment_types','minimum_service_months'].includes(key))) {
+        return res.status(400).json({ error: 'Built-in leave rules are protected. Only employment-type and minimum-service eligibility can be configured.' });
       }
-      if (!Object.prototype.hasOwnProperty.call(body, 'eligible_employment_types')) {
+      if (!Object.keys(body).length) {
         return res.json(leaveTypeRowToApi(existing));
       }
-      const eligibility = normalizeEligibleEmploymentTypes(body.eligible_employment_types);
+      const payload = leaveTypePayloadFromBody(body, existing);
+      const eligibility = payload.eligibleEmploymentTypes;
       const updated = await pool.query(
-        `UPDATE leave_types SET eligible_employment_types = $1::text[], updated_at = now()
-         WHERE id = $2::uuid RETURNING *`, [eligibility, req.params.id]
+        `UPDATE leave_types SET eligible_employment_types = $1::text[], minimum_service_months = $3, updated_at = now()
+         WHERE id = $2::uuid RETURNING *`, [eligibility, req.params.id, payload.minimumServiceMonths]
       );
       return res.json(leaveTypeRowToApi(updated.rows[0]));
     }
@@ -1621,6 +1644,8 @@ router.put('/types/:id', protect, requireAdminOrHr, requireDtrFeatureIfAdmin('le
            employee_detail_schema = $17::jsonb,
            eligible_employment_types = $19::text[],
            admin_can_file = $20,
+           minimum_service_months = $21,
+           first_year_allowance = $22,
            updated_at = now()
        WHERE id = $18::uuid
        RETURNING *`,
@@ -1649,6 +1674,8 @@ router.put('/types/:id', protect, requireAdminOrHr, requireDtrFeatureIfAdmin('le
         req.params.id,
         payload.eligibleEmploymentTypes,
         payload.adminCanFile,
+        payload.minimumServiceMonths,
+        payload.firstYearAllowance,
       ]
     );
     res.json(leaveTypeRowToApi(q.rows[0]));
@@ -2021,7 +2048,14 @@ router.get('/working-days', protect, async (req, res) => {
           requestedCountedDates: result.countedDates,
         })
       : null;
+    const leaveRule = leaveTypeName ? await getLeaveTypeDefinition(pool, leaveTypeName) : null;
+    let service = null;
+    if (Number(leaveRule?.minimum_service_months || 0) > 0) {
+      const employee = await pool.query('SELECT date_hired::text AS date_hired FROM users WHERE id = $1::uuid LIMIT 1', [userId]);
+      service = serviceEligibility(leaveRule, employee.rows[0]?.date_hired, startStr);
+    }
     res.json({
+      service_eligibility: service,
       start_date: startStr,
       end_date: endStr,
       working_days_applied: result.days,
@@ -2214,6 +2248,7 @@ router.post('/submit', protect, async (req, res) => {
       }
       const leaveRule = await getLeaveTypeDefinition(client, leave_type);
       await assertLeaveEmploymentEligibility(client, leaveRule, userId);
+      await assertLeaveServiceEligibility(client, leaveRule, userId, startStr);
       const reviewSnapshot = await getDepartmentReviewSnapshot(client, userId);
       const preparedWorkflow = await workflowEngine.prepareWorkflow(client,'leave',leaveRule,userId,reviewSnapshot);
       await assertLeaveSubmissionReviewer(client, userId, 'leave', leaveRule, reviewSnapshot);
@@ -2468,6 +2503,7 @@ router.post('/submit-with-attachment', protect, uploadLeaveAttachmentMemoryMw, a
 
       const leaveRule = await getLeaveTypeDefinition(client, leave_type);
       await assertLeaveEmploymentEligibility(client, leaveRule, userId);
+      await assertLeaveServiceEligibility(client, leaveRule, userId, startStr);
       const reviewSnapshot = await getDepartmentReviewSnapshot(client, userId);
       const preparedWorkflow = await workflowEngine.prepareWorkflow(client,'leave',leaveRule,userId,reviewSnapshot);
       await assertLeaveSubmissionReviewer(client, userId, 'leave', leaveRule, reviewSnapshot);
@@ -2797,6 +2833,7 @@ router.put('/:id', protect, async (req, res) => {
         ? await getLeaveTypeDefinition(client, leave_type)
         : storedTypeRule?.rows[0] ? leaveTypeRowToApi(storedTypeRule.rows[0]) : null;
       await assertLeaveEmploymentEligibility(client, leaveRule, userId);
+      if (!savingDraft) await assertLeaveServiceEligibility(client, leaveRule, userId, startStr);
       if (leaveRule && lockedRequest.rows[0].leave_type_id === leaveTypeId) leaveRule.approval_workflow_snapshot=lockedRequest.rows[0].workflow_snapshot;
       if (submitting) {
         reviewSnapshot = await getDepartmentReviewSnapshot(client, userId);
@@ -4144,6 +4181,7 @@ async function finalizeLeaveApproval(client, r, {id, reviewerId, remarks, depart
   const leaveTypeRule = r.leave_type_name
     ? await getLeaveTypeDefinition(client, r.leave_type_name)
     : null;
+  await assertLeaveServiceEligibility(client, leaveTypeRule, targetUserId, startStr);
   assertRequiredLeaveAttachment({
     rule: leaveTypeRule,
     leaveType: r.leave_type_name,
@@ -5416,6 +5454,8 @@ router.get('/balances/:userId', protect, async (req, res) => {
       `SELECT name,
               COALESCE(display_name, description, name) AS display_name,
               max_days,
+              minimum_service_months,
+              first_year_allowance,
               sex_eligibility,
               eligible_employment_types
        FROM leave_types
@@ -5431,6 +5471,8 @@ router.get('/balances/:userId', protect, async (req, res) => {
       name: row.name,
       display: row.display_name || systemLeaveTypeDisplayName(row.name),
       quota: parseFloat(row.max_days),
+      minimum_service_months: row.minimum_service_months || 0,
+      first_year_allowance: row.first_year_allowance || 'full',
       sex: normalizeSexEligibility(row.sex_eligibility, row.name),
       employmentTypes: row.eligible_employment_types,
     }));
@@ -5438,9 +5480,11 @@ router.get('/balances/:userId', protect, async (req, res) => {
     // Skip employment- and sex-restricted types the employee cannot use
     let employeeSex = null;
     let employeeEmploymentType = null;
+    let employeeHireDate = null;
     try {
-      const sexRow = await pool.query('SELECT sex, employment_type FROM users WHERE id = $1::uuid LIMIT 1', [targetId]);
+      const sexRow = await pool.query('SELECT sex, employment_type, date_hired::text AS date_hired FROM users WHERE id = $1::uuid LIMIT 1', [targetId]);
       employeeSex = sexRow.rows[0]?.sex || null;
+      employeeHireDate = sexRow.rows[0]?.date_hired || null;
       employeeEmploymentType = sexRow.rows[0]?.employment_type || null;
     } catch (_) {}
 
@@ -5497,6 +5541,8 @@ router.get('/balances/:userId', protect, async (req, res) => {
       const employeeName = mappedBalances.length > 0 ? mappedBalances[0].employee_name : null;
       const today = officialDate;
       for (const t of synthTypes) {
+        const allowance = annualAllowance({...t, max_days:t.quota}, employeeHireDate, currentYear);
+        const service = serviceEligibility(t, employeeHireDate, officialDate);
         mappedBalances.push({
           id: `synth-${t.name}-${currentYear}`,
           user_id: targetId,
@@ -5506,7 +5552,13 @@ router.get('/balances/:userId', protect, async (req, res) => {
           record_kind: 'annual_entitlement',
           entitlement_basis: ENTITLEMENT_BASES.ANNUAL,
           entitlement_year: currentYear,
-          earned_days: t.quota,
+          earned_days: allowance.limit_days,
+          full_limit_days: allowance.full_limit_days,
+          calculated_days: allowance.calculated_days,
+          prorated: allowance.prorated,
+          eligibility_message: allowance.error_message || service.message,
+          eligible: !allowance.error_message && service.eligible,
+          eligible_from: service.eligible_from,
           used_days: usageMap[t.name].used,
           pending_days: usageMap[t.name].pending,
           adjusted_days: 0,

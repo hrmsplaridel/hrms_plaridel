@@ -41,7 +41,7 @@ test('the complete fresh initializer runs as SQL without psql commands or other 
 
 test('DTR table definitions declare the current workflow, signature, field and layout columns',()=>{
  const columns={
-  leave_types:['approval_workflow_id'],leave_requests:['workflow_snapshot','signature_revision'],
+  leave_types:['approval_workflow_id','minimum_service_months','first_year_allowance'],leave_requests:['workflow_snapshot','signature_revision'],
   locator_request_types:['approval_workflow_id','employee_detail_schema'],
   locator_slips:['workflow_snapshot','employee_detail_schema_snapshot','additional_details'],
   docutracker_leave_signatures:['revision'],leave_print_template_versions:['print_layout'],
@@ -72,6 +72,38 @@ test('fresh DTR installation resolves configured reviewers and preserves current
   db=new Client({connectionString:target.toString()});await db.connect();
   // Send the complete file as SQL, just like pgAdmin Query Tool: no psql includes.
   await db.query(schema);
+  const hireRulesMigration=fs.readFileSync(path.join(root,'scripts/migrations/dtr/20261018_leave_hire_date_rules.sql'),'utf8');
+  await db.query(hireRulesMigration);
+  await db.query(hireRulesMigration);
+  const defaultRules=(await db.query("SELECT minimum_service_months, first_year_allowance FROM leave_types WHERE name='soloParentLeave'")).rows[0];
+  assert.deepEqual(defaultRules,{minimum_service_months:0,first_year_allowance:'full'});
+  await assert.rejects(db.query("INSERT INTO leave_types(name,minimum_service_months) VALUES('invalidService',-1)"),{code:'23514'});
+  await assert.rejects(db.query("INSERT INTO leave_types(name,first_year_allowance) VALUES('invalidProration','prorated')"),{code:'23514'});
+  const sharedWorkflow=(await db.query('SELECT id FROM approval_workflows LIMIT 1')).rows[0].id;
+  await db.query("INSERT INTO leave_types(name,minimum_service_months,first_year_allowance,entitlement_basis,max_days,approval_workflow_id) VALUES('hireRulesTest',6,'prorated','annual',5,$1)",[sharedWorkflow]);
+  // Exercise actual SQL parameter bindings, not just route mocks.
+  const {withMockedModule,clearModule}=require('./helpers/moduleMocks');
+  const restorePool=withMockedModule('../src/config/db',{pool:{query:(...args)=>db.query(...args)}});
+  clearModule('../src/routes/leaveRoutes');
+  try {
+    const router=require('../src/routes/leaveRoutes');
+    const response=()=>({code:200,status(code){this.code=code;return this;},json(body){this.body=body;return this;}});
+    const create=router.stack.find(l=>l.route?.path==='/types'&&l.route.methods.post).route.stack.at(-1).handle;
+    const created=response();
+    await create({body:{name:'proratedRouteTest',display_name:'Prorated Test',entitlement_basis:'annual',max_days:5,minimum_service_months:6,first_year_allowance:'prorated',approval_workflow_id:sharedWorkflow}},created);
+    assert.equal(created.code,201,JSON.stringify(created.body));
+    assert.equal(created.body.minimum_service_months,6);assert.equal(created.body.first_year_allowance,'prorated');
+    const update=router.stack.find(l=>l.route?.path==='/types/:id'&&l.route.methods.put).route.stack.at(-1).handle;
+    const updated=response();
+    await update({params:{id:created.body.id},body:{display_name:'Changed Name'}},updated);
+    assert.equal(updated.code,200,JSON.stringify(updated.body));
+    assert.equal(updated.body.minimum_service_months,6);assert.equal(updated.body.first_year_allowance,'prorated');
+    const solo=(await db.query("SELECT id FROM leave_types WHERE name='soloParentLeave'")).rows[0];
+    const protectedUpdate=response();
+    await update({params:{id:solo.id},body:{minimum_service_months:6}},protectedUpdate);
+    assert.equal(protectedUpdate.code,200,JSON.stringify(protectedUpdate.body));
+    assert.equal(protectedUpdate.body.max_days,7);assert.equal(protectedUpdate.body.minimum_service_months,6);
+  } finally {clearModule('../src/routes/leaveRoutes');restorePool();}
   const reset=(await db.query("INSERT INTO users(email,password_hash,full_name) VALUES('reset@test.invalid','test-hash','Reset User') RETURNING id")).rows[0];
   const assistance=(await db.query('INSERT INTO password_reset_requests(user_id) VALUES($1) RETURNING id',[reset.id])).rows[0];
   await db.query("INSERT INTO auth_password_reset_otps(user_id,code_hash,expires_at,assistance_request_id) VALUES($1,'test',now()+interval '5 minutes',$2)",[reset.id,assistance.id]);

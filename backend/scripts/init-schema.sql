@@ -707,6 +707,8 @@ CREATE TABLE IF NOT EXISTS leave_types (
   requires_attachment_when_over_days NUMERIC,
   max_days NUMERIC,
   minimum_advance_days INTEGER,
+  minimum_service_months INTEGER NOT NULL DEFAULT 0,
+  first_year_allowance TEXT NOT NULL DEFAULT 'full',
   affects_dtr_normally BOOLEAN NOT NULL DEFAULT true,
   balance_ledger_type TEXT NOT NULL DEFAULT 'none',
   entitlement_basis TEXT NOT NULL DEFAULT 'per_request',
@@ -746,6 +748,17 @@ CREATE TABLE IF NOT EXISTS leave_types (
   ),
   CONSTRAINT chk_leave_type_minimum_advance_days_nonnegative CHECK (
     minimum_advance_days IS NULL OR minimum_advance_days >= 0
+  ),
+  CONSTRAINT chk_leave_type_minimum_service_months CHECK (
+    minimum_service_months BETWEEN 0 AND 1200
+  ),
+  CONSTRAINT chk_leave_type_first_year_allowance CHECK (
+    first_year_allowance IN ('full', 'prorated') AND (
+      first_year_allowance = 'full' OR (
+        entitlement_basis = 'annual' AND max_days IS NOT NULL AND max_days > 0
+        AND balance_ledger_type = 'none'
+      )
+    )
   )
 );
 

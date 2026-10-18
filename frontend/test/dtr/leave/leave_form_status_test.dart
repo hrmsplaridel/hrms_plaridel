@@ -96,12 +96,27 @@ Future<void> _openForm(
   bool canSign = false,
   bool signed = false,
   LeaveRequestAction? onSubmit,
+  Map<String, dynamic>? serviceEligibility,
 }) async {
   ApiClient.instance.init();
   ApiClient.instance.dio.interceptors.insert(
     0,
     InterceptorsWrapper(
       onRequest: (options, handler) {
+        if (options.path == '/api/leave/working-days' &&
+            serviceEligibility != null) {
+          handler.resolve(
+            Response(
+              requestOptions: options,
+              statusCode: 200,
+              data: {
+                'working_days_applied': 1,
+                'service_eligibility': serviceEligibility,
+              },
+            ),
+          );
+          return;
+        }
         if (options.path == '/api/leave/types') {
           handler.resolve(
             Response<List<dynamic>>(
@@ -109,7 +124,11 @@ Future<void> _openForm(
               statusCode: 200,
               data: [
                 {'name': 'vacationLeave', 'display_name': 'Vacation Leave'},
-                {'name': 'sickLeave', 'display_name': 'Sick Leave'},
+                {
+                  'name': 'sickLeave',
+                  'display_name': 'Sick Leave',
+                  if (serviceEligibility != null) 'minimum_service_months': 6,
+                },
               ],
             ),
           );
@@ -159,6 +178,71 @@ Future<void> _openForm(
 }
 
 void main() {
+  testWidgets(
+    'service requirement blocks submission before signing or saving',
+    (tester) async {
+      final date = _futureWorkingDate();
+      final validDraft = draft.copyWith(
+        startDate: date,
+        endDate: date,
+        workingDaysApplied: 1,
+        sickLeaveNature: SickLeaveNature.outPatient,
+        sickIllnessDetails: 'Fever',
+      );
+      final repository = _Repository()..read = () async => validDraft;
+      ApiClient.instance.init();
+      ApiClient.instance.dio.interceptors.clear();
+      LeaveTypeDefinitionCache.instance.invalidate();
+      var submissions = 0;
+      var availabilityChecks = 0;
+      ApiClient.instance.dio.interceptors.add(
+        InterceptorsWrapper(
+          onRequest: (o, h) {
+            if (o.path == '/api/leave/submission-availability') {
+              availabilityChecks++;
+              h.resolve(
+                Response(
+                  requestOptions: o,
+                  statusCode: 200,
+                  data: {'can_submit': true},
+                ),
+              );
+            } else {
+              h.reject(DioException(requestOptions: o));
+            }
+          },
+        ),
+      );
+      await _openForm(
+        tester,
+        repository,
+        initial: validDraft,
+        loadOfficialDate: true,
+        signed: true,
+        serviceEligibility: {
+          'eligible': false,
+          'eligible_from': '2027-04-01',
+          'message': 'You become eligible on 2027-04-01.',
+        },
+        onSubmit: (_) async {
+          submissions++;
+          return false;
+        },
+      );
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.text('Submit Request'));
+      await tester.tap(find.text('Submit Request'));
+      await tester.pumpAndSettle();
+      expect(submissions, 0);
+      expect(availabilityChecks, 0);
+      expect(
+        find.textContaining('You become eligible on 2027-04-01.'),
+        findsWidgets,
+      );
+      await tester.pumpWidget(const SizedBox.shrink());
+      LeaveTypeDefinitionCache.instance.invalidate();
+    },
+  );
   testWidgets(
     'Submit explicitly confirms the chosen applicant asset for the final submitted form',
     (tester) async {

@@ -690,6 +690,22 @@ class _CompactBalanceRow extends StatelessWidget {
                         fontWeight: FontWeight.w600,
                       ),
                     ),
+                    if (annual && balance.prorated)
+                      Text(
+                        'First year: rounded down to whole days',
+                        style: TextStyle(
+                          color: AppTheme.dashTextSecondaryOf(context),
+                          fontSize: 11,
+                        ),
+                      ),
+                    if (annual && balance.eligibilityMessage != null)
+                      Text(
+                        balance.eligibilityMessage!,
+                        style: TextStyle(
+                          color: AppTheme.dashTextSecondaryOf(context),
+                          fontSize: 11,
+                        ),
+                      ),
                     if (annual && balance.entitlementYear != null)
                       Text(
                         '${balance.entitlementYear}',

@@ -234,6 +234,62 @@ void main() {
     'is_system': system, 'is_active': true,
   };
 
+  testWidgets('minimum service can be saved and restored for a custom type', (
+    tester,
+  ) async {
+    rows = [
+      {...existingType('existing'), 'minimum_service_months': 6},
+    ];
+    await mount(tester);
+    final field = textField('Minimum months of service');
+    await tester.scrollUntilVisible(field, 200, scrollable: formScrollable());
+    expect(tester.widget<TextFormField>(field).controller!.text, '6');
+    await tester.enterText(field, '12');
+    await tester.tap(find.text('Save Changes'));
+    await tester.pumpAndSettle();
+    expect(
+      requests
+          .singleWhere((r) => r.method == 'PUT')
+          .data['minimum_service_months'],
+      12,
+    );
+  });
+
+  testWidgets('annual first-year proration saves and survives scrolling', (
+    tester,
+  ) async {
+    rows = [
+      {
+        ...existingType('existing'),
+        'entitlement_basis': 'annual',
+        'max_days': 5,
+      },
+    ];
+    await mount(tester);
+    final field = stringDropdown('First-year allowance');
+    await tester.scrollUntilVisible(field, 200, scrollable: formScrollable());
+    await tester.ensureVisible(field);
+    await tester.tap(field);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Prorate by date hired (whole days)').last);
+    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(
+      textField('Leave type name'),
+      -200,
+      scrollable: formScrollable(),
+    );
+    await tester.scrollUntilVisible(field, 200, scrollable: formScrollable());
+    expect(find.text('Prorate by date hired (whole days)'), findsOneWidget);
+    await tester.tap(find.text('Save Changes'));
+    await tester.pumpAndSettle();
+    expect(
+      requests
+          .singleWhere((r) => r.method == 'PUT')
+          .data['first_year_allowance'],
+      'prorated',
+    );
+  });
+
   for (final system in [false, true]) {
     testWidgets('overall save persists routing edits for existing type; protected=$system', (tester) async {
       rows = [existingType('existing', system: system)];

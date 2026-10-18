@@ -126,6 +126,8 @@ class LeaveTypeDefinition {
     this.requiresAttachmentWhenOverDays,
     this.maxDays,
     this.minimumAdvanceDays,
+    this.minimumServiceMonths = 0,
+    this.firstYearAllowance = 'full',
     this.affectsDtrNormally = true,
     this.balanceLedgerType = 'none',
     this.entitlementBasis = LeaveEntitlementBasis.perRequest,
@@ -148,6 +150,8 @@ class LeaveTypeDefinition {
   final double? requiresAttachmentWhenOverDays;
   final double? maxDays;
   final int? minimumAdvanceDays;
+  final int minimumServiceMonths;
+  final String firstYearAllowance;
   final bool affectsDtrNormally;
   final String balanceLedgerType;
   final String entitlementBasis;
@@ -187,6 +191,8 @@ class LeaveTypeDefinition {
         json['requires_attachment_when_over_days'] ??
             json['requiresAttachmentWhenOverDays'],
       ),
+      minimumServiceMonths: _parseInt(json['minimum_service_months']) ?? 0,
+      firstYearAllowance: json['first_year_allowance']?.toString() ?? 'full',
       maxDays: _parseDouble(json['max_days'] ?? json['maxDays']),
       minimumAdvanceDays: _parseInt(
         json['minimum_advance_days'] ?? json['minimumAdvanceDays'],
@@ -233,6 +239,8 @@ class LeaveTypeDefinition {
       'requires_attachment_when_over_days': requiresAttachmentWhenOverDays,
       'max_days': maxDays,
       'minimum_advance_days': minimumAdvanceDays,
+      'minimum_service_months': minimumServiceMonths,
+      'first_year_allowance': firstYearAllowance,
       'affects_dtr_normally': affectsDtrNormally,
       'balance_ledger_type': balanceLedgerType,
       'entitlement_basis': entitlementBasis,
@@ -259,6 +267,8 @@ class LeaveTypeDefinition {
     double? requiresAttachmentWhenOverDays,
     double? maxDays,
     int? minimumAdvanceDays,
+    int? minimumServiceMonths,
+    String? firstYearAllowance,
     bool? affectsDtrNormally,
     String? balanceLedgerType,
     String? entitlementBasis,
@@ -282,6 +292,8 @@ class LeaveTypeDefinition {
           requiresAttachmentWhenOverDays ?? this.requiresAttachmentWhenOverDays,
       maxDays: maxDays ?? this.maxDays,
       minimumAdvanceDays: minimumAdvanceDays ?? this.minimumAdvanceDays,
+      minimumServiceMonths: minimumServiceMonths ?? this.minimumServiceMonths,
+      firstYearAllowance: firstYearAllowance ?? this.firstYearAllowance,
       affectsDtrNormally: affectsDtrNormally ?? this.affectsDtrNormally,
       balanceLedgerType: balanceLedgerType ?? this.balanceLedgerType,
       entitlementBasis: entitlementBasis ?? this.entitlementBasis,

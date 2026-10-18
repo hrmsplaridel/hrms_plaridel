@@ -54,6 +54,22 @@ class LeaveDaysCard extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(height: 4),
+                if (balance.prorated)
+                  Text(
+                    'First-year allowance rounded down to whole days',
+                    style: TextStyle(
+                      color: AppTheme.dashTextSecondaryOf(context),
+                      fontSize: 10,
+                    ),
+                  ),
+                if (balance.eligibilityMessage != null)
+                  Text(
+                    balance.eligibilityMessage!,
+                    style: TextStyle(
+                      color: AppTheme.dashTextSecondaryOf(context),
+                      fontSize: 10,
+                    ),
+                  ),
                 Row(
                   children: [
                     _Pip(

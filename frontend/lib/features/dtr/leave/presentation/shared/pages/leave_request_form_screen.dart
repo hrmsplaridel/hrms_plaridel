@@ -92,6 +92,7 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
   String? _workingDaysHelperText;
   int _workingDaysRequestSerial = 0;
   LeaveAnnualEntitlementPreview? _annualEntitlementPreview;
+  Map<String, dynamic>? _serviceEligibility;
   Map<String, dynamic> _customDetailValues = {};
   DocuTrackerSourceSignatureBundle? _leaveSignatures;
 
@@ -783,6 +784,7 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
         return;
       }
       if (!_validateEventDateRules()) return;
+      if (!_validateServiceRequirement()) return;
       if (!_validateAnnualQuotaLimit()) return;
       if (_shouldShowAttachmentSection() && !_hasAttachment()) {
         _showMessage('Attachment is required for this leave type.');
@@ -854,6 +856,7 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
         _workingDaysHelperText = 'Select dates to auto-compute';
         _workingDaysController.clear();
         _annualEntitlementPreview = null;
+        _serviceEligibility = null;
       });
       return;
     }
@@ -864,6 +867,7 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
       _workingDaysHelperText = 'Computing from assigned shift and holidays...';
       _workingDaysController.text = fallback?.toString() ?? '';
       _annualEntitlementPreview = null;
+      _serviceEligibility = null;
     });
 
     try {
@@ -893,6 +897,7 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
               ? 'Could not verify shift-aware annual entitlement'
               : 'Could not compute from shift; using Mon-Fri fallback';
           _annualEntitlementPreview = null;
+          _serviceEligibility = null;
         });
         return;
       }
@@ -909,6 +914,10 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
         _workingDaysController.text = _formatWorkingDays(days);
         _workingDaysHelperText = '$helper: ${_formatWorkingDays(days)} day(s)';
         _annualEntitlementPreview = annualPreview;
+        final service = data['service_eligibility'];
+        _serviceEligibility = service is Map
+            ? Map<String, dynamic>.from(service)
+            : null;
       });
     } catch (_) {
       if (!mounted || serial != _workingDaysRequestSerial) return;
@@ -919,6 +928,7 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
             ? 'Server estimate unavailable; annual entitlement cannot be verified'
             : 'Server estimate unavailable; using Mon-Fri fallback';
         _annualEntitlementPreview = null;
+        _serviceEligibility = null;
       });
     }
   }
@@ -1189,6 +1199,24 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
     }
 
     return true;
+  }
+
+  bool _validateServiceRequirement() {
+    if ((_selectedLeaveTypeDefinition?.minimumServiceMonths ?? 0) <= 0) {
+      return true;
+    }
+    if (_serviceEligibility == null) {
+      _showMessage(
+        'Service eligibility could not be verified. Please reselect the leave dates and try again.',
+      );
+      return false;
+    }
+    if (_serviceEligibility!['eligible'] == true) return true;
+    _showMessage(
+      _serviceEligibility!['message']?.toString() ??
+          'The minimum service requirement is not met.',
+    );
+    return false;
   }
 
   bool _validateAnnualQuotaLimit() {
@@ -2101,6 +2129,21 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
           'No leave credits required. This request will not deduct Vacation or Sick Leave credits.';
     } else {
       message = 'Leave policy information is not available.';
+    }
+
+    final serviceMonths =
+        _selectedLeaveTypeDefinition?.minimumServiceMonths ?? 0;
+    if (serviceMonths > 0) {
+      final serviceMessage = _serviceEligibility?['message']?.toString();
+      message +=
+          ' Minimum service: $serviceMonths month(s) from date hired, measured at the first leave date.';
+      if (serviceMessage != null && serviceMessage.isNotEmpty) {
+        message += ' $serviceMessage';
+      }
+    }
+    if (_selectedLeaveTypeDefinition?.firstYearAllowance == 'prorated') {
+      message +=
+          ' The hiring-year allowance is prorated by date hired and rounded down to whole days. The full annual allowance applies from January 1 of the next year.';
     }
 
     return Container(

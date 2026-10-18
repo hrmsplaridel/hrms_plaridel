@@ -30,6 +30,7 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
   final _descriptionController = TextEditingController();
   final _maxDaysController = TextEditingController();
   final _minimumAdvanceDaysController = TextEditingController();
+  final _minimumServiceMonthsController = TextEditingController();
   final _attachmentOverDaysController = TextEditingController();
   final _searchController = TextEditingController();
 
@@ -56,6 +57,7 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
   String _balanceLedgerType = 'none';
   String _entitlementBasis = LeaveEntitlementBasis.perRequest;
   String _sexEligibility = 'any';
+  String _firstYearAllowance = 'full';
   List<String>? _eligibleEmploymentTypes;
   List<LeaveCustomFieldDefinition> _customFields = const [];
   List<int> _customFieldUiIds = const [];
@@ -108,6 +110,7 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
     _descriptionController.dispose();
     _maxDaysController.dispose();
     _minimumAdvanceDaysController.dispose();
+    _minimumServiceMonthsController.dispose();
     _attachmentOverDaysController.dispose();
     _searchController.dispose();
     super.dispose();
@@ -168,6 +171,7 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
     _maxDaysController.text = item.maxDays?.toString() ?? '';
     _minimumAdvanceDaysController.text =
         item.minimumAdvanceDays?.toString() ?? '';
+    _minimumServiceMonthsController.text = item.minimumServiceMonths.toString();
     _isActive = item.isActive;
     _employeeCanFile = item.employeeCanFile;
     _adminOnly = item.adminOnly;
@@ -182,6 +186,7 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
         ? item.balanceLedgerType
         : 'none';
     _entitlementBasis = item.entitlementBasis;
+    _firstYearAllowance = item.firstYearAllowance;
     _sexEligibility = _sexEligibilityTypes.containsKey(item.sexEligibility)
         ? item.sexEligibility
         : 'any';
@@ -231,6 +236,7 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
       _descriptionController.clear();
       _maxDaysController.clear();
       _minimumAdvanceDaysController.clear();
+      _minimumServiceMonthsController.clear();
       _attachmentOverDaysController.clear();
       _isActive = true;
       _employeeCanFile = true;
@@ -241,6 +247,7 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
       _affectsDtrNormally = true;
       _balanceLedgerType = 'none';
       _entitlementBasis = LeaveEntitlementBasis.perRequest;
+      _firstYearAllowance = 'full';
       _sexEligibility = 'any';
       _eligibleEmploymentTypes = null;
       _customFields = const [];
@@ -282,6 +289,10 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
     final data = selected?.isSystem == true
         ? <String, dynamic>{
             'eligible_employment_types': _eligibleEmploymentTypes,
+            if ((_intOrNull(_minimumServiceMonthsController.text) ?? 0) !=
+                selected!.minimumServiceMonths)
+              'minimum_service_months':
+                  _intOrNull(_minimumServiceMonthsController.text) ?? 0,
           }
         : _payloadFromForm();
     if (selected?.id == null && _creationRouting['approval_workflow_id']==null) {
@@ -456,9 +467,16 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
           : null,
       'max_days': _numberOrNull(_maxDaysController.text),
       'minimum_advance_days': _intOrNull(_minimumAdvanceDaysController.text),
+      'minimum_service_months':
+          _intOrNull(_minimumServiceMonthsController.text) ?? 0,
       'affects_dtr_normally': _affectsDtrNormally,
       'balance_ledger_type': _balanceLedgerType,
       'entitlement_basis': _entitlementBasis,
+      'first_year_allowance':
+          _entitlementBasis == LeaveEntitlementBasis.annual &&
+              _balanceLedgerType == 'none'
+          ? _firstYearAllowance
+          : 'full',
       'sex_eligibility': _sexEligibility,
       'eligible_employment_types': _eligibleEmploymentTypes,
       'employee_detail_schema': _customFields
@@ -805,7 +823,7 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
                         const SizedBox(height: 6),
                         Text(
                           systemLocked
-                              ? 'Built-in rules are protected. Employment-type eligibility and printed forms can be configured.'
+                              ? 'Built-in rules are protected. Employment-type and service eligibility, and printed forms can be configured.'
                               : 'Configure filing, balance, and DTR behavior.',
                           style: TextStyle(
                             color: _mutedColor(context),
@@ -827,7 +845,7 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
                     _InfoPanel(
                       icon: Icons.lock_outline_rounded,
                       text:
-                          'Built-in rules are protected. Employment-type eligibility and printed forms can be configured here.',
+                          'Built-in rules are protected. Employment-type and service eligibility, and printed forms can be configured here.',
                     ),
                   _settingsSection([
                     _sectionTitle('Basic Information'),
@@ -972,6 +990,52 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
                           onChanged: _setRequiresAttachment,
                         ),
                       ],
+                    ),
+                    const SizedBox(height: 16),
+                    if (_entitlementBasis == LeaveEntitlementBasis.annual &&
+                        _balanceLedgerType == 'none') ...[
+                      DropdownButtonFormField<String>(
+                        key: ValueKey('first-year-$_firstYearAllowance'),
+                        initialValue: _firstYearAllowance,
+                        isExpanded: true,
+                        decoration: _inputDecoration(
+                          'First-year allowance',
+                          helperText:
+                              'Proration uses months remaining in the hiring year, including the employed fraction of the hiring month. Rounded down to whole days; full allowance from January 1.',
+                        ),
+                        items: const [
+                          DropdownMenuItem(
+                            value: 'full',
+                            child: Text('Full annual allowance'),
+                          ),
+                          DropdownMenuItem(
+                            value: 'prorated',
+                            child: Text('Prorate by date hired (whole days)'),
+                          ),
+                        ],
+                        onChanged: _saving || systemLocked
+                            ? null
+                            : (value) => setState(
+                                () => _firstYearAllowance = value ?? 'full',
+                              ),
+                      ),
+                      const SizedBox(height: 16),
+                    ],
+                    TextFormField(
+                      controller: _minimumServiceMonthsController,
+                      readOnly: _saving,
+                      style: AppTheme.dashFieldTextStyle(context),
+                      keyboardType: TextInputType.number,
+                      decoration: _inputDecoration(
+                        'Minimum months of service',
+                        helperText:
+                            'Blank or 0 means no requirement. Measured from date hired to the first leave date.',
+                      ),
+                      validator: (value) =>
+                          _validateNonNegativeInteger(value) ??
+                          ((int.tryParse(value ?? '') ?? 0) > 1200
+                              ? 'Maximum is 1200 months'
+                              : null),
                     ),
                     const SizedBox(height: 16),
                     LeaveEmploymentEligibilityField(
