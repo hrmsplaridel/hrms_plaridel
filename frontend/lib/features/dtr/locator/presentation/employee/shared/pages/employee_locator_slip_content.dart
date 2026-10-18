@@ -2438,8 +2438,9 @@ class EmployeeLocatorSlipContentState extends State<EmployeeLocatorSlipContent>
     try {
       final assigned = await loadAssignedWorkflowRequests('locator');
       if (!_isCurrentAuthSession(userId, authGeneration) ||
-          loadGeneration != _approvalsLoadGeneration)
+          loadGeneration != _approvalsLoadGeneration) {
         return;
+      }
       final assignedItems = assigned.values
           .map(
             (entry) => _LocatorSlipDraft.fromApi(
@@ -3236,6 +3237,7 @@ class _LocatorSlipFormDialogState extends State<_LocatorSlipFormDialog> {
   @override
   void initState() {
     super.initState();
+    ActiveApplicationReview.register(this, 'locator', _submissionIssues);
     final today = DateTime(
       widget.officialDate.year,
       widget.officialDate.month,
@@ -3305,6 +3307,7 @@ class _LocatorSlipFormDialogState extends State<_LocatorSlipFormDialog> {
 
   @override
   void dispose() {
+    ActiveApplicationReview.clear(this);
     _officeController.dispose();
     _remarksController.dispose();
     super.dispose();
@@ -3366,11 +3369,6 @@ class _LocatorSlipFormDialogState extends State<_LocatorSlipFormDialog> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        OutlinedButton.icon(
-          onPressed: _reviewApplication,
-          icon: const Icon(Icons.fact_check_outlined),
-          label: const Text('Review my application'),
-        ),
         KeyedSubtree(key: _reviewDateKey, child: _datePicker()),
         const SizedBox(height: 14),
         _requestTypeDropdown(),
@@ -3735,10 +3733,6 @@ class _LocatorSlipFormDialogState extends State<_LocatorSlipFormDialog> {
       );
     }
     return issues;
-  }
-
-  Future<void> _reviewApplication() async {
-    await showApplicationReview(context, _submissionIssues());
   }
 
   void _save() {

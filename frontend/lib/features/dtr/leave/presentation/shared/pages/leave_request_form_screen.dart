@@ -109,6 +109,7 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
   @override
   void initState() {
     super.initState();
+    ActiveApplicationReview.register(this, 'leave', _reviewApplication);
     final initial = widget.initialRequest;
     _savedRequest = initial;
     _checkingStatus = (initial?.id ?? '').isNotEmpty;
@@ -284,6 +285,7 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
 
   @override
   void dispose() {
+    ActiveApplicationReview.clear(this);
     _customLeaveTypeController.dispose();
     _reasonController.dispose();
     _locationDetailsController.dispose();
@@ -690,9 +692,13 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
   final _reviewDetailsKey = GlobalKey();
   final _reviewAttachmentKey = GlobalKey();
 
-  Future<void> _reviewApplication() async {
+  List<ApplicationReviewIssue> _reviewApplication() {
     if (_busy || _submitFlowInFlight || _checkingStatus || !_canEditRequest) {
-      return;
+      return [
+        const ApplicationReviewIssue(
+          'The application is busy or cannot be edited. Please try again when it is ready.',
+        ),
+      ];
     }
     final issues = reviewFormFields(_formKey.currentState);
     _reviewIssues = issues;
@@ -730,7 +736,7 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
       _reviewIssues = null;
       _reviewTarget = null;
     }
-    if (mounted) await showApplicationReview(context, issues);
+    return issues;
   }
 
   Future<void> _submitRequest() async {
@@ -1914,16 +1920,6 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
                               spacing: 16,
                               runSpacing: 12,
                               children: [
-                                OutlinedButton.icon(
-                                  onPressed:
-                                      _busy ||
-                                          _submitFlowInFlight ||
-                                          _checkingStatus
-                                      ? null
-                                      : _reviewApplication,
-                                  icon: const Icon(Icons.fact_check_outlined),
-                                  label: const Text('Review my application'),
-                                ),
                                 if (widget.onSaveDraft != null)
                                   OutlinedButton(
                                     onPressed:

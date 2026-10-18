@@ -1,5 +1,55 @@
 import 'package:flutter/material.dart';
 
+/// The open form supplies its current validation results to the chat.
+class ActiveApplicationReview {
+  static Object? _owner;
+  static List<ApplicationReviewIssue> Function()? _review;
+  static String? _module;
+
+  static void register(
+    Object owner,
+    String module,
+    List<ApplicationReviewIssue> Function() review,
+  ) {
+    _owner = owner;
+    _module = module;
+    _review = review;
+  }
+
+  static void clear([Object? owner]) {
+    if (owner != null && !identical(owner, _owner)) return;
+    _owner = null;
+    _module = null;
+    _review = null;
+  }
+
+  static bool matches(String text) =>
+      RegExp(
+        r'\b(review|check|validate|ready|missing|kulang|suriin|i-check)\b',
+        caseSensitive: false,
+      ).hasMatch(text) &&
+      RegExp(
+        r'\b(application|form|before submitting|before i submit|ready to submit)\b',
+        caseSensitive: false,
+      ).hasMatch(text) &&
+      !RegExp(
+        r'\b(status|approved|pending|reviewer|who)\b',
+        caseSensitive: false,
+      ).hasMatch(text);
+
+  static String reply() {
+    final review = _review;
+    if (review == null) {
+      return 'Open your leave or locator application, then ask me to review it. I need the open form to check your current entries.';
+    }
+    final issues = review();
+    final details = issues.isEmpty
+        ? 'No issues found by the current form checks.'
+        : 'Please address these items:\n${issues.map((issue) => '- ${issue.message}').join('\n')}';
+    return 'Review of your $_module application\n\n$details\n\nNothing has been submitted. Final eligibility, availability, and approval checks still apply when you submit.';
+  }
+}
+
 class ApplicationReviewIssue {
   const ApplicationReviewIssue(this.message, {this.target});
   final String message;

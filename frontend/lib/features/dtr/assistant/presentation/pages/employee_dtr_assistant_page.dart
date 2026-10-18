@@ -1,3 +1,4 @@
+import 'package:hrms_plaridel/features/dtr/assistant/presentation/widgets/application_review.dart';
 import 'dart:async';
 import 'package:hrms_plaridel/features/dtr/assistant/presentation/widgets/active_assistant_field.dart';
 import 'dart:typed_data';
@@ -342,7 +343,10 @@ class _EmployeeDtrAssistantPageState extends State<EmployeeDtrAssistantPage> {
       (item) => item.id == _selectedModelProfile,
       orElse: () => _modelProfiles.first,
     );
-    if (selectedProfile.external &&
+    final reviewRequested =
+        requestReference == null && ActiveApplicationReview.matches(text);
+    if (!reviewRequested &&
+        selectedProfile.external &&
         selectedProfile.requiresConsent &&
         _selectedExternalConsentVersion != selectedProfile.consentVersion) {
       await _handleModelChanged(selectedProfile.id);
@@ -366,16 +370,22 @@ class _EmployeeDtrAssistantPageState extends State<EmployeeDtrAssistantPage> {
           ? ActiveAssistantForm.current
           : null;
       final fieldValue = fieldBinding?.read();
-      final reply = await _api.sendMessage(
-        text,
-        intent: intent,
-        modelProfile: _selectedModelProfile,
-        conversationId: _conversationId,
-        externalConsentVersion: _selectedExternalConsentVersion,
-        cancelToken: cancelToken,
-        formContext: fieldBinding?.context,
-        requestReference: requestReference,
-      );
+      final reply = reviewRequested
+          ? DtrAssistantMessage(
+              role: 'assistant',
+              content: ActiveApplicationReview.reply(),
+              createdAt: DateTime.now(),
+            )
+          : await _api.sendMessage(
+              text,
+              intent: intent,
+              modelProfile: _selectedModelProfile,
+              conversationId: _conversationId,
+              externalConsentVersion: _selectedExternalConsentVersion,
+              cancelToken: cancelToken,
+              formContext: fieldBinding?.context,
+              requestReference: requestReference,
+            );
       if (!mounted || !_turnGuard.isCurrent(turnGeneration)) return;
       if (fieldBinding != null && reply.id != null) {
         _fieldBindings[reply.id!] = fieldBinding;
