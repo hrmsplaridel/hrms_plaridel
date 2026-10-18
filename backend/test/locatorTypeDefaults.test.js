@@ -2,6 +2,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
+const { readDtrImplementation } = require('./helpers/dtrModuleSources');
 
 function readBackendFile(relativePath) {
   return fs.readFileSync(path.resolve(__dirname, '..', relativePath), 'utf8');
@@ -97,7 +98,7 @@ test('fresh schema and upgrade migration enforce locator type text limits', () =
 });
 
 test('DTR coverage behavior does not override the configured mode by type code', () => {
-  const route = readBackendFile('src/routes/dtrDailySummary.js');
+  const route = readDtrImplementation();
 
   assert.doesNotMatch(
     route,

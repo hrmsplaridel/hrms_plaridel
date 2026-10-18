@@ -20,7 +20,8 @@
     "test:dtr-assistant": "node --test test/dtrAssistantRequestFocus.test.js test/leaveFieldAssistant.test.js test/dtrAssistantRegression.test.js test/dtrAssistantApi.test.js test/dtrAssistantIntegration.test.js test/dtrAssistantDataService.test.js test/dtrAssistantProviders.test.js test/dtrAssistantDateAndExport.test.js test/dtrAssistantExportStore.test.js test/dtrAssistantIntelligence.test.js test/dtrAssistantActionPrefill.test.js test/dtrAssistantPrivacy.test.js test/dtrAssistantFeedbackPostgres.integration.test.js",
     "test:dtr-assistant:regression": "node --test test/dtrAssistantRegression.test.js",
     "eval:intents": "node scripts/eval-intents.js",
-    "eval:export-feedback": "node scripts/export-feedback.js"
+    "eval:export-feedback": "node scripts/export-feedback.js",
+    "test:dtr-management": "node --test test/dtrModuleStructure.test.js test/dtrReportOverlays.test.js test/dtrAdminAccess.test.js test/dtrBulkReport.test.js test/dtrHistoricalDepartmentFilter.test.js test/dtrReportYears.test.js test/dtrDeletionAudit.test.js test/dtrDailySummaryAccess.test.js test/dtrReportCutoff.test.js test/dtrPunchDateValidation.test.js test/securityHardening.test.js test/heavyWorkQueue.test.js test/attendancePolicyDefaultQueries.test.js test/attendancePolicyResolver.test.js test/attendancePolicyCache.test.js test/shiftSchemaOwnership.test.js test/shiftAttendance.test.js test/overnightShift.test.js test/holidayOverlay.test.js test/locatorCoverage.test.js test/locatorTypeDefaults.test.js"
   },
   "keywords": [],
   "author": "",
