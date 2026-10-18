@@ -368,3 +368,21 @@ workflow data (apart from the new default column), Leave requests, and Locator
 requests were unchanged. The migration also passed an isolated upgrade test,
 including repeat execution and rejection of invalid values. No production
 database was changed. A code rollback can retain this additive column safely.
+
+## Revoke approved shared Leave requests (2026-10-18)
+
+Shared Leave details connect **Revoke Approval** to the existing confirmation
+and revocation API. The read-only inbox/source response includes
+`can_revoke_approval`, based on the final workflow assignment, account role,
+current Mayor identity, and administrator Leave access. Department-stage actors,
+unrelated backups, and applicants do not receive the action. Expired or missing
+approval dates show a reason instead. The deadline is three days after
+`approved_at`, falling back to `reviewed_at` for older records.
+
+Opening the confirmation refreshes the source record. The API still locks and
+rechecks the request before returning it to the employee, restoring stored paid
+credits, removing its Leave coverage, and recording the audit event. The Mayor
+route guard now permits this specific revoke operation after workflow completion;
+other decision endpoints retain their pending-stage restrictions. No migration
+is required. Verification uses mocked revocations; no application requests were
+revoked as part of testing.

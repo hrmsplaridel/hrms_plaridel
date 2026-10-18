@@ -73,7 +73,9 @@ class AdminLeaveDetailsSideSheet extends StatelessWidget {
                         req.status == LeaveRequestStatus.pendingDepartmentHead
                   : canReviewPending && req.status.isPending);
           final approved = req.status == LeaveRequestStatus.approved;
-          final revokeDisabledReason = approved && onRevoke != null
+          final canRevoke = approved && !isOwnRequest && onRevoke != null &&
+              (!sharedWorkflow || req.canRevokeApproval == true);
+          final revokeDisabledReason = canRevoke
               ? adminLeaveRevokeDisabledReason(req)
               : null;
           return SingleChildScrollView(
@@ -87,10 +89,10 @@ class AdminLeaveDetailsSideSheet extends StatelessWidget {
               onReject: canReview ? () => onReject(req) : null,
               onPreview: onPreview == null ? null : () => onPreview!(req),
               onRevoke:
-                  approved && onRevoke != null && revokeDisabledReason == null
+                  canRevoke && revokeDisabledReason == null
                   ? () => onRevoke!(req)
                   : null,
-              revokeDisabledReason: approved && onRevoke != null
+              revokeDisabledReason: canRevoke
                   ? revokeDisabledReason
                   : null,
               onPrint: () => onPrint(req),
@@ -259,6 +261,10 @@ class AdminLeaveRequestDetailsPanel extends StatelessWidget {
         ],
         AdminLeaveSubsectionTitle(title: 'Actions'),
         const SizedBox(height: 10),
+        if (revokeDisabledReason != null) ...[
+          Text(revokeDisabledReason!, style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant)),
+          const SizedBox(height: 10),
+        ],
         Wrap(
           spacing: 12,
           runSpacing: 12,

@@ -164,6 +164,8 @@ class LeaveRequest {
     this.workflowSnapshot,
     this.reviewerTitle,
     this.reviewedAt,
+    this.approvedAt,
+    this.canRevokeApproval,
     this.departmentHeadReviewerId,
     this.departmentHeadReviewerName,
     this.departmentHeadReviewedAt,
@@ -237,6 +239,8 @@ class LeaveRequest {
   final Map<String,dynamic>? workflowSnapshot;
   final String? reviewerTitle;
   final DateTime? reviewedAt;
+  final DateTime? approvedAt;
+  final bool? canRevokeApproval;
   final String? departmentHeadReviewerId;
   final String? departmentHeadReviewerName;
   final DateTime? departmentHeadReviewedAt;
@@ -388,6 +392,8 @@ class LeaveRequest {
       workflowSnapshot: json['workflow_snapshot'] is Map ? Map<String,dynamic>.from(json['workflow_snapshot']) : null,
       reviewerTitle: json['reviewer_title']?.toString(),
       reviewedAt: _parseDateTime(json['reviewed_at']),
+      approvedAt: _parseDateTime(json['approved_at']),
+      canRevokeApproval: json['can_revoke_approval'] is bool ? json['can_revoke_approval'] as bool : null,
       departmentHeadReviewerId: json['department_head_reviewer_id']?.toString(),
       departmentHeadReviewerName: json['department_head_reviewer_name']
           ?.toString(),
@@ -458,6 +464,8 @@ class LeaveRequest {
       'workflow_snapshot': workflowSnapshot,
       'reviewer_title': _trimOrNull(reviewerTitle),
       'reviewed_at': reviewedAt?.toIso8601String(),
+      'approved_at': approvedAt?.toIso8601String(),
+      'can_revoke_approval': canRevokeApproval,
       'department_head_reviewer_id': departmentHeadReviewerId,
       'department_head_reviewer_name': _trimOrNull(departmentHeadReviewerName),
       'department_head_reviewed_at': departmentHeadReviewedAt
@@ -525,6 +533,8 @@ class LeaveRequest {
     Map<String,dynamic>? workflowSnapshot,
     String? reviewerTitle,
     DateTime? reviewedAt,
+    DateTime? approvedAt,
+    bool? canRevokeApproval,
     String? departmentHeadReviewerId,
     String? departmentHeadReviewerName,
     DateTime? departmentHeadReviewedAt,
@@ -598,6 +608,8 @@ class LeaveRequest {
       workflowSnapshot:workflowSnapshot ?? this.workflowSnapshot,
       reviewerTitle: reviewerTitle ?? this.reviewerTitle,
       reviewedAt: reviewedAt ?? this.reviewedAt,
+      approvedAt: approvedAt ?? this.approvedAt,
+      canRevokeApproval: canRevokeApproval ?? this.canRevokeApproval,
       departmentHeadReviewerId:
           departmentHeadReviewerId ?? this.departmentHeadReviewerId,
       departmentHeadReviewerName:

@@ -12,6 +12,7 @@ import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_request.dart';
 import 'package:hrms_plaridel/features/dtr/leave/utils/leave_workflow_history.dart';
 import 'package:hrms_plaridel/features/dtr/leave/presentation/admin/widgets/admin_leave_details_side_sheet.dart';
+import 'package:hrms_plaridel/features/dtr/leave/presentation/admin/widgets/admin_leave_screen_utils.dart';
 import 'package:hrms_plaridel/features/dtr/leave/presentation/shared/widgets/history_timeline.dart';
 import 'package:hrms_plaridel/core/utils/responsive_right_side_panel.dart';
 import 'package:hrms_plaridel/features/dtr/locator/models/locator_request_type.dart';
@@ -75,6 +76,8 @@ Future<bool> reviewAssignedWorkflowRequest(
             request: request,
             onPreview: onPreview,
             onPrint: onPrint,
+            onRevoke: onRevoke,
+            revokeDisabledReason: revokeDisabledReason,
           ),
         ),
       );
@@ -811,6 +814,12 @@ class _WorkflowDecisionDialogState extends State<_WorkflowDecisionDialog> {
       leave,
       decisions: request['decisions'] as List?,
     );
+    final canRevoke = leave.status == LeaveRequestStatus.approved &&
+        leave.canRevokeApproval == true && widget.onRevoke != null &&
+        context.read<AuthProvider>().user?.id != leave.userId;
+    final revokeReason = canRevoke
+        ? widget.revokeDisabledReason ?? adminLeaveRevokeDisabledReason(leave)
+        : null;
     return AdminLeaveRequestDetailsPanel(
       request: leave,
       isDepartmentHead: false,
@@ -832,6 +841,14 @@ class _WorkflowDecisionDialogState extends State<_WorkflowDecisionDialog> {
           ? null
           : () => _openForm(widget.onPreview!),
       onPrint: widget.onPrint == null ? null : () => _openForm(widget.onPrint!),
+      onRevoke: canRevoke && revokeReason == null && !_refreshing && _refreshError == null
+          ? () {
+              if (_saving) return;
+              Navigator.of(context).pop();
+              widget.onRevoke!();
+            }
+          : null,
+      revokeDisabledReason: revokeReason,
       onOpenAttachment: () {
         if (!_saving) _attachment();
       },

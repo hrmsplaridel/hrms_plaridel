@@ -61,6 +61,8 @@ async function listInbox(db,user,{includeHistory=false}={}) {
     status:row.status,created_at:row.created_at,updated_at:row.updated_at,workflow_snapshot:snapshot,date_filed:dateOnly(row.created_at),
     final_review_route:row.final_review_route,attachment_name:row.attachment_name||null,
     ...(kind==='leave'?{...leaveDetails,user_id:row.employee_id||row.user_id,
+     approved_at:row.approved_at||null,reviewed_at:row.reviewed_at||null,
+     can_revoke_approval:await require('./leaveRevocationAccess').canRevokeSharedLeave(db,row,user),
      start_date:dateOnly(row.start_date),end_date:dateOnly(row.end_date),
      working_days_applied:Number(row.number_of_days??row.total_days??0),
      leave_type:row.leave_type_name||row.leave_type,

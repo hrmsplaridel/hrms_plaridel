@@ -924,6 +924,7 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
       request,
       onPreview: () => _previewLeaveForm(leave),
       onPrint: () => _printLeaveForm(leave),
+      onRevoke: widget.isDepartmentHead ? null : () => unawaited(_revokeApproval(leave)),
     ) && mounted) {
       await _loadRequests(forceRefresh: true);
     }
@@ -1265,20 +1266,40 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
   }
 
   // #15: Revoke approval.
-  Future<void> _revokeApproval(LeaveRequest request) async {
+  Future<void> _revokeApproval(LeaveRequest initial) async {
+    final leaveProvider = context.read<LeaveProvider>();
+    final auth = context.read<AuthProvider>();
+    final id = initial.id;
+    if (id == null || id.isEmpty) return;
+    // A completed workflow or its authorized final reviewers may have changed
+    // since the details opened. Confirm current data before offering revocation.
+    final request = await leaveProvider.refreshRequestById(id);
+    if (!mounted) return;
+    if (request == null) {
+      _showMessage(leaveProvider.error ?? 'Could not refresh this request. Try again.');
+      return;
+    }
+    final shared = (request.workflowSnapshot?['steps'] as List? ?? []).any((step) => step is Map);
+    if (request.status != LeaveRequestStatus.approved || request.userId == auth.user?.id ||
+        (shared && request.canRevokeApproval != true)) {
+      _showMessage('This approval can no longer be revoked by your account.');
+      return;
+    }
     final revokeDisabledReason = adminLeaveRevokeDisabledReason(request);
     if (revokeDisabledReason != null) {
       _showMessage(revokeDisabledReason);
       return;
     }
-    final leaveProvider = context.read<LeaveProvider>();
-    final auth = context.read<AuthProvider>();
+    final restoresCredits = _creditPolicyForRequest(request) != 'none' &&
+        (request.approvedDaysWithPay ?? request.workingDaysApplied ?? 0) > 0;
     final input = await showDialog<LeaveReviewDecisionInput>(
       context: context,
       builder: (_) => AdminLeaveDecisionDialog(
         title: 'Revoke Approval',
         subtitle:
-            'This will reverse the approval: balance will be restored and DTR leave entries removed. The request returns to the employee for correction.',
+            'This will revoke the approval and remove its DTR leave entries. '
+            '${restoresCredits ? 'Leave credits will be restored. ' : ''}'
+            'The request returns to the employee for correction.',
         confirmLabel: 'Revoke Approval',
         requireReason: false,
         request: request,
@@ -1311,7 +1332,9 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
     if (!mounted) return;
     _showMessage(
       ok
-          ? 'Approval revoked. Leave balance restored.'
+          ? (restoresCredits
+              ? 'Approval revoked. Leave credits restored.'
+              : 'Approval revoked. The request was returned to the employee.')
           : (leaveProvider.error ?? 'Revoke failed.'),
     );
     if (ok) await _loadRequests();

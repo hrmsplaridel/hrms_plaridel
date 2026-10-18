@@ -24,7 +24,13 @@ function requireLeaveFinalRole(req,res,next){
   if(String(mayor?.employee_id)!==String(req.user.id))return res.status(403).json({error:'Current Mayor access required'});
   if(req.params?.id){
    const snapshot=await require('./approvalWorkflows').loadRequestWorkflow(db,'leave',req.params.id);
-   if(!snapshot || require('./approvalWorkflows').stepKind(snapshot.steps[snapshot.current_step])!=='mayor')return res.status(403).json({error:'This request is not awaiting Mayor approval.'});
+   const revoke=req.method==='PATCH' && req.route?.path==='/:id/revoke';
+   if(revoke && snapshot) {
+    // Completed workflows resolve the final electronic step. The controller
+    // repeats this check with the locked applicant/status before reversing leave.
+    const reviewers=await require('./approvalWorkflows').resolveWorkflowReviewers(db,'leave',{id:req.params.id,workflow_snapshot:snapshot});
+    if(!reviewers.some(reviewer=>String(reviewer.id)===String(req.user.id)))return res.status(403).json({error:'Final reviewer access required'});
+   } else if(!snapshot || require('./approvalWorkflows').stepKind(snapshot.steps[snapshot.current_step])!=='mayor')return res.status(403).json({error:'This request is not awaiting Mayor approval.'});
   }
   return next();
  })().catch(()=>res.status(503).json({error:'Approval authority could not be verified'}));

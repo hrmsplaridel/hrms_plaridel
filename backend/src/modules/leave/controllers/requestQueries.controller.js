@@ -205,7 +205,13 @@ module.exports = function createLeaveControllers({
         ) {
           return res.status(404).json({ error: 'Leave request not found' });
         }
-        res.json(mapLeaveRowToApi(rows.rows[0]));
+        const row = rows.rows[0];
+        res.json({
+          ...mapLeaveRowToApi(row),
+          ...(require('../../../services/approvalWorkflows').isShared(row.workflow_snapshot)
+            ? { can_revoke_approval: await require('../../../services/leaveRevocationAccess').canRevokeSharedLeave(pool, row, req.user) }
+            : {}),
+        });
       } catch (err) {
         console.error('[leave GET /:id]', err);
         res.status(500).json({ error: 'Failed to fetch leave request' });

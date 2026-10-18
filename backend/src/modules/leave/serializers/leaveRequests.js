@@ -59,6 +59,7 @@ module.exports = function createLeaveComponent({
         row.reserved_credit_days != null ? parseFloat(row.reserved_credit_days) : null,
       approved_other_details: row.approved_other_details || null,
       reviewed_at: row.reviewed_at || row.approved_at || null,
+      approved_at: row.approved_at || null,
       created_at: row.created_at || null,
       updated_at: row.updated_at || null,
       leave_type: row.leave_type_name || row.leave_type || null,

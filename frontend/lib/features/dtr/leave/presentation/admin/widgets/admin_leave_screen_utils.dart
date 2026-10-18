@@ -47,7 +47,7 @@ String formatAdminLeaveDateTime(DateTime value) {
 const adminLeaveRevokeWindow = Duration(days: 3);
 
 DateTime? adminLeaveRevokeDeadline(LeaveRequest request) {
-  final reviewedAt = request.reviewedAt;
+  final reviewedAt = request.approvedAt ?? request.reviewedAt;
   if (reviewedAt == null) return null;
   return reviewedAt.add(adminLeaveRevokeWindow);
 }
@@ -56,7 +56,7 @@ String? adminLeaveRevokeDisabledReason(LeaveRequest request, {DateTime? now}) {
   if (request.status != LeaveRequestStatus.approved) return null;
   final deadline = adminLeaveRevokeDeadline(request);
   if (deadline == null) {
-    return 'Cannot determine the HR approval date for this request.';
+    return 'Cannot determine the final approval date for this request.';
   }
   final effectiveNow = now ?? DateTime.now();
   if (effectiveNow.isAfter(deadline)) {
