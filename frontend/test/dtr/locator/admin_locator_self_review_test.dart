@@ -10,6 +10,8 @@ import 'package:hrms_plaridel/core/services/app_realtime_provider.dart';
 import 'package:hrms_plaridel/providers/auth_provider.dart';
 import 'package:hrms_plaridel/features/dtr/locator/data/repositories/locator_slip_data_cache.dart';
 import 'package:hrms_plaridel/features/dtr/locator/presentation/admin/pages/admin_locator_management_screen.dart';
+import 'package:hrms_plaridel/features/dtr/locator/presentation/shared/widgets/locator_signature_section.dart';
+import 'package:hrms_plaridel/features/dtr/management/approvals/widgets/approval_workflow_summary.dart';
 
 class _Signatures extends DocuTrackerProvider {
   @override
@@ -100,6 +102,9 @@ void main() {
       expect(find.text('Mayor Reviewer'), findsOneWidget);
       expect(find.text('Mayor Remarks'), findsOneWidget);
       expect(find.text('HR Reviewer'), findsNothing);
+      expect(find.byType(LocatorSignatureSection), findsNothing);
+      expect(find.byType(ApprovalWorkflowSummary), findsNothing);
+      expect(find.text('Signatures'), findsNothing);
       await tester.tap(find.text('History'));
       await tester.pumpAndSettle();
       expect(find.text('Rejected by Mayor'), findsWidgets);

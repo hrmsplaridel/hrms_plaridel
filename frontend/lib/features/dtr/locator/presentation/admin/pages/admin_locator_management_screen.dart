@@ -25,7 +25,6 @@ import 'package:hrms_plaridel/features/dtr/locator/utils/locator_slip_print.dart
 import 'package:hrms_plaridel/features/dtr/locator/utils/locator_form_signatories.dart';
 import 'package:hrms_plaridel/features/dtr/locator/utils/locator_workflow_labels.dart';
 import 'package:hrms_plaridel/features/dtr/locator/utils/locator_signature_prompt.dart';
-import 'package:hrms_plaridel/features/dtr/locator/presentation/shared/widgets/locator_signature_section.dart';
 import 'package:hrms_plaridel/features/dtr/locator/utils/open_locator_attachment_io.dart'
     if (dart.library.html) 'package:hrms_plaridel/features/dtr/locator/utils/open_locator_attachment_web.dart'
     as locator_attachment;
@@ -1253,7 +1252,6 @@ class _AdminLocatorManagementScreenState
                           ],
                         ),
                       ),
-                      LocatorSignatureSection(requestId: item.id),
                     ],
                   ),
                 ),

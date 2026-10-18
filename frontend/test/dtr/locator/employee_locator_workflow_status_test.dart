@@ -11,7 +11,10 @@ import 'package:hrms_plaridel/core/services/app_realtime_provider.dart';
 import 'package:hrms_plaridel/features/docutracker/data/providers/docutracker_provider.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document_builder.dart';
 import 'package:hrms_plaridel/features/dtr/locator/data/repositories/locator_slip_data_cache.dart';
+import 'package:hrms_plaridel/features/dtr/locator/presentation/employee/mobile/widgets/employee_locator_mobile_details_widgets.dart';
 import 'package:hrms_plaridel/features/dtr/locator/presentation/employee/shared/pages/employee_locator_slip_content.dart';
+import 'package:hrms_plaridel/features/dtr/locator/presentation/shared/widgets/locator_signature_section.dart';
+import 'package:hrms_plaridel/features/dtr/management/approvals/widgets/approval_workflow_summary.dart';
 import 'package:hrms_plaridel/providers/auth_provider.dart';
 
 class _Signatures extends DocuTrackerProvider {
@@ -165,6 +168,21 @@ void main() {
           await tester.tap(find.textContaining('Target office').first);
           await tester.pumpAndSettle();
           expect(find.text(expected), findsWidgets);
+          expect(find.byType(LocatorSignatureSection), findsNothing);
+          expect(find.byType(ApprovalWorkflowSummary), findsNothing);
+          expect(find.text('Signatures'), findsNothing);
+          expect(
+            find.descendant(
+              of: find.byType(EmployeeLocatorMobileDetailsDialog),
+              matching: find.text('Official business'),
+            ),
+            findsOneWidget,
+          );
+          expect(find.text('History'), findsOneWidget);
+          if (stage == 3) {
+            expect(find.text('Preview'), findsOneWidget);
+            expect(find.text('Print'), findsOneWidget);
+          }
           if (stage == 0) expect(find.text('Pending HR Admin'), findsNothing);
           expect(tester.takeException(), isNull);
         },
