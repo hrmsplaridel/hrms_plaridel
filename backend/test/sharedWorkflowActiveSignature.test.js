@@ -37,7 +37,10 @@ for(const kind of ['leave','locator']) {
      throw Error('Unexpected query '+sql);
     }};
     const restores=[
-     withMockedModule('../src/services/leaveFinalReviewerService',{resolveEligibleFinalReviewers:async()=>[reviewer]}),
+     withMockedModule('../src/services/leaveFinalReviewerService',{
+      resolveEligibleFinalReviewers:async()=>[reviewer],
+      resolveFinalLeaveReviewerConfiguration:async()=>({primary:null}),
+     }),
      withMockedModule('../src/services/sharedWorkflowInbox',{canRead:async()=>true}),
      withMockedModule('../src/services/approvalWorkflows',{...engine,printOfficials:async()=>row.print_signatories}),
     ];

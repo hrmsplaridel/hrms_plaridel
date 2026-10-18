@@ -38,7 +38,7 @@ router.post('/requests/:kind/:id/:action',async(req,res)=>{
 // Authentication is applied at the mount. Type editors need the read-only catalog.
 router.get('/', requireAdminOrHr, async(req,res)=>{
   try {
-    const result=await pool.query(`SELECT w.*,v.steps FROM approval_workflows w
+    const result=await pool.query(`SELECT w.*,v.steps,v.self_filing_signatory_policy FROM approval_workflows w
       JOIN approval_workflow_versions v ON v.workflow_id=w.id AND v.version=w.current_version
       ORDER BY w.name,w.id`);
     res.json(result.rows);
@@ -93,12 +93,12 @@ async function write(req,res) {
       workflow=(await client.query(`UPDATE approval_workflows SET name=$2,is_active=$3,current_version=current_version+1,updated_at=now()
         WHERE id=$1::uuid RETURNING *`,[req.params.id,input.name,input.is_active])).rows[0];
     } else workflow=(await client.query('INSERT INTO approval_workflows(name,is_active) VALUES($1,$2) RETURNING *',[input.name,input.is_active])).rows[0];
-    await client.query(`INSERT INTO approval_workflow_versions(workflow_id,version,steps,employment_types,created_by)
-      VALUES($1::uuid,$2,$3::jsonb,$4::text[],$5::uuid)`,[workflow.id,workflow.current_version,JSON.stringify(input.steps),employmentTypes,req.user.id]);
+    await client.query(`INSERT INTO approval_workflow_versions(workflow_id,version,steps,employment_types,created_by,self_filing_signatory_policy)
+      VALUES($1::uuid,$2,$3::jsonb,$4::text[],$5::uuid,$6)`,[workflow.id,workflow.current_version,JSON.stringify(input.steps),employmentTypes,req.user.id,input.self_filing_signatory_policy]);
     await require('../services/sharedDocumentWorkflows').syncLinkedDocumentWorkflows(client,
       {...workflow,version:workflow.current_version,steps:input.steps,employment_types:employmentTypes},req.user.id);
     await client.query('COMMIT');
-    res.status(req.params.id?200:201).json({...workflow,steps:input.steps,employment_types:employmentTypes});
+    res.status(req.params.id?200:201).json({...workflow,steps:input.steps,employment_types:employmentTypes,self_filing_signatory_policy:input.self_filing_signatory_policy});
   } catch(error) {
     if(client) await client.query('ROLLBACK');
     res.status(error.code==='23505'?409:error.statusCode||500).json({error:error.code==='23505'?'A workflow with that name already exists.':error.statusCode?error.message:'Could not publish workflow.'});

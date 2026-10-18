@@ -7,6 +7,17 @@ import 'package:hrms_plaridel/features/docutracker/presentation/admin/widgets/wo
 import 'package:hrms_plaridel/features/docutracker/services/employee_directory_lookup.dart';
 import 'workflow_reviewer_configuration.dart';
 
+const _printPolicyLabels = {
+  'mayor': 'Replace with Mayor',
+  'blank': 'Leave blank',
+  'actual_reviewer': 'Show actual approving reviewer',
+};
+const _printPolicyDescriptions = {
+  'mayor': 'Show the Mayor in the applicant’s department-head or HR block. A signature appears only after confirmed Mayor approval.',
+  'blank': 'Leave the applicant’s official name and signature blocks blank for manual completion.',
+  'actual_reviewer': 'Show the authorized reviewer who actually approves that step, with their confirmed signature. Leave the block blank until approval.',
+};
+
 class ApprovalWorkflowsPanel extends StatefulWidget {
   const ApprovalWorkflowsPanel({
     super.key,
@@ -343,6 +354,11 @@ class _WorkflowCard extends StatelessWidget {
                     approvalStepsLabel(workflow['steps']),
                     style: TextStyle(color: colors.onSurface, height: 1.5),
                   ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Primary reviewer’s own filing: ${_printPolicyLabels[workflow['self_filing_signatory_policy'] ?? 'mayor']}',
+                    style: TextStyle(color: colors.onSurfaceVariant, fontSize: 12),
+                  ),
                 ],
               ),
             ),
@@ -478,6 +494,7 @@ class _WorkflowEditorState extends State<_WorkflowEditor> {
   }
 
   late bool _active = widget.workflow?['is_active'] != false;
+  late String _printPolicy = widget.workflow?['self_filing_signatory_policy'] as String? ?? 'mayor';
   bool _saving = false;
   String? _error;
   @override
@@ -502,6 +519,7 @@ class _WorkflowEditorState extends State<_WorkflowEditor> {
             ? [for (var i = 0; i < _steps.length; i++) _stepJson(_steps[i], i)]
             : _steps,
         'is_active': _active,
+        'self_filing_signatory_policy': _printPolicy,
         if (widget.workflow != null)
           'current_version': widget.workflow!['current_version'],
       };
@@ -622,6 +640,29 @@ class _WorkflowEditorState extends State<_WorkflowEditor> {
                   icon: const Icon(Icons.add),
                   label: const Text('Add approval step'),
                 ),
+              const SizedBox(height: 16),
+              const Text(
+                'When a primary reviewer files their own request',
+                style: TextStyle(fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 12),
+              DropdownButtonFormField<String>(
+                key: const ValueKey('self-filing-signatory-policy'),
+                initialValue: _printPolicy,
+                isExpanded: true,
+                decoration: const InputDecoration(labelText: 'Printed signatories'),
+                items: [
+                  for (final entry in _printPolicyLabels.entries)
+                    DropdownMenuItem(value: entry.key, child: Text(entry.value)),
+                ],
+                onChanged: _saving ? null : (value) {
+                  if (value != null) setState(() => _printPolicy = value);
+                },
+              ),
+              const SizedBox(height: 8),
+              Text(_printPolicyDescriptions[_printPolicy]!),
+              const SizedBox(height: 8),
+              const Text('Applies to Leave and Locator printed forms. Approval steps and reviewer permissions stay the same.'),
               SwitchListTile(
                 contentPadding: EdgeInsets.zero,
                 title: const Text('Active workflow'),

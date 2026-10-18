@@ -7,6 +7,7 @@ const { recordLocatorWorkflowEvent } = require('./locatorWorkflowHistory');
 const { resolveActiveMayor } = require('./officialSignatoryService');
 const { canReadLocatorAsMayor } = require('./locatorMayorAccess');
 const { todayInHrmsTimezone } = require('../utils/dateRangeParser');
+const { selfFilingOfficial, requestPrintPolicy } = require('./workflowPrintPolicy');
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const LABELS = { applicant: 'Applicant', department_head: 'Head of Office', hr_approver: 'Noted' };
@@ -16,17 +17,43 @@ function fail(code, message) {
   throw Object.assign(new Error(message), { code, statusCode, payload: { error: message } });
 }
 
-async function substituteApplicantOfficial(db, row, officials) {
-  const slots = ['department_head', 'hr_approver'].filter(slot =>
+async function substituteApplicantOfficial(db, row, officials, primaryConflicts = []) {
+  const slots = ['department_head', 'hr_approver'].filter(slot => primaryConflicts.includes(slot) ||
     officials[slot]?.id && String(officials[slot].id) === String(row.employee_id));
   if (!slots.length) return officials;
-  const mayor = await resolveActiveMayor(db, todayInHrmsTimezone());
+  const lastSource = row.workflow_snapshot?.steps?.at(-1)?.assignee_source;
+  const mayor = requestPrintPolicy(row) === 'mayor'
+    ? ['active_mayor', 'manual_mayor'].includes(lastSource)
+      ? officials.hr_approver
+      : await resolveActiveMayor(db, todayInHrmsTimezone())
+    : null;
   const result = { ...officials };
   for (const slot of slots) {
-    result[slot] = { id: mayor?.employee_id || null, name: mayor?.name || '',
-      position_title: mayor?.position_title || 'Municipal Mayor' };
+    result[slot] = await selfFilingOfficial(db, row, slot === 'department_head' ? 'department' : 'hr', {
+      id: mayor?.id || mayor?.employee_id || null, employee_id: mayor?.id || mayor?.employee_id || null,
+      name: mayor?.name || '', position_title: mayor?.position_title || 'Municipal Mayor',
+    });
   }
   return result;
+}
+
+async function substitutePrimaryApplicantOfficial(db, row, officials) {
+  const steps = row.workflow_snapshot?.steps;
+  if (!require('./approvalWorkflows').isShared(row.workflow_snapshot) && requestPrintPolicy(row) === 'mayor') return officials;
+  const conflicts = [];
+  const first = steps[0];
+  if (row.department_id || first?.assignee_source === 'department_reviewers') {
+    const department = await resolveDepartmentReviewers(db, {
+      departmentId: first.assignee_source === 'department_reviewers' ? first.department_id : row.department_id,
+      effectiveDate: row.slip_date_text || todayInHrmsTimezone(),
+    });
+    if (String(department.primary?.reviewerId || '') === String(row.employee_id)) conflicts.push('department_head');
+  }
+  if (!['active_mayor', 'manual_mayor'].includes(steps.at(-1)?.assignee_source)) {
+    const final = await resolveFinalLeaveReviewerConfiguration(db);
+    if (String(final.primary?.id || '') === String(row.employee_id)) conflicts.push('hr_approver');
+  }
+  return substituteApplicantOfficial(db, row, officials, conflicts);
 }
 
 async function resolveMissingPositionTitles(db, officials, date) {
@@ -70,7 +97,7 @@ async function resolveOfficials(db, row) {
   });
   const shared=await require('./approvalWorkflows').printOfficials(db,'locator',row);
   if(shared)Object.assign(officials,shared);
-  return resolveMissingPositionTitles(db, officials, date);
+  return resolveMissingPositionTitles(db, await substitutePrimaryApplicantOfficial(db, row, officials), date);
 }
 
 async function snapshotLocatorReviewers(db, options) {
@@ -120,7 +147,7 @@ async function loadContext(db, user, id, lock = false) {
   let officials = { ...(row.print_signatories || await resolveOfficials(db, row)) };
   const shared=await require('./approvalWorkflows').printOfficials(db,'locator',row);
   if(shared)Object.assign(officials,shared);
-  if (!row.print_signatories) {
+  if (!row.print_signatories && !shared) {
     const primary = await db.query(
       `SELECT reviewer_id, reviewer_name_snapshot FROM locator_slip_department_reviewers
        WHERE locator_slip_id = $1::uuid AND reviewer_role = 'primary' LIMIT 1`, [id]
@@ -133,6 +160,7 @@ async function loadContext(db, user, id, lock = false) {
   // official. Reads keep Mayor snapshots frozen; pending handovers are recorded
   // explicitly during valid signing/approval, never while previewing a form.
   officials = await substituteApplicantOfficial(db, row, officials);
+  officials = await substitutePrimaryApplicantOfficial(db, row, officials);
   officials = await resolveMissingPositionTitles(db, officials, row.slip_date_text);
   const finalReviewers = hr && !owner && PENDING.has(row.status)
     ? await resolveEligibleFinalReviewers(db, row.employee_id, 'locator', id) : [];
@@ -220,8 +248,13 @@ async function getLocatorSourceSignatures(db, user, module, table, id) {
       },
       print_signatories: Object.fromEntries(Object.keys(LABELS).map((slot) => {
         const shared=require('./approvalWorkflows').isShared(context.workflow_snapshot);
-        const first=workflowSignatures.find(s=>s.slot_key==='workflow_step_1');
-        const signature = shared && slot==='department_head' && first && context.officials.department_head?.id===first.signed_by ? first
+        const manual = context.workflow_snapshot?.steps?.at(-1)?.assignee_source === 'manual_mayor';
+        // Replacement blocks may use the Mayor's completed decision, never the
+        // backup's ink or an unsigned/manual Mayor slot.
+        const confirmed = workflowSignatures.find(s => s.signed_by === context.officials[slot]?.id &&
+          ((slot === 'department_head' && s.slot_key === 'workflow_step_1') || context.status === 'approved'));
+        const signature = shared && slot !== 'applicant'
+          ? (manual && context.officials[slot]?.id === context.officials.hr_approver?.id ? null : confirmed)
           : printableSignature(context, slot, result.rows.find((s) => s.slot_key === slot));
         return [slot, {
           name: context.officials[slot]?.name || '',

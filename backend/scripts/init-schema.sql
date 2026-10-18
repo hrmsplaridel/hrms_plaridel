@@ -684,6 +684,9 @@ CREATE TABLE IF NOT EXISTS approval_workflow_versions (
     jsonb_typeof(steps) = 'array' AND jsonb_array_length(steps) BETWEEN 1 AND 20
   ),
   employment_types TEXT[],
+  self_filing_signatory_policy TEXT NOT NULL DEFAULT 'mayor'
+    CONSTRAINT approval_workflow_versions_print_policy_check
+    CHECK (self_filing_signatory_policy IN ('mayor', 'blank', 'actual_reviewer')),
   created_by UUID REFERENCES users(id),
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   PRIMARY KEY (workflow_id, version)

@@ -118,10 +118,17 @@ void main() {
       await tester.tap(find.text('Save Step'));
       await tester.pumpAndSettle();
       expect(find.textContaining('Primary: Maria Primary'), findsOneWidget);
+      final printPolicy = find.byKey(const ValueKey('self-filing-signatory-policy'));
+      await tester.ensureVisible(printPolicy);
+      await tester.tap(printPolicy);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Show actual approving reviewer').last);
+      await tester.pumpAndSettle();
       await tester.tap(find.text('Publish workflow'));
       await tester.pumpAndSettle();
       final request = calls.singleWhere((o) => o.method == 'POST');
       final step = (request.data['steps'] as List).single as Map;
+      expect(request.data['self_filing_signatory_policy'], 'actual_reviewer');
       expect(step['label'], 'Municipal administrator');
       expect(step['user_ids'], [primary, backup]);
       expect(step['requires_signature'], true);
@@ -223,6 +230,7 @@ void main() {
       find.widgetWithText(TextField, 'Review remarks'),
       'Please correct the destination.',
     );
+    await tester.ensureVisible(find.widgetWithText(OutlinedButton, 'Return'));
     await tester.tap(find.widgetWithText(OutlinedButton, 'Return'));
     await tester.pumpAndSettle();
     final write = calls.singleWhere((o) => o.method == 'POST');

@@ -7,7 +7,7 @@ const {
 
 test('named workflows validate executable ordered steps and manual signing', () => {
   assert.deepEqual(normalizeWorkflow({name:' Full approval ', steps:['department','hr','mayor']}),
-    {name:'Full approval', steps:['department','hr','mayor'], is_active:true});
+    {name:'Full approval', steps:['department','hr','mayor'], is_active:true,self_filing_signatory_policy:'mayor'});
   for (const steps of [[], ['unknown'], ['hr','hr'], ['mayor','hr'], ['hr','department'], ['manual_mayor']]) {
     assert.throws(() => normalizeWorkflow({name:'Invalid',steps}), {statusCode:400});
   }

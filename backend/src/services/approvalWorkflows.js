@@ -1,6 +1,7 @@
 'use strict';
 
 const {todayInHrmsTimezone} = require('../utils/dateRangeParser');
+const {normalizePrintPolicy} = require('./workflowPrintPolicy');
 const STEP_LABELS = {department:'Department Review', hr:'HR Review', mayor:'Mayor Approval', manual_mayor:'Manual Mayor Signing'};
 const STATUS = {department:'pending_department_head', hr:'pending_hr', mayor:'pending_mayor'};
 function stepKind(step) {
@@ -53,8 +54,9 @@ function hasDistinctReviewers(groups) {
 function normalizeWorkflow(body = {}) {
   const name = String(body.name || '').trim();
   const steps = body.steps;
+  const self_filing_signatory_policy = normalizePrintPolicy(body.self_filing_signatory_policy);
   if (!name || name.length > 100) throw error('Enter a workflow name of up to 100 characters.');
-  if(Array.isArray(steps) && steps.some(s=>s && typeof s==='object'))return {name,steps:normalizeSharedSteps(steps),is_active:body.is_active!==false};
+  if(Array.isArray(steps) && steps.some(s=>s && typeof s==='object'))return {name,steps:normalizeSharedSteps(steps),is_active:body.is_active!==false,self_filing_signatory_policy};
   if (!Array.isArray(steps) || !steps.length || steps.length > 3 ||
       steps.some(s => !Object.hasOwn(STEP_LABELS,s)) || new Set(steps).size !== steps.length ||
       steps.includes('department') && steps[0] !== 'department' ||
@@ -63,7 +65,7 @@ function normalizeWorkflow(body = {}) {
       steps.includes('mayor') && steps.includes('manual_mayor')) {
     throw error('Choose unique approval steps. Department review goes first; Mayor approval or manual signing goes last.');
   }
-  return {name, steps:[...steps], is_active:body.is_active !== false};
+  return {name, steps:[...steps], is_active:body.is_active !== false,self_filing_signatory_policy};
 }
 function workflowStatus(snapshot) {
   if (snapshot.outcome) return snapshot.outcome;
@@ -137,14 +139,15 @@ async function resolveWorkflowReviewers(db, kind, row, dependencies = {}) {
 async function prepareWorkflow(db, kind, rule, applicantId, reviewSnapshot) {
   if (!rule?.approval_workflow_id) return null;
   const saved=rule.approval_workflow_snapshot;
-  const workflow = saved ? {...saved,is_active:true} : (await db.query(`SELECT w.id,w.name,w.is_active,v.version,v.steps
+  const workflow = saved ? {...saved,is_active:true} : (await db.query(`SELECT w.id,w.name,w.is_active,v.version,v.steps,v.self_filing_signatory_policy
     FROM approval_workflows w JOIN approval_workflow_versions v ON v.workflow_id=w.id AND v.version=w.current_version
     WHERE w.id=$1::uuid`,[rule.approval_workflow_id])).rows[0];
   if (!workflow?.is_active) throw error('The selected approval workflow is inactive or unavailable. Contact HR.',409);
   let steps = workflow.steps;
   const configuredSteps=[...steps];
   if(rule.authorized_staff_auto_approval && !isShared({steps}) && steps.at(-1)==='hr')steps=['hr'];
-  const snapshot = {id:workflow.id,name:workflow.name,version:workflow.version,steps:[...steps],current_step:0,decisions:[]};
+  const snapshot = {id:workflow.id,name:workflow.name,version:workflow.version,steps:[...steps],current_step:0,decisions:[],
+    self_filing_signatory_policy:normalizePrintPolicy(workflow.self_filing_signatory_policy)};
   if(rule.authorized_staff_auto_approval && steps.length===1 && steps[0]==='hr')snapshot.staff_auto_approval={configured_steps:configuredSteps};
   const candidates=[];
   for (let i=0;i<steps.length;i++) {
@@ -177,7 +180,7 @@ async function saveWorkflow(db,kind,id,snapshot) {
       ORDER BY s.signed_at DESC LIMIT 1`,[id,decision.actor_id])).rows[0];
     if(signature) {
       decision.signature=signature;
-      if(isShared(snapshot))decision.reviewer=await reviewerProfile(db,decision.actor_id);
+      if(isShared(snapshot) || snapshot.self_filing_signatory_policy==='actual_reviewer')decision.reviewer=await reviewerProfile(db,decision.actor_id);
     }
   }
   await db.query(`UPDATE ${tableFor(kind)} SET workflow_snapshot=$2::jsonb WHERE id=$1::uuid`,[id,JSON.stringify(snapshot)]);
@@ -240,6 +243,7 @@ async function initialWorkflow(db,kind,id,prepared) {
   const previous=await loadRequestWorkflow(db,kind,id);
   const snapshot=previous ? {...prepared,
     cycles:[...(previous.cycles || []),{workflow_id:previous.id,version:previous.version,steps:previous.steps,
+      self_filing_signatory_policy:previous.self_filing_signatory_policy ?? 'mayor',
       decisions:previous.decisions || [],outcome:previous.outcome || null}]} : prepared;
   const route=workflowRoute(snapshot);
   const mayor=route!=='hr'?await require('./officialSignatoryService').resolveActiveMayor(db,todayInHrmsTimezone()):null;

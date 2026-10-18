@@ -336,3 +336,35 @@ suite, and 115 Flutter regression tests. The unit run skipped one database-only
 case, which passed when explicitly enabled in the database suite. Static
 analysis of the eight changed workflow UI/test files found no issues; syntax
 checks passed for 13 backend modules. Restart Flutter to load the updated UI.
+
+## Printed signatories when a primary reviewer files (2026-10-18)
+
+Workflow creation and editing include **When a primary reviewer files their own
+request**. The print-only rule has three choices:
+
+| Choice | Result in the applicant's own official block |
+| --- | --- |
+| Replace with Mayor (`mayor`, default) | Print the Mayor; use only their confirmed electronic approval signature. Manual Mayor signing stays unsigned. |
+| Leave blank (`blank`) | Leave the official name, position, and signature blank for manual completion. |
+| Show actual approving reviewer (`actual_reviewer`) | Print the authorized actor who approved that step, using the saved decision and matching signature. Before approval the block stays blank. |
+
+This applies to Leave certification (7.A) and recommendation (7.B), and Locator
+department-head and final-HR blocks. A separate final Mayor approval block keeps
+its normal identity and signature. Applicant signatures, other employees' forms,
+approval order, eligibility, and reviewer permissions are unchanged.
+
+The rule lives on `approval_workflow_versions.self_filing_signatory_policy` and
+is copied into `workflow_snapshot` at filing. Publishing a new workflow version
+does not alter filed forms. Resubmitting with the same type keeps the saved rule;
+old request snapshots without the field retain Mayor replacement. New decisions
+using the actual-reviewer option save the approver's name and position, including
+legacy string-step workflows. Previewing/printing does not update requests.
+
+Migration: `backend/scripts/migrations/dtr/20261018_workflow_self_filing_signatories.sql`.
+The standalone `init-schema.sql` includes the same column and constraint. Local
+application on 2026-10-18 targeted `localhost:5433/hrms_plaridel1`; all six existing
+versions received the Mayor default. Before/after checks verified that existing
+workflow data (apart from the new default column), Leave requests, and Locator
+requests were unchanged. The migration also passed an isolated upgrade test,
+including repeat execution and rejection of invalid values. No production
+database was changed. A code rollback can retain this additive column safely.

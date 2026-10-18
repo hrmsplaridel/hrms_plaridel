@@ -44,6 +44,7 @@ test('DTR table definitions declare the current workflow, signature, field and l
   leave_types:['approval_workflow_id','minimum_service_months','first_year_allowance'],leave_requests:['workflow_snapshot','signature_revision'],
   locator_request_types:['approval_workflow_id','employee_detail_schema'],
   locator_slips:['workflow_snapshot','employee_detail_schema_snapshot','additional_details'],
+  approval_workflow_versions:['self_filing_signatory_policy'],
   docutracker_leave_signatures:['revision'],leave_print_template_versions:['print_layout'],
   locator_print_template_versions:['print_layout'],
   docutracker_routing_config_versions:['shared_workflow_id','shared_workflow_version'],
@@ -72,6 +73,20 @@ test('fresh DTR installation resolves configured reviewers and preserves current
   db=new Client({connectionString:target.toString()});await db.connect();
   // Send the complete file as SQL, just like pgAdmin Query Tool: no psql includes.
   await db.query(schema);
+  const printPolicyMigration=fs.readFileSync(path.join(root,'scripts/migrations/dtr/20261018_workflow_self_filing_signatories.sql'),'utf8');
+  // Simulate an upgrade from the old version table in this disposable database.
+  await db.query(`CREATE SCHEMA print_policy_upgrade;
+    SET search_path TO print_policy_upgrade;
+    CREATE TABLE approval_workflow_versions(version integer PRIMARY KEY);
+    INSERT INTO approval_workflow_versions(version) VALUES(1)`);
+  await db.query(printPolicyMigration);
+  await db.query(printPolicyMigration);
+  assert.equal((await db.query('SELECT self_filing_signatory_policy FROM approval_workflow_versions WHERE version=1')).rows[0].self_filing_signatory_policy,'mayor');
+  await db.query("INSERT INTO approval_workflow_versions VALUES(2,'blank'),(3,'actual_reviewer')");
+  await assert.rejects(db.query("INSERT INTO approval_workflow_versions VALUES(4,'unknown')"),{code:'23514'});
+  await db.query('SET search_path TO public; DROP SCHEMA print_policy_upgrade CASCADE');
+  await db.query(printPolicyMigration);
+  assert.equal((await db.query('SELECT self_filing_signatory_policy FROM approval_workflow_versions LIMIT 1')).rows[0].self_filing_signatory_policy,'mayor');
   const hireRulesMigration=fs.readFileSync(path.join(root,'scripts/migrations/dtr/20261018_leave_hire_date_rules.sql'),'utf8');
   await db.query(hireRulesMigration);
   await db.query(hireRulesMigration);
