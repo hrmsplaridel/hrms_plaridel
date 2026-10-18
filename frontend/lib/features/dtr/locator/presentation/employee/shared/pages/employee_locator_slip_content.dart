@@ -1,6 +1,5 @@
 import 'package:hrms_plaridel/features/dtr/management/approvals/pages/workflow_approval_inbox_page.dart';
 import 'package:hrms_plaridel/features/dtr/assistant/presentation/widgets/application_review.dart';
-import 'package:hrms_plaridel/features/dtr/assistant/presentation/widgets/leave_field_assistant.dart';
 import 'package:hrms_plaridel/features/dtr/assistant/presentation/widgets/active_assistant_field.dart';
 import 'dart:async';
 import 'dart:convert';
@@ -427,13 +426,16 @@ class EmployeeLocatorSlipContentState extends State<EmployeeLocatorSlipContent>
         if (!searchable.contains(query)) return false;
       }
       final matchesStatus = switch (_selectedApprovalStatusFilter) {
-        'pending' => _assignedRequests[item.id] != null
-            ? _assignedRequests[item.id]!['can_review'] != false
-            : item.status == _LocatorSlipStatus.pendingDepartmentHead,
-        'forwarded' => _assignedRequests[item.id] != null
-            ? _assignedRequests[item.id]!['can_review'] == false &&
-                (item.status == _LocatorSlipStatus.pendingHr || item.status == _LocatorSlipStatus.pendingMayor)
-            : item.status == _LocatorSlipStatus.pendingHr,
+        'pending' =>
+          _assignedRequests[item.id] != null
+              ? _assignedRequests[item.id]!['can_review'] != false
+              : item.status == _LocatorSlipStatus.pendingDepartmentHead,
+        'forwarded' =>
+          _assignedRequests[item.id] != null
+              ? _assignedRequests[item.id]!['can_review'] == false &&
+                    (item.status == _LocatorSlipStatus.pendingHr ||
+                        item.status == _LocatorSlipStatus.pendingMayor)
+              : item.status == _LocatorSlipStatus.pendingHr,
         'returned' => item.status == _LocatorSlipStatus.returnedForCorrection,
         'approved' => item.status == _LocatorSlipStatus.approved,
         'revoked' => item.status == _LocatorSlipStatus.revoked,
@@ -2141,7 +2143,8 @@ class EmployeeLocatorSlipContentState extends State<EmployeeLocatorSlipContent>
       unawaited(_loadDepartmentHeadRequests());
       return true;
     }
-    if (_reviewerAccess.canAccessReviewSection || _assignedRequests.isNotEmpty) {
+    if (_reviewerAccess.canAccessReviewSection ||
+        _assignedRequests.isNotEmpty) {
       unawaited(_loadDepartmentHeadRequests());
       return true;
     }
@@ -2434,14 +2437,24 @@ class EmployeeLocatorSlipContentState extends State<EmployeeLocatorSlipContent>
     });
     try {
       final assigned = await loadAssignedWorkflowRequests('locator');
-      if (!_isCurrentAuthSession(userId, authGeneration) || loadGeneration != _approvalsLoadGeneration) return;
-      final assignedItems = assigned.values.map((entry) => _LocatorSlipDraft.fromApi(Map<String, dynamic>.from(entry['request_data'] as Map))).toList();
+      if (!_isCurrentAuthSession(userId, authGeneration) ||
+          loadGeneration != _approvalsLoadGeneration)
+        return;
+      final assignedItems = assigned.values
+          .map(
+            (entry) => _LocatorSlipDraft.fromApi(
+              Map<String, dynamic>.from(entry['request_data'] as Map),
+            ),
+          )
+          .toList();
       if (!_reviewerAccess.canAccessReviewSection) {
         setState(() {
           _assignedRequests = assigned;
           if (assigned.isNotEmpty) _isDeptHeadFuture = Future<bool>.value(true);
           _mergeLocatorPage(_deptHeadQueue, assignedItems, append: false);
-          _approvalPage = 1; _approvalPageCount = 1; _approvalTotal = assignedItems.length;
+          _approvalPage = 1;
+          _approvalPageCount = 1;
+          _approvalTotal = assignedItems.length;
           _approvalHistoryLoaded = true;
         });
         return;
@@ -2463,10 +2476,20 @@ class EmployeeLocatorSlipContentState extends State<EmployeeLocatorSlipContent>
       setState(() {
         _assignedRequests = assigned;
         if (assigned.isNotEmpty) _isDeptHeadFuture = Future<bool>.value(true);
-        _mergeLocatorPage(_deptHeadQueue, [...items, ...assignedItems], append: loadMore);
+        _mergeLocatorPage(_deptHeadQueue, [
+          ...items,
+          ...assignedItems,
+        ], append: loadMore);
         _approvalPage = page.page;
         _approvalPageCount = page.pageCount;
-        _approvalTotal = page.total + assignedItems.where((assignedItem) => !items.any((item) => item.id == assignedItem.id)).length;
+        _approvalTotal =
+            page.total +
+            assignedItems
+                .where(
+                  (assignedItem) =>
+                      !items.any((item) => item.id == assignedItem.id),
+                )
+                .length;
         _approvalHistoryLoaded = true;
       });
     } catch (error) {
@@ -3078,32 +3101,6 @@ class _LocatorSlipFormDialogState extends State<_LocatorSlipFormDialog> {
     apply: (value) => controller.text = value,
     child: child,
   );
-  Widget _fieldHelp(
-    String key,
-    String label,
-    TextEditingController controller,
-  ) => Align(
-    alignment: Alignment.centerRight,
-    child: TextButton.icon(
-      icon: const Icon(Icons.auto_awesome_outlined, size: 16),
-      label: const Text('Help me fill this'),
-      onPressed: () async {
-        final type = _requestType.code;
-        final suggestion = await showDialog<String>(
-          context: context,
-          builder: (_) => LeaveFieldAssistant(
-            module: 'locator',
-            leaveType: type,
-            fieldKey: key,
-            label: label,
-            initialValue: controller.text,
-          ),
-        );
-        if (!mounted || suggestion == null || type != _requestType.code) return;
-        controller.text = suggestion;
-      },
-    ),
-  );
   final _formKey = GlobalKey<FormState>();
   late DateTime _date;
   LocatorRequestType _requestType = LocatorRequestType.locator;
@@ -3384,7 +3381,6 @@ class _LocatorSlipFormDialogState extends State<_LocatorSlipFormDialog> {
         const SizedBox(height: 14),
         KeyedSubtree(key: _reviewCoverageKey, child: _segmentSelector()),
         const SizedBox(height: 14),
-        _fieldHelp('office', _requestType.locationLabel, _officeController),
         EmployeeLocatorMobileLabeledField(
           label: _requestType.locationLabel,
           labelColor: AppTheme.dashTextSecondaryOf(context),
@@ -3403,7 +3399,6 @@ class _LocatorSlipFormDialogState extends State<_LocatorSlipFormDialog> {
           ),
         ),
         const SizedBox(height: 12),
-        _fieldHelp('reason', 'Remarks / Reasons', _remarksController),
         EmployeeLocatorMobileLabeledField(
           label: 'Remarks / Reasons',
           labelColor: AppTheme.dashTextSecondaryOf(context),

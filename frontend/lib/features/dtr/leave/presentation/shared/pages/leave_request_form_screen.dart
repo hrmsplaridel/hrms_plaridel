@@ -4,7 +4,6 @@ import 'package:flutter/material.dart';
 import 'package:hrms_plaridel/features/dtr/assistant/presentation/widgets/application_review.dart';
 import 'package:hrms_plaridel/features/dtr/assistant/presentation/widgets/active_assistant_field.dart';
 import 'package:provider/provider.dart';
-import 'package:hrms_plaridel/features/dtr/assistant/presentation/widgets/leave_field_assistant.dart';
 
 import 'package:hrms_plaridel/core/api/client.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
@@ -2309,64 +2308,20 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
     child: child,
   );
 
-  Widget _fieldHelp(
-    String fieldKey,
-    String label, {
-    TextEditingController? controller,
-    bool canDraft = true,
-  }) => Align(
-    alignment: Alignment.centerRight,
-    child: TextButton.icon(
-      icon: const Icon(Icons.auto_awesome_outlined, size: 16),
-      label: const Text('Help me fill this'),
-      onPressed: () async {
-        final leaveType = _leaveTypeName;
-        final initial =
-            controller?.text ?? _customDetailValues[fieldKey]?.toString() ?? '';
-        final suggestion = await showDialog<String>(
-          context: context,
-          builder: (_) => LeaveFieldAssistant(
-            leaveType: leaveType,
-            fieldKey: fieldKey,
-            label: label,
-            initialValue: initial,
-            canDraft: canDraft,
-          ),
-        );
-        if (!mounted || suggestion == null || leaveType != _leaveTypeName) {
-          return;
-        }
-        setState(() {
-          if (controller != null) {
-            controller.text = suggestion;
-          } else {
-            _customDetailValues[fieldKey] = suggestion;
-            _assistantFieldRevision++;
-          }
-        });
-      },
-    ),
-  );
-
   Widget _buildDetailsCard() {
     List<Widget> children = [_buildSectionTitle('3. Leave Details')];
 
     // Shared Reasons
     children.addAll([
       const SizedBox(height: 16),
-      _fieldHelp(
-        'reason',
-        'General Reason / Remarks',
-        controller: _reasonController,
-      ),
       _activeAssistantField(
-        'location_details',
+        'reason',
         TextFormField(
           controller: _reasonController,
           maxLines: 2,
           decoration: _inputDecoration('General Reason / Remarks (Optional)'),
         ),
-        _locationDetailsController,
+        _reasonController,
       ),
     ]);
 
@@ -2400,21 +2355,15 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
         ),
         if (_locationOption != null) ...[
           const SizedBox(height: 8),
-          _fieldHelp(
-            'location_details',
-            'Location details',
-            controller: _locationDetailsController,
-            canDraft: true,
-          ),
           _activeAssistantField(
-            'sick_illness_details',
+            'location_details',
             TextFormField(
               controller: _locationDetailsController,
               decoration: _inputDecoration('Specify location...'),
               validator: (v) =>
                   (v == null || v.trim().isEmpty) ? 'Required' : null,
             ),
-            _sickIllnessController,
+            _locationDetailsController,
           ),
         ],
       ]);
@@ -2446,21 +2395,15 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
         ),
         if (_sickLeaveNature != null) ...[
           const SizedBox(height: 8),
-          _fieldHelp(
-            'sick_illness_details',
-            'Illness details',
-            controller: _sickIllnessController,
-            canDraft: true,
-          ),
           _activeAssistantField(
-            'vawc_case_details',
+            'sick_illness_details',
             TextFormField(
               controller: _sickIllnessController,
               decoration: _inputDecoration('Specify illness details...'),
               validator: (v) =>
                   (v == null || v.trim().isEmpty) ? 'Required' : null,
             ),
-            _vawcCaseDetailsController,
+            _sickIllnessController,
           ),
         ],
       ]);
@@ -2642,14 +2585,8 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
               : null,
         ),
         const SizedBox(height: 12),
-        _fieldHelp(
-          'vawc_case_details',
-          'Case details',
-          controller: _vawcCaseDetailsController,
-          canDraft: true,
-        ),
         _activeAssistantField(
-          'solo_parent_id_number',
+          'vawc_case_details',
           TextFormField(
             controller: _vawcCaseDetailsController,
             maxLines: 2,
@@ -2660,20 +2597,14 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
                 ? 'Required'
                 : null,
           ),
-          _soloParentIdNumberController,
+          _vawcCaseDetailsController,
         ),
       ]);
     } else if (_leaveType == LeaveType.soloParentLeave) {
       children.addAll([
         const SizedBox(height: 16),
-        _fieldHelp(
-          'solo_parent_id_number',
-          'Solo Parent ID Number',
-          controller: _soloParentIdNumberController,
-          canDraft: false,
-        ),
         _activeAssistantField(
-          'women_illness_details',
+          'solo_parent_id_number',
           TextFormField(
             controller: _soloParentIdNumberController,
             decoration: _inputDecoration('Solo Parent ID Number'),
@@ -2683,7 +2614,7 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
                 ? 'Required'
                 : null,
           ),
-          _womenIllnessController,
+          _soloParentIdNumberController,
         ),
         const SizedBox(height: 12),
         _buildDatePicker(
@@ -2696,21 +2627,15 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
     } else if (_leaveType == LeaveType.specialLeaveBenefitsForWomen) {
       children.addAll([
         const SizedBox(height: 16),
-        _fieldHelp(
-          'women_illness_details',
-          'Illness details',
-          controller: _womenIllnessController,
-          canDraft: true,
-        ),
         _activeAssistantField(
-          'study_purpose_details',
+          'women_illness_details',
           TextFormField(
             controller: _womenIllnessController,
             decoration: _inputDecoration('Specify illness details...'),
             validator: (v) =>
                 (v == null || v.trim().isEmpty) ? 'Required' : null,
           ),
-          _studyPurposeDetailsController,
+          _womenIllnessController,
         ),
       ]);
     } else if (_leaveType == LeaveType.studyLeave) {
@@ -2741,15 +2666,13 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
         ),
         if (_studyPurpose != null) ...[
           const SizedBox(height: 8),
-          _fieldHelp(
+          _activeAssistantField(
             'study_purpose_details',
-            'Study purpose',
-            controller: _studyPurposeDetailsController,
-            canDraft: true,
-          ),
-          TextFormField(
-            controller: _studyPurposeDetailsController,
-            decoration: _inputDecoration('Specify study leave details...'),
+            TextFormField(
+              controller: _studyPurposeDetailsController,
+              decoration: _inputDecoration('Specify study leave details...'),
+            ),
+            _studyPurposeDetailsController,
           ),
         ],
       ]);
@@ -2767,13 +2690,6 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
         ),
         const SizedBox(height: 12),
         for (final field in _selectedCustomFields) ...[
-          _fieldHelp(
-            field.key,
-            field.label,
-            canDraft:
-                field.type == LeaveCustomFieldType.text ||
-                field.type == LeaveCustomFieldType.longText,
-          ),
           _activeAssistantField(field.key, _buildCustomDetailField(field)),
           const SizedBox(height: 12),
         ],

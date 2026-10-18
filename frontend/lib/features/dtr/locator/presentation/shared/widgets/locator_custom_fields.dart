@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:hrms_plaridel/features/dtr/assistant/presentation/widgets/active_assistant_field.dart';
 import 'package:hrms_plaridel/features/dtr/assistant/presentation/widgets/field_guidance_editor.dart';
-import 'package:hrms_plaridel/features/dtr/assistant/presentation/widgets/leave_field_assistant.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_type_definition.dart';
 import 'package:hrms_plaridel/shared/widgets/form_settings_section.dart';
@@ -72,29 +71,6 @@ class _LocatorCustomFieldInputsState extends State<LocatorCustomFieldInputs> {
   Map<String, dynamic> get values => widget.values;
   int _revision = 0;
 
-  Future<void> _help(LeaveCustomFieldDefinition field) async {
-    final type = widget.requestType;
-    if (type == null) return;
-    final suggestion = await showDialog<String>(
-      context: context,
-      builder: (_) => LeaveFieldAssistant(
-        module: 'locator',
-        leaveType: type,
-        fieldKey: field.key,
-        label: field.label,
-        initialValue: values[field.key]?.toString() ?? '',
-        canDraft:
-            field.type == LeaveCustomFieldType.text ||
-            field.type == LeaveCustomFieldType.longText,
-      ),
-    );
-    if (!mounted || suggestion == null || widget.requestType != type) return;
-    setState(() {
-      values[field.key] = suggestion;
-      _revision++;
-    });
-  }
-
   @override
   Widget build(BuildContext context) {
     if (fields.isEmpty) return const SizedBox.shrink();
@@ -112,15 +88,6 @@ class _LocatorCustomFieldInputsState extends State<LocatorCustomFieldInputs> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  if (widget.requestType != null)
-                    Align(
-                      alignment: Alignment.centerRight,
-                      child: TextButton.icon(
-                        onPressed: () => _help(field),
-                        icon: const Icon(Icons.auto_awesome_outlined, size: 16),
-                        label: const Text('Help me fill this'),
-                      ),
-                    ),
                   if (widget.requestType != null)
                     ActiveAssistantField(
                       module: 'locator',
