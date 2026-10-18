@@ -181,8 +181,9 @@ class NotificationTapResult {
         );
       }
       if (t.startsWith('leave_')) {
+        // Personal status updates belong to My Requests, including for admins.
         return const NotificationTapResult(
-          NotificationTapKind.adminDtrLeaveManagement,
+          NotificationTapKind.employeeLeaveRequests,
         );
       }
       return const NotificationTapResult(NotificationTapKind.none);

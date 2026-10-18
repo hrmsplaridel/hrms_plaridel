@@ -1180,7 +1180,8 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
                       initialDraft: _creationPrint.hasChanges
                           ? _creationPrint
                           : null,
-                      onChanged: (value) => _creationPrint = value,
+                      onChanged: (value) =>
+                          setState(() => _creationPrint = value),
                     ),
                   ]),
                 ],

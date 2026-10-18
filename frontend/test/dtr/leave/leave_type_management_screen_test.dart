@@ -773,6 +773,35 @@ void main() {
     expect(print.files.single.value.filename, 'letterhead.pdf');
   });
 
+  testWidgets('scrolling alone retains the custom print selection without editing type fields', (tester) async {
+    await mount(tester);
+    await enterRequiredName(tester, 'Wellness Leave');
+    await tester.scrollUntilVisible(find.text('Design layout'), 250, scrollable: formScrollable());
+    await Scrollable.ensureVisible(tester.element(find.text('Design layout')), alignment: .5);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Design layout'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Use layout'));
+    await tester.pumpAndSettle();
+    expect(find.text('Custom designed form'), findsOneWidget);
+
+    for (var visit = 0; visit < 2; visit++) {
+      await tester.scrollUntilVisible(textField('Leave type name'), -250, scrollable: formScrollable());
+      await tester.pumpAndSettle();
+      // No input changes: scrolling must not depend on a parent form rebuild.
+      await tester.scrollUntilVisible(find.text('Preview'), 250, scrollable: formScrollable());
+      await tester.pumpAndSettle();
+      expect(find.text('Custom designed form'), findsOneWidget);
+      expect(find.text('Edit layout'), findsOneWidget);
+      expect(tester.widget<DropdownButtonFormField<String>>(stringDropdown('Form layout')).initialValue, 'custom');
+    }
+    await tester.tap(find.text('Create Leave Type'));
+    await tester.pumpAndSettle();
+    final print = requests.singleWhere((r) => r.method == 'POST' && r.path.startsWith('/api/leave/print/types/')).data as FormData;
+    expect(print.fields.singleWhere((f) => f.key == 'layout').value, 'custom');
+    expect(print.fields.singleWhere((f) => f.key == 'print_layout').value, contains('WELLNESS LEAVE'));
+  });
+
   for (final failUpload in [false, true]) {
     testWidgets(
       'new type saves a designed leave layout after creation; failure=$failUpload',
