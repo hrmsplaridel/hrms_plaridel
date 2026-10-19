@@ -21,6 +21,7 @@ import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/d
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_status_badge.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_status_theme.dart';
 import 'package:hrms_plaridel/features/docutracker/utils/docutracker_release_text.dart';
+import 'package:hrms_plaridel/features/docutracker/utils/docutracker_required_action_bucket.dart';
 import 'package:hrms_plaridel/features/docutracker/utils/docutracker_source_status_text.dart';
 import 'package:hrms_plaridel/features/docutracker/utils/docutracker_workflow_phase.dart';
 
@@ -263,6 +264,7 @@ class _DocuTrackerDocumentsScreenState
           DocuTrackerRequiredActionsPanel(
             documents: requiredDocuments,
             sourceRequests: pendingSourceRequests,
+            currentUserId: userId,
             loading: provider.sourceSignatureRequestsLoading,
             hasPartialError: provider.sourceSignatureRequestsError != null,
             onRefreshSignatures: () =>
@@ -598,10 +600,12 @@ class DocuTrackerRequiredActionsPanel extends StatefulWidget {
     required this.hasPartialError,
     required this.onRefreshSignatures,
     required this.onDocumentTap,
+    this.currentUserId = '',
   });
 
   final List<DocuTrackerDocument> documents;
   final List<DocuTrackerRspSignatureRequest> sourceRequests;
+  final String currentUserId;
   final bool loading;
   final bool hasPartialError;
   final Future<void> Function() onRefreshSignatures;
@@ -680,25 +684,12 @@ class _RequiredActionsPanelState
     return title.isEmpty ? raw.trim() : title;
   }
 
-  _ActionPriority _priorityFor(_RequiredActionEntry entry) {
-    final request = entry.sourceRequest;
-    final document = entry.document;
-    if (request != null) {
-      return switch (request.signatureState) {
-        DocuTrackerSourceSignatureState.needsSetup =>
-          _ActionPriority.needsSetup,
-        DocuTrackerSourceSignatureState.needsYourSignature =>
-          _ActionPriority.needsSignature,
-        DocuTrackerSourceSignatureState.waitingOnOthers =>
-          _ActionPriority.waiting,
-        DocuTrackerSourceSignatureState.fullySigned =>
-          _ActionPriority.completed,
-      };
-    }
-    // Native / leave documents in this panel are already action-only.
-    final action = (document?.sourceAction ?? '').trim();
-    if (action.isNotEmpty) return _ActionPriority.needsSignature;
-    return _ActionPriority.needsSignature;
+  DocuTrackerRequiredActionBucket _priorityFor(_RequiredActionEntry entry) {
+    return docuTrackerRequiredActionBucket(
+      document: entry.document,
+      sourceRequest: entry.sourceRequest,
+      userId: widget.currentUserId,
+    );
   }
 
   String _moduleKey(_RequiredActionEntry entry) {
@@ -937,27 +928,32 @@ class _RequiredActionsPanelState
       ...widget.documents.map(_RequiredActionEntry.document),
     ];
     final entries = allEntries.where(_matchesFilters).toList(growable: false);
+    final needsReview = <_RequiredActionEntry>[];
     final needsSignature = <_RequiredActionEntry>[];
     final needsSetup = <_RequiredActionEntry>[];
     final waiting = <_RequiredActionEntry>[];
     final completed = <_RequiredActionEntry>[];
     for (final entry in entries) {
       switch (_priorityFor(entry)) {
-        case _ActionPriority.needsSignature:
+        case DocuTrackerRequiredActionBucket.needsReview:
+          needsReview.add(entry);
+        case DocuTrackerRequiredActionBucket.needsSignature:
           needsSignature.add(entry);
-        case _ActionPriority.needsSetup:
+        case DocuTrackerRequiredActionBucket.needsSetup:
           needsSetup.add(entry);
-        case _ActionPriority.waiting:
+        case DocuTrackerRequiredActionBucket.waiting:
           waiting.add(entry);
-        case _ActionPriority.completed:
+        case DocuTrackerRequiredActionBucket.completed:
           completed.add(entry);
       }
     }
+    final reviewEntries = _displayOrder(needsReview);
     final signatureEntries = _displayOrder(needsSignature);
     final setupEntries = _displayOrder(needsSetup);
     final waitingEntries = _displayOrder(waiting);
     final completedEntries = _displayOrder(completed);
-    final primary = [...signatureEntries, ...setupEntries];
+    // Primary order: review → signature → setup (then secondary waiting/signed).
+    final primary = [...reviewEntries, ...signatureEntries, ...setupEntries];
     final secondary = [...waitingEntries, ...completedEntries];
     final secondaryVisible = _showSecondary || primary.isEmpty;
     // One page window over every visible card, in render order.
@@ -979,8 +975,12 @@ class _RequiredActionsPanelState
       return section.sublist(from, to);
     }
 
-    final pageSignature = onPage(signatureEntries, 0);
-    final pageSetup = onPage(setupEntries, signatureEntries.length);
+    final pageReview = onPage(reviewEntries, 0);
+    final pageSignature = onPage(signatureEntries, reviewEntries.length);
+    final pageSetup = onPage(
+      setupEntries,
+      reviewEntries.length + signatureEntries.length,
+    );
     final pageWaiting = secondaryVisible
         ? onPage(waitingEntries, primary.length)
         : const <_RequiredActionEntry>[];
@@ -994,8 +994,10 @@ class _RequiredActionsPanelState
     final actionableCount = allEntries
         .where(
           (e) =>
-              _priorityFor(e) == _ActionPriority.needsSignature ||
-              _priorityFor(e) == _ActionPriority.needsSetup,
+              _priorityFor(e) == DocuTrackerRequiredActionBucket.needsReview ||
+              _priorityFor(e) ==
+                  DocuTrackerRequiredActionBucket.needsSignature ||
+              _priorityFor(e) == DocuTrackerRequiredActionBucket.needsSetup,
         )
         .length;
     final filtering =
@@ -1103,6 +1105,12 @@ class _RequiredActionsPanelState
                   'Nothing needs your attention right now.',
                   style: TextStyle(color: muted),
                 ),
+              ),
+            if (pageReview.isNotEmpty)
+              _buildSection(
+                context,
+                title: 'Needs your review',
+                entries: pageReview,
               ),
             if (pageSignature.isNotEmpty)
               _buildSection(
@@ -1490,8 +1498,6 @@ class _RequiredActionEntry {
   final DocuTrackerDocument? document;
   final DocuTrackerRspSignatureRequest? sourceRequest;
 }
-
-enum _ActionPriority { needsSignature, needsSetup, waiting, completed }
 
 class _RequiredActionsPager extends StatelessWidget {
   const _RequiredActionsPager({

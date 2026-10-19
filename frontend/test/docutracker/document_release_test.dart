@@ -7,8 +7,10 @@ import 'package:hrms_plaridel/features/docutracker/models/document_notification.
 import 'package:hrms_plaridel/features/docutracker/models/document_release.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document_status.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/admin/widgets/docutracker_release_policy_tile.dart';
+import 'package:hrms_plaridel/features/docutracker/data/styles/docutracker_styles.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_release_section.dart';
 import 'package:hrms_plaridel/features/docutracker/services/docutracker_document_visibility.dart';
+import 'package:hrms_plaridel/features/docutracker/theme/docutracker_tokens.dart';
 import 'package:hrms_plaridel/features/docutracker/utils/docutracker_release_text.dart';
 
 Map<String, dynamic> _memoJson({
@@ -17,6 +19,9 @@ Map<String, dynamic> _memoJson({
   String? releasedAt,
   bool viewerReleaseAccess = false,
   bool viewerCanRelease = false,
+  String? currentHolderId,
+  List<String> signatureSignerIds = const [],
+  bool viewerIsRoutingAssignee = false,
 }) => {
   'id': 'doc-1',
   'document_type': 'memo',
@@ -34,6 +39,9 @@ Map<String, dynamic> _memoJson({
   },
   'viewer_release_access': viewerReleaseAccess,
   'viewer_can_release': viewerCanRelease,
+  if (currentHolderId != null) 'current_holder_id': currentHolderId,
+  'signature_signer_ids': signatureSignerIds,
+  'viewer_is_routing_assignee': viewerIsRoutingAssignee,
 };
 
 DocuTrackerDocument _memo({
@@ -42,6 +50,9 @@ DocuTrackerDocument _memo({
   String? releasedAt,
   bool viewerReleaseAccess = false,
   bool viewerCanRelease = false,
+  String? currentHolderId,
+  List<String> signatureSignerIds = const [],
+  bool viewerIsRoutingAssignee = false,
 }) => DocuTrackerDocument.fromJson(
   _memoJson(
     releaseRequired: releaseRequired,
@@ -49,6 +60,9 @@ DocuTrackerDocument _memo({
     releasedAt: releasedAt,
     viewerReleaseAccess: viewerReleaseAccess,
     viewerCanRelease: viewerCanRelease,
+    currentHolderId: currentHolderId,
+    signatureSignerIds: signatureSignerIds,
+    viewerIsRoutingAssignee: viewerIsRoutingAssignee,
   ),
 );
 
@@ -99,6 +113,118 @@ void main() {
       expect(doc.isAwaitingRelease, isFalse);
       expect(doc.isReleased, isFalse);
       expect(docuTrackerReleaseBadgeLabel(doc), isNull);
+    });
+
+    test('release-required approved copy does not say workflow complete', () {
+      final awaiting = _memo();
+      expect(
+        docuTrackerApprovedWorkflowMessage(awaiting),
+        'Approved — awaiting release',
+      );
+      expect(
+        docuTrackerApprovedWorkflowDetail(awaiting),
+        contains('must still be released'),
+      );
+      expect(
+        docuTrackerApprovedWorkflowMessage(awaiting),
+        isNot(contains('workflow is complete')),
+      );
+
+      final noRelease = _memo(releaseRequired: false);
+      expect(
+        docuTrackerApprovedWorkflowMessage(noRelease),
+        'This workflow is complete.',
+      );
+      expect(docuTrackerApprovedWorkflowDetail(noRelease), isNull);
+
+      final released = _memo(releasedAt: '2026-10-09T15:42:00');
+      expect(
+        docuTrackerApprovedWorkflowMessage(released),
+        'This workflow is complete.',
+      );
+    });
+
+    test('final-approve confirm copy keeps release separate', () {
+      final withRelease = docuTrackerFinalApproveConfirmCopy(
+        releaseRequired: true,
+      );
+      expect(withRelease.message, contains('must still be released'));
+      expect(
+        withRelease.message,
+        isNot(contains('This completes the workflow.')),
+      );
+
+      final without = docuTrackerFinalApproveConfirmCopy(
+        releaseRequired: false,
+      );
+      expect(without.message, 'This completes the workflow.');
+      expect(without.confirmLabel, 'Approve and Complete');
+    });
+
+    test('released department recipient sees view-only; actors do not', () {
+      final released = _memo(
+        releasedAt: '2026-10-09T15:42:00',
+        viewerReleaseAccess: true,
+      );
+      expect(
+        docuTrackerShowReleasedViewOnlyMessage(
+          document: released,
+          userId: 'eng-1',
+        ),
+        isTrue,
+      );
+      expect(
+        docuTrackerShowReleasedViewOnlyMessage(
+          document: released,
+          userId: 'eng-1',
+          hasActiveAction: true,
+        ),
+        isFalse,
+      );
+      expect(
+        docuTrackerShowReleasedViewOnlyMessage(
+          document: _memo(
+            releasedAt: '2026-10-09T15:42:00',
+            viewerReleaseAccess: true,
+            viewerCanRelease: true,
+          ),
+          userId: 'hr-1',
+        ),
+        isFalse,
+      );
+      expect(
+        docuTrackerShowReleasedViewOnlyMessage(
+          document: _memo(
+            releasedAt: '2026-10-09T15:42:00',
+            viewerReleaseAccess: true,
+            signatureSignerIds: const ['eng-1'],
+          ),
+          userId: 'eng-1',
+        ),
+        isFalse,
+      );
+      expect(
+        docuTrackerShowReleasedViewOnlyMessage(
+          document: _memo(
+            releasedAt: '2026-10-09T15:42:00',
+            viewerReleaseAccess: true,
+            currentHolderId: 'eng-1',
+          ),
+          userId: 'eng-1',
+        ),
+        isFalse,
+      );
+      expect(
+        docuTrackerShowReleasedViewOnlyMessage(
+          document: _memo(
+            releasedAt: '2026-10-09T15:42:00',
+            viewerReleaseAccess: true,
+            viewerIsRoutingAssignee: true,
+          ),
+          userId: 'eng-1',
+        ),
+        isFalse,
+      );
     });
 
     test('pending release-required memo is not awaiting release yet', () {
@@ -210,6 +336,62 @@ void main() {
         find.byKey(const ValueKey('docutracker-release-button')),
       );
       expect(pressed, 1);
+    });
+
+    Future<void> expectBrandReleaseStyle(
+      WidgetTester tester,
+      ThemeData theme,
+    ) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: theme,
+          home: Scaffold(
+            body: DocuTrackerReleaseSection(
+              document: _memo(viewerCanRelease: true),
+              onRelease: () {},
+            ),
+          ),
+        ),
+      );
+      final context = tester.element(
+        find.byKey(const ValueKey('docutracker-release-button')),
+      );
+      final button = tester.widget<FilledButton>(
+        find.byKey(const ValueKey('docutracker-release-button')),
+      );
+      final brand = DocuTrackerStyles.primaryBrandButtonStyle(context);
+      for (final states in <Set<WidgetState>>[
+        const {},
+        {WidgetState.disabled},
+        {WidgetState.hovered},
+        {WidgetState.focused},
+        {WidgetState.pressed},
+      ]) {
+        expect(
+          button.style?.backgroundColor?.resolve(states),
+          brand.backgroundColor?.resolve(states),
+        );
+        expect(
+          button.style?.foregroundColor?.resolve(states),
+          brand.foregroundColor?.resolve(states),
+        );
+      }
+      expect(
+        button.style?.backgroundColor?.resolve(const {}),
+        DocuTrackerTokens.brand,
+      );
+    }
+
+    testWidgets('Release Document uses the primary brand style (light)', (
+      tester,
+    ) async {
+      await expectBrandReleaseStyle(tester, ThemeData.light());
+    });
+
+    testWidgets('Release Document uses the primary brand style (dark)', (
+      tester,
+    ) async {
+      await expectBrandReleaseStyle(tester, ThemeData.dark());
     });
 
     testWidgets('released document shows department, actor and remarks '

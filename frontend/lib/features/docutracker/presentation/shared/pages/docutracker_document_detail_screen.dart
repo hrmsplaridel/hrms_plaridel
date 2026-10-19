@@ -705,6 +705,14 @@ class _DocuTrackerDocumentDetailScreenState
                 showYourTurn,
                 userId: userId,
                 isAssignedReviewer: isAssignedReviewer,
+                hasActiveAction:
+                    showYourTurn ||
+                    canSubmit ||
+                    canApprove ||
+                    canForward ||
+                    canReject ||
+                    canReturn ||
+                    (doc.isAwaitingRelease && doc.viewerCanRelease),
                 assigneeNames: _currentReviewerNames(
                   doc,
                   currentRouting,
@@ -820,6 +828,7 @@ class _DocuTrackerDocumentDetailScreenState
     bool showYourTurn, {
     required String userId,
     required bool isAssignedReviewer,
+    bool hasActiveAction = false,
     List<String> assigneeNames = const [],
   }) {
     final typeName = documentTypeFromString(doc.documentType).displayName;
@@ -1220,8 +1229,11 @@ class _DocuTrackerDocumentDetailScreenState
                   : const Color(0xFFB91C1C),
             ),
             message: doc.status == DocumentStatus.approved
-                ? 'This workflow is complete.'
+                ? docuTrackerApprovedWorkflowMessage(doc)
                 : 'This document was rejected and cannot move forward.',
+            detail: doc.status == DocumentStatus.approved
+                ? docuTrackerApprovedWorkflowDetail(doc)
+                : null,
           ),
         ],
         if (showYourTurn) ...[
@@ -1231,6 +1243,19 @@ class _DocuTrackerDocumentDetailScreenState
             subtitle: phase.detail != null
                 ? 'You are the assigned reviewer for this step. ${phase.detail}'
                 : 'You are the assigned reviewer — submit your decision or add a remark.',
+          ),
+        ] else if (docuTrackerShowReleasedViewOnlyMessage(
+          document: doc,
+          userId: userId,
+          hasActiveAction: hasActiveAction || isAssignedReviewer,
+        )) ...[
+          const SizedBox(height: 20),
+          const DocuTrackerDetailActionBanner(
+            key: ValueKey('docutracker-released-view-only-banner'),
+            title: 'Released to your department — view only',
+            subtitle:
+                'You can view this released document, but no action is required from you.',
+            icon: Icons.visibility_outlined,
           ),
         ] else if (guidance != null)
           guidance,
@@ -1579,16 +1604,18 @@ class _DocuTrackerDocumentDetailScreenState
             onPressed: provider.loading
                 ? null
                 : () async {
+                    final finalCopy = isFinalStep
+                        ? docuTrackerFinalApproveConfirmCopy(
+                            releaseRequired: doc.releaseRequired,
+                          )
+                        : null;
                     final confirmed = await _confirmWorkflowAction(
-                      title: isFinalStep
-                          ? 'Approve and complete?'
-                          : 'Approve and continue?',
-                      message: isFinalStep
-                          ? 'This completes the workflow.'
-                          : 'This sends the document to the next workflow step.',
-                      confirmLabel: isFinalStep
-                          ? 'Approve and Complete'
-                          : 'Approve and Continue',
+                      title: finalCopy?.title ?? 'Approve and continue?',
+                      message:
+                          finalCopy?.message ??
+                          'This sends the document to the next workflow step.',
+                      confirmLabel:
+                          finalCopy?.confirmLabel ?? 'Approve and Continue',
                     );
                     if (!confirmed || !mounted) return;
                     final ok = await provider.approveDocument(

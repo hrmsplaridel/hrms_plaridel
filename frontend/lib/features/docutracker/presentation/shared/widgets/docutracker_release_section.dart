@@ -6,6 +6,7 @@ import 'package:hrms_plaridel/features/docutracker/data/repositories/docutracker
 import 'package:hrms_plaridel/features/docutracker/models/document.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document_release.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document_type.dart';
+import 'package:hrms_plaridel/features/docutracker/data/styles/docutracker_styles.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_document_detail_ui.dart';
 import 'package:hrms_plaridel/features/docutracker/theme/docutracker_tokens.dart';
 import 'package:hrms_plaridel/features/docutracker/utils/docutracker_release_text.dart';
@@ -92,6 +93,7 @@ class DocuTrackerReleaseSection extends StatelessWidget {
                 onPressed: onRelease,
                 icon: const Icon(Icons.outbox_rounded),
                 label: const Text('Release Document'),
+                style: DocuTrackerStyles.primaryBrandButtonStyle(context),
               ),
             ],
           ],
