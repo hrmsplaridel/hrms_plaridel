@@ -11,6 +11,7 @@ import 'package:hrms_plaridel/features/docutracker/models/document_type.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document_builder.dart';
 import 'package:hrms_plaridel/features/docutracker/services/docutracker_document_visibility.dart';
 import 'package:hrms_plaridel/features/docutracker/theme/docutracker_tokens.dart';
+import 'package:hrms_plaridel/features/docutracker/data/styles/docutracker_styles.dart';
 import 'package:hrms_plaridel/features/docutracker/data/navigation/docutracker_document_navigation.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_create_document_dialog.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_signature_library_dialog.dart';
@@ -435,8 +436,9 @@ class _DocuTrackerDocumentsScreenState
             onPressed: provider.loading
                 ? null
                 : () => _openCreateDialog(auth, provider),
-            icon: const Icon(Icons.add_rounded, size: 18),
+            icon: const Icon(Icons.note_add_rounded, size: 19),
             label: const Text('Create Draft'),
+            style: DocuTrackerStyles.primaryBrandButtonStyle(context),
           )
         : null;
 
@@ -505,7 +507,10 @@ class _DocuTrackerDocumentsScreenState
                     ),
                     refreshButton,
                     signaturesButton,
-                    if (createButton != null) createButton,
+                    if (createButton != null) ...[
+                      const SizedBox(width: 6),
+                      createButton,
+                    ],
                   ],
                 ),
                 if (_showMobileFilters) ...[
@@ -557,7 +562,7 @@ class _DocuTrackerDocumentsScreenState
               const SizedBox(width: 8),
               signaturesButton,
               if (createButton != null) ...[
-                const SizedBox(width: 8),
+                const SizedBox(width: 14),
                 createButton,
               ],
             ],
@@ -1724,19 +1729,9 @@ class _EmptyState extends StatelessWidget {
                 const SizedBox(height: 28),
                 FilledButton.icon(
                   onPressed: onCreateTap,
-                  icon: const Icon(Icons.add_rounded, size: 18),
+                  icon: const Icon(Icons.note_add_rounded, size: 19),
                   label: const Text('Create Draft'),
-                  style: DocuTrackerTokens.terracottaFilledStyle().copyWith(
-                    padding: WidgetStateProperty.all(
-                      const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
-                    ),
-                    textStyle: WidgetStateProperty.all(
-                      const TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ),
+                  style: DocuTrackerStyles.primaryBrandButtonStyle(context),
                 ),
               ],
             ],

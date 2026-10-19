@@ -455,7 +455,7 @@ class _DocuTrackerCreateDocumentFlowState
     final primary = FilledButton.icon(
       key: const Key('docutracker-create-submit'),
       onPressed: !onDetails || _creating ? null : _create,
-      style: DocuTrackerStyles.primaryButtonStyle(),
+      style: DocuTrackerStyles.primaryBrandButtonStyle(context),
       icon: _creating
           ? const SizedBox.square(
               dimension: 18,
@@ -464,7 +464,7 @@ class _DocuTrackerCreateDocumentFlowState
                 color: Colors.white,
               ),
             )
-          : const Icon(Icons.edit_document, size: 18),
+          : const Icon(Icons.edit_document, size: 19),
       label: const Text('Create & Open Editor'),
     );
     return Container(
@@ -475,7 +475,7 @@ class _DocuTrackerCreateDocumentFlowState
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 if (onDetails) primary,
-                if (onDetails) const SizedBox(height: 8),
+                if (onDetails) const SizedBox(height: 12),
                 secondary,
               ],
             )
@@ -483,7 +483,7 @@ class _DocuTrackerCreateDocumentFlowState
               mainAxisAlignment: MainAxisAlignment.end,
               children: [
                 secondary,
-                if (onDetails) ...[const SizedBox(width: 12), primary],
+                if (onDetails) ...[const SizedBox(width: 16), primary],
               ],
             ),
     );

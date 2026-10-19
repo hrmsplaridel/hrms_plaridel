@@ -936,6 +936,7 @@ class _DocuTrackerDocumentDetailScreenState
     final actionButtons = Wrap(
       spacing: 8,
       runSpacing: 8,
+      crossAxisAlignment: WrapCrossAlignment.center,
       children: [
         if (!doc.sourceOnly)
           OutlinedButton.icon(
@@ -945,13 +946,14 @@ class _DocuTrackerDocumentDetailScreenState
             label: const Text('Preview'),
             style: DocuTrackerStyles.outlinedButtonStyle(context),
           ),
+        if (!doc.sourceOnly) const SizedBox(width: 6),
         FilledButton.icon(
           onPressed: busy ? null : () => _openPrimaryDocument(doc),
-          icon: const Icon(Icons.article_outlined, size: 18),
+          icon: const Icon(Icons.article_rounded, size: 19),
           label: Text(
             doc.sourceOnly ? 'Open Source Document' : 'Open Document',
           ),
-          style: DocuTrackerStyles.primaryBrandButtonStyle(),
+          style: DocuTrackerStyles.primaryBrandButtonStyle(context),
         ),
       ],
     );
@@ -1560,7 +1562,7 @@ class _DocuTrackerDocumentDetailScreenState
                   },
             icon: const Icon(Icons.play_arrow_rounded, size: 20),
             label: const Text('Submit Draft'),
-            style: DocuTrackerStyles.primaryBrandButtonStyle().copyWith(
+            style: DocuTrackerStyles.primaryBrandButtonStyle(context).copyWith(
               minimumSize: WidgetStateProperty.all(
                 const Size(double.infinity, 48),
               ),
@@ -1928,7 +1930,7 @@ class _DocuTrackerDocumentDetailScreenState
               ),
               FilledButton(
                 onPressed: () => Navigator.of(ctx).pop(true),
-                style: DocuTrackerStyles.primaryBrandButtonStyle(),
+                style: DocuTrackerStyles.primaryBrandButtonStyle(ctx),
                 child: Text(confirmLabel),
               ),
             ],
@@ -2005,7 +2007,7 @@ class _DocuTrackerDocumentDetailScreenState
                 _showActionError(provider, fallback: 'Could not save remark.');
               }
             },
-            style: DocuTrackerStyles.primaryBrandButtonStyle(),
+            style: DocuTrackerStyles.primaryBrandButtonStyle(ctx),
             child: const Text('Save'),
           ),
         ],

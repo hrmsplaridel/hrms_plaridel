@@ -68,11 +68,12 @@ class DocuTrackerStyles {
   );
 
   /// Orange brand primary (module chrome, create, open, links).
-  static ButtonStyle primaryBrandButtonStyle() =>
-      DocuTrackerTokens.brandFilledStyle();
+  static ButtonStyle primaryBrandButtonStyle([BuildContext? context]) =>
+      DocuTrackerTokens.brandFilledStyle(context);
 
   /// @deprecated Use [primaryBrandButtonStyle].
-  static ButtonStyle primaryButtonStyleNavy() => primaryBrandButtonStyle();
+  static ButtonStyle primaryButtonStyleNavy([BuildContext? context]) =>
+      primaryBrandButtonStyle(context);
 
   static ButtonStyle outlinedButtonStyle([BuildContext? context]) =>
       OutlinedButton.styleFrom(

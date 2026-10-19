@@ -202,18 +202,77 @@ abstract final class DocuTrackerTokens {
     );
   }
 
-  static ButtonStyle brandFilledStyle() => FilledButton.styleFrom(
-    backgroundColor: brand,
-    foregroundColor: Colors.white,
-    elevation: 0,
-    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-    shape: RoundedRectangleBorder(
-      borderRadius: BorderRadius.circular(radiusSm),
-    ),
-  );
+  /// Filled/elevated primary CTA (Create, Open, Save). Theme-aware hover so
+  /// dark mode deepens the orange instead of flashing a pale surface.
+  static ButtonStyle brandFilledStyle([BuildContext? context]) {
+    final dark = context != null && isDark(context);
+    final hoverFill = dark ? const Color(0xFFFF6D00) : brandDark;
+    final pressedFill = dark ? const Color(0xFFE65100) : const Color(0xFFA62F08);
+    return ButtonStyle(
+      backgroundColor: WidgetStateProperty.resolveWith((states) {
+        if (states.contains(WidgetState.disabled)) {
+          return brand.withValues(alpha: dark ? 0.30 : 0.40);
+        }
+        if (states.contains(WidgetState.pressed)) return pressedFill;
+        if (states.contains(WidgetState.hovered) ||
+            states.contains(WidgetState.focused)) {
+          return hoverFill;
+        }
+        return brand;
+      }),
+      foregroundColor: WidgetStateProperty.resolveWith((states) {
+        if (states.contains(WidgetState.disabled)) {
+          return Colors.white.withValues(alpha: dark ? 0.55 : 0.72);
+        }
+        return Colors.white;
+      }),
+      elevation: WidgetStateProperty.resolveWith((states) {
+        if (states.contains(WidgetState.disabled)) return 0;
+        if (states.contains(WidgetState.pressed)) return 1;
+        if (states.contains(WidgetState.hovered) ||
+            states.contains(WidgetState.focused)) {
+          return 3;
+        }
+        return 2;
+      }),
+      shadowColor: WidgetStatePropertyAll(
+        brand.withValues(alpha: dark ? 0.50 : 0.32),
+      ),
+      overlayColor: WidgetStateProperty.resolveWith((states) {
+        if (states.contains(WidgetState.pressed)) {
+          return Colors.black.withValues(alpha: dark ? 0.22 : 0.14);
+        }
+        if (states.contains(WidgetState.hovered) ||
+            states.contains(WidgetState.focused)) {
+          // Soft lift on the fill itself — never a bright white wash.
+          return Colors.black.withValues(alpha: dark ? 0.10 : 0.06);
+        }
+        return Colors.transparent;
+      }),
+      padding: const WidgetStatePropertyAll(
+        EdgeInsets.symmetric(horizontal: 18, vertical: 13),
+      ),
+      textStyle: const WidgetStatePropertyAll(
+        TextStyle(
+          fontSize: 14,
+          fontWeight: FontWeight.w700,
+          letterSpacing: 0.15,
+          height: 1.2,
+        ),
+      ),
+      iconSize: const WidgetStatePropertyAll(19),
+      visualDensity: VisualDensity.standard,
+      shape: WidgetStatePropertyAll(
+        RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(radiusSm),
+        ),
+      ),
+    );
+  }
 
   /// @deprecated Use [brandFilledStyle].
-  static ButtonStyle terracottaFilledStyle() => brandFilledStyle();
+  static ButtonStyle terracottaFilledStyle([BuildContext? context]) =>
+      brandFilledStyle(context);
 
   static InputDecoration warmSearchDecoration(
     BuildContext context,
