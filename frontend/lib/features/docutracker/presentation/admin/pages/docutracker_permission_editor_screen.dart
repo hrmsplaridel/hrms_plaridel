@@ -2353,19 +2353,44 @@ class _DocuTrackerPermissionEditorScreenState
                     ),
                   const SizedBox(width: 8),
                 ],
-                FilledButton.icon(
-                  key: const ValueKey('permission-save'),
-                  onPressed: canSave ? _save : null,
-                  icon: _saving
-                      ? const SizedBox(
-                          width: 16,
-                          height: 16,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : const Icon(Icons.check_rounded),
-                  label: Text(_saving ? 'Saving…' : 'Save changes'),
-                  style: DocuTrackerTokens.brandFilledStyle(),
-                ),
+                if (compact)
+                  Tooltip(
+                    message: _saving ? 'Saving…' : 'Save changes',
+                    child: FilledButton(
+                      key: const ValueKey('permission-save'),
+                      onPressed: canSave ? _save : null,
+                      style: DocuTrackerTokens.brandFilledStyle().copyWith(
+                        padding: const WidgetStatePropertyAll(
+                          EdgeInsets.all(12),
+                        ),
+                        minimumSize: const WidgetStatePropertyAll(Size(48, 48)),
+                      ),
+                      child: _saving
+                          ? const SizedBox(
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Icon(
+                              Icons.check_rounded,
+                              semanticLabel: 'Save changes',
+                            ),
+                    ),
+                  )
+                else
+                  FilledButton.icon(
+                    key: const ValueKey('permission-save'),
+                    onPressed: canSave ? _save : null,
+                    icon: _saving
+                        ? const SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.check_rounded),
+                    label: Text(_saving ? 'Saving…' : 'Save changes'),
+                    style: DocuTrackerTokens.brandFilledStyle(),
+                  ),
               ],
             );
           },
