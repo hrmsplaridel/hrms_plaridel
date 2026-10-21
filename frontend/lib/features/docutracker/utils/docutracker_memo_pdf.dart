@@ -487,6 +487,7 @@ Future<Uint8List> buildDocuTrackerMemoPdf({
     );
   }
 
+  final resolvedTheme = theme ?? await loadDocuTrackerMemoPdfTheme();
   final document = pw.Document(
     compress: compress,
     title: memo.subject.trim().isEmpty ? 'Memorandum' : memo.subject.trim(),
@@ -496,7 +497,7 @@ Future<Uint8List> buildDocuTrackerMemoPdf({
       maxPages: 50,
       pageTheme: pw.PageTheme(
         pageFormat: format,
-        theme: theme,
+        theme: resolvedTheme,
         margin: pw.EdgeInsets.fromLTRB(
           marginX,
           DocuTrackerMemoLayout.headerBottom * height,

@@ -108,6 +108,15 @@ class FormPdf {
   static pw.MemoryImage? _lockedPrintBg;
   static PdfPageFormat? _activeCustomFormat;
   static String? _customTemplateError;
+
+  /// Test seam. When set, background lookup does not touch [ApiClient].
+  /// Production printing leaves this null and uses [FormPrintTemplateRepo].
+  @visibleForTesting
+  static Future<FormPrintTemplate?> Function({
+    required String module,
+    required String formKey,
+  })?
+  debugLoadPrintTemplateMeta;
   static pw.Font? _idpPdfFont;
   static pw.Font? _idpPdfFontBold;
   static Uint8List? _idpBuildingBytes;
@@ -653,10 +662,13 @@ class FormPdf {
       return;
     }
     try {
-      final meta = await FormPrintTemplateRepo.instance.getMeta(
-        module: module,
-        formKey: formKey,
-      );
+      final metaLoader = debugLoadPrintTemplateMeta;
+      final meta = metaLoader != null
+          ? await metaLoader(module: module, formKey: formKey)
+          : await FormPrintTemplateRepo.instance.getMeta(
+              module: module,
+              formKey: formKey,
+            );
       if (meta == null) {
         _customTemplateCache[cacheKey] = const _CustomPrintBind();
         return;
@@ -734,12 +746,16 @@ class FormPdf {
     _idpPdfFontBold = pw.Font.ttf(bold);
   }
 
+  /// Noto Sans Regular and Bold. No italic file is bundled, so italic runs
+  /// use these upright faces and keep Unicode characters such as ñ and ₱.
   static pw.ThemeData get _idpPdfTheme {
     final base = _idpPdfFont ?? pw.Font.helvetica();
     final bold = _idpPdfFontBold ?? pw.Font.helveticaBold();
     return pw.ThemeData.withFont(
       base: base,
       bold: bold,
+      italic: _idpPdfFont,
+      boldItalic: _idpPdfFontBold,
     ).copyWith(defaultTextStyle: const pw.TextStyle(color: PdfColors.black));
   }
 
@@ -1509,8 +1525,9 @@ class FormPdf {
 
   static Future<pw.Document> buildBiFormPdf(BiFormEntry e) async {
     await ensureLogoLoaded();
+    await _ensureIdpPdfFonts();
     await _bindCustomTemplate('rsp', 'bi');
-    final doc = pw.Document();
+    final doc = pw.Document(theme: _idpPdfTheme);
     const formTitle = 'BACKGROUND INVESTIGATION (BI FORM)';
     final pageFormat = _printPageFormat(biPrintPageFormat);
 
@@ -1922,7 +1939,8 @@ class FormPdf {
     _lockedPrintBg = null;
     _activeCustomFormat = null;
     await ensureLogoLoaded();
-    final doc = pw.Document();
+    await _ensureIdpPdfFonts();
+    final doc = pw.Document(theme: _idpPdfTheme);
     doc.addPage(
       _fitPage(
         pageFormat: pageLetter,
@@ -3189,7 +3207,8 @@ class FormPdf {
     _lockedPrintBg = null;
     _activeCustomFormat = null;
     await ensureLogoLoaded();
-    final doc = pw.Document();
+    await _ensureIdpPdfFonts();
+    final doc = pw.Document(theme: _idpPdfTheme);
     doc.addPage(
       _fitPage(
         pageFormat: pageLongLandscape,
@@ -3324,7 +3343,8 @@ class FormPdf {
     _lockedPrintBg = null;
     _activeCustomFormat = null;
     await ensureLogoLoaded();
-    final doc = pw.Document();
+    await _ensureIdpPdfFonts();
+    final doc = pw.Document(theme: _idpPdfTheme);
     doc.addPage(
       _fitPage(
         pageFormat: pageLetter,
@@ -5126,7 +5146,8 @@ class FormPdf {
     TrainingDailyReport r,
   ) async {
     await ensureLogoLoaded();
-    final doc = pw.Document();
+    await _ensureIdpPdfFonts();
+    final doc = pw.Document(theme: _idpPdfTheme);
     doc.addPage(
       _fitPage(
         pageFormat: pageLetter,

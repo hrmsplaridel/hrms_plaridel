@@ -75,6 +75,12 @@ Future<void> _expectPdf(Future<pw.Document> documentFuture) async {
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
+  setUp(() {
+    FormPdf.debugLoadPrintTemplateMeta =
+        ({required module, required formKey}) async => null;
+  });
+  tearDown(() => FormPdf.debugLoadPrintTemplateMeta = null);
+
   test(
     'all supported RSP forms generate PDFs with persisted signatures',
     () async {
@@ -539,7 +545,7 @@ void main() {
     expect(raw.contains('612'), isTrue);
     expect(raw.contains('(088) 3448-200'), isFalse);
     expect(raw.contains('Asenso'), isFalse);
-    final text = _pdfPlainText(bytes);
+    final text = _pdfVisibleText(bytes);
     expect(text, contains('information'));
     expect(text, contains('stakeholder'));
     expect(text, contains('Describe'));
@@ -604,19 +610,129 @@ void main() {
       expect(await pages(11), 3);
     },
   );
+
+  test('RSP PDF text uses Noto Sans for ñ, ₱, and bold Unicode', () async {
+    final previousPrinting = PrintingPlatform.instance;
+    PrintingPlatform.instance = _NoRasterPrinting();
+    addTearDown(() => PrintingPlatform.instance = previousPrinting);
+
+    final document = await FormPdf.buildSelectionLineupPdf(
+      const SelectionLineupEntry(
+        vacantPosition: 'Administrative Officer',
+        applicants: [
+          SelectionLineupApplicant(name: 'Ni\u00F1o Dela Pe\u00F1a'),
+        ],
+        preparedByName: 'Fee \u20B11200',
+        preparedByTitle: 'Officer\u2019s desk',
+      ),
+    );
+    final bytes = await document.save();
+    final source = _pdfWithInflatedStreams(bytes);
+    expect(source, contains('/BaseFont/NotoSans-Regular'));
+    expect(source, contains('/BaseFont/NotoSans-Bold'));
+    expect(source, isNot(contains('/Helvetica')));
+
+    final regular = _toUnicodeForFont(source, 'NotoSans-Regular');
+    final bold = _toUnicodeForFont(source, 'NotoSans-Bold');
+    // Applicant name is regular. The italic position title uses the same
+    // upright Regular face because no italic file is bundled.
+    expect(regular, contains('<00F1>'));
+    expect(regular, contains('<2019>'));
+    expect(bold, contains('<20B1>'));
+  });
 }
 
-String _pdfPlainText(List<int> bytes) {
+/// PDF source with FlateDecode streams inflated so font CMaps are readable.
+String _pdfWithInflatedStreams(List<int> bytes) {
   final raw = latin1.decode(bytes, allowInvalid: true);
+  return raw.replaceAllMapped(
+    RegExp(
+      r'(/Filter\s*/FlateDecode[\s\S]*?stream\r?\n)([\s\S]*?)(\r?\nendstream)',
+    ),
+    (match) {
+      try {
+        final inflated = zlib.decode(latin1.encode(match.group(2)!));
+        return '${match.group(1)}'
+            '${latin1.decode(inflated, allowInvalid: true)}'
+            '${match.group(3)}';
+      } catch (_) {
+        return match.group(0)!;
+      }
+    },
+  );
+}
+
+String _toUnicodeForFont(String source, String baseFont) {
+  final objects = RegExp(r'(\d+) 0 obj\s*([\s\S]*?)\nendobj');
+  final byId = <String, String>{
+    for (final match in objects.allMatches(source))
+      match.group(1)!: match.group(2)!,
+  };
+  for (final body in byId.values) {
+    if (!body.contains('/BaseFont/$baseFont')) continue;
+    final toUnicode = RegExp(r'/ToUnicode (\d+) 0 R').firstMatch(body);
+    if (toUnicode == null) continue;
+    return byId[toUnicode.group(1)!] ?? '';
+  }
+  return '';
+}
+
+String _pdfVisibleText(List<int> bytes) {
+  final source = _pdfWithInflatedStreams(bytes);
+  final cmaps = _cmapsByFontNumber(source);
   final out = StringBuffer();
-  final streams = RegExp(r'stream\r?\n([\s\S]*?)\r?\nendstream');
-  for (final match in streams.allMatches(raw)) {
-    final data = latin1.encode(match.group(1)!);
-    try {
-      out.write(latin1.decode(zlib.decode(data), allowInvalid: true));
-    } catch (_) {
-      out.write(latin1.decode(data, allowInvalid: true));
+  var font = const <int, int>{};
+  final token = RegExp(
+    r'/F(\d+)\s+[\d.]+\s+Tf|\[<([0-9A-Fa-f]*)>\]TJ|\(((?:\\.|[^\\)])*)\)TJ',
+  );
+  for (final stream in RegExp(
+    r'stream\r?\n([\s\S]*?)\r?\nendstream',
+  ).allMatches(source)) {
+    final body = stream.group(1)!;
+    if (!body.contains('BT')) continue;
+    for (final match in token.allMatches(body)) {
+      if (match.group(1) != null) {
+        font = cmaps[match.group(1)!] ?? const {};
+      } else if (match.group(2) != null) {
+        final hex = match.group(2)!;
+        for (var i = 0; i + 4 <= hex.length; i += 4) {
+          final code = font[int.parse(hex.substring(i, i + 4), radix: 16)];
+          if (code != null && code != 0) out.writeCharCode(code);
+        }
+      } else if (match.group(3) != null) {
+        out.write(match.group(3));
+      }
     }
   }
   return out.toString();
+}
+
+Map<String, Map<int, int>> _cmapsByFontNumber(String source) {
+  final objects = RegExp(r'(\d+) 0 obj\s*([\s\S]*?)\nendobj');
+  final byId = <String, String>{
+    for (final match in objects.allMatches(source))
+      match.group(1)!: match.group(2)!,
+  };
+  final unicodeByObject = <String, Map<int, int>>{};
+  for (final entry in byId.entries) {
+    if (!entry.value.contains('beginbfchar')) continue;
+    final map = <int, int>{};
+    for (final pair in RegExp(
+      r'<([0-9A-Fa-f]{4})>\s*<([0-9A-Fa-f]{4})>',
+    ).allMatches(entry.value)) {
+      map[int.parse(pair.group(1)!, radix: 16)] = int.parse(
+        pair.group(2)!,
+        radix: 16,
+      );
+    }
+    unicodeByObject[entry.key] = map;
+  }
+  final fonts = <String, Map<int, int>>{};
+  for (final body in byId.values) {
+    final name = RegExp(r'/Name/F(\d+)').firstMatch(body);
+    final toUnicode = RegExp(r'/ToUnicode (\d+) 0 R').firstMatch(body);
+    if (name == null || toUnicode == null) continue;
+    fonts[name.group(1)!] = unicodeByObject[toUnicode.group(1)!] ?? const {};
+  }
+  return fonts;
 }

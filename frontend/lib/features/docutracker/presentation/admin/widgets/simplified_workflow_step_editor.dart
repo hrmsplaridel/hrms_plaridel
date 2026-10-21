@@ -348,49 +348,51 @@ class _SimplifiedWorkflowStepEditorState
                   const SizedBox(height: 20),
                   const _FieldHeading(number: 2, label: 'Assignee Mode'),
                   const SizedBox(height: 8),
-                  RadioListTile<_AssigneeMode>(
-                    contentPadding: EdgeInsets.zero,
-                    dense: true,
-                    title: const Text('Specific people'),
-                    subtitle: const Text('Pick a primary and optional backup.'),
-                    value: _AssigneeMode.specificPeople,
+                  RadioGroup<_AssigneeMode>(
                     groupValue: _assigneeMode,
-                    onChanged: (value) => setState(() {
-                      _assigneeMode = value!;
-                      _error = null;
-                    }),
-                  ),
-                  RadioListTile<_AssigneeMode>(
-                    contentPadding: EdgeInsets.zero,
-                    dense: true,
-                    title: const Text('Department reviewer of submitter'),
-                    subtitle: const Text(
-                      'Routes to the primary reviewer of the submitter\'s department. If the primary reviewer is the document creator, an eligible backup reviewer is used instead.',
-                    ),
-                    value: _AssigneeMode.submitterDepartmentHead,
-                    groupValue: _assigneeMode,
-                    onChanged: (value) => setState(() {
-                      _assigneeMode = value!;
-                      _error = null;
-                    }),
-                  ),
-                  if (canUseFixedDepartment)
-                    RadioListTile<_AssigneeMode>(
-                      contentPadding: EdgeInsets.zero,
-                      dense: true,
-                      title: const Text(
-                        'Department reviewer of a fixed department',
-                      ),
-                      subtitle: const Text(
-                        'Legacy: keeps the department stored on this step.',
-                      ),
-                      value: _AssigneeMode.fixedDepartmentHead,
-                      groupValue: _assigneeMode,
-                      onChanged: (value) => setState(() {
-                        _assigneeMode = value!;
+                    onChanged: (value) {
+                      if (value == null) return;
+                      setState(() {
+                        _assigneeMode = value;
                         _error = null;
-                      }),
+                      });
+                    },
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        RadioListTile<_AssigneeMode>(
+                          contentPadding: EdgeInsets.zero,
+                          dense: true,
+                          title: const Text('Specific people'),
+                          subtitle: const Text(
+                            'Pick a primary and optional backup.',
+                          ),
+                          value: _AssigneeMode.specificPeople,
+                        ),
+                        RadioListTile<_AssigneeMode>(
+                          contentPadding: EdgeInsets.zero,
+                          dense: true,
+                          title: const Text('Department reviewer of submitter'),
+                          subtitle: const Text(
+                            'Routes to the primary reviewer of the submitter\'s department. If the primary reviewer is the document creator, an eligible backup reviewer is used instead.',
+                          ),
+                          value: _AssigneeMode.submitterDepartmentHead,
+                        ),
+                        if (canUseFixedDepartment)
+                          RadioListTile<_AssigneeMode>(
+                            contentPadding: EdgeInsets.zero,
+                            dense: true,
+                            title: const Text(
+                              'Department reviewer of a fixed department',
+                            ),
+                            subtitle: const Text(
+                              'Legacy: keeps the department stored on this step.',
+                            ),
+                            value: _AssigneeMode.fixedDepartmentHead,
+                          ),
+                      ],
                     ),
+                  ),
                   const SizedBox(height: 12),
                   if (_usesSubmitterDepartmentHead) ...[
                     const _FieldHeading(number: 3, label: 'Resolved Assignees'),
