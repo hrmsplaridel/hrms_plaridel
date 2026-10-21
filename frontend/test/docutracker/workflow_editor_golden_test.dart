@@ -88,7 +88,11 @@ void main() {
       config: buildConfig(),
     );
 
-    expect(
+    // matchesGoldenFile compares pixels asynchronously. expect() returns
+    // before that finishes, and the test binding then records the mismatch
+    // only after it has already treated the test as successful. expectLater
+    // keeps the test open until the mismatch is reported.
+    await expectLater(
       find.byType(DocuTrackerWorkflowEditorScreen),
       matchesGoldenFile('goldens/docutracker/workflow_editor_shell.png'),
     );
@@ -101,7 +105,7 @@ void main() {
       config: buildConfig(),
     );
 
-    expect(
+    await expectLater(
       find.byType(DocuTrackerWorkflowEditorScreen),
       matchesGoldenFile('goldens/docutracker/workflow_editor_shell_narrow.png'),
     );
@@ -114,7 +118,7 @@ void main() {
       config: buildLongConfig(),
     );
 
-    expect(
+    await expectLater(
       find.byType(DocuTrackerWorkflowEditorScreen),
       matchesGoldenFile(
         'goldens/docutracker/workflow_editor_shell_long_list.png',

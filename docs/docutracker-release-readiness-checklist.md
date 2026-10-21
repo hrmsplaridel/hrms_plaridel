@@ -6,6 +6,13 @@ Use this document for P0/P1/P2 closure before go-live.
 
 ### 1) Schema parity (mandatory)
 
+- [ ] Run the read-only schema preflight before DocuTracker deployment or testing:
+  `node backend/scripts/check-docutracker-schema.js`
+  (from `backend/`: `npm run docutracker:schema-check`).
+  It only reads PostgreSQL catalogs. It does not run migrations.
+  A fresh database receives `primary_reviewer_designations` from `backend/scripts/init-schema.sql`.
+  An older database must apply `backend/scripts/migrations/dtr/20261009_employee_primary_reviewers.sql` manually.
+  That file is a DTR migration. DocuTracker depends on the table and does not create it.
 - [ ] Run: `backend/scripts/migrations/docutracker/verify-docutracker-source-parity.sql`
 - [ ] Required source tables exist:
   - [ ] `training_daily_reports`
