@@ -87,6 +87,9 @@ coverage/
 frontend/windows/installer/output/
 frontend/windows/installer/prerequisites/
 
+# Flutter golden failure images (master/test/diff). Baseline goldens stay tracked.
+frontend/test/docutracker/failures/
+
 # Symbolication related
 app.*.symbols
 
