@@ -163,6 +163,107 @@ test('sourceActionForRow exposes only the viewer current DTR leave action', () =
   );
 });
 
+test('Required Actions omits discarded leave drafts and keeps active ones', async () => {
+  const ownerId = '22222222-2222-4222-8222-222222222222';
+  const records = [
+    {
+      source_record_id: 'active-oct-21',
+      source_module: 'dtr',
+      source_table: 'leave_requests',
+      source_title: 'Leave 2026-10-21',
+      description: 'Leave request',
+      created_by: ownerId,
+      creator_name: 'Owner',
+      created_at: '2026-10-21T00:00:00.000Z',
+      updated_at: '2026-10-21T00:00:00.000Z',
+      source_status: 'draft',
+      source_owner_id: ownerId,
+      assigned_department_head_id: null,
+      viewer_is_department_reviewer: false,
+      discarded_at: null,
+    },
+    {
+      source_record_id: 'discarded-sept',
+      source_module: 'dtr',
+      source_table: 'leave_requests',
+      source_title: 'Leave 2026-09-14 to 2026-09-15',
+      description: 'Leave request',
+      created_by: ownerId,
+      creator_name: 'Owner',
+      created_at: '2026-09-14T00:00:00.000Z',
+      updated_at: '2026-09-20T00:00:00.000Z',
+      source_status: 'draft',
+      source_owner_id: ownerId,
+      assigned_department_head_id: null,
+      viewer_is_department_reviewer: false,
+      discarded_at: '2026-09-20T00:00:00.000Z',
+    },
+    {
+      source_record_id: 'approved-leave',
+      source_module: 'dtr',
+      source_table: 'leave_requests',
+      source_title: 'Leave 2026-09-16 to 2026-09-17',
+      description: 'Leave request',
+      created_by: ownerId,
+      creator_name: 'Owner',
+      created_at: '2026-09-16T00:00:00.000Z',
+      updated_at: '2026-09-18T00:00:00.000Z',
+      source_status: 'approved',
+      source_owner_id: ownerId,
+      assigned_department_head_id: null,
+      viewer_is_department_reviewer: false,
+      discarded_at: null,
+    },
+  ];
+
+  async function listedIds(user) {
+    let leaveSql = '';
+    const pool = {
+      query: async (sql, params = []) => {
+        if (sql.includes('FROM docutracker_permissions')) {
+          return params[1] === 'dtr'
+            ? {
+                rows: [
+                  {
+                    user_id: ownerId,
+                    role_id: null,
+                    document_type: 'dtr',
+                    granted: true,
+                  },
+                ],
+              }
+            : { rows: [] };
+        }
+        if (sql.includes('FROM leave_requests')) {
+          leaveSql = sql;
+          const visible = sql.includes('l.discarded_at IS NULL')
+            ? records.filter((row) => row.discarded_at == null)
+            : records;
+          return { rows: visible };
+        }
+        return { rows: [] };
+      },
+    };
+    const result = await listDocuments(pool, user, {});
+    return { leaveSql, documents: result.documents };
+  }
+
+  for (const user of [
+    { id: ownerId, role: 'employee' },
+    { id: ownerId, role: 'admin' },
+  ]) {
+    const { leaveSql, documents } = await listedIds(user);
+    assert.match(leaveSql, /l\.discarded_at IS NULL/);
+    const leaveDocs = documents.filter((doc) => doc.source_table === 'leave_requests');
+    const ids = leaveDocs.map((doc) => doc.source_record_id);
+    assert.deepEqual(ids.sort(), ['active-oct-21', 'approved-leave']);
+    const active = leaveDocs.find((doc) => doc.source_record_id === 'active-oct-21');
+    assert.equal(active.source_status, 'draft');
+    assert.equal(active.source_action, 'complete_in_dtr');
+    assert.equal(active.source_action_label, 'Complete and submit in DTR');
+  }
+});
+
 test('sourceActionForRow points L&D admins to the owning module step', () => {
   const admin = { id: 'admin-1', role: 'admin' };
   // Hiring steps belong to RSP; DocuTracker never offers them as actions.

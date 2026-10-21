@@ -370,7 +370,8 @@ async function listSourceBackedDocuments(pool, user, filters = {}) {
          ) AS viewer_is_department_reviewer
        FROM leave_requests l
        JOIN users u ON u.id = COALESCE(l.user_id, l.employee_id)
-       WHERE ${
+       WHERE l.discarded_at IS NULL
+         AND ${
          user.role === 'admin' || user.role === 'hr'
            ? '1=1'
            : `(
