@@ -7,7 +7,10 @@ const {normalizeWorkflow}=require('../services/approvalWorkflows');
 const router=express.Router();
 // Assigned reviewers use this inbox regardless of their global account role.
 router.get('/inbox',async(req,res)=>{
-  try {res.json(await require('../services/sharedWorkflowInbox').listInbox(pool,req.user,{includeHistory:req.query?.include_history==='true'}));}
+  try {res.json(await require('../services/sharedWorkflowInbox').listInbox(pool,req.user,{
+   includeHistory:req.query?.include_history==='true',paginated:req.query?.paginated==='true',
+   limit:req.query?.limit,kind:req.query?.kind,cursor:req.query?.cursor,requestId:req.query?.request_id,
+  }));}
   catch(error){res.status(error.statusCode||500).json({error:error.statusCode?error.message:'Could not load workflow approvals.'});}
 });
 router.get('/requests/:kind/:id/attachment',async(req,res)=>{

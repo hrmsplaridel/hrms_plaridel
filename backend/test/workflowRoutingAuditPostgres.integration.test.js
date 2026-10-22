@@ -23,7 +23,8 @@ test('configured primary/backups, custom steps, Mayor and manual routes execute 
    CREATE TEMP TABLE leave_final_reviewer_backups(employee_id uuid,backup_rank integer,effective_from date DEFAULT '2026-01-01',effective_to date,is_active boolean DEFAULT true);
    CREATE TEMP TABLE dtr_admin_access(admin_user_id uuid,leave_allowed boolean,locator_allowed boolean);
    CREATE TEMP TABLE approval_workflows(id uuid PRIMARY KEY,name text,current_version integer,is_active boolean DEFAULT true);
-   CREATE TEMP TABLE approval_workflow_versions(workflow_id uuid,version integer,steps jsonb,employment_types text[]);
+   CREATE TEMP TABLE approval_workflow_versions(workflow_id uuid,version integer,steps jsonb,employment_types text[],
+    self_filing_signatory_policy text DEFAULT 'mayor');
    CREATE TEMP TABLE leave_types(id uuid PRIMARY KEY,name text);
    CREATE TEMP TABLE leave_requests(id uuid PRIMARY KEY,user_id uuid,employee_id uuid,status text,workflow_snapshot jsonb,signature_revision integer DEFAULT 1,
     final_review_route text,final_reviewer_user_id uuid,department_id uuid,leave_type_id uuid,start_date date,end_date date,created_at timestamptz DEFAULT now(),discarded_at timestamptz);
@@ -49,7 +50,7 @@ test('configured primary/backups, custom steps, Mayor and manual routes execute 
    const request=id(sequence++),workflow=id(sequence++);
    const steps=route.map((s,i)=>({...s,step_order:i+1}));
    await db.query("INSERT INTO approval_workflows(id,name,current_version) VALUES($1,'Audit route',1)",[workflow]);
-   await db.query('INSERT INTO approval_workflow_versions VALUES($1,1,$2,NULL)',[workflow,JSON.stringify(steps)]);
+   await db.query('INSERT INTO approval_workflow_versions(workflow_id,version,steps,employment_types) VALUES($1,1,$2,NULL)',[workflow,JSON.stringify(steps)]);
    await db.query(`INSERT INTO ${engine.tableFor(kind)}(id,employee_id,user_id,status,department_id) VALUES($1,$2,$2,'draft',$3)`,[request,id(1),id(20)]);
    const prepared=await engine.prepareWorkflow(db,kind,{approval_workflow_id:workflow},id(1));
    await engine.initialWorkflow(db,kind,request,prepared);

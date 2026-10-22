@@ -13,12 +13,14 @@ class WorkflowInboxCache {
   List<dynamic>? _rows;
   DateTime? _loadedAt;
   Future<List<dynamic>>? _pending;
+  final Map<String, String> _cursors = {};
+  final Map<String, Future<Map<String, Map<String, dynamic>>>> _more = {};
   int _generation = 0;
   int _session = 0;
 
   Future<Map<String, Map<String, dynamic>>> get(
     String kind,
-    Future<List<dynamic>> Function() load, {
+    Future<dynamic> Function() load, {
     bool forceRefresh = false,
   }) async {
     final session = _session;
@@ -33,8 +35,22 @@ class WorkflowInboxCache {
         return _forKind(_rows!, kind);
       }
 
+      if (_pending == null) {
+        _generation++;
+        _more.clear();
+      }
       final generation = _generation;
-      final pending = _pending ??= Future<List<dynamic>>.sync(load);
+      final pending = _pending ??= Future<dynamic>.sync(load).then((data) {
+        if (generation != _generation || session != _session) {
+          return <dynamic>[];
+        }
+        final rows = _pageRows(data);
+        final cursors = _pageCursors(data);
+        _cursors
+          ..clear()
+          ..addAll(cursors);
+        return rows;
+      });
       try {
         final rows = await pending;
         if (session != _session) {
@@ -60,6 +76,84 @@ class WorkflowInboxCache {
     _rows = null;
     _loadedAt = null;
     _pending = null;
+    _cursors.clear();
+    _more.clear();
+  }
+
+  bool hasMore(String kind) => _cursors.containsKey(kind);
+
+  Future<Map<String, Map<String, dynamic>>> loadMore(
+    String kind,
+    Future<dynamic> Function(String cursor) load,
+  ) {
+    if (_pending != null) {
+      final session = _session;
+      return _pending!.then((_) {
+        if (session != _session) {
+          throw StateError('The approval inbox session changed.');
+        }
+        return loadMore(kind, load);
+      });
+    }
+    final existing = _more[kind];
+    if (existing != null) return existing;
+    final cursor = _cursors[kind];
+    if (cursor == null) return Future.value(_forKind(_rows ?? [], kind));
+    final generation = _generation, session = _session;
+    late final Future<Map<String, Map<String, dynamic>>> pending;
+    pending = Future<dynamic>.sync(() => load(cursor))
+        .then((data) {
+          if (generation != _generation || session != _session) {
+            throw StateError(
+              'The approval inbox changed. Refresh before loading more.',
+            );
+          }
+          final pageRows = _pageRows(data);
+          final cursors = _pageCursors(data);
+          if (cursors[kind] == cursor) {
+            throw const FormatException('Approval pagination did not advance.');
+          }
+          final merged = <String, dynamic>{
+            for (final row in [...?_rows, ...pageRows].whereType<Map>())
+              '${row['kind']}/${row['id']}': _copy(row),
+          };
+          _rows = merged.values.toList();
+          _cursors.remove(kind);
+          if (cursors[kind] != null) _cursors[kind] = cursors[kind]!;
+          return _forKind(_rows!, kind);
+        })
+        .whenComplete(() {
+          if (identical(_more[kind], pending)) _more.remove(kind);
+        });
+    _more[kind] = pending;
+    return pending;
+  }
+
+  static List<dynamic> _pageRows(dynamic data) {
+    if (data is List) return List<dynamic>.from(data);
+    if (data is Map && data['items'] is List) {
+      return List<dynamic>.from(data['items']);
+    }
+    throw const FormatException('Invalid approval inbox response.');
+  }
+
+  static Map<String, String> _pageCursors(dynamic data) {
+    if (data is! Map) return {};
+    final result = <String, String>{};
+    final cursors = data['next_cursor'];
+    final more = data['has_more'];
+    if (cursors is! Map || more is! Map) {
+      throw const FormatException('Missing approval pagination.');
+    }
+    for (final kind in ['leave', 'locator']) {
+      if (more[kind] != true) continue;
+      final cursor = cursors[kind];
+      if (cursor is! String || cursor.isEmpty) {
+        throw const FormatException('Invalid approval pagination cursor.');
+      }
+      result[kind] = cursor;
+    }
+    return result;
   }
 
   /// Unlike data invalidation, an account change must terminate old readers.

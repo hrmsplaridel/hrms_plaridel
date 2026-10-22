@@ -1,5 +1,6 @@
 'use strict';
 const engine=require('./approvalWorkflows');
+const pagingSupport=require('./workflowInboxPaging');
 const {sanitizeEmployeeLeaveDetails,normalizeEmployeeDetailSchema,normalizeEmployeeOfficialSnapshot,customLeaveDetailValues}=require('./leaveRequestDetailsPolicy');
 function forbidden(){throw Object.assign(new Error('This workflow request is not assigned to you.'),{statusCode:403});}
 async function canRead(db,kind,row,user) {
@@ -27,9 +28,17 @@ async function getRequest(db,kind,id,user,{decision=false}={}) {
  }
  return row;
 }
-async function listInbox(db,user,{includeHistory=false}={}) {
+async function listInbox(db,user,options={}) {
+ const {includeHistory=false}=options;
+ const paging=pagingSupport.optionsFor(options);
+ db=pagingSupport.memoizedReads(db);
  const entries=[];
- for(const kind of ['leave','locator']) {
+ const sortKeys=new Map();
+ const next_cursor={},has_more={};
+ for(const kind of paging.kinds) {
+  let count=0,last=null;
+  has_more[kind]=false;
+  next_cursor[kind]=null;
   const table=engine.tableFor(kind),owner=kind==='leave'?'COALESCE(r.employee_id,r.user_id)':'r.employee_id';
   const assignedScope=`(r.status IN ('pending_hr','pending_mayor')
     AND ((r.workflow_snapshot #> ARRAY['steps',r.workflow_snapshot->>'current_step','user_ids']) ? $1::text
@@ -37,20 +46,30 @@ async function listInbox(db,user,{includeHistory=false}={}) {
   const scope=includeHistory?`(${assignedScope} OR EXISTS (
     SELECT 1 FROM jsonb_array_elements(COALESCE(r.workflow_snapshot->'decisions','[]'::jsonb)) decision
     WHERE decision->>'actor_id'=$1::text))`:assignedScope;
-  const result=await db.query(`SELECT r.*,u.full_name AS employee_name${kind==='locator'?',r.slip_date::text AS slip_date_text,d.name AS department_name':',lt.name AS leave_type_name'} FROM ${table} r JOIN users u ON u.id=${owner}
+  const sql=`SELECT r.*,to_char(r.created_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS inbox_created_at,u.full_name AS employee_name${kind==='locator'?',r.slip_date::text AS slip_date_text,d.name AS department_name':',lt.name AS leave_type_name'} FROM ${table} r JOIN users u ON u.id=${owner}
     ${kind==='locator'?'LEFT JOIN departments d ON d.id=r.department_id':'LEFT JOIN leave_types lt ON lt.id=r.leave_type_id'}
     WHERE jsonb_typeof(r.workflow_snapshot->'steps'->0)='object'
       AND ${owner}<>$1::uuid
       ${kind==='leave'?'AND r.discarded_at IS NULL':''}
-      AND ${scope}
-    ORDER BY r.created_at DESC,r.id`,[user.id]);
-  for(const row of result.rows) {
+      AND ${scope}`;
+  for await(const row of pagingSupport.candidates(db,sql,user.id,paging)) {
    const snapshot=row.workflow_snapshot;
    const pending=!snapshot.outcome&&['pending_hr','pending_mayor'].includes(row.status)&&snapshot.current_step<snapshot.steps.length;
    const reviewers=pending?await engine.resolveWorkflowReviewers(db,kind,row):[];
    const canReview=reviewers.some(r=>String(r.id)===String(user.id));
    const reviewed=snapshot.decisions?.some(d=>String(d.actor_id)===String(user.id));
    if(!canReview&&!(includeHistory&&reviewed))continue;
+   if(paging.paginated && count===paging.limit) {
+    has_more[kind]=true;
+    next_cursor[kind]=pagingSupport.cursorFor(last,kind,includeHistory);
+    break;
+   }
+   count++;
+   last=row;
+   if(paging.paginated)sortKeys.set(kind+'/'+row.id,{
+    rank:['pending_hr','pending_mayor'].includes(row.status)?0:1,
+    created:row.inbox_created_at||new Date(row.created_at).toISOString(),
+   });
    const step=snapshot.steps[Math.min(snapshot.current_step,snapshot.steps.length-1)];
    const dateOnly=value=>value instanceof Date?value.toISOString().slice(0,10):value?.toString().slice(0,10)||null;
    const leaveSchema=kind==='leave'?normalizeEmployeeDetailSchema(row.employee_detail_schema_snapshot):[];
@@ -90,6 +109,11 @@ async function listInbox(db,user,{includeHistory=false}={}) {
     attachment_name:row.attachment_name || null});
   }
  }
- return entries.sort((a,b)=>new Date(b.created_at)-new Date(a.created_at));
+ const items=entries.sort((a,b)=>{
+  if(!paging.paginated)return new Date(b.created_at)-new Date(a.created_at);
+  const left=sortKeys.get(a.kind+'/'+a.id),right=sortKeys.get(b.kind+'/'+b.id);
+  return left.rank-right.rank || right.created.localeCompare(left.created) || b.id.localeCompare(a.id);
+ });
+ return paging.paginated?{items,has_more,next_cursor,limit:paging.limit}:items;
 }
 module.exports={canRead,pendingReadAccess,getRequest,listInbox};

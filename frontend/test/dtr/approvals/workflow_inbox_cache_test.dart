@@ -31,6 +31,197 @@ void main() {
     {'id': 'locator-request', 'kind': 'locator', 'can_review': true},
   ];
 
+  test('an expired first page supersedes a delayed older page', () async {
+    var now = DateTime(2026);
+    final cache = WorkflowInboxCache(now: () => now);
+    await cache.get(
+      'leave',
+      () async => {
+        'items': rows,
+        'has_more': {'leave': true},
+        'next_cursor': {'leave': 'old-cursor'},
+      },
+    );
+    final response = Completer<dynamic>();
+    final oldPage = cache.loadMore('leave', (_) => response.future);
+    final failure = expectLater(oldPage, throwsStateError);
+    now = now.add(const Duration(seconds: 15));
+    await cache.get('leave', () async => <dynamic>[]);
+    response.complete(<dynamic>[
+      {'id': 'obsolete', 'kind': 'leave'},
+    ]);
+    await failure;
+    expect(await cache.get('leave', () async => rows), isEmpty);
+  });
+
+  test(
+    'load more waits for a first-page refresh and uses the refreshed cursor',
+    () async {
+      final cache = WorkflowInboxCache();
+      dynamic responsePage(String? cursor) => {
+        'items': rows,
+        'has_more': {'leave': cursor != null},
+        'next_cursor': {'leave': cursor},
+      };
+      await cache.get('leave', () async => responsePage('old-cursor'));
+      final response = Completer<dynamic>();
+      final refresh = cache.get(
+        'leave',
+        () => response.future,
+        forceRefresh: true,
+      );
+      final more = cache.loadMore('leave', (cursor) async {
+        expect(cursor, 'new-cursor');
+        return responsePage(null);
+      });
+      response.complete(responsePage('new-cursor'));
+      await refresh;
+      expect((await more).length, 1);
+    },
+  );
+
+  test(
+    'client requests bounded pages and accepts module continuation metadata',
+    () async {
+      ApiClient.instance.dio.interceptors.add(
+        InterceptorsWrapper(
+          onRequest: (options, handler) {
+            expect(options.queryParameters['paginated'], true);
+            expect(options.queryParameters['limit'], 50);
+            handler.resolve(
+              Response(
+                requestOptions: options,
+                data: {
+                  'items': rows,
+                  'has_more': {'leave': true, 'locator': false},
+                  'next_cursor': {'leave': 'next-leave-page', 'locator': null},
+                },
+              ),
+            );
+          },
+        ),
+      );
+      expect((await loadAssignedWorkflowRequests('leave')).keys, [
+        'leave-request',
+      ]);
+    },
+  );
+
+  dynamic page(List<dynamic> items, {String? cursor}) => {
+    'items': items,
+    'has_more': {'leave': cursor != null, 'locator': false},
+    'next_cursor': {'leave': cursor, 'locator': null},
+  };
+
+  test(
+    'loading the next module page appends rows without dropping the other module',
+    () async {
+      var now = DateTime(2026);
+      final cache = WorkflowInboxCache(now: () => now);
+      await cache.get('leave', () async => page(rows, cursor: 'page-2'));
+      now = now.add(const Duration(seconds: 30));
+      final result = await cache.loadMore('leave', (cursor) async {
+        expect(cursor, 'page-2');
+        return page([
+          {'id': 'older-leave', 'kind': 'leave'},
+        ]);
+      });
+      expect(result.keys, ['leave-request', 'older-leave']);
+      expect(cache.hasMore('leave'), false);
+      // No forced refresh: inspect the other module while the initial page is fresh.
+      now = now.subtract(const Duration(seconds: 30));
+      final locator = await cache.get(
+        'locator',
+        () async => throw StateError('Unexpected fetch'),
+      );
+      expect(locator.keys, ['locator-request']);
+    },
+  );
+
+  test(
+    'simultaneous load-more calls share one request and failure retains its cursor',
+    () async {
+      final cache = WorkflowInboxCache();
+      await cache.get('leave', () async => page(rows, cursor: 'page-2'));
+      final pending = Completer<dynamic>();
+      var calls = 0;
+      Future<dynamic> load(String cursor) {
+        calls++;
+        return pending.future;
+      }
+
+      final first = cache.loadMore('leave', load),
+          second = cache.loadMore('leave', load);
+      final firstError = expectLater(first, throwsStateError);
+      final secondError = expectLater(second, throwsStateError);
+      pending.completeError(StateError('Unavailable'));
+      await Future.wait([firstError, secondError]);
+      expect(calls, 1);
+      expect(cache.hasMore('leave'), true);
+      final retry = await cache.loadMore(
+        'leave',
+        (_) async => page([
+          {'id': 'older', 'kind': 'leave'},
+        ]),
+      );
+      expect(retry.length, 2);
+    },
+  );
+
+  for (final change in ['event', 'account', 'refresh']) {
+    test(
+      '$change prevents a delayed page from repopulating the inbox',
+      () async {
+        final cache = WorkflowInboxCache();
+        await cache.get('leave', () async => page(rows, cursor: 'page-2'));
+        final response = Completer<dynamic>();
+        final pending = cache.loadMore('leave', (_) => response.future);
+        final failure = expectLater(pending, throwsStateError);
+        if (change == 'event') cache.invalidate();
+        if (change == 'account') cache.clearSession();
+        await cache.get(
+          'leave',
+          () async => page([]),
+          forceRefresh: change == 'refresh',
+        );
+        response.complete(
+          page([
+            {'id': 'obsolete', 'kind': 'leave'},
+          ]),
+        );
+        await failure;
+        expect(
+          await cache.get(
+            'leave',
+            () async => throw StateError('Unexpected fetch'),
+          ),
+          isEmpty,
+        );
+        expect(cache.hasMore('leave'), false);
+      },
+    );
+  }
+
+  test(
+    'a repeated cursor is rejected without losing loaded rows or retry state',
+    () async {
+      final cache = WorkflowInboxCache();
+      await cache.get('leave', () async => page(rows, cursor: 'page-2'));
+      await expectLater(
+        cache.loadMore('leave', (_) async => page([], cursor: 'page-2')),
+        throwsFormatException,
+      );
+      expect(cache.hasMore('leave'), true);
+      expect(
+        (await cache.get(
+          'leave',
+          () async => throw StateError('Unexpected fetch'),
+        )).length,
+        1,
+      );
+    },
+  );
+
   test(
     'simultaneous Leave and Locator loads share one inbox request',
     () async {

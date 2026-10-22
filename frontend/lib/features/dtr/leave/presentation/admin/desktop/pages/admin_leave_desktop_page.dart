@@ -609,10 +609,11 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         _AdminHeaderCard(
-          totalRequests: totalCount,
+          totalRequests: hasMoreAssignedWorkflowRequests('leave') ? filteredRequests.length : totalCount,
+          partialAssignments: hasMoreAssignedWorkflowRequests('leave'),
           hasMore: provider.reviewHasMore(
             departmentHead: widget.isDepartmentHead,
-          ),
+          ) || hasMoreAssignedWorkflowRequests('leave'),
           pendingCount: filteredRequests
               .where(
                 (r) => _assignedRequests[r.id] != null
@@ -780,6 +781,10 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
               _openRequestDetailsPanel(request);
             },
           ),
+        WorkflowInboxMoreButton(
+          kind: 'leave',
+          onLoaded: (rows) => setState(() => _assignedRequests = rows),
+        ),
       ],
     );
   }
@@ -863,15 +868,31 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
 
   Future<void> _openCurrentAssignedRequest(LeaveRequest request) async {
     // Another primary/backup may have completed this step since the queue loaded.
-    await _loadRequests(forceRefresh: true);
+    final id = request.id;
+    if (id == null) return;
+    Map<String, dynamic>? assigned;
+    try {
+      assigned = await loadAssignedWorkflowRequest('leave', id);
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not verify this request. Refresh before reviewing.')),
+        );
+      }
+      return;
+    }
     if (!mounted) return;
-    final assigned = _assignedRequests[request.id];
+    setState(() {
+      if (assigned == null) {
+        _assignedRequests.remove(id);
+      } else {
+        _assignedRequests[id] = assigned;
+      }
+    });
     if (assigned != null) {
       await _reviewAssigned(assigned);
       return;
     }
-    final id = request.id;
-    if (id == null) return;
     final fresh = await context.read<LeaveProvider>().refreshRequestById(id);
     if (!mounted) return;
     if (fresh == null) {
@@ -1599,6 +1620,7 @@ class _AdminHeaderCard extends StatelessWidget {
   const _AdminHeaderCard({
     required this.totalRequests,
     required this.hasMore,
+    this.partialAssignments = false,
     required this.pendingCount,
     required this.reviewing,
     required this.onRefresh,
@@ -1614,6 +1636,7 @@ class _AdminHeaderCard extends StatelessWidget {
 
   final int totalRequests;
   final bool hasMore;
+  final bool partialAssignments;
   final int pendingCount;
   final bool reviewing;
   final Future<void> Function() onRefresh;
@@ -1788,7 +1811,7 @@ class _AdminHeaderCard extends StatelessWidget {
                         runSpacing: 10,
                         children: [
                           AdminLeaveHeaderChip(
-                            label: 'Total Matching',
+                            label: partialAssignments ? 'Loaded Requests' : 'Total Matching',
                             value: '$totalRequests',
                           ),
                           AdminLeaveHeaderChip(

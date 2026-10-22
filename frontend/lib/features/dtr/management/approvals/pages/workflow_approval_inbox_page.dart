@@ -43,12 +43,77 @@ Future<Map<String, Map<String, dynamic>>> loadAssignedWorkflowRequests(
   String kind, {
   bool forceRefresh = false,
 }) => WorkflowInboxCache.instance.get(kind, () async {
-  final response = await ApiClient.instance.get<List<dynamic>>(
+  final response = await ApiClient.instance.get<dynamic>(
     '/api/approval-workflows/inbox',
-    queryParameters: {'include_history': true},
+    queryParameters: {'include_history': true, 'paginated': true, 'limit': 50},
   );
   return response.data ?? <dynamic>[];
 }, forceRefresh: forceRefresh);
+
+Future<Map<String, Map<String, dynamic>>> loadMoreAssignedWorkflowRequests(String kind) =>
+    WorkflowInboxCache.instance.loadMore(kind, (cursor) async {
+      final response = await ApiClient.instance.get<dynamic>(
+        '/api/approval-workflows/inbox',
+        queryParameters: {'include_history': true, 'paginated': true, 'limit': 50,
+          'kind': kind, 'cursor': cursor},
+      );
+      return response.data;
+    });
+
+bool hasMoreAssignedWorkflowRequests(String kind) => WorkflowInboxCache.instance.hasMore(kind);
+
+Future<Map<String, dynamic>?> loadAssignedWorkflowRequest(String kind, String id) async {
+  final response = await ApiClient.instance.get<dynamic>(
+    '/api/approval-workflows/inbox',
+    queryParameters: {'include_history': true, 'paginated': true, 'limit': 1,
+      'kind': kind, 'request_id': id},
+  );
+  final data = response.data;
+  final rows = data is Map ? data['items'] : data;
+  if (rows is! List) throw const FormatException('Invalid approval inbox response.');
+  for (final row in rows.whereType<Map>()) {
+    if (row['kind'] == kind && row['id'] == id) return Map<String, dynamic>.from(row);
+  }
+  return null;
+}
+
+class WorkflowInboxMoreButton extends StatefulWidget {
+  const WorkflowInboxMoreButton({super.key, required this.kind, required this.onLoaded});
+  final String kind;
+  final ValueChanged<Map<String, Map<String, dynamic>>> onLoaded;
+  @override
+  State<WorkflowInboxMoreButton> createState() => _WorkflowInboxMoreButtonState();
+}
+
+class _WorkflowInboxMoreButtonState extends State<WorkflowInboxMoreButton> {
+  bool _loading = false;
+  String? _error;
+  @override
+  Widget build(BuildContext context) {
+    if (!WorkflowInboxCache.instance.hasMore(widget.kind) && _error == null) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.only(top: 12),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        if (_error != null) Text(_error!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
+        TextButton.icon(
+          icon: const Icon(Icons.expand_more),
+          label: Text(_loading ? 'Loading workflow requests…' : 'Load more workflow requests'),
+          onPressed: _loading ? null : () async {
+            setState(() { _loading = true; _error = null; });
+            try {
+              final rows = await loadMoreAssignedWorkflowRequests(widget.kind);
+              if (mounted) widget.onLoaded(rows);
+            } catch (_) {
+              if (mounted) setState(() => _error = 'Could not load more workflow requests. Refresh or try again.');
+            } finally {
+              if (mounted) setState(() => _loading = false);
+            }
+          },
+        ),
+      ]),
+    );
+  }
+}
 
 Future<bool> reviewAssignedWorkflowRequest(
   BuildContext context,
@@ -169,11 +234,7 @@ class _WorkflowDecisionDialogState extends State<_WorkflowDecisionDialog> {
       _refreshError = null;
     });
     try {
-      final assigned = await loadAssignedWorkflowRequests(
-        'leave',
-        forceRefresh: true,
-      );
-      var current = assigned[_request['id']];
+      var current = await loadAssignedWorkflowRequest('leave', _request['id'].toString());
       if (current == null) {
         // Backups who did not act disappear from the assigned inbox after completion.
         // Load the authorized source record for the final status and complete history.

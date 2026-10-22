@@ -369,6 +369,18 @@ class _AdminLocatorManagementScreenState
                     ],
                   ),
                 ),
+              WorkflowInboxMoreButton(
+                kind: 'locator',
+                onLoaded: (rows) => setState(() {
+                  _assignedRequests = rows;
+                  final merged = <String, _LocatorAdminRecord>{
+                    for (final item in _items) item.id: item,
+                    for (final item in _matchingAssignedRecords(rows)) item.id: item,
+                  };
+                  _totalItems += merged.length - _items.length;
+                  _items = merged.values.toList();
+                }),
+              ),
             ],
           ),
         ),

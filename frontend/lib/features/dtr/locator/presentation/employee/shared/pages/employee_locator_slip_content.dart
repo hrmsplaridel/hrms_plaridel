@@ -1382,6 +1382,17 @@ class EmployeeLocatorSlipContentState extends State<EmployeeLocatorSlipContent>
                     ),
                   ],
                 ],
+                WorkflowInboxMoreButton(
+                  kind: 'locator',
+                  onLoaded: (rows) => setState(() {
+                    _assignedRequests = rows;
+                    final previousCount = _deptHeadQueue.length;
+                    _mergeLocatorPage(_deptHeadQueue, rows.values.map((entry) =>
+                      _LocatorSlipDraft.fromApi(Map<String, dynamic>.from(entry['request_data'] as Map)),
+                    ).toList(), append: true);
+                    _approvalTotal += _deptHeadQueue.length - previousCount;
+                  }),
+                ),
               ],
             ),
     );
