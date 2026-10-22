@@ -49,7 +49,8 @@ async function substitutePrimaryApplicantOfficial(db, row, officials) {
     });
     if (String(department.primary?.reviewerId || '') === String(row.employee_id)) conflicts.push('department_head');
   }
-  if (!['active_mayor', 'manual_mayor'].includes(steps.at(-1)?.assignee_source)) {
+  if (!require('./approvalWorkflows').isDepartmentOnlyWorkflow(row.workflow_snapshot) &&
+      !['active_mayor', 'manual_mayor'].includes(steps.at(-1)?.assignee_source)) {
     const final = await resolveFinalLeaveReviewerConfiguration(db);
     if (String(final.primary?.id || '') === String(row.employee_id)) conflicts.push('hr_approver');
   }

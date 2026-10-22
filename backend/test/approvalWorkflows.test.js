@@ -3,7 +3,44 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const {
   normalizeWorkflow, workflowStatus, nextWorkflowStep, resolveWorkflowReviewers, prepareWorkflow,
+  printOfficials,
 } = require('../src/services/approvalWorkflows');
+
+for (const kind of ['leave', 'locator']) {
+  for (const source of ['submitter_department_reviewers', 'department_reviewers', 'final_hr_reviewers', 'active_mayor', 'specific_users']) {
+    test(`${kind} single ${source} step prints the confirmed reviewer in the matching form block`, async () => {
+      const departmentOnly = ['submitter_department_reviewers', 'department_reviewers'].includes(source);
+      const row = { employee_id: 'applicant', status: 'approved', workflow_snapshot: {
+        steps: [{ assignee_source: source }], current_step: 1,
+        decisions: [{ step: 0, action: 'approve', actor_id: 'acting-backup',
+          reviewer: { employee_id: 'acting-backup', name: 'Saved Acting Reviewer', position_title: 'Saved Title' } }],
+      } };
+      const before = structuredClone(row);
+      const officials = await printOfficials({ query: async () => { throw Error('Use the saved reviewer snapshot'); } }, kind, row);
+      const active = departmentOnly ? officials.department_head : officials.hr_approver;
+      const blank = departmentOnly ? officials.hr_approver : officials.department_head;
+      assert.equal(active.id, 'acting-backup');
+      assert.equal(active.name, 'Saved Acting Reviewer');
+      assert.equal(active.position_title, 'Saved Title');
+      assert.equal(blank.id, null);
+      assert.equal(blank.name, '');
+      assert.deepEqual(row, before, 'Printing must not modify the filed workflow');
+    });
+  }
+  test(`${kind} multiple review steps retain separate department and final printed officials`, async () => {
+    const row = { workflow_snapshot: { steps: [
+      { assignee_source: 'submitter_department_reviewers' },
+      { assignee_source: 'final_hr_reviewers' },
+      { assignee_source: 'active_mayor' },
+    ], decisions: [
+      { step: 0, action: 'approve', actor_id: 'head', reviewer: { name: 'Department Reviewer' } },
+      { step: 2, action: 'approve', actor_id: 'mayor', reviewer: { name: 'Mayor' } },
+    ] } };
+    const officials = await printOfficials({}, kind, row);
+    assert.equal(officials.department_head.id, 'head');
+    assert.equal(officials.hr_approver.id, 'mayor');
+  });
+}
 
 test('named workflows validate executable ordered steps and manual signing', () => {
   assert.deepEqual(normalizeWorkflow({name:' Full approval ', steps:['department','hr','mayor']}),

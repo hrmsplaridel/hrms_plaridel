@@ -11,6 +11,10 @@ function stepKind(step) {
 }
 function stepLabel(step) {return typeof step==='string'?STEP_LABELS[step]:step?.label;}
 function isShared(snapshot) {return snapshot?.steps?.some(step=>typeof step==='object' && step!==null)===true;}
+function isDepartmentOnlyWorkflow(snapshot) {
+  return snapshot?.steps?.length===1 &&
+    ['submitter_department_reviewers','department_reviewers'].includes(snapshot.steps[0]?.assignee_source);
+}
 function workflowRoute(snapshot) {return snapshot.steps.some(s=>stepKind(s)==='mayor')?'mayor_direct':snapshot.steps.some(s=>stepKind(s)==='manual_mayor')?'mayor':'hr';}
 function legacyStep(step,index) {
   return {step_order:index+1,label:STEP_LABELS[step],assignee_type:'user',
@@ -207,6 +211,9 @@ async function printOfficials(db,kind,row) {
   return {...profile,id:reviewers[0].id,name:decision?.signature?.signer_name_snapshot||profile?.name||reviewers[0].name||''};
  }
  const first=indices[0],last=indices.at(-1);
+ if(isDepartmentOnlyWorkflow(snapshot)) {
+  return {department_head:await official(first),hr_approver:{id:null,name:'',position_title:''}};
+ }
  if(stepKind(snapshot.steps.at(-1))==='manual_mayor') {
   const mayor=row.status==='approved' && row.approving_authority_snapshot?.name?row.approving_authority_snapshot:
     row.print_signatories?.hr_approver || await require('./officialSignatoryService').resolveActiveMayor(db,todayInHrmsTimezone());
@@ -290,4 +297,4 @@ async function workflowDecision(db,kind,id,actorId,action,expected=null) {
 }
 module.exports={normalizeWorkflow,workflowStatus,nextWorkflowStep,resolveWorkflowReviewers,prepareWorkflow,saveWorkflow,
   initialWorkflow,selectedWorkflowId,loadRequestWorkflow,workflowDecision,tableFor,isCurrentMayor,STEP_LABELS,
-    stepKind,stepLabel,isShared,workflowRoute,legacyStep,normalizeSharedSteps,reviewerProfile,printOfficials,assertActiveSelectedReviewers,decisionSignatures,currentStepSignature};
+    stepKind,stepLabel,isShared,isDepartmentOnlyWorkflow,workflowRoute,legacyStep,normalizeSharedSteps,reviewerProfile,printOfficials,assertActiveSelectedReviewers,decisionSignatures,currentStepSignature};

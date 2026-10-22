@@ -16,6 +16,41 @@ const steps = [
   { label: 'Mayor', assignee_source: 'active_mayor' },
 ];
 
+for (const policy of ['mayor', 'actual_reviewer']) for (const applicantIsFinalHr of [false, true]) {
+  test(`department-only Locator prints confirmed head ink and leaves final block empty: ${policy}, applicant HR=${applicantIsFinalHr}`, async () => {
+    const signature = { revision: 1, signature_asset_id: id(30), signer_name_snapshot: 'Admin User' };
+    const row = { id: id(10), employee_id: applicant, employee_name: 'Applicant',
+      department_id: department, slip_date_text: '2026-10-22', status: 'approved', signature_revision: 1,
+      print_signatories: { applicant: profile(applicant, 'Applicant'), department_head: profile(head, 'Old Head'), hr_approver: profile(head, 'Old Final') },
+      workflow_snapshot: { steps: steps.slice(0, 1), current_step: 1, self_filing_signatory_policy: policy,
+        decisions: [{ step: 0, action: 'approve', actor_id: head, reviewer: profile(head, 'Admin User'), signature }] },
+    };
+    const calls = [];
+    const db = { query: async sql => {
+      calls.push(sql);
+      if (sql.includes('FROM locator_slips ls')) return { rows: [row] };
+      if (sql.includes('FROM docutracker_locator_signatures')) return { rows: [] };
+      if (sql.includes('FROM docutracker_signature_assets')) return { rows: [{ id: id(30), owner_user_id: head, signature_image_base64: 'saved-head-ink' }] };
+      throw Error('Unexpected query ' + sql);
+    } };
+    const restores = [
+      withMockedModule('../src/services/departmentReviewerService', { resolveDepartmentReviewers: async () => ({ primary: { reviewerId: head } }) }),
+      withMockedModule('../src/services/leaveFinalReviewerService', { resolveFinalLeaveReviewerConfiguration: async () => ({ primary: profile(applicantIsFinalHr ? applicant : hr, 'Primary HR') }) }),
+      withMockedModule('../src/services/officialSignatoryService', { resolveActiveMayor: async () => mayorProfile }),
+      withMockedModule('../src/services/sharedWorkflowInbox', { canRead: async () => true }),
+    ];
+    const module = '../src/services/locatorSignatureService'; clearModule(module);
+    try {
+      const result = await require(module).getLocatorSourceSignatures(db, { id: applicant, role: 'employee' }, 'dtr', 'locator_slips', row.id);
+      assert.equal(result.print_signatories.department_head.name, 'Admin User');
+      assert.equal(result.print_signatories.department_head.signature_image_base64, 'saved-head-ink');
+      assert.equal(result.print_signatories.hr_approver.name, '');
+      assert.equal(result.print_signatories.hr_approver.signature_image_base64, null);
+      assert.equal(calls.some(sql => /^(UPDATE|INSERT|DELETE)/.test(sql)), false);
+    } finally { clearModule(module); restores.reverse().forEach(restore => restore()); }
+  });
+}
+
 for (const role of ['department', 'hr', 'both', 'neither']) {
   test(`shared leave replaces only the applicant's primary ${role} roles, preserving the approved Mayor`, async () => {
     const row = { id: id(10), employee_id: applicant, status: 'approved', submitted_on: '2026-10-01',
