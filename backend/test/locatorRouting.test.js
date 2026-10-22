@@ -2,6 +2,18 @@ const test=require('node:test');
 const assert=require('node:assert/strict');
 const {normalizeLocatorRouting,chooseLocatorRoute,resolveLocatorRouting,locatorFinalReviewers}=require('../src/services/locatorRouting');
 const {assertFinalLeaveReviewer}=require('../src/services/leaveFinalReviewerService');
+test('corrected Locator retains its filed workflow after the type workflow is removed', async () => {
+ const saved={id:'original',name:'Department Only',version:3,steps:['department'],current_step:0,
+   outcome:'returned_for_correction',decisions:[],self_filing_signatory_policy:'actual_reviewer'};
+ const routing=await resolveLocatorRouting({query:async()=>{throw Error('Do not use the new legacy Mayor route');}},
+   'applicant',{approval_workflow_id:null,approval_workflow_snapshot:saved,approval_route:'mayor_direct'},
+   'head',{departmentHeadUserId:'head',reviewerUserIds:['head']});
+ assert.equal(routing.route,'hr');
+ assert.equal(routing.status,'pending_department_head');
+ assert.equal(routing.workflow.id,'original');
+ assert.equal(routing.workflow.version,3);
+ assert.equal(routing.workflow.self_filing_signatory_policy,'actual_reviewer');
+});
 test('direct Mayor decisions reject HR and self approval',async()=>{
  const db={query:async(sql)=>({rows:sql.includes('department_approver_id')?[{}]:sql.includes('final_review_route')?[{final_review_route:'mayor_direct'}]:[{employee_id:'mayor',name:'Mayor'}]})};
  await assertFinalLeaveReviewer(db,'employee','mayor','locator','request');

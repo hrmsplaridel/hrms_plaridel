@@ -141,7 +141,7 @@ async function resolveWorkflowReviewers(db, kind, row, dependencies = {}) {
   return reviewers.filter(r => !excluded.has(String(r.id)));
 }
 async function prepareWorkflow(db, kind, rule, applicantId, reviewSnapshot) {
-  if (!rule?.approval_workflow_id) return null;
+  if (!rule?.approval_workflow_id && !rule?.approval_workflow_snapshot) return null;
   const saved=rule.approval_workflow_snapshot;
   const workflow = saved ? {...saved,is_active:true} : (await db.query(`SELECT w.id,w.name,w.is_active,v.version,v.steps,v.self_filing_signatory_policy
     FROM approval_workflows w JOIN approval_workflow_versions v ON v.workflow_id=w.id AND v.version=w.current_version

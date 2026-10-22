@@ -14,7 +14,7 @@ function chooseLocatorRoute(rule,type) {
    (rule.mayor_employment_types==null || rule.mayor_employment_types.includes(type))?rule.approval_route:'hr';
 }
 async function resolveLocatorRouting(db,applicantId,rule,headId,reviewSnapshot=null) {
- if(rule?.approval_workflow_id) {
+ if(rule?.approval_workflow_id || rule?.approval_workflow_snapshot) {
   const engine=require('./approvalWorkflows');
   const snapshot=await engine.prepareWorkflow(db,'locator',rule,applicantId,reviewSnapshot || {departmentHeadUserId:headId,reviewerUserIds:headId?[headId]:[]});
   const route=engine.workflowRoute(snapshot);

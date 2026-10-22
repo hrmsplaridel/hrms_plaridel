@@ -108,7 +108,7 @@ async function assertFinalLeaveReviewer(db, applicantId, actorId, requestType = 
 }
 
 async function assertLeaveSubmissionReviewer(db, applicantId, requestType = 'leave', rule = null, reviewSnapshot = null) {
-  if(rule?.approval_workflow_id) {
+  if(rule?.approval_workflow_id || rule?.approval_workflow_snapshot) {
     await require('./approvalWorkflows').prepareWorkflow(db,requestType,rule,applicantId,reviewSnapshot);
     return;
   }

@@ -243,7 +243,7 @@ module.exports = function createLeaveControllers({
               }
 
               // Two-stage workflow: resolve actual target status.
-              if (!leaveRule?.approval_workflow_id && leaveRule?.approval_route === 'mayor') {
+              if (!preparedWorkflow && leaveRule?.approval_route === 'mayor') {
                 const emp = (
                   await client.query('SELECT employment_type FROM users WHERE id=$1', [userId])
                 ).rows[0]?.employment_type;
