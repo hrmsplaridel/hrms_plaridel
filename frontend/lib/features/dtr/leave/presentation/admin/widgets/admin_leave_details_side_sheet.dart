@@ -73,30 +73,27 @@ class AdminLeaveDetailsSideSheet extends StatelessWidget {
                         req.status == LeaveRequestStatus.pendingDepartmentHead
                   : canReviewPending && req.status.isPending);
           final approved = req.status == LeaveRequestStatus.approved;
-          final canRevoke = approved && !isOwnRequest && onRevoke != null &&
+          final canRevoke =
+              approved &&
+              !isOwnRequest &&
+              onRevoke != null &&
               (!sharedWorkflow || req.canRevokeApproval == true);
           final revokeDisabledReason = canRevoke
               ? adminLeaveRevokeDisabledReason(req)
               : null;
-          return SingleChildScrollView(
-            padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
-            child: AdminLeaveRequestDetailsPanel(
-              request: req,
-              isDepartmentHead: isDepartmentHead,
-              reviewing: provider.reviewing,
-              onApprove: canReview ? () => onApprove(req) : null,
-              onReturn: canReview ? () => onReturn(req) : null,
-              onReject: canReview ? () => onReject(req) : null,
-              onPreview: onPreview == null ? null : () => onPreview!(req),
-              onRevoke:
-                  canRevoke && revokeDisabledReason == null
-                  ? () => onRevoke!(req)
-                  : null,
-              revokeDisabledReason: canRevoke
-                  ? revokeDisabledReason
-                  : null,
-              onPrint: () => onPrint(req),
-            ),
+          return AdminLeaveRequestDetailsPanel(
+            request: req,
+            isDepartmentHead: isDepartmentHead,
+            reviewing: provider.reviewing,
+            onApprove: canReview ? () => onApprove(req) : null,
+            onReturn: canReview ? () => onReturn(req) : null,
+            onReject: canReview ? () => onReject(req) : null,
+            onPreview: onPreview == null ? null : () => onPreview!(req),
+            onRevoke: canRevoke && revokeDisabledReason == null
+                ? () => onRevoke!(req)
+                : null,
+            revokeDisabledReason: canRevoke ? revokeDisabledReason : null,
+            onPrint: () => onPrint(req),
           );
         },
       ),
@@ -206,116 +203,162 @@ class AdminLeaveRequestDetailsPanel extends StatelessWidget {
     }
 
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    request!.employeeName ?? 'Unknown employee',
-                    style: TextStyle(
-                      color: AppTheme.dashTextPrimaryOf(context),
-                      fontSize: 26,
-                      fontWeight: FontWeight.w700,
+        Expanded(
+          child: SingleChildScrollView(
+            key: const ValueKey('leave-request-details-scroll'),
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            request!.employeeName ?? 'Unknown employee',
+                            style: TextStyle(
+                              color: AppTheme.dashTextPrimaryOf(context),
+                              fontSize: 26,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
+                    LeaveStatusChip(
+                      status: request!.status,
+                      label:
+                          statusLabel ??
+                          adminLeaveStatusLabel(
+                            request!.status,
+                            finalReviewRoute: request!.finalReviewRoute,
+                            isDepartmentHead: isDepartmentHead,
+                          ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 18),
+                Divider(height: 1, color: AppTheme.dashHairlineOf(context)),
+                const SizedBox(height: 20),
+                LeaveRequestInformation(request: request!),
+                if ((request!.attachmentName ?? '').trim().isNotEmpty) ...[
+                  _AdminLeaveAttachmentTile(
+                    requestId: request!.id,
+                    attachmentName: request!.attachmentName,
+                    hasAttachment: true,
+                    onOpen: onOpenAttachment,
                   ),
+                  const SizedBox(height: 16),
+                ],
+                AdminLeaveSubsectionTitle(title: 'Approval History'),
+                const SizedBox(height: 8),
+                HistoryTimeline(
+                  events: historyEvents ?? _buildHistoryEvents(request!),
+                ),
+                const SizedBox(height: 10),
+                if (reviewFields != null) ...[
+                  reviewFields!,
+                  const SizedBox(height: 16),
+                ],
+              ],
+            ),
+          ),
+        ),
+        _buildActionsFooter(context),
+      ],
+    );
+  }
+
+  Widget _buildActionsFooter(BuildContext context) {
+    return DecoratedBox(
+      key: const ValueKey('leave-request-actions-footer'),
+      decoration: BoxDecoration(
+        color: AppTheme.dashIsDark(context)
+            ? AppTheme.dashMutedSurfaceOf(context)
+            : AppTheme.offWhite,
+        border: Border(
+          top: BorderSide(color: AppTheme.dashHairlineOf(context)),
+        ),
+      ),
+      child: SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 12, 20, 16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              if (revokeDisabledReason != null) ...[
+                Text(
+                  revokeDisabledReason!,
+                  style: TextStyle(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+                ),
+                const SizedBox(height: 10),
+              ],
+              Wrap(
+                alignment: WrapAlignment.end,
+                spacing: 12,
+                runSpacing: 12,
+                children: [
+                  if (onApprove != null)
+                    FilledButton.icon(
+                      onPressed: reviewing || !approvalEnabled
+                          ? null
+                          : onApprove,
+                      icon: const Icon(Icons.check_circle_rounded),
+                      label: const Text('Approve'),
+                    ),
+                  if (onReturn != null)
+                    OutlinedButton.icon(
+                      onPressed: reviewing ? null : onReturn,
+                      icon: const Icon(Icons.reply_rounded),
+                      label: const Text('Return'),
+                    ),
+                  if (onReject != null)
+                    OutlinedButton.icon(
+                      onPressed: reviewing ? null : onReject,
+                      icon: const Icon(Icons.cancel_rounded),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: Colors.red.shade700,
+                        side: BorderSide(color: Colors.red.shade300),
+                      ),
+                      label: const Text('Reject'),
+                    ),
+                  if (onRevoke != null)
+                    OutlinedButton.icon(
+                      onPressed: reviewing ? null : onRevoke,
+                      icon: const Icon(Icons.undo_rounded),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: Colors.orange.shade800,
+                        side: BorderSide(color: Colors.orange.shade300),
+                      ),
+                      label: const Text('Revoke Approval'),
+                    ),
+                  if (onPreview != null)
+                    OutlinedButton.icon(
+                      onPressed: reviewing ? null : onPreview,
+                      icon: const Icon(Icons.visibility_outlined),
+                      label: const Text('Preview Form'),
+                    ),
+                  if (onPrint != null)
+                    OutlinedButton.icon(
+                      onPressed: reviewing ? null : onPrint,
+                      icon: const Icon(Icons.print_rounded),
+                      label: const Text('Print Form'),
+                    ),
                 ],
               ),
-            ),
-            LeaveStatusChip(
-              status: request!.status,
-              label:
-                  statusLabel ??
-                  adminLeaveStatusLabel(
-                    request!.status,
-                    finalReviewRoute: request!.finalReviewRoute,
-                    isDepartmentHead: isDepartmentHead,
-                  ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 18),
-        Divider(height: 1, color: AppTheme.dashHairlineOf(context)),
-        const SizedBox(height: 20),
-        LeaveRequestInformation(request: request!),
-        if ((request!.attachmentName ?? '').trim().isNotEmpty) ...[
-          _AdminLeaveAttachmentTile(
-            requestId: request!.id,
-            attachmentName: request!.attachmentName,
-            hasAttachment: true,
-            onOpen: onOpenAttachment,
+            ],
           ),
-          const SizedBox(height: 16),
-        ],
-        AdminLeaveSubsectionTitle(title: 'Approval History'),
-        const SizedBox(height: 8),
-        HistoryTimeline(events: historyEvents ?? _buildHistoryEvents(request!)),
-        const SizedBox(height: 10),
-        if (reviewFields != null) ...[
-          reviewFields!,
-          const SizedBox(height: 16),
-        ],
-        AdminLeaveSubsectionTitle(title: 'Actions'),
-        const SizedBox(height: 10),
-        if (revokeDisabledReason != null) ...[
-          Text(revokeDisabledReason!, style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant)),
-          const SizedBox(height: 10),
-        ],
-        Wrap(
-          spacing: 12,
-          runSpacing: 12,
-          children: [
-            if (onApprove != null)
-              FilledButton.icon(
-                onPressed: reviewing || !approvalEnabled ? null : onApprove,
-                icon: const Icon(Icons.check_circle_rounded),
-                label: const Text('Approve'),
-              ),
-            if (onReturn != null)
-              OutlinedButton.icon(
-                onPressed: reviewing ? null : onReturn,
-                icon: const Icon(Icons.reply_rounded),
-                label: const Text('Return'),
-              ),
-            if (onReject != null)
-              OutlinedButton.icon(
-                onPressed: reviewing ? null : onReject,
-                icon: const Icon(Icons.cancel_rounded),
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: Colors.red.shade700,
-                  side: BorderSide(color: Colors.red.shade300),
-                ),
-                label: const Text('Reject'),
-              ),
-            if (onRevoke != null)
-              OutlinedButton.icon(
-                onPressed: reviewing ? null : onRevoke,
-                icon: const Icon(Icons.undo_rounded),
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: Colors.orange.shade800,
-                  side: BorderSide(color: Colors.orange.shade300),
-                ),
-                label: const Text('Revoke Approval'),
-              ),
-            if (onPreview != null)
-              OutlinedButton.icon(
-                onPressed: reviewing ? null : onPreview,
-                icon: const Icon(Icons.visibility_outlined),
-                label: const Text('Preview Form'),
-              ),
-            if (onPrint != null)
-              OutlinedButton.icon(
-                onPressed: reviewing ? null : onPrint,
-                icon: const Icon(Icons.print_rounded),
-                label: const Text('Print Form'),
-              ),
-          ],
         ),
-      ],
+      ),
     );
   }
 

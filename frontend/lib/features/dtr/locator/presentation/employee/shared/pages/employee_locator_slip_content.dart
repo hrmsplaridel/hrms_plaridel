@@ -23,6 +23,8 @@ import 'package:hrms_plaridel/features/dtr/locator/presentation/employee/mobile/
 import 'package:hrms_plaridel/features/dtr/locator/presentation/employee/mobile/widgets/employee_locator_mobile_request_card.dart';
 import 'package:hrms_plaridel/features/dtr/locator/presentation/employee/mobile/widgets/employee_locator_mobile_request_list.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
+import 'package:hrms_plaridel/shared/widgets/workforce_loading_skeleton.dart';
+import 'package:hrms_plaridel/shared/widgets/skeleton_bone.dart';
 import 'package:hrms_plaridel/providers/auth_provider.dart';
 import 'package:hrms_plaridel/core/services/app_realtime_provider.dart';
 import 'package:hrms_plaridel/features/dtr/locator/utils/locator_slip_print.dart';
@@ -1301,9 +1303,7 @@ class EmployeeLocatorSlipContentState extends State<EmployeeLocatorSlipContent>
       subtitle:
           'Review pending locator, pass slip, and work-from-home requests.',
       icon: Icons.fact_check_rounded,
-      child: _loadingApprovals
-          ? const _CenteredLoading(message: 'Loading approval queue...')
-          : Column(
+      child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 RequestFiltersBar<String>(
@@ -1323,7 +1323,22 @@ class EmployeeLocatorSlipContentState extends State<EmployeeLocatorSlipContent>
                   onClearFilters: _clearApprovalFilters,
                   formatDate: _formatDate,
                 ),
-                const SizedBox(height: 16),
+                SizedBox(
+                  height: 4,
+                  width: double.infinity,
+                  child: _loadingApprovals && _approvalHistoryLoaded
+                      ? Semantics(
+                          label: 'Refreshing locator requests',
+                          child: const SkeletonBone(height: 4),
+                        )
+                      : null,
+                ),
+                const SizedBox(height: 12),
+                if (_loadingApprovals && !_approvalHistoryLoaded)
+                  const WorkforceRowsSkeleton(
+                    columns: [2, 1, 3, 1, 1],
+                    label: 'Loading locator approvals',
+                  ),
                 if (_approvalsError != null)
                   Padding(
                     padding: const EdgeInsets.only(bottom: 12),

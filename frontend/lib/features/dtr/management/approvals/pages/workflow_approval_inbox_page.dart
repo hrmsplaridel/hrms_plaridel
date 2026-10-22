@@ -468,10 +468,7 @@ class _WorkflowDecisionDialogState extends State<_WorkflowDecisionDialog> {
           body: isLeave
               ? AdminLeaveDetailsFrame(
                   canClose: !_saving,
-                  child: SingleChildScrollView(
-                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
-                    child: _leaveDetails(reviewFields, actions),
-                  ),
+                  child: _leaveDetails(reviewFields, actions),
                 )
               : _locatorDetails(reviewFields, actions),
         ),

@@ -29,12 +29,19 @@ void main() {
         expect(find.text('Preview Form'), findsOneWidget);
         expect(find.text('Print Form'), findsOneWidget);
         expect(find.text('Approve'), findsNothing);
-        expect(find.text('Actions'), findsOneWidget);
+        expect(find.text('Actions'), findsNothing);
         expect(find.text('Close'), findsNothing);
         expect(
           find.ancestor(
             of: find.text(label),
             matching: find.byType(SingleChildScrollView),
+          ),
+          findsNothing,
+        );
+        expect(
+          find.descendant(
+            of: find.byKey(const ValueKey('leave-request-actions-footer')),
+            matching: find.text(label),
           ),
           findsOneWidget,
         );

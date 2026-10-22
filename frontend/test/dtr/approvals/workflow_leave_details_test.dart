@@ -14,7 +14,7 @@ void main() {
     for (final stepCount in [2, 3]) {
       for (var stage = 0; stage < stepCount; stage++) {
         testWidgets(
-          '$stepCount-step workflow leave uses the old details layout at stage $stage, width $width',
+          '$stepCount-step workflow leave uses a fixed action footer at stage $stage, width $width',
           (tester) async {
             tester.view.physicalSize = Size(width, 1000);
             tester.view.devicePixelRatio = 1;
@@ -153,16 +153,23 @@ void main() {
             expect(find.text('Destination'), findsOneWidget);
             expect(find.text('Cebu'), findsOneWidget);
             expect(find.text('Approval History'), findsOneWidget);
-            expect(find.text('Actions'), findsOneWidget);
+            expect(find.text('Actions'), findsNothing);
             expect(find.text('Current review cycle'), findsNothing);
             expect(
               find.ancestor(
                 of: find.text('Approve'),
                 matching: find.byType(SingleChildScrollView),
               ),
-              findsOneWidget,
+              findsNothing,
               reason:
-                  'Workflow actions must use the existing scrollable Actions section.',
+                  'Workflow actions must remain in the fixed footer outside the scrolling details.',
+            );
+            expect(
+              find.descendant(
+                of: find.byKey(const ValueKey('leave-request-actions-footer')),
+                matching: find.text('Approve'),
+              ),
+              findsOneWidget,
             );
             expect(find.text('Submitted'), findsOneWidget);
             expect(find.textContaining('location_details:'), findsNothing);

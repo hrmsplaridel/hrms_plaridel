@@ -8,6 +8,7 @@ import 'package:hrms_plaridel/shared/widgets/reviewer_access_notice.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:hrms_plaridel/shared/widgets/workforce_loading_skeleton.dart';
+import 'package:hrms_plaridel/shared/widgets/skeleton_bone.dart';
 import 'package:provider/provider.dart';
 
 import 'package:hrms_plaridel/core/api/client.dart';
@@ -78,6 +79,7 @@ class _AdminLocatorManagementScreenState
   DateTime? _toDate;
   Map<String, Map<String, dynamic>> _assignedRequests = {};
   bool _loading = false;
+  bool _queueLoaded = false;
   String? _error;
   List<LocatorRequestType> _locatorTypes = [];
   List<LocatorAdminFilterOption> _departmentOptions = [];
@@ -274,7 +276,18 @@ class _AdminLocatorManagementScreenState
                   ),
                 ],
               ),
-              const SizedBox(height: 8),
+              const SizedBox(height: 4),
+              SizedBox(
+                height: 4,
+                width: double.infinity,
+                child: _loading && _queueLoaded &&
+                        (_canFinalReview || _assignedRequests.isNotEmpty)
+                    ? Semantics(
+                        label: 'Refreshing locator requests',
+                        child: const SkeletonBone(height: 4),
+                      )
+                    : null,
+              ),
               if (_error != null)
                 Container(
                   width: double.infinity,
@@ -298,7 +311,7 @@ class _AdminLocatorManagementScreenState
                     await _load(forceRefresh: true);
                   },
                 )
-              else if (_loading && _items.isEmpty)
+              else if (_loading && !_queueLoaded && _items.isEmpty)
                 Padding(
                   padding: const EdgeInsets.only(top: 10),
                   child: SizedBox(
@@ -332,33 +345,10 @@ class _AdminLocatorManagementScreenState
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      Stack(
-                        children: [
-                          _adminItemsTable(
-                            items: pageItems,
-                            maxHeight: maxListHeight,
-                            useScrollableList: useScrollableList,
-                          ),
-                          if (_loading)
-                            Positioned.fill(
-                              child: ColoredBox(
-                                color: AppTheme.dashPanelOf(
-                                  context,
-                                ).withValues(alpha: 0.72),
-                                child: Center(
-                                  child: Semantics(
-                                    label: 'Refreshing locator requests',
-                                    child: const SingleChildScrollView(
-                                      child: WorkforceRowsSkeleton(
-                                        columns: [2, 2, 1],
-                                        rows: 3,
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ),
-                        ],
+                      _adminItemsTable(
+                        items: pageItems,
+                        maxHeight: maxListHeight,
+                        useScrollableList: useScrollableList,
                       ),
                       if (_totalItems > _rowsPerPage) ...[
                         const SizedBox(height: 12),
@@ -1988,6 +1978,7 @@ class _AdminLocatorManagementScreenState
       if (!_canFinalReview) {
         setState(() {
           _items = _matchingAssignedRecords(assigned);
+          _queueLoaded = true;
           _totalItems = _items.length;
           _serverPageCount = 1;
         });
@@ -2047,6 +2038,7 @@ class _AdminLocatorManagementScreenState
         for (final item in assignedItems) item.id: item,
       };
       setState(() {
+        _queueLoaded = true;
         _items = [
           for (final item in assignedItems)
             if (actionableIds.contains(item.id)) item,
