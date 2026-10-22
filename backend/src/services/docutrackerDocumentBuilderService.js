@@ -2,6 +2,7 @@ const { v4: uuidv4 } = require('uuid');
 const {
   canUserPerformDocumentAction,
   canAddOwnSignatureToDocument,
+  nativeDocumentContentLockMessage,
 } = require('./docutrackerWorkflowService');
 
 const MAX_PAGES = 50;
@@ -229,6 +230,10 @@ async function saveDocumentBuilder(pool, user, documentId, input) {
   try {
     await client.query('BEGIN');
     const document = await getDocumentForUpdate(client, documentId, true);
+    const lockMessage = nativeDocumentContentLockMessage(document);
+    if (lockMessage) {
+      throw forbiddenError(lockMessage);
+    }
     if (!(await canEditBuilder(client, document, user))) {
       throw forbiddenError('You do not have permission to edit this document layout');
     }

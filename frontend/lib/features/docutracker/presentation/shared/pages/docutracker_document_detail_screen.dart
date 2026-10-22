@@ -30,7 +30,9 @@ import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/d
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_document_detail_ui.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_error_banner.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_release_section.dart';
+import 'package:hrms_plaridel/features/docutracker/utils/docutracker_content_lock.dart';
 import 'package:hrms_plaridel/features/docutracker/utils/docutracker_release_text.dart';
+import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_content_lock_banner.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_responsive_body.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_status_badge.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_source_signature_card.dart';
@@ -348,10 +350,11 @@ class _DocuTrackerDocumentDetailScreenState
           granted(DocumentAction.download.value) ||
           granted(DocumentAction.view.value);
       _canModifyAttachment =
-          isAdmin ||
-          (DocuTrackerDocumentVisibility.isWorkInProgressDraft(doc) &&
-              doc.createdBy == userId) ||
-          granted(DocumentAction.edit.value);
+          !docuTrackerNativeContentIsLocked(doc) &&
+          (isAdmin ||
+              (DocuTrackerDocumentVisibility.isWorkInProgressDraft(doc) &&
+                  doc.createdBy == userId) ||
+              granted(DocumentAction.edit.value));
       _permissionsLoading = false;
     });
   }
@@ -1161,6 +1164,10 @@ class _DocuTrackerDocumentDetailScreenState
           ],
         ),
         const SizedBox(height: 16),
+        if (docuTrackerNativeContentLockMessage(doc) case final lockMessage?) ...[
+          DocuTrackerContentLockBanner(message: lockMessage),
+          const SizedBox(height: 16),
+        ],
         Container(
           width: double.infinity,
           padding: const EdgeInsets.all(24),
@@ -2127,7 +2134,9 @@ class _DocuTrackerDocumentDetailScreenState
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          if (!_permissionsLoading && _canEdit && userId.isNotEmpty) ...[
+          if (!_permissionsLoading &&
+              _canViewAuditTrail &&
+              userId.isNotEmpty) ...[
             _buildNoteComposer(provider, doc, userId),
             const SizedBox(height: 16),
           ],

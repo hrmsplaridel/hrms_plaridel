@@ -14,7 +14,9 @@ import 'package:hrms_plaridel/features/docutracker/data/providers/docutracker_pr
 import 'package:hrms_plaridel/features/docutracker/models/document.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document_builder.dart';
 import 'package:hrms_plaridel/features/docutracker/models/docutracker_memo_template.dart';
+import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_content_lock_banner.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_error_banner.dart';
+import 'package:hrms_plaridel/features/docutracker/utils/docutracker_content_lock.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_memo_sheet.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_printable_page_frame.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_signature_field_visual.dart';
@@ -73,6 +75,11 @@ class _DocuTrackerDocumentBuilderScreenState
   bool _loadingDirectory = false;
   bool _exporting = false;
   bool _canEditLayout = false;
+  String? _staleLockMessage;
+
+  String? get _contentLockMessage =>
+      _staleLockMessage ?? docuTrackerNativeContentLockMessage(widget.document);
+
   bool _canAddOwnSignature = false;
 
   bool get _canInsertOwnSignature => _canEditLayout || _canAddOwnSignature;
@@ -427,10 +434,16 @@ class _DocuTrackerDocumentBuilderScreenState
     );
     if (!mounted) return false;
     if (saved == null) {
+      final message =
+          _provider.builderError ?? 'Could not save the document layout.';
+      final locked = message.toLowerCase().contains('read-only');
       setState(() {
         _saving = false;
-        _error =
-            _provider.builderError ?? 'Could not save the document layout.';
+        _error = message;
+        if (locked) {
+          _canEditLayout = false;
+          _staleLockMessage = message;
+        }
       });
       return false;
     }
@@ -1349,6 +1362,13 @@ class _DocuTrackerDocumentBuilderScreenState
                       Padding(
                         padding: const EdgeInsets.all(8),
                         child: DocuTrackerErrorBanner(message: _error!),
+                      ),
+                    if (_contentLockMessage case final lockMessage?)
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
+                        child: DocuTrackerContentLockBanner(
+                          message: lockMessage,
+                        ),
                       ),
                     Expanded(child: _buildWorkspace()),
                     _buildCanvasControls(),

@@ -573,6 +573,25 @@ function isDraftOrWipDocument(document, normalizedStatus = null) {
   );
 }
 
+function isNativeDocuTrackerDocument(document) {
+  const source = String(document?.source_module || document?.sourceModule || '').trim();
+  return source.length === 0;
+}
+
+/** Native documents leave the editable draft once routing, a decision, or release begins. */
+function nativeDocumentContentIsLocked(document) {
+  if (!document || !isNativeDocuTrackerDocument(document)) return false;
+  return !isDraftOrWipDocument(document);
+}
+
+function nativeDocumentContentLockMessage(document) {
+  if (!nativeDocumentContentIsLocked(document)) return null;
+  if (document.released_at || document.releasedAt) {
+    return 'This released document is finalized and read-only.';
+  }
+  return 'This document is no longer a draft, so its content is read-only.';
+}
+
 function userFacingValidationMessage(message) {
   if (!message) return message;
   const noSteps = message.match(/Workflow config for '([^']+)' has no steps/);
@@ -1890,6 +1909,12 @@ async function isUserAssignedSignature(client, { document, userId }) {
 
 async function canUserPerformDocumentAction(client, { user, document, action }) {
   if (action === RELEASE_ACTION) return canReleaseDocument(client, { user, document });
+  if (
+    (action === 'edit' || action === 'delete') &&
+    nativeDocumentContentIsLocked(document)
+  ) {
+    return false;
+  }
   const relationship = getRelationshipFlags(document, user);
   if (relationship.isAdmin && !WORKFLOW_STEP_ACTIONS.has(action)) return true;
 
@@ -2025,6 +2050,24 @@ async function getEffectivePermissionExplanation(client, { user, action, documen
   const canonicalAction = canonicalPermissionAction(action);
   const relationship = getRelationshipFlags(document, user);
   const scopeType = document ? 'document' : 'type';
+  if (
+    document &&
+    (canonicalAction === 'edit' || canonicalAction === 'delete') &&
+    nativeDocumentContentIsLocked(document)
+  ) {
+    const released = Boolean(document.released_at || document.releasedAt);
+    return {
+      scope: scopeType,
+      action: canonicalAction,
+      document_type: documentType,
+      explicit_matches: [],
+      explicit_decision: false,
+      fallback_decision: false,
+      final_decision: false,
+      relationship,
+      reason: released ? 'released_content_locked' : 'content_locked',
+    };
+  }
   if (
     relationship.isAdmin &&
     !WORKFLOW_STEP_ACTIONS.has(canonicalAction) &&
@@ -3263,6 +3306,10 @@ async function updateDocumentMetadata(pool, user, documentId, payload = {}) {
     if (!canView) {
       throw forbiddenError('You do not have access to this document');
     }
+    const lockMessage = nativeDocumentContentLockMessage(doc);
+    if (lockMessage) {
+      throw forbiddenError(lockMessage);
+    }
 
     const canEdit = await canUserPerformDocumentAction(client, {
       user,
@@ -3537,6 +3584,8 @@ module.exports = {
   resolveStepAssignees,
   resolveDepartmentReviewEscalation,
   isDraftOrWipDocument,
+  nativeDocumentContentIsLocked,
+  nativeDocumentContentLockMessage,
   listDocuments,
   getDocumentBundle,
   createDocument,

@@ -950,3 +950,47 @@ test('users outside the current step cannot add their own signature field', asyn
     assert.equal(state.rolledBack, true);
   }
 });
+
+test('saveDocumentBuilder rejects content changes after submission without writing', async () => {
+  const documentId = '11111111-1111-4111-8111-111111111111';
+  const userId = '33333333-3333-4333-8333-333333333333';
+  const document = {
+    id: documentId,
+    document_type: 'memo',
+    status: 'in_review',
+    created_by: userId,
+    current_holder_id: '77777777-7777-4777-8777-777777777777',
+    current_step: 1,
+    sent_time: '2026-10-01T00:00:00.000Z',
+  };
+  const statements = [];
+  const client = {
+    async query(sql) {
+      statements.push(sql);
+      if (sql === 'BEGIN' || sql === 'COMMIT' || sql === 'ROLLBACK') {
+        return { rowCount: 0, rows: [] };
+      }
+      if (sql.includes('SELECT * FROM docutracker_documents')) {
+        return { rowCount: 1, rows: [document] };
+      }
+      throw new Error(`Unexpected transaction query: ${sql}`);
+    },
+    release() {},
+  };
+  const pool = { connect: async () => client };
+
+  await assert.rejects(
+    saveDocumentBuilder(pool, { id: userId, role: 'admin' }, documentId, {
+      pages: [[{ insert: 'changed\n' }]],
+      signature_fields: [],
+      revision: 1,
+    }),
+    (error) => {
+      assert.equal(error.code, 'FORBIDDEN');
+      assert.match(error.message, /read-only/);
+      return true;
+    }
+  );
+  assert.equal(statements.some((sql) => sql.includes('INSERT INTO docutracker_document_contents')), false);
+  assert.equal(statements.some((sql) => sql.includes('docutracker_signature_fields')), false);
+});

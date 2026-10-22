@@ -15,6 +15,8 @@ const {
   listReviewedDepartments,
   canUserPerformDocumentAction,
   isDraftOrWipDocument,
+  nativeDocumentContentIsLocked,
+  nativeDocumentContentLockMessage,
   updateDocumentMetadata,
   recoverDocumentAssignment,
   describeViewerReleaseAccess,
@@ -154,9 +156,31 @@ async function loadDocumentRowForAccess(documentId) {
 
 async function canModifyDocumentAttachment(client, docRow, user) {
   if (!docRow || !user?.id) return false;
+  if (nativeDocumentContentIsLocked(docRow)) return false;
   if (user.role === 'admin') return true;
   if (isDraftOrWipDocument(docRow) && sameEntityId(docRow.created_by, user.id)) return true;
   return canUserPerformDocumentAction(client, { user, document: docRow, action: 'edit' });
+}
+
+function codedRouteError(code, message) {
+  const error = new Error(message);
+  error.code = code;
+  return error;
+}
+
+async function lockDocumentForAttachmentChange(client, documentId, user) {
+  const result = await client.query(
+    'SELECT * FROM docutracker_documents WHERE id = $1 FOR UPDATE',
+    [documentId]
+  );
+  if (!result.rowCount) throw codedRouteError('NOT_FOUND', 'Document not found');
+  const document = result.rows[0];
+  const lockMessage = nativeDocumentContentLockMessage(document);
+  if (lockMessage) throw codedRouteError('FORBIDDEN', lockMessage);
+  if (!(await canModifyDocumentAttachment(client, document, user))) {
+    throw codedRouteError('FORBIDDEN', 'You do not have permission to change this file.');
+  }
+  return document;
 }
 
 async function canDownloadDocumentFile(client, docRow, user) {
@@ -2630,8 +2654,12 @@ router.post('/documents/:id/attachment', protect, uploadDocutrackerAttachmentMw,
     if (!(await assertDocumentReadable(req, id))) {
       return res.status(403).json({ error: 'Forbidden' });
     }
-    if (!(await canModifyDocumentAttachment(pool, docRow, req.user))) {
-      return res.status(403).json({ error: 'You do not have permission to attach a file.' });
+    const lockMessage = nativeDocumentContentLockMessage(docRow);
+    if (lockMessage || !(await canModifyDocumentAttachment(pool, docRow, req.user))) {
+      if (req.file?.path && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+      return res.status(403).json({
+        error: lockMessage || 'You do not have permission to attach a file.',
+      });
     }
 
     const relPath = `${DOCUTRACKER_ATTACHMENT_SUBDIR}/${req.file.filename}`;
@@ -2640,6 +2668,7 @@ router.post('/documents/:id/attachment', protect, uploadDocutrackerAttachmentMw,
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
+      await lockDocumentForAttachmentChange(client, id, req.user);
       const updated = await client.query(
         `UPDATE docutracker_documents
          SET file_path = $1, file_name = $2, updated_at = NOW()
@@ -2669,6 +2698,10 @@ router.post('/documents/:id/attachment', protect, uploadDocutrackerAttachmentMw,
       const filePath = path.join(UPLOAD_DIR, uploadedRelPath);
       if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
     }
+    const mapped = mapWorkflowServiceError(err);
+    if (err?.code === 'FORBIDDEN' || err?.code === 'NOT_FOUND' || err?.code === 'VALIDATION') {
+      return res.status(mapped.status).json({ error: mapped.error });
+    }
     console.error('[docutracker POST /documents/:id/attachment]', err);
     res.status(500).json({ error: 'Failed to upload attachment' });
   }
@@ -2686,12 +2719,16 @@ router.delete('/documents/:id/attachment', protect, async (req, res) => {
     if (!(await assertDocumentReadable(req, id))) {
       return res.status(403).json({ error: 'Forbidden' });
     }
-    if (!(await canModifyDocumentAttachment(pool, docRow, req.user))) {
-      return res.status(403).json({ error: 'You do not have permission to remove the file.' });
+    const lockMessage = nativeDocumentContentLockMessage(docRow);
+    if (lockMessage || !(await canModifyDocumentAttachment(pool, docRow, req.user))) {
+      return res.status(403).json({
+        error: lockMessage || 'You do not have permission to remove the file.',
+      });
     }
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
+      await lockDocumentForAttachmentChange(client, id, req.user);
       await clearCurrentDocumentFiles(client, id);
       const updated = await client.query(
         `UPDATE docutracker_documents
@@ -2709,6 +2746,10 @@ router.delete('/documents/:id/attachment', protect, async (req, res) => {
       client.release();
     }
   } catch (err) {
+    const mapped = mapWorkflowServiceError(err);
+    if (err?.code === 'FORBIDDEN' || err?.code === 'NOT_FOUND' || err?.code === 'VALIDATION') {
+      return res.status(mapped.status).json({ error: mapped.error });
+    }
     console.error('[docutracker DELETE /documents/:id/attachment]', err);
     res.status(500).json({ error: 'Failed to remove attachment' });
   }
