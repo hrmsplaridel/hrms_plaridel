@@ -4445,15 +4445,17 @@ class FormPdf {
                   ),
                 ),
                 padding: const pw.EdgeInsets.only(left: 3, bottom: 1),
-                child: pw.FittedBox(
-                  fit: pw.BoxFit.scaleDown,
-                  alignment: pw.Alignment.bottomLeft,
-                  child: pw.Text(
-                    text.isEmpty ? ' ' : text,
-                    maxLines: 1,
-                    style: const pw.TextStyle(fontSize: 8),
-                  ),
-                ),
+                child: text.isEmpty
+                    ? null
+                    : pw.FittedBox(
+                        fit: pw.BoxFit.scaleDown,
+                        alignment: pw.Alignment.bottomLeft,
+                        child: pw.Text(
+                          text,
+                          maxLines: 1,
+                          style: const pw.TextStyle(fontSize: 8),
+                        ),
+                      ),
               ),
             ),
           ],
