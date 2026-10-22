@@ -48,7 +48,7 @@ test('Mayor monitoring indexes are present without requiring runtime bootstrap',
 });
 
 test('merged RSP and LD bootstrap upgrades also have explicit deployment migrations',()=>{
- for(const file of ['20261023_rsp_hired_account_sync.sql','20261023_ld_multiple_training_records.sql']) {
+ for(const file of ['20261023_rsp_hired_account_sync.sql','20261023_ld_multiple_training_records.sql','20261023_schema_support_parity.sql']) {
   assert.ok(fs.existsSync(path.join(root,'scripts/migrations',file)),`${file} is available for existing databases`);
  }
 });
@@ -87,6 +87,16 @@ test('fresh DTR installation resolves configured reviewers and preserves current
   db=new Client({connectionString:target.toString()});await db.connect();
   // Send the complete file as SQL, just like pgAdmin Query Tool: no psql includes.
   await db.query(schema);
+  // Existing deployments can predate these support objects while already having all columns.
+  await db.query(`DROP FUNCTION public.rsp_storage_path_allowed(text);
+    DROP TRIGGER trg_user_push_tokens_updated_at ON public.user_push_tokens;
+    ALTER TABLE public.leave_requests ALTER COLUMN user_id DROP NOT NULL;
+    ALTER TABLE public.dtr_daily_summary_deletions DROP CONSTRAINT dtr_daily_summary_deletions_restoration_reason_check`);
+  const storageUpgrade=fs.readFileSync(path.join(root,'scripts/migrations/rsp/rsp-storage-attachment-policy.sql'),'utf8');
+  const supportUpgrade=fs.readFileSync(path.join(root,'scripts/migrations/20261023_schema_support_parity.sql'),'utf8');
+  await db.query(storageUpgrade);await db.query(supportUpgrade);await db.query(supportUpgrade);
+  assert.equal((await db.query("SELECT is_nullable FROM information_schema.columns WHERE table_schema='public' AND table_name='leave_requests' AND column_name='user_id'")).rows[0].is_nullable,'NO');
+  assert.equal((await db.query("SELECT convalidated FROM pg_constraint WHERE conname='dtr_daily_summary_deletions_restoration_reason_check'")).rows[0].convalidated,true);
   const printPolicyMigration=fs.readFileSync(path.join(root,'scripts/migrations/dtr/20261018_workflow_self_filing_signatories.sql'),'utf8');
   // Simulate an upgrade from the old version table in this disposable database.
   await db.query(`CREATE SCHEMA print_policy_upgrade;
@@ -134,6 +144,9 @@ test('fresh DTR installation resolves configured reviewers and preserves current
     assert.equal(protectedUpdate.body.max_days,7);assert.equal(protectedUpdate.body.minimum_service_months,6);
   } finally {clearModule('../src/routes/leaveRoutes');restorePool();}
   const reset=(await db.query("INSERT INTO users(email,password_hash,full_name) VALUES('reset@test.invalid','test-hash','Reset User') RETURNING id")).rows[0];
+  const push=(await db.query("INSERT INTO user_push_tokens(user_id,token,updated_at) VALUES($1,'test-push-token','2000-01-01') RETURNING id,updated_at",[reset.id])).rows[0];
+  const updatedPush=(await db.query("UPDATE user_push_tokens SET last_seen_at=now() WHERE id=$1 RETURNING updated_at",[push.id])).rows[0];
+  assert.ok(updatedPush.updated_at>push.updated_at,'Push-token updates advance the timestamp');
   const assistance=(await db.query('INSERT INTO password_reset_requests(user_id) VALUES($1) RETURNING id',[reset.id])).rows[0];
   await db.query("INSERT INTO auth_password_reset_otps(user_id,code_hash,expires_at,assistance_request_id) VALUES($1,'test',now()+interval '5 minutes',$2)",[reset.id,assistance.id]);
   const audit=(await db.query("INSERT INTO audit_logs(user_id,entity_id,entity_type,action) VALUES($1,$1,'auth','test') RETURNING actor_snapshot,target_snapshot",[reset.id])).rows[0];
