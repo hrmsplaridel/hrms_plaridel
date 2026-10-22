@@ -2141,6 +2141,7 @@ CREATE TABLE IF NOT EXISTS recruitment_applications (
   final_interview_passed BOOLEAN,
   hired_user_id UUID REFERENCES users(id) ON DELETE SET NULL,
   hr_account_setup_done BOOLEAN NOT NULL DEFAULT FALSE,
+  hr_account_setup_linked_sync BOOLEAN NOT NULL DEFAULT FALSE,
   hire_credentials_email_sent_at TIMESTAMPTZ,
   hire_login_username TEXT,
   hire_login_password TEXT,
@@ -2398,6 +2399,7 @@ CREATE TABLE IF NOT EXISTS mayor_endorsement_requests (
   meeting_decided_by UUID REFERENCES users(id) ON DELETE SET NULL,
   meeting_decision_remarks TEXT,
   meeting_reschedule_proposed_at TIMESTAMPTZ,
+  is_test BOOLEAN NOT NULL DEFAULT false,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
@@ -3663,6 +3665,12 @@ CREATE INDEX IF NOT EXISTS idx_mayor_endorsement_requests_submitted
   ON mayor_endorsement_requests(submitted_at DESC);
 CREATE INDEX IF NOT EXISTS idx_mayor_endorsement_requests_office
   ON mayor_endorsement_requests(requested_office_id, destination_office_id);
+CREATE INDEX IF NOT EXISTS idx_mayor_endorsement_requests_meeting_request_status
+  ON mayor_endorsement_requests(meeting_request_status);
+CREATE INDEX IF NOT EXISTS idx_mayor_endorsement_requests_endorsed_at
+  ON mayor_endorsement_requests(endorsed_at DESC NULLS LAST);
+CREATE INDEX IF NOT EXISTS idx_mayor_endorsement_requests_is_test
+  ON mayor_endorsement_requests(is_test) WHERE is_test = true;
 CREATE INDEX IF NOT EXISTS idx_mayor_endorsement_activity_request_created
   ON mayor_endorsement_activity_logs(request_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_selection_lineup_entries_created

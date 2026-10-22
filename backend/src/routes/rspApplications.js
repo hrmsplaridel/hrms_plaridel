@@ -869,7 +869,6 @@ const RSP_ADMIN_STATUSES = new Set([
 // Admin status updates (approve/decline/failed/passed).
 router.put('/:applicationId/status', protect, async (req, res) => {
   try {
-    await ensureRspApplicationsTables();
     const { applicationId } = req.params;
     const { status } = req.body || {};
     if (!status || typeof status !== 'string') {
@@ -878,6 +877,7 @@ router.put('/:applicationId/status', protect, async (req, res) => {
     if (!RSP_ADMIN_STATUSES.has(status)) {
       return res.status(400).json({ error: 'Unsupported application status' });
     }
+    await ensureRspApplicationsTables();
     const outcome = await withRspTransaction(async (client) => {
       const current = await client.query(
         `SELECT status, email, full_name, applicant_number, position_applied_for
@@ -2098,7 +2098,9 @@ function generateHireTemporaryPassword(length = 12) {
 router.post('/:applicationId/send-credentials', recruitmentStaff, async (req, res) => {
   let hiredUserId = null;
   let previousHash = null;
+  let passwordHash = null;
   let passwordUpdated = false;
+  let credentialsSent = false;
   try {
     const useEmailJs = isEmailJsConfiguredForHireEmail();
     if (!useEmailJs && !isSmtpConfigured()) {
@@ -2147,13 +2149,17 @@ router.post('/:applicationId/send-credentials', recruitmentStaff, async (req, re
 
     const username = String(userRow.email || to).trim().toLowerCase();
     const password = generateHireTemporaryPassword();
-    const passwordHash = await bcrypt.hash(password, 10);
+    passwordHash = await bcrypt.hash(password, 10);
     previousHash = userRow.password_hash || null;
 
-    await pool.query(
-      `UPDATE public.users SET password_hash = $1, updated_at = now() WHERE id = $2::uuid`,
-      [passwordHash, hiredUserId],
+    const changed = await pool.query(
+      `UPDATE public.users SET password_hash = $1, auth_version = auth_version + 1,
+         updated_at = now() WHERE id = $2::uuid AND password_hash = $3 RETURNING id`,
+      [passwordHash, hiredUserId, previousHash],
     );
+    if (!changed.rowCount) {
+      return res.status(409).json({ error: 'The employee account changed. Refresh before sending credentials again.' });
+    }
     passwordUpdated = true;
 
     const name = String(row.full_name || '').trim() || 'Applicant';
@@ -2182,6 +2188,7 @@ router.post('/:applicationId/send-credentials', recruitmentStaff, async (req, re
       });
     }
 
+    credentialsSent = true;
     await pool.query(
       `
       UPDATE public.recruitment_applications
@@ -2202,11 +2209,12 @@ router.post('/:applicationId/send-credentials', recruitmentStaff, async (req, re
       hire_credentials_email_sent_at: new Date().toISOString(),
     });
   } catch (err) {
-    if (passwordUpdated && hiredUserId && previousHash) {
+    if (!credentialsSent && passwordUpdated && hiredUserId && previousHash) {
       try {
         await pool.query(
-          `UPDATE public.users SET password_hash = $1, updated_at = now() WHERE id = $2::uuid`,
-          [previousHash, hiredUserId],
+          `UPDATE public.users SET password_hash = $1, auth_version = auth_version + 1,
+             updated_at = now() WHERE id = $2::uuid AND password_hash = $3`,
+          [previousHash, hiredUserId, passwordHash],
         );
       } catch (restoreErr) {
         console.error('[rspApplications POST send-credentials] password restore failed', restoreErr);
@@ -2215,7 +2223,7 @@ router.post('/:applicationId/send-credentials', recruitmentStaff, async (req, re
     console.error('[rspApplications POST send-credentials]', err);
     const msg = err?.message ? String(err.message) : String(err);
     return res.status(500).json({
-      error: 'Failed to send email',
+      error: credentialsSent ? 'Email sent, but its delivery status could not be saved' : 'Failed to send email',
       details: msg,
     });
   }

@@ -2,7 +2,7 @@ const { pool } = require('../config/db');
 const policy = require('./rspIssuedFormPolicy');
 const { revisionIsNew } = require('./rspApplicantNotices');
 
-const ISSUED_FORM_MIGRATION = 'backend/scripts/migrations/20261006_rsp_issued_form_gate.sql';
+const ISSUED_FORM_MIGRATION = 'backend/scripts/migrations/rsp/20261006_rsp_issued_form_gate.sql';
 let issuedFormSchemaReady = false;
 
 class IssuedFormError extends Error {

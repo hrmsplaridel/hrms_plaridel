@@ -48,8 +48,17 @@ function parseReportPeriod(query = {}) {
       };
     }
     fromDate = fromRaw;
-    // inclusive end → exclusive next day
+    const start = new Date(`${fromRaw}T00:00:00Z`);
     const end = new Date(`${toRaw}T00:00:00Z`);
+    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) ||
+        start.toISOString().slice(0, 10) !== fromRaw ||
+        end.toISOString().slice(0, 10) !== toRaw) {
+      return { error: 'Custom report bounds must be valid calendar dates' };
+    }
+    if (fromRaw > toRaw) {
+      return { error: 'from_date must not be after to_date' };
+    }
+    // inclusive end → exclusive next day
     end.setUTCDate(end.getUTCDate() + 1);
     toDateExclusive = end.toISOString().slice(0, 10);
     return { period: 'custom', includeTest, fromDate, toDateExclusive, toDateInclusive: toRaw };
