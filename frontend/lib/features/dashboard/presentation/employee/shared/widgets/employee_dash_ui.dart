@@ -1,8 +1,7 @@
 import 'package:flutter/material.dart';
 
-import 'package:hrms_plaridel/features/dtr/attendance/presentation/widgets/real_time_clock.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
-import 'package:hrms_plaridel/shared/utils/time_greeting.dart';
+import 'package:hrms_plaridel/shared/widgets/dashboard_welcome_banner.dart';
 
 /// Dashboard accent colors (aligned with admin home welcome banner).
 class _EmployeeDashColors {
@@ -15,39 +14,6 @@ class EmployeeDashUi {
 
   static const double radiusLg = 20;
   static const double radiusMd = 16;
-
-  static BoxDecoration welcomeBanner(BuildContext context) {
-    final dark = AppTheme.dashIsDark(context);
-    return BoxDecoration(
-      borderRadius: BorderRadius.circular(radiusLg),
-      gradient: LinearGradient(
-        begin: Alignment.topLeft,
-        end: Alignment.bottomRight,
-        colors: dark
-            ? [const Color(0xFF252D3D), const Color(0xFF1E2430)]
-            : [const Color(0xFFFFF8F3), Colors.white, const Color(0xFFF5F8FF)],
-      ),
-      border: Border.all(
-        color: dark
-            ? AppTheme.dashHairlineOf(context)
-            : _EmployeeDashColors.accentOrange.withValues(alpha: 0.14),
-      ),
-      boxShadow: [
-        BoxShadow(
-          color: _EmployeeDashColors.accentOrange.withValues(
-            alpha: dark ? 0.12 : 0.08,
-          ),
-          blurRadius: 28,
-          offset: const Offset(0, 10),
-        ),
-        BoxShadow(
-          color: Colors.black.withValues(alpha: dark ? 0.25 : 0.04),
-          blurRadius: 16,
-          offset: const Offset(0, 4),
-        ),
-      ],
-    );
-  }
 
   static BoxDecoration elevatedPanel(BuildContext context) {
     final base = AppTheme.dashSurfaceCard(context, radius: radiusLg);
@@ -116,7 +82,7 @@ class EmployeeDashUi {
   );
 }
 
-/// Gradient welcome hero for the employee dashboard home.
+/// Welcome hero for the employee dashboard home.
 class EmployeeWelcomeBanner extends StatelessWidget {
   const EmployeeWelcomeBanner({
     super.key,
@@ -125,132 +91,17 @@ class EmployeeWelcomeBanner extends StatelessWidget {
   });
 
   final String displayName;
+
+  /// Kept for existing call sites. Layout follows the banner's own width.
   final bool isNarrow;
 
   @override
   Widget build(BuildContext context) {
-    final primary = AppTheme.dashTextPrimaryOf(context);
-    final secondary = AppTheme.dashTextSecondaryOf(context);
-    final greeting = personalizedTimeGreeting(displayName);
-
-    final copy = Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Container(
-          padding: EdgeInsets.symmetric(
-            horizontal: isNarrow ? 8 : 10,
-            vertical: isNarrow ? 4 : 5,
-          ),
-          decoration: BoxDecoration(
-            color: _EmployeeDashColors.accentOrange.withValues(alpha: 0.12),
-            borderRadius: BorderRadius.circular(20),
-            border: Border.all(
-              color: _EmployeeDashColors.accentOrange.withValues(alpha: 0.22),
-            ),
-          ),
-          child: Text(
-            'Employee Portal',
-            style: TextStyle(
-              color: _EmployeeDashColors.accentOrange,
-              fontSize: isNarrow ? 10.5 : 11,
-              fontWeight: FontWeight.w700,
-              letterSpacing: 0.4,
-            ),
-          ),
-        ),
-        SizedBox(height: isNarrow ? 8 : 12),
-        Text(
-          greeting,
-          style: TextStyle(
-            color: primary,
-            fontSize: isNarrow ? 19 : 28,
-            fontWeight: FontWeight.w800,
-            height: 1.15,
-          ),
-          maxLines: isNarrow ? 2 : 3,
-          overflow: TextOverflow.ellipsis,
-        ),
-        SizedBox(height: isNarrow ? 5 : 8),
-        Text(
-          "Here's your latest overview of your HR activities.",
-          style: TextStyle(
-            color: secondary,
-            fontSize: isNarrow ? 12.5 : 15,
-            height: isNarrow ? 1.3 : 1.45,
-          ),
-          maxLines: isNarrow ? 2 : null,
-          overflow: isNarrow ? TextOverflow.ellipsis : null,
-        ),
-      ],
-    );
-
-    return Container(
-      padding: EdgeInsets.all(isNarrow ? 14 : 26),
-      decoration: EmployeeDashUi.welcomeBanner(context),
-      child: Stack(
-        clipBehavior: Clip.none,
-        children: [
-          if (isNarrow)
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Expanded(child: copy),
-                const SizedBox(width: 10),
-                const RealTimeClock(
-                  compact: true,
-                  accentColor: _EmployeeDashColors.accentOrange,
-                ),
-              ],
-            )
-          else ...[
-            Positioned(
-              right: -16,
-              top: -24,
-              child: Container(
-                width: 160,
-                height: 160,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  gradient: RadialGradient(
-                    colors: [
-                      _EmployeeDashColors.accentOrange.withValues(alpha: 0.12),
-                      Colors.transparent,
-                    ],
-                  ),
-                ),
-              ),
-            ),
-            Positioned(
-              left: -8,
-              bottom: -16,
-              child: Container(
-                width: 100,
-                height: 100,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  gradient: RadialGradient(
-                    colors: [
-                      AppTheme.letterheadNavy.withValues(alpha: 0.08),
-                      Colors.transparent,
-                    ],
-                  ),
-                ),
-              ),
-            ),
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Expanded(child: copy),
-                const SizedBox(width: 20),
-                const RealTimeClock(
-                  accentColor: _EmployeeDashColors.accentOrange,
-                ),
-              ],
-            ),
-          ],
-        ],
-      ),
+    assert(isNarrow == isNarrow);
+    return DashboardWelcomeBanner(
+      portalLabel: 'Employee Portal',
+      displayName: displayName,
+      description: 'Welcome to your HRMS dashboard.',
     );
   }
 }

@@ -3,6 +3,9 @@ const assert = require('node:assert/strict');
 const {
   vacancyListedHeadlineKey,
   vacancyPositionKey,
+  vacancyMinimumStandards,
+  mergeBlankMinimumStandards,
+  applyPublishedDates,
   findListedVacancyForPosition,
   parseVacancyAgeRequirements,
   vacancyMinimumAge,
@@ -30,6 +33,54 @@ test('listed vacancy key uses the job title only', () => {
 
 test('legacy position key still falls back to requirements', () => {
   assert.equal(vacancyPositionKey({ education: 'BSIT' }), 'bsit');
+});
+
+test('vacancy minimum standards keep only posted qualification text', () => {
+  assert.deepEqual(
+    vacancyMinimumStandards({
+      headline: 'IT Staff',
+      education: ' Bachelor of Science in Information Technology ',
+      experience: '1 year relevant experience',
+      training: '',
+    }),
+    {
+      min_education: 'Bachelor of Science in Information Technology',
+      min_experience: '1 year relevant experience',
+      min_training: null,
+      min_eligibility: null,
+    },
+  );
+  assert.equal(vacancyMinimumStandards({ headline: 'IT Staff' }), null);
+});
+
+test('blank work experience standards fill without replacing saved text', () => {
+  const merged = mergeBlankMinimumStandards(
+    { min_education: 'Already saved', min_experience: '  ' },
+    {
+      min_education: 'From vacancy',
+      min_experience: '2 years',
+      min_training: '8 hours',
+      min_eligibility: null,
+    },
+  );
+  assert.equal(merged.changed, true);
+  assert.equal(merged.entry.min_education, 'Already saved');
+  assert.equal(merged.entry.min_experience, '2 years');
+  assert.equal(merged.entry.min_training, '8 hours');
+});
+
+test('published date stays on the first landing-page date for that title', () => {
+  const stamped = applyPublishedDates(
+    [
+      { headline: 'Work Immersion', education: 'Grade 12' },
+      { headline: 'IT Staff' },
+    ],
+    [{ headline: 'Work Immersion', published_at: '2026-09-01' }],
+    '2026-10-16',
+  );
+  assert.equal(stamped[0].published_at, '2026-09-01');
+  assert.equal(stamped[1].published_at, '2026-10-16');
+  assert.equal(stamped[0].education, 'Grade 12');
 });
 
 test('find listed vacancy ignores requirement-only rows', () => {

@@ -4,9 +4,10 @@ import 'package:provider/provider.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/features/dashboard/presentation/employee/mobile/widgets/employee_dashboard_mobile_nav_items.dart';
 import 'package:hrms_plaridel/features/docutracker/data/providers/docutracker_provider.dart';
+import 'package:hrms_plaridel/providers/auth_provider.dart';
 import 'package:hrms_plaridel/shared/widgets/collapsible_dashboard_sidebar.dart';
+import 'package:hrms_plaridel/shared/widgets/dashboard_header_actions.dart';
 import 'package:hrms_plaridel/shared/widgets/portal_sidebar_brand.dart';
-import 'package:hrms_plaridel/shared/widgets/user_avatar.dart';
 
 /// Left navigation drawer for the employee mobile shell.
 ///
@@ -53,10 +54,13 @@ class EmployeeDashboardMobileDrawer extends StatelessWidget {
             ),
             Padding(
               padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
-              child: _DrawerProfileTile(
+              child: DashboardSidebarProfileCard(
                 displayName: displayName,
+                subtitle: context.select<AuthProvider, String>(
+                  (auth) => dashboardAccountRoleLabel(auth.user?.role),
+                ),
                 avatarPath: avatarPath,
-                onTap: () {
+                onProfile: () {
                   Navigator.of(context).pop();
                   onProfile();
                 },
@@ -100,92 +104,3 @@ class EmployeeDashboardMobileDrawer extends StatelessWidget {
   }
 }
 
-class _DrawerProfileTile extends StatelessWidget {
-  const _DrawerProfileTile({
-    required this.displayName,
-    required this.avatarPath,
-    required this.onTap,
-  });
-
-  final String displayName;
-  final String? avatarPath;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(14),
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-          decoration: BoxDecoration(
-            color: AppTheme.dashMutedSurfaceOf(context),
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(
-              color: AppTheme.primaryNavy.withValues(alpha: 0.25),
-            ),
-          ),
-          child: Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.all(2),
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  border: Border.all(
-                    color: AppTheme.primaryNavy.withValues(alpha: 0.5),
-                    width: 2,
-                  ),
-                ),
-                child: UserAvatar(
-                  avatarPath: avatarPath,
-                  radius: 20,
-                  backgroundColor: AppTheme.dashHairlineOf(context),
-                  placeholderIconColor: AppTheme.primaryNavy,
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      displayName.isNotEmpty ? displayName : 'User',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        color: AppTheme.dashTextPrimaryOf(context),
-                        fontWeight: FontWeight.w700,
-                        fontSize: 14,
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      'View profile',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        color: AppTheme.dashTextSecondaryOf(context),
-                        fontSize: 12,
-                        height: 1.2,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              Icon(
-                Icons.chevron_right_rounded,
-                size: 22,
-                color: AppTheme.dashTextSecondaryOf(
-                  context,
-                ).withValues(alpha: 0.7),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}

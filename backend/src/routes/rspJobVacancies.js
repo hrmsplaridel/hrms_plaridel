@@ -8,7 +8,10 @@ const {
   vacancyMinimumAge,
   vacancyMaximumAge,
   enrichVacanciesWithApplicationCounts,
+  applyPublishedDates,
+  publishedDateOnly,
 } = require('../utils/jobVacancySlots');
+const { todayInHrmsTimezone } = require('../utils/dateRangeParser');
 
 const router = express.Router();
 const protect = [authMiddleware];
@@ -102,6 +105,23 @@ router.get('/', async (_req, res) => {
       minimum_age: vacancyMinimumAge(v),
       maximum_age: vacancyMaximumAge(v),
     }));
+    const stamped = applyPublishedDates(
+      vacancies,
+      vacancies,
+      publishedDateOnly(row.updated_at) || todayInHrmsTimezone(),
+    );
+    const publishedChanged = stamped.some(
+      (vacancy, index) => vacancy.published_at !== vacancies[index]?.published_at,
+    );
+    vacancies = stamped;
+    if (publishedChanged) {
+      await pool.query(
+        `UPDATE public.job_vacancy_announcement
+         SET vacancies = $1::jsonb
+         WHERE id = 'default'`,
+        [JSON.stringify(vacancies)],
+      );
+    }
     vacancies = await enrichVacanciesWithApplicationCounts(vacancies);
 
     const acceptingApplications =
@@ -148,6 +168,14 @@ router.put('/', protect, requireAdminOrSupervisor, async (req, res) => {
     const optStr = (x) =>
       typeof x === 'string' && x.trim().length ? x.trim() : null;
 
+    await ensureTable();
+    const current = await pool.query(
+      `SELECT vacancies FROM public.job_vacancy_announcement WHERE id = 'default' LIMIT 1`,
+    );
+    const existingVacancies = Array.isArray(current.rows[0]?.vacancies)
+      ? current.rows[0].vacancies
+      : [];
+
     const normalizedVacancies = [];
     for (const v of list.filter((item) => item && typeof item === 'object')) {
       const ages = parseVacancyAgeRequirements(v.minimum_age, v.maximum_age);
@@ -177,6 +205,13 @@ router.put('/', protect, requireAdminOrSupervisor, async (req, res) => {
         ...(ages.maximumAge != null ? { maximum_age: ages.maximumAge } : {}),
       });
     }
+    const withPublishedDates = applyPublishedDates(
+      normalizedVacancies,
+      existingVacancies,
+      todayInHrmsTimezone(),
+    );
+    normalizedVacancies.length = 0;
+    normalizedVacancies.push(...withPublishedDates);
 
     // Ensure landing-page table exists (idempotent).
     await ensureTable();

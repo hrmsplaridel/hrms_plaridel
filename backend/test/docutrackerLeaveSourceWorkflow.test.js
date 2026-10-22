@@ -22,6 +22,7 @@ function fakeDb({ canView = true, status, history = [], reviewers = [] }) {
       if (/^\s*SELECT 1/.test(sql)) {
         return { rowCount: canView ? 1 : 0, rows: canView ? [{}] : [] };
       }
+      if(sql.startsWith('SELECT * FROM leave_requests'))return {rows:[],rowCount:0};
       if (sql.includes('FROM leave_requests l') && sql.includes('assigned_department_head_name')) {
         return {
           rowCount: 1,
@@ -90,7 +91,7 @@ test('returns null when the user has no relationship to the leave', async () => 
     finalReviewerResolver: configuredFinal,
   });
   assert.equal(result, null);
-  assert.equal(db.queries.length, 1);
+  assert.equal(db.queries.length, 2);
 });
 
 test('builds steps with recorded reviewers and maps history to DocuTracker shape', async () => {

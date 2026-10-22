@@ -182,12 +182,15 @@ class _EmployeeLocatorMobileDetailHeader extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: 8),
-              EmployeeLocatorMobileDetailStatusPill(
-                label: statusLabel,
-                icon: statusIcon,
-                background: statusBg,
-                border: statusBorder,
-                foreground: statusText,
+              Flexible(
+                flex: 2,
+                child: EmployeeLocatorMobileDetailStatusPill(
+                  label: statusLabel,
+                  icon: statusIcon,
+                  background: statusBg,
+                  border: statusBorder,
+                  foreground: statusText,
+                ),
               ),
             ],
           ),
@@ -419,12 +422,14 @@ class EmployeeLocatorMobileDetailStatusPill extends StatelessWidget {
         children: [
           Icon(icon, size: 15, color: foreground),
           const SizedBox(width: 5),
-          Text(
-            label,
-            style: TextStyle(
-              color: foreground,
-              fontSize: 11,
-              fontWeight: FontWeight.w800,
+          Flexible(
+            child: Text(
+              label,
+              style: TextStyle(
+                color: foreground,
+                fontSize: 11,
+                fontWeight: FontWeight.w800,
+              ),
             ),
           ),
         ],
@@ -489,7 +494,7 @@ class EmployeeLocatorMobileDetailActions extends StatelessWidget {
     required this.canCancel,
     required this.canPrint,
     required this.canOpenAttachment,
-    required this.onHistory,
+    this.onHistory,
     required this.onCancel,
     required this.onPreview,
     required this.onPrint,
@@ -502,6 +507,7 @@ class EmployeeLocatorMobileDetailActions extends StatelessWidget {
     this.onApprove,
     this.onReturn,
     this.onCorrect,
+    this.additionalAction,
   });
 
   final bool canCancel;
@@ -511,7 +517,7 @@ class EmployeeLocatorMobileDetailActions extends StatelessWidget {
   final bool canApprove;
   final bool canReturn;
   final bool canCorrect;
-  final VoidCallback onHistory;
+  final VoidCallback? onHistory;
   final VoidCallback onCancel;
   final VoidCallback onPreview;
   final VoidCallback onPrint;
@@ -520,6 +526,7 @@ class EmployeeLocatorMobileDetailActions extends StatelessWidget {
   final VoidCallback? onApprove;
   final VoidCallback? onReturn;
   final VoidCallback? onCorrect;
+  final Widget? additionalAction;
 
   @override
   Widget build(BuildContext context) {
@@ -535,15 +542,16 @@ class EmployeeLocatorMobileDetailActions extends StatelessWidget {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                SizedBox(
-                  width: double.infinity,
-                  child: OutlinedButton.icon(
-                    onPressed: onHistory,
-                    style: secondaryStyle,
-                    icon: const Icon(Icons.history_rounded, size: 18),
-                    label: const Text('History'),
+                if (onHistory != null)
+                  SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton.icon(
+                      onPressed: onHistory,
+                      style: secondaryStyle,
+                      icon: const Icon(Icons.history_rounded, size: 18),
+                      label: const Text('History'),
+                    ),
                   ),
-                ),
                 if (canCancel) ...[
                   const SizedBox(height: 8),
                   SizedBox(
@@ -641,6 +649,10 @@ class EmployeeLocatorMobileDetailActions extends StatelessWidget {
                     ],
                   ),
                 ],
+                if (additionalAction != null) ...[
+                  const SizedBox(height: 8),
+                  SizedBox(width: double.infinity, child: additionalAction),
+                ],
               ],
             ),
           );
@@ -655,12 +667,13 @@ class EmployeeLocatorMobileDetailActions extends StatelessWidget {
               spacing: 10,
               runSpacing: 10,
               children: [
-                OutlinedButton.icon(
-                  onPressed: onHistory,
-                  style: secondaryStyle,
-                  icon: const Icon(Icons.history_rounded, size: 18),
-                  label: const Text('History'),
-                ),
+                if (onHistory != null)
+                  OutlinedButton.icon(
+                    onPressed: onHistory,
+                    style: secondaryStyle,
+                    icon: const Icon(Icons.history_rounded, size: 18),
+                    label: const Text('History'),
+                  ),
                 if (canCancel)
                   OutlinedButton.icon(
                     onPressed: onCancel,
@@ -717,6 +730,7 @@ class EmployeeLocatorMobileDetailActions extends StatelessWidget {
                     icon: const Icon(Icons.print_rounded, size: 18),
                     label: const Text('Print'),
                   ),
+                if (additionalAction != null) additionalAction!,
               ],
             ),
           ),

@@ -1,0 +1,429 @@
+[
+  {
+    "name": "authMiddleware",
+    "regexp": "/^\\/print\\/?(?=\\/|$)/i"
+  },
+  {
+    "name": "router",
+    "regexp": "/^\\/print\\/?(?=\\/|$)/i"
+  },
+  {
+    "name": "authMiddleware",
+    "regexp": "/^\\/routing\\/?(?=\\/|$)/i"
+  },
+  {
+    "name": "router",
+    "regexp": "/^\\/routing\\/?(?=\\/|$)/i"
+  },
+  {
+    "path": "/final-reviewer/me",
+    "methods": [
+      "get"
+    ],
+    "middleware": [
+      "authMiddleware",
+      "requireLeaveFinalRole"
+    ]
+  },
+  {
+    "path": "/submission-availability",
+    "methods": [
+      "get"
+    ],
+    "middleware": [
+      "authMiddleware"
+    ]
+  },
+  {
+    "path": "/types",
+    "methods": [
+      "get"
+    ],
+    "middleware": [
+      "authMiddleware"
+    ]
+  },
+  {
+    "path": "/types",
+    "methods": [
+      "post"
+    ],
+    "middleware": [
+      "authMiddleware",
+      "requireAdminOrHr",
+      ""
+    ]
+  },
+  {
+    "path": "/types/:id",
+    "methods": [
+      "put"
+    ],
+    "middleware": [
+      "authMiddleware",
+      "requireAdminOrHr",
+      ""
+    ]
+  },
+  {
+    "path": "/working-days",
+    "methods": [
+      "get"
+    ],
+    "middleware": [
+      "authMiddleware"
+    ]
+  },
+  {
+    "path": "/draft",
+    "methods": [
+      "post"
+    ],
+    "middleware": [
+      "authMiddleware"
+    ]
+  },
+  {
+    "path": "/submit",
+    "methods": [
+      "post"
+    ],
+    "middleware": [
+      "authMiddleware"
+    ]
+  },
+  {
+    "path": "/submit-with-attachment",
+    "methods": [
+      "post"
+    ],
+    "middleware": [
+      "authMiddleware",
+      "uploadLeaveAttachmentMemoryMw"
+    ]
+  },
+  {
+    "path": "/:id",
+    "methods": [
+      "put"
+    ],
+    "middleware": [
+      "authMiddleware"
+    ]
+  },
+  {
+    "path": "/:id/discard",
+    "methods": [
+      "patch"
+    ],
+    "middleware": [
+      "authMiddleware"
+    ]
+  },
+  {
+    "path": "/:id/cancel",
+    "methods": [
+      "patch"
+    ],
+    "middleware": [
+      "authMiddleware"
+    ]
+  },
+  {
+    "path": "/my/context",
+    "methods": [
+      "get"
+    ],
+    "middleware": [
+      "authMiddleware"
+    ]
+  },
+  {
+    "path": "/my",
+    "methods": [
+      "get"
+    ],
+    "middleware": [
+      "authMiddleware"
+    ]
+  },
+  {
+    "path": "/my/:id/history",
+    "methods": [
+      "get"
+    ],
+    "middleware": [
+      "authMiddleware"
+    ]
+  },
+  {
+    "path": "/signatories",
+    "methods": [
+      "get"
+    ],
+    "middleware": [
+      "authMiddleware"
+    ]
+  },
+  {
+    "path": "/admin/forced-leave-deduction",
+    "methods": [
+      "post"
+    ],
+    "middleware": [
+      "authMiddleware",
+      "requireAdminOrHr",
+      ""
+    ]
+  },
+  {
+    "path": "/admin/monthly-accrual",
+    "methods": [
+      "post"
+    ],
+    "middleware": [
+      "authMiddleware",
+      "requireAdminOrHr",
+      ""
+    ]
+  },
+  {
+    "path": "/filter-options",
+    "methods": [
+      "get"
+    ],
+    "middleware": [
+      "authMiddleware",
+      "requireLeaveFinalRole",
+      ""
+    ]
+  },
+  {
+    "path": "/",
+    "methods": [
+      "get"
+    ],
+    "middleware": [
+      "authMiddleware",
+      "requireLeaveFinalRole",
+      ""
+    ]
+  },
+  {
+    "path": "/pending",
+    "methods": [
+      "get"
+    ],
+    "middleware": [
+      "authMiddleware",
+      "requireLeaveFinalRole",
+      ""
+    ]
+  },
+  {
+    "path": "/department-head/check",
+    "methods": [
+      "get"
+    ],
+    "middleware": [
+      "authMiddleware"
+    ]
+  },
+  {
+    "path": "/department-head/filter-options",
+    "methods": [
+      "get"
+    ],
+    "middleware": [
+      "authMiddleware"
+    ]
+  },
+  {
+    "path": "/department-head",
+    "methods": [
+      "get"
+    ],
+    "middleware": [
+      "authMiddleware"
+    ]
+  },
+  {
+    "path": "/:id/department-head-approve",
+    "methods": [
+      "patch"
+    ],
+    "middleware": [
+      "authMiddleware"
+    ]
+  },
+  {
+    "path": "/:id/department-head-reject",
+    "methods": [
+      "patch"
+    ],
+    "middleware": [
+      "authMiddleware"
+    ]
+  },
+  {
+    "path": "/:id/department-head-return",
+    "methods": [
+      "patch"
+    ],
+    "middleware": [
+      "authMiddleware"
+    ]
+  },
+  {
+    "path": "/:id/approve",
+    "methods": [
+      "patch"
+    ],
+    "middleware": [
+      "authMiddleware",
+      "requireLeaveFinalRole",
+      ""
+    ]
+  },
+  {
+    "path": "/:id/reject",
+    "methods": [
+      "patch"
+    ],
+    "middleware": [
+      "authMiddleware",
+      "requireLeaveFinalRole",
+      ""
+    ]
+  },
+  {
+    "path": "/:id/revoke",
+    "methods": [
+      "patch"
+    ],
+    "middleware": [
+      "authMiddleware",
+      "requireLeaveFinalRole",
+      ""
+    ]
+  },
+  {
+    "path": "/:id/return",
+    "methods": [
+      "patch"
+    ],
+    "middleware": [
+      "authMiddleware",
+      "requireLeaveFinalRole",
+      ""
+    ]
+  },
+  {
+    "path": "/ledger",
+    "methods": [
+      "get"
+    ],
+    "middleware": [
+      "authMiddleware"
+    ]
+  },
+  {
+    "path": "/:id/form-credits",
+    "methods": [
+      "get"
+    ],
+    "middleware": [
+      "authMiddleware"
+    ]
+  },
+  {
+    "path": "/balances/:userId",
+    "methods": [
+      "get"
+    ],
+    "middleware": [
+      "authMiddleware"
+    ]
+  },
+  {
+    "path": "/balances/:userId/adjustments",
+    "methods": [
+      "post"
+    ],
+    "middleware": [
+      "authMiddleware",
+      "requireAdminOrHr",
+      ""
+    ]
+  },
+  {
+    "path": "/balances/:userId",
+    "methods": [
+      "put"
+    ],
+    "middleware": [
+      "authMiddleware",
+      "requireAdminOrHr",
+      ""
+    ]
+  },
+  {
+    "path": "/:id/attachment",
+    "methods": [
+      "post"
+    ],
+    "middleware": [
+      "authMiddleware",
+      "uploadLeaveAttachmentMw"
+    ]
+  },
+  {
+    "path": "/:id/attachment",
+    "methods": [
+      "delete"
+    ],
+    "middleware": [
+      "authMiddleware"
+    ]
+  },
+  {
+    "path": "/:id/attachment",
+    "methods": [
+      "get"
+    ],
+    "middleware": [
+      "authMiddleware"
+    ]
+  },
+  {
+    "path": "/:id",
+    "methods": [
+      "get"
+    ],
+    "middleware": [
+      "authMiddleware"
+    ]
+  },
+  {
+    "path": "/admin/year-end-forced-leave",
+    "methods": [
+      "get"
+    ],
+    "middleware": [
+      "authMiddleware",
+      "requireAdminOrHr",
+      ""
+    ]
+  },
+  {
+    "path": "/admin/year-end-forced-leave/apply",
+    "methods": [
+      "post"
+    ],
+    "middleware": [
+      "authMiddleware",
+      "requireAdminOrHr",
+      ""
+    ]
+  }
+]

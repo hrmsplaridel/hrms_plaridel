@@ -7,14 +7,17 @@ function departmentApproverSql(kind, alias) {
   return `(SELECT CASE WHEN stage.action = 'department_head_approved' THEN stage.acted_by END
     FROM leave_request_history stage
     WHERE stage.leave_request_id = ${alias}.id
-      AND stage.action IN ('submitted', 'department_head_approved',
+      AND stage.action IN ('submitted', 'resubmitted', 'department_head_approved',
                            'department_head_rejected', 'department_head_returned')
     ORDER BY stage.acted_at DESC, stage.id DESC LIMIT 1)`;
 }
 
 function finalQueueVisibilitySql(kind, alias, actorSql) {
-  return `(${alias}.status NOT IN ('pending', 'pending_hr') OR
-    ${departmentApproverSql(kind, alias)} IS DISTINCT FROM ${actorSql})`;
+  const pending = kind==='locator'?"'pending', 'pending_hr','pending_mayor'":"'pending', 'pending_hr'";
+  return `((jsonb_typeof(${alias}.workflow_snapshot->'steps'->0) IS DISTINCT FROM 'object'
+    OR ${alias}.status NOT IN ('pending_department_head', 'pending_hr', 'pending_mayor', 'pending'))
+    AND (${alias}.status NOT IN (${pending}) OR
+    ${departmentApproverSql(kind, alias)} IS DISTINCT FROM ${actorSql}))`;
 }
 
 async function loadDepartmentApprover(db, kind, requestId) {

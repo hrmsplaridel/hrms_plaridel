@@ -24,10 +24,27 @@ function requireAdminOrSuperAdmin(req, res, next) {
   next();
 }
 
-/** Mayor-only module access. */
+/** Municipal Mayor only (final decisions / leave & DocuTracker signatory). */
 function requireMayor(req, res, next) {
   if (req.user?.role !== 'mayor') {
     return res.status(403).json({ error: 'Mayor access required' });
+  }
+  next();
+}
+
+/** Mayor's Office Staff only (intake and operational processing). */
+function requireMayorOfficeStaff(req, res, next) {
+  if (req.user?.role !== 'mayor_office_staff') {
+    return res.status(403).json({ error: "Mayor's Office Staff access required" });
+  }
+  next();
+}
+
+/** Either Municipal Mayor or Mayor's Office Staff (read / shared endorsement access). */
+function requireMayorEndorsementAccess(req, res, next) {
+  const role = String(req.user?.role || '').toLowerCase();
+  if (role !== 'mayor' && role !== 'mayor_office_staff') {
+    return res.status(403).json({ error: "Mayor's Office access required" });
   }
   next();
 }
@@ -64,6 +81,8 @@ module.exports = {
   requireSuperAdmin,
   requireAdminOrSuperAdmin,
   requireMayor,
+  requireMayorOfficeStaff,
+  requireMayorEndorsementAccess,
   requireAdminOrHr,
   requireAdminOrSupervisor,
   requireRole,

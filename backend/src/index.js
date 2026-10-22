@@ -232,6 +232,7 @@ app.use('/api/rsp/storage', rspStorageRoutes);
 app.use('/api/rsp-ld-saved-entries', rspLdSavedEntriesRoutes);
 app.use('/api/form-print-templates', formPrintTemplatesRoutes);
 app.use('/api/mayor/endorsements', mayorEndorsementsRoutes);
+app.use('/api/approval-workflows', require('./middleware/auth').authMiddleware, require('./routes/approvalWorkflows'));
 app.use('/api/leave', leaveRoutes);
 app.use('/api/notifications', notificationsRoutes);
 app.use('/api/locator-slips', locatorSlipsRoutes);

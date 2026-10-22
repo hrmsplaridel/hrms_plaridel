@@ -7,8 +7,8 @@ import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/shared/widgets/user_avatar.dart';
 import 'portal_sidebar_brand.dart';
 
-/// Icon-only rail width — fits orbital nav + medallion header.
-const double kDashboardSidebarCollapsedWidth = 72;
+/// Narrow strip that keeps the UnityPillar logo visible after collapse.
+const double kDashboardSidebarCollapsedWidth = 64;
 
 /// Expanded sidebar width (must match [kDashboardSidebarWidth] in portal_sidebar_brand).
 const double kDashboardSidebarExpandedWidth = kDashboardSidebarWidth;
@@ -16,7 +16,7 @@ const double kDashboardSidebarExpandedWidth = kDashboardSidebarWidth;
 /// Collapsed nav touch target (circular orb inside).
 const double kDashboardSidebarCollapsedOrbSize = 40;
 
-const Duration kDashboardSidebarAnimationDuration = Duration(milliseconds: 220);
+const Duration kDashboardSidebarAnimationDuration = Duration(milliseconds: 180);
 
 /// 0 = fully expanded, 1 = fully collapsed.
 class SidebarCollapseScope extends InheritedWidget {
@@ -75,8 +75,8 @@ class _AnimatedSidebarWidthState extends State<AnimatedSidebarWidth>
     );
     _collapseT = CurvedAnimation(
       parent: _controller,
-      curve: Curves.easeOutCubic,
-      reverseCurve: Curves.easeInCubic,
+      curve: const Cubic(0.2, 0, 0, 1),
+      reverseCurve: const Cubic(0.2, 0, 0, 1),
     );
     if (widget.collapsed) {
       _controller.value = 1;
@@ -120,8 +120,8 @@ class _AnimatedSidebarWidthState extends State<AnimatedSidebarWidth>
                 kDashboardSidebarCollapsedWidth,
                 t,
               )!;
-              // Lay out at full expanded width inside OverflowBox so collapsing
-              // never squeezes the tree to 72px (which broke translate + clip).
+              // Slide the window from the left edge to the center so the
+              // collapsed icons, which sit in the middle of each row, stay visible.
               final alignX = lerpDouble(-1.0, 0.0, t)!;
               return ClipRect(
                 clipBehavior: Clip.hardEdge,
@@ -651,10 +651,7 @@ class CollapsedSidebarProfileOrb extends StatelessWidget {
               decoration: BoxDecoration(
                 color: Colors.white,
                 shape: BoxShape.circle,
-                border: Border.all(
-                  color: primary,
-                  width: 3,
-                ),
+                border: Border.all(color: primary, width: 3),
                 boxShadow: [
                   BoxShadow(
                     color: primary.withValues(alpha: 0.28),
@@ -663,9 +660,7 @@ class CollapsedSidebarProfileOrb extends StatelessWidget {
                   ),
                 ],
               ),
-              child: ClipOval(
-                child: _CollapsedAvatar(avatarPath: avatarPath),
-              ),
+              child: ClipOval(child: _CollapsedAvatar(avatarPath: avatarPath)),
             ),
             const SizedBox(height: 8),
             Container(

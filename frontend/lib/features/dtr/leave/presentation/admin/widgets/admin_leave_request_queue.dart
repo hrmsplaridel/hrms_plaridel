@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:hrms_plaridel/shared/widgets/workforce_loading_skeleton.dart';
+import 'package:hrms_plaridel/shared/widgets/skeleton_bone.dart';
 
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/shared/widgets/request_filters_bar.dart';
@@ -572,7 +573,17 @@ class _AdminLeaveRequestQueuePanelState
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           widget.filterBar,
-          const SizedBox(height: 14),
+          const SizedBox(height: 10),
+          SizedBox(
+            height: 4,
+            width: double.infinity,
+            child: widget.loading && widget.requests.isNotEmpty
+                ? Semantics(
+                    label: 'Refreshing leave requests',
+                    child: const SkeletonBone(height: 4),
+                  )
+                : null,
+          ),
           if (widget.requests.isEmpty &&
               (widget.loading ||
                   (!widget.initialLoadComplete &&
@@ -634,6 +645,7 @@ class _AdminLeaveRequestQueuePanelState
                                 widget.selectedRequest?.id,
                             statusLabel: adminLeaveStatusLabel(
                               pageRequests[index].status,
+                              workflowSnapshot: pageRequests[index].workflowSnapshot,
                               finalReviewRoute:
                                   pageRequests[index].finalReviewRoute,
                               isDepartmentHead: widget.isDepartmentHead,
@@ -683,6 +695,7 @@ class _AdminLeaveRequestQueuePanelState
                                       request: request,
                                       statusLabel: adminLeaveStatusLabel(
                                         request.status,
+                                        workflowSnapshot: request.workflowSnapshot,
                                         finalReviewRoute:
                                             request.finalReviewRoute,
                                         isDepartmentHead:

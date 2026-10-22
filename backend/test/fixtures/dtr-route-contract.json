@@ -1,0 +1,148 @@
+[
+  {
+    "path": "/report-years",
+    "methods": [
+      "get"
+    ],
+    "middleware": [
+      "authMiddleware"
+    ]
+  },
+  {
+    "path": "/",
+    "methods": [
+      "get"
+    ],
+    "middleware": [
+      "authMiddleware",
+      "requireAnyDtrAccessForList"
+    ]
+  },
+  {
+    "path": "/bulk-report",
+    "methods": [
+      "post"
+    ],
+    "middleware": [
+      "authMiddleware",
+      "requireAdminOrSupervisor",
+      ""
+    ]
+  },
+  {
+    "path": "/summary",
+    "methods": [
+      "get"
+    ],
+    "middleware": [
+      "authMiddleware",
+      "requireAdminOrSupervisor",
+      ""
+    ]
+  },
+  {
+    "path": "/shift-for-date",
+    "methods": [
+      "get"
+    ],
+    "middleware": [
+      "authMiddleware",
+      "requireAdminOrHr"
+    ]
+  },
+  {
+    "path": "/my-shift-today",
+    "methods": [
+      "get"
+    ],
+    "middleware": [
+      "authMiddleware"
+    ]
+  },
+  {
+    "path": "/today",
+    "methods": [
+      "get"
+    ],
+    "middleware": [
+      "authMiddleware"
+    ]
+  },
+  {
+    "path": "/",
+    "methods": [
+      "post"
+    ],
+    "middleware": [
+      "authMiddleware",
+      "requireAdminOrHr",
+      ""
+    ]
+  },
+  {
+    "path": "/:id",
+    "methods": [
+      "put"
+    ],
+    "middleware": [
+      "authMiddleware",
+      "requireAdminOrHr",
+      ""
+    ]
+  },
+  {
+    "path": "/:id/recalculate",
+    "methods": [
+      "post"
+    ],
+    "middleware": [
+      "authMiddleware",
+      "requireAdminOrHr",
+      ""
+    ]
+  },
+  {
+    "path": "/deletions",
+    "methods": [
+      "get"
+    ],
+    "middleware": [
+      "authMiddleware",
+      "requireAdmin",
+      ""
+    ]
+  },
+  {
+    "path": "/deletions/:deletionId/restore",
+    "methods": [
+      "post"
+    ],
+    "middleware": [
+      "authMiddleware",
+      "requireAdmin",
+      ""
+    ]
+  },
+  {
+    "path": "/:id",
+    "methods": [
+      "delete"
+    ],
+    "middleware": [
+      "authMiddleware",
+      "requireAdmin",
+      ""
+    ]
+  },
+  {
+    "path": "/sync-holidays",
+    "methods": [
+      "post"
+    ],
+    "middleware": [
+      "authMiddleware",
+      "requireAdmin",
+      ""
+    ]
+  }
+]

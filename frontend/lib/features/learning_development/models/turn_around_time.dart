@@ -150,6 +150,23 @@ class TurnAroundTimeEntry {
   }
 }
 
+/// Splits a qualification standard onto one printed underline per item.
+List<String> turnAroundQsLines(String? raw) {
+  final text = (raw ?? '').trim();
+  if (text.isEmpty) return const [];
+  final normalized = text.replaceAllMapped(
+    RegExp(
+      r'\s+(?=(?:Education|Experience|Training|Eligibility)\s*:)',
+      caseSensitive: false,
+    ),
+    (_) => '\n',
+  );
+  return [
+    for (final line in normalized.split(RegExp(r'\r?\n')))
+      if (line.trim().isNotEmpty) line.trim(),
+  ];
+}
+
 class TurnAroundTimeRepo {
   TurnAroundTimeRepo._();
   static final TurnAroundTimeRepo instance = TurnAroundTimeRepo._();
@@ -169,12 +186,13 @@ class TurnAroundTimeRepo {
     return row == null ? null : TurnAroundTimeEntry.fromJson(row);
   }
 
-  Future<void> insert(TurnAroundTimeEntry entry) async {
+  Future<TurnAroundTimeEntry> insert(TurnAroundTimeEntry entry) async {
     final payload = Map<String, dynamic>.from(entry.toJson())..remove('id');
-    await RspLdSavedEntriesApi.insertRow(
+    final row = await RspLdSavedEntriesApi.insertRowReturning(
       TurnAroundTimeEntry.tableName,
       payload,
     );
+    return TurnAroundTimeEntry.fromJson(row);
   }
 
   Future<void> update(TurnAroundTimeEntry entry) async {

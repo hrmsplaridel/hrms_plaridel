@@ -4,7 +4,7 @@ import 'dart:ui' show Color, Rect;
 /// fractions of an A4 page. Shared by the builder sheet and the vector PDF so
 /// both place the letterhead, closing block and signatures identically.
 abstract final class DocuTrackerMemoLayout {
-  static const String sealAsset = 'assets/images/Plaridel Logo.jpg';
+  static const String sealAsset = 'assets/images/PlaridelLogo.jpg';
 
   /// Official artwork not yet in the project. Their slots stay blank until the
   /// files are added at these paths (no code change needed).

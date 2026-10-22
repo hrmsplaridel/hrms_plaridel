@@ -1,3 +1,4 @@
+import 'package:hrms_plaridel/features/dtr/management/approvals/pages/workflow_approval_inbox_page.dart';
 import 'package:hrms_plaridel/features/dtr/leave/utils/configured_leave_pdf.dart';
 import 'dart:async';
 
@@ -71,6 +72,9 @@ class AdminLeaveScreen extends StatefulWidget {
 
 class _AdminLeaveScreenState extends State<AdminLeaveScreen>
     with WidgetsBindingObserver {
+  Map<String, Map<String, dynamic>> _assignedRequests = {};
+  String? _assignedRequestsError;
+  bool _assignedRequestsLoaded = false;
   bool _initialized = false;
   LeaveRequest? _selectedRequest;
   LeaveRequestStatus? _statusFilter;
@@ -99,6 +103,10 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
 
   Future<void> _loadFinalReviewerEligibility() async {
     if (widget.isDepartmentHead) return;
+    if (!['admin', 'hr', 'mayor'].contains(context.read<AuthProvider>().user?.role)) {
+      setState(() { _checkingReviewer = false; _canReviewFinal = false; });
+      return;
+    }
     final version = ++_reviewerCheckVersion;
     setState(() {
       // Keep confirmed access visible until the recheck denies access or fails.
@@ -476,18 +484,27 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
   @override
   Widget build(BuildContext context) {
     final provider = context.watch<LeaveProvider>();
-    final requests = widget.isDepartmentHead
-        ? provider.departmentHeadRequests
-        : provider.requests;
-    final filterOptions = _reviewFilterOptions.isNotEmpty
-        ? _reviewFilterOptions
-        : requests.map(
+    final mergedRequests = <String?, LeaveRequest>{
+      for (final request in (widget.isDepartmentHead ? provider.departmentHeadRequests : _canReviewFinal ? provider.requests : <LeaveRequest>[])) request.id: request,
+      for (final entry in _assignedRequests.values) entry['id'].toString(): LeaveRequest.fromJson(Map<String,dynamic>.from(entry['request_data'] as Map)),
+    }.values.toList();
+    final actionableIds = _assignedRequests.entries
+        .where((entry) => entry.value['can_review'] != false)
+        .map((entry) => entry.key)
+        .toSet();
+    final requests = [
+      for (final request in mergedRequests)
+        if (actionableIds.contains(request.id)) request,
+      for (final request in mergedRequests)
+        if (!actionableIds.contains(request.id)) request,
+    ];
+    final filterOptions = [..._reviewFilterOptions, ...requests.map(
             (request) => LeaveReviewFilterOption(
               userId: request.userId,
               employeeName: request.employeeName ?? '',
               department: request.officeDepartment,
             ),
-          );
+          )];
     final departmentMap = <String, String>{};
     for (final option in filterOptions) {
       final raw = (option.department ?? '').trim();
@@ -563,6 +580,8 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
       if (!employeeOk) return false;
       return true;
     }).toList();
+    final baseRequests = widget.isDepartmentHead ? provider.departmentHeadRequests : _canReviewFinal ? provider.requests : <LeaveRequest>[];
+    final totalCount = (widget.isDepartmentHead || _canReviewFinal ? provider.reviewTotal(departmentHead: widget.isDepartmentHead) : 0) + filteredRequests.where((r) => _assignedRequests.containsKey(r.id) && !baseRequests.any((base) => base.id == r.id)).length;
     // Sync the selected request to the latest instance from `filteredRequests`
     // so actions like Reject immediately reflect in the details panel history.
     LeaveRequest? selected;
@@ -590,15 +609,15 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         _AdminHeaderCard(
-          totalRequests: provider.reviewTotal(
-            departmentHead: widget.isDepartmentHead,
-          ),
+          totalRequests: totalCount,
           hasMore: provider.reviewHasMore(
             departmentHead: widget.isDepartmentHead,
           ),
           pendingCount: filteredRequests
               .where(
-                (r) => widget.isDepartmentHead
+                (r) => _assignedRequests[r.id] != null
+                    ? r.status.isPending && _assignedRequests[r.id]!['can_review'] != false
+                    : widget.isDepartmentHead
                     ? r.status == LeaveRequestStatus.pendingDepartmentHead
                     : r.status.isPending,
               )
@@ -633,6 +652,7 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
               ? null
               : _openLeaveTypeRules,
         ),
+        if (_assignedRequestsError != null) AdminLeaveErrorBanner(message: _assignedRequestsError!, onDismiss: () => setState(() => _assignedRequestsError = null)),
         if (provider.reviewError(departmentHead: widget.isDepartmentHead) !=
             null) ...[
           const SizedBox(height: 16),
@@ -653,7 +673,7 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
           ),
         ],
         const SizedBox(height: 24),
-        if (!widget.isDepartmentHead && !_canReviewFinal)
+        if (!widget.isDepartmentHead && !_canReviewFinal && _assignedRequests.isEmpty)
           ReviewerAccessNotice(
             requestType: 'leave',
             checking: _checkingReviewer,
@@ -677,16 +697,14 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
             loading: provider.reviewLoading(
               departmentHead: widget.isDepartmentHead,
             ),
-            initialLoadComplete: provider.reviewInitialLoadComplete(
+            initialLoadComplete: _assignedRequestsLoaded || provider.reviewInitialLoadComplete(
               departmentHead: widget.isDepartmentHead,
             ),
-            initialLoadAttempted: provider.reviewLoadAttempted(
+            initialLoadAttempted: _assignedRequestsLoaded || _assignedRequestsError != null || provider.reviewLoadAttempted(
               departmentHead: widget.isDepartmentHead,
             ),
             onRetry: () => _loadRequests(forceRefresh: true),
-            totalCount: provider.reviewTotal(
-              departmentHead: widget.isDepartmentHead,
-            ),
+            totalCount: totalCount,
             hasMore: provider.reviewHasMore(
               departmentHead: widget.isDepartmentHead,
             ),
@@ -795,8 +813,17 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
     if (!mounted) return;
     if (!widget.isDepartmentHead) {
       await _loadFinalReviewerEligibility();
-      if (!mounted || !_canReviewFinal) return;
+      if (!mounted) return;
     }
+    try {
+      final assigned = await loadAssignedWorkflowRequests('leave');
+      if (!mounted) return;
+      setState(() { _assignedRequests = assigned; _assignedRequestsError = null; _assignedRequestsLoaded = true; });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() { _assignedRequests = {}; _assignedRequestsError = 'Unable to load assigned leave approvals. Refresh to retry.'; });
+    }
+    if (!widget.isDepartmentHead && !_canReviewFinal) return;
     final provider = context.read<LeaveProvider>();
     final query = _currentReviewQuery();
     if (widget.isDepartmentHead) {
@@ -821,8 +848,43 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
   );
 
   /// Same UX as filing leave: wide = resizable right sheet; narrow = full-screen route.
-  /// Opens immediately; refresh runs in background so tap is not blocked on the network.
+  /// Assigned requests refresh before review controls open.
   void _openRequestDetailsPanel(LeaveRequest request) {
+    final assigned = _assignedRequests[request.id];
+    if (assigned != null) {
+      unawaited(_openCurrentAssignedRequest(request));
+      return;
+    }
+    _openHistoryDetailsPanel(request);
+  }
+
+  Future<void> _openCurrentAssignedRequest(LeaveRequest request) async {
+    // Another primary/backup may have completed this step since the queue loaded.
+    await _loadRequests(forceRefresh: true);
+    if (!mounted) return;
+    final assigned = _assignedRequests[request.id];
+    if (assigned != null) {
+      await _reviewAssigned(assigned);
+      return;
+    }
+    final id = request.id;
+    if (id == null) return;
+    final fresh = await context.read<LeaveProvider>().refreshRequestById(id);
+    if (!mounted) return;
+    if (fresh == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'This request is no longer assigned to you, or could not be refreshed.',
+          ),
+        ),
+      );
+      return;
+    }
+    _openHistoryDetailsPanel(fresh);
+  }
+
+  void _openHistoryDetailsPanel(LeaveRequest request) {
     final id = request.id;
     if (id != null && id.isNotEmpty) {
       unawaited(context.read<LeaveProvider>().refreshRequestById(id));
@@ -840,7 +902,8 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
           currentReviewerId: context.read<AuthProvider>().user?.id,
           canReviewPending:
               widget.canReviewPending &&
-              (widget.isDepartmentHead || _canReviewFinal),
+              (widget.isDepartmentHead || _canReviewFinal) &&
+              !(request.workflowSnapshot?['steps'] is List && (request.workflowSnapshot!['steps'] as List).any((step) => step is Map)),
           onApprove: widget.isDepartmentHead ? _deptHeadApprove : _approve,
           onReturn: widget.isDepartmentHead ? _deptHeadReturn : _returnRequest,
           onReject: widget.isDepartmentHead ? _deptHeadReject : _rejectRequest,
@@ -850,6 +913,21 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
         ),
       );
     });
+  }
+
+  Future<void> _reviewAssigned(Map<String, dynamic> request) async {
+    final leave = LeaveRequest.fromJson(
+      Map<String, dynamic>.from(request['request_data'] as Map),
+    );
+    if (await reviewAssignedWorkflowRequest(
+      context,
+      request,
+      onPreview: () => _previewLeaveForm(leave),
+      onPrint: () => _printLeaveForm(leave),
+      onRevoke: widget.isDepartmentHead ? null : () => unawaited(_revokeApproval(leave)),
+    ) && mounted) {
+      await _loadRequests(forceRefresh: true);
+    }
   }
 
   Future<void> _printLeaveForm(LeaveRequest request) =>
@@ -954,7 +1032,14 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
       final bytes = await saveConfiguredLeavePdf(
         request: target,
         document: document,
+      balances: balances,
         departmentReviewer: formSignatories.recommendationOfficer?.name,
+        departmentReviewerTitle: formSignatories.recommendationOfficer?.title,
+        approvingAuthorityName: formSignatories.approvingAuthority?.name,
+        approvingAuthorityTitle: formSignatories.approvingAuthority?.title,
+        certificationOfficerName: formSignatories.certificationOfficer?.name,
+        certificationOfficerTitle: formSignatories.certificationOfficer?.title,
+        certificationSignature: formSignatories.certificationOfficerSignature?.signatureImageBytes,
         applicantSignature:
             formSignatories.applicantSignature?.signatureImageBytes,
         departmentSignature:
@@ -996,10 +1081,9 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
       _showMessage('Cannot determine employee for this request.');
       return;
     }
-    final balances = await leaveProvider.fetchBalancesForUser(
-      userId,
-      forceRefresh: true,
-    );
+    final balances = widget.isMayor
+        ? await leaveProvider.fetchFormCreditsForRequestStrict(request.id!)
+        : await leaveProvider.fetchBalancesForUser(userId, forceRefresh: true);
     final creditBucket = _creditBucketForRequest(request);
     final leaveBalance = _balanceForBucket(balances, creditBucket);
     String creditSummary;
@@ -1062,16 +1146,18 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
     );
 
     bool ok;
+    LeaveRequest? updated;
     if (widget.onApprove != null) {
       ok = await widget.onApprove!(finalInput);
     } else {
       final result = await leaveProvider.approveRequest(finalInput);
       ok = result != null;
+      updated = result;
     }
     if (!mounted) return;
     _showMessage(
       ok
-          ? 'Leave request approved.'
+          ? updated?.status.isPending == true ? 'Review completed. Awaiting the next workflow approver.' : 'Leave request approved.'
           : (leaveProvider.error ?? 'Approval could not be completed.'),
     );
     if (ok) {
@@ -1180,20 +1266,40 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
   }
 
   // #15: Revoke approval.
-  Future<void> _revokeApproval(LeaveRequest request) async {
+  Future<void> _revokeApproval(LeaveRequest initial) async {
+    final leaveProvider = context.read<LeaveProvider>();
+    final auth = context.read<AuthProvider>();
+    final id = initial.id;
+    if (id == null || id.isEmpty) return;
+    // A completed workflow or its authorized final reviewers may have changed
+    // since the details opened. Confirm current data before offering revocation.
+    final request = await leaveProvider.refreshRequestById(id);
+    if (!mounted) return;
+    if (request == null) {
+      _showMessage(leaveProvider.error ?? 'Could not refresh this request. Try again.');
+      return;
+    }
+    final shared = (request.workflowSnapshot?['steps'] as List? ?? []).any((step) => step is Map);
+    if (request.status != LeaveRequestStatus.approved || request.userId == auth.user?.id ||
+        (shared && request.canRevokeApproval != true)) {
+      _showMessage('This approval can no longer be revoked by your account.');
+      return;
+    }
     final revokeDisabledReason = adminLeaveRevokeDisabledReason(request);
     if (revokeDisabledReason != null) {
       _showMessage(revokeDisabledReason);
       return;
     }
-    final leaveProvider = context.read<LeaveProvider>();
-    final auth = context.read<AuthProvider>();
+    final restoresCredits = _creditPolicyForRequest(request) != 'none' &&
+        (request.approvedDaysWithPay ?? request.workingDaysApplied ?? 0) > 0;
     final input = await showDialog<LeaveReviewDecisionInput>(
       context: context,
       builder: (_) => AdminLeaveDecisionDialog(
         title: 'Revoke Approval',
         subtitle:
-            'This will reverse the approval: balance will be restored and DTR leave entries removed. The request returns to the employee for correction.',
+            'This will revoke the approval and remove its DTR leave entries. '
+            '${restoresCredits ? 'Leave credits will be restored. ' : ''}'
+            'The request returns to the employee for correction.',
         confirmLabel: 'Revoke Approval',
         requireReason: false,
         request: request,
@@ -1226,7 +1332,9 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
     if (!mounted) return;
     _showMessage(
       ok
-          ? 'Approval revoked. Leave balance restored.'
+          ? (restoresCredits
+              ? 'Approval revoked. Leave credits restored.'
+              : 'Approval revoked. The request was returned to the employee.')
           : (leaveProvider.error ?? 'Revoke failed.'),
     );
     if (ok) await _loadRequests();
@@ -1365,7 +1473,7 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
         signatureTitle: 'Department Head E-Signature',
         unsignedMessage: 'No department reviewer signature selected',
         waitingMessage: 'Only the assigned department reviewer can sign here.',
-        confirmLabel: request.finalReviewRoute == 'mayor'
+        confirmLabel: request.workflowSnapshot!=null ? 'Sign and Approve Step' : request.finalReviewRoute == 'mayor'
             ? 'Sign and Approve'
             : 'Sign and Forward to HR',
       ),
@@ -1382,7 +1490,7 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
     if (!mounted) return;
     _showMessage(
       ok
-          ? request.finalReviewRoute == 'mayor'
+          ? request.workflowSnapshot!=null ? result.status==LeaveRequestStatus.pendingMayor ? 'Department review completed. Awaiting Mayor approval.' : result.status==LeaveRequestStatus.approved ? 'Request approved.' : 'Department review completed. Awaiting HR review.' : request.finalReviewRoute == 'mayor'
                 ? 'Approved. The Mayor signs the printed form manually.'
                 : 'Forwarded to HR for final approval.'
           : (leaveProvider.error ?? 'Department head approval failed.'),

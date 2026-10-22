@@ -2,6 +2,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
+const { readDtrImplementation } = require('./helpers/dtrModuleSources');
 
 function readBackendFile(relativePath) {
   return fs.readFileSync(path.resolve(__dirname, '..', relativePath), 'utf8');
@@ -15,7 +16,7 @@ function requiredMatch(source, pattern, description) {
 
 test('fresh and runtime defaults do not seed Work From Home', () => {
   const schema = readBackendFile('scripts/init-schema.sql');
-  const route = readBackendFile('src/routes/locatorSlips.js');
+  const route = readBackendFile('src/modules/locator/policies/types.js');
 
   const schemaSeed = requiredMatch(
     schema,
@@ -24,7 +25,7 @@ test('fresh and runtime defaults do not seed Work From Home', () => {
   );
   const runtimeDefaults = requiredMatch(
     route,
-    /const DEFAULT_LOCATOR_TYPES = \[[\s\S]*?\n\];/,
+    /const DEFAULT_LOCATOR_TYPES = \[[\s\S]*?\n\s*\];/,
     'runtime locator defaults must exist'
   );
 
@@ -97,7 +98,7 @@ test('fresh schema and upgrade migration enforce locator type text limits', () =
 });
 
 test('DTR coverage behavior does not override the configured mode by type code', () => {
-  const route = readBackendFile('src/routes/dtrDailySummary.js');
+  const route = readDtrImplementation();
 
   assert.doesNotMatch(
     route,

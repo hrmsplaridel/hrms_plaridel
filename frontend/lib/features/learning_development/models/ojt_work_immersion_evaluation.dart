@@ -19,6 +19,7 @@ class OjtWorkImmersionEvaluation {
     this.keyStrengths,
     this.keyConcerns,
     this.interviewer,
+    this.interviewerSignature,
     this.createdAt,
     this.updatedAt,
   });
@@ -39,6 +40,9 @@ class OjtWorkImmersionEvaluation {
   final String? keyStrengths;
   final String? keyConcerns;
   final String? interviewer;
+
+  /// PNG signature drawn by HR, stored as base64 without a data-url prefix.
+  final String? interviewerSignature;
   final DateTime? createdAt;
   final DateTime? updatedAt;
 
@@ -63,6 +67,12 @@ class OjtWorkImmersionEvaluation {
     ];
     if (scores.any((s) => !isValidScore(s))) return null;
     return scores.fold<int>(0, (sum, s) => sum + s!);
+  }
+
+  static String? _optionalSignature(dynamic value) {
+    final text = value?.toString().trim() ?? '';
+    if (text.isEmpty) return null;
+    return text;
   }
 
   static int? _parseScore(dynamic v) {
@@ -90,6 +100,7 @@ class OjtWorkImmersionEvaluation {
       keyStrengths: json['key_strengths']?.toString(),
       keyConcerns: json['key_concerns']?.toString(),
       interviewer: json['interviewer']?.toString(),
+      interviewerSignature: _optionalSignature(json['interviewer_signature']),
       createdAt: json['created_at'] != null
           ? DateTime.tryParse(json['created_at'] as String)
           : null,
@@ -118,6 +129,7 @@ class OjtWorkImmersionEvaluation {
       'key_strengths': keyStrengths,
       'key_concerns': keyConcerns,
       'interviewer': interviewer,
+      'interviewer_signature': interviewerSignature,
       'updated_at': DateTime.now().toIso8601String(),
     };
   }

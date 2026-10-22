@@ -70,3 +70,27 @@ eligibility are independent settings.
 Deploy the corresponding backend and Flutter changes as well as the migrations.
 Restart the backend and rebuild/restart the frontend after deployment. A SQL
 migration by itself does not deploy the application code.
+
+## Custom printed leave layouts (2026-10-13)
+
+After the existing leave print-template migration, apply only this upgrade:
+
+```sh
+psql -v ON_ERROR_STOP=1 -d "$DATABASE_URL" -f scripts/migrations/dtr/20261013_leave_print_layouts.sql
+```
+
+Back up the target database before applying it. Deploy the matching backend and rebuild the Flutter frontend. The upgrade adds JSON layout storage and the `custom` layout option; it does not change any leave type selection, submitted request pointer, background or existing CSC/Wellness template version.
+
+In **Leave Types / Printed Form / Design layout**, upload optional A4 letterhead, arrange leave fields, additional details, text, lines and signature blocks, then choose **Use layout** and save/create the leave type. Preview uses the unsaved design. **Save Changes** also saves edited print settings; a failed print upload can be retried without creating another leave type. Submitted forms retain their saved version. Drafts and returned requests follow the existing resubmission snapshot rules.
+
+Automatic signature captions use the actual signer position; custom captions remain literal. The employee, department reviewer, certification officer and approving authority use the existing verified signatory flow. Manual Mayor routes print the Mayor's name and title with a blank signature area. Long or unplaced additional answers continue on another page.
+
+To restore the standard template for future filings, select **Standard CSC form** or **Wellness Leave form** and save. Existing filed forms keep their version. Wellness remains restricted to JO/COS; custom designs may be selected for other eligible employment types.
+
+### Editing existing forms (2026-10-14)
+
+Existing CSC and Wellness types now open the designer with their current form structure, editable value slots, and original signature sections. Saved custom designs keep their stored placements. The insert menu offers common leave fields, details applicable to the selected type, and that type's additional fields. Wellness offers its three signature sections; CSC includes the certification officer as well.
+
+CSC uses its original Legal page without a background, or the existing scaled A4 placement when letterhead is present. Wellness retains its A4 placement. Printed labels, borders, checkboxes, and the credit table remain part of the original form structure; request values and signatures can be positioned in the editor. Values, balances, and signatories are populated when rendering the actual request. Insert any additional fields needed on the main page; unplaced or long answers continue on another page.
+
+Opening or previewing does not save a version. **Use layout** stages the design; saving creates a custom template version for future filings. No additional migration is needed for these optional JSON layout properties. Deploy the updated API and Flutter build together.

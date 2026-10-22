@@ -14,6 +14,8 @@ const {
 const DYNAMIC_DEPARTMENT_ASSIGNEE_SOURCES = new Set([
   'department_reviewers',
   'submitter_department_reviewers',
+  'final_hr_reviewers',
+  'active_mayor',
 ]);
 
 function isDynamicDepartmentAssigneeSource(source) {
@@ -1755,6 +1757,14 @@ async function resolveStepAssignees(client, {
   }
 
   if (isDynamicDepartmentAssigneeSource(source)) {
+    if(source==='active_mayor' || source==='final_hr_reviewers') {
+      const reviewers=source==='active_mayor'
+        ? await resolveActiveMayor(client,todayInHrmsTimezone()).then(m=>m?[m.employee_id]:[])
+        : await require('./leaveFinalReviewerService').resolveFinalLeaveReviewerConfiguration(client).then(c=>c.reviewers.map(r=>r.id));
+      const ids=reviewers.filter(id=>!submitterUserId || !sameEntityId(id,submitterUserId));
+      if(!ids.length)throw validationError('No eligible active authority is available for this workflow step. Configure another reviewer or backup.');
+      return ids;
+    }
     return resolveDepartmentReviewStepAssignees(client, { stepConfig, source, submitterUserId });
   }
 

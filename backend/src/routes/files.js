@@ -257,6 +257,12 @@ router.get('/ld-training-requirement', async (req, res) => {
       res.setHeader('Content-Disposition', `attachment; filename="${safeName}"`);
     } else {
       res.setHeader('Cache-Control', 'private, max-age=300');
+      // The global middleware sends X-Frame-Options: DENY, which makes the
+      // admin preview iframe show "localhost refused to connect".
+      res.removeHeader('X-Frame-Options');
+      res.setHeader('Content-Security-Policy', 'frame-ancestors *');
+      res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+      res.setHeader('X-Content-Type-Options', 'nosniff');
       res.setHeader('Content-Disposition', `inline; filename="${safeName}"`);
       if (path.extname(localAbs).toLowerCase() === '.pdf') {
         res.setHeader('Content-Type', 'application/pdf');

@@ -1,3 +1,5 @@
+import 'package:hrms_plaridel/features/dtr/leave/models/leave_type_definition.dart';
+
 class LocatorRequestType {
   const LocatorRequestType({
     required this.code,
@@ -8,6 +10,12 @@ class LocatorRequestType {
     required this.dtrSlotLabel,
     required this.dtrPrintLabel,
     this.requiresAttachment = false,
+    this.filingAccess = 'employee',
+    this.autoApproveAdmin = false,
+    this.approvalRoute = 'hr',
+    this.approvalWorkflowId,
+    this.mayorEmploymentTypes,
+    this.employeeDetailSchema = const [],
     this.coverageMode = 'manual',
     this.isActive = true,
     this.isSystem = false,
@@ -50,6 +58,14 @@ class LocatorRequestType {
   final String dtrSlotLabel;
   final String dtrPrintLabel;
   final bool requiresAttachment;
+  final String filingAccess;
+  final bool autoApproveAdmin;
+  final String approvalRoute;
+  final String? approvalWorkflowId;
+  final List<String>? mayorEmploymentTypes;
+  final List<LeaveCustomFieldDefinition> employeeDetailSchema;
+  bool get employeeCanFile => filingAccess != 'admin';
+  bool get adminCanFile => filingAccess != 'employee';
   final String coverageMode;
   final bool isActive;
   final bool isSystem;
@@ -67,6 +83,12 @@ class LocatorRequestType {
     String? dtrSlotLabel,
     String? dtrPrintLabel,
     bool? requiresAttachment,
+    String? filingAccess,
+    bool? autoApproveAdmin,
+    String? approvalRoute,
+    String? approvalWorkflowId,
+    List<String>? mayorEmploymentTypes,
+    List<LeaveCustomFieldDefinition>? employeeDetailSchema,
     String? coverageMode,
     bool? isActive,
     bool? isSystem,
@@ -82,6 +104,12 @@ class LocatorRequestType {
       dtrSlotLabel: dtrSlotLabel ?? this.dtrSlotLabel,
       dtrPrintLabel: dtrPrintLabel ?? this.dtrPrintLabel,
       requiresAttachment: requiresAttachment ?? this.requiresAttachment,
+      filingAccess: filingAccess ?? this.filingAccess,
+      autoApproveAdmin: autoApproveAdmin ?? this.autoApproveAdmin,
+      approvalRoute: approvalRoute ?? this.approvalRoute,
+      approvalWorkflowId: approvalWorkflowId ?? this.approvalWorkflowId,
+      mayorEmploymentTypes: mayorEmploymentTypes ?? this.mayorEmploymentTypes,
+      employeeDetailSchema: employeeDetailSchema ?? this.employeeDetailSchema,
       coverageMode: coverageMode ?? this.coverageMode,
       isActive: isActive ?? this.isActive,
       isSystem: isSystem ?? this.isSystem,
@@ -100,6 +128,12 @@ class LocatorRequestType {
       'dtr_slot_label': dtrSlotLabel,
       'dtr_print_label': dtrPrintLabel,
       'requires_attachment': requiresAttachment,
+      'filing_access': filingAccess,
+      'auto_approve_admin': autoApproveAdmin,
+      'approval_route': approvalRoute,
+      'approval_workflow_id': approvalWorkflowId,
+      'mayor_employment_types': mayorEmploymentTypes,
+      'employee_detail_schema': employeeDetailSchema.map((field)=>field.toJson()).toList(),
       'coverage_mode': coverageMode,
       'is_active': isActive,
       'sort_order': sortOrder,
@@ -111,6 +145,13 @@ class LocatorRequestType {
     final fallback = fromCode(code);
     return fallback.copyWith(
       id: json['id']?.toString(),
+      employeeDetailSchema: leaveCustomFieldDefinitionsFromJson(json['employee_detail_schema']),
+      filingAccess: _read(json, ['filing_access'], 'employee'),
+      autoApproveAdmin: _readBool(json, ['auto_approve_admin']),
+      approvalRoute: _read(json, ['approval_route'], 'hr'),
+      approvalWorkflowId: json['approval_workflow_id'] as String?,
+      mayorEmploymentTypes: (json['mayor_employment_types'] as List?)
+          ?.cast<String>(),
       code: code == null || code.isEmpty ? fallback.code : code,
       label: _read(json, ['label'], fallback.label),
       shortLabel: _read(json, [

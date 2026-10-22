@@ -4,6 +4,7 @@ import 'package:hrms_plaridel/core/api/user_facing_api_error.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/core/utils/form_pdf.dart';
 import 'package:hrms_plaridel/features/learning_development/models/work_experience_sheet.dart';
+import 'package:hrms_plaridel/features/recruitment/models/job_vacancy_announcement.dart';
 import 'package:hrms_plaridel/features/recruitment/presentation/admin/widgets/rsp_records_list_table.dart';
 import 'package:hrms_plaridel/shared/widgets/read_only_saved_entry_dialog.dart';
 import 'package:hrms_plaridel/shared/widgets/form_document_preview.dart';
@@ -381,6 +382,52 @@ class _WorkExperienceSheetEditorState extends State<WorkExperienceSheetEditor> {
       text: e.jobDescriptionLastWork ?? '',
     );
     _applicantName = TextEditingController(text: e.applicantName ?? '');
+    _fillStandardsFromVacancy();
+  }
+
+  String _positionKey(String? raw) {
+    var text = (raw ?? '').trim().toLowerCase();
+    text = text.replaceFirst(RegExp(r'^now hiring:\s*'), '');
+    return text.replaceAll(RegExp(r'\s+'), ' ');
+  }
+
+  JobVacancyItem? _vacancyForPosition(
+    List<JobVacancyItem> vacancies,
+    String position,
+  ) {
+    final key = _positionKey(position);
+    if (key.isEmpty) return null;
+    for (final vacancy in vacancies) {
+      if (_positionKey(vacancy.headline) == key) return vacancy;
+    }
+    for (final vacancy in vacancies) {
+      if (_positionKey(vacancy.positionKey) == key) return vacancy;
+    }
+    return null;
+  }
+
+  void _applyVacancyStandards(JobVacancyItem vacancy) {
+    void fill(TextEditingController controller, String? value) {
+      if (controller.text.trim().isNotEmpty) return;
+      final text = (value ?? '').trim();
+      if (text.isEmpty) return;
+      controller.text = text;
+    }
+
+    fill(_education, vacancy.education);
+    fill(_experience, vacancy.experience);
+    fill(_training, vacancy.training);
+  }
+
+  Future<void> _fillStandardsFromVacancy() async {
+    final position = _position.text.trim();
+    if (position.isEmpty) return;
+    final announcement = await JobVacancyAnnouncementRepo.instance
+        .fetchIfAvailable();
+    if (!mounted || announcement == null) return;
+    final vacancy = _vacancyForPosition(announcement.vacancies, position);
+    if (vacancy == null) return;
+    setState(() => _applyVacancyStandards(vacancy));
   }
 
   @override
@@ -500,14 +547,16 @@ class _WorkExperienceSheetEditorState extends State<WorkExperienceSheetEditor> {
       _labeledField('Education', _education),
       _labeledField('Experience', _experience),
       _labeledField('Training', _training),
-      _labeledField('Eligibility', _eligibility),
+      _labeledField('Eligibility (optional)', _eligibility),
     ];
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         _sectionTitle('Minimum Standards', Icons.fact_check_outlined),
         const SizedBox(height: 4),
-        _helper('Enter the required qualification standards for the position.'),
+        _helper(
+          'Filled from the job vacancy of the position applied for. Edit a field only if the posted standard needs a correction.',
+        ),
         const SizedBox(height: 12),
         if (twoByTwo)
           Column(

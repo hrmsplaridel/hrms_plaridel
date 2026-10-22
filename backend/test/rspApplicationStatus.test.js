@@ -89,6 +89,7 @@ const applicationId = '11111111-1111-4111-8111-111111111111';
 
 test('RSP status route rejects statuses owned by other modules', async () => {
   const updates = [];
+  const queries = [];
   const pool = {
     async connect() {
       return {
@@ -98,7 +99,8 @@ test('RSP status route rejects statuses owned by other modules', async () => {
     },
     async query(sql, params) {
       const text = String(sql);
-      if (text.includes('UPDATE public.recruitment_applications')) {
+      queries.push(text);
+      if (text.includes('UPDATE public.recruitment_applications') && /SET status\s*=/.test(text)) {
         updates.push(params);
         return { rowCount: 1, rows: [] };
       }
@@ -125,6 +127,7 @@ test('RSP status route rejects statuses owned by other modules', async () => {
     assert.equal(res.statusCode, 400, status);
   }
   assert.deepEqual(updates, []);
+  assert.deepEqual(queries, [], 'Invalid status requests must not trigger schema changes or account backfills');
 
   const res = response();
   await handler({ params: { applicationId }, body: { status: 'document_approved' } }, res);

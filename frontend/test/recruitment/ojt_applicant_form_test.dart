@@ -103,8 +103,11 @@ void main() {
     expect(source.contains('openFormDocumentPreview'), isFalse);
     expect(source.contains('FormPdf.buildOjtWorkImmersionEvaluationPdf'), isFalse);
     expect(source.contains('onPreview'), isFalse);
-    expect(source.contains("'ojt_immersion': entry.ojtImmersion"), isTrue);
     expect(source.contains("'school': entry.school"), isTrue);
+    expect(source.contains("'problem_solving_notes': entry.problemSolvingNotes"), isTrue);
+    expect(source.contains("'communication_notes': entry.communicationNotes"), isTrue);
+    expect(source.contains("'teamwork_notes': entry.teamworkNotes"), isTrue);
+    expect(source.contains("'adaptability_notes': entry.adaptabilityNotes"), isTrue);
     expect(source.contains('problem_solving_score'), isFalse);
     expect(source.contains('ApplicantBiFormHost'), isTrue);
   });
@@ -160,14 +163,12 @@ void main() {
 
     final ojt = tester.widget<TextField>(_labeledField('OJT / Immersion'));
     final school = tester.widget<TextField>(_labeledField('School'));
-    expect(ojt.enabled ?? true, isTrue);
-    expect(school.enabled ?? true, isTrue);
-    expect(ojt.readOnly, isFalse);
+    expect(ojt.readOnly, isTrue);
     expect(school.readOnly, isFalse);
 
     final notes = tester.widgetList<TextField>(_labeledField('Evidence / Notes'));
     expect(notes, hasLength(4));
-    expect(notes.every((field) => field.readOnly), isTrue);
+    expect(notes.every((field) => field.readOnly), isFalse);
 
     final strengths = tester.widget<TextField>(_labeledField('Key Strengths'));
     final concerns = tester.widget<TextField>(_labeledField('Key Concerns'));
@@ -221,13 +222,13 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('applicant can type OJT and School, and those values submit', (
+  testWidgets('applicant can type evidence notes, and those values submit', (
     tester,
   ) async {
     OjtWorkImmersionEvaluation? submitted;
     await _pumpEditor(
       tester,
-      entry: _assignedEntry(ojtImmersion: '', school: ''),
+      entry: _assignedEntry(),
       applicantOnly: true,
       onPreview: (_) async {},
       onSave: (entry) {
@@ -238,79 +239,53 @@ void main() {
     expect(find.text('Preview Form'), findsNothing);
     expect(find.text('Submit to HR'), findsOneWidget);
 
-    final ojt = _labeledField('OJT / Immersion');
-    final school = _labeledField('School');
-    await tester.tap(ojt);
-    await tester.pump();
-    expect(
-      tester.widget<EditableText>(
-        find.descendant(of: ojt, matching: find.byType(EditableText)),
-      ).readOnly,
-      isFalse,
-    );
-    await tester.enterText(ojt, 'J');
-    await tester.pump();
-    expect(tester.widget<TextField>(ojt).controller?.text, 'J');
-    await tester.enterText(ojt, 'Juan Dela Cruz');
-    await tester.pump();
-    expect(tester.widget<TextField>(ojt).controller?.text, 'Juan Dela Cruz');
+    final ojt = tester.widget<TextField>(_labeledField('OJT / Immersion'));
+    final school = tester.widget<TextField>(_labeledField('School'));
+    expect(ojt.readOnly, isTrue);
+    expect(school.readOnly, isFalse);
+    expect(ojt.controller?.text, 'Juan Dela Cruz');
+    expect(school.controller?.text, 'Plaridel National High School');
 
-    await tester.tap(school);
-    await tester.pump();
-    expect(
-      tester.widget<EditableText>(
-        find.descendant(of: school, matching: find.byType(EditableText)),
-      ).readOnly,
-      isFalse,
+    await tester.enterText(
+      _labeledField('School'),
+      'Plaridel Community College',
     );
-    await tester.enterText(school, 'P');
     await tester.pump();
-    expect(tester.widget<TextField>(school).controller?.text, 'P');
-    await tester.enterText(school, 'Plaridel National High School');
-    await tester.pump();
-    expect(
-      tester.widget<TextField>(school).controller?.text,
-      'Plaridel National High School',
-    );
-    expect(tester.widget<TextField>(ojt).controller?.text, 'Juan Dela Cruz');
-
-    final date = _labeledField('Date of Interview');
-    expect(tester.widget<TextField>(date).readOnly, isTrue);
-    expect(
-      tester.widget<EditableText>(
-        find.descendant(of: date, matching: find.byType(EditableText)),
-      ).readOnly,
-      isTrue,
-    );
-    expect(tester.widget<TextField>(date).controller?.text, isEmpty);
 
     final notes = _labeledField('Evidence / Notes');
-    expect(
-      tester.widgetList<EditableText>(
-        find.descendant(of: notes, matching: find.byType(EditableText)),
-      ).every((field) => field.readOnly),
-      isTrue,
-    );
+    final noteFields = tester.widgetList<TextField>(notes).toList();
+    expect(noteFields, hasLength(4));
+    const answers = [
+      'Solved the assigned case',
+      'Explained the answer clearly',
+      'Worked with the group',
+      'Adjusted when the task changed',
+    ];
+    for (var i = 0; i < noteFields.length; i++) {
+      await tester.enterText(notes.at(i), answers[i]);
+      await tester.pump();
+    }
+
     await tester.tap(_scoreInks().first);
     await tester.pump();
     expect(
       tester.widgetList<InkWell>(_scoreInks()).every((ink) => ink.onTap == null),
       isTrue,
     );
+    expect(find.text('— / 20'), findsOneWidget);
 
     await tester.tap(find.text('Submit to HR'));
     await tester.pump();
     expect(submitted?.id, _linkedId);
     expect(submitted?.ojtImmersion, 'Juan Dela Cruz');
-    expect(submitted?.school, 'Plaridel National High School');
-    expect(submitted?.interviewDate, isNull);
+    expect(submitted?.school, 'Plaridel Community College');
+    expect(submitted?.problemSolvingNotes, answers[0]);
+    expect(submitted?.communicationNotes, answers[1]);
+    expect(submitted?.teamworkNotes, answers[2]);
+    expect(submitted?.adaptabilityNotes, answers[3]);
     expect(submitted?.problemSolvingScore, isNull);
-    expect(submitted?.communicationScore, isNull);
-    expect(submitted?.teamworkScore, isNull);
-    expect(submitted?.adaptabilityScore, isNull);
     expect(submitted?.overallRecommendation, isNull);
     expect(submitted?.keyStrengths, isNull);
-    expect(submitted?.keyConcerns, isNull);
     expect(submitted?.interviewer, isNull);
   });
 
@@ -346,6 +321,7 @@ void main() {
 
     await tester.tap(_scoreInks().first);
     await tester.pump();
+    expect(find.text('1 / 20'), findsOneWidget);
     expect(find.text('Submit to HR'), findsNothing);
 
     await tester.tap(find.text('Save Evaluation'));

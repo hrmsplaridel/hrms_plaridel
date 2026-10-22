@@ -174,12 +174,13 @@ class ApplicantsProfileRepo {
     return row == null ? null : ApplicantsProfileEntry.fromJson(row);
   }
 
-  Future<void> insert(ApplicantsProfileEntry entry) async {
+  Future<ApplicantsProfileEntry> insert(ApplicantsProfileEntry entry) async {
     final payload = Map<String, dynamic>.from(entry.toJson())..remove('id');
-    await RspLdSavedEntriesApi.insertRow(
+    final row = await RspLdSavedEntriesApi.insertRowReturning(
       ApplicantsProfileEntry.tableName,
       payload,
     );
+    return ApplicantsProfileEntry.fromJson(row);
   }
 
   Future<void> update(ApplicantsProfileEntry entry) async {

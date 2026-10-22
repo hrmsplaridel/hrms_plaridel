@@ -30,7 +30,8 @@ class _ApplicantRequiredFormPageState extends State<ApplicantRequiredFormPage> {
   bool get _readOnly =>
       _status == 'submitted_for_review' ||
       _status == 'resubmitted_for_review' ||
-      _status == 'approved';
+      _status == 'approved' ||
+      _status == 'failed';
 
   @override
   void initState() {
@@ -115,8 +116,11 @@ class _ApplicantRequiredFormPageState extends State<ApplicantRequiredFormPage> {
       await RecruitmentRepo.instance.submitRequiredForm(
         widget.applicationId,
         <String, dynamic>{
-          'ojt_immersion': entry.ojtImmersion,
           'school': entry.school,
+          'problem_solving_notes': entry.problemSolvingNotes,
+          'communication_notes': entry.communicationNotes,
+          'teamwork_notes': entry.teamworkNotes,
+          'adaptability_notes': entry.adaptabilityNotes,
         },
       );
       if (!mounted) return;

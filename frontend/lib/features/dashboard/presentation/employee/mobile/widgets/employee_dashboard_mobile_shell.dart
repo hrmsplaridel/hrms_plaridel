@@ -1,7 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
-import 'package:hrms_plaridel/features/dtr/assistant/presentation/widgets/dtr_assistant_fab.dart';
-import 'package:hrms_plaridel/features/dtr/assistant/presentation/widgets/employee_hrms_assistant_controller.dart';
 import 'package:hrms_plaridel/features/dashboard/presentation/employee/mobile/widgets/employee_dashboard_mobile_bottom_bar.dart';
 import 'package:hrms_plaridel/features/dashboard/presentation/employee/mobile/widgets/employee_dashboard_mobile_drawer.dart';
 import 'package:hrms_plaridel/features/dashboard/presentation/employee/mobile/widgets/employee_dashboard_mobile_nav_items.dart';
@@ -9,7 +7,6 @@ import 'package:hrms_plaridel/features/dashboard/presentation/employee/shared/wi
 import 'package:hrms_plaridel/features/dashboard/presentation/employee/tutorial/employee_tutorial_controller.dart';
 import 'package:hrms_plaridel/features/notifications/models/notification_tap_result.dart';
 import 'package:hrms_plaridel/shared/widgets/dashboard_content_navigator.dart';
-import 'package:hrms_plaridel/shared/widgets/dashboard_header_actions.dart';
 import 'package:hrms_plaridel/shared/widgets/dashboard_mobile_bottom_nav.dart';
 import 'package:hrms_plaridel/shared/widgets/portal_sidebar_brand.dart';
 
@@ -29,7 +26,6 @@ class EmployeeDashboardMobileShell extends StatelessWidget {
     required this.onNotificationTap,
     required this.onFileLeave,
     required this.onFileLocator,
-    required this.onHrmsAssistant,
     required this.onTutorial,
     required this.showMobileLeaveFab,
   });
@@ -51,7 +47,6 @@ class EmployeeDashboardMobileShell extends StatelessWidget {
   final void Function(NotificationTapResult? result) onNotificationTap;
   final VoidCallback onFileLeave;
   final VoidCallback onFileLocator;
-  final VoidCallback onHrmsAssistant;
   final VoidCallback onTutorial;
   final bool showMobileLeaveFab;
 
@@ -59,9 +54,6 @@ class EmployeeDashboardMobileShell extends StatelessWidget {
       width < 600 && selectedIndex == 2 && showMobileLeaveFab;
   bool get _ownsMobileLeaveAction => width < 600 && selectedIndex == 2;
   bool get _useMobileLocatorFab => selectedIndex == 3;
-  bool get _showAssistantFab =>
-      selectedIndex >= 0 &&
-      selectedIndex < employeeDashboardMobileNavItems.length;
 
   @override
   Widget build(BuildContext context) {
@@ -97,18 +89,7 @@ class EmployeeDashboardMobileShell extends StatelessWidget {
                   showNotifications: false,
                   onViewAllNotifications: onViewAllNotifications,
                   onNotificationTap: onNotificationTap,
-                  trailing: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      EmployeeTutorialButton(onPressed: onTutorial),
-                      DashboardAccountMenuButton(
-                        avatarPath: avatarPath,
-                        compact: width < 600,
-                        tooltip: displayName,
-                        onProfile: onProfile,
-                      ),
-                    ],
-                  ),
+                  trailing: EmployeeTutorialButton(onPressed: onTutorial),
                 ),
                 Expanded(
                   child: ColoredBox(
@@ -149,35 +130,6 @@ class EmployeeDashboardMobileShell extends StatelessWidget {
           ),
           if (_buildFileActionButton() case final actionButton?)
             Positioned(right: 16, bottom: 16, child: actionButton),
-          if (_showAssistantFab)
-            ValueListenableBuilder<bool>(
-              valueListenable: EmployeeHrmsAssistantController
-                  .instance
-                  .baseLauncherSuppressed,
-              builder: (context, launcherSuppressed, _) => launcherSuppressed
-                  ? const SizedBox.shrink()
-                  : ValueListenableBuilder<bool>(
-                      valueListenable: EmployeeHrmsAssistantController
-                          .instance
-                          .floatingVisible,
-                      builder: (context, assistantOpen, _) => assistantOpen
-                          ? const SizedBox.shrink()
-                          : ValueListenableBuilder<bool>(
-                              valueListenable:
-                                  EmployeeTutorialController.coachActive,
-                              builder: (context, coachActive, _) => coachActive
-                                  ? const SizedBox.shrink()
-                                  : DraggableDtrAssistantLauncher(
-                                      onPressed: onHrmsAssistant,
-                                      initialBottom:
-                                          _useMobileLeaveFab ||
-                                              _useMobileLocatorFab
-                                          ? 108
-                                          : 16,
-                                    ),
-                            ),
-                    ),
-            ),
         ],
       ),
     );

@@ -25,20 +25,38 @@ class LeaveRequestHistoryEntry {
   final String? remarks;
   final Map<String, dynamic>? metadata;
 
-  String get actionLabel => switch (action) {
-    'saved_draft' => 'Draft saved',
-    'submitted' => 'Submitted',
-    'updated' => 'Request updated',
-    'resubmitted' => 'Resubmitted',
-    'department_head_approved' => 'Approved by Department Reviewer',
-    'department_head_rejected' => 'Rejected by Department Reviewer',
-    'department_head_returned' => 'Returned by Department Reviewer',
-    'approved' => 'Approved by HR',
-    'rejected' => 'Rejected by HR',
-    'returned' => 'Returned by HR',
-    'cancelled' => 'Cancelled',
-    _ => _humanize(action),
-  };
+  String get actionLabel {
+    final step = metadata?['workflow_step'];
+    if (step is Map && step['label'] != null) {
+      if (action == 'approved' || action == 'workflow_step_approved') {
+        return '${step['label']} approved';
+      }
+      if (action == 'returned') {
+        return 'Returned at ${step['label']}';
+      }
+      if (action == 'rejected') {
+        return 'Rejected at ${step['label']}';
+      }
+    }
+    return switch (action) {
+      'saved_draft' => 'Draft saved',
+      'submitted' => 'Submitted',
+      'updated' => 'Request updated',
+      'resubmitted' => 'Resubmitted',
+      'department_head_approved' => 'Approved by Department Reviewer',
+      'department_head_rejected' => 'Rejected by Department Reviewer',
+      'department_head_returned' => 'Returned by Department Reviewer',
+      'approved' =>
+        fromStatus == 'pending_mayor' ? 'Approved by Mayor' : 'Approved by HR',
+      'workflow_step_approved' => 'HR review approved; forwarded to Mayor',
+      'rejected' =>
+        fromStatus == 'pending_mayor' ? 'Rejected by Mayor' : 'Rejected by HR',
+      'returned' =>
+        fromStatus == 'pending_mayor' ? 'Returned by Mayor' : 'Returned by HR',
+      'cancelled' => 'Cancelled',
+      _ => _humanize(action),
+    };
+  }
 
   String get actorLabel {
     final name = actorName?.trim();

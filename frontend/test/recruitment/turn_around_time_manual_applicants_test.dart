@@ -21,6 +21,29 @@ void main() {
     expect(entry.applicants, isEmpty);
   });
 
+  test('qualification standard prints one item on each underline', () {
+    expect(
+      turnAroundQsLines(
+        'Education: Grade 12\nExperience: 2 yrs relevant experience',
+      ),
+      [
+        'Education: Grade 12',
+        'Experience: 2 yrs relevant experience',
+      ],
+    );
+    expect(
+      turnAroundQsLines(
+        'Education: Grade 12 Experience: 2 yrs Training: 72 hours',
+      ),
+      [
+        'Education: Grade 12',
+        'Experience: 2 yrs',
+        'Training: 72 hours',
+      ],
+    );
+    expect(turnAroundQsLines('  '), isEmpty);
+  });
+
   test('a selected position keeps only applications for that position title', () {
     const rows = [
       {

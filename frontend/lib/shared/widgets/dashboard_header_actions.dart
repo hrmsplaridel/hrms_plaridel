@@ -17,7 +17,38 @@ String? dashboardAccountIdLabel(AppUser? user) {
   if (user == null) return null;
   final empId = user.displayEmployeeId;
   if (empId.isEmpty) return null;
-  return 'Employee ID · $empId';
+  return 'User ID · $empId';
+}
+
+/// Sidebar profile subtitle from the account that was created for this user.
+String dashboardAccountRoleLabel(String? role) {
+  switch ((role ?? '').trim().toLowerCase()) {
+    case 'admin':
+      return 'Admin';
+    case 'super_admin':
+      return 'Super Admin';
+    case 'hr':
+      return 'HR';
+    case 'mayor':
+      return 'Mayor';
+    case 'mayor_office_staff':
+      return "Mayor's Office Staff";
+    case 'supervisor':
+      return 'Supervisor';
+    case 'employee':
+      return 'Employee';
+    default:
+      final raw = (role ?? '').trim();
+      if (raw.isEmpty) return 'Employee';
+      return raw
+          .split(RegExp(r'[_\s]+'))
+          .where((part) => part.isNotEmpty)
+          .map(
+            (part) =>
+                '${part[0].toUpperCase()}${part.substring(1).toLowerCase()}',
+          )
+          .join(' ');
+  }
 }
 
 /// Theme toggle + notifications bell for admin/employee dashboard top bars.
@@ -252,12 +283,16 @@ class DashboardSidebarProfileCard extends StatefulWidget {
     required this.subtitle,
     this.avatarPath,
     this.collapsed = false,
+    this.onProfile,
   });
 
   final String displayName;
   final String subtitle;
   final String? avatarPath;
   final bool collapsed;
+
+  /// When set, tapping the card toggles the account menu above it.
+  final VoidCallback? onProfile;
 
   @override
   State<DashboardSidebarProfileCard> createState() =>
@@ -291,7 +326,7 @@ class _DashboardSidebarProfileCardState
   Widget build(BuildContext context) {
     const avatarRadius = 20.0;
 
-    return sidebarCollapseCrossfade(
+    final card = sidebarCollapseCrossfade(
       alignment: Alignment.center,
       collapsed: CollapsedSidebarProfileOrb(
         displayName: widget.displayName,
@@ -395,6 +430,14 @@ class _DashboardSidebarProfileCardState
         },
       ),
     );
+    final onProfile = widget.onProfile;
+    if (onProfile == null) return card;
+    return DashboardAccountMenuButton(
+      onProfile: onProfile,
+      avatarPath: widget.avatarPath,
+      openAbove: true,
+      child: card,
+    );
   }
 }
 
@@ -455,6 +498,8 @@ class DashboardAccountMenuButton extends StatelessWidget {
     this.avatarPath,
     this.compact = false,
     this.tooltip,
+    this.openAbove = false,
+    this.child,
   });
 
   final VoidCallback onProfile;
@@ -462,11 +507,20 @@ class DashboardAccountMenuButton extends StatelessWidget {
   final bool compact;
   final String? tooltip;
 
+  /// Places the menu above [child] instead of under the header avatar.
+  final bool openAbove;
+
+  /// Custom tap target. The header avatar is used when this is null.
+  final Widget? child;
+
   @override
   Widget build(BuildContext context) {
     final auth = context.watch<AuthProvider>();
     final role = (auth.user?.role ?? '').trim().toLowerCase();
-    if (role == 'admin') {
+    if (role == 'admin' ||
+        role == 'employee' ||
+        role == 'mayor' ||
+        role == 'mayor_office_staff') {
       return _AdminAccountMenuButton(
         onProfile: onProfile,
         avatarPath: avatarPath ?? auth.user?.avatarPath,
@@ -474,8 +528,10 @@ class DashboardAccountMenuButton extends StatelessWidget {
         tooltip: tooltip,
         displayName: auth.displayName,
         email: auth.email,
-        roleLabel: (auth.user?.role ?? '').trim(),
+        roleLabel: dashboardAccountRoleLabel(auth.user?.role),
         employeeId: auth.user?.displayEmployeeId,
+        openAbove: openAbove,
+        child: child,
       );
     }
     return _LegacyAccountMenuButton(
@@ -684,44 +740,41 @@ class _AccountMenuHeader extends StatelessWidget {
           ),
           if (idLabel != null) ...[
             const SizedBox(height: 12),
-            Tooltip(
-              message: idLabel!,
-              child: Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 7,
+            Container(
+              padding: const EdgeInsets.symmetric(
+                horizontal: 12,
+                vertical: 7,
+              ),
+              decoration: BoxDecoration(
+                color: AppTheme.dashPanelOf(context).withValues(alpha: 0.85),
+                borderRadius: BorderRadius.circular(24),
+                border: Border.all(
+                  color: AppTheme.primaryNavy.withValues(alpha: 0.28),
                 ),
-                decoration: BoxDecoration(
-                  color: AppTheme.dashPanelOf(context).withValues(alpha: 0.85),
-                  borderRadius: BorderRadius.circular(24),
-                  border: Border.all(
-                    color: AppTheme.primaryNavy.withValues(alpha: 0.28),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    Icons.badge_outlined,
+                    size: 16,
+                    color: AppTheme.primaryNavy,
                   ),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(
-                      Icons.badge_outlined,
-                      size: 16,
-                      color: AppTheme.primaryNavy,
-                    ),
-                    const SizedBox(width: 8),
-                    Flexible(
-                      child: Text(
-                        idLabel!,
-                        style: TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w700,
-                          color: AppTheme.primaryNavy,
-                          letterSpacing: 0.15,
-                        ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
+                  const SizedBox(width: 8),
+                  Flexible(
+                    child: Text(
+                      idLabel!,
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                        color: AppTheme.primaryNavy,
+                        letterSpacing: 0.15,
                       ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                     ),
-                  ],
-                ),
+                  ),
+                ],
               ),
             ),
           ],
@@ -806,6 +859,8 @@ class _AdminAccountMenuButton extends StatefulWidget {
     this.employeeId,
     this.compact = false,
     this.tooltip,
+    this.openAbove = false,
+    this.child,
   });
 
   final VoidCallback onProfile;
@@ -816,6 +871,8 @@ class _AdminAccountMenuButton extends StatefulWidget {
   final String? employeeId;
   final bool compact;
   final String? tooltip;
+  final bool openAbove;
+  final Widget? child;
 
   @override
   State<_AdminAccountMenuButton> createState() =>
@@ -847,22 +904,57 @@ class _AdminAccountMenuButtonState extends State<_AdminAccountMenuButton> {
     _removeEntry();
   }
 
+  double _menuWidth(double screenW) {
+    if (screenW < 720) return (screenW - 28).clamp(260.0, 340.0);
+    return 340;
+  }
+
+  /// Horizontal shift so the menu stays on screen when the sidebar is collapsed.
+  ///
+  /// The profile card is laid out at the full sidebar width and then clipped to
+  /// the narrow rail, so its left edge sits off-screen. Anchor the menu to the
+  /// right of that visible rail instead.
+  double _anchorDx(double menuWidth) {
+    if (!widget.openAbove) return 0;
+    final target = context.findRenderObject();
+    final overlay = Overlay.of(context, rootOverlay: true)
+        .context
+        .findRenderObject();
+    if (target is! RenderBox ||
+        !target.hasSize ||
+        !target.attached ||
+        overlay is! RenderBox ||
+        !overlay.hasSize) {
+      return 0;
+    }
+    final origin = target.localToGlobal(Offset.zero, ancestor: overlay);
+    var menuLeft = origin.dx;
+    if (menuLeft < 8) {
+      final center = origin.dx + target.size.width / 2;
+      menuLeft = center + kDashboardSidebarCollapsedWidth / 2 + 8;
+    }
+    final maxLeft = overlay.size.width - menuWidth - 8;
+    if (menuLeft > maxLeft) menuLeft = maxLeft;
+    if (menuLeft < 8) menuLeft = 8;
+    return menuLeft - origin.dx;
+  }
+
   void _toggle() {
     if (_entry != null) {
       _close();
       return;
     }
     final overlay = Overlay.of(context, rootOverlay: true);
+    final screenW = MediaQuery.sizeOf(context).width;
+    final width = _menuWidth(screenW);
+    final anchorDx = _anchorDx(width);
     _entry = OverlayEntry(
       builder: (overlayContext) {
-        final screenW = MediaQuery.sizeOf(overlayContext).width;
-        final width = screenW < 720
-            ? (screenW - 28).clamp(260.0, 340.0)
-            : 340.0;
         return _AdminAccountDropdown(
           key: _menuKey,
           link: _link,
           width: width,
+          anchorDx: anchorDx,
           displayName: widget.displayName.isNotEmpty
               ? widget.displayName
               : 'User',
@@ -881,6 +973,7 @@ class _AdminAccountMenuButtonState extends State<_AdminAccountMenuButton> {
             if (!mounted) return;
             await performDashboardSignOut(context);
           },
+          openAbove: widget.openAbove,
         );
       },
     );
@@ -895,11 +988,12 @@ class _AdminAccountMenuButtonState extends State<_AdminAccountMenuButton> {
         cursor: SystemMouseCursors.click,
         child: GestureDetector(
           onTap: _toggle,
-          child: DashboardHeaderProfileAvatar(
-            avatarPath: widget.avatarPath,
-            compact: widget.compact,
-            tooltip: widget.tooltip ?? widget.displayName,
-          ),
+          child: widget.child ??
+              DashboardHeaderProfileAvatar(
+                avatarPath: widget.avatarPath,
+                compact: widget.compact,
+                tooltip: widget.tooltip ?? widget.displayName,
+              ),
         ),
       ),
     );
@@ -919,10 +1013,13 @@ class _AdminAccountDropdown extends StatefulWidget {
     required this.onDismiss,
     required this.onSettings,
     required this.onSignOut,
+    this.openAbove = false,
+    this.anchorDx = 0,
   });
 
   final LayerLink link;
   final double width;
+  final double anchorDx;
   final String displayName;
   final String email;
   final String roleLabel;
@@ -931,6 +1028,7 @@ class _AdminAccountDropdown extends StatefulWidget {
   final VoidCallback onDismiss;
   final Future<void> Function() onSettings;
   final Future<void> Function() onSignOut;
+  final bool openAbove;
 
   @override
   State<_AdminAccountDropdown> createState() => _AdminAccountDropdownState();
@@ -987,14 +1085,21 @@ class _AdminAccountDropdownState extends State<_AdminAccountDropdown>
         CompositedTransformFollower(
           link: widget.link,
           showWhenUnlinked: false,
-          targetAnchor: Alignment.bottomRight,
-          followerAnchor: Alignment.topRight,
-          offset: const Offset(0, 8),
+          targetAnchor: widget.openAbove
+              ? Alignment.topLeft
+              : Alignment.bottomRight,
+          followerAnchor: widget.openAbove
+              ? Alignment.bottomLeft
+              : Alignment.topRight,
+          offset: Offset(
+            widget.openAbove ? widget.anchorDx : 0,
+            widget.openAbove ? -8 : 8,
+          ),
           child: FadeTransition(
             opacity: curved,
             child: SlideTransition(
               position: Tween<Offset>(
-                begin: const Offset(0, -0.06),
+                begin: Offset(0, widget.openAbove ? 0.06 : -0.06),
                 end: Offset.zero,
               ).animate(curved),
               child: Focus(
@@ -1049,231 +1154,51 @@ class _AdminAccountCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final dark = AppTheme.dashIsDark(context);
-    final primary = AppTheme.dashTextPrimaryOf(context);
-    final secondary = AppTheme.dashTextSecondaryOf(context);
-    final surface = dark
-        ? AppTheme.dashPanelOf(context)
-        : const Color(0xFFFFFCF9);
     final id = (employeeId ?? '').trim();
+    final role = roleLabel.trim();
 
     return Material(
-      color: surface,
-      elevation: 8,
-      shadowColor: Colors.black.withValues(alpha: 0.12),
+      color: AppTheme.dashPanelOf(context),
+      elevation: 16,
+      shadowColor: Colors.black.withValues(alpha: 0.14),
       borderRadius: BorderRadius.circular(20),
       clipBehavior: Clip.antiAlias,
-      child: Container(
+      child: SizedBox(
         width: width,
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(
-            color: AppTheme.primaryNavy.withValues(alpha: dark ? 0.28 : 0.16),
-          ),
-        ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.fromLTRB(14, 14, 14, 12),
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                  colors: [
-                    AppTheme.primaryNavy.withValues(alpha: dark ? 0.16 : 0.10),
-                    AppTheme.primaryNavy.withValues(alpha: dark ? 0.04 : 0.02),
-                  ],
-                ),
-              ),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  _AdminMenuAvatar(name: displayName, avatarPath: avatarPath),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          displayName,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            color: primary,
-                            fontSize: 16.5,
-                            fontWeight: FontWeight.w800,
-                            height: 1.15,
-                            letterSpacing: -0.2,
-                          ),
-                        ),
-                        if (email.isNotEmpty) ...[
-                          const SizedBox(height: 4),
-                          Row(
-                            children: [
-                              Icon(
-                                Icons.mail_outline_rounded,
-                                size: 13,
-                                color: secondary,
-                              ),
-                              const SizedBox(width: 4),
-                              Expanded(
-                                child: Text(
-                                  email,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: TextStyle(
-                                    color: secondary,
-                                    fontSize: 12.5,
-                                    height: 1.2,
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ],
-                        if (roleLabel.isNotEmpty) ...[
-                          const SizedBox(height: 6),
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 8,
-                              vertical: 3,
-                            ),
-                            decoration: BoxDecoration(
-                              color: AppTheme.primaryNavy.withValues(
-                                alpha: dark ? 0.18 : 0.12,
-                              ),
-                              borderRadius: BorderRadius.circular(999),
-                            ),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Icon(
-                                  Icons.verified_user_outlined,
-                                  size: 12,
-                                  color: AppTheme.primaryNavy,
-                                ),
-                                const SizedBox(width: 4),
-                                Text(
-                                  roleLabel.toUpperCase(),
-                                  style: const TextStyle(
-                                    color: AppTheme.primaryNavy,
-                                    fontSize: 10.5,
-                                    fontWeight: FontWeight.w800,
-                                    letterSpacing: 0.4,
-                                    height: 1,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ],
-                      ],
-                    ),
-                  ),
-                ],
-              ),
+            _AccountMenuHeader(
+              displayName: displayName,
+              email: email,
+              idLabel: id.isEmpty ? null : 'User ID · $id',
+              avatarPath: avatarPath,
+              role: role.isEmpty ? null : role,
             ),
-            if (id.isNotEmpty)
-              Padding(
-                padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
-                child: Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 10,
-                    vertical: 8,
-                  ),
-                  decoration: BoxDecoration(
-                    color: dark
-                        ? AppTheme.primaryNavy.withValues(alpha: 0.10)
-                        : const Color(0xFFFFF6EF),
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(
-                      color: AppTheme.primaryNavy.withValues(alpha: 0.22),
-                    ),
-                  ),
-                  child: Row(
-                    children: [
-                      Container(
-                        width: 32,
-                        height: 32,
-                        alignment: Alignment.center,
-                        decoration: BoxDecoration(
-                          color: AppTheme.primaryNavy.withValues(alpha: 0.12),
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: const Icon(
-                          Icons.badge_outlined,
-                          size: 18,
-                          color: AppTheme.primaryNavy,
-                        ),
-                      ),
-                      Container(
-                        width: 1,
-                        height: 28,
-                        margin: const EdgeInsets.symmetric(horizontal: 10),
-                        color: AppTheme.primaryNavy.withValues(alpha: 0.22),
-                      ),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              'Employee ID',
-                              style: TextStyle(
-                                color: secondary,
-                                fontSize: 11,
-                                fontWeight: FontWeight.w600,
-                                height: 1.1,
-                              ),
-                            ),
-                            const SizedBox(height: 2),
-                            Text(
-                              id,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(
-                                color: primary,
-                                fontSize: 15,
-                                fontWeight: FontWeight.w800,
-                                height: 1.1,
-                                letterSpacing: 0.2,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            Divider(
-              height: 1,
-              thickness: 1,
-              color: AppTheme.dashHairlineOf(context),
-            ),
-            _AdminMenuAction(
-              icon: Icons.settings_outlined,
-              label: 'Settings',
-              iconColor: AppTheme.primaryNavy,
-              iconBackground: AppTheme.primaryNavy.withValues(alpha: 0.12),
-              hoverColor: AppTheme.primaryNavy.withValues(alpha: 0.08),
+            const Divider(height: 1, thickness: 1),
+            _AdminMenuTap(
               onTap: onSettings,
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+              child: _AccountMenuActionRow(
+                icon: Icons.settings_outlined,
+                label: 'Settings',
+                iconBackground: AppTheme.primaryNavy.withValues(alpha: 0.12),
+                iconColor: AppTheme.primaryNavy,
+              ),
             ),
-            Divider(
-              height: 1,
-              thickness: 1,
-              color: AppTheme.dashHairlineOf(context),
-            ),
-            _AdminMenuAction(
-              icon: Icons.logout_rounded,
-              label: 'Sign out',
-              iconColor: const Color(0xFFC62828),
-              iconBackground: const Color(0xFFFFEBEE),
-              hoverColor: const Color(0xFFFFEBEE),
-              labelColor: const Color(0xFFC62828),
+            const Divider(height: 1, thickness: 1),
+            _AdminMenuTap(
               onTap: onSignOut,
+              padding: const EdgeInsets.fromLTRB(12, 4, 12, 12),
+              child: const _AccountMenuActionRow(
+                icon: Icons.logout_rounded,
+                label: 'Sign out',
+                iconBackground: Color(0xFFFFEBEE),
+                iconColor: Color(0xFFC62828),
+                labelColor: Color(0xFFC62828),
+                labelWeight: FontWeight.w600,
+              ),
             ),
           ],
         ),
@@ -1282,139 +1207,39 @@ class _AdminAccountCard extends StatelessWidget {
   }
 }
 
-class _AdminMenuAvatar extends StatelessWidget {
-  const _AdminMenuAvatar({required this.name, required this.avatarPath});
-
-  final String name;
-  final String? avatarPath;
-
-  @override
-  Widget build(BuildContext context) {
-    final hasPhoto = (avatarPath ?? '').trim().isNotEmpty;
-    return Container(
-      padding: const EdgeInsets.all(2),
-      decoration: BoxDecoration(
-        shape: BoxShape.circle,
-        border: Border.all(color: AppTheme.primaryNavy, width: 1.5),
-      ),
-      child: hasPhoto
-          ? UserAvatar(
-              avatarPath: avatarPath,
-              radius: 26,
-              backgroundColor: Colors.white,
-              placeholderIconColor: AppTheme.primaryNavy,
-            )
-          : CircleAvatar(
-              radius: 26,
-              backgroundColor: AppTheme.primaryNavy.withValues(alpha: 0.12),
-              child: Text(
-                _accountInitials(name),
-                style: const TextStyle(
-                  color: AppTheme.primaryNavy,
-                  fontSize: 16,
-                  fontWeight: FontWeight.w800,
-                ),
-              ),
-            ),
-    );
-  }
-}
-
-class _AdminMenuAction extends StatefulWidget {
-  const _AdminMenuAction({
-    required this.icon,
-    required this.label,
-    required this.iconColor,
-    required this.iconBackground,
-    required this.hoverColor,
+class _AdminMenuTap extends StatefulWidget {
+  const _AdminMenuTap({
     required this.onTap,
-    this.labelColor,
+    required this.padding,
+    required this.child,
   });
 
-  final IconData icon;
-  final String label;
-  final Color iconColor;
-  final Color iconBackground;
-  final Color hoverColor;
-  final Color? labelColor;
   final Future<void> Function() onTap;
+  final EdgeInsetsGeometry padding;
+  final Widget child;
 
   @override
-  State<_AdminMenuAction> createState() => _AdminMenuActionState();
+  State<_AdminMenuTap> createState() => _AdminMenuTapState();
 }
 
-class _AdminMenuActionState extends State<_AdminMenuAction> {
+class _AdminMenuTapState extends State<_AdminMenuTap> {
   var _hovered = false;
 
   @override
   Widget build(BuildContext context) {
-    final labelColor = widget.labelColor ?? AppTheme.dashTextPrimaryOf(context);
     return MouseRegion(
       cursor: SystemMouseCursors.click,
       onEnter: (_) => setState(() => _hovered = true),
       onExit: (_) => setState(() => _hovered = false),
       child: Material(
-        color: _hovered ? widget.hoverColor : Colors.transparent,
+        color: _hovered
+            ? AppTheme.primaryNavy.withValues(alpha: 0.06)
+            : Colors.transparent,
         child: InkWell(
           onTap: () => widget.onTap(),
-          child: SizedBox(
-            height: 54,
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 12),
-              child: Row(
-                children: [
-                  Container(
-                    width: 34,
-                    height: 34,
-                    alignment: Alignment.center,
-                    decoration: BoxDecoration(
-                      color: widget.iconBackground,
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    child: Icon(widget.icon, size: 18, color: widget.iconColor),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Text(
-                      widget.label,
-                      style: TextStyle(
-                        color: labelColor,
-                        fontSize: 14.5,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                  ),
-                  Icon(
-                    Icons.chevron_right_rounded,
-                    size: 20,
-                    color:
-                        (widget.labelColor ??
-                                AppTheme.dashTextSecondaryOf(context))
-                            .withValues(alpha: 0.8),
-                  ),
-                ],
-              ),
-            ),
-          ),
+          child: Padding(padding: widget.padding, child: widget.child),
         ),
       ),
     );
   }
-}
-
-String _accountInitials(String name) {
-  final parts = name
-      .trim()
-      .split(RegExp(r'\s+'))
-      .where((part) => part.isNotEmpty)
-      .toList();
-  if (parts.isEmpty) return '?';
-  String first(String value) {
-    final iterator = value.runes.iterator;
-    if (!iterator.moveNext()) return '';
-    return String.fromCharCode(iterator.current).toUpperCase();
-  }
-
-  if (parts.length == 1) return first(parts.first);
-  return '${first(parts.first)}${first(parts.last)}';
 }

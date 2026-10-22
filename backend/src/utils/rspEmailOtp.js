@@ -67,6 +67,23 @@ function issueNewOtp(email) {
   }
 
   const now = Date.now();
+
+  // Strict: while the previous code is still valid, no new code may be issued
+  // (no resend). A fresh code is only allowed once it expires, is used, or is
+  // locked out by too many wrong attempts.
+  const existing = otpByEmail.get(emailNorm);
+  if (existing && now <= existing.expiresAt && existing.attempts < MAX_VERIFY_ATTEMPTS) {
+    const waitMs = existing.expiresAt - now;
+    const err = new Error(
+      `A code was already sent to this email and is still valid. Use it, or wait ${Math.ceil(
+        waitMs / 1000
+      )} seconds for it to expire before requesting a new one.`
+    );
+    err.code = 'OTP_STILL_ACTIVE';
+    err.waitMs = Math.max(0, waitMs);
+    throw err;
+  }
+
   const timestamps = pruneSendTimestamps(emailNorm, now);
   if (timestamps.length >= MAX_SENDS_PER_WINDOW) {
     const oldestInWindow = Math.min(...timestamps);

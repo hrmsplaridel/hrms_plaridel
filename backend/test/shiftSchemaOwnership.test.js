@@ -4,17 +4,19 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
+const { dtrImplementationFiles } = require('./helpers/dtrModuleSources');
 
 const runtimeFiles = [
   'src/routes/shifts.js',
   'src/routes/dtrDailySummary.js',
+  ...dtrImplementationFiles(),
   'src/services/biometricProcessing.js',
   'src/services/shiftAttendance.js',
 ];
 
 test('shift runtime code never alters the database schema', () => {
   for (const relativePath of runtimeFiles) {
-    const source = fs.readFileSync(path.join(__dirname, '..', relativePath), 'utf8');
+    const source = fs.readFileSync(path.resolve(__dirname, '..', relativePath), 'utf8');
     assert.doesNotMatch(
       source,
       /ALTER\s+TABLE\s+shifts/i,

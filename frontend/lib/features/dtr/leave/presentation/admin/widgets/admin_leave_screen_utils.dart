@@ -1,3 +1,4 @@
+import 'package:hrms_plaridel/features/dtr/management/approvals/pages/workflow_approval_inbox_page.dart';
 import 'package:flutter/material.dart';
 
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
@@ -46,7 +47,7 @@ String formatAdminLeaveDateTime(DateTime value) {
 const adminLeaveRevokeWindow = Duration(days: 3);
 
 DateTime? adminLeaveRevokeDeadline(LeaveRequest request) {
-  final reviewedAt = request.reviewedAt;
+  final reviewedAt = request.approvedAt ?? request.reviewedAt;
   if (reviewedAt == null) return null;
   return reviewedAt.add(adminLeaveRevokeWindow);
 }
@@ -55,7 +56,7 @@ String? adminLeaveRevokeDisabledReason(LeaveRequest request, {DateTime? now}) {
   if (request.status != LeaveRequestStatus.approved) return null;
   final deadline = adminLeaveRevokeDeadline(request);
   if (deadline == null) {
-    return 'Cannot determine the HR approval date for this request.';
+    return 'Cannot determine the final approval date for this request.';
   }
   final effectiveNow = now ?? DateTime.now();
   if (effectiveNow.isAfter(deadline)) {
@@ -68,7 +69,10 @@ String adminLeaveStatusLabel(
   LeaveRequestStatus status, {
   required bool isDepartmentHead,
   String finalReviewRoute = 'hr',
+  Map<String, dynamic>? workflowSnapshot,
 }) {
+  final named = pendingWorkflowStepLabel(workflowSnapshot);
+  if (status.isPending && named != null) return 'Pending $named';
   if (!isDepartmentHead) return status.displayName;
   return switch (status) {
     LeaveRequestStatus.pendingDepartmentHead => 'Pending',

@@ -152,6 +152,7 @@ TurnAroundTimeEntry turnAroundTimeEntryFromVacancy({
   String? noOfVacantPosition,
   String? endSearch,
   String? qualificationStandard,
+  String? dateOfPublication,
 }) {
   String? clean(String? value) {
     final text = (value ?? '').trim();
@@ -161,6 +162,7 @@ TurnAroundTimeEntry turnAroundTimeEntryFromVacancy({
   return TurnAroundTimeEntry(
     position: clean(position),
     noOfVacantPosition: clean(noOfVacantPosition),
+    dateOfPublication: clean(dateOfPublication),
     endSearch: clean(endSearch),
     qs: clean(qualificationStandard),
     applicants: const [],
@@ -358,6 +360,67 @@ class _RspTurnAroundTimeSectionState extends State<RspTurnAroundTimeSection> {
     }
   }
 
+  /// Opens a new form and persists it when create fields allow, so DocuTracker
+  /// can assign Prepared by (creator) and Noted by (HRMDO) during create.
+  Future<void> _beginTatEdit(TurnAroundTimeEntry draft) async {
+    final canCreateNow =
+        (draft.position ?? '').trim().isNotEmpty &&
+        (draft.office ?? '').trim().isNotEmpty;
+    if (!canCreateNow) {
+      if (!mounted) return;
+      setState(() {
+        _editing = draft;
+        _requirementCompleted = false;
+        _signatureStatus = null;
+        _historyLoaded = false;
+        _edits = [];
+      });
+      return;
+    }
+    try {
+      final saved = await TurnAroundTimeRepo.instance.insert(draft);
+      if (!mounted) return;
+      setState(() {
+        _editing = saved;
+        _requirementCompleted = false;
+        _signatureStatus = null;
+        _historyLoaded = false;
+        _edits = [];
+      });
+      final id = saved.id;
+      if (id != null) _loadEditHistory(id);
+      _load();
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _editing = draft;
+        _requirementCompleted = false;
+        _signatureStatus = null;
+        _historyLoaded = false;
+        _edits = [];
+      });
+    }
+  }
+
+  /// Called once Position and Office are filled on an unsaved create form so
+  /// e-sign fields can appear without waiting for an explicit Save.
+  Future<void> _ensureTatPersisted(TurnAroundTimeEntry entry) async {
+    if (_editing?.id != null || entry.id != null) return;
+    try {
+      final saved = await TurnAroundTimeRepo.instance.insert(entry);
+      if (!mounted || _editing?.id != null) return;
+      setState(() {
+        _editing = saved;
+        _signatureStatus = null;
+      });
+      final id = saved.id;
+      if (id != null) _loadEditHistory(id);
+      _load();
+    } catch (_) {
+      // Leave the local draft editable; Save still creates the row.
+    }
+  }
+
   Future<void> _startNew() async {
     try {
       final announcement = await JobVacancyAnnouncementRepo.instance.fetch();
@@ -370,46 +433,22 @@ class _RspTurnAroundTimeSectionState extends State<RspTurnAroundTimeSection> {
             vacancy.positionKey!.trim().toLowerCase(): vacancy,
       };
       if (positions.isEmpty) {
-        setState(() {
-          _editing = const TurnAroundTimeEntry();
-          _requirementCompleted = false;
-          _signatureStatus = null;
-          _historyLoaded = false;
-          _edits = [];
-        });
+        await _beginTatEdit(const TurnAroundTimeEntry());
         return;
       }
       final choice = await _pickTatPosition(positions);
       if (!mounted || choice == null || choice == _cancelledTatChoice) return;
       if (choice == _blankTatChoice) {
-        setState(() {
-          _editing = const TurnAroundTimeEntry();
-          _requirementCompleted = false;
-          _signatureStatus = null;
-          _historyLoaded = false;
-          _edits = [];
-        });
+        await _beginTatEdit(const TurnAroundTimeEntry());
         return;
       }
-      setState(() {
-        _editing = _buildAutoPrefilledTat(choice);
-        _requirementCompleted = false;
-        _signatureStatus = null;
-        _historyLoaded = false;
-        _edits = [];
-      });
+      await _beginTatEdit(_buildAutoPrefilledTat(choice));
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Could not load vacancy data. ${userFacingApiError(e)}')),
       );
-      setState(() {
-        _editing = const TurnAroundTimeEntry();
-        _requirementCompleted = false;
-        _signatureStatus = null;
-        _historyLoaded = false;
-        _edits = [];
-      });
+      await _beginTatEdit(const TurnAroundTimeEntry());
     }
   }
 
@@ -494,16 +533,33 @@ class _RspTurnAroundTimeSectionState extends State<RspTurnAroundTimeSection> {
     }
   }
 
-  Future<void> _markTatCompleted() async {
-    final id = _editing?.id;
-    if (id == null || _requirementCompleted) return;
+  Future<void> _markTatCompleted(TurnAroundTimeEntry entry) async {
+    if (_requirementCompleted) return;
     try {
+      var working = entry;
+      var id = working.id;
+      if (id == null) {
+        working = await TurnAroundTimeRepo.instance.insert(working);
+        id = working.id;
+        if (id == null) {
+          throw StateError('The form was saved but no record id was returned.');
+        }
+        if (!mounted) return;
+        setState(() {
+          _editing = working;
+          _signatureStatus = null;
+          _historyLoaded = false;
+          _edits = [];
+        });
+        _loadEditHistory(id);
+      }
       await RecruitmentRepo.instance.completeTurnAroundTimeEntry(id);
       if (!mounted) return;
       setState(() => _requirementCompleted = true);
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Turn-Around Time marked completed.')),
       );
+      _load();
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -563,6 +619,9 @@ class _RspTurnAroundTimeSectionState extends State<RspTurnAroundTimeSection> {
     return turnAroundTimeEntryFromVacancy(
       position: position,
       noOfVacantPosition: vacancy?.maxApplicants?.toString(),
+      dateOfPublication: vacancy?.publishedAt == null
+          ? null
+          : _formatTatDate(vacancy!.publishedAt!),
       endSearch: vacancy?.closingDate == null
           ? null
           : _formatTatDate(vacancy!.closingDate!),
@@ -572,55 +631,261 @@ class _RspTurnAroundTimeSectionState extends State<RspTurnAroundTimeSection> {
 
   Map<String, JobVacancyItem> _matchedVacancy = {};
 
+  List<String> _positionsLatestFirst(List<String> positions) {
+    final ordered = [...positions];
+    ordered.sort((a, b) {
+      final av = _matchedVacancy[a.trim().toLowerCase()]?.publishedAt;
+      final bv = _matchedVacancy[b.trim().toLowerCase()]?.publishedAt;
+      if (av == null && bv == null) {
+        return a.toLowerCase().compareTo(b.toLowerCase());
+      }
+      if (av == null) return 1;
+      if (bv == null) return -1;
+      final byDate = bv.compareTo(av);
+      if (byDate != 0) return byDate;
+      return a.toLowerCase().compareTo(b.toLowerCase());
+    });
+    return ordered;
+  }
+
+  String _vacancyMeta(JobVacancyItem? vacancy) {
+    if (vacancy == null) return 'Applicants on file for this position';
+    final parts = <String>[];
+    final education = (vacancy.education ?? '').trim();
+    final experience = (vacancy.experience ?? '').trim();
+    if (education.isNotEmpty) parts.add(education);
+    if (experience.isNotEmpty) parts.add(experience);
+    if (vacancy.closingDate != null) {
+      parts.add('Closes ${_formatTatDate(vacancy.closingDate!)}');
+    }
+    final count = vacancy.applicationCount;
+    if (count != null) {
+      parts.add('$count ${count == 1 ? 'applicant' : 'applicants'}');
+    }
+    final slots = vacancy.maxApplicants;
+    if (slots != null && slots > 0) parts.add('$slots slots');
+    return parts.join(' · ');
+  }
+
   Future<String?> _pickTatPosition(List<String> positions) {
+    final ordered = _positionsLatestFirst(positions);
     return showDialog<String>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Select vacancy'),
-        content: SizedBox(
-          width: 420,
-          child: ListView(
-            shrinkWrap: true,
-            children: [
-              for (final position in positions)
-                ListTile(
-                  title: Text(position),
-                  onTap: () => Navigator.of(ctx).pop(position),
-                ),
-            ],
+      builder: (ctx) {
+        final primary = AppTheme.dashTextPrimaryOf(ctx);
+        final secondary = AppTheme.dashTextSecondaryOf(ctx);
+        final hairline = AppTheme.dashHairlineOf(ctx);
+        return Dialog(
+          backgroundColor: Colors.transparent,
+          insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 28),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 480),
+            child: Material(
+              color: AppTheme.dashPanelOf(ctx),
+              borderRadius: BorderRadius.circular(16),
+              clipBehavior: Clip.antiAlias,
+              elevation: 10,
+              shadowColor: Colors.black26,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 16, 8, 12),
+                    child: Row(
+                      children: [
+                        Container(
+                          width: 36,
+                          height: 36,
+                          decoration: BoxDecoration(
+                            color: AppTheme.primaryNavy.withValues(alpha: 0.12),
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: const Icon(
+                            Icons.work_outline_rounded,
+                            size: 20,
+                            color: AppTheme.primaryNavy,
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Select vacancy',
+                                style: TextStyle(
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.w800,
+                                  color: primary,
+                                ),
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                'Newest posting first. Choosing one prefills the form.',
+                                style: TextStyle(fontSize: 12.5, color: secondary),
+                              ),
+                            ],
+                          ),
+                        ),
+                        IconButton(
+                          onPressed: () => Navigator.of(ctx).pop(_cancelledTatChoice),
+                          icon: Icon(Icons.close_rounded, color: secondary),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Divider(height: 1, color: hairline),
+                  ConstrainedBox(
+                    constraints: const BoxConstraints(maxHeight: 360),
+                    child: ListView.separated(
+                      shrinkWrap: true,
+                      padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
+                      itemCount: ordered.length,
+                      separatorBuilder: (_, __) => const SizedBox(height: 8),
+                      itemBuilder: (_, index) {
+                        final position = ordered[index];
+                        final vacancy =
+                            _matchedVacancy[position.trim().toLowerCase()];
+                        final meta = _vacancyMeta(vacancy);
+                        final closed = vacancy?.isClosed == true;
+                        return Material(
+                          color: AppTheme.dashMutedSurfaceOf(ctx),
+                          borderRadius: BorderRadius.circular(12),
+                          child: InkWell(
+                            onTap: () => Navigator.of(ctx).pop(position),
+                            borderRadius: BorderRadius.circular(12),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 14,
+                                vertical: 12,
+                              ),
+                              decoration: BoxDecoration(
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(color: hairline),
+                              ),
+                              child: Row(
+                                children: [
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Row(
+                                          children: [
+                                            Flexible(
+                                              child: Text(
+                                                position,
+                                                style: TextStyle(
+                                                  fontWeight: FontWeight.w800,
+                                                  color: primary,
+                                                ),
+                                              ),
+                                            ),
+                                            if (closed) ...[
+                                              const SizedBox(width: 8),
+                                              Container(
+                                                padding: const EdgeInsets.symmetric(
+                                                  horizontal: 8,
+                                                  vertical: 2,
+                                                ),
+                                                decoration: BoxDecoration(
+                                                  color: const Color(0xFFC62828)
+                                                      .withValues(alpha: 0.1),
+                                                  borderRadius: BorderRadius.circular(999),
+                                                ),
+                                                child: const Text(
+                                                  'Closed',
+                                                  style: TextStyle(
+                                                    fontSize: 11,
+                                                    fontWeight: FontWeight.w800,
+                                                    color: Color(0xFFC62828),
+                                                  ),
+                                                ),
+                                              ),
+                                            ],
+                                          ],
+                                        ),
+                                        if (meta.isNotEmpty) ...[
+                                          const SizedBox(height: 4),
+                                          Text(
+                                            meta,
+                                            style: TextStyle(
+                                              fontSize: 12.5,
+                                              height: 1.35,
+                                              color: secondary,
+                                            ),
+                                          ),
+                                        ],
+                                      ],
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Icon(
+                                    Icons.chevron_right_rounded,
+                                    color: AppTheme.primaryNavy.withValues(alpha: 0.7),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                  Divider(height: 1, color: hairline),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 10, 16, 14),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.end,
+                      children: [
+                        TextButton(
+                          onPressed: () => Navigator.of(ctx).pop(_cancelledTatChoice),
+                          child: const Text('Cancel'),
+                        ),
+                        const SizedBox(width: 8),
+                        OutlinedButton(
+                          onPressed: () => Navigator.of(ctx).pop(_blankTatChoice),
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: AppTheme.primaryNavy,
+                            side: BorderSide(
+                              color: AppTheme.primaryNavy.withValues(alpha: 0.4),
+                            ),
+                          ),
+                          child: const Text('Blank form'),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
           ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(_blankTatChoice),
-            child: const Text('Blank form'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(_cancelledTatChoice),
-            child: const Text('Cancel'),
-          ),
-        ],
-      ),
+        );
+      },
     );
   }
 
   Future<void> _onSave(TurnAroundTimeEntry entry) async {
     try {
+      final TurnAroundTimeEntry saved;
       if (entry.id == null) {
-        await TurnAroundTimeRepo.instance.insert(entry);
+        saved = await TurnAroundTimeRepo.instance.insert(entry);
       } else {
         await TurnAroundTimeRepo.instance.update(entry);
+        saved = entry;
       }
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Turn-around time saved.')),
       );
+      // Keep the editor open so the creator can sign and DocuTracker can keep
+      // the next-signer assignment visible.
       setState(() {
-        _editing = null;
-        _signatureStatus = null;
-        _historyLoaded = false;
-        _edits = [];
+        _editing = saved;
+        _signatureStatus = _signatureStatus;
       });
+      final id = saved.id;
+      if (id != null) _loadEditHistory(id);
       _load();
     } catch (e) {
       if (!mounted) return;
@@ -836,22 +1101,13 @@ class _RspTurnAroundTimeSectionState extends State<RspTurnAroundTimeSection> {
             onPreview: _preview,
             onDownloadPdf: _download,
             requirementCompleted: _requirementCompleted,
-            onMarkCompleted: _editing?.id == null ? null : _markTatCompleted,
+            onMarkCompleted: _markTatCompleted,
+            onEnsurePersisted: _editing?.id == null ? _ensureTatPersisted : null,
+            showSignatures: true,
+            signatureStatus: _signatureStatus,
+            onSignaturesChanged: _onSignaturesChanged,
           ),
           if (_editing?.id != null) ...[
-            const SizedBox(height: 16),
-            DocuTrackerRspSignatureSection(
-              sourceTable: TurnAroundTimeEntry.tableName,
-              sourceRecordId: _editing!.id!,
-              signatureStatus: _signatureStatus,
-              onChanged: _onSignaturesChanged,
-              helperText:
-                  'Prepared by is the form creator and signs first. Noted by is the HRMDO official and signs second. The form stays editable. A real content change asks both to sign again.',
-              slots: const [
-                DocuTrackerRspSignatureSlot('prepared_by', 'Prepared by'),
-                DocuTrackerRspSignatureSlot('noted_by', 'Noted by'),
-              ],
-            ),
             if (_historyLoaded &&
                 tatSignaturesNeedRenewal(
                   signatureStatus: _signatureStatus,
@@ -918,7 +1174,11 @@ class TurnAroundTimeEditor extends StatefulWidget {
     required this.onDownloadPdf,
     this.requirementCompleted = false,
     this.onMarkCompleted,
+    this.onEnsurePersisted,
     this.loadLinkableApplications,
+    this.showSignatures = false,
+    this.signatureStatus,
+    this.onSignaturesChanged,
   });
 
   final TurnAroundTimeEntry entry;
@@ -929,11 +1189,25 @@ class TurnAroundTimeEditor extends StatefulWidget {
   final Future<void> Function(TurnAroundTimeEntry)? onPreview;
   final Future<void> Function(TurnAroundTimeEntry) onDownloadPdf;
   final bool requirementCompleted;
-  final Future<void> Function()? onMarkCompleted;
+  final Future<void> Function(TurnAroundTimeEntry)? onMarkCompleted;
+
+  /// When set, called once Position and Office are filled so DocuTracker
+  /// e-sign slots can initialize during create.
+  final Future<void> Function(TurnAroundTimeEntry)? onEnsurePersisted;
 
   /// Recruitment applications HR may attach while adding an applicant.
   /// Defaults to the final-hiring source list. Tests can supply a fixed list.
   final Future<List<Map<String, dynamic>>> Function()? loadLinkableApplications;
+
+  /// Shows the DocuTracker signature area under Prepared by / Noted by.
+  /// Record previews leave this off so they stay a read-only form snapshot.
+  final bool showSignatures;
+
+  /// DocuTracker source status for the saved record, when one exists.
+  final String? signatureStatus;
+
+  /// Called after the creator signs or DocuTracker assigns the next signer.
+  final ValueChanged<DocuTrackerSourceSignatureBundle>? onSignaturesChanged;
 
   @override
   State<TurnAroundTimeEditor> createState() => _TurnAroundTimeEditorState();
@@ -959,8 +1233,51 @@ class _TurnAroundTimeEditorState extends State<TurnAroundTimeEditor> {
   String _query = '';
   String? _positionError;
   String? _officeError;
+  bool _ensurePersistRequested = false;
 
   bool get _creating => widget.entry.id == null && !widget.readOnly;
+
+  void _maybeEnsurePersisted() {
+    if (!_creating ||
+        widget.onEnsurePersisted == null ||
+        _ensurePersistRequested) {
+      return;
+    }
+    if (_position.text.trim().isEmpty || _office.text.trim().isEmpty) return;
+    _ensurePersistRequested = true;
+    widget.onEnsurePersisted!(_buildEntry());
+  }
+
+  String _positionKey(String? raw) {
+    var text = (raw ?? '').trim().toLowerCase();
+    text = text.replaceFirst(RegExp(r'^now hiring:\s*'), '');
+    return text.replaceAll(RegExp(r'\s+'), ' ');
+  }
+
+  Future<void> _fillPublicationDateFromVacancy() async {
+    if (widget.readOnly || _dateOfPublication.text.trim().isNotEmpty) return;
+    final position = _position.text.trim();
+    if (position.isEmpty) return;
+    final announcement = await JobVacancyAnnouncementRepo.instance
+        .fetchIfAvailable();
+    if (!mounted ||
+        announcement == null ||
+        _dateOfPublication.text.trim().isNotEmpty) {
+      return;
+    }
+    final key = _positionKey(position);
+    JobVacancyItem? match;
+    for (final vacancy in announcement.vacancies) {
+      if (_positionKey(vacancy.headline) == key ||
+          _positionKey(vacancy.positionKey) == key) {
+        match = vacancy;
+        break;
+      }
+    }
+    final published = match?.publishedAt;
+    if (published == null) return;
+    setState(() => _dateOfPublication.text = _formatTatDate(published));
+  }
 
   @override
   void initState() {
@@ -977,6 +1294,7 @@ class _TurnAroundTimeEditorState extends State<TurnAroundTimeEditor> {
     _notedByName = TextEditingController(text: e.notedByName ?? '');
     _notedByTitle = TextEditingController(text: e.notedByTitle ?? '');
     _applicants = e.applicants.map(_tatValuesFromApplicant).toList();
+    _fillPublicationDateFromVacancy();
     _search.addListener(() {
       setState(() => _query = _search.text.trim().toLowerCase());
     });
@@ -1248,7 +1566,12 @@ class _TurnAroundTimeEditorState extends State<TurnAroundTimeEditor> {
       if (_endSearch.text.trim().isEmpty && selected.closingDate != null) {
         _endSearch.text = _formatTatDate(selected.closingDate!);
       }
+      if (_dateOfPublication.text.trim().isEmpty &&
+          selected.publishedAt != null) {
+        _dateOfPublication.text = _formatTatDate(selected.publishedAt!);
+      }
     });
+    _maybeEnsurePersisted();
   }
 
   Widget _positionField(bool ro) {
@@ -1258,6 +1581,7 @@ class _TurnAroundTimeEditorState extends State<TurnAroundTimeEditor> {
       onChanged: _creating
           ? (_) {
               if (_positionError != null) setState(() => _positionError = null);
+              _maybeEnsurePersisted();
             }
           : null,
       decoration: _decoration(
@@ -1294,6 +1618,7 @@ class _TurnAroundTimeEditorState extends State<TurnAroundTimeEditor> {
                     if (_officeError != null) {
                       setState(() => _officeError = null);
                     }
+                    _maybeEnsurePersisted();
                   }
                 : null,
           ),
@@ -1564,6 +1889,41 @@ class _TurnAroundTimeEditorState extends State<TurnAroundTimeEditor> {
     );
   }
 
+  Widget _signatureSection(BuildContext context) {
+    final recordId = widget.entry.id;
+    if (recordId == null) {
+      return Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: AppTheme.dashMutedSurfaceOf(context),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: AppTheme.dashHairlineOf(context)),
+        ),
+        child: Text(
+          'Fill Position and Office to open the signature area. The person who created this form can sign Prepared by right away. DocuTracker assigns the next signer.',
+          style: TextStyle(
+            color: AppTheme.dashTextSecondaryOf(context),
+            fontSize: 13,
+            height: 1.35,
+          ),
+        ),
+      );
+    }
+    return DocuTrackerRspSignatureSection(
+      sourceTable: TurnAroundTimeEntry.tableName,
+      sourceRecordId: recordId,
+      signatureStatus: widget.signatureStatus,
+      onChanged: widget.onSignaturesChanged,
+      helperText:
+          'The person who created this form can sign Prepared by now. DocuTracker assigns the next signer for Noted by. The form stays editable. A real content change asks both to sign again.',
+      slots: const [
+        DocuTrackerRspSignatureSlot('prepared_by', 'Prepared by'),
+        DocuTrackerRspSignatureSlot('noted_by', 'Noted by'),
+      ],
+    );
+  }
+
   Widget _preparedNotedByRow(BuildContext context, bool ro) {
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -1619,11 +1979,14 @@ class _TurnAroundTimeEditorState extends State<TurnAroundTimeEditor> {
             icon: const Icon(Icons.close_rounded, size: 18),
             label: const Text('Cancel'),
           ),
-          if (widget.entry.id != null &&
-              widget.onMarkCompleted != null &&
-              !widget.requirementCompleted)
+          if (widget.onMarkCompleted != null && !widget.requirementCompleted)
             FilledButton.icon(
-              onPressed: widget.onMarkCompleted,
+              onPressed: () {
+                if (widget.entry.id == null && !_validateCreateFields()) {
+                  return;
+                }
+                widget.onMarkCompleted!(_buildEntry());
+              },
               icon: const Icon(Icons.task_alt_rounded, size: 18),
               label: const Text('Mark Completed'),
               style: FilledButton.styleFrom(
@@ -1683,6 +2046,10 @@ class _TurnAroundTimeEditorState extends State<TurnAroundTimeEditor> {
                 _applicantsBody(context, ro),
                 const SizedBox(height: 20),
                 _preparedNotedByRow(context, ro),
+                if (widget.showSignatures) ...[
+                  const SizedBox(height: 16),
+                  _signatureSection(context),
+                ],
                 if (ro && (widget.entry.createdAt != null || widget.entry.updatedAt != null)) ...[
                   const SizedBox(height: 16),
                   if (widget.entry.createdAt != null)
@@ -2053,12 +2420,16 @@ class _TatLinkableApplication {
     required this.name,
     required this.label,
     required this.searchText,
+    this.deliberationAt,
   });
 
   final String id;
   final String name;
   final String label;
   final String searchText;
+
+  /// HR deliberation appointment already saved on the application.
+  final DateTime? deliberationAt;
 }
 
 List<_TatLinkableApplication> _tatLinkableApplications(
@@ -2096,6 +2467,9 @@ List<_TatLinkableApplication> _tatLinkableApplications(
           applicantNumber: number,
           position: position,
           statusLabel: statusLabel,
+        ),
+        deliberationAt: DateTime.tryParse(
+          (row['final_interview_at'] ?? '').toString(),
         ),
       ),
     );
@@ -2147,8 +2521,10 @@ class _ApplicantEditorDialogState extends State<_ApplicantEditorDialog> {
   String? _nameError;
   String? _linkedApplicationId;
   String? _linkedLabel;
+  DateTime? _linkedDeliberationAt;
   bool _loadingChoices = false;
   String? _choiceError;
+  Map<String, RecruitmentExamResult> _examByApplication = {};
 
   @override
   void initState() {
@@ -2167,6 +2543,62 @@ class _ApplicantEditorDialogState extends State<_ApplicantEditorDialog> {
       _loadingChoices = true;
       _loadChoices();
     }
+    _loadExamScores();
+  }
+
+  Future<void> _loadExamScores() async {
+    final results = await RecruitmentRepo.instance.getExamResultsByApplication();
+    if (!mounted) return;
+    setState(() => _examByApplication = results);
+    _fillExamTakenDate(onlyIfEmpty: true);
+    final choice = _examResultChoice;
+    if (choice != null) _setExamResult(choice);
+  }
+
+  double? get _linkedExamPercent {
+    final id = (_linkedApplicationId ?? '').trim().toLowerCase();
+    if (id.isEmpty) return null;
+    return _examByApplication[id]?.scorePercent;
+  }
+
+  /// Writes the date the linked applicant submitted the screening exam.
+  void _fillExamTakenDate({bool onlyIfEmpty = false}) {
+    final field = _c['date_contract_exam'];
+    if (field == null) return;
+    if (onlyIfEmpty && field.text.trim().isNotEmpty) return;
+    final id = (_linkedApplicationId ?? '').trim().toLowerCase();
+    if (id.isEmpty) return;
+    final taken = _examByApplication[id]?.submittedAt;
+    field.text = taken == null ? '' : _formatTatDate(taken);
+  }
+
+  /// Writes the deliberation appointment HR already scheduled.
+  void _fillDeliberationDate({bool onlyIfEmpty = false}) {
+    final field = _c['date_deliberation'];
+    if (field == null) return;
+    if (onlyIfEmpty && field.text.trim().isNotEmpty) return;
+    if ((_linkedApplicationId ?? '').trim().isEmpty) return;
+    final at = _linkedDeliberationAt;
+    field.text = at == null ? '' : _formatTatDate(at);
+  }
+
+  String? get _examResultChoice {
+    final raw = _c['skills_trade_exam_result']!.text.trim().toLowerCase();
+    if (raw.startsWith('pass')) return 'Passed';
+    if (raw.startsWith('fail')) return 'Failed';
+    return null;
+  }
+
+  void _setExamResult(String? choice) {
+    if (choice == null || choice.isEmpty) {
+      _c['skills_trade_exam_result']!.text = '';
+      return;
+    }
+    final percent = _linkedExamPercent;
+    final score = percent == null ? null : '${percent.toStringAsFixed(1)}%';
+    _c['skills_trade_exam_result']!.text = score == null
+        ? choice
+        : '$choice · $score';
   }
 
   Future<void> _loadChoices() async {
@@ -2256,13 +2688,19 @@ class _ApplicantEditorDialogState extends State<_ApplicantEditorDialog> {
       if (match == null) {
         _linkedApplicationId = null;
         _linkedLabel = null;
+        _linkedDeliberationAt = null;
         return;
       }
       _linkedApplicationId = match.id;
       _linkedLabel = match.label;
+      _linkedDeliberationAt = match.deliberationAt;
       _c['name']!.text = match.name;
       _nameError = null;
+      _fillExamTakenDate();
+      _fillDeliberationDate();
     });
+    final choice = _examResultChoice;
+    if (choice != null) _setExamResult(choice);
   }
 
   InputDecoration _decoration(BuildContext context, {String? label, String? hint, Widget? suffixIcon, Widget? prefixIcon}) =>
@@ -2277,6 +2715,45 @@ class _ApplicantEditorDialogState extends State<_ApplicantEditorDialog> {
 
   Widget _milestoneField(BuildContext context, _TatMilestone m) {
     final c = _c[m.key]!;
+    if (m.key == 'skills_trade_exam_result') {
+      final choice = _examResultChoice;
+      final percent = _linkedExamPercent;
+      final scoreLabel = percent == null
+          ? 'No overall exam score on file for this applicant.'
+          : 'Overall exam score: ${percent.toStringAsFixed(1)}%';
+      return Padding(
+        padding: const EdgeInsets.only(bottom: 12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            DropdownButtonFormField<String>(
+              key: ValueKey('tat-exam-result-$choice'),
+              initialValue: choice,
+              decoration: _decoration(context, label: 'Exam Result'),
+              hint: const Text('Select Passed or Failed'),
+              items: const [
+                DropdownMenuItem(value: 'Passed', child: Text('Passed')),
+                DropdownMenuItem(value: 'Failed', child: Text('Failed')),
+              ],
+              onChanged: _setExamResult,
+            ),
+            if (choice != null) ...[
+              const SizedBox(height: 6),
+              Text(
+                scoreLabel,
+                style: TextStyle(
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w700,
+                  color: choice == 'Passed'
+                      ? const Color(0xFF1B7F4E)
+                      : const Color(0xFFC62828),
+                ),
+              ),
+            ],
+          ],
+        ),
+      );
+    }
     if (!m.isDate) {
       return Padding(
         padding: const EdgeInsets.only(bottom: 12),
@@ -2286,24 +2763,68 @@ class _ApplicantEditorDialogState extends State<_ApplicantEditorDialog> {
         ),
       );
     }
+    final taken = _linkedExamSubmittedAt;
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
-      child: TextFormField(
-        controller: c,
-        readOnly: true,
-        onTap: () => _pickMilestoneDate(m.key),
-        decoration: _decoration(
-          context,
-          label: m.label,
-          hint: 'Select date',
-          suffixIcon: IconButton(
-            tooltip: 'Pick date',
-            icon: const Icon(Icons.calendar_today_rounded, size: 18),
-            onPressed: () => _pickMilestoneDate(m.key),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          TextFormField(
+            controller: c,
+            readOnly: true,
+            onTap: () => _pickMilestoneDate(m.key),
+            decoration: _decoration(
+              context,
+              label: m.label,
+              hint: m.key == 'date_contract_exam'
+                  ? 'Filled from the exam date'
+                  : m.key == 'date_deliberation'
+                  ? 'Filled from the HR schedule'
+                  : 'Select date',
+              suffixIcon: IconButton(
+                tooltip: 'Pick date',
+                icon: const Icon(Icons.calendar_today_rounded, size: 18),
+                onPressed: () => _pickMilestoneDate(m.key),
+              ),
+            ),
           ),
-        ),
+          if (m.key == 'date_contract_exam' &&
+              (_linkedApplicationId ?? '').trim().isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: 6, left: 4),
+              child: Text(
+                taken == null
+                    ? 'This applicant has no exam date on file yet.'
+                    : 'Taken ${_formatTatDate(taken)}.',
+                style: TextStyle(
+                  fontSize: 12,
+                  color: AppTheme.dashTextSecondaryOf(context),
+                ),
+              ),
+            ),
+          if (m.key == 'date_deliberation' &&
+              (_linkedApplicationId ?? '').trim().isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: 6, left: 4),
+              child: Text(
+                _linkedDeliberationAt == null
+                    ? 'No deliberation schedule on file yet.'
+                    : 'Scheduled ${_formatTatDate(_linkedDeliberationAt!)}.',
+                style: TextStyle(
+                  fontSize: 12,
+                  color: AppTheme.dashTextSecondaryOf(context),
+                ),
+              ),
+            ),
+        ],
       ),
     );
+  }
+
+  DateTime? get _linkedExamSubmittedAt {
+    final id = (_linkedApplicationId ?? '').trim().toLowerCase();
+    if (id.isEmpty) return null;
+    return _examByApplication[id]?.submittedAt;
   }
 
   @override

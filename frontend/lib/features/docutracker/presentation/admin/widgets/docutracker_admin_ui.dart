@@ -805,6 +805,10 @@ class DocuTrackerMirroredWorkflowCard extends StatelessWidget {
                   _metaPill(context, '${workflow.steps.length} steps'),
                 ],
               ),
+              if (workflow.usedBy.isNotEmpty) ...[
+                const SizedBox(height: 8),
+                Text(workflow.usageSummary, style: DocuTrackerTokens.metaStyle(context)),
+              ],
             ],
           ),
         ),
@@ -924,6 +928,31 @@ class DocuTrackerMirroredWorkflowCard extends StatelessWidget {
           color: DocuTrackerTokens.textSecondaryOf(context),
         ),
       ),
+    );
+  }
+}
+
+/// Type usage is expanded in workflow details to keep the workflow list compact.
+class DocuTrackerWorkflowUsageDetails extends StatelessWidget {
+  const DocuTrackerWorkflowUsageDetails({super.key, required this.workflow});
+  final HrWorkflowMirror workflow;
+
+  @override
+  Widget build(BuildContext context) {
+    if (workflow.usedBy.isEmpty) return const SizedBox.shrink();
+    return ExpansionTile(
+      tilePadding: EdgeInsets.zero,
+      title: const Text('Used by'),
+      subtitle: Text(workflow.usageSummary),
+      children: [
+        for (final type in workflow.usedBy)
+          ListTile(
+            dense: true,
+            leading: Icon(type.module == 'leave' ? Icons.event_note_outlined : Icons.pin_drop_outlined),
+            title: Text(type.typeName),
+            subtitle: Text(type.module == 'leave' ? 'Leave type' : 'Locator type'),
+          ),
+      ],
     );
   }
 }

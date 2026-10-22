@@ -71,3 +71,103 @@ test('Employee Profiles can filter Mayor accounts', async () => {
     assert.ok(queries.some(q => q.params.includes('mayor') && /u\.role = \$\d+/.test(q.sql)));
   } finally { clearModule('../src/routes/employees'); restore(); }
 });
+
+for (const scenario of [
+  { actor: 'admin', expected: 201 },
+  { actor: 'super_admin', expected: 201 },
+  { actor: 'employee', expected: 403 },
+]) {
+  test(`Mayor's Office Staff creation: ${JSON.stringify(scenario)}`, async () => {
+    const calls = [];
+    const client = {
+      query: async (sql, params) => {
+        calls.push({ sql, params });
+        if (sql.includes('nextval')) return { rows: [{ n: 456 }] };
+        if (sql.includes('INSERT INTO users')) {
+          return {
+            rows: [{
+              id: 'staff-user',
+              email: 'staff@example.test',
+              role: params[2],
+              is_active: true,
+              full_name: 'Office Staff',
+            }],
+          };
+        }
+        return { rows: [], rowCount: 0 };
+      },
+      release() {},
+    };
+    const restore = withMockedModule('../src/config/db', {
+      pool: { connect: async () => client },
+    });
+    const mail = withMockedModule('../src/utils/smtpMail', {
+      isSmtpConfigured: () => false,
+    });
+    clearModule('../src/routes/employees');
+    try {
+      const router = require('../src/routes/employees');
+      const layer = router.stack.find(
+        (l) => l.route?.path === '/' && l.route.methods.post,
+      );
+      // Employee create is protected; invoke the final handler for role logic when actor is admin/super_admin.
+      // For non-admin actors, middleware would reject before handler — simulate that gate.
+      if (scenario.expected === 403 && scenario.actor === 'employee') {
+        const res = {
+          statusCode: 200,
+          status(n) {
+            this.statusCode = n;
+            return this;
+          },
+          json(body) {
+            this.body = body;
+          },
+        };
+        const { requireAdminOrSuperAdmin } = require('../src/middleware/rbac');
+        requireAdminOrSuperAdmin(
+          { user: { id: 'emp', role: 'employee' } },
+          res,
+          () => {
+            throw new Error('should not continue');
+          },
+        );
+        assert.equal(res.statusCode, 403);
+        return;
+      }
+      const handler = layer.route.stack.at(-1).handle;
+      const res = {
+        statusCode: 200,
+        status(n) {
+          this.statusCode = n;
+          return this;
+        },
+        json(body) {
+          this.body = body;
+        },
+      };
+      await handler(
+        {
+          user: { id: 'creator', role: scenario.actor },
+          body: {
+            email: 'staff@example.test',
+            role: 'mayor_office_staff',
+            first_name: 'Office',
+            last_name: 'Staff',
+            full_name: 'Office Staff',
+            date_hired: '2026-10-08',
+          },
+        },
+        res,
+      );
+      assert.equal(res.statusCode, scenario.expected);
+      if (scenario.expected === 201) {
+        assert.equal(res.body.role, 'mayor_office_staff');
+        assert.equal(calls.at(-1).sql, 'COMMIT');
+      }
+    } finally {
+      clearModule('../src/routes/employees');
+      mail();
+      restore();
+    }
+  });
+}

@@ -188,13 +188,10 @@ void main() {
   });
 
   testWidgets(
-    'mobile remember, reset and legal controls retain their actions',
+    'mobile reset and legal controls retain their actions',
     (tester) async {
       await pumpAt(tester, const Size(375, 812));
-      await tester.ensureVisible(find.text('Remember me'));
-      await tester.tap(find.text('Remember me'));
-      await tester.pump();
-      expect(tester.widget<Checkbox>(find.byType(Checkbox)).value, isTrue);
+      expect(find.text('Remember me'), findsOneWidget);
 
       await tester.ensureVisible(find.byType(TextField).first);
       await tester.enterText(

@@ -1,10 +1,17 @@
 const { pool } = require('../config/db');
 const policy = require('./rspPreDeliberationPolicy');
+const {
+  loadVacanciesFromDb,
+  findListedVacancyForPosition,
+  findVacancyForPosition,
+  vacancyMinimumStandards,
+  mergeBlankMinimumStandards,
+} = require('../utils/jobVacancySlots');
 const { revisionIsNew } = require('./rspApplicantNotices');
 const { initializeCreatorSourceSignatures } = require('./docutrackerRspSignatureService');
 const { resolveLineupCreatorId } = require('./selectionLineupEditAudit');
 
-const MIGRATION = 'backend/scripts/migrations/20261007_rsp_pre_deliberation_gate.sql';
+const MIGRATION = 'backend/scripts/migrations/rsp/20261007_rsp_pre_deliberation_gate.sql';
 let schemaReady = false;
 
 class PreDeliberationError extends Error {
@@ -81,6 +88,48 @@ function trimOrNull(value) {
   if (value == null) return null;
   const text = String(value).trim();
   return text === '' ? null : text;
+}
+
+async function standardsForAppliedPosition(position) {
+  const title = trimOrNull(position);
+  if (!title) return null;
+  const vacancies = await loadVacanciesFromDb();
+  const vacancy =
+    findListedVacancyForPosition(vacancies, title) ||
+    findVacancyForPosition(vacancies, title);
+  return vacancyMinimumStandards(vacancy);
+}
+
+async function fillBlankWesStandards(entry, position) {
+  if (!entry || !entry.id) return entry;
+  let standards = null;
+  try {
+    standards = await standardsForAppliedPosition(position || entry.position_applied_for);
+  } catch (err) {
+    console.error('[rspPreDeliberation] vacancy standards lookup failed', err);
+    return entry;
+  }
+  const merged = mergeBlankMinimumStandards(entry, standards);
+  if (!merged.changed) return entry;
+  const next = merged.entry;
+  const updated = await pool.query(
+    `UPDATE public.work_experience_sheet_entries
+     SET min_education = $2,
+         min_experience = $3,
+         min_training = $4,
+         min_eligibility = $5,
+         updated_at = now()
+     WHERE id = $1
+     RETURNING *`,
+    [
+      entry.id,
+      next.min_education ?? null,
+      next.min_experience ?? null,
+      next.min_training ?? null,
+      next.min_eligibility ?? null,
+    ],
+  );
+  return updated.rows[0] || next;
 }
 
 async function loadLocked(client, applicationId) {
@@ -184,12 +233,23 @@ async function assignWorkExperience({ applicationId, actorId }) {
         applicantNotice: false,
       };
     }
+    const standards = await standardsForAppliedPosition(app.position_applied_for);
     const inserted = await client.query(
       `INSERT INTO public.work_experience_sheet_entries (
-         position_applied_for, applicant_name, application_id, created_at, updated_at
-       ) VALUES ($1, $2, $3, now(), now())
+         position_applied_for, applicant_name, application_id,
+         min_education, min_experience, min_training, min_eligibility,
+         created_at, updated_at
+       ) VALUES ($1, $2, $3, $4, $5, $6, $7, now(), now())
        RETURNING *`,
-      [app.position_applied_for, app.full_name, app.id],
+      [
+        app.position_applied_for,
+        app.full_name,
+        app.id,
+        standards?.min_education || null,
+        standards?.min_experience || null,
+        standards?.min_training || null,
+        standards?.min_eligibility || null,
+      ],
     );
     const entry = inserted.rows[0];
     const updated = await client.query(
@@ -474,7 +534,10 @@ async function getPreDeliberation(applicationId, { includeHrForms }) {
     throw new PreDeliberationError(404, 'NOT_FOUND', 'Application not found');
   }
   const row = result.rows[0];
-  const wes = await loadRow('public.work_experience_sheet_entries', row.wes_entry_id);
+  const wes = await fillBlankWesStandards(
+    await loadRow('public.work_experience_sheet_entries', row.wes_entry_id),
+    row.position_applied_for,
+  );
   if (!includeHrForms) {
     return { tracking: publicTracking(row), wes };
   }

@@ -1,7 +1,9 @@
+import 'package:hrms_plaridel/features/dtr/management/approvals/widgets/approval_workflow_summary.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:hrms_plaridel/features/docutracker/data/providers/docutracker_provider.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document_builder.dart';
+import 'package:hrms_plaridel/features/dtr/management/approvals/widgets/workflow_request_signatures.dart';
 
 class LocatorSignatureSection extends StatefulWidget {
   const LocatorSignatureSection({super.key, required this.requestId});
@@ -66,11 +68,18 @@ class _LocatorSignatureSectionState extends State<LocatorSignatureSection> {
         ],
       );
     }
+    if ((_bundle?.workflowSnapshot?['steps'] as List? ?? []).any((step) => step is Map)) {
+      return WorkflowRequestSignatures(
+        sourceTable: 'locator_slips', requestId: widget.requestId,
+        initialBundle: _bundle, showWorkflowSummary: true,
+      );
+    }
     return Padding(
       padding: const EdgeInsets.only(top: 12),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
+          ApprovalWorkflowSummary(snapshot:_bundle?.workflowSnapshot),
           const Text(
             'Signatures',
             style: TextStyle(fontWeight: FontWeight.w600),

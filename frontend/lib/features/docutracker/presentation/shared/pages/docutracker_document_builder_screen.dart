@@ -55,7 +55,7 @@ class _DocuTrackerDocumentBuilderScreenState
   static const double _verticalMargin = 72;
   static const double _signaturePanelBreakpoint = 1180;
   static const int _letterheadFormatVersion = 2;
-  static const String _letterheadLogoAsset = 'assets/images/Plaridel Logo.jpg';
+  static const String _letterheadLogoAsset = 'assets/images/PlaridelLogo.jpg';
 
   final EmployeeDirectoryLookup _directory = EmployeeDirectoryLookup();
   final List<_EditorPage> _pages = <_EditorPage>[];

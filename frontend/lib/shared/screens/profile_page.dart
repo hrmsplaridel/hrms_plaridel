@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:dio/dio.dart';
@@ -153,6 +154,9 @@ class _ProfileContentState extends State<ProfileContent> {
   bool _obscureNew = true;
   bool _obscureConfirm = true;
   bool _loadedFromAuth = false;
+  AuthProvider? _profileAuth;
+  AppUser? _lastProfileUser;
+  bool _requestedProfileRefresh = false;
   String? _sexValue;
   String? _civilStatusValue;
   String? _suffixValue;
@@ -250,6 +254,7 @@ class _ProfileContentState extends State<ProfileContent> {
   }
 
   void _applyUserProfile(AppUser u) {
+    _lastProfileUser = u;
     _capturingBaseline = true;
     _firstNameController.text = u.firstName ?? '';
     _middleNameController.text = u.middleName ?? '';
@@ -277,13 +282,51 @@ class _ProfileContentState extends State<ProfileContent> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+    final auth = context.read<AuthProvider>();
+    if (!identical(_profileAuth, auth)) {
+      _profileAuth?.removeListener(_onAuthProfileChanged);
+      _profileAuth = auth;
+      auth.addListener(_onAuthProfileChanged);
+      _requestedProfileRefresh = false;
+    }
     if (!_loadedFromAuth) {
-      final auth = context.read<AuthProvider>();
       if (auth.user != null) {
         _applyUserProfile(auth.user!);
         _loadedFromAuth = true;
       }
     }
+    _requestProfileRefresh();
+  }
+
+  void _requestProfileRefresh() {
+    final auth = _profileAuth;
+    if (_requestedProfileRefresh ||
+        !widget.showAccountSection ||
+        auth?.user == null) {
+      return;
+    }
+    _requestedProfileRefresh = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !identical(_profileAuth, auth)) return;
+      unawaited(auth!.refreshUser());
+    });
+  }
+
+  void _onAuthProfileChanged() {
+    if (!mounted) return;
+    final user = _profileAuth?.user;
+    if (user == null || identical(user, _lastProfileUser)) return;
+    final differentAccount = _lastProfileUser?.id != user.id;
+    _lastProfileUser = user;
+    if (!_loadedFromAuth ||
+        differentAccount ||
+        (!_isProfileDirty && !_loading)) {
+      setState(() {
+        _applyUserProfile(user);
+        _loadedFromAuth = true;
+      });
+    }
+    _requestProfileRefresh();
   }
 
   String? _avatarDisplayUrl(String userId, {String? pathOverride}) {
@@ -329,6 +372,7 @@ class _ProfileContentState extends State<ProfileContent> {
 
   @override
   void dispose() {
+    _profileAuth?.removeListener(_onAuthProfileChanged);
     _firstNameController.dispose();
     _middleNameController.dispose();
     _lastNameController.dispose();
@@ -796,55 +840,93 @@ class _ProfileContentState extends State<ProfileContent> {
 
     showDialog<void>(
       context: context,
-      barrierColor: Colors.black.withValues(alpha: 0.82),
+      barrierColor: Colors.black.withValues(alpha: 0.55),
       builder: (ctx) {
         final size = MediaQuery.sizeOf(ctx);
-        final maxSide = math.min(520.0, size.shortestSide - 48);
+        final maxSide = math.min(420.0, size.shortestSide - 80);
+
+        Widget photo({required double side, required BoxFit fit}) {
+          if (bytes != null) {
+            return Image.memory(bytes, width: side, height: side, fit: fit);
+          }
+          return Image.network(
+            url!,
+            width: side,
+            height: side,
+            fit: fit,
+            errorBuilder: (_, __, ___) => SizedBox(
+              width: side,
+              height: side,
+              child: Icon(
+                Icons.broken_image_outlined,
+                color: AppTheme.dashTextSecondaryOf(ctx),
+              ),
+            ),
+          );
+        }
+
         return Dialog(
           backgroundColor: Colors.transparent,
+          elevation: 0,
           insetPadding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Align(
-                alignment: Alignment.centerRight,
-                child: IconButton(
-                  tooltip: 'Close',
-                  onPressed: () => Navigator.of(ctx).pop(),
-                  icon: const Icon(Icons.close_rounded, color: Colors.white),
+          child: SizedBox(
+            width: maxSide,
+            height: maxSide,
+            child: Stack(
+              children: [
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(20),
+                  child: ColoredBox(
+                    color: AppTheme.dashPanelOf(ctx),
+                    child: InteractiveViewer(
+                      minScale: 1,
+                      maxScale: 4,
+                      child: photo(side: maxSide, fit: BoxFit.contain),
+                    ),
+                  ),
                 ),
-              ),
-              ClipRRect(
-                borderRadius: BorderRadius.circular(16),
-                child: InteractiveViewer(
-                  minScale: 1,
-                  maxScale: 4,
-                  child: bytes != null
-                      ? Image.memory(
-                          bytes,
-                          width: maxSide,
-                          height: maxSide,
-                          fit: BoxFit.contain,
-                        )
-                      : Image.network(
-                          url!,
-                          width: maxSide,
-                          height: maxSide,
-                          fit: BoxFit.contain,
-                          errorBuilder: (_, __, ___) => SizedBox(
-                            width: maxSide,
-                            height: 160,
-                            child: const Center(
-                              child: Text(
-                                'Could not load this photo.',
-                                style: TextStyle(color: Colors.white),
-                              ),
-                            ),
-                          ),
+                Positioned(
+                  top: 10,
+                  right: 10,
+                  child: Material(
+                    color: Colors.black.withValues(alpha: 0.45),
+                    shape: const CircleBorder(),
+                    child: IconButton(
+                      tooltip: 'Close',
+                      visualDensity: VisualDensity.compact,
+                      onPressed: () => Navigator.of(ctx).pop(),
+                      icon: const Icon(
+                        Icons.close_rounded,
+                        color: Colors.white,
+                        size: 20,
+                      ),
+                    ),
+                  ),
+                ),
+                Positioned(
+                  left: 12,
+                  bottom: 12,
+                  child: Container(
+                    width: 64,
+                    height: 64,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      border: Border.all(color: Colors.white, width: 2),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withValues(alpha: 0.25),
+                          blurRadius: 8,
+                          offset: const Offset(0, 2),
                         ),
+                      ],
+                    ),
+                    child: ClipOval(
+                      child: photo(side: 64, fit: BoxFit.cover),
+                    ),
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         );
       },
@@ -1039,7 +1121,11 @@ class _ProfileContentState extends State<ProfileContent> {
     final role = (user?.role ?? 'employee').toLowerCase();
     return switch (role) {
       'admin' => 'Administrator',
+      'super_admin' => 'Super Admin',
       'hr' => 'HR Staff',
+      'mayor' => 'Mayor',
+      'mayor_office_staff' => "Mayor's Office Staff",
+      'supervisor' => 'Supervisor',
       _ => 'Employee',
     };
   }
@@ -1103,14 +1189,14 @@ class _ProfileContentState extends State<ProfileContent> {
       title: 'Employment Information',
       child: Column(
         children: [
-          ProfileInfoRow(label: 'Employee ID', value: empId),
+          ProfileInfoRow(label: 'User ID', value: empId),
           ProfileInfoRow(
             label: 'Department',
             value: _dashText(user?.departmentName),
           ),
           ProfileInfoRow(
-            label: 'Position',
-            value: _dashText(user?.positionName),
+            label: 'Account',
+            value: dashboardAccountRoleLabel(user?.role),
           ),
           ProfileInfoRow(
             label: 'Username',

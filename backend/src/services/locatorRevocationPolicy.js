@@ -39,7 +39,7 @@ function evaluateLocatorRevocation({
       statusCode: 409,
       code: 'locator_approval_time_missing',
       error:
-        'Cannot determine the HR approval time for this locator request.',
+        'Cannot determine the approval time for this locator request.',
     };
   }
 
@@ -49,7 +49,7 @@ function evaluateLocatorRevocation({
       ok: false,
       statusCode: 409,
       code: 'locator_revoke_window_expired',
-      error: `The revoke period has expired. Locator approval can only be revoked within ${LOCATOR_REVOKE_WINDOW_DAYS} days after HR approval.`,
+      error: `The revoke period has expired. Locator approval can only be revoked within ${LOCATOR_REVOKE_WINDOW_DAYS} days after final approval.`,
       deadline,
     };
   }

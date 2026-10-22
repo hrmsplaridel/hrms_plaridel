@@ -5,11 +5,15 @@ import 'package:hrms_plaridel/features/docutracker/data/styles/docutracker_style
 import 'package:hrms_plaridel/features/docutracker/models/workflow_step.dart';
 import 'package:hrms_plaridel/features/docutracker/services/employee_directory_lookup.dart';
 import 'package:hrms_plaridel/features/docutracker/theme/docutracker_tokens.dart';
+import 'package:hrms_plaridel/features/dtr/management/approvals/widgets/workflow_reviewer_configuration.dart';
 
 enum _AssigneeMode {
   specificPeople,
   submitterDepartmentHead,
   fixedDepartmentHead,
+  finalHr,
+  currentMayor,
+  manualMayor,
 }
 
 class SimplifiedWorkflowStepEditor extends StatefulWidget {
@@ -17,10 +21,12 @@ class SimplifiedWorkflowStepEditor extends StatefulWidget {
     super.key,
     required this.title,
     required this.initial,
+    this.approvalOnly = false,
   });
 
   final String title;
   final WorkflowStep initial;
+  final bool approvalOnly;
 
   @override
   State<SimplifiedWorkflowStepEditor> createState() =>
@@ -57,11 +63,17 @@ class _SimplifiedWorkflowStepEditorState
     _nameController.text = step.label ?? '';
     _deadlineController.text = step.deadlineHours?.toString() ?? '';
     _enabled = step.enabled;
-    _requiresSignature = step.requiresSignature;
+    _requiresSignature = widget.approvalOnly || step.requiresSignature;
     if (step.assigneeSource == 'submitter_department_reviewers') {
       _assigneeMode = _AssigneeMode.submitterDepartmentHead;
     } else if (step.assigneeSource == 'department_reviewers') {
       _assigneeMode = _AssigneeMode.fixedDepartmentHead;
+    } else if (step.assigneeSource == 'final_hr_reviewers') {
+      _assigneeMode = _AssigneeMode.finalHr;
+    } else if (step.assigneeSource == 'active_mayor') {
+      _assigneeMode = _AssigneeMode.currentMayor;
+    } else if (step.assigneeSource == 'manual_mayor') {
+      _assigneeMode = _AssigneeMode.manualMayor;
     } else {
       _assigneeMode = _AssigneeMode.specificPeople;
     }
@@ -78,6 +90,10 @@ class _SimplifiedWorkflowStepEditorState
         .map((action) => action.trim().toLowerCase())
         .where(_actionLabels.containsKey)
         .toSet();
+    if (widget.approvalOnly) {
+      _allowedActions.remove('forward');
+      _allowedActions.add('approve');
+    }
     _loadPeople(ids);
   }
 
@@ -102,6 +118,16 @@ class _SimplifiedWorkflowStepEditorState
 
   bool get _usesFixedDepartmentHead =>
       _assigneeMode == _AssigneeMode.fixedDepartmentHead;
+
+  Future<void> _configureReviewers() => showWorkflowReviewerConfiguration(
+    context,
+    source: _usesSubmitterDepartmentHead
+        ? 'submitter_department_reviewers'
+        : _usesFixedDepartmentHead
+        ? 'department_reviewers'
+        : 'final_hr_reviewers',
+    departmentId: _usesFixedDepartmentHead ? widget.initial.departmentId : null,
+  );
 
   Widget _assigneePicker({
     required String label,
@@ -264,6 +290,18 @@ class _SimplifiedWorkflowStepEditorState
         assigneeSource = 'specific_users';
         departmentId = primaryDepartmentId;
         savedUserIds = userIds;
+      case _AssigneeMode.finalHr:
+        assigneeSource = 'final_hr_reviewers';
+        departmentId = null;
+        savedUserIds = const [];
+      case _AssigneeMode.currentMayor:
+        assigneeSource = 'active_mayor';
+        departmentId = null;
+        savedUserIds = const [];
+      case _AssigneeMode.manualMayor:
+        assigneeSource = 'manual_mayor';
+        departmentId = null;
+        savedUserIds = const [];
     }
 
     Navigator.of(context).pop(
@@ -288,278 +326,315 @@ class _SimplifiedWorkflowStepEditorState
         (widget.initial.departmentId ?? '').trim().isNotEmpty ||
         _usesFixedDepartmentHead;
 
-    return Material(
-      color: AppTheme.dashPanelOf(context),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(20, 14, 8, 8),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        widget.title,
-                        style: const TextStyle(
-                          fontSize: 19,
-                          fontWeight: FontWeight.w800,
-                        ),
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        'Set who handles this step and what they can do.',
-                        style: TextStyle(
-                          color: AppTheme.dashTextSecondaryOf(context),
-                          fontSize: 12,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                IconButton(
-                  tooltip: 'Close',
-                  onPressed: () => Navigator.of(context).pop(),
-                  icon: const Icon(Icons.close_rounded),
-                ),
-              ],
-            ),
-          ),
-          const Divider(height: 1),
-          Expanded(
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.all(20),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
+    return RadioGroup<_AssigneeMode>(
+      groupValue: _assigneeMode,
+      onChanged: (value) => setState(() {
+        _assigneeMode = value!;
+        _error = null;
+      }),
+      child: Material(
+        color: AppTheme.dashPanelOf(context),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 14, 8, 8),
+              child: Row(
                 children: [
-                  const _FieldHeading(number: 1, label: 'Step Name'),
-                  const SizedBox(height: 8),
-                  TextField(
-                    controller: _nameController,
-                    decoration: DocuTrackerStyles.inputDecoration(
-                      context,
-                      'Example: Department Review',
-                      Icons.label_outline_rounded,
-                    ),
-                    onChanged: (_) => setState(() => _error = null),
-                  ),
-                  const SizedBox(height: 20),
-                  const _FieldHeading(number: 2, label: 'Assignee Mode'),
-                  const SizedBox(height: 8),
-                  RadioGroup<_AssigneeMode>(
-                    groupValue: _assigneeMode,
-                    onChanged: (value) {
-                      if (value == null) return;
-                      setState(() {
-                        _assigneeMode = value;
-                        _error = null;
-                      });
-                    },
+                  Expanded(
                     child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        RadioListTile<_AssigneeMode>(
-                          contentPadding: EdgeInsets.zero,
-                          dense: true,
-                          title: const Text('Specific people'),
-                          subtitle: const Text(
-                            'Pick a primary and optional backup.',
+                        Text(
+                          widget.title,
+                          style: const TextStyle(
+                            fontSize: 19,
+                            fontWeight: FontWeight.w800,
                           ),
-                          value: _AssigneeMode.specificPeople,
                         ),
-                        RadioListTile<_AssigneeMode>(
-                          contentPadding: EdgeInsets.zero,
-                          dense: true,
-                          title: const Text('Department reviewer of submitter'),
-                          subtitle: const Text(
-                            'Routes to the primary reviewer of the submitter\'s department. If the primary reviewer is the document creator, an eligible backup reviewer is used instead.',
+                        const SizedBox(height: 2),
+                        Text(
+                          'Set who handles this step and what they can do.',
+                          style: TextStyle(
+                            color: AppTheme.dashTextSecondaryOf(context),
+                            fontSize: 12,
                           ),
-                          value: _AssigneeMode.submitterDepartmentHead,
                         ),
-                        if (canUseFixedDepartment)
-                          RadioListTile<_AssigneeMode>(
-                            contentPadding: EdgeInsets.zero,
-                            dense: true,
-                            title: const Text(
-                              'Department reviewer of a fixed department',
-                            ),
-                            subtitle: const Text(
-                              'Legacy: keeps the department stored on this step.',
-                            ),
-                            value: _AssigneeMode.fixedDepartmentHead,
-                          ),
                       ],
                     ),
                   ),
-                  const SizedBox(height: 12),
-                  if (_usesSubmitterDepartmentHead) ...[
-                    const _FieldHeading(number: 3, label: 'Resolved Assignees'),
-                    const SizedBox(height: 8),
-                    _infoCard(
-                      'Primary: the primary reviewer (Department Head) of the submitter\'s department at routing time\n'
-                      'Backup: that department\'s backup reviewers, in their configured order\n'
-                      'The submitter never reviews their own document. If no other reviewer is eligible, submission is blocked.\n'
-                      'No person is stored on this step. Set each department\'s reviewers in Department Management.',
-                    ),
-                  ] else if (_usesFixedDepartmentHead) ...[
-                    const _FieldHeading(number: 3, label: 'Resolved Assignees'),
-                    const SizedBox(height: 8),
-                    _infoCard(
-                      'Primary: the primary reviewer (Department Head) of the fixed department on this step\n'
-                      'Backup: that department\'s backup reviewers, in their configured order\n'
-                      'The submitter never reviews their own document.',
-                    ),
-                  ] else ...[
-                    const _FieldHeading(number: 3, label: 'Primary Assignee'),
-                    const SizedBox(height: 8),
-                    if (_loadingPeople)
-                      const LinearProgressIndicator(minHeight: 2)
-                    else
-                      _assigneePicker(
-                        label: 'Search by name, department, or position',
-                        selectedId: _primaryUserId,
-                        excludeId: _backupUserId,
-                        onChanged: (value) => setState(() {
-                          _primaryUserId = value;
-                          if (_backupUserId == value) _backupUserId = null;
-                          _legacyAdditionalBackupIds =
-                              _legacyAdditionalBackupIds
-                                  .where((id) => id != value)
-                                  .toList(growable: false);
-                          _error = null;
-                        }),
-                      ),
-                    const SizedBox(height: 20),
-                    const _FieldHeading(
-                      number: 4,
-                      label: 'Backup Assignee (Optional)',
-                    ),
-                    const SizedBox(height: 8),
-                    if (!_loadingPeople)
-                      _assigneePicker(
-                        label: 'Search optional backup',
-                        selectedId: _backupUserId,
-                        excludeId: _primaryUserId,
-                        optional: true,
-                        onChanged: (value) => setState(() {
-                          _backupUserId = value;
-                          _error = null;
-                        }),
-                      ),
-                    if (_legacyAdditionalBackupIds.isNotEmpty) ...[
-                      const SizedBox(height: 8),
-                      Text(
-                        '${_legacyAdditionalBackupIds.length} additional existing backup(s) '
-                        'will be preserved for compatibility.',
-                        style: TextStyle(
-                          color: AppTheme.dashTextSecondaryOf(context),
-                          fontSize: 11,
-                        ),
-                      ),
-                    ],
-                  ],
-                  const SizedBox(height: 20),
-                  const _FieldHeading(number: 5, label: 'Allowed Actions'),
-                  const SizedBox(height: 6),
-                  Text(
-                    'These actions apply equally to the primary and backup assignee.',
-                    style: TextStyle(
-                      color: AppTheme.dashTextSecondaryOf(context),
-                      fontSize: 12,
-                    ),
+                  IconButton(
+                    tooltip: 'Close',
+                    onPressed: () => Navigator.of(context).pop(),
+                    icon: const Icon(Icons.close_rounded),
                   ),
-                  const SizedBox(height: 6),
-                  for (final entry in _actionLabels.entries)
-                    CheckboxListTile(
-                      dense: true,
-                      contentPadding: EdgeInsets.zero,
-                      title: Text(entry.value),
-                      value: _allowedActions.contains(entry.key),
-                      controlAffinity: ListTileControlAffinity.leading,
-                      onChanged: (checked) => setState(() {
-                        if (checked == true) {
-                          _allowedActions.add(entry.key);
-                        } else {
-                          _allowedActions.remove(entry.key);
-                        }
-                        _error = null;
-                      }),
-                    ),
-                  const SizedBox(height: 8),
-                  SwitchListTile(
-                    key: const Key('workflow-step-requires-signature'),
-                    contentPadding: EdgeInsets.zero,
-                    secondary: const Icon(Icons.draw_outlined),
-                    title: const Text('Signature required'),
-                    subtitle: const Text(
-                      'The reviewer must sign the document before they can '
-                      'approve or forward it at this step.',
-                    ),
-                    value: _requiresSignature,
-                    onChanged: (value) =>
-                        setState(() => _requiresSignature = value),
-                  ),
-                  const SizedBox(height: 8),
-                  ExpansionTile(
-                    tilePadding: EdgeInsets.zero,
-                    title: const Text(
-                      'Additional settings',
-                      style: TextStyle(fontWeight: FontWeight.w700),
-                    ),
-                    subtitle: const Text('Enable state and review deadline'),
-                    children: [
-                      SwitchListTile(
-                        contentPadding: EdgeInsets.zero,
-                        title: const Text('Step enabled'),
-                        value: _enabled,
-                        onChanged: (value) => setState(() => _enabled = value),
-                      ),
-                      TextField(
-                        controller: _deadlineController,
-                        keyboardType: TextInputType.number,
-                        decoration: DocuTrackerStyles.inputDecoration(
-                          context,
-                          'Review deadline in hours (optional)',
-                          Icons.timer_outlined,
-                        ),
-                      ),
-                    ],
-                  ),
-                  if (_error != null) ...[
-                    const SizedBox(height: 12),
-                    Text(
-                      _error!,
-                      style: const TextStyle(
-                        color: Color(0xFFB91C1C),
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ],
                 ],
               ),
             ),
-          ),
-          const Divider(height: 1),
-          Padding(
-            padding: const EdgeInsets.all(12),
-            child: Row(
-              children: [
-                TextButton(
-                  onPressed: () => Navigator.of(context).pop(),
-                  child: const Text('Cancel'),
+            const Divider(height: 1),
+            Expanded(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.all(20),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    const _FieldHeading(number: 1, label: 'Step Name'),
+                    const SizedBox(height: 8),
+                    TextField(
+                      controller: _nameController,
+                      decoration: DocuTrackerStyles.inputDecoration(
+                        context,
+                        'Example: Department Review',
+                        Icons.label_outline_rounded,
+                      ),
+                      onChanged: (_) => setState(() => _error = null),
+                    ),
+                    const SizedBox(height: 20),
+                    const _FieldHeading(number: 2, label: 'Assignee Mode'),
+                    const SizedBox(height: 8),
+                    RadioListTile<_AssigneeMode>(
+                      contentPadding: EdgeInsets.zero,
+                      dense: true,
+                      title: const Text('Specific people'),
+                      subtitle: const Text(
+                        'Pick a primary and optional backup.',
+                      ),
+                      value: _AssigneeMode.specificPeople,
+                    ),
+                    RadioListTile<_AssigneeMode>(
+                      contentPadding: EdgeInsets.zero,
+                      dense: true,
+                      title: const Text('Department reviewer of submitter'),
+                      subtitle: const Text(
+                        'Routes to the primary reviewer of the submitter\'s department. If the primary reviewer is the document creator, an eligible backup reviewer is used instead.',
+                      ),
+                      value: _AssigneeMode.submitterDepartmentHead,
+                    ),
+                    if (canUseFixedDepartment)
+                      RadioListTile<_AssigneeMode>(
+                        contentPadding: EdgeInsets.zero,
+                        dense: true,
+                        title: const Text(
+                          'Department reviewer of a fixed department',
+                        ),
+                        subtitle: const Text(
+                          'Legacy: keeps the department stored on this step.',
+                        ),
+                        value: _AssigneeMode.fixedDepartmentHead,
+                      ),
+                    const SizedBox(height: 12),
+                    if (widget.approvalOnly)
+                      for (final option in {
+                        _AssigneeMode.finalHr: 'Configured Final HR reviewers',
+                        _AssigneeMode.currentMayor: 'Current Municipal Mayor',
+                        _AssigneeMode.manualMayor:
+                            'Manual Mayor signing (printed form)',
+                      }.entries)
+                        RadioListTile<_AssigneeMode>(
+                          contentPadding: EdgeInsets.zero,
+                          title: Text(option.value),
+                          value: option.key,
+                        ),
+                    if (_usesSubmitterDepartmentHead) ...[
+                      const _FieldHeading(
+                        number: 3,
+                        label: 'Resolved Assignees',
+                      ),
+                      const SizedBox(height: 8),
+                      _infoCard(
+                        'Primary: the primary reviewer (Department Head) of the submitter\'s department at routing time\n'
+                        'Backup: that department\'s backup reviewers, in their configured order\n'
+                        'The submitter never reviews their own document. If no other reviewer is eligible, submission is blocked.\n'
+                        'Use Configure reviewers below to manage this shared department group from the workflow editor.',
+                      ),
+                    ] else if (_usesFixedDepartmentHead) ...[
+                      const _FieldHeading(
+                        number: 3,
+                        label: 'Resolved Assignees',
+                      ),
+                      const SizedBox(height: 8),
+                      _infoCard(
+                        'Primary: the primary reviewer (Department Head) of the fixed department on this step\n'
+                        'Backup: that department\'s backup reviewers, in their configured order\n'
+                        'The submitter never reviews their own document.',
+                      ),
+                    ] else if (_usesSpecificPeople) ...[
+                      const _FieldHeading(number: 3, label: 'Primary Assignee'),
+                      const SizedBox(height: 8),
+                      if (_loadingPeople)
+                        const LinearProgressIndicator(minHeight: 2)
+                      else
+                        _assigneePicker(
+                          label: 'Search by name, department, or position',
+                          selectedId: _primaryUserId,
+                          excludeId: _backupUserId,
+                          onChanged: (value) => setState(() {
+                            _primaryUserId = value;
+                            if (_backupUserId == value) _backupUserId = null;
+                            _legacyAdditionalBackupIds =
+                                _legacyAdditionalBackupIds
+                                    .where((id) => id != value)
+                                    .toList(growable: false);
+                            _error = null;
+                          }),
+                        ),
+                      const SizedBox(height: 20),
+                      const _FieldHeading(
+                        number: 4,
+                        label: 'Backup Assignee (Optional)',
+                      ),
+                      const SizedBox(height: 8),
+                      if (!_loadingPeople)
+                        _assigneePicker(
+                          label: 'Search optional backup',
+                          selectedId: _backupUserId,
+                          excludeId: _primaryUserId,
+                          optional: true,
+                          onChanged: (value) => setState(() {
+                            _backupUserId = value;
+                            _error = null;
+                          }),
+                        ),
+                      if (_legacyAdditionalBackupIds.isNotEmpty) ...[
+                        const SizedBox(height: 8),
+                        Text(
+                          '${_legacyAdditionalBackupIds.length} additional existing backup(s) '
+                          'will be preserved for compatibility.',
+                          style: TextStyle(
+                            color: AppTheme.dashTextSecondaryOf(context),
+                            fontSize: 11,
+                          ),
+                        ),
+                      ],
+                    ],
+                    if (_usesSubmitterDepartmentHead ||
+                        _usesFixedDepartmentHead ||
+                        _assigneeMode == _AssigneeMode.finalHr) ...[
+                      const SizedBox(height: 12),
+                      if (_assigneeMode == _AssigneeMode.finalHr)
+                        _infoCard(
+                          'Uses the shared Final HR primary and backup reviewers. Configure this group here; changes apply to every workflow using Final HR review.',
+                        ),
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: TextButton.icon(
+                          onPressed: _configureReviewers,
+                          icon: const Icon(Icons.manage_accounts_outlined),
+                          label: const Text('Configure reviewers'),
+                        ),
+                      ),
+                    ],
+                    const SizedBox(height: 20),
+                    const _FieldHeading(number: 5, label: 'Allowed Actions'),
+                    const SizedBox(height: 6),
+                    Text(
+                      'These actions apply equally to the primary and backup assignee.',
+                      style: TextStyle(
+                        color: AppTheme.dashTextSecondaryOf(context),
+                        fontSize: 12,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    for (final entry in _actionLabels.entries.where(
+                      (entry) => !widget.approvalOnly || entry.key != 'forward',
+                    ))
+                      CheckboxListTile(
+                        dense: true,
+                        contentPadding: EdgeInsets.zero,
+                        title: Text(entry.value),
+                        value: _allowedActions.contains(entry.key),
+                        controlAffinity: ListTileControlAffinity.leading,
+                        onChanged: widget.approvalOnly && entry.key == 'approve'
+                            ? null
+                            : (checked) => setState(() {
+                                if (checked == true) {
+                                  _allowedActions.add(entry.key);
+                                } else {
+                                  _allowedActions.remove(entry.key);
+                                }
+                                _error = null;
+                              }),
+                      ),
+                    const SizedBox(height: 8),
+                    SwitchListTile(
+                      key: const Key('workflow-step-requires-signature'),
+                      contentPadding: EdgeInsets.zero,
+                      secondary: const Icon(Icons.draw_outlined),
+                      title: const Text('Signature required'),
+                      subtitle: const Text(
+                        'The reviewer must sign the document before they can '
+                        'approve or forward it at this step.',
+                      ),
+                      value: _requiresSignature,
+                      onChanged: widget.approvalOnly
+                          ? null
+                          : (value) =>
+                                setState(() => _requiresSignature = value),
+                    ),
+                    const SizedBox(height: 8),
+                    if (!widget.approvalOnly)
+                      ExpansionTile(
+                        tilePadding: EdgeInsets.zero,
+                        title: const Text(
+                          'Additional settings',
+                          style: TextStyle(fontWeight: FontWeight.w700),
+                        ),
+                        subtitle: const Text(
+                          'Enable state and review deadline',
+                        ),
+                        children: [
+                          SwitchListTile(
+                            contentPadding: EdgeInsets.zero,
+                            title: const Text('Step enabled'),
+                            value: _enabled,
+                            onChanged: (value) =>
+                                setState(() => _enabled = value),
+                          ),
+                          TextField(
+                            controller: _deadlineController,
+                            keyboardType: TextInputType.number,
+                            decoration: DocuTrackerStyles.inputDecoration(
+                              context,
+                              'Review deadline in hours (optional)',
+                              Icons.timer_outlined,
+                            ),
+                          ),
+                        ],
+                      ),
+                    if (_error != null) ...[
+                      const SizedBox(height: 12),
+                      Text(
+                        _error!,
+                        style: const TextStyle(
+                          color: Color(0xFFB91C1C),
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ],
                 ),
-                const Spacer(),
-                FilledButton.icon(
-                  onPressed: _submit,
-                  icon: const Icon(Icons.check_rounded),
-                  label: const Text('Save Step'),
-                ),
-              ],
+              ),
             ),
-          ),
-        ],
+            const Divider(height: 1),
+            Padding(
+              padding: const EdgeInsets.all(12),
+              child: Row(
+                children: [
+                  TextButton(
+                    onPressed: () => Navigator.of(context).pop(),
+                    child: const Text('Cancel'),
+                  ),
+                  const Spacer(),
+                  FilledButton.icon(
+                    onPressed: _submit,
+                    icon: const Icon(Icons.check_rounded),
+                    label: const Text('Save Step'),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

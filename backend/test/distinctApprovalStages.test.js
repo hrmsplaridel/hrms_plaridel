@@ -5,6 +5,7 @@ const { assertFinalLeaveReviewer, resolveEligibleFinalReviewers } = require('../
 
 function database(departmentApprover = 'earl') {
   return { async query(sql) {
+    if (sql.startsWith('SELECT workflow_snapshot')) return {rows:[{workflow_snapshot:null}]};
     if (sql.startsWith('SELECT final_review_route')) return {rows:[{final_review_route:'hr'}]};
     if (sql.includes('primary_reviewer_designations')) return { rows: [{ id: 'earl' }] };
     if (sql.includes('leave_final_reviewer_backups')) return { rows: [{ id: 'other' }, { id: 'applicant' }] };

@@ -81,9 +81,17 @@ async function ensureTable() {
       pre_requirements_approved BOOLEAN NOT NULL DEFAULT FALSE,
       post_requirements_approved BOOLEAN NOT NULL DEFAULT FALSE,
       created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-      updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-      CONSTRAINT uq_ld_training_requirement_employee UNIQUE (employee_id)
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
+  `);
+  // An employee may declare many trainings/seminars, one record each.
+  await pool.query(`
+    ALTER TABLE public.ld_training_requirement_records
+      DROP CONSTRAINT IF EXISTS uq_ld_training_requirement_employee;
+  `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_ld_training_requirement_employee
+      ON public.ld_training_requirement_records (employee_id, created_at DESC);
   `);
   // Existing deployments created the table before travel order existed.
   await pool.query(`
@@ -129,34 +137,40 @@ async function getRecordById(recordId) {
   return rows[0] || null;
 }
 
-async function ensureEmployeeRecord(employeeId, trainingTitle) {
+/** The employee's current training: newest one HR has not fully approved yet. */
+async function getActiveRecord(employeeId) {
   await ensureTable();
-  const existing = await pool.query(
-    `SELECT id FROM public.ld_training_requirement_records WHERE employee_id = $1`,
+  const { rows } = await pool.query(
+    `
+    SELECT r.id
+    FROM public.ld_training_requirement_records r
+    WHERE r.employee_id = $1 AND r.post_requirements_approved = FALSE
+    ORDER BY r.created_at DESC
+    LIMIT 1
+    `,
     [employeeId],
   );
-  if (existing.rows[0]) {
-    if (trainingTitle && typeof trainingTitle === 'string' && trainingTitle.trim()) {
-      await pool.query(
-        `
-        UPDATE public.ld_training_requirement_records
-        SET training_title = $1, updated_at = now()
-        WHERE employee_id = $2
-        `,
-        [trainingTitle.trim(), employeeId],
-      );
-    }
-    return getRecordById(existing.rows[0].id);
-  }
-  const ins = await pool.query(
+  return rows[0] ? getRecordById(rows[0].id) : null;
+}
+
+/** Finished (fully approved) trainings, newest first. */
+async function getCompletedRecords(employeeId) {
+  await ensureTable();
+  const { rows } = await pool.query(
     `
-    INSERT INTO public.ld_training_requirement_records (employee_id, training_title)
-    VALUES ($1, $2)
-    RETURNING id
+    SELECT ${ROW_SELECT}
+    FROM public.ld_training_requirement_records r
+    JOIN public.users u ON u.id = r.employee_id
+    WHERE r.employee_id = $1 AND r.post_requirements_approved = TRUE
+    ORDER BY r.updated_at DESC
     `,
-    [employeeId, trainingTitle?.trim() || null],
+    [employeeId],
   );
-  return getRecordById(ins.rows[0].id);
+  return rows;
+}
+
+function cleanTitle(value) {
+  return typeof value === 'string' ? value.trim().slice(0, 300) : '';
 }
 
 const ldUpload = multer({
@@ -221,23 +235,86 @@ router.get('/', adminProtect, async (_req, res) => {
   }
 });
 
-// GET /api/ld/training-requirements/mine — employee record (auto-create)
+// GET /api/ld/training-requirements/mine
+// `record` is the current training (null until the employee declares one);
+// `history` lists trainings HR has fully approved.
 router.get('/mine', protect, async (req, res) => {
   try {
-    const row = await ensureEmployeeRecord(req.user.id, null);
-    return res.json({ record: mapRow(row) });
+    const row = await getActiveRecord(req.user.id);
+    const history = await getCompletedRecords(req.user.id);
+    return res.json({ record: mapRow(row), history: history.map(mapRow) });
   } catch (err) {
     console.error('[ldTrainingRequirements GET /mine]', err);
     return res.status(500).json({ error: 'Failed to load your training requirements' });
   }
 });
 
-// PUT /api/ld/training-requirements/mine — employee update training title
+// POST /api/ld/training-requirements/mine — declare a new training/seminar.
+// Not allowed while the previous one is still waiting for HR approval.
+router.post('/mine', protect, async (req, res) => {
+  try {
+    const title = cleanTitle(req.body?.trainingTitle);
+    if (!title) {
+      return res.status(400).json({
+        error: 'Enter the training or seminar you will attend first.',
+      });
+    }
+    const active = await getActiveRecord(req.user.id);
+    if (active && cleanTitle(active.training_title)) {
+      return res.status(409).json({
+        error:
+          'Finish your current training first. HR must approve its post-training requirements before you can add a new one.',
+      });
+    }
+    if (active) {
+      // Legacy record created before titles were required: adopt it.
+      await pool.query(
+        `UPDATE public.ld_training_requirement_records
+            SET training_title = $1, updated_at = now()
+          WHERE id = $2`,
+        [title, active.id],
+      );
+      return res.json({ ok: true, record: mapRow(await getRecordById(active.id)) });
+    }
+    const ins = await pool.query(
+      `INSERT INTO public.ld_training_requirement_records (employee_id, training_title)
+       VALUES ($1, $2) RETURNING id`,
+      [req.user.id, title],
+    );
+    return res.status(201).json({
+      ok: true,
+      record: mapRow(await getRecordById(ins.rows[0].id)),
+    });
+  } catch (err) {
+    console.error('[ldTrainingRequirements POST /mine]', err);
+    return res.status(500).json({ error: 'Failed to declare training' });
+  }
+});
+
+// PUT /api/ld/training-requirements/mine — rename the current training
+// (only until HR approves its pre-training documents).
 router.put('/mine', protect, async (req, res) => {
   try {
-    const { trainingTitle } = req.body || {};
-    const row = await ensureEmployeeRecord(req.user.id, trainingTitle);
-    return res.json({ ok: true, record: mapRow(row) });
+    const title = cleanTitle(req.body?.trainingTitle);
+    if (!title) {
+      return res.status(400).json({ error: 'trainingTitle is required' });
+    }
+    const active = await getActiveRecord(req.user.id);
+    if (!active) {
+      return res.status(404).json({ error: 'No current training. Declare one first.' });
+    }
+    if (active.pre_requirements_approved === true) {
+      return res.status(409).json({
+        error: 'The title is locked after HR approves the pre-training documents.',
+      });
+    }
+    await pool.query(
+      `UPDATE public.ld_training_requirement_records
+          SET training_title = $1, updated_at = now()
+        WHERE id = $2`,
+      [title, active.id],
+    );
+    return res.json({ ok: true, record: mapRow(await getRecordById(active.id)) });
   } catch (err) {
     console.error('[ldTrainingRequirements PUT /mine]', err);
     return res.status(500).json({ error: 'Failed to update training title' });
@@ -320,6 +397,18 @@ router.post(
       if (!docKind) {
         try { fs.unlinkSync(req.file.path); } catch (_) { /* ignore */ }
         return res.status(400).json({ error: 'kind query parameter is required' });
+      }
+      if (!isAdmin && !cleanTitle(row.training_title)) {
+        try { fs.unlinkSync(req.file.path); } catch (_) { /* ignore */ }
+        return res.status(400).json({
+          error: 'Declare the training or seminar before submitting requirements.',
+        });
+      }
+      if (!isAdmin && row.post_requirements_approved === true) {
+        try { fs.unlinkSync(req.file.path); } catch (_) { /* ignore */ }
+        return res.status(409).json({
+          error: 'This training is already completed. Declare a new training to submit again.',
+        });
       }
       const relPath = `${recordId}/${req.file.filename}`;
       const origName = req.file.originalname || req.file.filename;

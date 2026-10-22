@@ -248,41 +248,6 @@ class _RspFinalRequirementsSectionState
     }
   }
 
-  Future<void> _setOrientationAttendance(
-    RecruitmentApplication app,
-    bool? attended,
-  ) async {
-    setState(() => _savingIds.add(app.id));
-    try {
-      await RecruitmentRepo.instance.updateOrientationAttended(
-        app.id,
-        attended,
-      );
-      if (!mounted) return;
-      final msg = attended == null
-          ? 'Orientation attendance reset to pending.'
-          : attended
-          ? 'Orientation marked as attended.'
-          : 'Orientation marked as no-show.';
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
-      await _load();
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(userFacingApiError(e))));
-    } finally {
-      if (mounted) setState(() => _savingIds.remove(app.id));
-    }
-  }
-
-  String _formatScheduleDateTime(DateTime at, BuildContext context) {
-    final local = at.toLocal();
-    final dateStr = MaterialLocalizations.of(context).formatFullDate(local);
-    final timeStr = TimeOfDay.fromDateTime(local).format(context);
-    return '$dateStr · $timeStr';
-  }
-
   void _clearFilters() {
     setState(() {
       _selectedPositionFilter = null;
@@ -1100,7 +1065,6 @@ class _RspFinalRequirementsSectionState
       );
     }
 
-    final orientCol = _buildOrientationAttendancePanel(app);
     final accountCol = Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -1168,46 +1132,19 @@ class _RspFinalRequirementsSectionState
         threeColShell(
           LayoutBuilder(
             builder: (context, c) {
-              if (c.maxWidth >= 860) {
+              if (c.maxWidth >= 760) {
                 return Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Expanded(flex: 5, child: docsCol),
                     divider(),
-                    Expanded(flex: 3, child: orientCol),
-                    divider(),
-                    Expanded(flex: 3, child: accountCol),
-                  ],
-                );
-              }
-              if (c.maxWidth >= 640) {
-                return Column(
-                  children: [
-                    docsCol,
-                    const SizedBox(height: 10),
-                    Divider(
-                      height: 1,
-                      color: RspFinalReqUi.hairlineOf(context),
-                    ),
-                    const SizedBox(height: 10),
-                    Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Expanded(child: orientCol),
-                        divider(),
-                        Expanded(child: accountCol),
-                      ],
-                    ),
+                    Expanded(flex: 4, child: accountCol),
                   ],
                 );
               }
               return Column(
                 children: [
                   docsCol,
-                  const SizedBox(height: 10),
-                  Divider(height: 1, color: RspFinalReqUi.hairlineOf(context)),
-                  const SizedBox(height: 10),
-                  orientCol,
                   const SizedBox(height: 10),
                   Divider(height: 1, color: RspFinalReqUi.hairlineOf(context)),
                   const SizedBox(height: 10),
@@ -1523,142 +1460,6 @@ class _RspFinalRequirementsSectionState
                 label,
                 style: TextStyle(
                   fontSize: 13,
-                  fontWeight: FontWeight.w700,
-                  color: active ? accent : RspFinalReqUi.primaryTextOf(context),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildOrientationAttendancePanel(RecruitmentApplication app) {
-    final saving = _savingIds.contains(app.id);
-    final attended = app.orientationAttended;
-    final selected = attended == null ? 0 : (attended ? 1 : 2);
-    final scheduled = app.orientationAt;
-    final ac = RspFinalReqUi.accentOf(context);
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            Icon(Icons.event_available_outlined, size: 16, color: ac),
-            const SizedBox(width: 6),
-            Expanded(
-              child: Text(
-                'Orientation Attendance',
-                style: TextStyle(
-                  fontFamily: 'NotoSans',
-                  fontWeight: FontWeight.w800,
-                  fontSize: 13,
-                  color: RspFinalReqUi.primaryTextOf(context),
-                ),
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 4),
-        Text(
-          scheduled == null
-              ? 'Schedule orientation in Scheduling, then record attendance.'
-              : 'Scheduled: ${_formatScheduleDateTime(scheduled, context)}',
-          style: TextStyle(
-            fontSize: 11,
-            height: 1.3,
-            color: RspFinalReqUi.secondaryTextOf(context),
-          ),
-        ),
-        const SizedBox(height: 10),
-        IgnorePointer(
-          ignoring: saving,
-          child: Opacity(
-            opacity: saving ? 0.45 : 1,
-            child: Row(
-              children: [
-                for (final entry in [
-                  (0, 'Pending', Icons.schedule_rounded),
-                  (1, 'Attended', Icons.check_rounded),
-                  (2, 'No Show', Icons.person_off_rounded),
-                ]) ...[
-                  if (entry.$1 > 0) const SizedBox(width: 4),
-                  Expanded(
-                    child: _orientChip(
-                      label: entry.$2,
-                      icon: entry.$3,
-                      active: selected == entry.$1,
-                      accent: ac,
-                      onTap: () {
-                        if (saving) return;
-                        final want = entry.$1 == 0 ? null : (entry.$1 == 1);
-                        if (want == attended) return;
-                        _setOrientationAttendance(app, want);
-                      },
-                    ),
-                  ),
-                ],
-              ],
-            ),
-          ),
-        ),
-        const SizedBox(height: 8),
-        Text(
-          attended == true
-              ? 'Applicant attended orientation.'
-              : attended == false
-              ? 'Applicant did not attend orientation.'
-              : scheduled == null
-              ? 'Waiting for orientation schedule.'
-              : 'Orientation scheduled — record attendance after the session.',
-          style: TextStyle(
-            fontSize: 11,
-            color: RspFinalReqUi.secondaryTextOf(context),
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _orientChip({
-    required String label,
-    required IconData icon,
-    required bool active,
-    required Color accent,
-    required VoidCallback onTap,
-  }) {
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(999),
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 150),
-          padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
-          decoration: BoxDecoration(
-            color: active ? accent.withValues(alpha: 0.14) : Colors.transparent,
-            borderRadius: BorderRadius.circular(999),
-            border: Border.all(
-              color: active ? accent : RspFinalReqUi.hairlineOf(context),
-            ),
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(
-                icon,
-                size: 14,
-                color: active ? accent : RspFinalReqUi.secondaryTextOf(context),
-              ),
-              const SizedBox(height: 2),
-              Text(
-                label,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  fontSize: 10.5,
                   fontWeight: FontWeight.w700,
                   color: active ? accent : RspFinalReqUi.primaryTextOf(context),
                 ),

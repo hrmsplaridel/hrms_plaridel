@@ -5,6 +5,11 @@ class ApprovalConfigurationRepository {
     final response = await ApiClient.instance.get<Map<String, dynamic>>(
       '/api/docutracker/hr-workflow-mirrors',
     );
+    final assignments=response.data?['reviewer_assignments'];
+    if(assignments is Map) {
+      final groups=[...rows(assignments['department_groups']),if(assignments['final_group'] is Map)Map<String,dynamic>.from(assignments['final_group'])];
+      return {for(final group in groups)group['scope_id']?.toString() ?? 'office-wide':group['primary']==null?'Primary not configured':'Primary assigned'};
+    }
     final workflows = rows(response.data?['workflows']);
     final leave = workflows.firstWhere((w) => w['key'] == 'leave');
     return {

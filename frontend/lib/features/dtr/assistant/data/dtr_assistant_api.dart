@@ -16,12 +16,16 @@ class DtrAssistantApi {
     String? modelProfile,
     String? conversationId,
     String? externalConsentVersion,
+    Map<String, dynamic>? formContext,
+    Map<String, dynamic>? requestReference,
     CancelToken? cancelToken,
   }) async {
     final res = await _client.post<Map<String, dynamic>>(
       '/api/dtr-assistant/chat',
       data: {
         'message': message,
+        if (formContext != null) 'formContext': formContext,
+        if (requestReference != null) 'requestReference': requestReference,
         if (intent != null) 'intent': intent,
         if (modelProfile != null) 'modelProfile': modelProfile,
         if (conversationId != null) 'conversationId': conversationId,

@@ -69,31 +69,34 @@ void main() {
     }
     expect(find.text('Submit to HR'), findsOneWidget);
 
-    for (final label in ['OJT / Immersion', 'School']) {
-      final f = find.byWidgetPredicate(
-        (w) => w is TextField && w.decoration?.labelText == label,
+    final name = find.byWidgetPredicate(
+      (w) => w is TextField && w.decoration?.labelText == 'OJT / Immersion',
+    );
+    expect(tester.widget<TextField>(name).readOnly, isTrue);
+
+    final school = find.byWidgetPredicate(
+      (w) => w is TextField && w.decoration?.labelText == 'School',
+    );
+    expect(school, findsOneWidget);
+    await tester.tap(school);
+    await tester.pump();
+    final et = tester.widget<EditableText>(
+      find.descendant(of: school, matching: find.byType(EditableText)),
+    );
+    expect(et.readOnly, isFalse);
+    expect(tester.testTextInput.hasAnyClients, isTrue);
+    var text = '';
+    for (final ch in 'Abc'.split('')) {
+      text += ch;
+      tester.testTextInput.updateEditingValue(
+        TextEditingValue(
+          text: text,
+          selection: TextSelection.collapsed(offset: text.length),
+        ),
       );
-      expect(f, findsOneWidget);
-      await tester.tap(f);
       await tester.pump();
-      final et = tester.widget<EditableText>(
-        find.descendant(of: f, matching: find.byType(EditableText)),
-      );
-      expect(et.readOnly, isFalse);
-      expect(tester.testTextInput.hasAnyClients, isTrue);
-      var text = '';
-      for (final ch in 'Abc'.split('')) {
-        text += ch;
-        tester.testTextInput.updateEditingValue(
-          TextEditingValue(
-            text: text,
-            selection: TextSelection.collapsed(offset: text.length),
-          ),
-        );
-        await tester.pump();
-      }
-      expect(tester.widget<TextField>(f).controller?.text, 'Abc');
-      expect(et.focusNode.hasFocus, isTrue);
     }
+    expect(tester.widget<TextField>(school).controller?.text, 'Abc');
+    expect(et.focusNode.hasFocus, isTrue);
   });
 }

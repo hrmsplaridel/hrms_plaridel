@@ -35,6 +35,11 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
+      expect(
+        find.text('A4 portrait · PDF, PNG or JPEG · Max 5 MB'),
+        findsOneWidget,
+      );
+      expect(find.text('Preview'), findsOneWidget);
       await tester.tap(find.byType(DropdownButtonFormField<String>));
       await tester.pumpAndSettle();
       await tester.tap(find.text('Wellness Leave form').last);

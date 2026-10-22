@@ -622,7 +622,7 @@ class _ReportEmptyState extends StatelessWidget {
   }
 }
 
-class _TrainingReportCard extends StatelessWidget {
+class _TrainingReportCard extends StatefulWidget {
   const _TrainingReportCard({
     required this.report,
     required this.compact,
@@ -646,6 +646,25 @@ class _TrainingReportCard extends StatelessWidget {
   final VoidCallback? onDownloadFile;
 
   @override
+  State<_TrainingReportCard> createState() => _TrainingReportCardState();
+}
+
+class _TrainingReportCardState extends State<_TrainingReportCard> {
+  bool _expanded = false;
+
+  TrainingDailyReport get report => widget.report;
+  bool get compact => widget.compact;
+  VoidCallback get onView => widget.onView;
+  VoidCallback get onPreview => widget.onPreview;
+  VoidCallback get onPrint => widget.onPrint;
+  VoidCallback get onMarkSeen => widget.onMarkSeen;
+  VoidCallback get onDelete => widget.onDelete;
+  VoidCallback? get onViewFile => widget.onViewFile;
+  VoidCallback? get onDownloadFile => widget.onDownloadFile;
+
+  void _toggle() => setState(() => _expanded = !_expanded);
+
+  @override
   Widget build(BuildContext context) {
     final r = report;
     final desc = (r.description ?? '').trim();
@@ -654,119 +673,133 @@ class _TrainingReportCard extends StatelessWidget {
     final hairline = AppTheme.dashHairlineOf(context);
     final name = r.employeeName ?? 'Unknown employee';
     final reviewed = _isReviewedStatus(r.status);
+    final title = r.title.trim().isEmpty ? 'Untitled training' : r.title;
 
     return Material(
       color: AppTheme.dashPanelOf(context),
       borderRadius: BorderRadius.circular(12),
-      child: InkWell(
-        onTap: onView,
-        borderRadius: BorderRadius.circular(12),
-        hoverColor: AppTheme.primaryNavy.withValues(alpha: 0.03),
-        child: Container(
-          padding: EdgeInsets.fromLTRB(
-            compact ? 14 : 16,
-            14,
-            compact ? 12 : 16,
-            14,
-          ),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: hairline),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.03),
-                blurRadius: 8,
-                offset: const Offset(0, 2),
+      child: Container(
+        padding: EdgeInsets.fromLTRB(
+          compact ? 14 : 16,
+          14,
+          compact ? 12 : 16,
+          14,
+        ),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: hairline),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.03),
+              blurRadius: 8,
+              offset: const Offset(0, 2),
+            ),
+          ],
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Material(
+              color: Colors.transparent,
+              child: InkWell(
+                onTap: _toggle,
+                borderRadius: BorderRadius.circular(8),
+                hoverColor: AppTheme.primaryNavy.withValues(alpha: 0.03),
+                child: Semantics(
+                  button: true,
+                  expanded: _expanded,
+                  label: _expanded ? 'Collapse report' : 'Expand report',
+                  child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 2),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      _initialsAvatar(context, name),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              name,
+                              style: TextStyle(
+                                color: primary,
+                                fontWeight: FontWeight.w800,
+                                fontSize: 15,
+                                height: 1.2,
+                              ),
+                            ),
+                            const SizedBox(height: 3),
+                            Text(
+                              '$title · ${_formatReportDate(r.submittedAt)} · ${_formatReportTime(r.submittedAt)}',
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                color: secondary,
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      _ReportStatusBadge(status: r.status),
+                      const SizedBox(width: 2),
+                      Icon(
+                        _expanded
+                            ? Icons.expand_less_rounded
+                            : Icons.expand_more_rounded,
+                        color: secondary,
+                      ),
+                    ],
+                  ),
+                ),
               ),
-            ],
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  _initialsAvatar(context, name),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Column(
+            ),
+            ),
+            AnimatedSize(
+              duration: const Duration(milliseconds: 180),
+              curve: Curves.easeOut,
+              alignment: Alignment.topCenter,
+              child: _expanded
+                  ? Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
+                        const SizedBox(height: 10),
                         Text(
-                          name,
+                          'Daily Report',
                           style: TextStyle(
-                            color: primary,
-                            fontWeight: FontWeight.w800,
-                            fontSize: 15,
-                            height: 1.2,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
+                            color: secondary,
                           ),
                         ),
                         const SizedBox(height: 3),
                         Text(
-                          r.title.trim().isEmpty
-                              ? 'Untitled training'
-                              : r.title,
+                          desc.isEmpty ? 'No description provided.' : desc,
                           style: TextStyle(
-                            color: secondary,
-                            fontSize: 13,
-                            fontWeight: FontWeight.w600,
+                            color: desc.isEmpty
+                                ? secondary.withValues(alpha: 0.8)
+                                : primary,
+                            fontSize: 13.5,
+                            height: 1.4,
+                            fontStyle: desc.isEmpty
+                                ? FontStyle.italic
+                                : FontStyle.normal,
                           ),
                         ),
+                        if (r.attachmentUrl != null) ...[
+                          const SizedBox(height: 10),
+                          _attachmentChip(context, r),
+                        ],
+                        const SizedBox(height: 12),
+                        _actions(context, reviewed: reviewed),
                       ],
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  _ReportStatusBadge(status: r.status),
-                ],
-              ),
-              const SizedBox(height: 10),
-              Wrap(
-                spacing: 14,
-                runSpacing: 4,
-                children: [
-                  _meta(
-                    context,
-                    Icons.event_outlined,
-                    _formatReportDate(r.submittedAt),
-                  ),
-                  _meta(
-                    context,
-                    Icons.schedule_rounded,
-                    _formatReportTime(r.submittedAt),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 10),
-              Text(
-                'Daily Report',
-                style: TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w700,
-                  color: secondary,
-                ),
-              ),
-              const SizedBox(height: 3),
-              Text(
-                desc.isEmpty ? 'No description provided.' : desc,
-                maxLines: 3,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  color: desc.isEmpty
-                      ? secondary.withValues(alpha: 0.8)
-                      : primary,
-                  fontSize: 13.5,
-                  height: 1.4,
-                  fontStyle: desc.isEmpty ? FontStyle.italic : FontStyle.normal,
-                ),
-              ),
-              if (r.attachmentUrl != null) ...[
-                const SizedBox(height: 10),
-                _attachmentChip(context, r),
-              ],
-              const SizedBox(height: 12),
-              _actions(context, reviewed: reviewed),
-            ],
-          ),
+                    )
+                  : const SizedBox(width: double.infinity),
+            ),
+          ],
         ),
       ),
     );
@@ -797,23 +830,6 @@ class _TrainingReportCard extends StatelessWidget {
               : AppTheme.primaryNavy,
         ),
       ),
-    );
-  }
-
-  Widget _meta(BuildContext context, IconData icon, String text) {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Icon(icon, size: 14, color: AppTheme.dashTextSecondaryOf(context)),
-        const SizedBox(width: 5),
-        Text(
-          text,
-          style: TextStyle(
-            fontSize: 12.5,
-            color: AppTheme.dashTextSecondaryOf(context),
-          ),
-        ),
-      ],
     );
   }
 

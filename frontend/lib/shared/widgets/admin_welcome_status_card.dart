@@ -373,51 +373,38 @@ class _AdminWelcomeStatusCardState extends State<AdminWelcomeStatusCard> {
     return LayoutBuilder(
       builder: (context, constraints) {
         final bounded = constraints.maxWidth.isFinite;
-        final narrow = bounded && constraints.maxWidth < 560;
+        final narrow = bounded && constraints.maxWidth < 640;
         final time = _adminHeaderTimeGroup(primary, secondary);
         final weather = _adminHeaderWeatherGroup(primary, secondary);
         final location = _adminHeaderLocationGroup(secondary);
         final refresh = _adminHeaderRefresh();
 
-        if (narrow) {
-          return Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+        if (narrow || widget.fillWidth) {
+          return Wrap(
+            spacing: 16,
+            runSpacing: 12,
+            crossAxisAlignment: WrapCrossAlignment.center,
             children: [
-              Wrap(
-                spacing: 14,
-                runSpacing: 10,
-                crossAxisAlignment: WrapCrossAlignment.center,
-                children: [
-                  time,
-                  weather,
-                  if (location != null) location,
-                ],
-              ),
-              const SizedBox(height: 8),
+              time,
+              weather,
+              if (location != null) location,
               refresh,
             ],
           );
         }
 
-        final row = Row(
+        return Row(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.center,
           children: [
             time,
             _adminHeaderDivider(),
             weather,
-            if (location != null) ...[
-              _adminHeaderDivider(),
-              location,
-            ],
+            if (location != null) ...[_adminHeaderDivider(), location],
             const SizedBox(width: 8),
             refresh,
           ],
         );
-        if (widget.fillWidth) {
-          return SizedBox(width: double.infinity, child: row);
-        }
-        return row;
       },
     );
   }
@@ -523,11 +510,7 @@ class _AdminWelcomeStatusCardState extends State<AdminWelcomeStatusCard> {
       return Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(
-            Icons.cloud_off_outlined,
-            size: 18,
-            color: secondary,
-          ),
+          Icon(Icons.cloud_off_outlined, size: 18, color: secondary),
           const SizedBox(width: 6),
           Text(
             'Weather unavailable',
@@ -610,10 +593,10 @@ class _AdminWelcomeStatusCardState extends State<AdminWelcomeStatusCard> {
               ),
               const SizedBox(width: 4),
               ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 150),
+                constraints: const BoxConstraints(maxWidth: 160),
                 child: Text(
                   _adminHeaderPlaceLabel(weather.locationLabel),
-                  maxLines: 1,
+                  maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
                     fontSize: 12.5,
@@ -949,10 +932,7 @@ class _WelcomeActionButton extends StatelessWidget {
         onTap: loading ? null : onTap,
         borderRadius: BorderRadius.circular(8),
         child: flat
-            ? Padding(
-                padding: const EdgeInsets.all(6),
-                child: iconWidget,
-              )
+            ? Padding(padding: const EdgeInsets.all(6), child: iconWidget)
             : Container(
                 margin: const EdgeInsets.symmetric(vertical: 2),
                 padding: const EdgeInsets.all(4),

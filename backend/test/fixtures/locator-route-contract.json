@@ -1,0 +1,307 @@
+[
+  {
+    "name": "authMiddleware",
+    "regexp": "/^\\/print\\/?(?=\\/|$)/i"
+  },
+  {
+    "name": "router",
+    "regexp": "/^\\/print\\/?(?=\\/|$)/i"
+  },
+  {
+    "path": "/final-reviewer/me",
+    "methods": [
+      "get"
+    ],
+    "middleware": [
+      "authMiddleware",
+      "requireLocatorFinalRole"
+    ]
+  },
+  {
+    "path": "/submission-availability",
+    "methods": [
+      "get"
+    ],
+    "middleware": [
+      "authMiddleware"
+    ]
+  },
+  {
+    "path": "/context",
+    "methods": [
+      "get"
+    ],
+    "middleware": [
+      "authMiddleware"
+    ]
+  },
+  {
+    "path": "/shift-coverage",
+    "methods": [
+      "get"
+    ],
+    "middleware": [
+      "authMiddleware"
+    ]
+  },
+  {
+    "path": "/department-head/check",
+    "methods": [
+      "get"
+    ],
+    "middleware": [
+      "authMiddleware"
+    ]
+  },
+  {
+    "path": "/types",
+    "methods": [
+      "get"
+    ],
+    "middleware": [
+      "authMiddleware"
+    ]
+  },
+  {
+    "path": "/types",
+    "methods": [
+      "post"
+    ],
+    "middleware": [
+      "authMiddleware",
+      "requireAdminOrHr",
+      ""
+    ]
+  },
+  {
+    "path": "/types/:id",
+    "methods": [
+      "put"
+    ],
+    "middleware": [
+      "authMiddleware",
+      "requireAdminOrHr",
+      ""
+    ]
+  },
+  {
+    "path": "/types/:id",
+    "methods": [
+      "delete"
+    ],
+    "middleware": [
+      "authMiddleware",
+      "requireAdminOrHr",
+      ""
+    ]
+  },
+  {
+    "path": "/my",
+    "methods": [
+      "get"
+    ],
+    "middleware": [
+      "authMiddleware"
+    ]
+  },
+  {
+    "path": "/admin/filing-employees",
+    "methods": [
+      "get"
+    ],
+    "middleware": [
+      "authMiddleware",
+      "requireAdminOrHr",
+      ""
+    ]
+  },
+  {
+    "path": "/admin/file",
+    "methods": [
+      "post"
+    ],
+    "middleware": [
+      "authMiddleware",
+      "requireAdminOrHr",
+      "",
+      "uploadLocatorAttachmentMw"
+    ]
+  },
+  {
+    "path": "/submit",
+    "methods": [
+      "post"
+    ],
+    "middleware": [
+      "authMiddleware"
+    ]
+  },
+  {
+    "path": "/submit-with-attachment",
+    "methods": [
+      "post"
+    ],
+    "middleware": [
+      "authMiddleware",
+      "uploadLocatorAttachmentMw"
+    ]
+  },
+  {
+    "path": "/admin/corrections",
+    "methods": [
+      "post"
+    ],
+    "middleware": [
+      "authMiddleware",
+      "requireAdminOrHr",
+      "",
+      "uploadLocatorAttachmentMw"
+    ]
+  },
+  {
+    "path": "/:id/cancel",
+    "methods": [
+      "patch"
+    ],
+    "middleware": [
+      "authMiddleware"
+    ]
+  },
+  {
+    "path": "/:id/resubmit",
+    "methods": [
+      "patch"
+    ],
+    "middleware": [
+      "authMiddleware"
+    ]
+  },
+  {
+    "path": "/:id/attachment",
+    "methods": [
+      "post"
+    ],
+    "middleware": [
+      "authMiddleware",
+      "uploadLocatorAttachmentMw"
+    ]
+  },
+  {
+    "path": "/:id/attachment",
+    "methods": [
+      "delete"
+    ],
+    "middleware": [
+      "authMiddleware"
+    ]
+  },
+  {
+    "path": "/:id/history",
+    "methods": [
+      "get"
+    ],
+    "middleware": [
+      "authMiddleware"
+    ]
+  },
+  {
+    "path": "/:id/attachment",
+    "methods": [
+      "get"
+    ],
+    "middleware": [
+      "authMiddleware"
+    ]
+  },
+  {
+    "path": "/department-head",
+    "methods": [
+      "get"
+    ],
+    "middleware": [
+      "authMiddleware"
+    ]
+  },
+  {
+    "path": "/:id/department-head-approve",
+    "methods": [
+      "patch"
+    ],
+    "middleware": [
+      "authMiddleware"
+    ]
+  },
+  {
+    "path": "/:id/department-head-reject",
+    "methods": [
+      "patch"
+    ],
+    "middleware": [
+      "authMiddleware"
+    ]
+  },
+  {
+    "path": "/:id/department-head-return",
+    "methods": [
+      "patch"
+    ],
+    "middleware": [
+      "authMiddleware"
+    ]
+  },
+  {
+    "path": "/admin",
+    "methods": [
+      "get"
+    ],
+    "middleware": [
+      "authMiddleware",
+      "requireLocatorFinalRole",
+      ""
+    ]
+  },
+  {
+    "path": "/:id/return-for-correction",
+    "methods": [
+      "patch"
+    ],
+    "middleware": [
+      "authMiddleware",
+      "requireLocatorFinalRole",
+      ""
+    ]
+  },
+  {
+    "path": "/:id/approve",
+    "methods": [
+      "patch"
+    ],
+    "middleware": [
+      "authMiddleware",
+      "requireLocatorFinalRole",
+      ""
+    ]
+  },
+  {
+    "path": "/:id/revoke",
+    "methods": [
+      "patch"
+    ],
+    "middleware": [
+      "authMiddleware",
+      "requireAdminOrHr",
+      ""
+    ]
+  },
+  {
+    "path": "/:id/reject",
+    "methods": [
+      "patch"
+    ],
+    "middleware": [
+      "authMiddleware",
+      "requireLocatorFinalRole",
+      ""
+    ]
+  }
+]

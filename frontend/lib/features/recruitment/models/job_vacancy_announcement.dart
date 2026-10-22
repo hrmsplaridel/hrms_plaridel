@@ -15,6 +15,7 @@ class JobVacancyItem {
     this.totalApplicationCount,
     this.minimumAge = 18,
     this.maximumAge,
+    this.publishedAt,
   });
 
   final String? headline;
@@ -45,6 +46,9 @@ class JobVacancyItem {
 
   /// Oldest age this vacancy accepts. Null means no maximum.
   final int? maximumAge;
+
+  /// Calendar date this position was first published on the landing page.
+  final DateTime? publishedAt;
 
   /// Public qualification line generated from the stored age rule.
   String get ageRequirementLabel {
@@ -221,6 +225,7 @@ class JobVacancyAnnouncement {
               ),
               minimumAge: JobVacancyItem.parseMinimumAge(m['minimum_age']),
               maximumAge: JobVacancyItem.parseMaximumAge(m['maximum_age']),
+              publishedAt: JobVacancyItem._parseDateOnly(m['published_at']),
               applicationCount: m['application_count'] is int
                   ? m['application_count'] as int
                   : int.tryParse(m['application_count']?.toString() ?? ''),
@@ -245,6 +250,7 @@ class JobVacancyAnnouncement {
           ),
           minimumAge: JobVacancyItem.parseMinimumAge(json['minimum_age']),
           maximumAge: JobVacancyItem.parseMaximumAge(json['maximum_age']),
+          publishedAt: JobVacancyItem._parseDateOnly(json['published_at']),
           applicationCount: json['application_count'] is int
               ? json['application_count'] as int
               : int.tryParse(json['application_count']?.toString() ?? ''),
@@ -287,6 +293,9 @@ class JobVacancyAnnouncement {
           'max_applicants': v.maxApplicants,
         'minimum_age': v.minimumAge,
         'maximum_age': v.maximumAge,
+        if (v.publishedAt != null)
+          'published_at':
+              '${v.publishedAt!.year.toString().padLeft(4, '0')}-${v.publishedAt!.month.toString().padLeft(2, '0')}-${v.publishedAt!.day.toString().padLeft(2, '0')}',
       };
     }).toList();
     final first = vacancies.isNotEmpty ? vacancies.first : null;

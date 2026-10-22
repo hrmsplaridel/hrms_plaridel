@@ -1,6 +1,6 @@
 /**
  * Recruitment attachment paths allowed for signed URLs / proxy (Postgres).
- * See scripts/rsp-storage-attachment-policy.sql
+ * See scripts/migrations/rsp/rsp-storage-attachment-policy.sql
  */
 const { pool } = require('../config/db');
 

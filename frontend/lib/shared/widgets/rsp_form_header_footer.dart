@@ -65,7 +65,7 @@ class RspFormHeader extends StatelessWidget {
                     ),
                     clipBehavior: Clip.antiAlias,
                     child: Image.asset(
-                      'assets/images/Plaridel Logo.jpg',
+                      'assets/images/PlaridelLogo.jpg',
                       fit: BoxFit.cover,
                       errorBuilder: (_, __, ___) => Icon(
                         Icons.account_balance_rounded,

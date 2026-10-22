@@ -1,4 +1,5 @@
 const { detectAssistantLanguage } = require('./dtrAssistantLanguage');
+const { configuredLeaveType } = require('./configuredLeaveType');
 const {
   extractMessageEntities,
   extractDayCount,
@@ -37,6 +38,8 @@ function hasDateHint(text, memory, context) {
 }
 
 function resolveLeaveType(text, memory, context) {
+  const configured = configuredLeaveType(text, context?.leave_types);
+  if (configured) return configured.name || configured.code || configured.leave_type || configured.display_name;
   const fromText = normalizeLeaveTypeHint(text);
   if (fromText) return fromText;
   if (memory?.leaveType) return memory.leaveType;
@@ -228,10 +231,10 @@ function clarificationQuestion(field, topic, language) {
     }
     if (field === 'date') {
       return language === 'bisaya'
-        ? 'Para asa nga petsa imong i-file? (pananglitan: ugma, June 30, or 2 days starting Monday)'
+        ? 'Para asa nga petsa imong i-file? (pananglitan: ugma o ang eksaktong petsa nga imong gusto)'
         : language === 'tagalog'
-          ? 'Para sa anong petsa mo ifa-file? (halimbawa: bukas, June 30, o 2 days starting Monday)'
-          : 'For what date(s) should I check or file? (e.g. tomorrow, June 30, or 2 days starting Monday)';
+          ? 'Para sa anong petsa mo ifa-file? (halimbawa: bukas o ang eksaktong petsang gusto mo)'
+          : 'For what date(s) should I check or file? (e.g. tomorrow or your preferred exact date)';
     }
     if (field === 'days') {
       return language === 'bisaya'
@@ -252,10 +255,10 @@ function clarificationQuestion(field, topic, language) {
     }
     if (field === 'date') {
       return language === 'bisaya'
-        ? 'Asa nga workday ang imong locator slip? (pananglitan: ugma or June 30)'
+        ? 'Asa nga workday ang imong locator slip? (pananglitan: ugma o ang eksaktong petsa nga imong gusto)'
         : language === 'tagalog'
-          ? 'Para sa anong workday ang locator slip? (halimbawa: bukas o June 30)'
-          : 'Which workday should the locator slip cover? (e.g. tomorrow or June 30)';
+          ? 'Para sa anong workday ang locator slip? (halimbawa: bukas o ang eksaktong petsang gusto mo)'
+          : 'Which workday should the locator slip cover? (e.g. tomorrow or your preferred exact date)';
     }
     if (field === 'destination') {
       return language === 'bisaya'
@@ -322,6 +325,8 @@ function isPendingClarificationAnswer(text, memory) {
     return Boolean(normalizeLocatorTypeHint(value));
   }
   if (pending.field === 'date') {
+    const contextualDate = /^\d{1,2}(?:st|nd|rd|th)?$/i.test(value.trim()) ? `petsa ${value.trim()}` : value;
+    const parsed = parseAssistantDateRange(contextualDate);
     const hasExplicitDateText =
       /\b(today|tomorrow|yesterday|karon|ugma|gahapon|kagahapon|ngayon|bukas|kahapon|monday|tuesday|wednesday|thursday|friday|saturday|sunday|lunes|martes|miyerkules|mierkules|huwebes|webes|biyernes|byernes|sabado|domingo|week|month|semana|semanaha|bulan|bulana|buwan|buwana|pay\s*period|cutoff|next day|following day|sunod adlaw|previous day|day before)\b/.test(
         normalized
@@ -330,7 +335,7 @@ function isPendingClarificationAnswer(text, memory) {
       /\b(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\s+\d{1,2}\b/.test(
         normalized
       );
-    return hasExplicitDateText && Boolean(parseAssistantDateRange(value)?.startDate);
+    return (hasExplicitDateText || parsed?.label !== 'today') && Boolean(parsed?.startDate);
   }
   if (pending.field === 'days') {
     return wordCount <= 8 && extractDayCount(value) != null;
@@ -385,7 +390,12 @@ function evaluateGuidedClarification({ intent, text, context, memory }) {
   if (fields.length === 0) return null;
 
   const nextField = fields[0];
-  const question = clarificationQuestion(nextField, topic, language);
+  let question = clarificationQuestion(nextField, topic, language);
+  if (nextField === 'leaveType' && context?.leave_types?.length) {
+    const names = context.leave_types.filter((type) => type.is_active !== false && type.employee_can_file !== false && type.admin_only !== true)
+      .map((type) => type.display_name || type.name).filter(Boolean).slice(0, 12);
+    if (names.length) question = `${language === 'bisaya' ? 'Unsa nga leave type?' : language === 'tagalog' ? 'Anong leave type?' : 'Which leave type do you want?'} (${names.join(', ')})`;
+  }
   if (!question) return null;
 
   const known = {
@@ -432,7 +442,8 @@ function applyPendingClarificationAnswer(text, memory) {
     return patch;
   }
 
-  const value = String(text || '').trim();
+  const rawValue = String(text || '').trim();
+  const value = pending.field === 'date' && /^\d{1,2}(?:st|nd|rd|th)?$/i.test(rawValue) ? `petsa ${rawValue}` : rawValue;
   const entities = extractMessageEntities(value);
   const parsedDateRange = parseAssistantDateRange(value);
   const suppliedDateRange = hasDateHint(

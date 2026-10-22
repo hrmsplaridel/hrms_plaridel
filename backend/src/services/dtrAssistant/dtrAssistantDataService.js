@@ -151,6 +151,7 @@ function assistantContextLoadPlan(intents) {
     if (DTR_RECORD_INTENTS.has(intent)) {
       plan.dtrRecords = true;
       plan.dtrCalendarDays = true;
+      plan.locatorSlips = true;
       continue;
     }
     if (intent === 'dtr_holiday_check' || intent === 'dtr_schedule_context') {
@@ -440,7 +441,7 @@ async function loadLeaveBalances(pool, userId) {
   });
 }
 
-async function loadRecentLeaveRequests(pool, userId, dateRange) {
+async function loadRecentLeaveRequests(pool, userId, dateRange, requestId = null) {
   const result = await runAssistantQuery(
     pool,
     `SELECT lr.id,
@@ -504,7 +505,8 @@ async function loadRecentLeaveRequests(pool, userId, dateRange) {
        LEFT JOIN users actor ON actor.id = h.acted_by
        WHERE h.leave_request_id = lr.id
      ) history_summary ON true
-     WHERE lr.user_id = $1::uuid OR lr.employee_id = $1::uuid
+     WHERE (lr.user_id = $1::uuid OR lr.employee_id = $1::uuid)
+     ${requestId ? 'AND lr.id = $4::uuid' : ''}
      ORDER BY
        CASE
          WHEN lr.start_date <= $3::date AND lr.end_date >= $2::date THEN 0
@@ -513,7 +515,7 @@ async function loadRecentLeaveRequests(pool, userId, dateRange) {
        lr.updated_at DESC NULLS LAST,
        lr.created_at DESC
      LIMIT 30`,
-    [userId, dateRange.startDate, dateRange.endDate]
+    [userId, dateRange.startDate, dateRange.endDate, ...(requestId ? [requestId] : [])]
   );
 
   return result.rows.map((row) => ({
@@ -636,8 +638,7 @@ async function queryLeaveTypes(pool) {
             is_active
      FROM leave_types
      WHERE is_active IS NULL OR is_active = true
-     ORDER BY display_name NULLS LAST, name ASC
-     LIMIT 30`
+     ORDER BY display_name NULLS LAST, name ASC`
   );
 
   return result.rows.map((row) => ({
@@ -669,7 +670,7 @@ function loadLeaveTypes(pool) {
   );
 }
 
-async function loadRecentLocatorSlips(pool, userId, dateRange) {
+async function loadRecentLocatorSlips(pool, userId, dateRange, requestId = null, coverageOnly = false) {
   const result = await runAssistantQuery(
     pool,
     `SELECT ls.id,
@@ -711,6 +712,8 @@ async function loadRecentLocatorSlips(pool, userId, dateRange) {
      LEFT JOIN users revoker ON revoker.id = ls.revoked_by
      LEFT JOIN locator_request_types lrt ON lrt.code = ls.request_type
      WHERE ls.employee_id = $1::uuid
+     ${requestId ? 'AND ls.id = $4::uuid' : ''}
+     ${coverageOnly ? 'AND ls.slip_date BETWEEN $2::date AND $3::date' : ''}
      ORDER BY
        CASE
          WHEN ls.slip_date BETWEEN $2::date AND $3::date THEN 0
@@ -718,8 +721,8 @@ async function loadRecentLocatorSlips(pool, userId, dateRange) {
        END,
        ls.updated_at DESC,
        ls.created_at DESC
-     LIMIT 30`,
-    [userId, dateRange.startDate, dateRange.endDate]
+     ${coverageOnly ? '' : 'LIMIT 30'}`,
+    [userId, dateRange.startDate, dateRange.endDate, ...(requestId ? [requestId] : [])]
   );
 
   return result.rows.map((row) => ({
@@ -805,13 +808,15 @@ function loadLocatorTypes(pool) {
 
 async function loadEmployeeAssistantContext(
   pool,
-  { userId, message, dateRange: dateRangeOverride, intents, signal }
+  { userId, message, dateRange: dateRangeOverride, intents, signal, requestReference }
 ) {
   throwIfAssistantQueryAborted(signal);
   const dateRange = assertAssistantDateRange(
     dateRangeOverride || parseAssistantDateRange(message)
   );
   const loadPlan = assistantContextLoadPlan(intents);
+  const needsLocatorCoverage = (Array.isArray(intents) ? intents : [intents])
+    .some((intent) => DTR_RECORD_INTENTS.has(intent) || intent === 'dtr_locator_coverage_check');
   const [
     employee,
     dtrRecords,
@@ -831,14 +836,16 @@ async function loadEmployeeAssistantContext(
         : [],
       loadPlan.leaveBalances ? loadLeaveBalances(pool, userId) : [],
       loadPlan.leaveRequests
-        ? loadRecentLeaveRequests(pool, userId, dateRange)
+        ? loadRecentLeaveRequests(pool, userId, dateRange, requestReference?.module === 'leave' ? requestReference.id : null)
         : [],
       loadPlan.leaveAnnualUsage
         ? loadAnnualLeaveUsage(pool, userId, dateRange)
         : [],
       loadPlan.leaveTypes ? loadLeaveTypes(pool) : [],
       loadPlan.locatorSlips
-        ? loadRecentLocatorSlips(pool, userId, dateRange)
+        ? loadRecentLocatorSlips(pool, userId, dateRange,
+          needsLocatorCoverage ? null : requestReference?.module === 'locator' ? requestReference.id : null,
+          needsLocatorCoverage)
         : [],
       loadPlan.locatorTypes ? loadLocatorTypes(pool) : [],
     ]);

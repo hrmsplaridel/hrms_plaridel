@@ -288,7 +288,7 @@ and `reject`) cannot be granted through these system-access endpoints.
 |--------|----------|-------------|
 | GET | /api/docutracker/routing-configs | List workflow configs |
 | POST | /api/docutracker/routing-configs | Publish a workflow version with its step assignees and actions |
-| GET | /api/docutracker/hr-workflow-mirrors | List read-only Leave and Locator reviewer routes resolved from DTR configuration (admin only) |
+| GET | /api/docutracker/hr-workflow-mirrors | List read-only DTR routes grouped by saved workflow/version, with used_by type references (admin only) |
 
 Each item in `steps` may include `user_ids` ordered as primary then backups and
 `allowed_actions`, containing one or more of `approve`, `forward`, `return`, or

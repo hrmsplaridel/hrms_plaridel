@@ -15,6 +15,18 @@ const base = {
   reviewingDepartmentHeadId: null,
 };
 
+test('Mayor attachment privilege requires confirmed current authority on a direct route', () => {
+  const mayor = { ...base, role: 'mayor', finalReviewRoute: 'mayor_direct' };
+  assert.equal(resolveLocatorAttachmentAccess(mayor).allowed, false);
+  assert.equal(resolveLocatorAttachmentAccess({ ...mayor, canReadAsMayor: false }).allowed, false);
+  assert.deepEqual(resolveLocatorAttachmentAccess({ ...mayor, canReadAsMayor: true }),
+    { allowed: true, reason: 'mayor_reviewer' });
+  for (const finalReviewRoute of ['hr', 'mayor', null]) {
+    assert.equal(resolveLocatorAttachmentAccess({ ...mayor, canReadAsMayor: true, finalReviewRoute }).allowed, false);
+  }
+  assert.equal(resolveLocatorAttachmentAccess({ ...mayor, userId: base.ownerUserId }).reason, 'request_owner');
+});
+
 test('owner and HR/admin can access a locator attachment', () => {
   assert.deepEqual(
     resolveLocatorAttachmentAccess({ ...base, userId: 'employee-1' }),

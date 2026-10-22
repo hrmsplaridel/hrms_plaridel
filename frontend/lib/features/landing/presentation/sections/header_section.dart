@@ -840,7 +840,7 @@ class _MunicipalityLogoCircular extends StatelessWidget {
       ),
       child: ClipOval(
         child: Image.asset(
-          'assets/images/Plaridel Logo.jpg',
+          'assets/images/PlaridelLogo.jpg',
           height: size,
           width: size,
           fit: BoxFit.cover,

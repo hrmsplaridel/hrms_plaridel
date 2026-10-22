@@ -3,6 +3,7 @@
 // ignore_for_file: unused_element
 
 import 'package:flutter/material.dart';
+import 'package:hrms_plaridel/features/dtr/management/approvals/widgets/approval_workflows_panel.dart';
 import 'package:provider/provider.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/features/docutracker/data/providers/docutracker_provider.dart';
@@ -576,6 +577,21 @@ class _DocuTrackerAdminScreenState extends State<DocuTrackerAdminScreen> {
             ],
           ),
         ),
+        const SizedBox(height: 12),
+        Align(
+          alignment: Alignment.centerLeft,
+          child: OutlinedButton.icon(
+            icon: const Icon(Icons.account_tree_outlined),
+            label: const Text('Shared approval workflows'),
+            onPressed: () async {
+              await Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => Scaffold(
+                appBar: AppBar(title: const Text('Shared approval workflows')),
+                body: const Padding(padding: EdgeInsets.all(24), child: ApprovalWorkflowsPanel(allowDocumentBinding: true)),
+              )));
+              if (mounted) await _load(forceRefresh: true);
+            },
+          ),
+        ),
         const SizedBox(height: 20),
         if (provider.loading || _hrWorkflowMirrorsLoading)
           const Padding(
@@ -632,6 +648,14 @@ class _DocuTrackerAdminScreenState extends State<DocuTrackerAdminScreen> {
                 child: DocuTrackerActiveWorkflowCard(
                   config: config,
                   onEdit: () async {
+                    if (config.sharedWorkflowId != null) {
+                      await Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => Scaffold(
+                        appBar: AppBar(title: Text('${config.documentType.displayName} · Shared workflow')),
+                        body: Padding(padding: const EdgeInsets.all(24), child: ApprovalWorkflowsPanel(allowDocumentBinding: true, initialWorkflowId: config.sharedWorkflowId)),
+                      )));
+                      if (mounted) await _load(forceRefresh: true);
+                      return;
+                    }
                     final saved = await Navigator.of(context).push<bool>(
                       MaterialPageRoute<bool>(
                         builder: (_) => DocuTrackerWorkflowEditorScreen(
@@ -692,9 +716,7 @@ class _DocuTrackerAdminScreenState extends State<DocuTrackerAdminScreen> {
                             borderRadius: BorderRadius.circular(8),
                           ),
                           child: Icon(
-                            workflow.key == 'locator'
-                                ? Icons.pin_drop_outlined
-                                : Icons.event_note_outlined,
+                            Icons.account_tree_outlined,
                             color: DocuTrackerTokens.brand,
                             size: 21,
                           ),
@@ -742,6 +764,10 @@ class _DocuTrackerAdminScreenState extends State<DocuTrackerAdminScreen> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
+                          if (workflow.usedBy.isNotEmpty) ...[
+                            DocuTrackerWorkflowUsageDetails(workflow: workflow),
+                            const SizedBox(height: 20),
+                          ],
                           for (
                             var index = 0;
                             index < workflow.steps.length;

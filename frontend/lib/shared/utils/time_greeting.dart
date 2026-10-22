@@ -1,12 +1,14 @@
 /// Time-of-day greetings for dashboard welcome lines.
 ///
-/// - Good Morning: 5:00 AM – 11:59 AM
-/// - Good Afternoon: 12:00 PM – 4:59 PM
-/// - Good Evening: 5:00 PM – 4:59 AM
+/// - Good Morning: 12:00 AM – 11:59 AM
+/// - Good Noon: 12:00 NN – 12:59 NN
+/// - Good Afternoon: 1:00 PM – 5:59 PM
+/// - Good Evening: 6:00 PM – 11:59 PM
 String timeOfDayGreeting([DateTime? when]) {
   final hour = (when ?? DateTime.now()).hour;
-  if (hour >= 5 && hour < 12) return 'Good Morning';
-  if (hour >= 12 && hour < 17) return 'Good Afternoon';
+  if (hour < 12) return 'Good Morning';
+  if (hour < 13) return 'Good Noon';
+  if (hour < 18) return 'Good Afternoon';
   return 'Good Evening';
 }
 

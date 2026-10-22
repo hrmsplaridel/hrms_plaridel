@@ -122,7 +122,14 @@ class EmployeeLeaveActions {
       final bytes = await saveConfiguredLeavePdf(
         request: target,
         document: doc,
+        balances: balances,
         departmentReviewer: formSignatories.recommendationOfficer?.name,
+        departmentReviewerTitle: formSignatories.recommendationOfficer?.title,
+        approvingAuthorityName: formSignatories.approvingAuthority?.name,
+        approvingAuthorityTitle: formSignatories.approvingAuthority?.title,
+        certificationOfficerName: formSignatories.certificationOfficer?.name,
+        certificationOfficerTitle: formSignatories.certificationOfficer?.title,
+        certificationSignature: formSignatories.certificationOfficerSignature?.signatureImageBytes,
         applicantSignature:
             formSignatories.applicantSignature?.signatureImageBytes,
         departmentSignature:

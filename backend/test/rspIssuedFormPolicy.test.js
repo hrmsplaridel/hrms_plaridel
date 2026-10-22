@@ -31,22 +31,37 @@ test('revision resubmits into review and does not reject the application', () =>
   assert.equal(policy.statusAfterApplicantSubmit('needs_revision'), 'resubmitted_for_review');
   assert.equal(policy.hrCanReview('resubmitted_for_review'), true);
   assert.equal(policy.canReassign('submitted_for_review'), false);
+  assert.equal(policy.canUndoAssignment('assigned'), true);
+  assert.equal(policy.canUndoAssignment('in_progress'), true);
+  assert.equal(policy.canUndoAssignment('submitted_for_review'), false);
+  assert.equal(policy.canUndoAssignment('approved'), false);
   assert.equal(policy.applicantCanEdit('needs_revision'), true);
 });
 
-test('OJT applicant submit only requires immersion and school', () => {
+test('OJT applicant submit requires school and evidence notes', () => {
   assert.deepEqual(
     policy.validateOjtApplicant({
-      ojt_immersion: 'Juan Dela Cruz',
       school: 'Plaridel National High School',
-      interview_date: null,
-      problem_solving_score: null,
-      overall_recommendation: null,
-      interviewer: null,
+      problem_solving_notes: 'Solved the case',
+      communication_notes: 'Clear answers',
+      teamwork_notes: 'Worked with the group',
+      adaptability_notes: 'Adjusted to the task',
     }),
     [],
   );
-  assert.deepEqual(policy.validateOjtApplicant({}), ['OJT / immersion', 'school']);
+  assert.deepEqual(policy.validateOjtApplicant({}), [
+    'school',
+    'problem solving evidence',
+    'communication evidence',
+    'teamwork evidence',
+    'adaptability evidence',
+  ]);
+});
+
+test('only a Recommended OJT result counts as passed', () => {
+  assert.equal(policy.ojtPassed({ overall_recommendation: 'Recommended' }), true);
+  assert.equal(policy.ojtPassed({ overall_recommendation: 'Not Recommended' }), false);
+  assert.equal(policy.ojtPassed({ overall_recommendation: 'For Further Review' }), false);
 });
 
 test('OJT approval waits for interviewer fields', () => {

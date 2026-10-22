@@ -46,7 +46,7 @@ class _HrmsMaterialApp extends StatelessWidget {
     );
 
     return MaterialApp(
-      title: 'HRMS',
+      title: 'UnityPillar',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.lightTheme,
       darkTheme: AppTheme.darkTheme,
@@ -282,7 +282,9 @@ class _RestrictedMobileRouteScreen extends StatelessWidget {
 Widget _initialHome(AuthProvider auth, {required double logicalWidth}) {
   if (auth.user != null) {
     final role = (auth.user!.role ?? 'employee').toLowerCase();
-    if (role == 'mayor') return const MayorDashboardPage();
+    if (role == 'mayor' || role == 'mayor_office_staff') {
+      return const MayorDashboardPage();
+    }
     final isPrivileged =
         role == 'admin' || role == 'hr' || role == 'super_admin';
     final isNativeMobile =
