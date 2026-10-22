@@ -816,7 +816,10 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
       if (!mounted) return;
     }
     try {
-      final assigned = await loadAssignedWorkflowRequests('leave');
+      final assigned = await loadAssignedWorkflowRequests(
+        'leave',
+        forceRefresh: forceRefresh,
+      );
       if (!mounted) return;
       setState(() { _assignedRequests = assigned; _assignedRequestsError = null; _assignedRequestsLoaded = true; });
     } catch (_) {

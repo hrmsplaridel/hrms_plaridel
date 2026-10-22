@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:dio/dio.dart';
 import 'package:provider/provider.dart';
 import 'package:hrms_plaridel/core/api/client.dart';
+import 'package:hrms_plaridel/core/api/workflow_inbox_cache.dart';
 import 'package:hrms_plaridel/core/services/app_realtime_provider.dart';
 import 'package:hrms_plaridel/core/api/user_facing_api_error.dart';
 import 'package:hrms_plaridel/providers/auth_provider.dart';
@@ -39,18 +40,15 @@ String? pendingWorkflowStepLabel(Map<String, dynamic>? snapshot) {
 
 /// Assigned requests are merged into the source module's existing queue.
 Future<Map<String, Map<String, dynamic>>> loadAssignedWorkflowRequests(
-  String kind,
-) async {
+  String kind, {
+  bool forceRefresh = false,
+}) => WorkflowInboxCache.instance.get(kind, () async {
   final response = await ApiClient.instance.get<List<dynamic>>(
     '/api/approval-workflows/inbox',
     queryParameters: {'include_history': true},
   );
-  return {
-    for (final row in (response.data ?? []).whereType<Map>())
-      if (row['kind'] == kind)
-        row['id'].toString(): Map<String, dynamic>.from(row),
-  };
-}
+  return response.data ?? <dynamic>[];
+}, forceRefresh: forceRefresh);
 
 Future<bool> reviewAssignedWorkflowRequest(
   BuildContext context,
@@ -171,7 +169,10 @@ class _WorkflowDecisionDialogState extends State<_WorkflowDecisionDialog> {
       _refreshError = null;
     });
     try {
-      final assigned = await loadAssignedWorkflowRequests('leave');
+      final assigned = await loadAssignedWorkflowRequests(
+        'leave',
+        forceRefresh: true,
+      );
       var current = assigned[_request['id']];
       if (current == null) {
         // Backups who did not act disappear from the assigned inbox after completion.
@@ -315,6 +316,7 @@ class _WorkflowDecisionDialogState extends State<_WorkflowDecisionDialog> {
           },
         },
       );
+      WorkflowInboxCache.instance.invalidate();
       if (!mounted) return;
       final data = response.data;
       final nextLabel = data is Map && data['workflow_snapshot'] is Map
@@ -330,6 +332,9 @@ class _WorkflowDecisionDialogState extends State<_WorkflowDecisionDialog> {
       setState(() => _saving = false);
       Navigator.pop(context, _WorkflowDecisionResult(message));
     } catch (error) {
+      if (error is DioException && error.response?.statusCode == 409) {
+        WorkflowInboxCache.instance.invalidate();
+      }
       if (mounted) {
         final message = userFacingApiError(error);
         setState(() => _error = message);

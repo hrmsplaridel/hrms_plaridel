@@ -6,6 +6,7 @@ import 'client_device_header.dart';
 import 'config.dart';
 import 'token_storage.dart';
 import 'rate_limit_cooldown.dart';
+import 'workflow_inbox_cache.dart';
 
 /// HTTP client for the HRMS backend API.
 /// Attaches access JWT from [TokenStorage] and refreshes via [POST /auth/refresh] on 401.
@@ -73,7 +74,20 @@ class ApiClient {
           }
           return handler.next(options);
         },
+        onResponse: (response, handler) {
+          WorkflowInboxCache.instance.invalidateAfterResponse(
+            response.requestOptions.method,
+            response.requestOptions.path,
+            response.statusCode,
+          );
+          handler.next(response);
+        },
         onError: (error, handler) async {
+          WorkflowInboxCache.instance.invalidateAfterResponse(
+            error.requestOptions.method,
+            error.requestOptions.path,
+            error.response?.statusCode,
+          );
           final status = error.response?.statusCode;
           final opts = error.requestOptions;
 

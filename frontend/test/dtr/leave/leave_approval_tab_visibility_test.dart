@@ -3,24 +3,19 @@ import 'dart:async';
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:provider/provider.dart';
 import 'package:hrms_plaridel/core/api/app_user.dart';
 import 'package:hrms_plaridel/core/api/client.dart';
 import 'package:hrms_plaridel/providers/auth_provider.dart';
 import 'package:hrms_plaridel/features/dtr/leave/presentation/shared/pages/leave_main.dart';
 
-class _SwitchingAuth extends AuthProvider {
-  _SwitchingAuth(this.currentUser);
-  AppUser currentUser;
-  @override
-  AppUser get user => currentUser;
-  void switchUser(AppUser value) {
-    currentUser = value;
-    notifyListeners();
-  }
-}
-
 void main() {
+  setUp(() {
+    FlutterSecureStorage.setMockInitialValues({});
+    SharedPreferences.setMockInitialValues({});
+  });
   testWidgets(
     'a delayed reviewer lookup cannot expose approvals to the next account',
     (tester) async {
@@ -52,13 +47,14 @@ void main() {
           },
         ),
       );
-      final auth = _SwitchingAuth(
-        const AppUser(
-          id: 'reviewer',
-          email: 'reviewer@example.test',
-          role: 'employee',
-        ),
-      );
+      final auth = AuthProvider()
+        ..replaceUser(
+          const AppUser(
+            id: 'reviewer',
+            email: 'reviewer@example.test',
+            role: 'employee',
+          ),
+        );
       addTearDown(() async {
         await tester.pumpWidget(const SizedBox.shrink());
         ApiClient.instance.dio.interceptors.clear();
@@ -81,7 +77,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(oldRequests, 2);
       oldAccount = false;
-      auth.switchUser(
+      auth.replaceUser(
         const AppUser(
           id: 'unassigned',
           email: 'unassigned@example.test',

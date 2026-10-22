@@ -6,6 +6,7 @@ import 'package:web_socket_channel/web_socket_channel.dart';
 
 import 'package:hrms_plaridel/core/api/config.dart';
 import 'package:hrms_plaridel/core/api/token_storage.dart';
+import 'package:hrms_plaridel/core/api/workflow_inbox_cache.dart';
 
 class AppRealtimeEvent {
   const AppRealtimeEvent({
@@ -123,6 +124,7 @@ class AppRealtimeProvider extends ChangeNotifier {
       );
       await channel.ready;
       if (_disposed || !identical(_channel, channel)) return;
+      WorkflowInboxCache.instance.invalidate();
       _connected = true;
       notifyListeners();
     } catch (_) {

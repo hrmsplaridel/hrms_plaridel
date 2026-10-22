@@ -1972,7 +1972,10 @@ class _AdminLocatorManagementScreenState
     try {
       await _loadFinalReviewerAccess();
       if (!mounted || loadVersion != _loadVersion) return;
-      final assigned = await loadAssignedWorkflowRequests('locator');
+      final assigned = await loadAssignedWorkflowRequests(
+        'locator',
+        forceRefresh: forceRefresh,
+      );
       if (!mounted || loadVersion != _loadVersion) return;
       setState(() => _assignedRequests = assigned);
       if (!_canFinalReview) {

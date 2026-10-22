@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:dio/dio.dart';
 import 'package:hrms_plaridel/core/api/client.dart';
+import 'package:hrms_plaridel/core/api/workflow_inbox_cache.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:provider/provider.dart';
 import 'package:hrms_plaridel/features/dtr/leave/data/providers/leave_provider.dart';
@@ -20,6 +21,7 @@ class _Repository extends MockLeaveRepository {
 
 void main() {
   setUp(() {
+    WorkflowInboxCache.instance.clearSession();
     ApiClient.instance.init();
     ApiClient.instance.dio.interceptors.clear();
     ApiClient.instance.dio.interceptors.add(

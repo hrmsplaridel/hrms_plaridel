@@ -4,6 +4,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hrms_plaridel/core/api/client.dart';
+import 'package:hrms_plaridel/core/api/workflow_inbox_cache.dart';
 import 'package:hrms_plaridel/core/services/app_realtime_bridge.dart';
 import 'package:hrms_plaridel/core/services/app_realtime_provider.dart';
 import 'package:hrms_plaridel/features/dtr/locator/data/repositories/locator_slip_data_cache.dart';
@@ -63,6 +64,36 @@ void main() {
       expect(repository.loads, 1);
       expect(notifications.unreadCount, 0);
       expect(notifications.items.single.readAt, isNotNull);
+      await tester.pumpWidget(const SizedBox());
+    });
+  }
+
+  for (final eventName in ['leave_updated', 'locator_updated', 'connected']) {
+    testWidgets('$eventName invalidates the shared approval inbox', (
+      tester,
+    ) async {
+      final cache = WorkflowInboxCache.instance;
+      cache.clearSession();
+      addTearDown(cache.clearSession);
+      await cache.get(
+        'leave',
+        () async => <dynamic>[
+          {'id': 'old', 'kind': 'leave'},
+        ],
+      );
+      final realtime = _FakeRealtimeProvider();
+      addTearDown(realtime.dispose);
+      await tester.pumpWidget(
+        ChangeNotifierProvider<AppRealtimeProvider>.value(
+          value: realtime,
+          child: const AppRealtimeBridge(child: SizedBox()),
+        ),
+      );
+      realtime.emit(AppRealtimeEvent(name: eventName));
+      await tester.pump();
+      await tester.runAsync(() async {
+        expect(await cache.get('leave', () async => <dynamic>[]), isEmpty);
+      });
       await tester.pumpWidget(const SizedBox());
     });
   }

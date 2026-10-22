@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'workflow_inbox_cache.dart';
 
 /// Persists access and refresh JWTs for API auth.
 /// Uses [FlutterSecureStorage]; on web it falls back to in-memory–like behavior
@@ -82,6 +83,7 @@ class TokenStorage {
 
   /// Removes both tokens (e.g. on sign out or auth failure).
   Future<void> clearAllTokens() async {
+    WorkflowInboxCache.instance.clearSession();
     await _safeVoid(() => _storage.delete(key: _keyAccess));
     await _safeVoid(() => _storage.delete(key: _keyRefresh));
   }

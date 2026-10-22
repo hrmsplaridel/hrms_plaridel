@@ -2451,7 +2451,10 @@ class EmployeeLocatorSlipContentState extends State<EmployeeLocatorSlipContent>
       }
     });
     try {
-      final assigned = await loadAssignedWorkflowRequests('locator');
+      final assigned = await loadAssignedWorkflowRequests(
+        'locator',
+        forceRefresh: forceRefresh,
+      );
       if (!_isCurrentAuthSession(userId, authGeneration) ||
           loadGeneration != _approvalsLoadGeneration) {
         return;
