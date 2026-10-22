@@ -115,6 +115,9 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
       subtitle: auth.email.isNotEmpty ? auth.email : 'System Administrator',
       avatarPath: auth.avatarPath,
       onSelect: _selectPage,
+      onToggle: isWide
+          ? () => setState(() => _sidebarCollapsed = !_sidebarCollapsed)
+          : null,
     );
 
     return Scaffold(
@@ -171,6 +174,7 @@ class _SuperAdminSidebar extends StatelessWidget {
     required this.subtitle,
     required this.avatarPath,
     required this.onSelect,
+    this.onToggle,
   });
 
   final _SuperAdminPage selectedPage;
@@ -178,6 +182,7 @@ class _SuperAdminSidebar extends StatelessWidget {
   final String subtitle;
   final String? avatarPath;
   final ValueChanged<_SuperAdminPage> onSelect;
+  final VoidCallback? onToggle;
 
   @override
   Widget build(BuildContext context) {
@@ -196,7 +201,7 @@ class _SuperAdminSidebar extends StatelessWidget {
           if (isDrawer)
             const PortalSidebarBrand()
           else
-            const SidebarRailHeader(),
+            SidebarRailHeader(onToggle: onToggle),
           Expanded(
             child: ListView(
               padding: const EdgeInsets.only(top: 12),

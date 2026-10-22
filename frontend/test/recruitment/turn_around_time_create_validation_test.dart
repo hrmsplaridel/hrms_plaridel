@@ -9,8 +9,9 @@ void main() {
 
   Future<List<TurnAroundTimeEntry>> pumpEditor(
     WidgetTester tester,
-    TurnAroundTimeEntry entry,
-  ) async {
+    TurnAroundTimeEntry entry, {
+    Future<void> Function(TurnAroundTimeEntry)? onMarkCompleted,
+  }) async {
     final saved = <TurnAroundTimeEntry>[];
     await tester.binding.setSurfaceSize(const Size(1400, 2200));
     addTearDown(() => tester.binding.setSurfaceSize(null));
@@ -24,6 +25,7 @@ void main() {
               onCancel: () {},
               onPrint: (_) async {},
               onDownloadPdf: (_) async {},
+              onMarkCompleted: onMarkCompleted,
             ),
           ),
         ),
@@ -100,6 +102,76 @@ void main() {
     expect(find.text('Save'), findsOneWidget);
     expect(saved, isEmpty);
   });
+
+  testWidgets('Mark Completed shows on a new unsaved form', (tester) async {
+    await pumpEditor(
+      tester,
+      const TurnAroundTimeEntry(),
+      onMarkCompleted: (_) async {},
+    );
+
+    expect(find.text('Mark Completed'), findsOneWidget);
+  });
+
+  testWidgets(
+    'filling Position and Office on create asks to persist for e-sign',
+    (tester) async {
+      TurnAroundTimeEntry? ensured;
+      await tester.binding.setSurfaceSize(const Size(1400, 2200));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: SingleChildScrollView(
+              child: TurnAroundTimeEditor(
+                entry: const TurnAroundTimeEntry(),
+                onSave: (_) {},
+                onCancel: () {},
+                onPrint: (_) async {},
+                onDownloadPdf: (_) async {},
+                onEnsurePersisted: (entry) async {
+                  ensured = entry;
+                },
+              ),
+            ),
+          ),
+        ),
+      );
+
+      await tester.enterText(labeled('Position *'), 'Clerk');
+      await tester.pump();
+      expect(ensured, isNull);
+
+      await tester.enterText(labeled('Office *'), 'HR Office');
+      await tester.pump();
+
+      expect(ensured, isNotNull);
+      expect(ensured!.position, 'Clerk');
+      expect(ensured!.office, 'HR Office');
+    },
+  );
+
+  testWidgets(
+    'Mark Completed on a blank create form still requires position and office',
+    (tester) async {
+      var marked = false;
+      await pumpEditor(
+        tester,
+        const TurnAroundTimeEntry(),
+        onMarkCompleted: (_) async {
+          marked = true;
+        },
+      );
+
+      await tester.ensureVisible(find.text('Mark Completed'));
+      await tester.tap(find.text('Mark Completed'));
+      await tester.pump();
+
+      expect(find.text('Position is required.'), findsOneWidget);
+      expect(find.text('Office is required.'), findsOneWidget);
+      expect(marked, isFalse);
+    },
+  );
 
   testWidgets('create blocks a filled position with a blank office', (
     tester,

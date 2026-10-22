@@ -29,7 +29,6 @@ import 'package:hrms_plaridel/shared/screens/profile_page.dart'
     show DashboardProfilePanel;
 import 'package:hrms_plaridel/shared/widgets/dashboard_content_navigator.dart';
 import 'package:hrms_plaridel/shared/widgets/dashboard_header_actions.dart';
-import 'package:hrms_plaridel/shared/utils/time_greeting.dart';
 import 'package:hrms_plaridel/shared/widgets/collapsible_dashboard_sidebar.dart';
 import 'package:hrms_plaridel/shared/widgets/portal_sidebar_brand.dart';
 import 'package:hrms_plaridel/features/dtr/dtr_main.dart';
@@ -69,7 +68,7 @@ import 'package:hrms_plaridel/features/dtr/leave/presentation/shared/pages/leave
 import 'package:hrms_plaridel/features/notifications/presentation/widgets/open_notifications_panel.dart';
 import 'package:hrms_plaridel/features/dashboard/presentation/admin/desktop/widgets/recruitment_hub_analytics.dart';
 import 'package:hrms_plaridel/features/dashboard/presentation/admin/desktop/widgets/recruitment_monitoring_stats.dart';
-import 'package:hrms_plaridel/shared/widgets/admin_welcome_status_card.dart';
+import 'package:hrms_plaridel/shared/widgets/dashboard_welcome_banner.dart';
 
 /// Dashboard accent colors for home-view chrome (orange theme).
 class _DashboardColors {
@@ -82,26 +81,6 @@ class _AdminDashUi {
 
   static const double radiusLg = 20;
   static const double radiusMd = 16;
-
-  static BoxDecoration welcomeBanner(BuildContext context) {
-    final dark = AppTheme.dashIsDark(context);
-    return BoxDecoration(
-      borderRadius: BorderRadius.circular(20),
-      color: dark ? AppTheme.dashPanelOf(context) : Colors.white,
-      border: Border.all(
-        color: dark
-            ? AppTheme.dashHairlineOf(context)
-            : _DashboardColors.accentOrange.withValues(alpha: 0.16),
-      ),
-      boxShadow: [
-        BoxShadow(
-          color: Colors.black.withValues(alpha: dark ? 0.22 : 0.045),
-          blurRadius: 16,
-          offset: const Offset(0, 4),
-        ),
-      ],
-    );
-  }
 
   static BoxDecoration elevatedPanel(BuildContext context) {
     final base = AppTheme.dashSurfaceCard(context, radius: radiusLg);
@@ -195,145 +174,18 @@ class _AdminSectionHeader extends StatelessWidget {
 }
 
 class _AdminWelcomeBanner extends StatelessWidget {
-  const _AdminWelcomeBanner({required this.isNarrow});
-
-  final bool isNarrow;
+  const _AdminWelcomeBanner();
 
   @override
   Widget build(BuildContext context) {
-    final primary = AppTheme.dashTextPrimaryOf(context);
-    final secondary = AppTheme.dashTextSecondaryOf(context);
     final displayName = context.select<AuthProvider, String>(
       (a) => a.displayName.isNotEmpty ? a.displayName : 'Admin',
     );
-    final greeting = personalizedTimeGreeting(displayName);
-    final firstName = greetingFirstName(displayName);
-    final initial = firstName.isNotEmpty ? firstName[0].toUpperCase() : 'A';
 
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final stack = constraints.maxWidth < 720 || isNarrow;
-        final tablet = !stack && constraints.maxWidth < 1080;
-        final avatarSize = stack ? 52.0 : (tablet ? 58.0 : 62.0);
-
-        final greetingBlock = Row(
-          crossAxisAlignment: CrossAxisAlignment.center,
-          children: [
-            Container(
-              width: avatarSize,
-              height: avatarSize,
-              alignment: Alignment.center,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                gradient: const LinearGradient(
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                  colors: [AppTheme.primaryNavy, AppTheme.primaryNavyLight],
-                ),
-                boxShadow: [
-                  BoxShadow(
-                    color: AppTheme.primaryNavy.withValues(alpha: 0.28),
-                    blurRadius: 12,
-                    offset: const Offset(0, 4),
-                  ),
-                ],
-              ),
-              child: Text(
-                initial,
-                style: TextStyle(
-                  color: Colors.white,
-                  fontSize: stack ? 20 : 24,
-                  fontWeight: FontWeight.w800,
-                ),
-              ),
-            ),
-            SizedBox(width: stack ? 14 : 16),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 10,
-                      vertical: 5,
-                    ),
-                    decoration: BoxDecoration(
-                      color: AppTheme.primaryNavy.withValues(alpha: 0.1),
-                      borderRadius: BorderRadius.circular(20),
-                    ),
-                    child: const Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(
-                          Icons.admin_panel_settings_rounded,
-                          size: 14,
-                          color: AppTheme.primaryNavy,
-                        ),
-                        SizedBox(width: 6),
-                        Text(
-                          'Admin Portal',
-                          style: TextStyle(
-                            color: AppTheme.primaryNavy,
-                            fontSize: 12,
-                            fontWeight: FontWeight.w700,
-                            letterSpacing: 0.2,
-                            height: 1.1,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    greeting,
-                    style: TextStyle(
-                      color: primary,
-                      fontSize: stack ? 22 : (tablet ? 26 : 30),
-                      fontWeight: FontWeight.w800,
-                      letterSpacing: -0.5,
-                      height: 1.15,
-                    ),
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    "Here's the latest overview of HR activities for Plaridel.",
-                    style: TextStyle(
-                      color: secondary,
-                      fontSize: stack ? 13.5 : 14.5,
-                      height: 1.4,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        );
-
-        final status = AdminWelcomeStatusCard(
-          layout: WelcomeStatusLayout.adminHeader,
-          fillWidth: stack,
-        );
-
-        return Container(
-          constraints: BoxConstraints(minHeight: stack ? 0 : 150),
-          padding: EdgeInsets.all(stack ? 18 : (tablet ? 22 : 26)),
-          decoration: _AdminDashUi.welcomeBanner(context),
-          child: stack
-              ? Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [greetingBlock, const SizedBox(height: 16), status],
-                )
-              : Row(
-                  crossAxisAlignment: CrossAxisAlignment.center,
-                  children: [
-                    Expanded(child: greetingBlock),
-                    SizedBox(width: tablet ? 24 : 32),
-                    status,
-                  ],
-                ),
-        );
-      },
+    return DashboardWelcomeBanner(
+      portalLabel: 'Admin Portal',
+      displayName: displayName,
+      description: "Here's the latest overview of HR activities for Plaridel.",
     );
   }
 }
@@ -926,6 +778,7 @@ class _AdminDashboardState extends State<AdminDashboard>
                   avatarPath: avatarPath,
                   email: email,
                   displayName: displayName,
+                  onProfile: _openMyProfile,
                   showBrand: true,
                   onTap: (menu) {
                     _onMenuSelected(menu);
@@ -942,6 +795,8 @@ class _AdminDashboardState extends State<AdminDashboard>
                   _Sidebar(
                     railMode: true,
                     collapsed: _sidebarCollapsed,
+                    onToggle: () =>
+                        setState(() => _sidebarCollapsed = !_sidebarCollapsed),
                     showBrand: false,
                     selectedMenu: _selectedMenu,
                     canCreateAccount: _canCreateAccount == true,
@@ -949,6 +804,7 @@ class _AdminDashboardState extends State<AdminDashboard>
                     avatarPath: avatarPath,
                     email: email,
                     displayName: displayName,
+                    onProfile: _openMyProfile,
                     onTap: _onMenuSelected,
                   ),
                   Expanded(
@@ -964,12 +820,6 @@ class _AdminDashboardState extends State<AdminDashboard>
                           compactActions: width < 600,
                           onViewAllNotifications: _handleOpenNotifications,
                           onNotificationTap: _applyNotificationTapResult,
-                          trailing: DashboardAccountMenuButton(
-                            avatarPath: avatarPath,
-                            compact: width < 600,
-                            tooltip: displayName,
-                            onProfile: () => _openMyProfile(),
-                          ),
                         ),
                         Expanded(
                           child: ColoredBox(
@@ -1010,12 +860,6 @@ class _AdminDashboardState extends State<AdminDashboard>
                       compactActions: width < 600,
                       onViewAllNotifications: _handleOpenNotifications,
                       onNotificationTap: _applyNotificationTapResult,
-                      trailing: DashboardAccountMenuButton(
-                        avatarPath: avatarPath,
-                        compact: width < 600,
-                        tooltip: displayName,
-                        onProfile: () => _openMyProfile(),
-                      ),
                     ),
                   ),
                   Expanded(
@@ -1154,9 +998,11 @@ class _Sidebar extends StatelessWidget {
     required this.email,
     required this.displayName,
     required this.onTap,
+    required this.onProfile,
     this.showBrand = true,
     this.railMode = false,
     this.collapsed = false,
+    this.onToggle,
   });
 
   final AdminMenu selectedMenu;
@@ -1166,11 +1012,13 @@ class _Sidebar extends StatelessWidget {
   final String email;
   final String displayName;
   final ValueChanged<AdminMenu> onTap;
+  final VoidCallback onProfile;
   final bool showBrand;
 
   /// Full-height rail with one straight right edge through header + nav.
   final bool railMode;
   final bool collapsed;
+  final VoidCallback? onToggle;
 
   Widget _buildNavList(BuildContext context, {required bool compact}) {
     final pendingSignatures = context.select<DocuTrackerProvider, int>(
@@ -1263,11 +1111,11 @@ class _Sidebar extends StatelessWidget {
           ),
           child: DashboardSidebarProfileCard(
             displayName: displayName,
-            subtitle: context.select<AuthProvider, String>((auth) {
-              final position = auth.user?.positionName?.trim() ?? '';
-              return position.isNotEmpty ? position : "No position assigned";
-            }),
+            subtitle: context.select<AuthProvider, String>(
+              (auth) => dashboardAccountRoleLabel(auth.user?.role),
+            ),
             avatarPath: avatarPath,
+            onProfile: onProfile,
           ),
         ),
         Opacity(
@@ -1366,7 +1214,7 @@ class _Sidebar extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          const SidebarRailHeader(),
+          SidebarRailHeader(onToggle: onToggle),
           Expanded(
             child: Builder(
               builder: (context) {
@@ -1454,7 +1302,6 @@ class _DashboardContent extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final isNarrow = MediaQuery.of(context).size.width < 500;
     const q = '';
 
     final showWelcome = _sectionVisible(q, [
@@ -1560,7 +1407,7 @@ class _DashboardContent extends StatelessWidget {
               ),
             ),
           ),
-        if (showWelcome) _AdminWelcomeBanner(isNarrow: isNarrow),
+        if (showWelcome) const _AdminWelcomeBanner(),
         if (showWelcome && showRspMonitoring) const SizedBox(height: 20),
         if (showRspMonitoring) const RecruitmentOverviewCard(),
         if ((showWelcome || showRspMonitoring) && showDocu)

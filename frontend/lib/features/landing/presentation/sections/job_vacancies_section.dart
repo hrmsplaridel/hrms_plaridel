@@ -365,7 +365,7 @@ class JobVacanciesSection extends StatelessWidget {
             constraints: const BoxConstraints(maxWidth: 720),
             child: Text(
               hiringOpen
-                  ? 'Open positions you can apply for online. Each role lists a short summary—full details and required documents are in the application form.'
+                  ? 'Open positions you can apply for online. Each role lists a short summary. Full details and required documents are in the application form.'
                   : toggleOnWithoutPosition
                   ? 'Hiring is not open for applications until HR posts a specific vacant position.'
                   : 'Vacancies are posted here when HR opens a role. Visit again soon—active listings will appear in the card below.',
@@ -390,7 +390,7 @@ class JobVacanciesSection extends StatelessWidget {
                     ? (maxWidth - gap) / 2
                     : maxWidth;
 
-                Widget cardFor(JobVacancyItem v) {
+                Widget cardFor(JobVacancyItem v, {bool featured = false}) {
                   final headlineText = _displayHeadline(
                     v.headline,
                     hiringOpen: hiringOpen,
@@ -432,7 +432,8 @@ class JobVacanciesSection extends StatelessWidget {
                     ),
                     requirementPanel: _requirementPanel(v),
                     hasVacancies: hiringOpen,
-                    minTall: twoColumns,
+                    minTall: twoColumns || featured,
+                    featured: featured,
                     status: status,
                     roleIcon: _iconForVacancyTitle(headlineText),
                     closingDate: v.closingDate,
@@ -773,6 +774,7 @@ class _VacancyCard extends StatefulWidget {
     required this.requirementPanel,
     required this.hasVacancies,
     this.minTall = false,
+    this.featured = false,
     required this.status,
     required this.roleIcon,
     this.closingDate,
@@ -787,6 +789,7 @@ class _VacancyCard extends StatefulWidget {
   final Widget requirementPanel;
   final bool hasVacancies;
   final bool minTall;
+  final bool featured;
   final _VacancyCardStatus status;
   final IconData roleIcon;
   final DateTime? closingDate;
@@ -933,7 +936,9 @@ class _VacancyCardState extends State<_VacancyCard> {
                       widget.headline,
                       style: TextStyle(
                         color: AppTheme.textPrimary,
-                        fontSize: widget.hasVacancies ? 19 : 17,
+                        fontSize: widget.hasVacancies
+                            ? (widget.featured ? 24 : 19)
+                            : 17,
                         fontWeight: FontWeight.w800,
                         height: 1.2,
                         letterSpacing: -0.2,
@@ -995,7 +1000,9 @@ class _VacancyCardState extends State<_VacancyCard> {
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 180),
         constraints: BoxConstraints(
-          minHeight: widget.minTall && widget.hasVacancies ? 260 : 0,
+          minHeight: widget.featured && widget.hasVacancies
+              ? 340
+              : (widget.minTall && widget.hasVacancies ? 260 : 0),
         ),
         decoration: BoxDecoration(
           color: AppTheme.white,

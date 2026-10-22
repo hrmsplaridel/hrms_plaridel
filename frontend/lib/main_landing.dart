@@ -7,11 +7,16 @@ import 'package:hrms_plaridel/features/landing/presentation/pages/landing_page.d
 import 'package:hrms_plaridel/shared/models/philippine_psgc_loader.dart';
 import 'package:hrms_plaridel/shared/widgets/sign_out_flow.dart';
 
-const String _kLandingTitle = 'HRMS Plaridel';
+const String _kLandingTitle = 'Municipality of Plaridel';
+
+void _applyLandingTab() {
+  setDocumentTitle(_kLandingTitle);
+  setDocumentFavicon('icons/PlaridelTransparent.png');
+}
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  setDocumentTitle(_kLandingTitle);
+  _applyLandingTab();
   ApiClient.instance.init();
 
   runApp(const LandingOnlyApp());
@@ -47,7 +52,7 @@ class _LandingStartupGateState extends State<_LandingStartupGate> {
   @override
   void initState() {
     super.initState();
-    setDocumentTitle(_kLandingTitle);
+    _applyLandingTab();
   }
 
   @override

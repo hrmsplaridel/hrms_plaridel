@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -143,7 +144,7 @@ class FormPdf {
   /// Call before building any PDF so the Plaridel logo is available in headers.
   static Future<void> ensureLogoLoaded() async {
     if (_logoBytes != null) return;
-    final data = await rootBundle.load('assets/images/Plaridel Logo.jpg');
+    final data = await rootBundle.load('assets/images/PlaridelLogo.jpg');
     _logoBytes = data.buffer.asUint8List();
   }
 
@@ -4400,6 +4401,9 @@ class FormPdf {
       _idpField(e.preparedByName),
     );
 
+    final qsLines = turnAroundQsLines(e.qs);
+    final qsLineCount = qsLines.length < 3 ? 3 : qsLines.length;
+
     pw.Widget infoLine(String label, String? value, {double indent = 0}) {
       final text = _idpField(value);
       return pw.Padding(
@@ -4421,9 +4425,14 @@ class FormPdf {
                   ),
                 ),
                 padding: const pw.EdgeInsets.only(left: 3, bottom: 1),
-                child: pw.Text(
-                  text.isEmpty ? ' ' : text,
-                  style: const pw.TextStyle(fontSize: 8),
+                child: pw.FittedBox(
+                  fit: pw.BoxFit.scaleDown,
+                  alignment: pw.Alignment.bottomLeft,
+                  child: pw.Text(
+                    text.isEmpty ? ' ' : text,
+                    maxLines: 1,
+                    style: const pw.TextStyle(fontSize: 8),
+                  ),
                 ),
               ),
             ),
@@ -4552,9 +4561,12 @@ class FormPdf {
                   flex: 3,
                   child: pw.Column(
                     children: [
-                      infoLine('Q.S. :', e.qs),
-                      infoLine('', null, indent: 28),
-                      infoLine('', null, indent: 28),
+                      for (var i = 0; i < qsLineCount; i++)
+                        infoLine(
+                          i == 0 ? 'Q.S. :' : '',
+                          i < qsLines.length ? qsLines[i] : null,
+                          indent: i == 0 ? 0 : 28,
+                        ),
                     ],
                   ),
                 ),
@@ -5636,6 +5648,16 @@ class FormPdf {
     return pw.Expanded(child: line);
   }
 
+  static Uint8List? _ojtSignatureBytes(String? value) {
+    final text = (value ?? '').trim();
+    if (text.isEmpty) return null;
+    try {
+      return base64Decode(text);
+    } catch (_) {
+      return null;
+    }
+  }
+
   static pw.Widget _ojtLabeledLine(
     String label,
     String? value, {
@@ -5821,6 +5843,16 @@ class FormPdf {
         ),
         _ojtLabeledLine('KEY STRENGTHS', e.keyStrengths, bullet: true),
         _ojtLabeledLine('KEY CONCERNS', e.keyConcerns, bullet: true),
+        if (_ojtSignatureBytes(e.interviewerSignature) != null) ...[
+          pw.SizedBox(height: 6),
+          pw.SizedBox(
+            height: 36,
+            child: pw.Image(
+              pw.MemoryImage(_ojtSignatureBytes(e.interviewerSignature)!),
+              fit: pw.BoxFit.contain,
+            ),
+          ),
+        ],
         _ojtLabeledLine('INTERVIEWER SIGNATURE', e.interviewer, bullet: true),
       ],
     );

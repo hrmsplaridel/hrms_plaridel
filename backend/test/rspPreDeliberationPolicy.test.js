@@ -83,4 +83,13 @@ test('work experience revision keeps the same edit and review rules', () => {
     job_description_last_work: 'Records',
     applicant_name: 'Ana',
   }).length, 0);
+  assert.deepEqual(policy.validateWes({
+    position_applied_for: 'Work Immersion',
+    department: 'HR',
+    min_education: 'Grade 12',
+    min_experience: '2 yrs relevant experience',
+    min_training: '72 units',
+    job_description_last_work: 'the work i have been is i was fired',
+    applicant_name: 'Code Crafters X',
+  }), []);
 });

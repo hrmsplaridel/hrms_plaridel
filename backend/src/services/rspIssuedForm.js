@@ -148,13 +148,12 @@ async function insertBi(client, app) {
 
 async function insertOjt(client, app) {
   const name = String(app.full_name || '').trim();
-  const school = app.course ? String(app.course).trim() : null;
   const result = await client.query(
     `INSERT INTO public.ojt_work_immersion_evaluation_entries (
        ojt_immersion, school, application_id, created_at, updated_at
-     ) VALUES ($1, $2, $3, now(), now())
+     ) VALUES ($1, NULL, $2, now(), now())
      RETURNING *`,
-    [name || null, school || null, app.id],
+    [name || null, app.id],
   );
   return result.rows[0];
 }
@@ -241,6 +240,55 @@ async function assignRequiredForm({ applicationId, formType, actorId }) {
       created: true,
       applicantNotice: true,
     };
+  } catch (err) {
+    try { await client.query('ROLLBACK'); } catch (_) {}
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+async function undoRequiredFormAssignment({ applicationId, actorId }) {
+  await assertIssuedFormSchema();
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const app = await loadLocked(client, applicationId);
+    assertGatedDocumentApproved(app);
+    if (!policy.canUndoAssignment(app.required_form_status)) {
+      throw new IssuedFormError(
+        409,
+        'FORM_CANNOT_BE_UNDONE',
+        'This form can no longer be undone. Review it, or request a revision, instead of replacing it.',
+      );
+    }
+    if (app.required_form_entry_id && app.required_form_type) {
+      await unlinkEntry(client, app.required_form_type, app.required_form_entry_id);
+    }
+    const updated = await client.query(
+      `UPDATE public.recruitment_applications
+       SET required_form_type = NULL,
+           required_form_status = 'waiting_for_hr_form',
+           required_form_entry_id = NULL,
+           required_form_assigned_by = NULL,
+           required_form_assigned_at = NULL,
+           required_form_submitted_at = NULL,
+           required_form_reviewed_by = NULL,
+           required_form_reviewed_at = NULL,
+           required_form_review_comment = NULL,
+           updated_at = now()
+       WHERE id = $1
+       RETURNING ${ASSIGNMENT_SQL}`,
+      [applicationId],
+    );
+    await appendLog(client, applicationId, {
+      at: new Date().toISOString(),
+      action: 'assignment_undone',
+      formType: app.required_form_type,
+      by: actorId || null,
+    });
+    await client.query('COMMIT');
+    return { assignment: publicAssignment(updated.rows[0]), entry: null, created: false };
   } catch (err) {
     try { await client.query('ROLLBACK'); } catch (_) {}
     throw err;
@@ -367,8 +415,11 @@ async function saveBi(client, entryId, payload, { requireComplete }) {
 
 async function saveOjtApplicant(client, entryId, body, { requireComplete }) {
   const payload = {
-    ojt_immersion: trimOrNull(body?.ojt_immersion),
     school: trimOrNull(body?.school),
+    problem_solving_notes: trimOrNull(body?.problem_solving_notes),
+    communication_notes: trimOrNull(body?.communication_notes),
+    teamwork_notes: trimOrNull(body?.teamwork_notes),
+    adaptability_notes: trimOrNull(body?.adaptability_notes),
   };
   if (requireComplete) {
     const missing = policy.validateOjtApplicant(payload);
@@ -382,12 +433,22 @@ async function saveOjtApplicant(client, entryId, body, { requireComplete }) {
   }
   const result = await client.query(
     `UPDATE public.ojt_work_immersion_evaluation_entries
-     SET ojt_immersion = $2,
-         school = $3,
+     SET school = $2,
+         problem_solving_notes = $3,
+         communication_notes = $4,
+         teamwork_notes = $5,
+         adaptability_notes = $6,
          updated_at = now()
      WHERE id = $1
      RETURNING *`,
-    [entryId, payload.ojt_immersion, payload.school],
+    [
+      entryId,
+      payload.school,
+      payload.problem_solving_notes,
+      payload.communication_notes,
+      payload.teamwork_notes,
+      payload.adaptability_notes,
+    ],
   );
   return result.rows[0];
 }
@@ -501,8 +562,19 @@ async function getRequiredForm(applicationId) {
     throw new IssuedFormError(404, 'NOT_FOUND', 'Application not found');
   }
   const row = result.rows[0];
-  const entry = await loadEntry(row.required_form_type, row.required_form_entry_id);
+  const entry = hideCopiedCourse(
+    row,
+    await loadEntry(row.required_form_type, row.required_form_entry_id),
+  );
   return { assignment: publicAssignment(row), entry };
+}
+
+function hideCopiedCourse(row, entry) {
+  if (!entry || row.required_form_type !== 'ojt') return entry;
+  const course = String(row.course || '').trim().toLowerCase();
+  const school = String(entry.school || '').trim().toLowerCase();
+  if (!course || course !== school) return entry;
+  return { ...entry, school: null };
 }
 
 async function approveRequiredForm({ applicationId, actorId }) {
@@ -532,6 +604,13 @@ async function approveRequiredForm({ applicationId, actorId }) {
           'Complete the interviewer scores, recommendation, and interviewer name on the evaluation before approving.',
         );
       }
+      if (!policy.ojtPassed(entry || {})) {
+        throw new IssuedFormError(
+          409,
+          'OJT_NOT_PASSED',
+          'Only a Recommended result can continue. Use Did not pass to stop this application.',
+        );
+      }
     }
     const updated = await client.query(
       `UPDATE public.recruitment_applications
@@ -547,6 +626,55 @@ async function approveRequiredForm({ applicationId, actorId }) {
       at: new Date().toISOString(),
       action: 'approved',
       by: actorId || null,
+    });
+    await client.query('COMMIT');
+    return { assignment: publicAssignment(updated.rows[0]), duplicate: false };
+  } catch (err) {
+    try { await client.query('ROLLBACK'); } catch (_) {}
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+async function failRequiredForm({ applicationId, actorId, comment }) {
+  const reason = trimOrNull(comment) || 'Did not pass the required form.';
+  await assertIssuedFormSchema();
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const app = await loadLocked(client, applicationId);
+    assertGatedDocumentApproved(app);
+    if (app.required_form_status === 'failed') {
+      await client.query('COMMIT');
+      return { assignment: publicAssignment(app), duplicate: true };
+    }
+    if (app.required_form_status === 'approved') {
+      throw new IssuedFormError(409, 'ALREADY_APPROVED', 'This form is already approved.');
+    }
+    if (!policy.hrCanReview(app.required_form_status)) {
+      throw new IssuedFormError(
+        409,
+        'NOT_READY_FOR_RESULT',
+        'Record the result after the applicant submits the form.',
+      );
+    }
+    const updated = await client.query(
+      `UPDATE public.recruitment_applications
+       SET required_form_status = 'failed',
+           required_form_reviewed_by = $2,
+           required_form_reviewed_at = now(),
+           required_form_review_comment = $3,
+           updated_at = now()
+       WHERE id = $1
+       RETURNING ${ASSIGNMENT_SQL}`,
+      [applicationId, actorId || null, reason],
+    );
+    await appendLog(client, applicationId, {
+      at: new Date().toISOString(),
+      action: 'failed',
+      by: actorId || null,
+      comment: reason,
     });
     await client.query('COMMIT');
     return { assignment: publicAssignment(updated.rows[0]), duplicate: false };
@@ -626,10 +754,12 @@ module.exports = {
   IssuedFormError,
   assertIssuedFormSchema,
   assignRequiredForm,
+  undoRequiredFormAssignment,
   saveApplicantDraft,
   submitApplicantForm,
   getRequiredForm,
   approveRequiredForm,
+  failRequiredForm,
   requestFormRevision,
   sendIssuedFormError,
   assessmentBlocked: policy.assessmentBlocked,

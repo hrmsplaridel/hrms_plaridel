@@ -4,8 +4,16 @@ import 'package:hrms_plaridel/shared/utils/time_greeting.dart';
 void main() {
   test('mayor portal greeting uses time of day and Mayor title', () {
     expect(
+      mayorPortalGreeting(DateTime(2026, 9, 15, 0, 0)),
+      'Good Morning, Mayor',
+    );
+    expect(
       mayorPortalGreeting(DateTime(2026, 9, 15, 8, 13)),
       'Good Morning, Mayor',
+    );
+    expect(
+      mayorPortalGreeting(DateTime(2026, 9, 15, 12, 30)),
+      'Good Noon, Mayor',
     );
     expect(
       mayorPortalGreeting(DateTime(2026, 9, 15, 14, 0)),

@@ -1,4 +1,6 @@
 import 'dart:async';
+
+import 'package:dio/dio.dart' show DioException;
 import 'dart:convert';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
@@ -42,6 +44,9 @@ const _defaultBeiQuestions = [
   'What was your greatest accomplishment?',
   'Tell me about a time you failed.',
 ];
+
+/// Applicants answer two exam questions per screen so the assessment moves faster.
+const int _examQuestionsPerPage = 2;
 
 /// Answer keys (option text) used to auto-check the 3 MCQ exams.
 ///
@@ -200,6 +205,12 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
   int _emailOtpTtlMs = 600000;
   bool _emailOtpSending = false;
   bool _emailOtpVerifying = false;
+
+  /// Strict OTP: no resend while the last code (for [_otpActiveEmailNorm]) is
+  /// still valid. The server enforces this too; this only drives the UI.
+  String? _otpActiveEmailNorm;
+  DateTime? _otpActiveUntil;
+  Timer? _otpTicker;
   String? _emailVerificationToken;
   String? _verifiedEmailNorm;
   final _emailOtpController = TextEditingController();
@@ -326,11 +337,54 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
   int get _emailOtpTtlMinutes =>
       ((_emailOtpTtlMs / 60000).round()).clamp(1, 120);
 
+  int get _otpRemainingSeconds {
+    final until = _otpActiveUntil;
+    if (until == null ||
+        _otpActiveEmailNorm != _emailController.text.trim().toLowerCase()) {
+      return 0;
+    }
+    final ms = until.difference(DateTime.now()).inMilliseconds;
+    return ms <= 0 ? 0 : (ms + 999) ~/ 1000;
+  }
+
+  String get _otpRemainingLabel {
+    final s = _otpRemainingSeconds;
+    return '${s ~/ 60}:${(s % 60).toString().padLeft(2, '0')}';
+  }
+
+  void _startOtpLock(String emailNorm, int seconds) {
+    _otpTicker?.cancel();
+    _otpActiveEmailNorm = emailNorm;
+    _otpActiveUntil = DateTime.now().add(Duration(seconds: seconds));
+    _otpTicker = Timer.periodic(const Duration(seconds: 1), (t) {
+      if (!mounted) {
+        t.cancel();
+        return;
+      }
+      if (DateTime.now().isAfter(_otpActiveUntil!)) {
+        t.cancel();
+        _otpActiveUntil = null;
+        _otpActiveEmailNorm = null;
+      }
+      setState(() {});
+    });
+  }
+
   Future<void> _sendApplicantEmailOtp() async {
     final email = _emailController.text.trim();
     if (!_isValidEmailFormat(email)) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Enter a valid email address first.')),
+      );
+      return;
+    }
+    if (_otpRemainingSeconds > 0) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'A code was already sent. Use it before it expires in $_otpRemainingLabel.',
+          ),
+        ),
       );
       return;
     }
@@ -359,6 +413,9 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
         })(),
       );
       if (!mounted) return;
+      setState(
+        () => _startOtpLock(email.toLowerCase(), _emailOtpTtlMs ~/ 1000),
+      );
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text(
@@ -368,6 +425,17 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
       );
     } catch (e) {
       if (!mounted) return;
+      if (e is DioException &&
+          e.response?.statusCode == 409 &&
+          e.response?.data is Map &&
+          (e.response!.data as Map)['code'] == 'OTP_STILL_ACTIVE') {
+        final secs =
+            int.tryParse(
+              '${(e.response!.data as Map)['expiresInSeconds']}',
+            ) ??
+            (_emailOtpTtlMs ~/ 1000);
+        setState(() => _startOtpLock(email.toLowerCase(), secs));
+      }
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(SnackBar(content: Text(userFacingApiError(e))));
@@ -522,7 +590,10 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
               crossAxisAlignment: WrapCrossAlignment.center,
               children: [
                 OutlinedButton.icon(
-                  onPressed: (_submitting || _emailOtpSending)
+                  onPressed:
+                      (_submitting ||
+                          _emailOtpSending ||
+                          _otpRemainingSeconds > 0)
                       ? null
                       : _sendApplicantEmailOtp,
                   icon: _emailOtpSending
@@ -535,7 +606,13 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
                           ),
                         )
                       : const Icon(Icons.mark_email_read_outlined, size: 20),
-                  label: Text(_emailOtpSending ? 'Sending…' : 'Send code'),
+                  label: Text(
+                    _emailOtpSending
+                        ? 'Sending…'
+                        : _otpRemainingSeconds > 0
+                        ? 'Code sent · new code in $_otpRemainingLabel'
+                        : 'Send code',
+                  ),
                   style: OutlinedButton.styleFrom(
                     foregroundColor: AppTheme.primaryNavy,
                     side: BorderSide(
@@ -839,6 +916,7 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
 
   @override
   void dispose() {
+    _otpTicker?.cancel();
     _examCountdownTimer?.cancel();
     _step1StatusTimer?.cancel();
     _beiGradingPollTimer?.cancel();
@@ -1447,7 +1525,29 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
     }
   }
 
+  /// Required documents that have not been attached yet (Step 1).
+  List<RspApplicationDocKind> get _missingStep1Docs => [
+    for (final kind in RspApplicationDocKind.values)
+      if (_pickedDocs[kind] == null ||
+          _pickedDocs[kind]!.bytes == null ||
+          _pickedDocs[kind]!.name.isEmpty)
+        kind,
+  ];
+
   Future<void> _submitStep1() async {
+    // Required documents gate: nothing else proceeds until all four are attached.
+    final missingDocs = _missingStep1Docs;
+    if (missingDocs.isNotEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Upload all required documents first. Missing: '
+            '${missingDocs.map(_docKindLabel).join(', ')}.',
+          ),
+        ),
+      );
+      return;
+    }
     if (_isVacancyApplication && !_privacyConsentAccepted) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -1813,6 +1913,19 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
     _examReviewing = false;
   }
 
+  int _examPageStart(int total) {
+    if (total <= 0) return 0;
+    var start = _examQuestionIndex;
+    if (start < 0) start = 0;
+    if (start >= total) start = total - 1;
+    return (start ~/ _examQuestionsPerPage) * _examQuestionsPerPage;
+  }
+
+  int _examPageEnd(int total, int pageStart) {
+    final end = pageStart + _examQuestionsPerPage;
+    return end > total ? total : end;
+  }
+
   void _startAssessment(String id) {
     setState(() {
       _activeAssessment = id;
@@ -1915,11 +2028,8 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
     required VoidCallback onSubmit,
   }) {
     final total = questions.length;
-    if (_examQuestionIndex >= total) _examQuestionIndex = total - 1;
-    if (_examQuestionIndex < 0) _examQuestionIndex = 0;
-    final i = _examQuestionIndex;
-    final q = questions[i];
-    final options = q['options'] as List<dynamic>? ?? [];
+    final pageStart = _examPageStart(total);
+    final pageEnd = _examPageEnd(total, pageStart);
     final timer = _examCountdownRemaining;
     final answered = _mcqAnsweredCount(selected);
 
@@ -1977,39 +2087,45 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
       children: [
         RspApplicantExamSessionHeader(
           title: title,
-          questionIndex: i + 1,
+          questionIndex: pageEnd,
+          questionRangeStart: pageStart + 1,
           total: total,
           timeLabel: timer != null && timer > 0 ? _formatMmSs(timer) : null,
           urgent: timer != null && timer <= 60,
         ),
         _buildExamTimerBanner(),
         const SizedBox(height: 16),
-        RspApplicantMcqQuestionCard(
-          index: i,
-          questionText: q['question_text']?.toString() ?? '',
-          options: options,
-          selectedIndex: i < selected.length ? selected[i] : -1,
-          useLetterPrefix: useLetterPrefix,
-          questionImage: examImagePathOrNull(q['question_image']),
-          questionImageCaption: examImagePathOrNull(
-            q['question_image_caption'],
+        for (var i = pageStart; i < pageEnd; i++) ...[
+          if (i > pageStart) const SizedBox(height: 12),
+          RspApplicantMcqQuestionCard(
+            index: i,
+            questionText: questions[i]['question_text']?.toString() ?? '',
+            options: questions[i]['options'] as List<dynamic>? ?? const [],
+            selectedIndex: i < selected.length ? selected[i] : -1,
+            useLetterPrefix: useLetterPrefix,
+            questionImage: examImagePathOrNull(questions[i]['question_image']),
+            questionImageCaption: examImagePathOrNull(
+              questions[i]['question_image_caption'],
+            ),
+            optionImages: examOptionImagesFrom(
+              questions[i]['option_images'],
+              (questions[i]['options'] as List<dynamic>? ?? const []).length,
+            ),
+            onSelect: (j) => setState(() => selected[i] = j),
           ),
-          optionImages: examOptionImagesFrom(
-            q['option_images'],
-            options.length,
-          ),
-          onSelect: (j) => setState(() => selected[i] = j),
-        ),
+        ],
         const SizedBox(height: 16),
         RspApplicantExamPagerNav(
-          canGoBack: i > 0,
-          isLast: i >= total - 1,
-          onBack: () => setState(() => _examQuestionIndex = i - 1),
+          canGoBack: pageStart > 0,
+          isLast: pageEnd >= total,
+          onBack: () => setState(
+            () => _examQuestionIndex = pageStart - _examQuestionsPerPage,
+          ),
           onForward: () {
-            if (i >= total - 1) {
+            if (pageEnd >= total) {
               setState(() => _examReviewing = true);
             } else {
-              setState(() => _examQuestionIndex = i + 1);
+              setState(() => _examQuestionIndex = pageEnd);
             }
           },
         ),
@@ -2587,6 +2703,10 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
     if (app.status == 'document_declined') {
       return 'Your documents were not approved. Continue to replace them and resubmit for HR review.';
     }
+    if (app.status == 'document_approved' &&
+        app.requiredFormStatus == 'failed') {
+      return 'You did not pass the assigned form. This application has stopped.';
+    }
     if (app.status == 'document_approved' && !app.assessmentUnlocked) {
       return 'Assessment opens after HR approves the assigned form.';
     }
@@ -2619,7 +2739,11 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
       return;
     }
     final resumingFromTrack = (widget.resumeEmail ?? '').trim().isNotEmpty;
-    if (!_isVacancyApplication && !resumingFromTrack) {
+    final applicationAlreadyLoaded =
+        (_applicationId ?? '').trim().isNotEmpty && _step > 1;
+    if (!_isVacancyApplication &&
+        !resumingFromTrack &&
+        !applicationAlreadyLoaded) {
       if (_step1StatusApp == null) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -3326,12 +3450,17 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
     );
   }
 
-  static final _trackEmailReady = RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$');
+  static final _trackEmailReady = RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]{2,}$');
+  static final _trackApplicationIdReady = RegExp(
+    r'^PLR-[A-Za-z0-9]{8}$',
+    caseSensitive: false,
+  );
 
   bool get _isCheckStatusEmailReady {
     final query = _continueEmailController.text.trim();
-    if (query.contains('@')) return _trackEmailReady.hasMatch(query);
-    return query.replaceAll(RegExp(r'\s'), '').length >= 6;
+    if (query.isEmpty) return false;
+    if (_trackEmailReady.hasMatch(query)) return true;
+    return _trackApplicationIdReady.hasMatch(query);
   }
 
   bool get _isCheckStatusActionEnabled {
@@ -3418,7 +3547,7 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
     final app = _step1StatusApp;
     final emailNonEmpty = _continueEmailController.text.trim().isNotEmpty;
     final showCheckStatusFirstHint =
-        emailNonEmpty &&
+        _isCheckStatusEmailReady &&
         app == null &&
         !_step1StatusLoading &&
         !_continueLoading &&
@@ -4654,7 +4783,8 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
             onPressed:
                 (_submitting ||
                     _checkingDuplicateApplicant ||
-                    _duplicateApplicantExists)
+                    _duplicateApplicantExists ||
+                    _missingStep1Docs.isNotEmpty)
                 ? null
                 : _submitStep1,
             style: FilledButton.styleFrom(
@@ -4901,6 +5031,19 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
         ),
       ];
     }
+    if (status == 'failed') {
+      final reason = (_requiredFormReviewComment ?? '').trim();
+      return [
+        RspApplicantWaitingState(
+          title: 'Application stopped',
+          body:
+              'You did not pass $_issuedFormTitle. You cannot continue to the next step.${reason.isEmpty ? '' : '\n\n$reason'}',
+          icon: Icons.block_rounded,
+          onRefresh: _refreshDocumentReview,
+          refreshBusy: _continueLoading,
+        ),
+      ];
+    }
     if (status == 'needs_revision') {
       final reason = (_requiredFormReviewComment ?? '').trim();
       return [
@@ -5136,7 +5279,8 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
   }
 
   Widget _buildStep3BeiExam() {
-    const stepTitle = '8 Behavioral Event Interview (BEI)';
+    final beiCount = _beiQuestionsLoaded?.length ?? _defaultBeiQuestions.length;
+    final stepTitle = '$beiCount Behavioral Event Interview (BEI)';
     final timeNote = _mcqInstructionTimeNote('bei');
     final stepSubtitle =
         'For new applicants and promotions. Answer each question in the space provided.$timeNote';
@@ -5161,9 +5305,8 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
       return const SizedBox.shrink();
     }
     final total = questions.length;
-    if (_examQuestionIndex >= total) _examQuestionIndex = total - 1;
-    if (_examQuestionIndex < 0) _examQuestionIndex = 0;
-    final i = _examQuestionIndex;
+    final pageStart = _examPageStart(total);
+    final pageEnd = _examPageEnd(total, pageStart);
     final timer = _examCountdownRemaining;
     final answered = _beiAnsweredCount();
     if (_examReviewing) {
@@ -5204,27 +5347,33 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
       children: [
         RspApplicantExamSessionHeader(
           title: 'Behavioral Event Interview',
-          questionIndex: i + 1,
+          questionIndex: pageEnd,
+          questionRangeStart: pageStart + 1,
           total: total,
           timeLabel: timer != null && timer > 0 ? _formatMmSs(timer) : null,
         ),
         const SizedBox(height: 16),
-        RspApplicantBeiQuestionCard(
-          index: i,
-          question: questions[i],
-          controller: _beiControllers[i],
-          onChanged: () => setState(() {}),
-        ),
+        for (var i = pageStart; i < pageEnd; i++) ...[
+          if (i > pageStart) const SizedBox(height: 12),
+          RspApplicantBeiQuestionCard(
+            index: i,
+            question: questions[i],
+            controller: _beiControllers[i],
+            onChanged: () => setState(() {}),
+          ),
+        ],
         const SizedBox(height: 16),
         RspApplicantExamPagerNav(
-          canGoBack: i > 0,
-          isLast: i >= total - 1,
-          onBack: () => setState(() => _examQuestionIndex = i - 1),
+          canGoBack: pageStart > 0,
+          isLast: pageEnd >= total,
+          onBack: () => setState(
+            () => _examQuestionIndex = pageStart - _examQuestionsPerPage,
+          ),
           onForward: () {
-            if (i >= total - 1) {
+            if (pageEnd >= total) {
               setState(() => _examReviewing = true);
             } else {
-              setState(() => _examQuestionIndex = i + 1);
+              setState(() => _examQuestionIndex = pageEnd);
             }
           },
         ),
@@ -5545,14 +5694,6 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
                         'Continue to Final Hiring to upload your medical certificate, drug test result, and NBI clearance.',
                         bulletColor: Colors.green.shade700,
                       ),
-                      _step7Bullet(
-                        'After HR approves your documents, they will schedule your orientation.',
-                        bulletColor: Colors.green.shade700,
-                      ),
-                      _step7Bullet(
-                        'Employee accounts are created by HR only—sign in on Step 8 when HR marks your account ready.',
-                        bulletColor: Colors.green.shade700,
-                      ),
                     ],
                   ),
                 ),
@@ -5662,10 +5803,6 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
                             ),
                           ],
                         ),
-                      ),
-                      _step7Bullet(
-                        'Arrive on time and bring a valid ID.',
-                        bulletColor: Colors.green.shade700,
                       ),
                       _step7Bullet(
                         'Contact HR if you need to reschedule.',

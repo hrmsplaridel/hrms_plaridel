@@ -47,7 +47,7 @@ class LocatorSlipPrint {
     pw.MemoryImage? logoImage;
     try {
       final logoBytes = await rootBundle.load(
-        'assets/images/Plaridel Logo.jpg',
+        'assets/images/PlaridelLogo.jpg',
       );
       logoImage = pw.MemoryImage(logoBytes.buffer.asUint8List());
     } catch (_) {

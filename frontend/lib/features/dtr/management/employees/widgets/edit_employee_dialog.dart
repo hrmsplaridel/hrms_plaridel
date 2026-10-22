@@ -62,6 +62,8 @@ class _EditEmployeeDialogState extends State<_EditEmployeeDialog> {
     _salaryGradeController.text = _profile.salaryGrade ?? '';
     _privilege = _profile.role == 'mayor'
         ? 'Mayor'
+        : _profile.role == 'mayor_office_staff'
+        ? "Mayor's Office Staff"
         : _profile.role == 'admin'
         ? 'Admin'
         : 'Employee';
@@ -212,7 +214,12 @@ class _EditEmployeeDialogState extends State<_EditEmployeeDialog> {
         '$firstName${middleName.isNotEmpty ? ' $middleName' : ''} $lastName$suffixPart'
             .trim();
     final privilege = _privilege ?? 'Employee';
-    final role = privilege == 'Admin' ? 'admin' : 'employee';
+    final role = switch (privilege) {
+      'Admin' => 'admin',
+      "Mayor's Office Staff" => 'mayor_office_staff',
+      'Mayor' => 'mayor',
+      _ => 'employee',
+    };
 
     setState(() => _saving = true);
     try {
@@ -544,7 +551,13 @@ class _EditEmployeeDialogState extends State<_EditEmployeeDialog> {
               style: TextStyle(color: AppTheme.dashTextSecondaryOf(context)),
             ),
             items:
-                (_profile.role == 'mayor' ? ['Mayor'] : ['Admin', 'Employee'])
+                (_profile.role == 'mayor'
+                        ? ['Mayor']
+                        : [
+                            'Admin',
+                            'Employee',
+                            "Mayor's Office Staff",
+                          ])
                     .map((o) => DropdownMenuItem(value: o, child: Text(o)))
                     .toList(),
             onChanged: _profile.role == 'mayor'

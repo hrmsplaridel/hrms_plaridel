@@ -1,3 +1,7 @@
+import 'dart:convert';
+import 'dart:typed_data';
+import 'dart:ui' as ui;
+
 import 'package:flutter/material.dart';
 
 import 'package:hrms_plaridel/core/api/client.dart';
@@ -144,9 +148,8 @@ const List<(int, String, String)> _kRatingScale = [
 ];
 
 class _ApplicantHint {
-  const _ApplicantHint({required this.name, this.school});
+  const _ApplicantHint({required this.name});
   final String name;
-  final String? school;
 }
 
 class _EmployeeHint {
@@ -160,12 +163,7 @@ Future<List<_ApplicantHint>> _fetchApplicantHints() async {
     return apps
         .where((a) => a.fullName.trim().isNotEmpty)
         .map(
-          (a) => _ApplicantHint(
-            name: a.fullName.trim(),
-            school: a.course?.trim().isNotEmpty == true
-                ? a.course!.trim()
-                : null,
-          ),
+          (a) => _ApplicantHint(name: a.fullName.trim()),
         )
         .toList();
   } catch (_) {
@@ -468,6 +466,7 @@ class OjtWorkImmersionEvaluationEditor extends StatefulWidget {
     this.onPreview,
     required this.onDownloadPdf,
     this.applicantOnly = false,
+    this.allowInterviewerSignature = false,
   });
 
   final OjtWorkImmersionEvaluation entry;
@@ -475,6 +474,9 @@ class OjtWorkImmersionEvaluationEditor extends StatefulWidget {
 
   /// Applicant recruitment mode keeps interviewer scoring on the HR side.
   final bool applicantOnly;
+
+  /// HR e-sign appears after the applicant submits this evaluation.
+  final bool allowInterviewerSignature;
   final void Function(OjtWorkImmersionEvaluation) onSave;
   final VoidCallback onCancel;
   final Future<void> Function(OjtWorkImmersionEvaluation) onPrint;
@@ -514,7 +516,9 @@ class _OjtWorkImmersionEvaluationEditorState
   String? _schoolError;
   String? _dateError;
   String? _scoreError;
+  String? _notesError;
   String? _interviewerError;
+  String? _signatureBase64;
 
   @override
   void initState() {
@@ -530,6 +534,7 @@ class _OjtWorkImmersionEvaluationEditorState
     _strengths = TextEditingController(text: e.keyStrengths ?? '');
     _concerns = TextEditingController(text: e.keyConcerns ?? '');
     _interviewer = TextEditingController(text: e.interviewer ?? '');
+    _signatureBase64 = e.interviewerSignature;
     _psScore = e.problemSolvingScore;
     _commScore = e.communicationScore;
     _teamScore = e.teamworkScore;
@@ -611,31 +616,47 @@ class _OjtWorkImmersionEvaluationEditorState
       keyStrengths: _opt(_strengths),
       keyConcerns: _opt(_concerns),
       interviewer: _opt(_interviewer),
+      interviewerSignature: _signatureBase64,
       createdAt: widget.entry.createdAt,
       updatedAt: widget.entry.updatedAt,
     );
   }
 
   int? get _total {
-    final scores = [_psScore, _commScore, _teamScore, _adaptScore];
-    if (scores.any((s) => !OjtWorkImmersionEvaluation.isValidScore(s))) {
-      return null;
-    }
+    final scores = [
+      _psScore,
+      _commScore,
+      _teamScore,
+      _adaptScore,
+    ].where(OjtWorkImmersionEvaluation.isValidScore).toList();
+    if (scores.isEmpty) return null;
     return scores.fold<int>(0, (sum, s) => sum + s!);
   }
 
   bool _validate() {
+    if (widget.applicantOnly) {
+      final missingNotes = [
+        _psNotes,
+        _commNotes,
+        _teamNotes,
+        _adaptNotes,
+      ].any((notes) => notes.text.trim().isEmpty);
+      _ojtError = null;
+      _schoolError = _school.text.trim().isEmpty ? 'School is required.' : null;
+      _dateError = null;
+      _scoreError = null;
+      _interviewerError = null;
+      _notesError = missingNotes
+          ? 'Write evidence or notes for every criterion.'
+          : null;
+      setState(() {});
+      return _notesError == null && _schoolError == null;
+    }
+    _notesError = null;
     _ojtError = _ojt.text.trim().isEmpty
         ? 'OJT / Immersion is required.'
         : null;
     _schoolError = _school.text.trim().isEmpty ? 'School is required.' : null;
-    if (widget.applicantOnly) {
-      _dateError = null;
-      _scoreError = null;
-      _interviewerError = null;
-      setState(() {});
-      return _ojtError == null && _schoolError == null;
-    }
     _dateError = _date.text.trim().isEmpty
         ? 'Date of interview is required.'
         : null;
@@ -665,7 +686,10 @@ class _OjtWorkImmersionEvaluationEditorState
     widget.onSave(_buildCurrent());
   }
 
-  bool get _evaluationLocked => widget.readOnly || widget.applicantOnly;
+  /// Scores, summary, and identity fields stay with HR after the form is assigned.
+  bool get _hrFieldsLocked => widget.readOnly || widget.applicantOnly;
+
+  bool get _evaluationLocked => _hrFieldsLocked;
 
   Future<void> _pickDate() async {
     if (_evaluationLocked) return;
@@ -739,7 +763,7 @@ class _OjtWorkImmersionEvaluationEditorState
           key: const ValueKey('ojt-immersion-field'),
           controller: _ojt,
           focusNode: _ojtFocus,
-          readOnly: widget.readOnly,
+          readOnly: _hrFieldsLocked,
           keyboardType: TextInputType.text,
           onChanged: (_) {
             final refreshSuggestions = !widget.applicantOnly &&
@@ -762,12 +786,14 @@ class _OjtWorkImmersionEvaluationEditorState
           Container(
             margin: const EdgeInsets.only(top: 4),
             constraints: const BoxConstraints(maxHeight: 200),
-            decoration: BoxDecoration(
+            child: Material(
               color: AppTheme.dashPanelOf(context),
-              borderRadius: BorderRadius.circular(10),
-              border: Border.all(color: AppTheme.dashHairlineOf(context)),
-            ),
-            child: ListView(
+              clipBehavior: Clip.antiAlias,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10),
+                side: BorderSide(color: AppTheme.dashHairlineOf(context)),
+              ),
+              child: ListView(
               shrinkWrap: true,
               padding: const EdgeInsets.symmetric(vertical: 4),
               children: [
@@ -781,19 +807,9 @@ class _OjtWorkImmersionEvaluationEditorState
                         fontSize: 13.5,
                       ),
                     ),
-                    subtitle: (m.school ?? '').isEmpty
-                        ? null
-                        : Text(
-                            m.school!,
-                            style: const TextStyle(fontSize: 11.5),
-                          ),
                     onTap: () {
                       setState(() {
                         _ojt.text = m.name;
-                        if ((m.school ?? '').isNotEmpty &&
-                            _school.text.trim().isEmpty) {
-                          _school.text = m.school!;
-                        }
                         _ojtError = null;
                       });
                       _ojtFocus.unfocus();
@@ -801,7 +817,81 @@ class _OjtWorkImmersionEvaluationEditorState
                   ),
               ],
             ),
+            ),
           ),
+      ],
+    );
+  }
+
+  Uint8List? _decodeSignature(String? value) {
+    final text = (value ?? '').trim();
+    if (text.isEmpty) return null;
+    try {
+      return base64Decode(text);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> _openSignaturePad() async {
+    if (widget.readOnly) return;
+    final bytes = await showDialog<Uint8List>(
+      context: context,
+      builder: (ctx) => const _RspSignaturePadDialog(),
+    );
+    if (bytes == null || !mounted) return;
+    setState(() => _signatureBase64 = base64Encode(bytes));
+    widget.onSave(_buildCurrent());
+  }
+
+  Widget _interviewerSignaturePad() {
+    final bytes = _decodeSignature(_signatureBase64);
+    final locked = widget.readOnly;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'HR signs here after the applicant submits this form.',
+          style: TextStyle(
+            fontSize: 12.5,
+            color: AppTheme.dashTextSecondaryOf(context),
+          ),
+        ),
+        const SizedBox(height: 8),
+        Container(
+          height: 96,
+          width: double.infinity,
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: AppTheme.dashHairlineOf(context)),
+          ),
+          child: bytes == null
+              ? Text(
+                  'No signature yet',
+                  style: TextStyle(
+                    color: AppTheme.dashTextSecondaryOf(context),
+                    fontSize: 13,
+                  ),
+                )
+              : Padding(
+                  padding: const EdgeInsets.all(8),
+                  child: Image.memory(bytes, fit: BoxFit.contain),
+                ),
+        ),
+        if (!locked) ...[
+          const SizedBox(height: 8),
+          FilledButton.icon(
+            onPressed: _openSignaturePad,
+            icon: const Icon(Icons.draw_rounded, size: 18),
+            label: Text(bytes == null ? 'Add signature' : 'Change signature'),
+            style: FilledButton.styleFrom(
+              backgroundColor: const Color(0xFFE85D04),
+              foregroundColor: Colors.white,
+            ),
+          ),
+        ],
       ],
     );
   }
@@ -837,12 +927,14 @@ class _OjtWorkImmersionEvaluationEditorState
           Container(
             margin: const EdgeInsets.only(top: 4),
             constraints: const BoxConstraints(maxHeight: 180),
-            decoration: BoxDecoration(
+            child: Material(
               color: AppTheme.dashPanelOf(context),
-              borderRadius: BorderRadius.circular(10),
-              border: Border.all(color: AppTheme.dashHairlineOf(context)),
-            ),
-            child: ListView(
+              clipBehavior: Clip.antiAlias,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10),
+                side: BorderSide(color: AppTheme.dashHairlineOf(context)),
+              ),
+              child: ListView(
               shrinkWrap: true,
               padding: const EdgeInsets.symmetric(vertical: 4),
               children: [
@@ -865,6 +957,7 @@ class _OjtWorkImmersionEvaluationEditorState
                     },
                   ),
               ],
+            ),
             ),
           ),
       ],
@@ -890,6 +983,7 @@ class _OjtWorkImmersionEvaluationEditorState
               decoration: _decoration(
                 context,
                 label: 'School',
+                hint: widget.applicantOnly ? 'Enter your school' : null,
                 error: _schoolError,
               ),
             ),
@@ -1122,10 +1216,24 @@ class _OjtWorkImmersionEvaluationEditorState
           const SizedBox(height: 12),
           TextFormField(
             controller: notes,
-            readOnly: ro,
+            readOnly: widget.readOnly,
             minLines: 3,
             maxLines: 6,
-            decoration: _decoration(context, label: 'Evidence / Notes'),
+            onChanged: widget.applicantOnly
+                ? (_) {
+                    if (_notesError == null) return;
+                    setState(() => _notesError = null);
+                  }
+                : null,
+            decoration: _decoration(
+              context,
+              label: 'Evidence / Notes',
+              error: widget.applicantOnly &&
+                      _notesError != null &&
+                      notes.text.trim().isEmpty
+                  ? _notesError
+                  : null,
+            ),
           ),
         ],
       ),
@@ -1249,6 +1357,10 @@ class _OjtWorkImmersionEvaluationEditorState
                     ),
                   ),
                   _interviewerField(),
+                  if (widget.allowInterviewerSignature) ...[
+                    const SizedBox(height: 12),
+                    _interviewerSignaturePad(),
+                  ],
                 ],
               ),
             ),
@@ -1536,4 +1648,161 @@ class _OjtList extends StatelessWidget {
           .toList(),
     );
   }
+}
+
+class _RspSignaturePadDialog extends StatefulWidget {
+  const _RspSignaturePadDialog();
+
+  @override
+  State<_RspSignaturePadDialog> createState() => _RspSignaturePadDialogState();
+}
+
+class _RspSignaturePadDialogState extends State<_RspSignaturePadDialog> {
+  final List<List<Offset>> _strokes = [];
+  List<Offset>? _active;
+  Size _padSize = const Size(640, 180);
+
+  bool get _hasInk => _strokes.any((stroke) => stroke.length > 1);
+
+  void _start(Offset point) {
+    setState(() {
+      _active = [point];
+      _strokes.add(_active!);
+    });
+  }
+
+  void _extend(Offset point) {
+    final stroke = _active;
+    if (stroke == null) return;
+    setState(() => stroke.add(point));
+  }
+
+  Future<void> _use() async {
+    if (!_hasInk) return;
+    final bytes = await _export();
+    if (!mounted || bytes == null) return;
+    Navigator.of(context).pop(bytes);
+  }
+
+  Future<Uint8List?> _export() async {
+    final width = _padSize.width;
+    final height = _padSize.height;
+    final recorder = ui.PictureRecorder();
+    final canvas = Canvas(recorder);
+    canvas.drawRect(
+      Offset.zero & Size(width, height),
+      Paint()..color = Colors.white,
+    );
+    final paint = Paint()
+      ..color = const Color(0xFF111827)
+      ..strokeWidth = 2.4
+      ..strokeCap = StrokeCap.round
+      ..strokeJoin = StrokeJoin.round
+      ..style = PaintingStyle.stroke;
+    for (final stroke in _strokes) {
+      if (stroke.length < 2) continue;
+      final path = Path()..moveTo(stroke.first.dx, stroke.first.dy);
+      for (final point in stroke.skip(1)) {
+        path.lineTo(point.dx, point.dy);
+      }
+      canvas.drawPath(path, paint);
+    }
+    final image = await recorder.endRecording().toImage(
+      width.ceil(),
+      height.ceil(),
+    );
+    final data = await image.toByteData(format: ui.ImageByteFormat.png);
+    return data?.buffer.asUint8List();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Interviewer signature'),
+      content: SizedBox(
+        width: 520,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const Text('Draw the HR signature for this evaluation.'),
+            const SizedBox(height: 12),
+            LayoutBuilder(
+              builder: (context, constraints) {
+                _padSize = Size(constraints.maxWidth, 180);
+                return GestureDetector(
+                  onPanStart: (details) => _start(details.localPosition),
+                  onPanUpdate: (details) => _extend(details.localPosition),
+                  onPanEnd: (_) => _active = null,
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: const Color(0xFFD6D3D1)),
+                    ),
+                    child: SizedBox(
+                      height: 180,
+                      width: double.infinity,
+                      child: CustomPaint(
+                        painter: _RspSignaturePainter(_strokes),
+                        child: const SizedBox.expand(),
+                      ),
+                    ),
+                  ),
+                );
+              },
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => setState(() {
+            _strokes.clear();
+            _active = null;
+          }),
+          child: const Text('Clear'),
+        ),
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          onPressed: _hasInk ? _use : null,
+          style: FilledButton.styleFrom(
+            backgroundColor: const Color(0xFFE85D04),
+            foregroundColor: Colors.white,
+          ),
+          child: const Text('Use signature'),
+        ),
+      ],
+    );
+  }
+}
+
+class _RspSignaturePainter extends CustomPainter {
+  const _RspSignaturePainter(this.strokes);
+
+  final List<List<Offset>> strokes;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = const Color(0xFF111827)
+      ..strokeWidth = 2.4
+      ..strokeCap = StrokeCap.round
+      ..strokeJoin = StrokeJoin.round
+      ..style = PaintingStyle.stroke;
+    for (final stroke in strokes) {
+      if (stroke.length < 2) continue;
+      final path = Path()..moveTo(stroke.first.dx, stroke.first.dy);
+      for (final point in stroke.skip(1)) {
+        path.lineTo(point.dx, point.dy);
+      }
+      canvas.drawPath(path, paint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _RspSignaturePainter oldDelegate) => true;
 }

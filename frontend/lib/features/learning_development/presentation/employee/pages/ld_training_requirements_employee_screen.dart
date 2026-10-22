@@ -28,6 +28,7 @@ class LdTrainingRequirementsEmployeeScreen extends StatefulWidget {
 class _LdTrainingRequirementsEmployeeScreenState
     extends State<LdTrainingRequirementsEmployeeScreen> {
   LdTrainingRequirementRecord? _record;
+  List<LdTrainingRequirementRecord> _history = const [];
   bool _loading = true;
   bool _uploading = false;
   bool _savingTitle = false;
@@ -49,11 +50,12 @@ class _LdTrainingRequirementsEmployeeScreenState
   Future<void> _load() async {
     setState(() => _loading = true);
     try {
-      final r = await LdTrainingRequirementRepo.instance.loadMine();
+      final mine = await LdTrainingRequirementRepo.instance.loadMine();
       if (!mounted) return;
       setState(() {
-        _record = r;
-        _trainingTitleController.text = r.trainingTitle ?? '';
+        _record = mine.current;
+        _history = mine.history;
+        _trainingTitleController.text = mine.current?.trainingTitle ?? '';
         _loading = false;
       });
     } catch (e) {
@@ -65,19 +67,37 @@ class _LdTrainingRequirementsEmployeeScreenState
     }
   }
 
+  bool _hasTitle(LdTrainingRequirementRecord r) =>
+      (r.trainingTitle ?? '').trim().isNotEmpty;
+
   Future<void> _saveTrainingTitle() async {
     final title = _trainingTitleController.text.trim();
-    if (title.isEmpty) return;
+    if (title.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Enter the training or seminar you will attend.'),
+        ),
+      );
+      return;
+    }
     setState(() => _savingTitle = true);
     try {
-      final r = await LdTrainingRequirementRepo.instance.updateMyTrainingTitle(
-        title,
-      );
+      final declared = _record != null && _hasTitle(_record!);
+      final repo = LdTrainingRequirementRepo.instance;
+      final r = declared
+          ? await repo.updateMyTrainingTitle(title)
+          : await repo.declareTraining(title);
       if (!mounted) return;
       setState(() => _record = r);
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('Training title saved.')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            declared
+                ? 'Training title saved.'
+                : 'Training declared. You can now submit your requirements.',
+          ),
+        ),
+      );
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(
@@ -132,6 +152,13 @@ class _LdTrainingRequirementsEmployeeScreenState
   Future<void> _previewDoc(LdTrainingRequirementDocKind kind) async {
     final r = _record;
     if (r == null) return;
+    await _previewRecordDoc(r, kind);
+  }
+
+  Future<void> _previewRecordDoc(
+    LdTrainingRequirementRecord r,
+    LdTrainingRequirementDocKind kind,
+  ) async {
     final path = r.docPath(kind);
     final name = r.docDisplayName(kind);
     if (path == null || path.isEmpty) return;
@@ -189,28 +216,11 @@ class _LdTrainingRequirementsEmployeeScreenState
     if (_loading) {
       return const Center(child: CircularProgressIndicator());
     }
-    final r = _record;
-    if (r == null) {
-      return Center(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(
-                Icons.error_outline_rounded,
-                size: 40,
-                color: AppTheme.dashTextSecondaryOf(context),
-              ),
-              const SizedBox(height: 12),
-              const Text('Could not load training requirements.'),
-              const SizedBox(height: 16),
-              FilledButton(onPressed: _load, child: const Text('Retry')),
-            ],
-          ),
-        ),
-      );
-    }
+    final current = _record;
+    // Requirements can only be submitted for a declared training/seminar.
+    final declared = current != null && _hasTitle(current);
+    final r =
+        current ?? const LdTrainingRequirementRecord(id: '', employeeId: '');
 
     const preKinds = [
       LdTrainingRequirementDocKind.invitationLetter,
@@ -238,10 +248,13 @@ class _LdTrainingRequirementsEmployeeScreenState
             record: r,
             kinds: preKinds,
             approved: r.preRequirementsApproved,
-            locked: false,
+            locked: !declared,
             isPreTraining: true,
           ),
-          locked: false,
+          locked: !declared,
+          lockedTitle: 'Declare your training first',
+          lockedMessage:
+              'Enter the training or seminar you will attend above to start submitting requirements.',
           compact: compact,
           picked: _picked,
           uploading: _uploading,
@@ -262,12 +275,16 @@ class _LdTrainingRequirementsEmployeeScreenState
             record: r,
             kinds: postKinds,
             approved: r.postRequirementsApproved,
-            locked: !r.preRequirementsApproved,
+            locked: !declared || !r.preRequirementsApproved,
             isPreTraining: false,
           ),
-          locked: !r.preRequirementsApproved,
-          lockedMessage:
-              'Post-training requirements will become available after HR approves your pre-training documents.',
+          locked: !declared || !r.preRequirementsApproved,
+          lockedTitle: declared
+              ? 'Waiting for HR approval'
+              : 'Declare your training first',
+          lockedMessage: declared
+              ? 'Post-training requirements will become available after HR approves your pre-training documents.'
+              : 'Enter the training or seminar you will attend above to start.',
           compact: compact,
           picked: _picked,
           uploading: _uploading,
@@ -291,6 +308,9 @@ class _LdTrainingRequirementsEmployeeScreenState
                 controller: _trainingTitleController,
                 saving: _savingTitle,
                 savedTitle: r.trainingTitle,
+                declared: declared,
+                titleLocked: declared && r.preRequirementsApproved,
+                justCompleted: !declared && _history.isNotEmpty,
                 compact: compact,
                 onSave: _saveTrainingTitle,
               ),
@@ -309,6 +329,14 @@ class _LdTrainingRequirementsEmployeeScreenState
               preCard,
               const SizedBox(height: 16),
               postCard,
+            ],
+            if (_history.isNotEmpty) ...[
+              const SizedBox(height: 20),
+              _CompletedTrainings(
+                records: _history,
+                compact: compact,
+                onPreview: _previewRecordDoc,
+              ),
             ],
           ],
         );
@@ -621,6 +649,9 @@ class _TrainingTitleCard extends StatelessWidget {
     required this.controller,
     required this.saving,
     required this.savedTitle,
+    required this.declared,
+    required this.titleLocked,
+    required this.justCompleted,
     required this.compact,
     required this.onSave,
   });
@@ -628,6 +659,15 @@ class _TrainingTitleCard extends StatelessWidget {
   final TextEditingController controller;
   final bool saving;
   final String? savedTitle;
+
+  /// A training/seminar is already declared for the current submission.
+  final bool declared;
+
+  /// HR approved the pre-training documents, so the title can't change.
+  final bool titleLocked;
+
+  /// The previous training was completed; the next one is not declared yet.
+  final bool justCompleted;
   final bool compact;
   final VoidCallback onSave;
 
@@ -639,30 +679,43 @@ class _TrainingTitleCard extends StatelessWidget {
     final secondary = AppTheme.dashTextSecondaryOf(context);
     final dark = AppTheme.dashIsDark(context);
 
+    final heading = declared
+        ? 'Training Program'
+        : 'Declare Training / Seminar';
+    final subheading = declared
+        ? (titleLocked
+              ? 'Locked after HR approved your pre-training documents.'
+              : 'Identify the training/program associated with these requirements.')
+        : (justCompleted
+              ? 'Previous training completed. Declare your next training or seminar to submit new requirements.'
+              : 'Declare the training or seminar you will attend before submitting any requirements.');
+
     final input = TextField(
       controller: controller,
+      enabled: !titleLocked,
       textInputAction: TextInputAction.done,
-      decoration: AppTheme.dashInputDecoration(
-        context,
-        hintText: 'e.g. Leadership Enhancement Program 2026',
-        prefixIcon: const Icon(Icons.school_outlined, size: 20),
-        contentPadding: const EdgeInsets.symmetric(
-          horizontal: 14,
-          vertical: 12,
-        ),
-        radius: 11,
-      ).copyWith(
-        filled: true,
-        fillColor: dark
-            ? AppTheme.dashMutedSurfaceOf(context)
-            : const Color(0xFFF7F8FA),
-        floatingLabelBehavior: FloatingLabelBehavior.never,
-      ),
+      decoration:
+          AppTheme.dashInputDecoration(
+            context,
+            hintText: 'e.g. Leadership Enhancement Program 2026',
+            prefixIcon: const Icon(Icons.school_outlined, size: 20),
+            contentPadding: const EdgeInsets.symmetric(
+              horizontal: 14,
+              vertical: 12,
+            ),
+            radius: 11,
+          ).copyWith(
+            filled: true,
+            fillColor: dark
+                ? AppTheme.dashMutedSurfaceOf(context)
+                : const Color(0xFFF7F8FA),
+            floatingLabelBehavior: FloatingLabelBehavior.never,
+          ),
       onSubmitted: (_) => onSave(),
     );
 
     final saveBtn = FilledButton.icon(
-      onPressed: saving ? null : onSave,
+      onPressed: (saving || titleLocked) ? null : onSave,
       icon: saving
           ? const SizedBox(
               width: 16,
@@ -672,8 +725,17 @@ class _TrainingTitleCard extends StatelessWidget {
                 color: Colors.white,
               ),
             )
-          : const Icon(Icons.save_outlined, size: 18),
-      label: Text(saving ? 'Saving…' : 'Save Title'),
+          : Icon(
+              declared ? Icons.save_outlined : Icons.add_circle_outline,
+              size: 18,
+            ),
+      label: Text(
+        saving
+            ? 'Saving…'
+            : declared
+            ? 'Save Title'
+            : 'Declare Training',
+      ),
       style: FilledButton.styleFrom(
         backgroundColor: AppTheme.primaryNavy,
         foregroundColor: Colors.white,
@@ -705,7 +767,7 @@ class _TrainingTitleCard extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'Training Program',
+                        heading,
                         style: TextStyle(
                           fontWeight: FontWeight.w800,
                           fontSize: 15,
@@ -713,7 +775,7 @@ class _TrainingTitleCard extends StatelessWidget {
                         ),
                       ),
                       Text(
-                        'Identify the training/program associated with these requirements.',
+                        subheading,
                         style: TextStyle(fontSize: 12, color: secondary),
                       ),
                     ],
@@ -731,12 +793,12 @@ class _TrainingTitleCard extends StatelessWidget {
                 _programIcon(),
                 const SizedBox(width: 12),
                 SizedBox(
-                  width: 168,
+                  width: 210,
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'Training Program',
+                        heading,
                         style: TextStyle(
                           fontWeight: FontWeight.w800,
                           fontSize: 15,
@@ -744,8 +806,12 @@ class _TrainingTitleCard extends StatelessWidget {
                         ),
                       ),
                       Text(
-                        'Identify the training/program associated with these requirements.',
-                        style: TextStyle(fontSize: 11.5, color: secondary, height: 1.3),
+                        subheading,
+                        style: TextStyle(
+                          fontSize: 11.5,
+                          color: secondary,
+                          height: 1.3,
+                        ),
                       ),
                     ],
                   ),
@@ -756,7 +822,9 @@ class _TrainingTitleCard extends StatelessWidget {
                 saveBtn,
               ],
             ),
-          if (savedTitle != null && savedTitle!.trim().isNotEmpty) ...[
+          if (declared &&
+              savedTitle != null &&
+              savedTitle!.trim().isNotEmpty) ...[
             const SizedBox(height: 8),
             Text(
               'Saved: ${savedTitle!.trim()}',
@@ -802,8 +870,10 @@ class _PhaseCard extends StatelessWidget {
     required this.onUpload,
     required this.onPreview,
     this.lockedMessage,
+    this.lockedTitle = 'Waiting for HR approval',
   });
 
+  final String lockedTitle;
   final int step;
   final String title;
   final String description;
@@ -832,8 +902,9 @@ class _PhaseCard extends StatelessWidget {
     return record.postRequirementsApproved;
   }
 
-  bool get _approved =>
-      step == 1 ? record.preRequirementsApproved : record.postRequirementsApproved;
+  bool get _approved => step == 1
+      ? record.preRequirementsApproved
+      : record.postRequirementsApproved;
 
   String _docReadyLabel(LdTrainingRequirementDocKind kind) {
     final path = record.docPath(kind);
@@ -897,11 +968,7 @@ class _PhaseCard extends StatelessWidget {
                     shape: BoxShape.circle,
                   ),
                   child: locked
-                      ? Icon(
-                          Icons.lock_rounded,
-                          size: 15,
-                          color: accentColor,
-                        )
+                      ? Icon(Icons.lock_rounded, size: 15, color: accentColor)
                       : Text(
                           '$step',
                           style: TextStyle(
@@ -985,7 +1052,7 @@ class _PhaseCard extends StatelessWidget {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            'Waiting for HR approval',
+                            lockedTitle,
                             style: TextStyle(
                               fontSize: 13,
                               fontWeight: FontWeight.w800,
@@ -1011,7 +1078,8 @@ class _PhaseCard extends StatelessWidget {
             const SizedBox(height: 14),
             LayoutBuilder(
               builder: (context, inner) {
-                final sideBySide = !compact && kinds.length > 1 && inner.maxWidth >= 420;
+                final sideBySide =
+                    !compact && kinds.length > 1 && inner.maxWidth >= 420;
                 if (sideBySide) {
                   return Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -1022,7 +1090,8 @@ class _PhaseCard extends StatelessWidget {
                           child: _DocTile(
                             kind: kinds[i],
                             record: record,
-                            disabled: locked || _isDocLocked(kinds[i]) || uploading,
+                            disabled:
+                                locked || _isDocLocked(kinds[i]) || uploading,
                             picked: picked[kinds[i]],
                             uploading: uploading,
                             showUploadButton: !singleKind,
@@ -1142,6 +1211,329 @@ class _PhaseCard extends StatelessWidget {
   }
 }
 
+/// Trainings/seminars HR has already fully approved.
+class _CompletedTrainings extends StatefulWidget {
+  const _CompletedTrainings({
+    required this.records,
+    required this.compact,
+    required this.onPreview,
+  });
+
+  final List<LdTrainingRequirementRecord> records;
+  final bool compact;
+  final void Function(
+    LdTrainingRequirementRecord record,
+    LdTrainingRequirementDocKind kind,
+  )
+  onPreview;
+
+  @override
+  State<_CompletedTrainings> createState() => _CompletedTrainingsState();
+}
+
+class _CompletedTrainingsState extends State<_CompletedTrainings> {
+  bool _open = false;
+  final Set<String> _openRecords = {};
+
+  @override
+  Widget build(BuildContext context) {
+    final primary = AppTheme.dashTextPrimaryOf(context);
+    final secondary = AppTheme.dashTextSecondaryOf(context);
+    final pad = widget.compact ? 16.0 : 20.0;
+    return Container(
+      decoration: _panelDecoration(context),
+      clipBehavior: Clip.antiAlias,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          InkWell(
+            onTap: () => setState(() => _open = !_open),
+            child: Padding(
+              padding: EdgeInsets.all(pad),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      'Training history (${widget.records.length})',
+                      style: TextStyle(
+                        fontWeight: FontWeight.w800,
+                        fontSize: 15,
+                        color: primary,
+                      ),
+                    ),
+                  ),
+                  Text(
+                    _open ? 'Hide' : 'Show',
+                    style: TextStyle(fontSize: 12, color: secondary),
+                  ),
+                  Icon(
+                    _open
+                        ? Icons.keyboard_arrow_up_rounded
+                        : Icons.keyboard_arrow_down_rounded,
+                    color: secondary,
+                  ),
+                ],
+              ),
+            ),
+          ),
+          if (_open)
+            Padding(
+              padding: EdgeInsets.fromLTRB(pad, 0, pad, pad),
+              child: Column(
+                children: [
+                  for (final r in widget.records)
+                    _recordTile(r, primary, secondary),
+                ],
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  String? _completedLabel(LdTrainingRequirementRecord r) {
+    final at = (r.updatedAt ?? r.createdAt)?.toLocal();
+    if (at == null) return null;
+    return 'Completed ${MaterialLocalizations.of(context).formatMediumDate(at)}';
+  }
+
+  Widget _recordTile(
+    LdTrainingRequirementRecord r,
+    Color primary,
+    Color secondary,
+  ) {
+    final expanded = _openRecords.contains(r.id);
+    final title = (r.trainingTitle ?? '').trim().isEmpty
+        ? 'Untitled training'
+        : r.trainingTitle!.trim();
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      decoration: BoxDecoration(
+        color: AppTheme.dashMutedSurfaceOf(context).withValues(alpha: 0.55),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppTheme.dashHairlineOf(context)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          InkWell(
+            borderRadius: BorderRadius.circular(12),
+            onTap: () => setState(() {
+              if (!_openRecords.remove(r.id)) _openRecords.add(r.id);
+            }),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              child: Row(
+                children: [
+                  const Icon(
+                    Icons.verified_rounded,
+                    size: 18,
+                    color: Color(0xFF2E7D32),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'TRAINING / SEMINAR',
+                          style: TextStyle(
+                            fontSize: 10,
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: 0.8,
+                            color: secondary,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          title,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: 13.5,
+                            fontWeight: FontWeight.w800,
+                            color: primary,
+                          ),
+                        ),
+                        if (_completedLabel(r) != null) ...[
+                          const SizedBox(height: 2),
+                          Text(
+                            _completedLabel(r)!,
+                            style: TextStyle(fontSize: 11.5, color: secondary),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                  Text(
+                    'Approved',
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                      color: secondary,
+                    ),
+                  ),
+                  Icon(
+                    expanded
+                        ? Icons.keyboard_arrow_up_rounded
+                        : Icons.keyboard_arrow_down_rounded,
+                    size: 20,
+                    color: secondary,
+                  ),
+                ],
+              ),
+            ),
+          ),
+          if (expanded)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
+              child: Column(
+                children: [
+                  _phaseSection(
+                    r,
+                    step: 1,
+                    label: 'Pre-training requirements',
+                    kinds: const [
+                      LdTrainingRequirementDocKind.invitationLetter,
+                      LdTrainingRequirementDocKind.travelOrder,
+                    ],
+                    primary: primary,
+                    secondary: secondary,
+                  ),
+                  const SizedBox(height: 8),
+                  _phaseSection(
+                    r,
+                    step: 2,
+                    label: 'Post-training requirements',
+                    kinds: const [
+                      LdTrainingRequirementDocKind.lap,
+                      LdTrainingRequirementDocKind.trainingCertificate,
+                    ],
+                    primary: primary,
+                    secondary: secondary,
+                  ),
+                ],
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _phaseSection(
+    LdTrainingRequirementRecord r, {
+    required int step,
+    required String label,
+    required List<LdTrainingRequirementDocKind> kinds,
+    required Color primary,
+    required Color secondary,
+  }) {
+    const green = Color(0xFF2E7D32);
+    return Container(
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+      decoration: BoxDecoration(
+        color: AppTheme.dashPanelOf(context),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: AppTheme.dashHairlineOf(context)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 22,
+                height: 22,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: green.withValues(alpha: 0.14),
+                  shape: BoxShape.circle,
+                ),
+                child: Text(
+                  '$step',
+                  style: const TextStyle(
+                    fontSize: 11.5,
+                    fontWeight: FontWeight.w800,
+                    color: green,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  label,
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w800,
+                    color: primary,
+                  ),
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(
+                  color: green.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: const Text(
+                  'Approved',
+                  style: TextStyle(
+                    fontSize: 10.5,
+                    fontWeight: FontWeight.w800,
+                    color: green,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          for (final k in kinds) _docRow(r, k, primary, secondary),
+        ],
+      ),
+    );
+  }
+
+  Widget _docRow(
+    LdTrainingRequirementRecord r,
+    LdTrainingRequirementDocKind kind,
+    Color primary,
+    Color secondary,
+  ) {
+    final path = r.docPath(kind);
+    final has = path != null && path.trim().isNotEmpty;
+    return Padding(
+      padding: const EdgeInsets.only(top: 6),
+      child: Row(
+        children: [
+          Icon(
+            Icons.picture_as_pdf_rounded,
+            size: 16,
+            color: Colors.red.shade700,
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              has
+                  ? '${_DocTile.shortLabel(kind)}: ${r.docDisplayName(kind) ?? 'Uploaded'}'
+                  : '${_DocTile.shortLabel(kind)}: not submitted',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 12.5,
+                color: has ? primary : secondary,
+              ),
+            ),
+          ),
+          if (has)
+            TextButton(
+              onPressed: () => widget.onPreview(r, kind),
+              child: const Text('View'),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
 class _HrReviewRow extends StatelessWidget {
   const _HrReviewRow({required this.approved, required this.locked});
 
@@ -1163,10 +1555,7 @@ class _HrReviewRow extends StatelessWidget {
         : const Color(0xFFE85D04);
     return Row(
       children: [
-        Text(
-          'HR Review',
-          style: TextStyle(fontSize: 13, color: secondary),
-        ),
+        Text('HR Review', style: TextStyle(fontSize: 13, color: secondary)),
         const Spacer(),
         Text(
           label,

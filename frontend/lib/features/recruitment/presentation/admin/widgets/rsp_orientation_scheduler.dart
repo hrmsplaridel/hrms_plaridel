@@ -51,10 +51,10 @@ class _RspOrientationSchedulerState extends State<RspOrientationScheduler> {
     _load();
   }
 
-  /// Sort key = latest relevant orientation scheduling activity. Falls back
-  /// to the application/record timestamp when no schedule has been set yet.
+  /// Newest applications first. The orientation date is shown on the row,
+  /// but it does not move an older applicant above someone who applied later.
   DateTime? _schedulingActivityKey(RecruitmentApplication a) =>
-      a.orientationAt ?? a.createdAt ?? a.updatedAt;
+      a.createdAt ?? a.updatedAt;
 
   int _compareBySchedulingActivity(
     RecruitmentApplication a,
@@ -668,7 +668,6 @@ class _RspOrientationSchedulerState extends State<RspOrientationScheduler> {
         !_collapsedIds.contains(app.id) &&
         (_expandedIds.contains(app.id) || scheduled == null);
     final hairline = AppTheme.dashHairlineOf(context);
-    final muted = AppTheme.dashMutedSurfaceOf(context);
     final position = (app.positionAppliedFor ?? '').trim();
     final applicantNo = (app.applicantNumber ?? '').trim();
 
@@ -777,133 +776,367 @@ class _RspOrientationSchedulerState extends State<RspOrientationScheduler> {
             const SizedBox(height: 16),
             Divider(height: 1, color: hairline),
             const SizedBox(height: 16),
-            Container(
-              padding: const EdgeInsets.all(14),
-              decoration: BoxDecoration(
-                color: muted,
-                borderRadius: BorderRadius.circular(14),
-                border: Border.all(color: hairline),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Row(
+            LayoutBuilder(
+              builder: (context, constraints) {
+                final appointment = _appointmentPanel(app, accent, busy);
+                final attendance = _attendancePanel(app, accent, busy);
+                if (RspSchedulingUi.isDesktopWidth(constraints.maxWidth)) {
+                  return Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Icon(
-                        Icons.calendar_month_rounded,
-                        size: 18,
-                        color: accent,
-                      ),
-                      const SizedBox(width: 8),
-                      Text(
-                        'Orientation Schedule',
-                        style: TextStyle(
-                          fontFamily: 'NotoSans',
-                          fontSize: 12.5,
-                          fontWeight: FontWeight.w800,
-                          letterSpacing: 0.2,
-                          color: AppTheme.dashTextPrimaryOf(context),
-                        ),
-                      ),
+                      Expanded(child: appointment),
+                      const SizedBox(width: 14),
+                      Expanded(child: attendance),
                     ],
-                  ),
-                  const SizedBox(height: 12),
-                  Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: AppTheme.dashPanelOf(context),
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: hairline),
-                    ),
-                    child: scheduled == null
-                        ? Row(
-                            children: [
-                              Icon(
-                                Icons.event_outlined,
-                                size: 18,
-                                color: AppTheme.dashTextSecondaryOf(context),
-                              ),
-                              const SizedBox(width: 10),
-                              Expanded(
-                                child: Text(
-                                  'No orientation schedule has been set.',
-                                  style: TextStyle(
-                                    fontFamily: 'NotoSans',
-                                    fontSize: 12.5,
-                                    fontWeight: FontWeight.w600,
-                                    color: AppTheme.dashTextSecondaryOf(
-                                      context,
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ],
-                          )
-                        : Row(
-                            children: [
-                              Icon(
-                                Icons.event_available_rounded,
-                                size: 18,
-                                color: accent,
-                              ),
-                              const SizedBox(width: 10),
-                              RspSchedulingUi.dateTimeBlock(context, scheduled),
-                            ],
-                          ),
-                  ),
-                  const SizedBox(height: 12),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: [
-                      FilledButton.icon(
-                        onPressed: busy ? null : () => _pickDateTime(app),
-                        icon: busy
-                            ? const SizedBox(
-                                width: 16,
-                                height: 16,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                  color: Colors.white,
-                                ),
-                              )
-                            : Icon(
-                                scheduled == null
-                                    ? Icons.event_rounded
-                                    : Icons.edit_calendar_rounded,
-                                size: 17,
-                              ),
-                        label: Text(
-                          scheduled == null
-                              ? 'Set date & time'
-                              : 'Change schedule',
-                        ),
-                        style: FilledButton.styleFrom(
-                          backgroundColor: accent,
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 14,
-                            vertical: 10,
-                          ),
-                          textStyle: const TextStyle(fontSize: 12.5),
-                        ),
-                      ),
-                      if (scheduled != null)
-                        TextButton.icon(
-                          onPressed: busy ? null : () => _clearSchedule(app),
-                          icon: const Icon(Icons.event_busy_rounded, size: 17),
-                          label: const Text('Clear'),
-                          style: TextButton.styleFrom(foregroundColor: accent),
-                        ),
-                    ],
-                  ),
-                ],
-              ),
+                  );
+                }
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    appointment,
+                    const SizedBox(height: 12),
+                    attendance,
+                  ],
+                );
+              },
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _appointmentPanel(
+    RecruitmentApplication app,
+    Color accent,
+    bool busy,
+  ) {
+    final scheduled = app.orientationAt;
+    final hairline = AppTheme.dashHairlineOf(context);
+    final muted = AppTheme.dashMutedSurfaceOf(context);
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: muted,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: hairline),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.calendar_month_rounded, size: 18, color: accent),
+              const SizedBox(width: 8),
+              Text(
+                'Orientation Schedule',
+                style: TextStyle(
+                  fontFamily: 'NotoSans',
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: 0.2,
+                  color: AppTheme.dashTextPrimaryOf(context),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: AppTheme.dashPanelOf(context),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: hairline),
+            ),
+            child: scheduled == null
+                ? Row(
+                    children: [
+                      Icon(
+                        Icons.event_outlined,
+                        size: 18,
+                        color: AppTheme.dashTextSecondaryOf(context),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          'No orientation schedule has been set.',
+                          style: TextStyle(
+                            fontFamily: 'NotoSans',
+                            fontSize: 12.5,
+                            fontWeight: FontWeight.w600,
+                            color: AppTheme.dashTextSecondaryOf(context),
+                          ),
+                        ),
+                      ),
+                    ],
+                  )
+                : Row(
+                    children: [
+                      Icon(
+                        Icons.event_available_rounded,
+                        size: 18,
+                        color: accent,
+                      ),
+                      const SizedBox(width: 10),
+                      RspSchedulingUi.dateTimeBlock(context, scheduled),
+                    ],
+                  ),
+          ),
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              FilledButton.icon(
+                onPressed: busy ? null : () => _pickDateTime(app),
+                icon: busy
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: Colors.white,
+                        ),
+                      )
+                    : Icon(
+                        scheduled == null
+                            ? Icons.event_rounded
+                            : Icons.edit_calendar_rounded,
+                        size: 17,
+                      ),
+                label: Text(
+                  scheduled == null ? 'Set date & time' : 'Change schedule',
+                ),
+                style: FilledButton.styleFrom(
+                  backgroundColor: accent,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 14,
+                    vertical: 10,
+                  ),
+                  textStyle: const TextStyle(fontSize: 12.5),
+                ),
+              ),
+              if (scheduled != null)
+                TextButton.icon(
+                  onPressed: busy ? null : () => _clearSchedule(app),
+                  icon: const Icon(Icons.event_busy_rounded, size: 17),
+                  label: const Text('Clear'),
+                  style: TextButton.styleFrom(foregroundColor: accent),
+                ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _setAttendance(RecruitmentApplication app, bool? attended) {
+    return _withSaveLock(app.id, () async {
+      await RecruitmentRepo.instance.updateOrientationAttended(
+        app.id,
+        attended,
+      );
+      if (!mounted) return;
+      final msg = attended == null
+          ? 'Orientation attendance reset to pending.'
+          : attended
+          ? 'Orientation marked as attended.'
+          : 'Orientation marked as no-show.';
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+    });
+  }
+
+  Widget _attendanceChip({
+    required String label,
+    required IconData icon,
+    required bool active,
+    required Color accent,
+    required VoidCallback? onTap,
+  }) {
+    final hairline = AppTheme.dashHairlineOf(context);
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(999),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 150),
+          padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
+          decoration: BoxDecoration(
+            color: active ? accent.withValues(alpha: 0.14) : Colors.transparent,
+            borderRadius: BorderRadius.circular(999),
+            border: Border.all(color: active ? accent : hairline),
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(
+                icon,
+                size: 15,
+                color: active ? accent : AppTheme.dashTextSecondaryOf(context),
+              ),
+              const SizedBox(width: 4),
+              Flexible(
+                child: Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontFamily: 'NotoSans',
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                    color: active
+                        ? accent
+                        : AppTheme.dashTextPrimaryOf(context),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _attendancePanel(RecruitmentApplication app, Color accent, bool busy) {
+    final hairline = AppTheme.dashHairlineOf(context);
+    final muted = AppTheme.dashMutedSurfaceOf(context);
+    final attended = app.orientationAttended;
+    final scheduled = app.orientationAt;
+    final selected = attended == null ? 0 : (attended ? 1 : 2);
+    final dark = AppTheme.dashIsDark(context);
+
+    late Color fg;
+    late IconData icon;
+    late String headline;
+    late String detail;
+    if (attended == true) {
+      fg = dark ? const Color(0xFF81C784) : const Color(0xFF1B5E20);
+      icon = Icons.check_circle_outline_rounded;
+      headline = 'Attended';
+      detail = 'Applicant attended orientation.';
+    } else if (attended == false) {
+      fg = dark ? const Color(0xFFEF9A9A) : const Color(0xFFB71C1C);
+      icon = Icons.cancel_outlined;
+      headline = 'No show';
+      detail = 'Applicant did not attend orientation.';
+    } else {
+      fg = AppTheme.dashTextSecondaryOf(context);
+      icon = Icons.hourglass_empty_rounded;
+      headline = 'Pending';
+      detail = scheduled == null
+          ? 'Waiting for orientation schedule.'
+          : 'Orientation scheduled — record attendance after the session.';
+    }
+
+    final options = <(int, String, IconData)>[
+      (0, 'Pending', Icons.schedule_rounded),
+      (1, 'Attended', Icons.check_rounded),
+      (2, 'No Show', Icons.person_off_rounded),
+    ];
+
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: muted,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: hairline),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.fact_check_outlined, size: 18, color: accent),
+              const SizedBox(width: 8),
+              Text(
+                'Orientation Attendance',
+                style: TextStyle(
+                  fontFamily: 'NotoSans',
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: 0.2,
+                  color: AppTheme.dashTextPrimaryOf(context),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: AppTheme.dashPanelOf(context),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: hairline),
+            ),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Icon(icon, size: 18, color: fg),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        headline,
+                        style: TextStyle(
+                          fontFamily: 'NotoSans',
+                          fontSize: 13.5,
+                          fontWeight: FontWeight.w800,
+                          color: fg,
+                          height: 1.2,
+                        ),
+                      ),
+                      const SizedBox(height: 3),
+                      Text(
+                        detail,
+                        style: TextStyle(
+                          fontFamily: 'NotoSans',
+                          fontSize: 12,
+                          height: 1.4,
+                          fontWeight: FontWeight.w500,
+                          color: AppTheme.dashTextPrimaryOf(
+                            context,
+                          ).withValues(alpha: 0.82),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              for (final o in options) ...[
+                if (o.$1 > 0) const SizedBox(width: 6),
+                Expanded(
+                  child: _attendanceChip(
+                    label: o.$2,
+                    icon: o.$3,
+                    active: selected == o.$1,
+                    accent: accent,
+                    onTap: busy
+                        ? null
+                        : () {
+                            final want = o.$1 == 0 ? null : (o.$1 == 1);
+                            if (want == attended) return;
+                            _setAttendance(app, want);
+                          },
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ],
       ),
     );
   }

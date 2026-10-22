@@ -133,12 +133,13 @@ class SelectionLineupRepo {
     return row == null ? null : SelectionLineupEntry.fromJson(row);
   }
 
-  Future<void> insert(SelectionLineupEntry entry) async {
+  Future<SelectionLineupEntry> insert(SelectionLineupEntry entry) async {
     final payload = Map<String, dynamic>.from(entry.toJson())..remove('id');
-    await RspLdSavedEntriesApi.insertRow(
+    final row = await RspLdSavedEntriesApi.insertRowReturning(
       SelectionLineupEntry.tableName,
       payload,
     );
+    return SelectionLineupEntry.fromJson(row);
   }
 
   Future<void> update(SelectionLineupEntry entry) async {

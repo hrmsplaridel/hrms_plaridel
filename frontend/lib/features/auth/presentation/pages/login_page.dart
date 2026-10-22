@@ -22,8 +22,8 @@ import 'package:hrms_plaridel/shared/utils/time_greeting.dart';
 const _rememberKey = 'login_remember_v1';
 const _rememberEmailKey = 'login_remember_email_v1';
 
-const _kPlaridelLogoAsset = 'assets/images/Plaridel Logo.jpg';
-const _kHrmsLogoAsset = 'assets/images/hrmslogo.png';
+const _kPlaridelLogoAsset = 'assets/images/PlaridelLogo.jpg';
+const _kHrmsLogoAsset = 'assets/images/UnityPillarLogo.png';
 const _kLoginHeroImageAsset = 'assets/images/PlaridelBuildingC.png';
 const _kCardRadius = 18.0;
 const _kInputRadius = 12.0;
@@ -197,6 +197,7 @@ class _LoginPageState extends State<LoginPage> with TickerProviderStateMixin {
             compact: !desktop,
             showBack: canPop,
             contentRightInset: formWidth * 0.58,
+            panLeft: formWidth * 0.34,
           ),
         ),
         Positioned(
@@ -298,14 +299,17 @@ class _LoginPageState extends State<LoginPage> with TickerProviderStateMixin {
 
         final role = auth.user?.role ?? 'employee';
         final isPrivileged = role == 'admin' || role == 'hr';
-        final isMayor = role == 'mayor';
+        final isMayorPortal =
+            role == 'mayor' || role == 'mayor_office_staff';
         final isSuperAdmin = role == 'super_admin';
 
         final prefs = await SharedPreferences.getInstance();
         await prefs.setString(
           kLoginAsKey,
-          isMayor
-              ? 'Mayor'
+          isMayorPortal
+              ? (role == 'mayor_office_staff'
+                    ? "Mayor's Office Staff"
+                    : 'Mayor')
               : (isPrivileged || isSuperAdmin ? 'Admin' : 'Employee'),
         );
 
@@ -314,7 +318,7 @@ class _LoginPageState extends State<LoginPage> with TickerProviderStateMixin {
           MaterialPageRoute(
             builder: (context) => isSuperAdmin
                 ? const SuperAdminDashboard()
-                : isMayor
+                : isMayorPortal
                 ? const MayorDashboardPage()
                 : (isPrivileged
                       ? const AdminDashboard()
@@ -366,30 +370,51 @@ String _readApiError(Object error, String fallback) {
 }
 
 class _LoginHeroImage extends StatelessWidget {
-  const _LoginHeroImage({required this.alignment});
+  const _LoginHeroImage({required this.panLeft});
 
-  final Alignment alignment;
+  /// How far the hall photo slides left, in logical pixels. The sign-in panel
+  /// covers the right side, so a plain [Alignment] cannot center the flagpole
+  /// in the visible area: the photo is wider than the panel and [BoxFit.cover]
+  /// only crops vertically.
+  final double panLeft;
 
   @override
   Widget build(BuildContext context) {
-    return Image.asset(
-      _kLoginHeroImageAsset,
-      fit: BoxFit.cover,
-      alignment: alignment,
-      filterQuality: FilterQuality.high,
-      gaplessPlayback: true,
-      errorBuilder: (_, __, ___) => Container(
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [
-              LoginTheme.brandingGradientStart,
-              LoginTheme.brandingGradientEnd,
-            ],
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final shift = panLeft.clamp(0.0, constraints.maxWidth * 0.4);
+        final scale = 1 + (2 * shift / constraints.maxWidth);
+        return ClipRect(
+          child: Transform.translate(
+            offset: Offset(-shift, 0),
+            child: Transform.scale(
+              alignment: Alignment.center,
+              scale: scale,
+              child: Image.asset(
+                _kLoginHeroImageAsset,
+                width: constraints.maxWidth,
+                height: constraints.maxHeight,
+                fit: BoxFit.cover,
+                alignment: const Alignment(0, 0.08),
+                filterQuality: FilterQuality.high,
+                gaplessPlayback: true,
+                errorBuilder: (_, __, ___) => Container(
+                  decoration: const BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                      colors: [
+                        LoginTheme.brandingGradientStart,
+                        LoginTheme.brandingGradientEnd,
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
           ),
-        ),
-      ),
+        );
+      },
     );
   }
 }
@@ -433,18 +458,20 @@ class _LoginHeroPanel extends StatelessWidget {
     required this.compact,
     required this.showBack,
     required this.contentRightInset,
+    required this.panLeft,
   });
 
   final bool compact;
   final bool showBack;
   final double contentRightInset;
+  final double panLeft;
 
   @override
   Widget build(BuildContext context) {
     return Stack(
       fit: StackFit.expand,
       children: [
-        const _LoginHeroImage(alignment: Alignment(0.12, 0.08)),
+        _LoginHeroImage(panLeft: panLeft),
         const _LoginHeroOverlay(),
         SafeArea(
           child: LayoutBuilder(

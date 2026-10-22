@@ -1,5 +1,6 @@
 node_modules/
 .env
+.env.acceptance
 .zkteco-sync-state.json
 *.log
 .DS_Store
@@ -7,3 +8,4 @@ uploads/
 /accomplishments_reports/
 /.system-health/
 /.backups/
+phase25_*_creds.json

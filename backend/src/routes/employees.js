@@ -48,7 +48,14 @@ const SALT_ROUNDS = 10;
 
 function employeeAccountEmailText({ name, email, password, role }) {
   const displayName = String(name || '').trim() || 'Employee';
-  const privilege = role === 'mayor' ? 'Mayor' : role === 'admin' ? 'administrator' : 'employee';
+  const privilege =
+    role === 'mayor'
+      ? 'Mayor'
+      : role === 'mayor_office_staff'
+        ? "Mayor's Office Staff"
+        : role === 'admin'
+          ? 'administrator'
+          : 'employee';
   return (
     `Dear ${displayName},\n\n` +
     `Your LGU Plaridel HRMS ${privilege} account has been created.\n\n` +
@@ -254,6 +261,13 @@ function buildEmployeeListFromSql(req, options = {}) {
   } else if (roleFilter === 'Mayor') {
     conditions.push(`${tbl}.role = $${i++}`);
     params.push('mayor');
+  } else if (
+    roleFilter === "Mayor's Office Staff" ||
+    roleFilter === 'Mayor Office Staff' ||
+    roleFilter === 'mayor_office_staff'
+  ) {
+    conditions.push(`${tbl}.role = $${i++}`);
+    params.push('mayor_office_staff');
   }
   if (historicalRange?.startDate && historicalRange?.endDate) {
     const startIdx = i++;
@@ -799,11 +813,18 @@ router.post('/', protect, requireAdminOrSuperAdmin, requireAccountCreationAccess
     if (validationError) {
       return res.status(400).json({ error: validationError });
     }
-    if (!['admin', 'employee', 'mayor'].includes(role)) {
-      return res.status(400).json({ error: 'Role must be admin, employee, or mayor' });
+    if (!['admin', 'employee', 'mayor', 'mayor_office_staff'].includes(role)) {
+      return res.status(400).json({
+        error: "Role must be admin, employee, mayor, or mayor_office_staff",
+      });
     }
     if (role === 'mayor' && req.user?.role !== 'super_admin') {
       return res.status(403).json({ error: 'Only the super admin can create a Mayor account' });
+    }
+    if (role === 'mayor_office_staff' && !['super_admin', 'admin'].includes(req.user?.role)) {
+      return res.status(403).json({
+        error: "Only an administrator can create a Mayor's Office Staff account",
+      });
     }
 
     const temporaryPassword =
@@ -1068,7 +1089,8 @@ router.put('/:id', protect, requireAdmin, requireDtrFeatureIfAdmin('employees_al
       effectiveEmploymentStatus !== 'active';
     const effectiveIsActive = nonActiveEmploymentStatus ? false : is_active;
     const requestedRole =
-      role !== undefined && ['admin', 'employee'].includes(role)
+      role !== undefined &&
+      ['admin', 'employee', 'mayor_office_staff'].includes(role)
         ? role
         : undefined;
     const requestedLeaveCreditEligible = leave_credit_eligible !== undefined
@@ -1137,7 +1159,12 @@ router.put('/:id', protect, requireAdmin, requireDtrFeatureIfAdmin('employees_al
     ];
     for (const [col, val] of fields) {
       if (val !== undefined) {
-        if (col === 'role' && !['admin', 'employee'].includes(val)) continue;
+        if (
+          col === 'role' &&
+          !['admin', 'employee', 'mayor_office_staff'].includes(val)
+        ) {
+          continue;
+        }
         if (col === 'employment_status' && val && !['active', 'inactive', 'resigned', 'retired', 'terminated'].includes(val)) continue;
         if (col === 'leave_credit_eligible') {
           updates.push(`${col} = $${i++}`);

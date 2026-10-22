@@ -968,6 +968,7 @@ class RspApplicantExamSessionHeader extends StatelessWidget {
     required this.title,
     required this.questionIndex,
     required this.total,
+    this.questionRangeStart,
     this.timeLabel,
     this.urgent = false,
   });
@@ -975,11 +976,21 @@ class RspApplicantExamSessionHeader extends StatelessWidget {
   final String title;
   final int questionIndex;
   final int total;
+
+  /// First question number on this screen. When set below [questionIndex],
+  /// the header shows that pair instead of a single question.
+  final int? questionRangeStart;
   final String? timeLabel;
   final bool urgent;
 
   @override
   Widget build(BuildContext context) {
+    final rangeStart = questionRangeStart;
+    final showsPair =
+        rangeStart != null && rangeStart > 0 && rangeStart < questionIndex;
+    final progressLabel = showsPair
+        ? 'Questions $rangeStart–$questionIndex of $total'
+        : 'Question $questionIndex of $total';
     final ratio = total <= 0 ? 0.0 : (questionIndex / total).clamp(0.0, 1.0);
     return Container(
       width: double.infinity,
@@ -1005,7 +1016,7 @@ class RspApplicantExamSessionHeader extends StatelessWidget {
             children: [
               Expanded(
                 child: Text(
-                  'Question $questionIndex of $total',
+                  progressLabel,
                   style: const TextStyle(
                     fontWeight: FontWeight.w700,
                     fontSize: 13.5,

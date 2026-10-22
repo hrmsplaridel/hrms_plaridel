@@ -103,7 +103,7 @@ function validateWes(row) {
   if (!text(row.min_education)) missing.push('education');
   if (!text(row.min_experience)) missing.push('experience');
   if (!text(row.min_training)) missing.push('training');
-  if (!text(row.min_eligibility)) missing.push('eligibility');
+  // Job vacancies do not post an eligibility standard, so a blank field must not block submit.
   if (!text(row.job_description_last_work)) missing.push('job description of last work');
   if (!text(row.applicant_name)) missing.push('applicant name');
   return missing;

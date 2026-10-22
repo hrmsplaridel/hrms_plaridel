@@ -155,7 +155,7 @@ class _BrandingSection extends StatelessWidget {
                       height: 56,
                       color: Colors.white.withValues(alpha: 0.2),
                       child: Image.asset(
-                        'assets/images/Plaridel Logo.jpg',
+                        'assets/images/PlaridelLogo.jpg',
                         fit: BoxFit.cover,
                         errorBuilder: (_, __, ___) => const Icon(
                           Icons.shield_outlined,

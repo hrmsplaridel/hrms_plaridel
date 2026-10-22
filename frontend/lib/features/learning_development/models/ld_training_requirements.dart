@@ -134,6 +134,15 @@ class LdTrainingRequirementRecord {
   }
 }
 
+/// The signed-in employee's current training plus finished ones.
+class LdMyTrainingRequirements {
+  const LdMyTrainingRequirements({this.current, this.history = const []});
+
+  /// Null until the employee declares a training (or after finishing one).
+  final LdTrainingRequirementRecord? current;
+  final List<LdTrainingRequirementRecord> history;
+}
+
 class LdTrainingRequirementRepo {
   LdTrainingRequirementRepo._();
   static final LdTrainingRequirementRepo instance =
@@ -152,13 +161,40 @@ class LdTrainingRequirementRepo {
         .toList();
   }
 
-  Future<LdTrainingRequirementRecord> loadMine() async {
+  Future<LdMyTrainingRequirements> loadMine() async {
     final res = await ApiClient.instance.get<Map<String, dynamic>>(
       '/api/ld/training-requirements/mine',
     );
     final record = res.data?['record'];
+    final history = res.data?['history'];
+    return LdMyTrainingRequirements(
+      current: record is Map
+          ? LdTrainingRequirementRecord.fromJson(
+              Map<String, dynamic>.from(record),
+            )
+          : null,
+      history: history is List
+          ? history
+                .map(
+                  (e) => LdTrainingRequirementRecord.fromJson(
+                    Map<String, dynamic>.from(e as Map),
+                  ),
+                )
+                .toList()
+          : const [],
+    );
+  }
+
+  /// Declares a new training/seminar and opens a fresh set of requirements.
+  Future<LdTrainingRequirementRecord> declareTraining(
+    String trainingTitle,
+  ) async {
+    final res = await ApiClient.instance.post<Map<String, dynamic>>(
+      '/api/ld/training-requirements/mine',
+      data: {'trainingTitle': trainingTitle.trim()},
+    );
     return LdTrainingRequirementRecord.fromJson(
-      Map<String, dynamic>.from(record as Map),
+      Map<String, dynamic>.from(res.data?['record'] as Map),
     );
   }
 

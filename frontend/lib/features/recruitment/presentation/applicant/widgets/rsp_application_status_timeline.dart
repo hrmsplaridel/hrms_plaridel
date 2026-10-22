@@ -286,6 +286,9 @@ class RspApplicationStatusTimeline extends StatelessWidget {
         }
         return 'Under review. You will be notified when your documents are approved so you can take the exam.';
       case 'document_approved':
+        if (application.requiredFormStatus == 'failed') {
+          return 'The assigned form was not passed. This application has stopped.';
+        }
         if (!application.assessmentUnlocked && !hasExamResult) {
           return 'Approved. Complete the form HR assigns before Assessment.';
         }
@@ -309,6 +312,10 @@ class RspApplicationStatusTimeline extends StatelessWidget {
     if (status == 'document_declined') return _TimelineStepStatus.failed;
     if (status == 'submitted' && !hasExamResult) {
       return _TimelineStepStatus.current;
+    }
+    if (status == 'document_approved' &&
+        application.requiredFormStatus == 'failed') {
+      return _TimelineStepStatus.failed;
     }
     if (status == 'document_approved' &&
         !application.assessmentUnlocked &&
@@ -336,6 +343,9 @@ class RspApplicationStatusTimeline extends StatelessWidget {
       return 'Completed (status on file).';
     }
     if (status == 'document_approved') {
+      if (application.requiredFormStatus == 'failed') {
+        return 'Not available. The assigned form was not passed.';
+      }
       if (!application.assessmentUnlocked && !hasExamResult) {
         return 'Available after HR approves the assigned form.';
       }

@@ -8,7 +8,6 @@ import 'package:provider/provider.dart';
 import 'package:hrms_plaridel/core/api/user_facing_api_error.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/providers/auth_provider.dart';
-import 'package:hrms_plaridel/features/dtr/assistant/presentation/widgets/dtr_assistant_fab.dart';
 import 'package:hrms_plaridel/features/dtr/assistant/presentation/widgets/employee_hrms_assistant_controller.dart';
 import 'package:hrms_plaridel/features/dtr/assistant/presentation/widgets/employee_hrms_assistant_overlay.dart';
 import 'package:hrms_plaridel/features/dtr/dtr_provider.dart';
@@ -522,13 +521,6 @@ class _EmployeeDashboardState extends State<EmployeeDashboardDesktopPage>
     }
   }
 
-  void _openHrmsAssistant() {
-    EmployeeHrmsAssistantController.instance.openFullPage(context);
-  }
-
-  bool get _showHrmsAssistantFab =>
-      _selectedNavIndex >= 0 && _selectedNavIndex < _navItems.length;
-
   Widget _buildEmployeeLeaveRequestForm() {
     return EmployeeHrmsAssistantOverlay(
       initialBottom: 36,
@@ -691,7 +683,6 @@ class _EmployeeDashboardState extends State<EmployeeDashboardDesktopPage>
         onNotificationTap: _applyNotificationTapResult,
         onFileLeave: _openEmployeeLeaveRequestForm,
         onFileLocator: _openEmployeeLocatorRequestForm,
-        onHrmsAssistant: _openHrmsAssistant,
         onTutorial: _openDashboardTutorial,
         showMobileLeaveFab: _showMobileLeaveFab,
       );
@@ -708,9 +699,12 @@ class _EmployeeDashboardState extends State<EmployeeDashboardDesktopPage>
                 _EmployeeSidebar(
                   railMode: true,
                   collapsed: _sidebarCollapsed,
+                  onToggle: () =>
+                      setState(() => _sidebarCollapsed = !_sidebarCollapsed),
                   showBrand: false,
                   displayName: displayName,
                   avatarPath: avatarPath,
+                  onProfile: _openMyProfile,
                   selectedIndex: _selectedNavIndex,
                   onTap: (i) {
                     _onNavSelected(i);
@@ -730,19 +724,8 @@ class _EmployeeDashboardState extends State<EmployeeDashboardDesktopPage>
                         compactActions: width < 600,
                         onViewAllNotifications: _handleOpenNotifications,
                         onNotificationTap: _applyNotificationTapResult,
-                        trailing: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            EmployeeTutorialButton(
-                              onPressed: _openDashboardTutorial,
-                            ),
-                            DashboardAccountMenuButton(
-                              avatarPath: avatarPath,
-                              compact: width < 600,
-                              tooltip: displayName,
-                              onProfile: () => _openMyProfile(),
-                            ),
-                          ],
+                        trailing: EmployeeTutorialButton(
+                          onPressed: _openDashboardTutorial,
                         ),
                       ),
                       Expanded(
@@ -778,32 +761,6 @@ class _EmployeeDashboardState extends State<EmployeeDashboardDesktopPage>
               ],
             ),
           ),
-          if (_showHrmsAssistantFab)
-            ValueListenableBuilder<bool>(
-              valueListenable: EmployeeHrmsAssistantController
-                  .instance
-                  .baseLauncherSuppressed,
-              builder: (context, launcherSuppressed, _) => launcherSuppressed
-                  ? const SizedBox.shrink()
-                  : ValueListenableBuilder<bool>(
-                      valueListenable: EmployeeHrmsAssistantController
-                          .instance
-                          .floatingVisible,
-                      builder: (context, assistantOpen, _) => assistantOpen
-                          ? const SizedBox.shrink()
-                          : ValueListenableBuilder<bool>(
-                              valueListenable:
-                                  EmployeeTutorialController.coachActive,
-                              builder: (context, coachActive, _) => coachActive
-                                  ? const SizedBox.shrink()
-                                  : DraggableDtrAssistantLauncher(
-                                      onPressed: _openHrmsAssistant,
-                                      initialRight: 24,
-                                      initialBottom: 24,
-                                    ),
-                            ),
-                    ),
-            ),
         ],
       ),
     );
@@ -1031,20 +988,24 @@ class _EmployeeSidebar extends StatelessWidget {
   const _EmployeeSidebar({
     required this.displayName,
     this.avatarPath,
+    this.onProfile,
     required this.selectedIndex,
     required this.onTap,
     this.showBrand = true,
     this.railMode = false,
     this.collapsed = false,
+    this.onToggle,
   });
 
   final String displayName;
   final String? avatarPath;
+  final VoidCallback? onProfile;
   final int selectedIndex;
   final ValueChanged<int> onTap;
   final bool showBrand;
   final bool railMode;
   final bool collapsed;
+  final VoidCallback? onToggle;
 
   Widget _buildNavList(BuildContext context, {required bool compact}) {
     final pendingSignatures = context.select<DocuTrackerProvider, int>(
@@ -1131,8 +1092,11 @@ class _EmployeeSidebar extends StatelessWidget {
           ),
           child: DashboardSidebarProfileCard(
             displayName: displayName,
-            subtitle: 'Employee',
+            subtitle: context.select<AuthProvider, String>(
+              (auth) => dashboardAccountRoleLabel(auth.user?.role),
+            ),
             avatarPath: avatarPath,
+            onProfile: onProfile,
           ),
         ),
         Opacity(
@@ -1213,7 +1177,7 @@ class _EmployeeSidebar extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          const SidebarRailHeader(),
+          SidebarRailHeader(onToggle: onToggle),
           Expanded(
             child: Builder(
               builder: (context) {

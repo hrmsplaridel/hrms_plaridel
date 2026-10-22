@@ -8,6 +8,7 @@ const {
   normalizeEmail,
   issueNewOtp,
   consumeOtpIfValid,
+  clearOtpForEmail,
   OTP_TTL_MS,
 } = require('../utils/rspEmailOtp');
 const {
@@ -63,6 +64,13 @@ router.post('/send', async (req, res) => {
       ({ code } = issueNewOtp(email));
     } catch (err) {
       const codeHint = err?.code ? String(err.code) : '';
+      if (codeHint === 'OTP_STILL_ACTIVE' && typeof err.waitMs === 'number') {
+        return res.status(409).json({
+          error: err.message,
+          code: 'OTP_STILL_ACTIVE',
+          expiresInSeconds: Math.ceil(err.waitMs / 1000),
+        });
+      }
       if (codeHint === 'RATE_LIMIT_SEND' && typeof err.waitMs === 'number') {
         return res.status(429).json({
           error: err.message || 'Too many requests',
@@ -80,12 +88,18 @@ router.post('/send', async (req, res) => {
     const applicantName =
       typeof rawName === 'string' ? rawName.trim().slice(0, 160) : '';
 
-    await sendRspEmailOtpEmailJs({
-      to: normalizeEmail(email),
-      verificationCode: code,
-      expiryMinutes,
-      ...(applicantName ? { applicantName } : {}),
-    });
+    try {
+      await sendRspEmailOtpEmailJs({
+        to: normalizeEmail(email),
+        verificationCode: code,
+        expiryMinutes,
+        ...(applicantName ? { applicantName } : {}),
+      });
+    } catch (sendErr) {
+      // The applicant never received this code, so don't lock them out of retrying.
+      clearOtpForEmail(email);
+      throw sendErr;
+    }
 
     return res.json({ ok: true, expiresInSeconds: Math.round(OTP_TTL_MS / 1000) });
   } catch (err) {

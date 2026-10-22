@@ -1,4 +1,5 @@
 const express = require('express');
+const crypto = require('crypto');
 const path = require('path');
 const fs = require('fs');
 const multer = require('multer');
@@ -417,6 +418,7 @@ async function ensureRspApplicationsTables() {
       ADD COLUMN IF NOT EXISTS final_interview_passed BOOLEAN,
       ADD COLUMN IF NOT EXISTS hired_user_id UUID,
       ADD COLUMN IF NOT EXISTS hr_account_setup_done BOOLEAN NOT NULL DEFAULT FALSE,
+      ADD COLUMN IF NOT EXISTS hr_account_setup_linked_sync BOOLEAN NOT NULL DEFAULT FALSE,
       ADD COLUMN IF NOT EXISTS hire_credentials_email_sent_at TIMESTAMPTZ,
       ADD COLUMN IF NOT EXISTS hire_login_username TEXT,
       ADD COLUMN IF NOT EXISTS hire_login_password TEXT,
@@ -452,6 +454,17 @@ async function ensureRspApplicationsTables() {
       );
     }
   }
+
+  // Accounts already created before Step 8 was tied to account creation.
+  // Marked once so a later manual "Not yet" is kept.
+  await pool.query(`
+    UPDATE public.recruitment_applications
+    SET hr_account_setup_done = TRUE,
+        hr_account_setup_linked_sync = TRUE,
+        updated_at = now()
+    WHERE hr_account_setup_linked_sync IS NOT TRUE
+      AND (hired_user_id IS NOT NULL OR status = 'registered')
+  `);
 
   await pool.query(`
     CREATE UNIQUE INDEX IF NOT EXISTS uq_recruitment_applications_applicant_number
@@ -823,7 +836,7 @@ router.get('/tat-applicant-choices', protect, async (_req, res) => {
     await ensureRspApplicationsTables();
     const result = await pool.query(
       `
-      SELECT id, applicant_number, full_name, position_applied_for, status
+      SELECT id, applicant_number, full_name, position_applied_for, status, final_interview_at
       FROM public.recruitment_applications
       WHERE ${excludeMayorIntakeStubSql()}
         AND status = ANY($1::text[])
@@ -966,6 +979,19 @@ router.post('/:applicationId/required-form/assign', recruitmentStaff, async (req
   }
 });
 
+router.post('/:applicationId/required-form/undo', recruitmentStaff, async (req, res) => {
+  try {
+    await ensureRspApplicationsTables();
+    const result = await issuedForm.undoRequiredFormAssignment({
+      applicationId: req.params.applicationId,
+      actorId: req.user?.id,
+    });
+    return res.json(issuedFormPayload(result));
+  } catch (err) {
+    return issuedForm.sendIssuedFormError(res, err, '[rspApplications POST required-form/undo]');
+  }
+});
+
 router.post('/:applicationId/required-form/approve', recruitmentStaff, async (req, res) => {
   try {
     await ensureRspApplicationsTables();
@@ -976,6 +1002,20 @@ router.post('/:applicationId/required-form/approve', recruitmentStaff, async (re
     return res.json(issuedFormPayload(result));
   } catch (err) {
     return issuedForm.sendIssuedFormError(res, err, '[rspApplications POST required-form/approve]');
+  }
+});
+
+router.post('/:applicationId/required-form/fail', recruitmentStaff, async (req, res) => {
+  try {
+    await ensureRspApplicationsTables();
+    const result = await issuedForm.failRequiredForm({
+      applicationId: req.params.applicationId,
+      actorId: req.user?.id,
+      comment: req.body?.comment,
+    });
+    return res.json(issuedFormPayload(result));
+  } catch (err) {
+    return issuedForm.sendIssuedFormError(res, err, '[rspApplications POST required-form/fail]');
   }
 });
 
@@ -2010,6 +2050,8 @@ router.put('/:applicationId/hired-link', protect, async (req, res) => {
       UPDATE public.recruitment_applications
       SET hired_user_id = $1::uuid,
           status = 'registered',
+          hr_account_setup_done = TRUE,
+          hr_account_setup_linked_sync = TRUE,
           hire_login_username = COALESCE($3, hire_login_username),
           hire_login_password = COALESCE($4, hire_login_password),
           hire_credentials_email_sent_at = NULL,
@@ -2025,6 +2067,156 @@ router.put('/:applicationId/hired-link', protect, async (req, res) => {
     return res.status(500).json({
       error: 'Failed to link hired user',
       details: err?.message ? String(err.message) : String(err),
+    });
+  }
+});
+
+function generateHireTemporaryPassword(length = 12) {
+  const lower = 'abcdefghijkmnopqrstuvwxyz';
+  const upper = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
+  const numbers = '23456789';
+  const symbols = '!@#$%';
+  const all = lower + upper + numbers + symbols;
+  const chars = [
+    lower[crypto.randomInt(lower.length)],
+    upper[crypto.randomInt(upper.length)],
+    numbers[crypto.randomInt(numbers.length)],
+    symbols[crypto.randomInt(symbols.length)],
+  ];
+  while (chars.length < length) {
+    chars.push(all[crypto.randomInt(all.length)]);
+  }
+  for (let i = chars.length - 1; i > 0; i--) {
+    const j = crypto.randomInt(i + 1);
+    [chars[i], chars[j]] = [chars[j], chars[i]];
+  }
+  return chars.join('');
+}
+
+// POST /api/rsp/applications/:applicationId/send-credentials
+// Admin/HR: creates a new login password and emails it. The password is not returned.
+router.post('/:applicationId/send-credentials', recruitmentStaff, async (req, res) => {
+  let hiredUserId = null;
+  let previousHash = null;
+  let passwordUpdated = false;
+  try {
+    const useEmailJs = isEmailJsConfiguredForHireEmail();
+    if (!useEmailJs && !isSmtpConfigured()) {
+      return res.status(503).json({
+        error: 'Email is not configured on the server',
+        details:
+          'Set EMAILJS_SERVICE_ID, EMAILJS_PUBLIC_KEY, and EMAILJS_TEMPLATE_HIRE_CREDENTIALS_ID; or set SMTP_HOST, SMTP_USER, SMTP_PASS, and SMTP_FROM in the API .env file.',
+      });
+    }
+    await ensureRspApplicationsTables();
+    const { applicationId } = req.params;
+    const appQ = await pool.query(
+      `
+      SELECT full_name, email, hired_user_id, hr_account_setup_done, status
+      FROM public.recruitment_applications
+      WHERE id = $1
+      `,
+      [applicationId],
+    );
+    const row = appQ.rows[0];
+    if (!row) {
+      return res.status(404).json({ error: 'Application not found' });
+    }
+    hiredUserId = row.hired_user_id;
+    if (!hiredUserId) {
+      return res.status(400).json({
+        error: 'Create the employee account before sending login credentials',
+      });
+    }
+
+    const to = String(row.email || '').trim();
+    if (!to) {
+      return res.status(400).json({ error: 'Applicant has no email on file' });
+    }
+
+    const userQ = await pool.query(
+      `SELECT id, email, password_hash FROM public.users WHERE id = $1::uuid`,
+      [hiredUserId],
+    );
+    const userRow = userQ.rows[0];
+    if (!userRow) {
+      return res.status(400).json({
+        error: 'The linked employee account no longer exists',
+      });
+    }
+
+    const username = String(userRow.email || to).trim().toLowerCase();
+    const password = generateHireTemporaryPassword();
+    const passwordHash = await bcrypt.hash(password, 10);
+    previousHash = userRow.password_hash || null;
+
+    await pool.query(
+      `UPDATE public.users SET password_hash = $1, updated_at = now() WHERE id = $2::uuid`,
+      [passwordHash, hiredUserId],
+    );
+    passwordUpdated = true;
+
+    const name = String(row.full_name || '').trim() || 'Applicant';
+    const accountNote = buildHireCredentialsAccountNote(
+      row.hr_account_setup_done === true,
+    );
+    if (useEmailJs) {
+      await sendHireCredentialsEmailJs({
+        to,
+        applicantName: name,
+        username,
+        password,
+        accountNote,
+        loginInstructions: HIRE_LOGIN_INSTRUCTIONS,
+      });
+    } else {
+      await sendSmtpMail({
+        to,
+        subject: HIRE_CREDENTIALS_EMAIL_SUBJECT,
+        text: buildHireCredentialsPlainText({
+          applicantName: name,
+          username,
+          password,
+          accountNote,
+        }),
+      });
+    }
+
+    await pool.query(
+      `
+      UPDATE public.recruitment_applications
+      SET hire_credentials_email_sent_at = now(),
+          hire_login_username = $2,
+          hire_login_password = $3,
+          updated_at = now()
+      WHERE id = $1
+      `,
+      [applicationId, username, password],
+    );
+
+    return res.json({
+      ok: true,
+      message: 'Email sent',
+      to,
+      via: useEmailJs ? 'emailjs' : 'smtp',
+      hire_credentials_email_sent_at: new Date().toISOString(),
+    });
+  } catch (err) {
+    if (passwordUpdated && hiredUserId && previousHash) {
+      try {
+        await pool.query(
+          `UPDATE public.users SET password_hash = $1, updated_at = now() WHERE id = $2::uuid`,
+          [previousHash, hiredUserId],
+        );
+      } catch (restoreErr) {
+        console.error('[rspApplications POST send-credentials] password restore failed', restoreErr);
+      }
+    }
+    console.error('[rspApplications POST send-credentials]', err);
+    const msg = err?.message ? String(err.message) : String(err);
+    return res.status(500).json({
+      error: 'Failed to send email',
+      details: msg,
     });
   }
 });
@@ -2587,23 +2779,46 @@ router.delete('/:applicationId', protect, async (req, res) => {
 
     await ensureRspApplicationsTables();
 
-    // Delete exam results first to avoid FK issues.
-    await pool.query(
-      'DELETE FROM public.recruitment_exam_results WHERE application_id = $1',
-      [applicationId]
-    );
+    // Everything the applicant did (exam results, mayor endorsement request,
+    // scheduling, final requirements, uploaded document references) is removed
+    // together in one transaction, so a failure never leaves partial data.
+    // Scheduling / orientation / final requirements / hire flags live on the
+    // application row itself and are removed with it.
+    const docCols = Object.values(RSP_DOC_KIND_COLUMNS).map((c) => c.pathCol);
+    const outcome = await withRspTransaction(async (client) => {
+      const found = await client.query(
+        `SELECT id, ${docCols.map((c) => `"${c}"`).join(', ')}
+           FROM public.recruitment_applications
+          WHERE id = $1
+          FOR UPDATE`,
+        [applicationId]
+      );
+      if (!found.rows[0]) return { rollback: true, deleted: 0 };
 
-    // Delete application row.
-    const result = await pool.query(
-      'DELETE FROM public.recruitment_applications WHERE id = $1',
-      [applicationId]
-    );
+      await client.query(
+        'DELETE FROM public.recruitment_exam_results WHERE application_id = $1',
+        [applicationId]
+      );
 
-    const deleted = result.rowCount ?? 0;
-    if (deleted === 0) {
+      // Mayor endorsements are independent of RSP. Do not delete them here.
+      // CASCADE FK removal is migration M3; until then, avoid explicit mayor deletes.
+      // After M3, orphaned legacy application_id values remain as non-authoritative metadata.
+
+      const result = await client.query(
+        'DELETE FROM public.recruitment_applications WHERE id = $1',
+        [applicationId]
+      );
+      return {
+        deleted: result.rowCount ?? 0,
+        row: found.rows[0],
+      };
+    });
+
+    if (!outcome.deleted) {
       return res.status(404).json({ error: 'Application not found' });
     }
 
+    // Remove uploaded files only after the database delete has committed.
     const appDir = path.join(rspAttachmentsRoot, applicationId);
     if (fs.existsSync(appDir)) {
       try {
@@ -2612,8 +2827,19 @@ router.delete('/:applicationId', protect, async (req, res) => {
         console.warn('[rspApplications DELETE] local attachments cleanup', err);
       }
     }
+    // Files referenced by the row but stored outside the per-application folder.
+    for (const col of docCols) {
+      const objectPath = String(outcome.row?.[col] || '').trim();
+      if (!objectPath) continue;
+      try {
+        const abs = resolveLocalRspAttachment(UPLOAD_DIR, objectPath);
+        if (abs && fs.existsSync(abs)) fs.unlinkSync(abs);
+      } catch (err) {
+        console.warn('[rspApplications DELETE] file cleanup', err?.message);
+      }
+    }
 
-    res.json({ ok: true, deleted });
+    res.json({ ok: true, deleted: outcome.deleted });
   } catch (err) {
     console.error('[rspApplications DELETE]', err);
     res.status(500).json({

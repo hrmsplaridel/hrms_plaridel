@@ -1,0 +1,240 @@
+{
+  "api": "http://127.0.0.1:3001",
+  "database": "hrms_plaridel_acceptance",
+  "summary": {
+    "PASS": 25,
+    "BLOCKED": 8,
+    "FAIL": 2,
+    "NOT TESTED": 3
+  },
+  "results": [
+    {
+      "area": "Environment",
+      "name": "Staging API health/db",
+      "status": "PASS",
+      "detail": "http=200"
+    },
+    {
+      "area": "Environment",
+      "name": "Staging DB name isolation",
+      "status": "PASS",
+      "detail": "db=hrms_plaridel_acceptance"
+    },
+    {
+      "area": "Environment",
+      "name": "Staging API not sharing operational DB writes target",
+      "status": "PASS",
+      "detail": ""
+    },
+    {
+      "area": "Authentication",
+      "name": "Staff password login",
+      "status": "PASS",
+      "detail": "status=200 role=mayor_office_staff"
+    },
+    {
+      "area": "Authentication",
+      "name": "Unauthorized account rejection",
+      "status": "PASS",
+      "detail": "status=401"
+    },
+    {
+      "area": "Authentication",
+      "name": "Mayor password login",
+      "status": "BLOCKED",
+      "detail": "ACCEPTANCE_MAYOR_PASSWORD / PHASE25_MAYOR_PASSWORD unset; JWT substitution forbidden"
+    },
+    {
+      "area": "Authentication",
+      "name": "Mayor dashboard routing (live login)",
+      "status": "BLOCKED",
+      "detail": "depends on Mayor password"
+    },
+    {
+      "area": "Authentication",
+      "name": "Staff dashboard routing (API)",
+      "status": "PASS",
+      "detail": "status=200"
+    },
+    {
+      "area": "Authentication",
+      "name": "Staff role label",
+      "status": "PASS",
+      "detail": "role=mayor_office_staff"
+    },
+    {
+      "area": "Authentication",
+      "name": "Session handling (/auth/me with access token)",
+      "status": "PASS",
+      "detail": "status=200"
+    },
+    {
+      "area": "Endorsement E2E",
+      "name": "Staff cannot finalize endorsement",
+      "status": "PASS",
+      "detail": "status=403"
+    },
+    {
+      "area": "Endorsement E2E",
+      "name": "Staff cannot approve meetings",
+      "status": "PASS",
+      "detail": "status=403"
+    },
+    {
+      "area": "Endorsement E2E",
+      "name": "Mayor cannot create intake",
+      "status": "BLOCKED",
+      "detail": "Mayor password login unavailable"
+    },
+    {
+      "area": "Endorsement E2E",
+      "name": "Happy-path endorse workflow",
+      "status": "BLOCKED",
+      "detail": "Mayor password login unavailable"
+    },
+    {
+      "area": "Endorsement E2E",
+      "name": "Reschedule branch",
+      "status": "BLOCKED",
+      "detail": "Mayor password login unavailable"
+    },
+    {
+      "area": "Endorsement E2E",
+      "name": "Decline meeting branch",
+      "status": "BLOCKED",
+      "detail": "Mayor password login unavailable"
+    },
+    {
+      "area": "Endorsement E2E",
+      "name": "No-show does not auto-reject",
+      "status": "BLOCKED",
+      "detail": "Mayor password login unavailable"
+    },
+    {
+      "area": "Dashboard/Reports",
+      "name": "daily report endpoint",
+      "status": "PASS",
+      "detail": "status=200"
+    },
+    {
+      "area": "Dashboard/Reports",
+      "name": "weekly report endpoint",
+      "status": "PASS",
+      "detail": "status=200"
+    },
+    {
+      "area": "Dashboard/Reports",
+      "name": "monthly report endpoint",
+      "status": "PASS",
+      "detail": "status=200"
+    },
+    {
+      "area": "Dashboard/Reports",
+      "name": "Custom date report",
+      "status": "PASS",
+      "detail": "status=200"
+    },
+    {
+      "area": "Dashboard/Reports",
+      "name": "History search/filter",
+      "status": "PASS",
+      "detail": "status=200"
+    },
+    {
+      "area": "Dashboard/Reports",
+      "name": "PDF generation smoke (pdf-lib)",
+      "status": "PASS",
+      "detail": "bytes=886"
+    },
+    {
+      "area": "Security",
+      "name": "GET /api/employees Staff redacted fields",
+      "status": "PASS",
+      "detail": "keys=id,full_name,avatar_path,current_department_name,current_position_name"
+    },
+    {
+      "area": "Security",
+      "name": "GET /api/employees Mayor redacted fields",
+      "status": "BLOCKED",
+      "detail": "Mayor password login unavailable"
+    },
+    {
+      "area": "RSP Regression",
+      "name": "Job vacancies public/list access",
+      "status": "PASS",
+      "detail": "status=200"
+    },
+    {
+      "area": "RSP Regression",
+      "name": "Mayor intake does not create RSP applications (staging check)",
+      "status": "FAIL",
+      "detail": "matching_ra_rows=1"
+    },
+    {
+      "area": "L&D Regression",
+      "name": "Training requirements route responds",
+      "status": "PASS",
+      "detail": "status=403"
+    },
+    {
+      "area": "DTR Regression",
+      "name": "DTR daily summary route responds",
+      "status": "PASS",
+      "detail": "status=200"
+    },
+    {
+      "area": "Leave Regression",
+      "name": "Leave types/list route responds",
+      "status": "PASS",
+      "detail": "status=200"
+    },
+    {
+      "area": "DocuTracker Regression",
+      "name": "DocuTracker route responds",
+      "status": "PASS",
+      "detail": "status=200"
+    },
+    {
+      "area": "Other Modules",
+      "name": "Employees list reachable for authenticated Staff",
+      "status": "PASS",
+      "detail": "status=200"
+    },
+    {
+      "area": "Leave Regression",
+      "name": "Staff leave pending_mayor access posture",
+      "status": "FAIL",
+      "detail": "status=500 (staff should not gain mayor signatory powers)"
+    },
+    {
+      "area": "UI",
+      "name": "Responsive desktop/tablet/mobile layout",
+      "status": "NOT TESTED",
+      "detail": "No browser automation in this acceptance run"
+    },
+    {
+      "area": "UI",
+      "name": "Flutter PDF print layout",
+      "status": "NOT TESTED",
+      "detail": "Server PDF smoke covered; Flutter Printing.layoutPdf not executed in browser"
+    },
+    {
+      "area": "UI",
+      "name": "Loading/empty/error states",
+      "status": "NOT TESTED",
+      "detail": "Requires Flutter widget/integration drive"
+    },
+    {
+      "area": "Environment",
+      "name": "Operational DB MER count unchanged after staging E2E",
+      "status": "PASS",
+      "detail": "before=4 after=4"
+    },
+    {
+      "area": "Environment",
+      "name": "Staging received disposable writes only",
+      "status": "PASS",
+      "detail": "staging_mer=4 test_flagged=3"
+    }
+  ]
+}

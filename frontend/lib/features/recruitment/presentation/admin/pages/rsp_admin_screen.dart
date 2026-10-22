@@ -1,4 +1,3 @@
-import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
@@ -11,7 +10,9 @@ import 'package:hrms_plaridel/features/learning_development/models/ojt_work_imme
 import 'package:hrms_plaridel/features/learning_development/models/applicants_profile.dart';
 import 'package:hrms_plaridel/features/learning_development/models/work_experience_sheet.dart';
 import 'package:hrms_plaridel/features/learning_development/data/repositories/rsp_ld_saved_entries_api.dart';
+import 'package:hrms_plaridel/features/learning_development/models/comparative_assessment.dart';
 import 'package:hrms_plaridel/features/learning_development/models/selection_lineup.dart';
+import 'package:hrms_plaridel/features/recruitment/utils/selection_lineup_applicant_fill.dart';
 import 'package:hrms_plaridel/features/recruitment/data/exam_image_support.dart';
 import 'package:hrms_plaridel/features/recruitment/models/job_vacancy_announcement.dart';
 import 'package:hrms_plaridel/features/dashboard/presentation/admin/desktop/widgets/recruitment_monitoring_stats.dart';
@@ -20,6 +21,7 @@ import 'package:hrms_plaridel/features/recruitment/models/rsp_screening_scores.d
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/core/utils/form_pdf.dart';
 import 'package:hrms_plaridel/shared/widgets/form_document_preview.dart';
+import 'package:hrms_plaridel/shared/widgets/searchable_dropdown_field.dart';
 import 'package:hrms_plaridel/shared/widgets/read_only_saved_entry_dialog.dart';
 import 'package:hrms_plaridel/shared/widgets/rsp_ld_saved_records_browser.dart';
 import 'package:hrms_plaridel/features/recruitment/presentation/admin/widgets/rsp_records_list_table.dart';
@@ -32,9 +34,6 @@ import 'package:hrms_plaridel/features/recruitment/presentation/admin/sections/c
 import 'package:hrms_plaridel/features/recruitment/presentation/admin/sections/work_experience_sheet_section.dart';
 import 'package:hrms_plaridel/features/recruitment/presentation/admin/sections/turn_around_time_section.dart';
 import 'package:hrms_plaridel/features/recruitment/presentation/admin/sections/ojt_work_immersion_evaluation_section.dart';
-import 'package:hrms_plaridel/features/recruitment/utils/rsp_applications_report_export.dart';
-import 'package:hrms_plaridel/features/recruitment/presentation/admin/widgets/rsp_generate_report_dialog.dart';
-import 'package:hrms_plaridel/features/recruitment/presentation/admin/widgets/rsp_applications_report_preview_screen.dart';
 import 'package:hrms_plaridel/core/api/user_facing_api_error.dart';
 import 'package:hrms_plaridel/providers/auth_provider.dart';
 import 'package:hrms_plaridel/features/recruitment/presentation/shared/widgets/rsp_attachment_actions.dart';
@@ -277,7 +276,7 @@ const _builtInExamPickerItems = <_RspExamPickerItem>[
     examKey: 'bei',
     title: 'BEI / Exam Questions',
     subtitle:
-        'View and edit the 8 Behavioral Event Interview questions applicants answer.',
+        'View and edit the Behavioral Event Interview questions applicants answer.',
     icon: Icons.psychology_alt_rounded,
     format: 'Open-ended',
     isOpenEnded: true,
@@ -307,7 +306,7 @@ const _builtInExamPickerItems = <_RspExamPickerItem>[
   ),
 ];
 
-/// RSP: "Exams" hub â€” pick which exam to view/edit (BEI, General, Math, General Info).
+/// RSP: "Exams" hub — pick which exam to view/edit (BEI, General, Math, General Info).
 class _RspExamsSection extends StatefulWidget {
   const _RspExamsSection({required this.onBackToRsp});
 
@@ -752,7 +751,7 @@ const _builtInFormPickerItems = <_RspExamPickerItem>[
   ),
 ];
 
-/// RSP: "Forms" hub â€” pick which form to view/edit.
+/// RSP: "Forms" hub — pick which form to view/edit.
 class _RspFormsSection extends StatefulWidget {
   const _RspFormsSection({required this.onBackToRsp});
 
@@ -1556,7 +1555,7 @@ class _RspCustomMcqExamEditorState extends State<_RspCustomMcqExamEditor> {
   }
 }
 
-/// Default 8 BEI questions when DB has none (so admin can edit and save).
+/// Default BEI questions when DB has none (so admin can edit and save).
 const _defaultBeiQuestions = [
   'Tell me about a time when you had to collaborate with a co-worker that you had a hard time getting along with?',
   'Describe for me a time when you were under a significant amount of pressure at work. How did you deal with it?',
@@ -1666,9 +1665,10 @@ class _RspBeiQuestionsEditorState extends State<_RspBeiQuestionsEditor> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const RspExamPageHeader(
+        RspExamPageHeader(
           icon: Icons.psychology_rounded,
-          title: '8 Behavioral Event Interview (BEI) Questions',
+          title:
+              '${_controllers.length} Behavioral Event Interview (BEI) Questions',
           subtitle:
               'For New Applicant/s and Promotion/s. Edit the questions below; applicants will see these when they take the exam.',
         ),
@@ -2686,7 +2686,7 @@ class _RspGeneralInfoExamEditorState extends State<_RspGeneralInfoExamEditor> {
   }
 }
 
-/// RSP: Background Investigation (BI) Form ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â list entries and add/edit form.
+/// RSP: Background Investigation (BI) Form — list entries and add/edit form.
 class _RspBiFormSection extends StatefulWidget {
   const _RspBiFormSection();
 
@@ -4964,6 +4964,30 @@ class _RspApplicantsProfileSectionState
   /// "Start with a blank form" instead of a vacancy to autofill from.
   static const String _blankFormChoice = '__blank_applicants_profile_form__';
 
+  /// Persists a new row immediately so DocuTracker can assign Prepared by
+  /// (creator) and the next signer before the user finishes editing.
+  Future<void> _beginProfileEdit(ApplicantsProfileEntry draft) async {
+    try {
+      final saved = await ApplicantsProfileRepo.instance.insert(draft);
+      if (!mounted) return;
+      setState(() {
+        _editing = saved;
+        _recordReadOnly = saved.signaturesLocked;
+        _requirementCompleted = false;
+        _signatureStatus = saved.signatureStatus;
+      });
+      _load();
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _editing = draft;
+        _recordReadOnly = false;
+        _requirementCompleted = false;
+        _signatureStatus = null;
+      });
+    }
+  }
+
   Future<void> _startNew() async {
     try {
       final announcement = await JobVacancyAnnouncementRepo.instance.fetch();
@@ -4979,32 +5003,19 @@ class _RspApplicantsProfileSectionState
         return;
       }
       if (selectedPosition == _blankFormChoice) {
-        setState(() {
-          _editing = const ApplicantsProfileEntry();
-          _recordReadOnly = false;
-          _requirementCompleted = false;
-          _signatureStatus = null;
-        });
+        await _beginProfileEdit(const ApplicantsProfileEntry());
         return;
       }
-      setState(() {
-        _recordReadOnly = false;
-        _requirementCompleted = false;
-        _signatureStatus = null;
-        _editing = _buildAutoPrefilledProfile(
+      await _beginProfileEdit(
+        _buildAutoPrefilledProfile(
           announcement,
           applications,
           preferredPosition: selectedPosition,
-        );
-      });
+        ),
+      );
     } catch (_) {
       if (!mounted) return;
-      setState(() {
-        _editing = const ApplicantsProfileEntry();
-        _recordReadOnly = false;
-        _requirementCompleted = false;
-        _signatureStatus = null;
-      });
+      await _beginProfileEdit(const ApplicantsProfileEntry());
     }
   }
 
@@ -5056,10 +5067,24 @@ class _RspApplicantsProfileSectionState
     });
   }
 
-  Future<void> _markProfileCompleted() async {
-    final id = _editing?.id;
-    if (id == null || _requirementCompleted) return;
+  Future<void> _markProfileCompleted(ApplicantsProfileEntry entry) async {
+    if (_requirementCompleted) return;
     try {
+      var working = entry;
+      var id = working.id;
+      if (id == null) {
+        working = await ApplicantsProfileRepo.instance.insert(working);
+        id = working.id;
+        if (id == null) {
+          throw StateError('The form was saved but no record id was returned.');
+        }
+        if (!mounted) return;
+        setState(() {
+          _editing = working;
+          _signatureStatus = working.signatureStatus;
+          _recordReadOnly = working.signaturesLocked;
+        });
+      }
       final payload = await RecruitmentRepo.instance
           .completeApplicantsProfileEntry(id);
       if (!mounted) return;
@@ -5074,6 +5099,7 @@ class _RspApplicantsProfileSectionState
           ),
         ),
       );
+      _load();
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(
@@ -5090,22 +5116,25 @@ class _RspApplicantsProfileSectionState
 
   Future<void> _onSave(ApplicantsProfileEntry entry) async {
     try {
+      final ApplicantsProfileEntry saved;
       if (entry.id == null) {
-        await ApplicantsProfileRepo.instance.insert(entry);
+        saved = await ApplicantsProfileRepo.instance.insert(entry);
       } else {
         await ApplicantsProfileRepo.instance.update(entry);
+        saved = entry;
       }
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Applicants profile saved.')),
-        );
-        setState(() {
-          _editing = null;
-          _recordReadOnly = false;
-          _signatureStatus = null;
-        });
-        _load();
-      }
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Applicants profile saved.')),
+      );
+      // Keep the editor open so the creator can sign and DocuTracker can
+      // keep the next-signer assignment visible.
+      setState(() {
+        _editing = saved;
+        _signatureStatus = saved.signatureStatus ?? _signatureStatus;
+        _recordReadOnly = saved.signaturesLocked;
+      });
+      _load();
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -5252,8 +5281,8 @@ class _RspApplicantsProfileSectionState
         return SavedRecordListItem(
           title: pos,
           subtitle:
-              '${e.applicants.length} applicant(s) Ã‚Â· Posted ${e.dateOfPosting ?? "Ã¢â‚¬â€"}',
-          detailDialogTitle: 'Applicants profile Ã¢â‚¬â€ $pos',
+              '${e.applicants.length} applicant(s) · Posted ${e.dateOfPosting ?? "—"}',
+          detailDialogTitle: 'Applicants profile — $pos',
           previewContentWidth: 960,
           previewBuilder: () => _ApplicantsProfileFormEditor(
             readOnly: true,
@@ -5340,9 +5369,7 @@ class _RspApplicantsProfileSectionState
             onPrint: _printProfile,
             onPreview: _previewProfile,
             onDownloadPdf: _downloadProfile,
-            onMarkCompleted: _editing?.id == null
-                ? null
-                : _markProfileCompleted,
+            onMarkCompleted: _markProfileCompleted,
             requirementCompleted: _requirementCompleted,
           ),
           if (_editing?.id != null) ...[
@@ -5411,7 +5438,7 @@ class _ApplicantsProfileFormEditor extends StatefulWidget {
   final Future<void> Function(ApplicantsProfileEntry) onPrint;
   final Future<void> Function(ApplicantsProfileEntry)? onPreview;
   final Future<void> Function(ApplicantsProfileEntry) onDownloadPdf;
-  final Future<void> Function()? onMarkCompleted;
+  final Future<void> Function(ApplicantsProfileEntry)? onMarkCompleted;
   final bool requirementCompleted;
 
   /// When null, document actions stay on editable forms only.
@@ -5533,7 +5560,11 @@ class _ApplicantsProfileFormEditorState
     if (widget.readOnly) return;
     final result = await showDialog<_ApplicantDialogResult>(
       context: context,
-      builder: (_) => const _ApplicantDialog(isEditing: false),
+      builder: (_) => _ApplicantDialog(
+        isEditing: false,
+        positionAppliedFor: _positionApplied.text,
+        excludedApplicationIds: _usedApplicationIds(),
+      ),
     );
     if (result == null || !mounted) return;
     setState(() {
@@ -5546,6 +5577,7 @@ class _ApplicantsProfileFormEditorState
           result.age,
           result.civilStatus,
           result.remark,
+          applicationId: result.applicationId ?? '',
         ),
       );
       _currentFormPage = (_applicantRows.length - 1) ~/ _kApplicantsPerPage;
@@ -5555,6 +5587,7 @@ class _ApplicantsProfileFormEditorState
   Future<void> _openEditApplicantDialog(int globalIndex) async {
     if (widget.readOnly) return;
     final row = _applicantRows[globalIndex];
+    final currentApplicationId = row['application_id']!.text.trim();
     final initial = _ApplicantDialogResult(
       name: row['name']!.text,
       course: row['course']!.text,
@@ -5563,13 +5596,22 @@ class _ApplicantsProfileFormEditorState
       age: row['age']!.text,
       civilStatus: row['civil_status']!.text,
       remark: row['remark_disability']!.text,
+      applicationId: currentApplicationId,
     );
     final result = await showDialog<_ApplicantDialogResult>(
       context: context,
-      builder: (_) => _ApplicantDialog(isEditing: true, initial: initial),
+      builder: (_) => _ApplicantDialog(
+        isEditing: true,
+        initial: initial,
+        positionAppliedFor: _positionApplied.text,
+        excludedApplicationIds: _usedApplicationIds(
+          exceptApplicationId: currentApplicationId,
+        ),
+      ),
     );
     if (result == null || !mounted) return;
     setState(() {
+      row['application_id']!.text = result.applicationId ?? '';
       row['name']!.text = result.name;
       row['course']!.text = result.course;
       row['address']!.text = result.address;
@@ -5578,6 +5620,16 @@ class _ApplicantsProfileFormEditorState
       row['civil_status']!.text = result.civilStatus;
       row['remark_disability']!.text = result.remark;
     });
+  }
+
+  Set<String> _usedApplicationIds({String? exceptApplicationId}) {
+    final skip = (exceptApplicationId ?? '').trim();
+    return {
+      for (final row in _applicantRows)
+        if (row['application_id']!.text.trim().isNotEmpty &&
+            row['application_id']!.text.trim() != skip)
+          row['application_id']!.text.trim(),
+    };
   }
 
   void _removeApplicant(int pageLocalIndex) {
@@ -5658,7 +5710,7 @@ class _ApplicantsProfileFormEditorState
     widget.onSave(_buildCurrentEntry());
   }
 
-  static String _dash(String v) => v.trim().isEmpty ? 'â€”' : v.trim();
+  static String _dash(String v) => v.trim().isEmpty ? '—' : v.trim();
 
   static String _initialsOf(String name) {
     final parts = name
@@ -5806,11 +5858,11 @@ class _ApplicantsProfileFormEditorState
                       backgroundColor: AppTheme.primaryNavy,
                     ),
                   ),
-                if (widget.entry.id != null &&
-                    widget.onMarkCompleted != null &&
+                if (widget.onMarkCompleted != null &&
                     !widget.requirementCompleted)
                   FilledButton(
-                    onPressed: widget.onMarkCompleted,
+                    onPressed: () =>
+                        widget.onMarkCompleted!(_buildCurrentEntry()),
                     style: FilledButton.styleFrom(
                       backgroundColor: const Color(0xFFE85D04),
                     ),
@@ -6091,7 +6143,7 @@ class _ApplicantsProfileFormEditorState
         Text(
           _applicantRows.isEmpty
               ? 'No applicants yet'
-              : 'Rows ${_currentPageStart + 1}â€“$_currentPageEnd of ${_applicantRows.length}',
+              : 'Rows ${_currentPageStart + 1}–$_currentPageEnd of ${_applicantRows.length}',
           style: TextStyle(
             color: AppTheme.dashTextSecondaryOf(context),
             fontSize: 12,
@@ -6205,7 +6257,7 @@ class _ApplicantsProfileFormEditorState
                   ),
                   DataCell(
                     Text(
-                      name.isEmpty ? 'â€”' : name,
+                      name.isEmpty ? '—' : name,
                       style: const TextStyle(fontWeight: FontWeight.w700),
                     ),
                   ),
@@ -6311,7 +6363,7 @@ class _ApplicantsProfileFormEditorState
                 ro
                     ? Text(
                         _preparedBy.text.trim().isEmpty
-                            ? 'â€”'
+                            ? '—'
                             : _preparedBy.text.trim(),
                         style: TextStyle(
                           color: primary,
@@ -6370,7 +6422,7 @@ class _ApplicantsProfileFormEditorState
                 ro
                     ? Text(
                         _checkedBy.text.trim().isEmpty
-                            ? 'â€”'
+                            ? '—'
                             : _checkedBy.text.trim(),
                         style: TextStyle(
                           color: primary,
@@ -6476,6 +6528,7 @@ class _ApplicantDialogResult {
     required this.age,
     required this.civilStatus,
     required this.remark,
+    this.applicationId,
   });
 
   final String name;
@@ -6485,14 +6538,22 @@ class _ApplicantDialogResult {
   final String age;
   final String civilStatus;
   final String remark;
+  final String? applicationId;
 }
 
 /// Modal used by the Applicants section for both "Add Applicant" and "Edit Applicant".
 class _ApplicantDialog extends StatefulWidget {
-  const _ApplicantDialog({required this.isEditing, this.initial});
+  const _ApplicantDialog({
+    required this.isEditing,
+    this.initial,
+    this.positionAppliedFor = '',
+    this.excludedApplicationIds = const {},
+  });
 
   final bool isEditing;
   final _ApplicantDialogResult? initial;
+  final String positionAppliedFor;
+  final Set<String> excludedApplicationIds;
 
   @override
   State<_ApplicantDialog> createState() => _ApplicantDialogState();
@@ -6517,6 +6578,12 @@ class _ApplicantDialogState extends State<_ApplicantDialog> {
   String? _sex;
   String? _civilStatus;
   String? _initialRawAddress;
+  int _fillRevision = 0;
+  List<RecruitmentApplication> _matches = const [];
+  bool _loadingApplicants = true;
+  String? _loadError;
+  String? _selectedApplicationId;
+  String? _selectedLabel;
 
   @override
   void initState() {
@@ -6527,11 +6594,122 @@ class _ApplicantDialogState extends State<_ApplicantDialog> {
     _street = TextEditingController();
     _age = TextEditingController(text: i?.age ?? '');
     _remark = TextEditingController(text: i?.remark ?? '');
-    _sex = _sexOptions.contains(i?.sex) ? i!.sex : null;
-    _civilStatus = _civilStatusOptions.contains(i?.civilStatus)
-        ? i!.civilStatus
-        : null;
+    _sex = _optionMatch(_sexOptions, i?.sex);
+    _civilStatus = _optionMatch(_civilStatusOptions, i?.civilStatus);
     _initialRawAddress = i?.address;
+    _selectedApplicationId = (i?.applicationId ?? '').trim().isEmpty
+        ? null
+        : i!.applicationId!.trim();
+    _loadApplicants();
+  }
+
+  static String _positionKey(String? raw) {
+    var text = (raw ?? '').trim().toLowerCase();
+    text = text.replaceFirst(RegExp(r'^now hiring:\s*'), '');
+    return text.replaceAll(RegExp(r'\s+'), ' ');
+  }
+
+  static String? _optionMatch(List<String> options, String? raw) {
+    final wanted = (raw ?? '').trim().toLowerCase();
+    if (wanted.isEmpty) return null;
+    for (final option in options) {
+      if (option.toLowerCase() == wanted) return option;
+    }
+    return null;
+  }
+
+  String _ageText(RecruitmentApplication app) {
+    final stored = (app.age ?? '').trim();
+    if (stored.isNotEmpty) return stored;
+    final parsed = DateTime.tryParse((app.dateOfBirth ?? '').trim());
+    if (parsed == null) return '';
+    final today = DateTime.now();
+    var age = today.year - parsed.year;
+    final hadBirthday =
+        today.month > parsed.month ||
+        (today.month == parsed.month && today.day >= parsed.day);
+    if (!hadBirthday) age--;
+    return age < 0 ? '' : '$age';
+  }
+
+  String _choiceLabel(RecruitmentApplication app) {
+    final name = app.fullName.trim();
+    final number = (app.applicantNumber ?? '').trim();
+    if (number.isEmpty) return name.isEmpty ? app.id : name;
+    return '$name · $number';
+  }
+
+  Future<void> _loadApplicants() async {
+    final position = _positionKey(widget.positionAppliedFor);
+    if (position.isEmpty) {
+      if (!mounted) return;
+      setState(() {
+        _matches = const [];
+        _loadingApplicants = false;
+      });
+      return;
+    }
+    try {
+      final rows = await RecruitmentRepo.instance.listApplications();
+      if (!mounted) return;
+      final matches = [
+        for (final app in rows)
+          if (_positionKey(app.positionAppliedFor) == position &&
+              !widget.excludedApplicationIds.contains(app.id))
+            app,
+      ]..sort(
+        (a, b) => a.fullName.toLowerCase().compareTo(b.fullName.toLowerCase()),
+      );
+      String? label;
+      if (_selectedApplicationId != null) {
+        for (final app in matches) {
+          if (app.id == _selectedApplicationId) {
+            label = _choiceLabel(app);
+            break;
+          }
+        }
+      }
+      setState(() {
+        _matches = matches;
+        _selectedLabel = label;
+        _loadingApplicants = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _loadError = userFacingApiError(e);
+        _loadingApplicants = false;
+      });
+    }
+  }
+
+  void _applyApplication(String? label) {
+    RecruitmentApplication? match;
+    for (final app in _matches) {
+      if (_choiceLabel(app) == label) {
+        match = app;
+        break;
+      }
+    }
+    if (match == null) {
+      setState(() {
+        _selectedApplicationId = null;
+        _selectedLabel = null;
+      });
+      return;
+    }
+    final selected = match;
+    setState(() {
+      _selectedApplicationId = selected.id;
+      _selectedLabel = label;
+      _name.text = selected.fullName;
+      _course.text = (selected.course ?? '').trim();
+      _age.text = _ageText(selected);
+      _sex = _optionMatch(_sexOptions, selected.sex);
+      _civilStatus = _optionMatch(_civilStatusOptions, selected.civilStatus);
+      _initialRawAddress = selected.address;
+      _fillRevision++;
+    });
   }
 
   @override
@@ -6560,6 +6738,7 @@ class _ApplicantDialogState extends State<_ApplicantDialog> {
         age: _age.text.trim(),
         civilStatus: _civilStatus ?? '',
         remark: _remark.text.trim(),
+        applicationId: _selectedApplicationId,
       ),
     );
   }
@@ -6626,7 +6805,7 @@ class _ApplicantDialogState extends State<_ApplicantDialog> {
                             ),
                             const SizedBox(height: 2),
                             Text(
-                              'Enter applicant details for this profile.',
+                              'Select an applicant for this position, or type the details.',
                               style: TextStyle(
                                 fontSize: 12.5,
                                 color: secondary,
@@ -6649,6 +6828,61 @@ class _ApplicantDialogState extends State<_ApplicantDialog> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
+                        Text(
+                          'EXISTING APPLICANT',
+                          style: AppTheme.dashSectionTitle(context),
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          _positionKey(widget.positionAppliedFor).isEmpty
+                              ? 'Enter Position Applied For on the profile first. Applicants for that job will appear here.'
+                              : 'Applicants who applied for ${widget.positionAppliedFor.trim()}. Selecting one fills this form.',
+                          style: TextStyle(fontSize: 12.5, color: secondary),
+                        ),
+                        const SizedBox(height: 10),
+                        if (_loadingApplicants)
+                          const LinearProgressIndicator(minHeight: 3)
+                        else if (_loadError != null)
+                          Text(
+                            _loadError!,
+                            style: TextStyle(
+                              color: Colors.red.shade700,
+                              fontSize: 12.5,
+                            ),
+                          )
+                        else if (_positionKey(widget.positionAppliedFor)
+                                .isNotEmpty &&
+                            _matches.isEmpty)
+                          Text(
+                            'No applications found for this position yet.',
+                            style: TextStyle(fontSize: 12.5, color: secondary),
+                          )
+                        else if (_matches.isNotEmpty)
+                          SearchableDropdownField(
+                            options: [
+                              for (final app in _matches) _choiceLabel(app),
+                            ],
+                            value: _selectedLabel,
+                            searchText: (label) {
+                              for (final app in _matches) {
+                                if (_choiceLabel(app) != label) continue;
+                                return [
+                                  app.fullName,
+                                  app.applicantNumber ?? '',
+                                  app.email,
+                                  app.course ?? '',
+                                ].join(' ').toLowerCase();
+                              }
+                              return label.toLowerCase();
+                            },
+                            onChanged: _applyApplication,
+                            decoration: AppTheme.dashInputDecoration(
+                              context,
+                              labelText: 'Applicant',
+                              hintText: 'Search name or Application ID',
+                            ),
+                          ),
+                        const SizedBox(height: 20),
                         Text(
                           'PERSONAL INFORMATION',
                           style: AppTheme.dashSectionTitle(context),
@@ -6699,6 +6933,7 @@ class _ApplicantDialogState extends State<_ApplicantDialog> {
                           builder: (context, constraints) {
                             final wide = constraints.maxWidth > 480;
                             final sexField = DropdownButtonFormField<String>(
+                              key: ValueKey('sex-$_fillRevision'),
                               initialValue: _sex,
                               decoration: AppTheme.dashInputDecoration(
                                 context,
@@ -6726,6 +6961,7 @@ class _ApplicantDialogState extends State<_ApplicantDialog> {
                               ),
                             );
                             final civilField = DropdownButtonFormField<String>(
+                              key: ValueKey('civil-$_fillRevision'),
                               initialValue: _civilStatus,
                               decoration: AppTheme.dashInputDecoration(
                                 context,
@@ -6904,6 +7140,30 @@ class _RspSelectionLineupSectionState
         application.status.trim().toLowerCase() == 'passed';
   }
 
+  /// Persists immediately so DocuTracker can assign Prepared by (creator)
+  /// while the user is still filling the form.
+  Future<void> _beginLineupEdit(SelectionLineupEntry draft) async {
+    try {
+      final saved = await SelectionLineupRepo.instance.insert(draft);
+      if (!mounted) return;
+      setState(() {
+        _editing = saved;
+        _recordReadOnly = false;
+        _requirementCompleted = false;
+        _signatureStatus = null;
+      });
+      _load();
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _editing = draft;
+        _recordReadOnly = false;
+        _requirementCompleted = false;
+        _signatureStatus = null;
+      });
+    }
+  }
+
   Future<void> _startNew() async {
     try {
       final announcement = await JobVacancyAnnouncementRepo.instance.fetch();
@@ -6919,12 +7179,7 @@ class _RspSelectionLineupSectionState
       if (!mounted) return;
       final positions = _lineupPositions(announcement, applications);
       if (positions.isEmpty) {
-        setState(() {
-          _editing = const SelectionLineupEntry();
-          _recordReadOnly = false;
-          _requirementCompleted = false;
-          _signatureStatus = null;
-        });
+        await _beginLineupEdit(const SelectionLineupEntry());
         return;
       }
       final selected = await _pickLineupPosition(positions, applications);
@@ -6932,33 +7187,20 @@ class _RspSelectionLineupSectionState
         return;
       }
       if (selected == _blankLineupChoice) {
-        setState(() {
-          _editing = const SelectionLineupEntry();
-          _recordReadOnly = false;
-          _requirementCompleted = false;
-          _signatureStatus = null;
-        });
+        await _beginLineupEdit(const SelectionLineupEntry());
         return;
       }
-      setState(() {
-        _recordReadOnly = false;
-        _requirementCompleted = false;
-        _signatureStatus = null;
-        _editing = _buildAutoPrefilledLineup(
+      await _beginLineupEdit(
+        _buildAutoPrefilledLineup(
           announcement,
           applications,
           workSheets,
           selected,
-        );
-      });
+        ),
+      );
     } catch (_) {
       if (!mounted) return;
-      setState(() {
-        _editing = const SelectionLineupEntry();
-        _recordReadOnly = false;
-        _requirementCompleted = false;
-        _signatureStatus = null;
-      });
+      await _beginLineupEdit(const SelectionLineupEntry());
     }
   }
 
@@ -7198,10 +7440,24 @@ class _RspSelectionLineupSectionState
 
   void _edit(SelectionLineupEntry entry) => _openRecord(entry, readOnly: false);
 
-  Future<void> _markLineupCompleted() async {
-    final id = _editing?.id;
-    if (id == null || _requirementCompleted) return;
+  Future<void> _markLineupCompleted(SelectionLineupEntry entry) async {
+    if (_requirementCompleted) return;
     try {
+      var working = entry;
+      var id = working.id;
+      if (id == null) {
+        working = await SelectionLineupRepo.instance.insert(working);
+        id = working.id;
+        if (id == null) {
+          throw StateError('The form was saved but no record id was returned.');
+        }
+        if (!mounted) return;
+        setState(() {
+          _editing = working;
+          _signatureStatus = null;
+          _recordReadOnly = false;
+        });
+      }
       final payload = await RecruitmentRepo.instance
           .completeSelectionLineupEntry(id);
       if (!mounted) return;
@@ -7216,6 +7472,7 @@ class _RspSelectionLineupSectionState
           ),
         ),
       );
+      _load();
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(
@@ -7341,22 +7598,23 @@ class _RspSelectionLineupSectionState
 
   Future<void> _onSave(SelectionLineupEntry entry) async {
     try {
+      final SelectionLineupEntry saved;
       if (entry.id == null) {
-        await SelectionLineupRepo.instance.insert(entry);
+        saved = await SelectionLineupRepo.instance.insert(entry);
       } else {
         await SelectionLineupRepo.instance.update(entry);
+        saved = entry;
       }
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Selection line-up saved.')),
-        );
-        setState(() {
-          _editing = null;
-          _recordReadOnly = false;
-          _signatureStatus = null;
-        });
-        _load();
-      }
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Selection line-up saved.')),
+      );
+      // Keep the editor open so e-sign fields stay available after save.
+      setState(() {
+        _editing = saved;
+        _recordReadOnly = false;
+      });
+      _load();
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -7494,8 +7752,8 @@ class _RspSelectionLineupSectionState
         return SavedRecordListItem(
           title: pos,
           subtitle:
-              '${e.date ?? "Ã¢â‚¬â€"} Ã‚Â· ${e.applicants.length} applicant(s)',
-          detailDialogTitle: 'Selection line-up Ã¢â‚¬â€ $pos',
+              '${e.date ?? "—"} · ${e.applicants.length} applicant(s)',
+          detailDialogTitle: 'Selection line-up — $pos',
           previewContentWidth: 1000,
           previewBuilder: () => _SelectionLineupEditor(
             readOnly: true,
@@ -7573,7 +7831,7 @@ class _RspSelectionLineupSectionState
             onPrint: _printSl,
             onPreview: _previewSl,
             onDownloadPdf: _downloadSl,
-            onMarkCompleted: _editing?.id == null ? null : _markLineupCompleted,
+            onMarkCompleted: _markLineupCompleted,
             requirementCompleted: _requirementCompleted,
           ),
           if (_editing?.id != null) ...[
@@ -7647,7 +7905,7 @@ class _SelectionLineupEditor extends StatefulWidget {
   final Future<void> Function(SelectionLineupEntry) onPrint;
   final Future<void> Function(SelectionLineupEntry)? onPreview;
   final Future<void> Function(SelectionLineupEntry) onDownloadPdf;
-  final Future<void> Function()? onMarkCompleted;
+  final Future<void> Function(SelectionLineupEntry)? onMarkCompleted;
   final bool requirementCompleted;
   final bool? showRecordActions;
   final VoidCallback? onEditRecord;
@@ -7889,14 +8147,32 @@ class _SelectionLineupEditorState extends State<_SelectionLineupEditor> {
     }
   }
 
+  Set<String> _usedApplicationIds({String? exceptApplicationId}) {
+    final skip = (exceptApplicationId ?? '').trim();
+    return {
+      for (final row in _rows)
+        if (row['application_id']!.text.trim().isNotEmpty &&
+            row['application_id']!.text.trim() != skip)
+          row['application_id']!.text.trim(),
+    };
+  }
+
   Future<void> _openAddApplicantDialog() async {
     if (widget.readOnly) return;
     final result = await showDialog<_SlApplicantDialogResult>(
       context: context,
-      builder: (_) => const _SlApplicantDialog(isEditing: false),
+      builder: (_) => _SlApplicantDialog(
+        isEditing: false,
+        vacantPosition: _position.text,
+        excludedApplicationIds: _usedApplicationIds(),
+      ),
     );
     if (result == null || !mounted) return;
     setState(() {
+      final pickedPosition = (result.vacantPosition ?? '').trim();
+      if (_position.text.trim().isEmpty && pickedPosition.isNotEmpty) {
+        _position.text = pickedPosition;
+      }
       _rows.add(
         _slRow(
           result.name,
@@ -7904,6 +8180,7 @@ class _SelectionLineupEditorState extends State<_SelectionLineupEditor> {
           result.experience,
           result.training,
           result.eligibility,
+          applicationId: result.applicationId ?? '',
         ),
       );
     });
@@ -7912,19 +8189,33 @@ class _SelectionLineupEditorState extends State<_SelectionLineupEditor> {
   Future<void> _openEditApplicantDialog(int index) async {
     if (widget.readOnly) return;
     final row = _rows[index];
+    final currentApplicationId = row['application_id']!.text.trim();
     final initial = _SlApplicantDialogResult(
       name: row['name']!.text,
       education: row['education']!.text,
       experience: row['experience']!.text,
       training: row['training']!.text,
       eligibility: row['eligibility']!.text,
+      applicationId: currentApplicationId.isEmpty ? null : currentApplicationId,
     );
     final result = await showDialog<_SlApplicantDialogResult>(
       context: context,
-      builder: (_) => _SlApplicantDialog(isEditing: true, initial: initial),
+      builder: (_) => _SlApplicantDialog(
+        isEditing: true,
+        initial: initial,
+        vacantPosition: _position.text,
+        excludedApplicationIds: _usedApplicationIds(
+          exceptApplicationId: currentApplicationId,
+        ),
+      ),
     );
     if (result == null || !mounted) return;
     setState(() {
+      final pickedPosition = (result.vacantPosition ?? '').trim();
+      if (_position.text.trim().isEmpty && pickedPosition.isNotEmpty) {
+        _position.text = pickedPosition;
+      }
+      row['application_id']!.text = result.applicationId ?? '';
       row['name']!.text = result.name;
       row['education']!.text = result.education;
       row['experience']!.text = result.experience;
@@ -8158,11 +8449,11 @@ class _SelectionLineupEditorState extends State<_SelectionLineupEditor> {
                   ),
               ],
               if ((widget.showRecordActions == true || !ro) &&
-                  widget.entry.id != null &&
                   widget.onMarkCompleted != null &&
                   !widget.requirementCompleted)
                 FilledButton(
-                  onPressed: widget.onMarkCompleted,
+                  onPressed: () =>
+                      widget.onMarkCompleted!(_buildCurrentEntry()),
                   style: FilledButton.styleFrom(
                     backgroundColor: const Color(0xFFE85D04),
                   ),
@@ -8635,6 +8926,8 @@ class _SlApplicantDialogResult {
     required this.experience,
     required this.training,
     required this.eligibility,
+    this.applicationId,
+    this.vacantPosition,
   });
 
   final String name;
@@ -8642,13 +8935,22 @@ class _SlApplicantDialogResult {
   final String experience;
   final String training;
   final String eligibility;
+  final String? applicationId;
+  final String? vacantPosition;
 }
 
 class _SlApplicantDialog extends StatefulWidget {
-  const _SlApplicantDialog({required this.isEditing, this.initial});
+  const _SlApplicantDialog({
+    required this.isEditing,
+    this.initial,
+    this.vacantPosition = '',
+    this.excludedApplicationIds = const {},
+  });
 
   final bool isEditing;
   final _SlApplicantDialogResult? initial;
+  final String vacantPosition;
+  final Set<String> excludedApplicationIds;
 
   @override
   State<_SlApplicantDialog> createState() => _SlApplicantDialogState();
@@ -8656,11 +8958,22 @@ class _SlApplicantDialog extends StatefulWidget {
 
 class _SlApplicantDialogState extends State<_SlApplicantDialog> {
   final _formKey = GlobalKey<FormState>();
+  final _search = TextEditingController();
   late TextEditingController _name;
   late TextEditingController _education;
   late TextEditingController _experience;
   late TextEditingController _training;
   late TextEditingController _eligibility;
+  List<RecruitmentApplication> _pool = const [];
+  List<String> _positionOptions = const [];
+  List<SelectionLineupEntry> _lineupCache = const [];
+  List<ComparativeAssessmentEntry> _assessmentCache = const [];
+  List<WorkExperienceSheetEntry> _sheetCache = const [];
+  bool _loadingApplicants = true;
+  String? _loadError;
+  String? _selectedApplicationId;
+  String? _fillNote;
+  late String _selectedPosition;
 
   @override
   void initState() {
@@ -8671,16 +8984,241 @@ class _SlApplicantDialogState extends State<_SlApplicantDialog> {
     _experience = TextEditingController(text: i?.experience ?? '');
     _training = TextEditingController(text: i?.training ?? '');
     _eligibility = TextEditingController(text: i?.eligibility ?? '');
+    final existingId = (i?.applicationId ?? '').trim();
+    _selectedApplicationId = existingId.isEmpty ? null : existingId;
+    final lineupPosition = widget.vacantPosition.trim();
+    _selectedPosition = lineupPosition;
+    _loadApplicants();
   }
 
   @override
   void dispose() {
+    _search.dispose();
     _name.dispose();
     _education.dispose();
     _experience.dispose();
     _training.dispose();
     _eligibility.dispose();
     super.dispose();
+  }
+
+  String _choiceLabel(RecruitmentApplication app) {
+    final name = app.fullName.trim();
+    final number = (app.applicantNumber ?? '').trim();
+    if (number.isEmpty) return name.isEmpty ? app.id : name;
+    return '$name · $number';
+  }
+
+  bool _positionSelected(RecruitmentApplication app) {
+    if (selectionLineupPositionKey(_selectedPosition).isEmpty) return false;
+    return selectionLineupSamePosition(
+      app.positionAppliedFor,
+      _selectedPosition,
+    );
+  }
+
+  List<RecruitmentApplication> get _visibleApplicants {
+    final query = _search.text.trim().toLowerCase();
+    final out = <RecruitmentApplication>[];
+    for (final app in _pool) {
+      if (widget.excludedApplicationIds.contains(app.id)) continue;
+      if (!_positionSelected(app)) continue;
+      if (query.isEmpty) {
+        out.add(app);
+        continue;
+      }
+      final hay = [
+        app.fullName,
+        app.applicantNumber ?? '',
+        app.email,
+        app.course ?? '',
+        app.positionAppliedFor ?? '',
+      ].join(' ').toLowerCase();
+      if (hay.contains(query)) out.add(app);
+    }
+    return out;
+  }
+
+  int get _alreadyOnFormCount {
+    var count = 0;
+    for (final app in _pool) {
+      if (!widget.excludedApplicationIds.contains(app.id)) continue;
+      if (_positionSelected(app)) count++;
+    }
+    return count;
+  }
+
+  String? get _positionToSave {
+    final selected = _selectedPosition.trim();
+    if (selected.isNotEmpty) return selected;
+    for (final app in _pool) {
+      if (app.id == _selectedApplicationId) {
+        final position = (app.positionAppliedFor ?? '').trim();
+        if (position.isNotEmpty) return position;
+      }
+    }
+    return null;
+  }
+
+  Future<List<String>> _safeVacancyPositions() async {
+    try {
+      final announcement = await JobVacancyAnnouncementRepo.instance.fetch();
+      final positions = <String>[];
+      for (final vacancy in announcement.vacancies) {
+        final key = vacancy.positionKey?.trim();
+        if (key != null && key.isNotEmpty && !positions.contains(key)) {
+          positions.add(key);
+        }
+      }
+      return positions;
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  Future<void> _loadApplicants() async {
+    List<RecruitmentApplication> apps = const [];
+    String? appError;
+    try {
+      apps = await RecruitmentRepo.instance.listApplications();
+    } catch (e) {
+      appError = userFacingApiError(e);
+    }
+    final results = await Future.wait([
+      _safeLineups(),
+      _safeAssessments(),
+      _safeSheets(),
+      _safeVacancyPositions(),
+    ]);
+    if (!mounted) return;
+    final lineups = results[0] as List<SelectionLineupEntry>;
+    final assessments = results[1] as List<ComparativeAssessmentEntry>;
+    final sheets = results[2] as List<WorkExperienceSheetEntry>;
+    final vacancies = results[3] as List<String>;
+    final pool = <RecruitmentApplication>[
+      for (final app in apps)
+        if (!app.isFromMayorModule) app,
+    ]..sort(
+      (a, b) => a.fullName.toLowerCase().compareTo(b.fullName.toLowerCase()),
+    );
+    final byKey = <String, String>{};
+    for (final label in vacancies) {
+      final key = selectionLineupPositionKey(label);
+      if (key.isEmpty) continue;
+      byKey.putIfAbsent(key, () => label.trim());
+    }
+    for (final app in pool) {
+      final label = (app.positionAppliedFor ?? '').trim();
+      final key = selectionLineupPositionKey(label);
+      if (key.isEmpty) continue;
+      byKey.putIfAbsent(key, () => label);
+    }
+    final lineup = widget.vacantPosition.trim();
+    final lineupKey = selectionLineupPositionKey(lineup);
+    if (lineupKey.isNotEmpty) byKey[lineupKey] = lineup;
+    final options = byKey.values.toList()..sort();
+    var selected = _selectedPosition.trim();
+    if (lineupKey.isNotEmpty) {
+      selected = byKey[lineupKey] ?? lineup;
+    } else if (selected.isNotEmpty) {
+      selected = byKey[selectionLineupPositionKey(selected)] ?? selected;
+    }
+    setState(() {
+      _pool = pool;
+      _positionOptions = options;
+      _selectedPosition = selected;
+      _loadingApplicants = false;
+      _loadError = appError;
+      _lineupCache = lineups;
+      _assessmentCache = assessments;
+      _sheetCache = sheets;
+    });
+  }
+
+  Future<List<SelectionLineupEntry>> _safeLineups() async {
+    try {
+      return await SelectionLineupRepo.instance.list();
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  Future<List<ComparativeAssessmentEntry>> _safeAssessments() async {
+    try {
+      return await ComparativeAssessmentRepo.instance.list();
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  Future<List<WorkExperienceSheetEntry>> _safeSheets() async {
+    try {
+      return await WorkExperienceSheetRepo.instance.list();
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  void _applyApplication(RecruitmentApplication match) {
+    final position = (match.positionAppliedFor ?? '').trim();
+    final fill = selectionLineupFillFromApplication(
+      application: match,
+      vacantPosition: position.isEmpty ? _selectedPosition : position,
+      lineups: _lineupCache,
+      assessments: _assessmentCache,
+      sheets: _sheetCache,
+    );
+    final filled = <String>[
+      if (fill.education.isNotEmpty) 'education',
+      if (fill.experience.isNotEmpty) 'experience',
+      if (fill.training.isNotEmpty) 'training',
+      if (fill.eligibility.isNotEmpty) 'eligibility',
+    ];
+    final filledLabel = switch (filled.length) {
+      0 => '',
+      1 => filled.single,
+      2 => '${filled[0]} and ${filled[1]}',
+      _ =>
+        '${filled.sublist(0, filled.length - 1).join(', ')}, and ${filled.last}',
+    };
+    setState(() {
+      _selectedApplicationId = match.id;
+      if (position.isNotEmpty) {
+        for (final option in _positionOptions) {
+          if (selectionLineupSamePosition(option, position)) {
+            _selectedPosition = option;
+            break;
+          }
+        }
+      }
+      _name.text = fill.name;
+      _education.text = fill.education;
+      _experience.text = fill.experience;
+      _training.text = fill.training;
+      _eligibility.text = fill.eligibility;
+      _fillNote = filled.isEmpty
+          ? 'Name was filled from this application. Type the qualifications below.'
+          : 'Filled name, $filledLabel. You can still edit every field.';
+    });
+  }
+
+  void _onPositionPicked(String? value) {
+    setState(() {
+      _selectedPosition = (value ?? '').trim();
+      if (_selectedApplicationId == null) return;
+      final stillThere = _pool.any(
+        (app) =>
+            app.id == _selectedApplicationId &&
+            selectionLineupSamePosition(
+              app.positionAppliedFor,
+              _selectedPosition,
+            ),
+      );
+      if (!stillThere) {
+        _selectedApplicationId = null;
+        _fillNote = null;
+      }
+    });
   }
 
   void _submit() {
@@ -8692,6 +9230,79 @@ class _SlApplicantDialogState extends State<_SlApplicantDialog> {
         experience: _experience.text.trim(),
         training: _training.text.trim(),
         eligibility: _eligibility.text.trim(),
+        applicationId: _selectedApplicationId,
+        vacantPosition: _positionToSave,
+      ),
+    );
+  }
+
+  Widget _pair(Widget a, Widget b) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        if (constraints.maxWidth < 460) {
+          return Column(
+            children: [a, const SizedBox(height: 10), b],
+          );
+        }
+        return Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(child: a),
+            const SizedBox(width: 12),
+            Expanded(child: b),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _applicantCard(BuildContext context, RecruitmentApplication app) {
+    final selected = app.id == _selectedApplicationId;
+    final secondary = AppTheme.dashTextSecondaryOf(context);
+    final position = (app.positionAppliedFor ?? '').trim();
+    final course = (app.course ?? '').trim();
+    return Material(
+      color: selected
+          ? AppTheme.primaryNavy.withValues(alpha: 0.08)
+          : AppTheme.dashMutedSurfaceOf(context),
+      borderRadius: BorderRadius.circular(12),
+      child: InkWell(
+        onTap: () => _applyApplication(app),
+        borderRadius: BorderRadius.circular(12),
+        child: Container(
+          width: double.infinity,
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: selected
+                  ? AppTheme.primaryNavy
+                  : AppTheme.dashHairlineOf(context),
+            ),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                _choiceLabel(app),
+                style: TextStyle(
+                  fontWeight: FontWeight.w700,
+                  color: AppTheme.dashTextPrimaryOf(context),
+                ),
+              ),
+              if (position.isNotEmpty || course.isNotEmpty) ...[
+                const SizedBox(height: 2),
+                Text(
+                  [
+                    if (position.isNotEmpty) position,
+                    if (course.isNotEmpty) course,
+                  ].join(' · '),
+                  style: TextStyle(fontSize: 12, color: secondary),
+                ),
+              ],
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -8700,35 +9311,78 @@ class _SlApplicantDialogState extends State<_SlApplicantDialog> {
   Widget build(BuildContext context) {
     final primary = AppTheme.dashTextPrimaryOf(context);
     final secondary = AppTheme.dashTextSecondaryOf(context);
+    final hairline = AppTheme.dashHairlineOf(context);
+    final visible = _visibleApplicants;
+    final hidden = _alreadyOnFormCount;
+    final query = _search.text.trim();
+    final maxH = MediaQuery.sizeOf(context).height * 0.9;
+    final hasPosition = selectionLineupPositionKey(_selectedPosition).isNotEmpty;
+    final emptyMessage = !hasPosition
+        ? 'Select a position first. Applicants for that job will appear here.'
+        : query.isNotEmpty
+        ? 'No applicants match that search.'
+        : hidden > 0
+        ? 'Every applicant for this position is already on the line-up.'
+        : 'No applications for this position yet. You can still type the details below.';
+
     return Dialog(
       backgroundColor: Colors.transparent,
-      insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 28),
+      insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
       child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 520),
-        child: Material(
-          color: AppTheme.dashPanelOf(context),
-          borderRadius: BorderRadius.circular(16),
-          clipBehavior: Clip.antiAlias,
-          elevation: 10,
-          shadowColor: Colors.black26,
-          child: Form(
-            key: _formKey,
-            child: Padding(
-              padding: const EdgeInsets.all(22),
+        constraints: BoxConstraints(maxWidth: 560, maxHeight: maxH),
+        child: SingleChildScrollView(
+          child: Material(
+            color: AppTheme.dashPanelOf(context),
+            borderRadius: BorderRadius.circular(16),
+            clipBehavior: Clip.antiAlias,
+            elevation: 10,
+            shadowColor: Colors.black26,
+            child: Form(
+              key: _formKey,
               child: Column(
                 mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(22, 18, 10, 12),
+                  child: Row(
                     children: [
+                      Container(
+                        width: 36,
+                        height: 36,
+                        decoration: BoxDecoration(
+                          color: AppTheme.primaryNavy.withValues(alpha: 0.12),
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: Icon(
+                          widget.isEditing
+                              ? Icons.edit_outlined
+                              : Icons.person_add_alt_1_rounded,
+                          size: 20,
+                          color: AppTheme.primaryNavy,
+                        ),
+                      ),
+                      const SizedBox(width: 12),
                       Expanded(
-                        child: Text(
-                          widget.isEditing ? 'Edit Applicant' : 'Add Applicant',
-                          style: TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.w800,
-                            color: primary,
-                          ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              widget.isEditing
+                                  ? 'Edit Applicant'
+                                  : 'Add Applicant',
+                              style: TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.w800,
+                                color: primary,
+                              ),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              'Select an applicant for this position, or type the details.',
+                              style: TextStyle(fontSize: 12.5, color: secondary),
+                            ),
+                          ],
                         ),
                       ),
                       IconButton(
@@ -8737,51 +9391,176 @@ class _SlApplicantDialogState extends State<_SlApplicantDialog> {
                       ),
                     ],
                   ),
-                  const SizedBox(height: 6),
-                  TextFormField(
-                    controller: _name,
-                    textCapitalization: TextCapitalization.words,
-                    decoration: AppTheme.dashInputDecoration(
-                      context,
-                      labelText: 'Applicant Name',
-                    ),
-                    validator: (v) =>
-                        (v == null || v.trim().isEmpty) ? 'Required' : null,
+                ),
+                Divider(height: 1, color: hairline),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(22, 16, 22, 8),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'EXISTING APPLICANT',
+                        style: AppTheme.dashSectionTitle(context),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        'The vacant position can stay blank. Choose the position here, then tap an applicant for that job.',
+                        style: TextStyle(fontSize: 12.5, color: secondary),
+                      ),
+                      const SizedBox(height: 10),
+                      if (_loadingApplicants)
+                        const LinearProgressIndicator(minHeight: 3)
+                      else if (_positionOptions.isEmpty)
+                        Text(
+                          'No positions found yet.',
+                          style: TextStyle(fontSize: 12.5, color: secondary),
+                        )
+                      else
+                        DropdownButtonFormField<String>(
+                          key: ValueKey(
+                            '${_positionOptions.join('|')}|$_selectedPosition',
+                          ),
+                          initialValue:
+                              _positionOptions.contains(_selectedPosition)
+                              ? _selectedPosition
+                              : null,
+                          isExpanded: true,
+                          hint: const Text('Select position'),
+                          items: [
+                            for (final position in _positionOptions)
+                              DropdownMenuItem<String>(
+                                value: position,
+                                child: Text(
+                                  position,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                          ],
+                          onChanged: _onPositionPicked,
+                          decoration: AppTheme.dashInputDecoration(
+                            context,
+                            labelText: 'Position',
+                          ),
+                        ),
+                      if (!_loadingApplicants &&
+                          _positionOptions.isNotEmpty &&
+                          !hasPosition)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 10),
+                          child: Text(
+                            'Select a position first. Applicants for that job will appear here.',
+                            style: TextStyle(fontSize: 12.5, color: secondary),
+                          ),
+                        )
+                      else if (hasPosition) ...[
+                        const SizedBox(height: 10),
+                        TextField(
+                          controller: _search,
+                          onChanged: (_) => setState(() {}),
+                          decoration: AppTheme.dashInputDecoration(
+                            context,
+                            hintText: 'Search name, ID, or course',
+                            prefixIcon: const Icon(
+                              Icons.search_rounded,
+                              size: 18,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 10),
+                        if (_loadError != null)
+                          Padding(
+                            padding: const EdgeInsets.only(bottom: 8),
+                            child: Text(
+                              _loadError!,
+                              style: TextStyle(
+                                color: Colors.red.shade700,
+                                fontSize: 12.5,
+                              ),
+                            ),
+                          ),
+                        if (visible.isEmpty)
+                          Text(
+                            emptyMessage,
+                            style: TextStyle(fontSize: 12.5, color: secondary),
+                          )
+                        else
+                          ConstrainedBox(
+                            constraints: const BoxConstraints(maxHeight: 220),
+                            child: ListView.separated(
+                              shrinkWrap: true,
+                              itemCount: visible.length,
+                              separatorBuilder: (_, __) =>
+                                  const SizedBox(height: 8),
+                              itemBuilder: (context, index) =>
+                                  _applicantCard(context, visible[index]),
+                            ),
+                          ),
+                      ],
+                      if (_fillNote != null) ...[
+                        const SizedBox(height: 8),
+                        Text(
+                          _fillNote!,
+                          style: TextStyle(fontSize: 12.5, color: secondary),
+                        ),
+                      ],
+                      const SizedBox(height: 18),
+                      Text(
+                        'QUALIFICATIONS',
+                        style: AppTheme.dashSectionTitle(context),
+                      ),
+                      const SizedBox(height: 12),
+                      TextFormField(
+                        controller: _name,
+                        textCapitalization: TextCapitalization.words,
+                        decoration: AppTheme.dashInputDecoration(
+                          context,
+                          labelText: 'Applicant Name',
+                        ),
+                        validator: (v) => (v == null || v.trim().isEmpty)
+                            ? 'Required'
+                            : null,
+                      ),
+                      const SizedBox(height: 10),
+                      _pair(
+                        TextFormField(
+                          controller: _education,
+                          decoration: AppTheme.dashInputDecoration(
+                            context,
+                            labelText: 'Education',
+                          ),
+                        ),
+                        TextFormField(
+                          controller: _experience,
+                          decoration: AppTheme.dashInputDecoration(
+                            context,
+                            labelText: 'Experience',
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      _pair(
+                        TextFormField(
+                          controller: _training,
+                          decoration: AppTheme.dashInputDecoration(
+                            context,
+                            labelText: 'Training',
+                          ),
+                        ),
+                        TextFormField(
+                          controller: _eligibility,
+                          decoration: AppTheme.dashInputDecoration(
+                            context,
+                            labelText: 'Eligibility',
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
-                  const SizedBox(height: 14),
-                  TextFormField(
-                    controller: _education,
-                    decoration: AppTheme.dashInputDecoration(
-                      context,
-                      labelText: 'Education',
-                    ),
-                  ),
-                  const SizedBox(height: 14),
-                  TextFormField(
-                    controller: _experience,
-                    decoration: AppTheme.dashInputDecoration(
-                      context,
-                      labelText: 'Experience',
-                    ),
-                  ),
-                  const SizedBox(height: 14),
-                  TextFormField(
-                    controller: _training,
-                    decoration: AppTheme.dashInputDecoration(
-                      context,
-                      labelText: 'Training',
-                    ),
-                  ),
-                  const SizedBox(height: 14),
-                  TextFormField(
-                    controller: _eligibility,
-                    decoration: AppTheme.dashInputDecoration(
-                      context,
-                      labelText: 'Eligibility',
-                    ),
-                  ),
-                  const SizedBox(height: 22),
-                  Row(
+                ),
+                Divider(height: 1, color: hairline),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(22, 12, 22, 16),
+                  child: Row(
                     mainAxisAlignment: MainAxisAlignment.end,
                     children: [
                       TextButton(
@@ -8800,10 +9579,11 @@ class _SlApplicantDialogState extends State<_SlApplicantDialog> {
                       ),
                     ],
                   ),
-                ],
-              ),
+                ),
+              ],
             ),
           ),
+        ),
         ),
       ),
     );
@@ -8839,8 +9619,6 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
   String _searchQuery = '';
 
   bool _loading = true;
-  bool _syncing = false;
-  bool _exportingReport = false;
   String? _adminPassingApplicantId;
   String? _openedApplicationId;
   final ScrollController _horizontalScrollController = ScrollController();
@@ -8960,7 +9738,7 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
   ) async {
     setState(() => _adminPassingApplicantId = app.id.toLowerCase());
     try {
-      var beiCount = 8;
+      var beiCount = _defaultBeiQuestions.length;
       try {
         final beiQs = await RecruitmentRepo.instance.getExamQuestions('bei');
         if (beiQs.isNotEmpty) beiCount = beiQs.length;
@@ -9617,231 +10395,6 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
     }
   }
 
-  String _reportFilterSummary() {
-    final parts = <String>[];
-    if (_selectedPositionFilter != null &&
-        _selectedPositionFilter!.trim().isNotEmpty) {
-      parts.add('Position: ${_selectedPositionFilter!.trim()}');
-    }
-    if (_selectedAppliedDate != null) {
-      parts.add('Applied date: ${_formatDateShort(_selectedAppliedDate!)}');
-    }
-    if (_statusFilter != null && _statusFilter!.trim().isNotEmpty) {
-      parts.add('Status: ${_statusFilter!.trim()}');
-    }
-    if (_searchQuery.isNotEmpty) {
-      parts.add('Search: $_searchQuery');
-    }
-    if (parts.isEmpty) return 'Filters: none (all applications)';
-    return 'Filters: ${parts.join(' · ')}';
-  }
-
-  List<RspApplicationsReportRow> _reportRows() {
-    return _filteredApplications
-        .map(
-          (app) => RspApplicationsReportRow.fromApplication(
-            app: app,
-            exam: _examResults[app.id.toLowerCase()],
-          ),
-        )
-        .toList();
-  }
-
-  Future<void> _showGenerateReportDialog() async {
-    final apps = _filteredApplications;
-    if (apps.isEmpty) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'No applicants match the current filters. Adjust filters or refresh data.',
-          ),
-        ),
-      );
-      return;
-    }
-
-    var withExam = 0;
-    var passed = 0;
-    for (final app in apps) {
-      final exam = _examResults[app.id.toLowerCase()];
-      if (exam != null) {
-        withExam++;
-        if (exam.passed) passed++;
-      }
-    }
-
-    final choice = await RspGenerateReportDialog.showApplications(
-      context,
-      applicantCount: apps.length,
-      filterSummary: _reportFilterSummary(),
-      withExamCount: withExam,
-      passedCount: passed,
-    );
-    if (choice == null || !mounted) return;
-
-    final rows = _reportRows();
-    final summary = _reportFilterSummary();
-
-    if (choice == RspReportExportChoice.preview) {
-      await RspApplicationsReportPreviewScreen.open(
-        context,
-        rows: rows,
-        filterSummary: summary,
-      );
-      return;
-    }
-
-    setState(() => _exportingReport = true);
-    try {
-      switch (choice) {
-        case RspReportExportChoice.preview:
-          break; // opened before export switch
-        case RspReportExportChoice.csv:
-          await RspApplicationsReportExport.shareCsv(
-            rows: rows,
-            filterSummary: summary,
-          );
-          if (!mounted) return;
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(
-                'CSV report downloaded (${rows.length} applicants).',
-              ),
-              behavior: SnackBarBehavior.floating,
-            ),
-          );
-        case RspReportExportChoice.pdf:
-          await RspApplicationsReportExport.sharePdf(
-            rows: rows,
-            filterSummary: summary,
-          );
-          if (!mounted) return;
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(
-                'PDF report downloaded (${rows.length} applicants).',
-              ),
-              behavior: SnackBarBehavior.floating,
-            ),
-          );
-        case RspReportExportChoice.print:
-          await RspApplicationsReportExport.printPdf(
-            context: context,
-            rows: rows,
-            filterSummary: summary,
-          );
-      }
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Report failed. ${userFacingApiError(e)}'),
-          backgroundColor: Theme.of(context).colorScheme.error,
-        ),
-      );
-    } finally {
-      if (mounted) setState(() => _exportingReport = false);
-    }
-  }
-
-  /// Lists storage paths; retries when the API returns 429 (rate limited).
-  Future<List<Map<String, String>>> _listStoragePathsWithRetry() async {
-    const maxAttempts = 3;
-    for (var attempt = 0; attempt < maxAttempts; attempt++) {
-      if (attempt > 0) {
-        await Future<void>.delayed(Duration(seconds: attempt * 2));
-      }
-      try {
-        return await RecruitmentRepo.instance.listStorageAttachmentPaths();
-      } on DioException catch (e) {
-        if (e.response?.statusCode == 429 && attempt < maxAttempts - 1) {
-          continue;
-        }
-        rethrow;
-      }
-    }
-    return RecruitmentRepo.instance.listStorageAttachmentPaths();
-  }
-
-  /// Sync attachment paths from server disk into DB for applications missing paths.
-  Future<void> _syncAttachmentsFromStorage() async {
-    if (_syncing) return;
-    setState(() => _syncing = true);
-    try {
-      final entries = await _listStoragePathsWithRetry();
-      debugPrint(
-        'Sync attachments: listed ${entries.length} file(s) on server.',
-      );
-      int linked = 0;
-      for (var i = 0; i < entries.length; i++) {
-        final e = entries[i];
-        final fileName = e['fileName']!;
-        final kind = RspApplicationDocKind.fromStorageFileName(fileName);
-        final finalReqKind = RspFinalRequirementDocKind.fromStorageFileName(
-          fileName,
-        );
-        final bool ok;
-        if (kind != null) {
-          ok = await RecruitmentRepo.instance
-              .setApplicationTypedAttachmentIfMissing(
-                e['applicationId']!,
-                e['path']!,
-                fileName,
-                kind,
-              );
-        } else if (finalReqKind != null) {
-          ok = await RecruitmentRepo.instance
-              .setApplicationFinalRequirementIfMissing(
-                e['applicationId']!,
-                e['path']!,
-                fileName,
-                finalReqKind,
-              );
-        } else {
-          ok = await RecruitmentRepo.instance.setApplicationAttachmentIfMissing(
-            e['applicationId']!,
-            e['path']!,
-            fileName,
-          );
-        }
-        if (ok) linked++;
-        if (i > 0 && i % 5 == 0) {
-          await Future<void>.delayed(const Duration(milliseconds: 200));
-        }
-      }
-      if (mounted) {
-        await _load();
-        if (!mounted) return;
-        setState(() => _syncing = false);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              linked > 0
-                  ? 'Linked $linked attachment(s) from storage. You can now view and download them.'
-                  : entries.isEmpty
-                  ? 'No files found in storage (bucket may be empty or path structure is applicationId/filename).'
-                  : 'No applications were missing attachment paths; already linked or no matching application IDs.',
-            ),
-          ),
-        );
-      }
-    } catch (e, st) {
-      debugPrint('Sync attachments failed: $e');
-      debugPrint('$st');
-      if (mounted) {
-        setState(() => _syncing = false);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Sync failed. ${userFacingApiError(e)}'),
-            backgroundColor: Theme.of(context).colorScheme.error,
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
-      }
-    }
-  }
-
   static const _kNa = 'N/A';
 
   ({String province, String city, String barangay, String street})
@@ -10058,39 +10611,9 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
     return n;
   }
 
-  Future<void> _confirmSyncAttachments() async {
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Sync attachments from storage?'),
-        content: const Text(
-          'Link files already in storage to applications that show “No file”. This does not delete or overwrite existing linked documents.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(ctx).pop(true),
-            style: FilledButton.styleFrom(
-              backgroundColor: AppTheme.primaryNavy,
-            ),
-            child: const Text('Sync'),
-          ),
-        ],
-      ),
-    );
-    if (ok == true && mounted) await _syncAttachmentsFromStorage();
-  }
-
   bool _signedInRoleCanManageRequiredForm() {
     final role = context.read<AuthProvider>().user?.role;
     return role == 'admin' || role == 'hr';
-  }
-
-  bool _signedInRoleCanScheduleDeliberation() {
-    return context.read<AuthProvider>().user?.role == 'admin';
   }
 
   Future<void> _openApplicantDetails(
@@ -10121,7 +10644,6 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
               child: _ApplicantDetailsDrawer(
                 app: app,
                 canManageRequiredForm: _signedInRoleCanManageRequiredForm(),
-                canScheduleDeliberation: _signedInRoleCanScheduleDeliberation(),
                 exam: _examResults[app.id.toLowerCase()],
                 initialTab: initialTab,
                 statusBadge: _applicationStatusBadge(
@@ -10669,38 +11191,6 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
     final secondary = AppTheme.dashTextSecondaryOf(context);
     final filteredApplications = _filteredApplications;
 
-    final generateReportBtn = Tooltip(
-      message:
-          'Export the filtered applicant list and exam scores (CSV or PDF).',
-      child: OutlinedButton.icon(
-        onPressed: (_loading || _exportingReport)
-            ? null
-            : _showGenerateReportDialog,
-        icon: _exportingReport
-            ? const SizedBox(
-                width: 18,
-                height: 18,
-                child: CircularProgressIndicator(strokeWidth: 2),
-              )
-            : const Icon(Icons.summarize_outlined, size: 18),
-        label: Text(_exportingReport ? 'Generating…' : 'Generate report'),
-        style: OutlinedButton.styleFrom(
-          foregroundColor: AppTheme.dashIsDark(context)
-              ? AppTheme.primaryNavyLight
-              : AppTheme.primaryNavy,
-          side: BorderSide(
-            color: AppTheme.primaryNavy.withValues(
-              alpha: AppTheme.dashIsDark(context) ? 0.45 : 0.35,
-            ),
-          ),
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
-          ),
-        ),
-      ),
-    );
-
     final dateFilterLabel = _selectedAppliedDate == null
         ? 'Applied date'
         : _formatDateShort(_selectedAppliedDate!);
@@ -10802,7 +11292,6 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
               runSpacing: 8,
               alignment: WrapAlignment.end,
               children: [
-                generateReportBtn,
                 OutlinedButton.icon(
                   onPressed: _loading ? null : _load,
                   icon: const Icon(Icons.refresh_rounded, size: 18),
@@ -10819,24 +11308,6 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                     ),
                   ),
                 ),
-                if (isApplicationsView)
-                  PopupMenuButton<String>(
-                    tooltip: 'More actions',
-                    onSelected: (v) {
-                      if (v == 'sync') _confirmSyncAttachments();
-                    },
-                    itemBuilder: (ctx) => [
-                      PopupMenuItem(
-                        value: 'sync',
-                        enabled: !_loading && !_syncing,
-                        child: Text(
-                          _syncing
-                              ? 'Syncing attachments…'
-                              : 'Sync attachments from storage',
-                        ),
-                      ),
-                    ],
-                  ),
               ],
             ),
           ],
@@ -11058,11 +11529,69 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
   }
 }
 
+/// Uses the content height when it fits, and scrolls once it would overflow.
+///
+/// The child is laid out without a height cap so expanding a card reports its
+/// real height. A constrained [Column] reports only the space it was given,
+/// which hid the overflow and left the yellow-black stripes in place.
+class _FitOrScroll extends StatefulWidget {
+  const _FitOrScroll({required this.maxHeight, required this.child});
+
+  final double maxHeight;
+  final Widget child;
+
+  @override
+  State<_FitOrScroll> createState() => _FitOrScrollState();
+}
+
+class _FitOrScrollState extends State<_FitOrScroll> {
+  final GlobalKey _contentKey = GlobalKey();
+  double? _contentHeight;
+
+  void _captureHeight() {
+    final box = _contentKey.currentContext?.findRenderObject() as RenderBox?;
+    if (box == null || !box.hasSize || !mounted) return;
+    final next = box.size.height;
+    if (_contentHeight != null && (next - _contentHeight!).abs() < 0.5) return;
+    setState(() => _contentHeight = next);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final maxHeight = widget.maxHeight;
+    final measured = _contentHeight;
+    final bounded = maxHeight.isFinite && maxHeight > 0;
+    final viewHeight = !bounded
+        ? (measured ?? 0)
+        : (measured == null || measured > maxHeight ? maxHeight : measured);
+    final canScroll = bounded && measured != null && measured > maxHeight + 0.5;
+
+    WidgetsBinding.instance.addPostFrameCallback((_) => _captureHeight());
+
+    return SizedBox(
+      height: viewHeight,
+      child: SingleChildScrollView(
+        physics: canScroll
+            ? const ClampingScrollPhysics()
+            : const NeverScrollableScrollPhysics(),
+        child: NotificationListener<SizeChangedLayoutNotification>(
+          onNotification: (_) {
+            WidgetsBinding.instance.addPostFrameCallback((_) => _captureHeight());
+            return false;
+          },
+          child: SizeChangedLayoutNotifier(
+            child: KeyedSubtree(key: _contentKey, child: widget.child),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _ApplicantDetailsDrawer extends StatelessWidget {
   const _ApplicantDetailsDrawer({
     required this.app,
     required this.canManageRequiredForm,
-    required this.canScheduleDeliberation,
     required this.exam,
     required this.initialTab,
     required this.statusBadge,
@@ -11079,7 +11608,6 @@ class _ApplicantDetailsDrawer extends StatelessWidget {
 
   final RecruitmentApplication app;
   final bool canManageRequiredForm;
-  final bool canScheduleDeliberation;
   final RecruitmentExamResult? exam;
   final int initialTab;
   final Widget statusBadge;
@@ -11182,6 +11710,25 @@ class _ApplicantDetailsDrawer extends StatelessWidget {
                   ],
                 ),
               ),
+              Expanded(
+                child: LayoutBuilder(
+                  builder: (context, constraints) {
+                    const tabBarSlot = 48.0;
+                    const minTabBody = 140.0;
+                    final available = constraints.maxHeight;
+                    final reserve = available > tabBarSlot + minTabBody + 80
+                        ? tabBarSlot + minTabBody
+                        : tabBarSlot;
+                    final maxCards = (available - reserve).clamp(0.0, available);
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        _FitOrScroll(
+                          maxHeight: maxCards,
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
               Padding(
                 padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
                 child: Container(
@@ -11272,7 +11819,6 @@ class _ApplicantDetailsDrawer extends StatelessWidget {
                   padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
                   child: _PreDeliberationCard(
                     app: app,
-                    canSchedule: canScheduleDeliberation,
                     onUpdated: onUpdated,
                   ),
                 ),
@@ -11283,27 +11829,35 @@ class _ApplicantDetailsDrawer extends StatelessWidget {
                   padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
                   child: _FinalHiringPrepCard(app: app, onUpdated: onUpdated),
                 ),
-              Material(
-                color: AppTheme.dashPanelOf(context),
-                child: const TabBar(
-                  isScrollable: true,
-                  tabAlignment: TabAlignment.start,
-                  tabs: [
-                    Tab(text: 'Overview'),
-                    Tab(text: 'Documents'),
-                    Tab(text: 'Assessment'),
-                    Tab(text: 'Hiring Progress'),
-                  ],
-                ),
-              ),
-              Expanded(
-                child: TabBarView(
-                  children: [
-                    _overviewTab(context),
-                    _documentsTab(context),
-                    _assessmentTab(context),
-                    _progressTab(context),
-                  ],
+                            ],
+                          ),
+                        ),
+                        Material(
+                          color: AppTheme.dashPanelOf(context),
+                          child: const TabBar(
+                            isScrollable: true,
+                            tabAlignment: TabAlignment.start,
+                            tabs: [
+                              Tab(text: 'Overview'),
+                              Tab(text: 'Documents'),
+                              Tab(text: 'Assessment'),
+                              Tab(text: 'Hiring Progress'),
+                            ],
+                          ),
+                        ),
+                        Expanded(
+                          child: TabBarView(
+                            children: [
+                              _overviewTab(context),
+                              _documentsTab(context),
+                              _assessmentTab(context),
+                              _progressTab(context),
+                            ],
+                          ),
+                        ),
+                      ],
+                    );
+                  },
                 ),
               ),
             ],
@@ -12263,7 +12817,7 @@ class _AdminExamBypassDialogState extends State<_AdminExamBypassDialog> {
                         Text(
                           alreadyPassed
                               ? 'Overwrite the current passing record with perfect scores on all four screening sections.'
-                              : 'Record this applicant as passed with 100% on every exam section â€” even without taking the screening exam.',
+                              : 'Record this applicant as passed with 100% on every exam section — even without taking the screening exam.',
                           style: TextStyle(
                             color: secondary,
                             fontSize: 13.5,
@@ -12778,15 +13332,11 @@ class _TypedDocAdminCell extends StatelessWidget {
             : null,
       );
     }
-    return Tooltip(
-      message:
-          'No file for this document type. Use "Sync attachments from storage" if uploads exist only in the bucket.',
-      child: Text(
-        'No file',
-        style: TextStyle(
-          color: Theme.of(context).colorScheme.outline,
-          fontSize: 12,
-        ),
+    return Text(
+      'No file',
+      style: TextStyle(
+        color: Theme.of(context).colorScheme.outline,
+        fontSize: 12,
       ),
     );
   }
@@ -12896,6 +13446,27 @@ class _IssuedFormReviewDialogState extends State<_IssuedFormReviewDialog> {
     setState(() => _busy = true);
     try {
       await RecruitmentRepo.instance.approveRequiredForm(widget.applicationId);
+      if (!mounted) return;
+      Navigator.of(context).pop(true);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _busy = false);
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(userFacingApiError(e))));
+    }
+  }
+
+  Future<void> _fail() async {
+    final reason = _comment.text.trim().isEmpty
+        ? 'Did not pass the required form.'
+        : _comment.text.trim();
+    setState(() => _busy = true);
+    try {
+      await RecruitmentRepo.instance.failRequiredForm(
+        widget.applicationId,
+        reason,
+      );
       if (!mounted) return;
       Navigator.of(context).pop(true);
     } catch (e) {
@@ -13022,6 +13593,10 @@ class _IssuedFormReviewDialogState extends State<_IssuedFormReviewDialog> {
                       )
                     : OjtWorkImmersionEvaluationEditor(
                         entry: OjtWorkImmersionEvaluation.fromJson(_entry),
+                        allowInterviewerSignature: _canDecide ||
+                            _status == 'approved' ||
+                            _status == 'failed' ||
+                            _status == 'needs_revision',
                         onSave: _saveOjt,
                         onCancel: () => Navigator.of(context).pop(),
                         onPrint: _printOjt,
@@ -13045,13 +13620,25 @@ class _IssuedFormReviewDialogState extends State<_IssuedFormReviewDialog> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
+                    Text(
+                      bi
+                          ? 'Passed continues the application. Did not pass stops it.'
+                          : 'Score each answer, then choose Recommended to pass. Did not pass stops the application. The total updates as you score.',
+                      style: TextStyle(
+                        fontSize: 12.5,
+                        height: 1.35,
+                        color: AppTheme.dashTextSecondaryOf(context),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
                     TextField(
                       controller: _comment,
                       minLines: 2,
                       maxLines: 4,
                       decoration: const InputDecoration(
-                        labelText: 'Revision reason',
-                        hintText: 'Tell the applicant what to change',
+                        labelText: 'Note for the applicant',
+                        hintText:
+                            'Required for a revision. Optional when the result is pass or fail.',
                       ),
                     ),
                     const SizedBox(height: 10),
@@ -13064,13 +13651,20 @@ class _IssuedFormReviewDialogState extends State<_IssuedFormReviewDialog> {
                           onPressed: _busy ? null : _revise,
                           child: const Text('Request Revision'),
                         ),
+                        OutlinedButton(
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: const Color(0xFFB91C1C),
+                          ),
+                          onPressed: _busy ? null : _fail,
+                          child: const Text('Did not pass'),
+                        ),
                         FilledButton(
                           style: FilledButton.styleFrom(
                             backgroundColor: const Color(0xFFE85D04),
                             foregroundColor: Colors.white,
                           ),
                           onPressed: _busy ? null : _approve,
-                          child: const Text('Approve'),
+                          child: const Text('Passed'),
                         ),
                       ],
                     ),
@@ -13095,15 +13689,20 @@ class _FinalHiringPrepCard extends StatefulWidget {
 }
 
 class _FinalHiringPrepCardState extends State<_FinalHiringPrepCard> {
+  static const _doneColor = Color(0xFF1B7F4E);
+  static const _waitColor = Color(0xFF6B7280);
+
   late String? _tatStatus;
   late String? _cscStatus;
   bool _busy = false;
+  late bool _expanded;
 
   @override
   void initState() {
     super.initState();
     _tatStatus = widget.app.tatStatus;
     _cscStatus = widget.app.cscApprovalStatus;
+    _expanded = !_complete;
   }
 
   String _tatLabel() => _tatStatus == 'completed' ? 'Completed' : 'In Progress';
@@ -13111,14 +13710,110 @@ class _FinalHiringPrepCardState extends State<_FinalHiringPrepCard> {
   String _cscLabel() =>
       _cscStatus == 'approved' ? 'Approved' : 'Waiting for CSC Approval';
 
+  bool get _requirementsLocked =>
+      !widget.app.finalHiringUnlocked && _cscStatus != 'approved';
+
   bool get _canApprove => _tatStatus == 'completed' && _cscStatus != 'approved';
+
+  bool get _complete =>
+      _tatStatus == 'completed' &&
+      _cscStatus == 'approved' &&
+      !_requirementsLocked;
+
+  int get _completedCount =>
+      (_tatStatus == 'completed' ? 1 : 0) +
+      (_cscStatus == 'approved' ? 1 : 0) +
+      (_requirementsLocked ? 0 : 1);
+
+  Color _toneColor(String label) {
+    switch (label) {
+      case 'Approved':
+      case 'Completed':
+      case 'Available':
+        return _doneColor;
+      case 'Waiting for CSC Approval':
+      case 'Locked':
+        return _waitColor;
+      default:
+        return AppTheme.primaryNavy;
+    }
+  }
+
+  Widget _statusChip(String label) {
+    final color = _toneColor(label);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          fontSize: 11,
+          fontWeight: FontWeight.w800,
+          color: color,
+        ),
+      ),
+    );
+  }
+
+  Widget _requirementRow({
+    required IconData icon,
+    required String title,
+    required String status,
+    Widget? action,
+  }) {
+    final color = _toneColor(status);
+    final done = status == 'Approved' ||
+        status == 'Completed' ||
+        status == 'Available';
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      child: Row(
+        children: [
+          Container(
+            width: 32,
+            height: 32,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: color.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Icon(
+              done ? Icons.check_rounded : icon,
+              size: 16,
+              color: color,
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              title,
+              style: TextStyle(
+                fontWeight: FontWeight.w700,
+                fontSize: 13.5,
+                color: AppTheme.dashTextPrimaryOf(context),
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          _statusChip(status),
+          if (action != null) ...[const SizedBox(width: 8), action],
+        ],
+      ),
+    );
+  }
 
   Future<void> _approve() async {
     setState(() => _busy = true);
     try {
       await RecruitmentRepo.instance.markCscApproved(widget.app.id);
       if (!mounted) return;
-      setState(() => _cscStatus = 'approved');
+      setState(() {
+        _cscStatus = 'approved';
+        if (_complete) _expanded = false;
+      });
       widget.onUpdated();
     } catch (e) {
       if (!mounted) return;
@@ -13132,9 +13827,12 @@ class _FinalHiringPrepCardState extends State<_FinalHiringPrepCard> {
 
   @override
   Widget build(BuildContext context) {
-    final locked = !widget.app.finalHiringUnlocked && _cscStatus != 'approved';
+    final done = _completedCount;
+    final accent = _complete ? _doneColor : AppTheme.primaryNavy;
+    final locked = _requirementsLocked;
     return Container(
-      padding: const EdgeInsets.all(14),
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
       decoration: BoxDecoration(
         color: AppTheme.dashPanelOf(context),
         borderRadius: BorderRadius.circular(12),
@@ -13143,22 +13841,158 @@ class _FinalHiringPrepCardState extends State<_FinalHiringPrepCard> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            'Final Hiring Preparation',
-            style: TextStyle(
-              fontWeight: FontWeight.w800,
-              color: AppTheme.dashTextPrimaryOf(context),
+          InkWell(
+            onTap: () => setState(() => _expanded = !_expanded),
+            borderRadius: BorderRadius.circular(8),
+            child: Row(
+              children: [
+                Container(
+                  width: 36,
+                  height: 36,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: accent.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Icon(
+                    Icons.assignment_turned_in_outlined,
+                    size: 18,
+                    color: accent,
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Final Hiring Preparation',
+                        style: TextStyle(
+                          fontWeight: FontWeight.w800,
+                          color: AppTheme.dashTextPrimaryOf(context),
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        '$done of 3 complete',
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: AppTheme.dashTextSecondaryOf(context),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Icon(
+                  _expanded
+                      ? Icons.expand_less_rounded
+                      : Icons.expand_more_rounded,
+                  color: AppTheme.dashTextSecondaryOf(context),
+                ),
+              ],
             ),
           ),
-          const SizedBox(height: 8),
-          Text('Turn-Around Time: ${_tatLabel()}'),
-          Text('CSC Approval: ${_cscLabel()}'),
-          Text('Final Requirements: ${locked ? 'Locked' : 'Available'}'),
-          if (_canApprove) ...[
+          if (_expanded) ...[
             const SizedBox(height: 10),
-            FilledButton(
-              onPressed: _busy ? null : _approve,
-              child: const Text('Mark CSC Approved'),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(99),
+              child: LinearProgressIndicator(
+                value: done / 3,
+                minHeight: 5,
+                backgroundColor: AppTheme.dashHairlineOf(context),
+                color: accent,
+              ),
+            ),
+            const SizedBox(height: 12),
+            Container(
+              decoration: BoxDecoration(
+                color: AppTheme.dashMutedSurfaceOf(context),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: AppTheme.dashHairlineOf(context)),
+              ),
+              child: Column(
+                children: [
+                  _requirementRow(
+                    icon: Icons.schedule_outlined,
+                    title: 'Turn-Around Time',
+                    status: _tatLabel(),
+                  ),
+                  Divider(height: 1, color: AppTheme.dashHairlineOf(context)),
+                  _requirementRow(
+                    icon: Icons.verified_outlined,
+                    title: 'CSC Approval',
+                    status: _cscLabel(),
+                    action: _canApprove
+                        ? OutlinedButton(
+                            onPressed: _busy ? null : _approve,
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: AppTheme.primaryNavy,
+                              side: const BorderSide(
+                                color: AppTheme.primaryNavy,
+                              ),
+                              visualDensity: VisualDensity.compact,
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 10,
+                                vertical: 6,
+                              ),
+                              minimumSize: const Size(0, 32),
+                              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                              textStyle: const TextStyle(
+                                fontSize: 12.5,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                            child: const Text('Mark approved'),
+                          )
+                        : null,
+                  ),
+                  Divider(height: 1, color: AppTheme.dashHairlineOf(context)),
+                  _requirementRow(
+                    icon: locked
+                        ? Icons.lock_outline_rounded
+                        : Icons.folder_open_outlined,
+                    title: 'Final Requirements',
+                    status: locked ? 'Locked' : 'Available',
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 12),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              decoration: BoxDecoration(
+                color: accent.withValues(alpha: 0.08),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: accent.withValues(alpha: 0.28)),
+              ),
+              child: Row(
+                children: [
+                  Icon(
+                    locked
+                        ? Icons.lock_outline_rounded
+                        : Icons.lock_open_rounded,
+                    size: 18,
+                    color: accent,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      _complete
+                          ? 'All final hiring requirements are complete.'
+                          : locked
+                          ? 'Final requirements stay locked until Turn-Around Time and CSC Approval are complete.'
+                          : 'Final requirements are available.',
+                      style: TextStyle(
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w600,
+                        color: AppTheme.dashTextPrimaryOf(context),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
             ),
           ],
         ],
@@ -13170,12 +14004,10 @@ class _FinalHiringPrepCardState extends State<_FinalHiringPrepCard> {
 class _PreDeliberationCard extends StatefulWidget {
   const _PreDeliberationCard({
     required this.app,
-    required this.canSchedule,
     required this.onUpdated,
   });
 
   final RecruitmentApplication app;
-  final bool canSchedule;
   final VoidCallback onUpdated;
 
   @override
@@ -13187,6 +14019,7 @@ class _PreDeliberationCardState extends State<_PreDeliberationCard> {
   late String? _profileStatus;
   late String? _lineupStatus;
   bool _busy = false;
+  late bool _expanded;
 
   @override
   void initState() {
@@ -13194,6 +14027,7 @@ class _PreDeliberationCardState extends State<_PreDeliberationCard> {
     _wesStatus = widget.app.wesStatus;
     _profileStatus = widget.app.applicantsProfileStatus;
     _lineupStatus = widget.app.selectionLineupStatus;
+    _expanded = !_unlocked;
   }
 
   bool get _unlocked =>
@@ -13265,27 +14099,112 @@ class _PreDeliberationCardState extends State<_PreDeliberationCard> {
     });
   }
 
-  Future<void> _schedule() async {
-    final now = DateTime.now();
-    final day = await showDatePicker(
-      context: context,
-      initialDate: now.add(const Duration(days: 7)),
-      firstDate: DateTime(now.year - 1),
-      lastDate: DateTime(now.year + 3),
-      helpText: 'Deliberation date',
+  static const _doneColor = Color(0xFF1B7F4E);
+  static const _waitColor = Color(0xFF6B7280);
+  static const _warnColor = Color(0xFFB26A00);
+
+  int get _completedCount =>
+      (_wesStatus == 'approved' ? 1 : 0) +
+      (_profileStatus == 'completed' ? 1 : 0) +
+      (_lineupStatus == 'completed' ? 1 : 0);
+
+  Color _toneColor(String label) {
+    switch (label) {
+      case 'Approved':
+      case 'Completed':
+        return _doneColor;
+      case 'Needs revision':
+        return _warnColor;
+      case 'Waiting':
+      case 'Waiting for HR':
+        return _waitColor;
+      default:
+        return AppTheme.primaryNavy;
+    }
+  }
+
+  Widget _statusChip(String label) {
+    final color = _toneColor(label);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          fontSize: 11,
+          fontWeight: FontWeight.w800,
+          color: color,
+        ),
+      ),
     );
-    if (day == null || !mounted) return;
-    final time = await showTimePicker(
-      context: context,
-      initialTime: TimeOfDay.now(),
-      helpText: 'Deliberation time',
+  }
+
+  Widget _compactAction({
+    required String label,
+    required IconData icon,
+    required VoidCallback? onPressed,
+  }) {
+    return OutlinedButton.icon(
+      onPressed: onPressed,
+      icon: Icon(icon, size: 15),
+      label: Text(label),
+      style: OutlinedButton.styleFrom(
+        foregroundColor: AppTheme.primaryNavy,
+        side: const BorderSide(color: AppTheme.primaryNavy),
+        visualDensity: VisualDensity.compact,
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        minimumSize: const Size(0, 32),
+        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+        textStyle: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700),
+      ),
     );
-    if (time == null || !mounted) return;
-    final dt = DateTime(day.year, day.month, day.day, time.hour, time.minute);
-    await RecruitmentRepo.instance.updateFinalInterviewAt(widget.app.id, dt);
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Deliberation schedule saved.')),
+  }
+
+  Widget _requirementRow({
+    required IconData icon,
+    required String title,
+    required String status,
+    Widget? action,
+  }) {
+    final color = _toneColor(status);
+    final done = status == 'Approved' || status == 'Completed';
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      child: Row(
+        children: [
+          Container(
+            width: 32,
+            height: 32,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: color.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Icon(
+              done ? Icons.check_rounded : icon,
+              size: 16,
+              color: color,
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              title,
+              style: TextStyle(
+                fontWeight: FontWeight.w700,
+                fontSize: 13.5,
+                color: AppTheme.dashTextPrimaryOf(context),
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          _statusChip(status),
+          if (action != null) ...[const SizedBox(width: 8), action],
+        ],
+      ),
     );
   }
 
@@ -13295,9 +14214,14 @@ class _PreDeliberationCardState extends State<_PreDeliberationCard> {
         _wesStatus == 'submitted_for_review' ||
         _wesStatus == 'resubmitted_for_review' ||
         _wesStatus == 'needs_revision';
+    final canAssign =
+        _wesStatus == null || _wesStatus == 'waiting_for_work_experience_sheet';
+    final done = _completedCount;
+    final accent = _unlocked ? _doneColor : AppTheme.primaryNavy;
+    final wesLabel = _wesLabel();
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+      padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
       decoration: BoxDecoration(
         color: AppTheme.dashPanelOf(context),
         borderRadius: BorderRadius.circular(12),
@@ -13306,48 +14230,158 @@ class _PreDeliberationCardState extends State<_PreDeliberationCard> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
-            'Pre-Deliberation Requirements',
-            style: TextStyle(fontWeight: FontWeight.w800),
-          ),
-          const SizedBox(height: 8),
-          Text('Work Experience Sheet: ${_wesLabel()}'),
-          Wrap(
-            spacing: 8,
-            children: [
-              if (_wesStatus == null ||
-                  _wesStatus == 'waiting_for_work_experience_sheet')
-                OutlinedButton(
-                  onPressed: _busy
-                      ? null
-                      : () => _run(() async {
-                          await RecruitmentRepo.instance.assignWorkExperience(
-                            widget.app.id,
-                          );
-                          setState(() => _wesStatus = 'assigned');
-                        }),
-                  child: const Text('Assign'),
+          InkWell(
+            onTap: () => setState(() => _expanded = !_expanded),
+            borderRadius: BorderRadius.circular(8),
+            child: Row(
+              children: [
+                Container(
+                  width: 36,
+                  height: 36,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: accent.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Icon(
+                    Icons.fact_check_outlined,
+                    size: 18,
+                    color: accent,
+                  ),
                 ),
-              if (canReviewWes)
-                OutlinedButton(
-                  onPressed: _busy ? null : () => _run(_reviewWes),
-                  child: const Text('Review'),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Pre-Deliberation Requirements',
+                        style: TextStyle(
+                          fontWeight: FontWeight.w800,
+                          color: AppTheme.dashTextPrimaryOf(context),
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        '$done of 3 complete',
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: AppTheme.dashTextSecondaryOf(context),
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
-            ],
-          ),
-          Text('Applicants Profile: ${_hrLabel(_profileStatus)}'),
-          Text('Selection Line-Up: ${_hrLabel(_lineupStatus)}'),
-          const SizedBox(height: 8),
-          Text(
-            _unlocked
-                ? 'Deliberation: Ready to schedule'
-                : 'Deliberation: Locked until all requirements are complete',
-          ),
-          if (widget.canSchedule && widget.app.finalInterviewAt == null)
-            FilledButton(
-              onPressed: _busy || !_unlocked ? null : () => _run(_schedule),
-              child: const Text('Schedule Deliberation'),
+                Icon(
+                  _expanded
+                      ? Icons.expand_less_rounded
+                      : Icons.expand_more_rounded,
+                  color: AppTheme.dashTextSecondaryOf(context),
+                ),
+              ],
             ),
+          ),
+          if (_expanded) ...[
+          const SizedBox(height: 10),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(99),
+            child: LinearProgressIndicator(
+              value: done / 3,
+              minHeight: 5,
+              backgroundColor: AppTheme.dashHairlineOf(context),
+              color: accent,
+            ),
+          ),
+          const SizedBox(height: 12),
+          Container(
+            decoration: BoxDecoration(
+              color: AppTheme.dashMutedSurfaceOf(context),
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: AppTheme.dashHairlineOf(context)),
+            ),
+            child: Column(
+              children: [
+                _requirementRow(
+                  icon: Icons.description_outlined,
+                  title: 'Work Experience Sheet',
+                  status: wesLabel,
+                  action: canAssign
+                      ? _compactAction(
+                          label: 'Assign',
+                          icon: Icons.assignment_ind_outlined,
+                          onPressed: _busy
+                              ? null
+                              : () => _run(() async {
+                                  await RecruitmentRepo.instance
+                                      .assignWorkExperience(widget.app.id);
+                                  setState(() => _wesStatus = 'assigned');
+                                }),
+                        )
+                      : canReviewWes
+                      ? _compactAction(
+                          label: 'Review',
+                          icon: Icons.rate_review_outlined,
+                          onPressed: _busy ? null : () => _run(_reviewWes),
+                        )
+                      : null,
+                ),
+                Divider(
+                  height: 1,
+                  color: AppTheme.dashHairlineOf(context),
+                ),
+                _requirementRow(
+                  icon: Icons.badge_outlined,
+                  title: 'Applicants Profile',
+                  status: _hrLabel(_profileStatus),
+                ),
+                Divider(
+                  height: 1,
+                  color: AppTheme.dashHairlineOf(context),
+                ),
+                _requirementRow(
+                  icon: Icons.groups_outlined,
+                  title: 'Selection Line-Up',
+                  status: _hrLabel(_lineupStatus),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 12),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            decoration: BoxDecoration(
+              color: accent.withValues(alpha: 0.08),
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: accent.withValues(alpha: 0.28)),
+            ),
+            child: Row(
+              children: [
+                Icon(
+                  _unlocked
+                      ? Icons.lock_open_rounded
+                      : Icons.lock_outline_rounded,
+                  size: 18,
+                  color: accent,
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    _unlocked
+                        ? 'All pre-deliberation requirements are complete.'
+                        : 'Deliberation stays locked until all three requirements are complete.',
+                    style: TextStyle(
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w600,
+                      color: AppTheme.dashTextPrimaryOf(context),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          ],
         ],
       ),
     );
@@ -13555,6 +14589,10 @@ class _RequiredFormAssignmentCardState
     }
   }
 
+  bool get _canUndoAssignment {
+    return _formStatus == 'assigned' || _formStatus == 'in_progress';
+  }
+
   String get _formName {
     switch (_formType) {
       case 'ojt':
@@ -13604,6 +14642,54 @@ class _RequiredFormAssignmentCardState
                 ? 'OJT / Work Immersion Evaluation assigned.'
                 : 'Background Investigation assigned.',
           ),
+        ),
+      );
+      widget.onUpdated();
+    } catch (e) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(userFacingApiError(e))));
+    }
+  }
+
+  Future<void> _undoAssignment(BuildContext context) async {
+    final formName = _formName.isEmpty ? 'this form' : _formName;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Undo this assignment?'),
+        content: Text(
+          '$formName will be removed so you can assign the correct form. Answers already saved on it will be cleared.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: const Color(0xFFE85D04),
+              foregroundColor: Colors.white,
+            ),
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Undo assignment'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !context.mounted) return;
+    try {
+      await RecruitmentRepo.instance.undoRequiredFormAssignment(widget.app.id);
+      if (!mounted) return;
+      setState(() {
+        _formType = null;
+        _formStatus = 'waiting_for_hr_form';
+      });
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Assignment removed. You can assign the correct form.'),
         ),
       );
       widget.onUpdated();
@@ -13695,6 +14781,17 @@ class _RequiredFormAssignmentCardState
               style: FilledButton.styleFrom(
                 backgroundColor: const Color(0xFFE85D04),
                 foregroundColor: Colors.white,
+              ),
+            ),
+          ] else if (_canUndoAssignment) ...[
+            const SizedBox(height: 10),
+            OutlinedButton.icon(
+              onPressed: () => _undoAssignment(context),
+              icon: const Icon(Icons.undo_rounded, size: 18),
+              label: const Text('Undo assignment'),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: const Color(0xFFE85D04),
+                side: const BorderSide(color: Color(0xFFE85D04)),
               ),
             ),
           ] else if (_canReview) ...[
@@ -14051,7 +15148,7 @@ class _AttachmentActions extends StatelessWidget {
       children: [
         Expanded(
           child: Tooltip(
-            message: 'Preview Ã¢â‚¬â€ $fileName',
+            message: 'Preview — $fileName',
             child: TextButton.icon(
               onPressed: () => _preview(context),
               icon: const Icon(Icons.visibility_outlined, size: 18),

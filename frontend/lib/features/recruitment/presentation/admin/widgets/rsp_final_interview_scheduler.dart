@@ -4,9 +4,6 @@ import 'package:hrms_plaridel/core/api/user_facing_api_error.dart';
 import 'package:hrms_plaridel/features/recruitment/models/recruitment_application.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/features/recruitment/presentation/admin/widgets/rsp_scheduling_ui.dart';
-import 'package:hrms_plaridel/features/recruitment/utils/rsp_final_interview_report_export.dart';
-import 'rsp_final_interview_report_preview_screen.dart';
-import 'rsp_generate_report_dialog.dart';
 
 /// Admin: applicants who passed the screening exam — schedule deliberation and record results.
 class RspFinalInterviewScheduler extends StatefulWidget {
@@ -28,7 +25,6 @@ class _RspFinalInterviewSchedulerState
   DateTime? _selectedAppliedDate;
   bool _latestFirst = true;
   bool _loading = true;
-  bool _exportingReport = false;
   final Set<String> _savingIds = {};
 
   /// Any applicant can be collapsed to a compact row until expanded.
@@ -52,11 +48,10 @@ class _RspFinalInterviewSchedulerState
     });
   }
 
-  /// Sort key = latest relevant deliberation scheduling activity (the
-  /// deliberation appointment). Falls back to the application/record
-  /// timestamp when no schedule has been set yet.
+  /// Newest applications first. The appointment date is shown on the row,
+  /// but it does not move an older applicant above someone who applied later.
   DateTime? _schedulingActivityKey(RecruitmentApplication a) =>
-      a.finalInterviewAt ?? a.createdAt ?? a.updatedAt;
+      a.createdAt ?? a.updatedAt;
 
   int _compareBySchedulingActivity(
     RecruitmentApplication a,
@@ -99,139 +94,6 @@ class _RspFinalInterviewSchedulerState
 
   bool get _hasActiveFilters =>
       _selectedPositionFilter != null || _selectedAppliedDate != null;
-
-  String _reportFilterSummary() {
-    final parts = <String>[];
-    if (_selectedPositionFilter != null &&
-        _selectedPositionFilter!.trim().isNotEmpty) {
-      parts.add('Position: ${_selectedPositionFilter!.trim()}');
-    }
-    if (_selectedAppliedDate != null) {
-      parts.add('Applied date: ${_formatDateShort(_selectedAppliedDate!)}');
-    }
-    if (parts.isEmpty) {
-      return 'Filters: none (all passed-exam applicants)';
-    }
-    return 'Filters: ${parts.join(' · ')}';
-  }
-
-  List<RspFinalInterviewReportRow> _reportRows() {
-    return _filteredPassedApplicants
-        .map((app) {
-          final exam = _examResults[app.id.toLowerCase()];
-          if (exam == null) return null;
-          return RspFinalInterviewReportRow.fromApplication(
-            app: app,
-            exam: exam,
-          );
-        })
-        .whereType<RspFinalInterviewReportRow>()
-        .toList();
-  }
-
-  Future<void> _showGenerateReportDialog() async {
-    final apps = _filteredPassedApplicants;
-    if (apps.isEmpty) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'No applicants match the current filters. Adjust filters or refresh.',
-          ),
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
-      return;
-    }
-
-    var scheduled = 0;
-    var hired = 0;
-    for (final app in apps) {
-      if (app.finalInterviewAt != null) scheduled++;
-      if (_isRegistered(app)) hired++;
-    }
-
-    final choice = await RspGenerateReportDialog.showFinalInterview(
-      context,
-      applicantCount: apps.length,
-      filterSummary: _reportFilterSummary(),
-      scheduledCount: scheduled,
-      hiredCount: hired,
-    );
-    if (choice == null || !mounted) return;
-
-    final rows = _reportRows();
-    final summary = _reportFilterSummary();
-
-    if (choice == RspReportExportChoice.preview) {
-      await RspFinalInterviewReportPreviewScreen.open(
-        context,
-        rows: rows,
-        filterSummary: summary,
-      );
-      return;
-    }
-
-    setState(() => _exportingReport = true);
-    try {
-      switch (choice) {
-        case RspReportExportChoice.preview:
-          break;
-        case RspReportExportChoice.csv:
-          await RspFinalInterviewReportExport.shareCsv(
-            rows: rows,
-            filterSummary: summary,
-          );
-          if (!mounted) return;
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(
-                'CSV report downloaded (${rows.length} applicants).',
-              ),
-              behavior: SnackBarBehavior.floating,
-            ),
-          );
-        case RspReportExportChoice.pdf:
-          await RspFinalInterviewReportExport.sharePdf(
-            rows: rows,
-            filterSummary: summary,
-          );
-          if (!mounted) return;
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(
-                'PDF report downloaded (${rows.length} applicants).',
-              ),
-              behavior: SnackBarBehavior.floating,
-            ),
-          );
-        case RspReportExportChoice.print:
-          await RspFinalInterviewReportExport.printPdf(
-            context: context,
-            rows: rows,
-            filterSummary: summary,
-          );
-          if (!mounted) return;
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Print dialog opened.'),
-              behavior: SnackBarBehavior.floating,
-            ),
-          );
-      }
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(userFacingApiError(e)),
-          backgroundColor: Theme.of(context).colorScheme.error,
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
-    } finally {
-      if (mounted) setState(() => _exportingReport = false);
-    }
-  }
 
   List<RecruitmentApplication> get _filteredPassedApplicants {
     return _passedApplicants.where((a) {
@@ -643,32 +505,6 @@ class _RspFinalInterviewSchedulerState
                 foregroundColor: Colors.white,
                 elevation: 0,
                 padding: const EdgeInsets.symmetric(horizontal: 16),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(
-                    RspSchedulingUi.inputRadius,
-                  ),
-                ),
-              ),
-            ),
-          ),
-          SizedBox(
-            height: RspSchedulingUi.controlHeight,
-            child: OutlinedButton.icon(
-              onPressed: (_loading || _exportingReport)
-                  ? null
-                  : _showGenerateReportDialog,
-              icon: _exportingReport
-                  ? const SizedBox(
-                      width: 16,
-                      height: 16,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : const Icon(Icons.summarize_outlined, size: 18),
-              label: Text(_exportingReport ? 'Generating…' : 'Generate report'),
-              style: OutlinedButton.styleFrom(
-                foregroundColor: accent,
-                side: BorderSide(color: accent.withValues(alpha: 0.35)),
-                padding: const EdgeInsets.symmetric(horizontal: 14),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(
                     RspSchedulingUi.inputRadius,

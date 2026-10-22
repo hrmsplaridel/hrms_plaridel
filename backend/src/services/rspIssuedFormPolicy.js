@@ -13,6 +13,7 @@ const FORM_STATUSES = new Set([
   'needs_revision',
   'resubmitted_for_review',
   'approved',
+  'failed',
 ]);
 
 const APPLICANT_EDITABLE = new Set(['assigned', 'in_progress', 'needs_revision']);
@@ -53,6 +54,10 @@ function canReassign(status) {
   return status == null || status === '' || REASSIGNABLE.has(status);
 }
 
+function canUndoAssignment(status) {
+  return status === 'assigned' || status === 'in_progress';
+}
+
 function validateBiSubmission(row) {
   const missing = [];
   if (!text(row.applicant_name)) missing.push('applicant name');
@@ -77,9 +82,17 @@ function validateBiSubmission(row) {
 
 function validateOjtApplicant(row) {
   const missing = [];
-  if (!text(row.ojt_immersion)) missing.push('OJT / immersion');
   if (!text(row.school)) missing.push('school');
+  if (!text(row.problem_solving_notes)) missing.push('problem solving evidence');
+  if (!text(row.communication_notes)) missing.push('communication evidence');
+  if (!text(row.teamwork_notes)) missing.push('teamwork evidence');
+  if (!text(row.adaptability_notes)) missing.push('adaptability evidence');
   return missing;
+}
+
+function ojtPassed(row) {
+  return text(row.overall_recommendation) &&
+    String(row.overall_recommendation).trim() === 'Recommended';
 }
 
 function ojtReadyForApproval(row) {
@@ -115,7 +128,9 @@ module.exports = {
   applicantCanEdit,
   hrCanReview,
   canReassign,
+  canUndoAssignment,
   validateBiSubmission,
   validateOjtApplicant,
+  ojtPassed,
   ojtReadyForApproval,
 };

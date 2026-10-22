@@ -1,5 +1,4 @@
 import 'package:dio/dio.dart';
-import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 import 'package:hrms_plaridel/core/api/client.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
@@ -12,12 +11,12 @@ import 'package:hrms_plaridel/shared/widgets/dashboard_content_navigator.dart';
 import 'package:hrms_plaridel/shared/widgets/dashboard_header_actions.dart';
 import 'package:hrms_plaridel/shared/widgets/dashboard_mobile_bottom_nav.dart';
 import 'package:hrms_plaridel/shared/widgets/portal_sidebar_brand.dart';
-import 'package:hrms_plaridel/shared/widgets/admin_welcome_status_card.dart';
 import 'package:hrms_plaridel/shared/data/philippine_courses.dart';
 import 'package:hrms_plaridel/shared/models/philippine_address_data.dart';
 import 'package:hrms_plaridel/shared/widgets/searchable_dropdown_field.dart';
 import 'package:hrms_plaridel/features/mayor/data/mayor_endorsement_offices.dart';
-import 'package:hrms_plaridel/shared/utils/time_greeting.dart';
+import 'package:hrms_plaridel/features/mayor/presentation/widgets/mayor_monitoring_dashboard.dart';
+import 'package:hrms_plaridel/shared/widgets/dashboard_welcome_banner.dart';
 import 'package:hrms_plaridel/shared/widgets/structured_address_fields.dart';
 import 'package:provider/provider.dart';
 
@@ -28,10 +27,44 @@ class MayorDashboardPage extends StatefulWidget {
   State<MayorDashboardPage> createState() => _MayorDashboardPageState();
 }
 
-enum _MayorMenu { dashboard, requests, history, profile }
+enum _MayorMenu {
+  dashboard,
+  meetings,
+  decisions,
+  requests,
+  scheduling,
+  history,
+  profile,
+}
+
+class _MayorPortalCapabilities {
+  const _MayorPortalCapabilities({
+    required this.isMayor,
+    required this.isStaff,
+  });
+
+  final bool isMayor;
+  final bool isStaff;
+
+  bool get canCreateIntake => isStaff;
+  bool get canScheduleMeetings => isStaff;
+  /// Mayor or Staff — early/sudden meetings may be recorded right after approve.
+  bool get canRecordAttendance => isStaff || isMayor;
+  bool get canDecideMeetings => isMayor;
+  bool get canFinalDecide => isMayor;
+}
 
 class _MayorDashboardPageState extends State<MayorDashboardPage> {
   _MayorMenu _selectedMenu = _MayorMenu.dashboard;
+
+  _MayorPortalCapabilities get _caps {
+    final role =
+        (context.read<AuthProvider>().user?.role ?? '').trim().toLowerCase();
+    return _MayorPortalCapabilities(
+      isMayor: role == 'mayor',
+      isStaff: role == 'mayor_office_staff',
+    );
+  }
   bool _sidebarCollapsed = false;
   final GlobalKey<NavigatorState> _contentNavKey = GlobalKey<NavigatorState>();
 
@@ -42,6 +75,7 @@ class _MayorDashboardPageState extends State<MayorDashboardPage> {
   String _office = '';
   String _status = '';
   String _priority = '';
+  String _meetingRequestStatus = '';
   DateTime? _fromDate;
   DateTime? _toDate;
   int _page = 1;
@@ -50,6 +84,14 @@ class _MayorDashboardPageState extends State<MayorDashboardPage> {
   bool _loadingList = false;
   bool _loadingHistory = false;
   bool _submittingIntake = false;
+
+  // History filters (independent of Requests workspace filters).
+  String _historySearch = '';
+  String _historyOffice = '';
+  String _historyStatus = '';
+  DateTime? _historyFromDate;
+  DateTime? _historyToDate;
+  bool _historyIncludeTest = false;
 
   /// Bumps [DashboardContentNavigator] homeRefreshKey so list/loading updates paint.
   int _contentEpoch = 0;
@@ -87,6 +129,7 @@ class _MayorDashboardPageState extends State<MayorDashboardPage> {
         office: _office,
         status: _status,
         priority: _priority,
+        meetingRequestStatus: _meetingRequestStatus,
         fromDate: _fromDate,
         toDate: _toDate,
         page: _page,
@@ -121,6 +164,12 @@ class _MayorDashboardPageState extends State<MayorDashboardPage> {
       // History is independent of Requests filters (pending/mayor_approved would
       // otherwise wipe endorsed/rejected results).
       final result = await _repo.listHistory(
+        search: _historySearch,
+        office: _historyOffice,
+        status: _historyStatus,
+        fromDate: _historyFromDate,
+        toDate: _historyToDate,
+        includeTest: _historyIncludeTest,
         page: _historyPage,
         pageSize: _pageSize,
       );
@@ -142,6 +191,53 @@ class _MayorDashboardPageState extends State<MayorDashboardPage> {
         });
       }
     }
+  }
+
+  void _clearHistoryFilters() {
+    setState(() {
+      _historySearch = '';
+      _historyOffice = '';
+      _historyStatus = '';
+      _historyFromDate = null;
+      _historyToDate = null;
+      _historyIncludeTest = false;
+      _historyPage = 1;
+      _bumpContent();
+    });
+    _loadHistory();
+  }
+
+  void _applyHistoryDatePreset(String preset) {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    DateTime? from;
+    DateTime? to = today;
+    switch (preset) {
+      case 'today':
+        from = today;
+        break;
+      case 'week':
+        // Monday week boundary (aligned with backend Asia/Manila week).
+        from = today.subtract(Duration(days: (today.weekday - DateTime.monday) % 7));
+        break;
+      case 'month':
+        from = DateTime(today.year, today.month, 1);
+        break;
+      default:
+        from = null;
+        to = null;
+    }
+    setState(() {
+      _historyFromDate = from;
+      _historyToDate = to;
+      _historyPage = 1;
+      _bumpContent();
+    });
+    _loadHistory();
+  }
+
+  Future<void> _openDashListItem(MayorDashListItem item) async {
+    await _openRequest(MayorEndorsementRequest.fromJson(item.raw));
   }
 
   Future<void> _refreshAll() async {
@@ -167,58 +263,59 @@ class _MayorDashboardPageState extends State<MayorDashboardPage> {
   Future<void> _openRequest(MayorEndorsementRequest item) async {
     final details = await _repo.getRequestDetails(item.id);
     if (!mounted) return;
+    final caps = _caps;
 
     final result = await showDialog<_ReviewActionResult>(
       context: context,
       barrierDismissible: false,
       builder: (_) => _MayorReviewDialog(
         details: details,
-        onScheduleMeeting: () => _scheduleMayorMeeting(item),
-        onMarkNoShow: () => _markMayorMeetingNoShow(item),
-        onMarkMetMayor: () => _markMetMayor(item),
+        canScheduleMeetings: caps.canScheduleMeetings,
+        canRecordAttendance: caps.canRecordAttendance,
+        canFinalDecide: caps.canFinalDecide,
+        onScheduleMeeting: caps.canScheduleMeetings
+            ? () => _scheduleMayorMeeting(item)
+            : null,
+        onMarkNoShow: caps.canRecordAttendance
+            ? () => _markMayorMeetingNoShow(item)
+            : null,
+        onMarkMetMayor:
+            caps.canRecordAttendance ? () => _markMetMayor(item) : null,
       ),
     );
 
     if (!mounted || result == null) return;
+    if (!caps.canFinalDecide) {
+      _showError('Only the Municipal Mayor can approve or reject endorsements.');
+      return;
+    }
 
-    if (result.action == _ReviewAction.approve) {
+    if (result.action == _ReviewAction.approve ||
+        result.action == _ReviewAction.approveForm) {
       if (item.status == 'pending' && !item.hasMetMayor) {
         _showError(
-          'Step 2 first: the applicant must meet the Mayor. '
-          'If they cannot, schedule a meeting.',
+          'Attendance must be recorded after an approved meeting before endorsement.',
         );
         return;
       }
       final ok = await _confirm(
-        title: 'Approve by Municipal Mayor',
+        title: 'Endorse applicant',
         message:
-            'Approve this endorsement as Municipal Mayor? Mayor\'s Office can then approve the endorsement form.',
+            'Endorse this applicant as Municipal Mayor? This is the final endorsement decision.',
       );
       if (!ok) return;
       try {
-        await _repo.approveRequest(
+        await _repo.endorseRequest(
           item.id,
           destinationOfficeId: result.destinationOfficeId,
           destinationOfficeName: result.destinationOfficeName,
           remarks: result.remarks,
         );
-        _showSuccess(
-          'Approved by Municipal Mayor. Awaiting Mayor\'s Office form approval.',
-        );
+        _showSuccess('Applicant endorsed by Municipal Mayor.');
         await _refreshAll();
       } catch (e) {
-        _showError('Failed to approve request: ${userFacingApiError(e)}');
+        _showError('Failed to endorse request: ${userFacingApiError(e)}');
       }
-      return;
-    }
-
-    if (result.action == _ReviewAction.approveForm) {
-      await _approveOfficeForm(
-        item,
-        destinationOfficeId: result.destinationOfficeId,
-        destinationOfficeName: result.destinationOfficeName,
-        remarks: result.remarks,
-      );
       return;
     }
 
@@ -230,13 +327,14 @@ class _MayorDashboardPageState extends State<MayorDashboardPage> {
         );
         return;
       }
+      final reason = (result.reason ?? '').trim();
       final ok = await _confirm(
         title: 'Reject Endorsement',
         message: 'Reject this endorsement request?',
       );
       if (!ok) return;
       try {
-        await _repo.rejectRequest(item.id, result.reason ?? '');
+        await _repo.rejectRequest(item.id, reason);
         _showSuccess('Endorsement rejected.');
         await _refreshAll();
       } catch (e) {
@@ -245,16 +343,11 @@ class _MayorDashboardPageState extends State<MayorDashboardPage> {
     }
   }
 
-  Future<void> _approveFromCard(MayorEndorsementRequest item) async {
-    if (item.status == 'mayor_approved') {
-      await _approveOfficeForm(item);
-      return;
-    }
-    if (item.status != 'pending') return;
-    if (!item.hasMetMayor) {
+  Future<void> _endorseFromCard(MayorEndorsementRequest item) async {
+    if (item.status != 'pending' && item.status != 'mayor_approved') return;
+    if (item.status == 'pending' && !item.hasMetMayor) {
       _showError(
-        'Step 2 first: the applicant must meet the Mayor. '
-        'If they cannot, schedule a meeting.',
+        'Attendance must be recorded after an approved meeting before endorsement.',
       );
       return;
     }
@@ -271,18 +364,16 @@ class _MayorDashboardPageState extends State<MayorDashboardPage> {
     );
     if (picked == null || !mounted) return;
     try {
-      await _repo.approveRequest(
+      await _repo.endorseRequest(
         item.id,
         destinationOfficeId: picked.officeId,
         destinationOfficeName: picked.officeName,
         remarks: item.mayorRemarks,
       );
-      _showSuccess(
-        'Approved by Municipal Mayor. Awaiting Mayor\'s Office form approval.',
-      );
+      _showSuccess('Applicant endorsed by Municipal Mayor.');
       await _refreshAll();
     } catch (e) {
-      _showError('Failed to approve request: ${userFacingApiError(e)}');
+      _showError('Failed to endorse request: ${userFacingApiError(e)}');
     }
   }
 
@@ -306,19 +397,16 @@ class _MayorDashboardPageState extends State<MayorDashboardPage> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                'Use this if the endorsement for ${item.applicantName} is not valid. '
-                'Enter the reason below.',
-              ),
+              Text(item.applicantName),
               const SizedBox(height: 12),
               TextField(
                 controller: reasonCtrl,
-                minLines: 3,
-                maxLines: 5,
+                minLines: 2,
+                maxLines: 4,
                 autofocus: true,
                 decoration: const InputDecoration(
-                  labelText: 'Rejection reason',
-                  hintText: 'Why is this endorsement not valid?',
+                  labelText: 'Rejection reason (optional)',
+                  hintText: 'Optional note',
                   border: OutlineInputBorder(),
                 ),
               ),
@@ -343,10 +431,6 @@ class _MayorDashboardPageState extends State<MayorDashboardPage> {
     );
     reasonCtrl.dispose();
     if (reason == null) return;
-    if (reason.isEmpty) {
-      _showError('A rejection reason is required.');
-      return;
-    }
     try {
       await _repo.rejectRequest(item.id, reason);
       _showSuccess('Endorsement rejected.');
@@ -357,6 +441,12 @@ class _MayorDashboardPageState extends State<MayorDashboardPage> {
   }
 
   Future<void> _openIntakeForm() async {
+    if (!_caps.canCreateIntake) {
+      _showError(
+        "Only Mayor's Office Staff can create endorsement intake records.",
+      );
+      return;
+    }
     final result = await showDialog<MayorEndorsementIntakeSubmission>(
       context: context,
       barrierDismissible: false,
@@ -396,49 +486,357 @@ class _MayorDashboardPageState extends State<MayorDashboardPage> {
 
   Future<bool> _scheduleMayorMeeting(MayorEndorsementRequest item) async {
     final now = DateTime.now();
-    final initial =
-        item.appointmentAt?.toLocal() ?? now.add(const Duration(days: 1));
+    final initial = item.meetingProposedAt?.toLocal() ??
+        item.appointmentAt?.toLocal() ??
+        now.add(const Duration(days: 1));
     final day = await showDatePicker(
       context: context,
       initialDate: DateTime(initial.year, initial.month, initial.day),
       firstDate: DateTime(now.year - 1),
       lastDate: DateTime(now.year + 3),
-      helpText: 'Meeting with the Mayor',
+      helpText: 'Proposed meeting date',
     );
     if (day == null || !mounted) return false;
     final time = await showTimePicker(
       context: context,
       initialTime: TimeOfDay.fromDateTime(initial),
-      helpText: 'Meeting time',
+      helpText: 'Proposed meeting time',
     );
     if (time == null || !mounted) return false;
+    final purposeCtrl = TextEditingController(
+      text: (item.meetingPurpose ?? '').trim(),
+    );
+    final purpose = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Meeting purpose'),
+        content: TextField(
+          controller: purposeCtrl,
+          minLines: 2,
+          maxLines: 4,
+          autofocus: true,
+          decoration: const InputDecoration(
+            labelText: 'Purpose / remarks (optional)',
+            border: OutlineInputBorder(),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(purposeCtrl.text.trim()),
+            child: const Text('Submit request'),
+          ),
+        ],
+      ),
+    );
+    // null = Cancel; empty string is allowed (purpose optional).
+    if (purpose == null || !mounted) return false;
     final dt = DateTime(day.year, day.month, day.day, time.hour, time.minute);
     try {
-      await _repo.scheduleMayorMeeting(item.id, appointmentAt: dt);
-      _showSuccess(
-        item.appointmentStatus == 'no_show'
-            ? 'Meeting rescheduled. Applicant can see the Mayor on the new date.'
-            : 'Meeting with the Mayor scheduled.',
+      await _repo.submitMeetingRequest(
+        item.id,
+        proposedAt: dt,
+        purpose: purpose,
       );
+      _showSuccess('Meeting request submitted for Mayor approval.');
       await _refreshAll();
       return true;
     } catch (e) {
-      _showError('Failed to save schedule: ${userFacingApiError(e)}');
+      _showError('Failed to submit meeting request: ${userFacingApiError(e)}');
       return false;
     }
   }
 
-  Future<bool> _markMetMayor(MayorEndorsementRequest item) async {
-    final ok = await _confirm(
-      title: 'Applicant met the Mayor?',
-      message:
-          'Confirm that ${item.applicantName} already talked to / saw the Mayor. '
-          'After this you can approve (and set the office) or reject.',
+  Future<void> _approveMeeting(MayorEndorsementRequest item) async {
+    final when = item.meetingProposedAt ?? item.appointmentAt;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) {
+        final secondary = AppTheme.dashTextSecondaryOf(ctx);
+        return AlertDialog(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
+          titlePadding: const EdgeInsets.fromLTRB(20, 18, 20, 0),
+          contentPadding: const EdgeInsets.fromLTRB(20, 14, 20, 8),
+          actionsPadding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
+          title: Row(
+            children: [
+              Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  color: AppTheme.primaryNavy.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: const Icon(
+                  Icons.event_available_rounded,
+                  color: AppTheme.primaryNavy,
+                  size: 22,
+                ),
+              ),
+              const SizedBox(width: 12),
+              const Expanded(
+                child: Text(
+                  'Approve schedule?',
+                  style: TextStyle(fontWeight: FontWeight.w800, fontSize: 18),
+                ),
+              ),
+            ],
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                item.applicantName.trim().isEmpty
+                    ? 'Applicant'
+                    : item.applicantName.trim(),
+                style: const TextStyle(
+                  fontWeight: FontWeight.w700,
+                  fontSize: 15,
+                ),
+              ),
+              if (when != null) ...[
+                const SizedBox(height: 4),
+                Text(
+                  _fmtDateTime(when),
+                  style: TextStyle(fontSize: 13, color: secondary),
+                ),
+              ],
+              const SizedBox(height: 10),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 8,
+                ),
+                decoration: BoxDecoration(
+                  color: AppTheme.primaryNavy.withValues(alpha: 0.06),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(
+                  'Schedule only — not an endorsement.',
+                  style: TextStyle(
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w600,
+                    color: secondary,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(ctx).pop(true),
+              style: FilledButton.styleFrom(
+                backgroundColor: AppTheme.primaryNavy,
+                foregroundColor: Colors.white,
+              ),
+              child: const Text('Approve'),
+            ),
+          ],
+        );
+      },
     );
-    if (!ok) return false;
+    if (ok != true) return;
+    try {
+      await _repo.approveMeeting(item.id);
+      _showSuccess('Schedule approved.');
+      await _refreshAll();
+    } catch (e) {
+      _showError('Failed to approve meeting: ${userFacingApiError(e)}');
+    }
+  }
+
+  Future<void> _rescheduleMeeting(MayorEndorsementRequest item) async {
+    final remarksCtrl = TextEditingController();
+    final remarks = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Request reschedule'),
+        content: TextField(
+          controller: remarksCtrl,
+          minLines: 2,
+          maxLines: 4,
+          autofocus: true,
+          decoration: const InputDecoration(
+            labelText: 'Remarks for Mayor\'s Office Staff',
+            border: OutlineInputBorder(),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(remarksCtrl.text.trim()),
+            child: const Text('Send to Staff'),
+          ),
+        ],
+      ),
+    );
+    if (remarks == null || remarks.isEmpty || !mounted) return;
+    try {
+      await _repo.rescheduleMeeting(item.id, remarks: remarks);
+      _showSuccess('Reschedule requested. Staff must submit a revised schedule.');
+      await _refreshAll();
+    } catch (e) {
+      _showError('Failed to request reschedule: ${userFacingApiError(e)}');
+    }
+  }
+
+  Future<void> _declineMeeting(MayorEndorsementRequest item) async {
+    final remarksCtrl = TextEditingController();
+    final remarks = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Decline meeting?'),
+        content: TextField(
+          controller: remarksCtrl,
+          minLines: 2,
+          maxLines: 4,
+          decoration: const InputDecoration(
+            labelText: 'Optional remarks',
+            border: OutlineInputBorder(),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(remarksCtrl.text.trim()),
+            style: FilledButton.styleFrom(
+              backgroundColor: const Color(0xFFC62828),
+            ),
+            child: const Text('Decline meeting'),
+          ),
+        ],
+      ),
+    );
+    if (remarks == null || !mounted) return;
+    try {
+      await _repo.declineMeeting(item.id, remarks: remarks);
+      _showSuccess(
+        'Meeting declined. The endorsement request remains open.',
+      );
+      await _refreshAll();
+    } catch (e) {
+      _showError('Failed to decline meeting: ${userFacingApiError(e)}');
+    }
+  }
+
+  Future<bool> _markMetMayor(MayorEndorsementRequest item) async {
+    final name = item.applicantName.trim().isEmpty
+        ? 'Applicant'
+        : item.applicantName.trim();
+    final when = item.appointmentAt ?? item.meetingProposedAt;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) {
+        final secondary = AppTheme.dashTextSecondaryOf(ctx);
+        return AlertDialog(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
+          titlePadding: const EdgeInsets.fromLTRB(20, 18, 20, 0),
+          contentPadding: const EdgeInsets.fromLTRB(20, 14, 20, 8),
+          actionsPadding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
+          title: Row(
+            children: [
+              Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  color: AppTheme.primaryNavy.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: const Icon(
+                  Icons.handshake_outlined,
+                  color: AppTheme.primaryNavy,
+                  size: 22,
+                ),
+              ),
+              const SizedBox(width: 12),
+              const Expanded(
+                child: Text(
+                  'Met the Mayor?',
+                  style: TextStyle(fontWeight: FontWeight.w800, fontSize: 18),
+                ),
+              ),
+            ],
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                name,
+                style: const TextStyle(
+                  fontWeight: FontWeight.w700,
+                  fontSize: 15,
+                ),
+              ),
+              if (when != null) ...[
+                const SizedBox(height: 4),
+                Text(
+                  _fmtDateTime(when),
+                  style: TextStyle(fontSize: 13, color: secondary),
+                ),
+              ],
+              const SizedBox(height: 10),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 8,
+                ),
+                decoration: BoxDecoration(
+                  color: AppTheme.primaryNavy.withValues(alpha: 0.06),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(
+                  'Unlocks endorse / reject.',
+                  style: TextStyle(
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w600,
+                    color: secondary,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(ctx).pop(true),
+              style: FilledButton.styleFrom(
+                backgroundColor: AppTheme.primaryNavy,
+                foregroundColor: Colors.white,
+              ),
+              child: const Text('Confirm'),
+            ),
+          ],
+        );
+      },
+    );
+    if (ok != true) return false;
     try {
       await _repo.markMetMayor(item.id);
-      _showSuccess('Meeting recorded. You can now approve or reject.');
+      _showSuccess('Met the Mayor recorded.');
       await _refreshAll();
       return true;
     } catch (e) {
@@ -448,15 +846,106 @@ class _MayorDashboardPageState extends State<MayorDashboardPage> {
   }
 
   Future<bool> _markMayorMeetingNoShow(MayorEndorsementRequest item) async {
-    final ok = await _confirm(
-      title: 'Applicant did not appear?',
-      message:
-          'Mark ${item.applicantName} as no-show. You can reschedule another meeting with the Mayor after this.',
+    final name = item.applicantName.trim().isEmpty
+        ? 'Applicant'
+        : item.applicantName.trim();
+    final when = item.appointmentAt ?? item.meetingProposedAt;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) {
+        final secondary = AppTheme.dashTextSecondaryOf(ctx);
+        return AlertDialog(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
+          titlePadding: const EdgeInsets.fromLTRB(20, 18, 20, 0),
+          contentPadding: const EdgeInsets.fromLTRB(20, 14, 20, 8),
+          actionsPadding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
+          title: Row(
+            children: [
+              Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  color: AppTheme.primaryNavy.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: const Icon(
+                  Icons.event_busy_rounded,
+                  color: AppTheme.primaryNavy,
+                  size: 22,
+                ),
+              ),
+              const SizedBox(width: 12),
+              const Expanded(
+                child: Text(
+                  'Did not appear?',
+                  style: TextStyle(fontWeight: FontWeight.w800, fontSize: 18),
+                ),
+              ),
+            ],
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                name,
+                style: const TextStyle(
+                  fontWeight: FontWeight.w700,
+                  fontSize: 15,
+                ),
+              ),
+              if (when != null) ...[
+                const SizedBox(height: 4),
+                Text(
+                  _fmtDateTime(when),
+                  style: TextStyle(fontSize: 13, color: secondary),
+                ),
+              ],
+              const SizedBox(height: 10),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 8,
+                ),
+                decoration: BoxDecoration(
+                  color: AppTheme.primaryNavy.withValues(alpha: 0.06),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(
+                  'Staff can request a new schedule.',
+                  style: TextStyle(
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w600,
+                    color: secondary,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(ctx).pop(true),
+              style: FilledButton.styleFrom(
+                backgroundColor: AppTheme.primaryNavy,
+                foregroundColor: Colors.white,
+              ),
+              child: const Text('Confirm'),
+            ),
+          ],
+        );
+      },
     );
-    if (!ok) return false;
+    if (ok != true) return false;
     try {
       await _repo.markMayorMeetingNoShow(item.id);
-      _showSuccess('Marked as did not appear. Reschedule when ready.');
+      _showSuccess('Marked did not appear.');
       await _refreshAll();
       return true;
     } catch (e) {
@@ -489,79 +978,20 @@ class _MayorDashboardPageState extends State<MayorDashboardPage> {
     return res == true;
   }
 
-  /// Mayor's Office personnel: approve endorsement form after municipal mayor approval.
-  Future<void> _approveOfficeForm(
-    MayorEndorsementRequest item, {
-    String? destinationOfficeId,
-    String? destinationOfficeName,
-    String? remarks,
-  }) async {
-    if (item.status != 'mayor_approved') {
-      _showError(
-        'Endorsement form can only be approved after the Municipal Mayor has approved the request.',
-      );
-      return;
-    }
-
-    final resolvedDestination =
-        [
-              destinationOfficeName,
-              item.destinationOfficeName,
-              item.requestedOfficeName,
-              item.endorseToOffice,
-            ]
-            .map((e) => (e ?? '').trim())
-            .firstWhere(
-              (e) => e.isNotEmpty && e != 'Unassigned',
-              orElse: () => '',
-            );
-    if (resolvedDestination.isEmpty) {
-      final picked = await showDialog<_ApproveOfficeChoice>(
-        context: context,
-        builder: (_) => _ApproveEndorsementDialog(
-          applicantName: item.applicantName,
-          initialOfficeName: '',
-          initialOfficeId: item.destinationOfficeId,
-        ),
-      );
-      if (picked == null || !mounted) return;
-      await _approveOfficeForm(
-        item,
-        destinationOfficeId: picked.officeId,
-        destinationOfficeName: picked.officeName,
-        remarks: remarks,
-      );
-      return;
-    }
-
-    final ok = await _confirm(
-      title: 'Approve Endorsement Form (Mayor\'s Office)',
-      message:
-          'Confirm that Mayor\'s Office personnel approve this endorsement form for ${item.applicantName}? '
-          'This finalizes the endorsement and generates the letter.',
-    );
-    if (!ok) return;
-    try {
-      await _repo.approveEndorsementForm(
-        item.id,
-        destinationOfficeId: destinationOfficeId ?? item.destinationOfficeId,
-        destinationOfficeName: resolvedDestination,
-        remarks: remarks ?? item.mayorRemarks,
-      );
-      _showSuccess('Endorsement form approved by Mayor\'s Office.');
-      await _refreshAll();
-    } catch (e) {
-      _showError(userFacingApiError(e));
-    }
-  }
-
   void _openRequests({String status = ''}) {
     _status = status;
     _page = 1;
-    _onMenuSelected(_MayorMenu.requests);
+    final caps = _caps;
+    _onMenuSelected(caps.isMayor ? _MayorMenu.decisions : _MayorMenu.requests);
   }
 
-  Widget _settingsPanel() => DashboardProfilePanel(onBack: _closeProfile);
+  bool _isRequestsWorkspace(_MayorMenu menu) =>
+      menu == _MayorMenu.requests ||
+      menu == _MayorMenu.meetings ||
+      menu == _MayorMenu.decisions ||
+      menu == _MayorMenu.scheduling;
+
+  Widget _settingsView() => DashboardProfilePanel(onBack: _closeProfile);
 
   void _onMenuSelected(_MayorMenu menu) {
     if (menu == _MayorMenu.profile) {
@@ -578,7 +1008,7 @@ class _MayorDashboardPageState extends State<MayorDashboardPage> {
     DashboardContentNavigator.showHome(_contentNavKey);
     if (menu == _MayorMenu.history) {
       _loadHistory();
-    } else if (menu == _MayorMenu.requests) {
+    } else if (_isRequestsWorkspace(menu)) {
       _loadRequests();
     } else if (menu == _MayorMenu.dashboard) {
       _refreshDashboard();
@@ -608,62 +1038,132 @@ class _MayorDashboardPageState extends State<MayorDashboardPage> {
     }
   }
 
+  Widget _buildRequestsWorkspace(_MayorPortalCapabilities caps) {
+    final title = switch (_selectedMenu) {
+      _MayorMenu.meetings => 'Meetings',
+      _MayorMenu.decisions => 'Decisions',
+      _MayorMenu.scheduling => 'Scheduling',
+      _ => 'Requests',
+    };
+    final subtitle = switch (_selectedMenu) {
+      _MayorMenu.meetings =>
+        'Approve schedules, then record Met the Mayor or Did not appear anytime after approval.',
+      _MayorMenu.decisions =>
+        'Endorse or reject applicants after approved meeting attendance.',
+      _MayorMenu.scheduling =>
+        'Submit meeting requests, track Mayor decisions, and record attendance.',
+      _ => caps.isStaff
+          ? 'Register applicants and track endorsement requests.'
+          : 'Monitor endorsement requests requiring Mayor attention.',
+    };
+    return _MayorRequestsTab(
+      title: title,
+      subtitle: subtitle,
+      workspace: _selectedMenu,
+      capabilities: caps,
+      loading: _loadingList,
+      submittingIntake: _submittingIntake,
+      requests: _requests,
+      search: _search,
+      office: _office,
+      status: _status,
+      priority: _priority,
+      meetingRequestStatus: _meetingRequestStatus,
+      fromDate: _fromDate,
+      toDate: _toDate,
+      onSearchChanged: (v) => _search = v,
+      onOfficeChanged: (v) => _office = v,
+      onStatusChanged: (v) => _status = v,
+      onPriorityChanged: (v) => _priority = v,
+      onMeetingRequestStatusChanged: (v) => _meetingRequestStatus = v,
+      onFromDateChanged: (v) => _fromDate = v,
+      onToDateChanged: (v) => _toDate = v,
+      onApplyFilters: () async {
+        _page = 1;
+        await _loadRequests();
+      },
+      page: _requests.page,
+      totalPages: _requests.totalPages,
+      onPreviousPage: () async {
+        if (_page <= 1) return;
+        _page -= 1;
+        await _loadRequests();
+      },
+      onNextPage: () async {
+        if (_page >= _requests.totalPages) return;
+        _page += 1;
+        await _loadRequests();
+      },
+      onOpenIntakeForm: _openIntakeForm,
+      onOpenRequest: _openRequest,
+      onApproveOfficeForm: _endorseFromCard,
+      onApproveRequest: _endorseFromCard,
+      onRejectRequest: _rejectFromCard,
+      onScheduleMeeting: _scheduleMayorMeeting,
+      onMarkNoShow: _markMayorMeetingNoShow,
+      onMarkMetMayor: _markMetMayor,
+      onApproveMeeting: _approveMeeting,
+      onRescheduleMeeting: _rescheduleMeeting,
+      onDeclineMeeting: _declineMeeting,
+    );
+  }
+
   Widget _buildContent() {
+    final caps = _caps;
     switch (_selectedMenu) {
       case _MayorMenu.dashboard:
         return _MayorDashboardTab(
           dashboardFuture: _dashboardFuture,
+          isMayor: caps.isMayor,
           onRefresh: _refreshDashboard,
-          onOpenRequest: _openRequest,
-          onViewAllRequests: () => _openRequests(),
-          onOpenFilteredRequests: (status) => _openRequests(status: status),
+          onOpenRequest: _openDashListItem,
+          onOpenMeetings: () => _onMenuSelected(_MayorMenu.meetings),
+          onOpenDecisions: () => _onMenuSelected(
+            caps.isMayor ? _MayorMenu.decisions : _MayorMenu.requests,
+          ),
+          onOpenRequests: () => _openRequests(),
+          onOpenHistory: () => _onMenuSelected(_MayorMenu.history),
         );
+      case _MayorMenu.meetings:
+      case _MayorMenu.decisions:
       case _MayorMenu.requests:
-        return _MayorRequestsTab(
-          loading: _loadingList,
-          submittingIntake: _submittingIntake,
-          requests: _requests,
-          search: _search,
-          office: _office,
-          status: _status,
-          priority: _priority,
-          fromDate: _fromDate,
-          toDate: _toDate,
-          onSearchChanged: (v) => _search = v,
-          onOfficeChanged: (v) => _office = v,
-          onStatusChanged: (v) => _status = v,
-          onPriorityChanged: (v) => _priority = v,
-          onFromDateChanged: (v) => _fromDate = v,
-          onToDateChanged: (v) => _toDate = v,
-          onApplyFilters: () async {
-            _page = 1;
-            await _loadRequests();
-          },
-          page: _requests.page,
-          totalPages: _requests.totalPages,
-          onPreviousPage: () async {
-            if (_page <= 1) return;
-            _page -= 1;
-            await _loadRequests();
-          },
-          onNextPage: () async {
-            if (_page >= _requests.totalPages) return;
-            _page += 1;
-            await _loadRequests();
-          },
-          onOpenIntakeForm: _openIntakeForm,
-          onOpenRequest: _openRequest,
-          onApproveOfficeForm: _approveOfficeForm,
-          onApproveRequest: _approveFromCard,
-          onRejectRequest: _rejectFromCard,
-          onScheduleMeeting: _scheduleMayorMeeting,
-          onMarkNoShow: _markMayorMeetingNoShow,
-          onMarkMetMayor: _markMetMayor,
-        );
+      case _MayorMenu.scheduling:
+        return _buildRequestsWorkspace(caps);
       case _MayorMenu.history:
         return _MayorHistoryTab(
           history: _history,
           loading: _loadingHistory,
+          search: _historySearch,
+          office: _historyOffice,
+          status: _historyStatus,
+          fromDate: _historyFromDate,
+          toDate: _historyToDate,
+          onSearchChanged: (v) => _historySearch = v,
+          onOfficeChanged: (v) => _historyOffice = v,
+          onStatusChanged: (v) {
+            setState(() {
+              _historyStatus = v;
+              _bumpContent();
+            });
+          },
+          onFromDateChanged: (v) {
+            setState(() {
+              _historyFromDate = v;
+              _bumpContent();
+            });
+          },
+          onToDateChanged: (v) {
+            setState(() {
+              _historyToDate = v;
+              _bumpContent();
+            });
+          },
+          onApplyFilters: () async {
+            _historyPage = 1;
+            await _loadHistory();
+          },
+          onClearFilters: _clearHistoryFilters,
+          onDatePreset: _applyHistoryDatePreset,
           onOpenRequest: _openRequest,
           onRefresh: _loadHistory,
           onPreviousPage: () async {
@@ -678,43 +1178,81 @@ class _MayorDashboardPageState extends State<MayorDashboardPage> {
           },
         );
       case _MayorMenu.profile:
-        return _settingsPanel();
+        return _settingsView();
     }
   }
 
-  static const _mobileNavItems = <DashboardMobileNavItem>[
-    DashboardMobileNavItem(
-      icon: Icons.dashboard_outlined,
-      label: 'Dashboard',
-    ),
-    DashboardMobileNavItem(
-      icon: Icons.assignment_outlined,
-      label: 'Requests',
-    ),
-    DashboardMobileNavItem(
-      icon: Icons.history_outlined,
-      label: 'History',
-    ),
-  ];
+  List<DashboardMobileNavItem> get _mobileNavItems {
+    final caps = _caps;
+    if (caps.isMayor) {
+      return const [
+        DashboardMobileNavItem(
+          icon: Icons.dashboard_outlined,
+          label: 'Dashboard',
+        ),
+        DashboardMobileNavItem(icon: Icons.event_outlined, label: 'Meetings'),
+        DashboardMobileNavItem(icon: Icons.gavel_outlined, label: 'Decisions'),
+        DashboardMobileNavItem(icon: Icons.history_outlined, label: 'History'),
+      ];
+    }
+    return const [
+      DashboardMobileNavItem(
+        icon: Icons.dashboard_outlined,
+        label: 'Dashboard',
+      ),
+      DashboardMobileNavItem(
+        icon: Icons.assignment_outlined,
+        label: 'Requests',
+      ),
+      DashboardMobileNavItem(
+        icon: Icons.calendar_month_outlined,
+        label: 'Scheduling',
+      ),
+      DashboardMobileNavItem(icon: Icons.history_outlined, label: 'History'),
+    ];
+  }
 
   int get _mobileNavIndex {
-    switch (_selectedMenu) {
-      case _MayorMenu.requests:
-        return 1;
-      case _MayorMenu.history:
-        return 2;
-      case _MayorMenu.profile:
-        return -1;
-      case _MayorMenu.dashboard:
-        return 0;
+    final caps = _caps;
+    if (caps.isMayor) {
+      return switch (_selectedMenu) {
+        _MayorMenu.meetings => 1,
+        _MayorMenu.decisions => 2,
+        _MayorMenu.history => 3,
+        _MayorMenu.profile => -1,
+        _ => 0,
+      };
     }
+    return switch (_selectedMenu) {
+      _MayorMenu.requests => 1,
+      _MayorMenu.scheduling => 2,
+      _MayorMenu.history => 3,
+      _MayorMenu.profile => -1,
+      _ => 0,
+    };
   }
 
   void _onMobileNav(int index) {
+    final caps = _caps;
+    if (caps.isMayor) {
+      switch (index) {
+        case 1:
+          _onMenuSelected(_MayorMenu.meetings);
+        case 2:
+          _onMenuSelected(_MayorMenu.decisions);
+        case 3:
+          _onMenuSelected(_MayorMenu.history);
+        default:
+          _onMenuSelected(_MayorMenu.dashboard);
+      }
+      return;
+    }
     switch (index) {
       case 1:
         _onMenuSelected(_MayorMenu.requests);
       case 2:
+        _onMenuSelected(_MayorMenu.scheduling);
+      case 3:
         _onMenuSelected(_MayorMenu.history);
       default:
         _onMenuSelected(_MayorMenu.dashboard);
@@ -725,12 +1263,9 @@ class _MayorDashboardPageState extends State<MayorDashboardPage> {
   Widget build(BuildContext context) {
     final width = MediaQuery.of(context).size.width;
     final isWide = width > 900;
-    final contentPadding = width > 900 ? 28.0 : (width > 600 ? 16.0 : 12.0);
+    final contentPadding = width > 900 ? 16.0 : (width > 600 ? 14.0 : 12.0);
     final displayName = context.select<AuthProvider, String>(
       (a) => a.displayName.isNotEmpty ? a.displayName : 'Mayor',
-    );
-    final email = context.select<AuthProvider, String>(
-      (a) => a.email.isNotEmpty ? a.email : 'Mayor',
     );
     final avatarPath = context.select<AuthProvider, String?>(
       (a) => a.avatarPath,
@@ -738,6 +1273,26 @@ class _MayorDashboardPageState extends State<MayorDashboardPage> {
 
     return Scaffold(
       backgroundColor: AppTheme.dashCanvasOf(context),
+      drawer: isWide
+          ? null
+          : Drawer(
+              child: SafeArea(
+                child: _MayorSidebar(
+                  selectedMenu: _selectedMenu,
+                  avatarPath: avatarPath,
+                  displayName: displayName,
+                  onProfile: () {
+                    Navigator.of(context).pop();
+                    _openProfile();
+                  },
+                  showBrand: true,
+                  onTap: (menu) {
+                    _onMenuSelected(menu);
+                    if (context.mounted) Navigator.of(context).pop();
+                  },
+                ),
+              ),
+            ),
       bottomNavigationBar: isWide
           ? null
           : DashboardMobileBottomNav(
@@ -754,11 +1309,13 @@ class _MayorDashboardPageState extends State<MayorDashboardPage> {
                   _MayorSidebar(
                     railMode: true,
                     collapsed: _sidebarCollapsed,
+                    onToggle: () =>
+                        setState(() => _sidebarCollapsed = !_sidebarCollapsed),
                     showBrand: false,
                     selectedMenu: _selectedMenu,
                     avatarPath: avatarPath,
-                    email: email,
                     displayName: displayName,
+                    onProfile: _openProfile,
                     onTap: _onMenuSelected,
                   ),
                   Expanded(
@@ -772,12 +1329,6 @@ class _MayorDashboardPageState extends State<MayorDashboardPage> {
                             () => _sidebarCollapsed = !_sidebarCollapsed,
                           ),
                           compactActions: width < 600,
-                          trailing: DashboardAccountMenuButton(
-                            avatarPath: avatarPath,
-                            compact: width < 600,
-                            tooltip: displayName,
-                            onProfile: _openProfile,
-                          ),
                         ),
                         Expanded(
                           child: ColoredBox(
@@ -792,7 +1343,7 @@ class _MayorDashboardPageState extends State<MayorDashboardPage> {
                                 _contentEpoch,
                               ),
                               homeBuilder: _buildContent,
-                              settingsPanel: _settingsPanel(),
+                              settingsPanel: _settingsView(),
                               homeScrollPadding: EdgeInsets.all(contentPadding),
                               settingsScrollPadding:
                                   kDashboardSettingsScrollPadding,
@@ -806,14 +1357,13 @@ class _MayorDashboardPageState extends State<MayorDashboardPage> {
               )
             : Column(
                 children: [
-                  DashboardAppHeaderBar(
-                    showBrand: true,
-                    compactActions: true,
-                    trailing: DashboardAccountMenuButton(
-                      avatarPath: avatarPath,
-                      compact: true,
-                      tooltip: displayName,
-                      onProfile: _openProfile,
+                  Builder(
+                    builder: (innerContext) => DashboardAppHeaderBar(
+                      showBrand: true,
+                      showMenuButton: true,
+                      onMenuPressed: () =>
+                          Scaffold.of(innerContext).openDrawer(),
+                      compactActions: true,
                     ),
                   ),
                   Expanded(
@@ -837,43 +1387,64 @@ class _MayorSidebar extends StatelessWidget {
   const _MayorSidebar({
     required this.selectedMenu,
     required this.avatarPath,
-    required this.email,
     required this.displayName,
+    required this.onProfile,
     required this.onTap,
     this.showBrand = true,
     this.railMode = false,
     this.collapsed = false,
+    this.onToggle,
   });
 
   final _MayorMenu selectedMenu;
   final String? avatarPath;
-  final String email;
   final String displayName;
+  final VoidCallback onProfile;
   final ValueChanged<_MayorMenu> onTap;
   final bool showBrand;
   final bool railMode;
   final bool collapsed;
+  final VoidCallback? onToggle;
 
   Widget _buildNavList(BuildContext context) {
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        SizedBox(height: railMode ? 8 : (showBrand ? 2 : 8)),
+    final role =
+        (context.watch<AuthProvider>().user?.role ?? '').trim().toLowerCase();
+    final isMayor = role == 'mayor';
+    final navChildren = <Widget>[
+      SizedBox(height: railMode ? 8 : (showBrand ? 2 : 8)),
+      DashboardSidebarNavTile(
+        icon: Icons.dashboard_outlined,
+        label: 'Dashboard',
+        selected: selectedMenu == _MayorMenu.dashboard,
+        onTap: () => onTap(_MayorMenu.dashboard),
+      ),
+      Padding(
+        padding: const EdgeInsets.fromLTRB(16, 10, 16, 8),
+        child: Divider(
+          height: 1,
+          thickness: 1,
+          color: AppTheme.dashHairlineOf(context),
+        ),
+      ),
+      const DashboardSidebarSectionLabel('ENDORSEMENTS'),
+    ];
+    if (isMayor) {
+      navChildren.addAll([
         DashboardSidebarNavTile(
-          icon: Icons.dashboard_outlined,
-          label: 'Dashboard',
-          selected: selectedMenu == _MayorMenu.dashboard,
-          onTap: () => onTap(_MayorMenu.dashboard),
+          icon: Icons.event_outlined,
+          label: 'Meetings',
+          selected: selectedMenu == _MayorMenu.meetings,
+          onTap: () => onTap(_MayorMenu.meetings),
         ),
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 10, 16, 8),
-          child: Divider(
-            height: 1,
-            thickness: 1,
-            color: AppTheme.dashHairlineOf(context),
-          ),
+        DashboardSidebarNavTile(
+          icon: Icons.gavel_outlined,
+          label: 'Decisions',
+          selected: selectedMenu == _MayorMenu.decisions,
+          onTap: () => onTap(_MayorMenu.decisions),
         ),
-        const DashboardSidebarSectionLabel('ENDORSEMENTS'),
+      ]);
+    } else {
+      navChildren.addAll([
         DashboardSidebarNavTile(
           icon: Icons.assignment_outlined,
           label: 'Requests',
@@ -881,14 +1452,23 @@ class _MayorSidebar extends StatelessWidget {
           onTap: () => onTap(_MayorMenu.requests),
         ),
         DashboardSidebarNavTile(
-          icon: Icons.history_outlined,
-          label: 'History',
-          selected: selectedMenu == _MayorMenu.history,
-          onTap: () => onTap(_MayorMenu.history),
+          icon: Icons.calendar_month_outlined,
+          label: 'Scheduling',
+          selected: selectedMenu == _MayorMenu.scheduling,
+          onTap: () => onTap(_MayorMenu.scheduling),
         ),
-        const SizedBox(height: 12),
-      ],
-    );
+      ]);
+    }
+    navChildren.addAll([
+      DashboardSidebarNavTile(
+        icon: Icons.history_outlined,
+        label: 'History',
+        selected: selectedMenu == _MayorMenu.history,
+        onTap: () => onTap(_MayorMenu.history),
+      ),
+      const SizedBox(height: 12),
+    ]);
+    return Column(mainAxisSize: MainAxisSize.min, children: navChildren);
   }
 
   Widget _buildFooter(BuildContext context) {
@@ -916,8 +1496,11 @@ class _MayorSidebar extends StatelessWidget {
           padding: const EdgeInsets.fromLTRB(12, 4, 12, 8),
           child: DashboardSidebarProfileCard(
             displayName: displayName,
-            subtitle: email,
+            subtitle: context.select<AuthProvider, String>(
+              (auth) => dashboardAccountRoleLabel(auth.user?.role),
+            ),
             avatarPath: avatarPath,
+            onProfile: onProfile,
           ),
         ),
         Opacity(
@@ -925,7 +1508,7 @@ class _MayorSidebar extends StatelessWidget {
           child: Padding(
             padding: const EdgeInsets.fromLTRB(16, 0, 16, 18),
             child: Text(
-              '© $year HRMS · Mayor Module',
+              "© $year HRMS · Mayor's Office",
               textAlign: TextAlign.center,
               style: TextStyle(
                 color: AppTheme.dashTextSecondaryOf(context),
@@ -946,7 +1529,7 @@ class _MayorSidebar extends StatelessWidget {
 
     final content = Column(
       children: [
-        if (railMode) SidebarRailHeader(collapsed: collapsed),
+        if (railMode) SidebarRailHeader(onToggle: onToggle),
         if (!railMode && showBrand) const PortalSidebarBrand(),
         Expanded(
           child: SingleChildScrollView(
@@ -980,32 +1563,59 @@ class _MayorSidebar extends StatelessWidget {
 class _MayorDashboardTab extends StatelessWidget {
   const _MayorDashboardTab({
     required this.dashboardFuture,
+    required this.isMayor,
     required this.onRefresh,
     required this.onOpenRequest,
-    required this.onViewAllRequests,
-    required this.onOpenFilteredRequests,
+    required this.onOpenMeetings,
+    required this.onOpenDecisions,
+    required this.onOpenRequests,
+    required this.onOpenHistory,
   });
 
   final Future<MayorDashboardData> dashboardFuture;
+  final bool isMayor;
   final Future<void> Function() onRefresh;
-  final ValueChanged<MayorEndorsementRequest> onOpenRequest;
-  final VoidCallback onViewAllRequests;
-  final ValueChanged<String> onOpenFilteredRequests;
+  final ValueChanged<MayorDashListItem> onOpenRequest;
+  final VoidCallback onOpenMeetings;
+  final VoidCallback onOpenDecisions;
+  final VoidCallback onOpenRequests;
+  final VoidCallback onOpenHistory;
 
   @override
   Widget build(BuildContext context) {
+    final displayName = context.select<AuthProvider, String>(
+      (a) => a.displayName.isNotEmpty
+          ? a.displayName
+          : (isMayor ? 'Mayor' : 'Staff'),
+    );
+    final banner = DashboardWelcomeBanner(
+      portalLabel: isMayor ? 'Mayor Portal' : "Mayor's Office",
+      displayName: displayName,
+      description: isMayor
+          ? "Here's the latest overview of endorsements and meetings for Plaridel."
+          : "Here's the latest overview of Mayor's Office operations for Plaridel.",
+    );
+
     return FutureBuilder<MayorDashboardData>(
       future: dashboardFuture,
       builder: (context, snap) {
         if (snap.connectionState != ConnectionState.done) {
-          return const Padding(
-            padding: EdgeInsets.symmetric(vertical: 48),
-            child: Center(child: CircularProgressIndicator()),
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              banner,
+              const Padding(
+                padding: EdgeInsets.symmetric(vertical: 48),
+                child: Center(child: CircularProgressIndicator()),
+              ),
+            ],
           );
         }
         if (snap.hasError || snap.data == null) {
           return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
+              banner,
               const SizedBox(height: 60),
               const Center(child: Text('Failed to load dashboard metrics.')),
               const SizedBox(height: 12),
@@ -1018,75 +1628,35 @@ class _MayorDashboardTab extends StatelessWidget {
           );
         }
         final data = snap.data!;
-        return LayoutBuilder(
-          builder: (context, constraints) {
-            final width = constraints.maxWidth;
-            final isDesktop = width >= 1100;
-            final isTablet = width >= 700;
-            return Align(
-              alignment: Alignment.topCenter,
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 1360),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    const _MayorWelcomeBanner(),
-                    const SizedBox(height: 16),
-                    _MayorKpiRow(
-                      pending: data.pendingCount,
-                      awaiting: data.mayorApprovedCount,
-                      approved: data.endorsedCount,
-                      rejected: data.rejectedCount,
-                      twoColumns: !isDesktop,
-                      onOpenFiltered: onOpenFilteredRequests,
-                    ),
-                    const SizedBox(height: 16),
-                    if (isDesktop)
-                      Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Expanded(
-                            flex: 6,
-                            child: _MayorMonitoringPanel(
-                              pending: data.pendingCount,
-                              awaiting: data.mayorApprovedCount,
-                              endorsed: data.endorsedCount,
-                              rejected: data.rejectedCount,
-                            ),
-                          ),
-                          const SizedBox(width: 14),
-                          Expanded(
-                            flex: 4,
-                            child: _MayorOfficeOverviewPanel(
-                              offices: data.officeStatistics,
-                            ),
-                          ),
-                        ],
-                      )
-                    else ...[
-                      _MayorMonitoringPanel(
-                        pending: data.pendingCount,
-                        awaiting: data.mayorApprovedCount,
-                        endorsed: data.endorsedCount,
-                        rejected: data.rejectedCount,
-                      ),
-                      const SizedBox(height: 14),
-                      _MayorOfficeOverviewPanel(
-                        offices: data.officeStatistics,
-                      ),
-                    ],
-                    const SizedBox(height: 14),
-                    _MayorRecentRequestsPanel(
-                      requests: data.recentRequests,
-                      onOpenRequest: onOpenRequest,
-                      onViewAll: onViewAllRequests,
-                      compactTable: isDesktop || isTablet,
-                    ),
-                  ],
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            banner,
+            const SizedBox(height: 16),
+            MayorMonitoringDashboard(
+          summary: data.toMonitoringSummary(),
+          isMayor: isMayor,
+          monthlyTrends: data.monthlyTrends,
+          officeStatistics: data.officeStatistics
+              .map(
+                (o) => MayorOfficeShare(
+                  officeName: o.officeName,
+                  total: o.total,
                 ),
-              ),
-            );
-          },
+              )
+              .toList(),
+          pendingMayorActions: data.pendingMayorActions,
+          recentEndorsements: data.recentEndorsements,
+          meetingQueue: data.meetingQueue,
+          upcomingMeetings: data.upcomingMeetings,
+          onRefresh: onRefresh,
+          onOpenRequest: onOpenRequest,
+          onOpenMeetings: onOpenMeetings,
+          onOpenDecisions: onOpenDecisions,
+          onOpenRequests: onOpenRequests,
+          onOpenHistory: onOpenHistory,
+            ),
+          ],
         );
       },
     );
@@ -1095,6 +1665,10 @@ class _MayorDashboardTab extends StatelessWidget {
 
 class _MayorRequestsTab extends StatelessWidget {
   const _MayorRequestsTab({
+    required this.title,
+    required this.subtitle,
+    required this.workspace,
+    required this.capabilities,
     required this.loading,
     required this.submittingIntake,
     required this.requests,
@@ -1102,12 +1676,14 @@ class _MayorRequestsTab extends StatelessWidget {
     required this.office,
     required this.status,
     required this.priority,
+    required this.meetingRequestStatus,
     required this.fromDate,
     required this.toDate,
     required this.onSearchChanged,
     required this.onOfficeChanged,
     required this.onStatusChanged,
     required this.onPriorityChanged,
+    required this.onMeetingRequestStatusChanged,
     required this.onFromDateChanged,
     required this.onToDateChanged,
     required this.onApplyFilters,
@@ -1123,8 +1699,15 @@ class _MayorRequestsTab extends StatelessWidget {
     required this.onScheduleMeeting,
     required this.onMarkNoShow,
     required this.onMarkMetMayor,
+    required this.onApproveMeeting,
+    required this.onRescheduleMeeting,
+    required this.onDeclineMeeting,
   });
 
+  final String title;
+  final String subtitle;
+  final _MayorMenu workspace;
+  final _MayorPortalCapabilities capabilities;
   final bool loading;
   final bool submittingIntake;
   final MayorEndorsementListResponse requests;
@@ -1132,12 +1715,14 @@ class _MayorRequestsTab extends StatelessWidget {
   final String office;
   final String status;
   final String priority;
+  final String meetingRequestStatus;
   final DateTime? fromDate;
   final DateTime? toDate;
   final ValueChanged<String> onSearchChanged;
   final ValueChanged<String> onOfficeChanged;
   final ValueChanged<String> onStatusChanged;
   final ValueChanged<String> onPriorityChanged;
+  final ValueChanged<String> onMeetingRequestStatusChanged;
   final ValueChanged<DateTime?> onFromDateChanged;
   final ValueChanged<DateTime?> onToDateChanged;
   final Future<void> Function() onApplyFilters;
@@ -1153,33 +1738,70 @@ class _MayorRequestsTab extends StatelessWidget {
   final Future<bool> Function(MayorEndorsementRequest item) onScheduleMeeting;
   final Future<bool> Function(MayorEndorsementRequest item) onMarkNoShow;
   final Future<bool> Function(MayorEndorsementRequest item) onMarkMetMayor;
+  final Future<void> Function(MayorEndorsementRequest item) onApproveMeeting;
+  final Future<void> Function(MayorEndorsementRequest item) onRescheduleMeeting;
+  final Future<void> Function(MayorEndorsementRequest item) onDeclineMeeting;
+
+  List<MayorEndorsementRequest> get _visibleItems {
+    final items = requests.items;
+    switch (workspace) {
+      case _MayorMenu.meetings:
+        return items
+            .where(
+              (i) =>
+                  i.meetingRequestStatus == 'submitted' ||
+                  i.meetingRequestStatus == 'approved' ||
+                  i.meetingRequestStatus == 'reschedule_requested' ||
+                  i.meetingRequestStatus == 'declined' ||
+                  i.appointmentStatus == 'scheduled' ||
+                  i.appointmentStatus == 'completed',
+            )
+            .toList();
+      case _MayorMenu.decisions:
+        return items
+            .where(
+              (i) =>
+                  (i.status == 'pending' && i.hasMetMayor) ||
+                  i.status == 'mayor_approved',
+            )
+            .toList();
+      case _MayorMenu.scheduling:
+        return items.where((i) => i.status == 'pending').toList();
+      default:
+        return items;
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     final primary = AppTheme.dashTextPrimaryOf(context);
     final secondary = AppTheme.dashTextSecondaryOf(context);
     final narrow = MediaQuery.sizeOf(context).width < 640;
-    final newButton = FilledButton.icon(
-      onPressed: submittingIntake ? null : onOpenIntakeForm,
-      icon: submittingIntake
-          ? const SizedBox(
-              width: 14,
-              height: 14,
-              child: CircularProgressIndicator(strokeWidth: 2),
-            )
-          : const Icon(Icons.add_rounded, size: 18),
-      label: Text(submittingIntake ? 'Submitting...' : 'New Endorsement'),
-      style: FilledButton.styleFrom(
-        backgroundColor: AppTheme.primaryNavy,
-        foregroundColor: Colors.white,
-        minimumSize: const Size(0, 44),
-      ),
-    );
+    final showIntakeButton =
+        capabilities.canCreateIntake && workspace == _MayorMenu.requests;
+    final newButton = showIntakeButton
+        ? FilledButton.icon(
+            onPressed: submittingIntake ? null : onOpenIntakeForm,
+            icon: submittingIntake
+                ? const SizedBox(
+                    width: 14,
+                    height: 14,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.add_rounded, size: 18),
+            label: Text(submittingIntake ? 'Submitting...' : 'New Endorsement'),
+            style: FilledButton.styleFrom(
+              backgroundColor: AppTheme.primaryNavy,
+              foregroundColor: Colors.white,
+              minimumSize: const Size(0, 44),
+            ),
+          )
+        : null;
     final titleBlock = Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          'Endorsement Requests',
+          title,
           style: TextStyle(
             color: primary,
             fontSize: narrow ? 20 : 22,
@@ -1189,7 +1811,7 @@ class _MayorRequestsTab extends StatelessWidget {
         ),
         const SizedBox(height: 4),
         Text(
-          'Manage applicant meetings, endorsements, and office confirmations.',
+          subtitle,
           style: TextStyle(color: secondary, fontSize: 13.5, height: 1.35),
         ),
       ],
@@ -1201,8 +1823,10 @@ class _MayorRequestsTab extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               titleBlock,
-              const SizedBox(height: 10),
-              newButton,
+              if (newButton != null) ...[
+                const SizedBox(height: 10),
+                newButton,
+              ],
             ],
           )
         else
@@ -1210,20 +1834,30 @@ class _MayorRequestsTab extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Expanded(child: titleBlock),
-              const SizedBox(width: 12),
-              newButton,
+              if (newButton != null) ...[
+                const SizedBox(width: 12),
+                newButton,
+              ],
             ],
           ),
         const SizedBox(height: 12),
-        _MayorStatusChips(
-          selected: status,
-          onSelected: (value) async {
-            onStatusChanged(value);
-            await onApplyFilters();
-          },
-        ),
-        const SizedBox(height: 10),
         _FilterPanel(
+          leading: workspace == _MayorMenu.meetings ||
+                  workspace == _MayorMenu.scheduling
+              ? _MayorMeetingStatusChips(
+                  selected: meetingRequestStatus,
+                  onSelected: (value) async {
+                    onMeetingRequestStatusChanged(value);
+                    await onApplyFilters();
+                  },
+                )
+              : _MayorStatusChips(
+                  selected: status,
+                  onSelected: (value) async {
+                    onStatusChanged(value);
+                    await onApplyFilters();
+                  },
+                ),
           search: search,
           office: office,
           status: status,
@@ -1237,6 +1871,7 @@ class _MayorRequestsTab extends StatelessWidget {
           onFromDateChanged: onFromDateChanged,
           onToDateChanged: onToDateChanged,
           onApply: onApplyFilters,
+          onResetExtras: () => onMeetingRequestStatusChanged(''),
         ),
         const SizedBox(height: 12),
         if (loading)
@@ -1244,7 +1879,7 @@ class _MayorRequestsTab extends StatelessWidget {
             padding: EdgeInsets.symmetric(vertical: 24),
             child: Center(child: CircularProgressIndicator()),
           )
-        else if (requests.items.isEmpty)
+        else if (_visibleItems.isEmpty)
           const _MayorEmptyState(
             icon: Icons.assignment_late_outlined,
             title: 'No endorsement requests found',
@@ -1252,22 +1887,36 @@ class _MayorRequestsTab extends StatelessWidget {
           )
         else
           _MayorSectionCard(
-            title: 'Request Queue',
+            title: switch (workspace) {
+              _MayorMenu.meetings => 'Meeting Queue',
+              _MayorMenu.decisions => 'Decision Queue',
+              _MayorMenu.scheduling => 'Scheduling Queue',
+              _ => 'Request Queue',
+            },
             child: Column(
               children: [
-                for (var i = 0; i < requests.items.length; i++) ...[
+                for (var i = 0; i < _visibleItems.length; i++) ...[
                   if (i > 0) const SizedBox(height: 12),
                   _MayorRequestCard(
-                    item: requests.items[i],
-                    onOpen: () => onOpenRequest(requests.items[i]),
+                    item: _visibleItems[i],
+                    workspace: workspace,
+                    capabilities: capabilities,
+                    onOpen: () => onOpenRequest(_visibleItems[i]),
                     onApproveOfficeForm: () =>
-                        onApproveOfficeForm(requests.items[i]),
-                    onApproveRequest: () => onApproveRequest(requests.items[i]),
-                    onRejectRequest: () => onRejectRequest(requests.items[i]),
+                        onApproveOfficeForm(_visibleItems[i]),
+                    onApproveRequest: () =>
+                        onApproveRequest(_visibleItems[i]),
+                    onRejectRequest: () => onRejectRequest(_visibleItems[i]),
                     onScheduleMeeting: () =>
-                        onScheduleMeeting(requests.items[i]),
-                    onMarkNoShow: () => onMarkNoShow(requests.items[i]),
-                    onMarkMetMayor: () => onMarkMetMayor(requests.items[i]),
+                        onScheduleMeeting(_visibleItems[i]),
+                    onMarkNoShow: () => onMarkNoShow(_visibleItems[i]),
+                    onMarkMetMayor: () => onMarkMetMayor(_visibleItems[i]),
+                    onApproveMeeting: () =>
+                        onApproveMeeting(_visibleItems[i]),
+                    onRescheduleMeeting: () =>
+                        onRescheduleMeeting(_visibleItems[i]),
+                    onDeclineMeeting: () =>
+                        onDeclineMeeting(_visibleItems[i]),
                   ),
                 ],
               ],
@@ -1297,6 +1946,8 @@ class _MayorRequestsTab extends StatelessWidget {
 class _MayorRequestCard extends StatelessWidget {
   const _MayorRequestCard({
     required this.item,
+    required this.workspace,
+    required this.capabilities,
     required this.onOpen,
     required this.onApproveOfficeForm,
     required this.onApproveRequest,
@@ -1304,9 +1955,14 @@ class _MayorRequestCard extends StatelessWidget {
     required this.onScheduleMeeting,
     required this.onMarkNoShow,
     required this.onMarkMetMayor,
+    required this.onApproveMeeting,
+    required this.onRescheduleMeeting,
+    required this.onDeclineMeeting,
   });
 
   final MayorEndorsementRequest item;
+  final _MayorMenu workspace;
+  final _MayorPortalCapabilities capabilities;
   final VoidCallback onOpen;
   final VoidCallback onApproveOfficeForm;
   final VoidCallback onApproveRequest;
@@ -1314,19 +1970,41 @@ class _MayorRequestCard extends StatelessWidget {
   final VoidCallback onScheduleMeeting;
   final VoidCallback onMarkNoShow;
   final VoidCallback onMarkMetMayor;
+  final VoidCallback onApproveMeeting;
+  final VoidCallback onRescheduleMeeting;
+  final VoidCallback onDeclineMeeting;
 
   @override
   Widget build(BuildContext context) {
     final primary = AppTheme.dashTextPrimaryOf(context);
     final secondary = AppTheme.dashTextSecondaryOf(context);
-    final awaitingMeeting = item.status == 'pending' && !item.hasMetMayor;
-    final canDecide =
-        (item.status == 'pending' && item.hasMetMayor) ||
-        item.status == 'mayor_approved';
-    final canOfficeApprove = item.status == 'mayor_approved';
-    final canMayorApprove = item.status == 'pending' && item.hasMetMayor;
+    final canEndorse = capabilities.canFinalDecide &&
+        ((item.status == 'pending' && item.hasMetMayor) ||
+            item.status == 'mayor_approved');
+    final canReject = canEndorse;
+    final canSubmitMeetingRequest = capabilities.canScheduleMeetings &&
+        item.status == 'pending' &&
+        item.canStaffSubmitMeetingRequest;
+    final canAttendance = capabilities.canRecordAttendance &&
+        item.status == 'pending' &&
+        item.meetingRequestStatus == 'approved' &&
+        (item.appointmentStatus == 'scheduled' ||
+            item.appointmentStatus == 'no_show');
+    final canMayorMeetingDecide = capabilities.canDecideMeetings &&
+        item.meetingRequestStatus == 'submitted';
+    final showDecisionActions =
+        workspace == _MayorMenu.decisions || workspace == _MayorMenu.requests;
+    final showMeetingDecideActions =
+        workspace == _MayorMenu.meetings || workspace == _MayorMenu.requests;
+    final showStaffScheduleActions =
+        workspace == _MayorMenu.scheduling || workspace == _MayorMenu.requests;
+    // Meetings: Mayor records attendance immediately after approve (early/sudden meet).
+    final showAttendanceActions = canAttendance &&
+        (workspace == _MayorMenu.scheduling ||
+            workspace == _MayorMenu.requests ||
+            workspace == _MayorMenu.meetings);
     final requester = (item.submittedByName ?? '').trim();
-    final meeting = item.appointmentAt;
+    final meeting = item.meetingProposedAt ?? item.appointmentAt;
     final noShow = item.appointmentStatus == 'no_show';
     final isScheduled = item.appointmentStatus == 'scheduled';
 
@@ -1379,6 +2057,8 @@ class _MayorRequestCard extends StatelessWidget {
                       ],
                     ),
                   ),
+                  _MayorMeetingOutcomePill(request: item),
+                  const SizedBox(width: 8),
                   _MayorStatusPill(status: item.status),
                   const SizedBox(width: 8),
                   _MayorPriorityPill(priority: item.priority),
@@ -1399,15 +2079,35 @@ class _MayorRequestCard extends StatelessWidget {
                     label: 'Endorsement',
                     value: item.decisionLabel,
                   ),
+                  if ((item.referenceNumber ?? '').isNotEmpty)
+                    _MayorMetaChip(
+                      icon: Icons.tag_rounded,
+                      label: 'Reference',
+                      value: item.referenceNumber!,
+                    ),
                   _MayorMetaChip(
                     icon: noShow
                         ? Icons.event_busy_rounded
+                        : item.hasMetMayor
+                        ? Icons.handshake_outlined
                         : Icons.event_available_rounded,
-                    label: 'Meeting with Mayor',
+                    label: 'Meeting',
                     value: meeting == null
-                        ? item.meetingLabel
-                        : '${item.meetingLabel} · ${_fmtDateTime(meeting)}',
+                        ? item.meetingRequestLabel
+                        : '${item.meetingRequestLabel} · ${_fmtDateTime(meeting)}',
                   ),
+                  if ((item.meetingPurpose ?? '').trim().isNotEmpty)
+                    _MayorMetaChip(
+                      icon: Icons.notes_rounded,
+                      label: 'Purpose',
+                      value: item.meetingPurpose!.trim(),
+                    ),
+                  if ((item.meetingDecisionRemarks ?? '').trim().isNotEmpty)
+                    _MayorMetaChip(
+                      icon: Icons.feedback_outlined,
+                      label: 'Mayor remarks',
+                      value: item.meetingDecisionRemarks!.trim(),
+                    ),
                   if (item.noShowCount > 0)
                     _MayorMetaChip(
                       icon: Icons.warning_amber_rounded,
@@ -1421,7 +2121,29 @@ class _MayorRequestCard extends StatelessWidget {
                 spacing: 8,
                 runSpacing: 6,
                 children: [
-                  if (awaitingMeeting) ...[
+                  if (showStaffScheduleActions && canSubmitMeetingRequest)
+                    OutlinedButton.icon(
+                      onPressed: onScheduleMeeting,
+                      icon: Icon(
+                        item.meetingRequestStatus == 'reschedule_requested' ||
+                                noShow
+                            ? Icons.event_repeat_rounded
+                            : Icons.event_rounded,
+                        size: 18,
+                      ),
+                      label: Text(
+                        item.meetingRequestStatus == 'reschedule_requested'
+                            ? 'Submit revised schedule'
+                            : item.meetingRequestStatus == 'declined' || noShow
+                            ? 'New meeting request'
+                            : 'Submit meeting request',
+                      ),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: AppTheme.primaryNavy,
+                        side: const BorderSide(color: AppTheme.primaryNavy),
+                      ),
+                    ),
+                  if (showAttendanceActions && isScheduled) ...[
                     FilledButton.icon(
                       onPressed: onMarkMetMayor,
                       icon: const Icon(Icons.handshake_outlined, size: 18),
@@ -1431,62 +2153,58 @@ class _MayorRequestCard extends StatelessWidget {
                         foregroundColor: Colors.white,
                       ),
                     ),
+                    TextButton.icon(
+                      onPressed: onMarkNoShow,
+                      icon: const Icon(Icons.event_busy_rounded, size: 18),
+                      label: const Text('Did not appear'),
+                      style: TextButton.styleFrom(
+                        foregroundColor: AppTheme.primaryNavy,
+                      ),
+                    ),
+                  ],
+                  if (showMeetingDecideActions && canMayorMeetingDecide) ...[
+                    FilledButton.icon(
+                      onPressed: onApproveMeeting,
+                      icon: const Icon(Icons.event_available_rounded, size: 18),
+                      label: const Text('Approve meeting'),
+                      style: FilledButton.styleFrom(
+                        backgroundColor: AppTheme.primaryNavy,
+                        foregroundColor: Colors.white,
+                      ),
+                    ),
                     OutlinedButton.icon(
-                      onPressed: onScheduleMeeting,
-                      icon: Icon(
-                        noShow
-                            ? Icons.event_repeat_rounded
-                            : meeting == null
-                            ? Icons.event_rounded
-                            : Icons.edit_calendar_rounded,
-                        size: 18,
-                      ),
-                      label: Text(
-                        noShow
-                            ? 'Reschedule'
-                            : meeting == null
-                            ? 'Schedule meeting'
-                            : 'Change schedule',
-                      ),
+                      onPressed: onRescheduleMeeting,
+                      icon: const Icon(Icons.event_repeat_rounded, size: 18),
+                      label: const Text('Request reschedule'),
                       style: OutlinedButton.styleFrom(
                         foregroundColor: AppTheme.primaryNavy,
                         side: const BorderSide(color: AppTheme.primaryNavy),
                       ),
                     ),
-                    if (isScheduled)
-                      TextButton.icon(
-                        onPressed: onMarkNoShow,
-                        icon: const Icon(Icons.event_busy_rounded, size: 18),
-                        label: const Text('Did not appear'),
-                        style: TextButton.styleFrom(
-                          foregroundColor: AppTheme.primaryNavy,
-                        ),
+                    OutlinedButton.icon(
+                      onPressed: onDeclineMeeting,
+                      icon: const Icon(Icons.cancel_outlined, size: 18),
+                      label: const Text('Decline meeting'),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: const Color(0xFFC62828),
+                        side: const BorderSide(color: Color(0xFFC62828)),
                       ),
+                    ),
                   ],
-                  if (canMayorApprove)
+                  if (showDecisionActions && canEndorse)
                     FilledButton.icon(
                       onPressed: onApproveRequest,
                       icon: const Icon(
                         Icons.check_circle_outline_rounded,
                         size: 18,
                       ),
-                      label: const Text('Approve'),
+                      label: const Text('Endorse'),
                       style: FilledButton.styleFrom(
                         backgroundColor: AppTheme.primaryNavy,
                         foregroundColor: Colors.white,
                       ),
                     ),
-                  if (canOfficeApprove)
-                    FilledButton.icon(
-                      onPressed: onApproveOfficeForm,
-                      icon: const Icon(Icons.verified_outlined, size: 16),
-                      style: FilledButton.styleFrom(
-                        backgroundColor: const Color(0xFF2E7D32),
-                        foregroundColor: Colors.white,
-                      ),
-                      label: const Text('Approve Form'),
-                    ),
-                  if (canDecide)
+                  if (showDecisionActions && canReject)
                     OutlinedButton.icon(
                       onPressed: onRejectRequest,
                       icon: const Icon(Icons.cancel_outlined, size: 18),
@@ -1568,6 +2286,19 @@ class _MayorHistoryTab extends StatelessWidget {
   const _MayorHistoryTab({
     required this.history,
     required this.loading,
+    required this.search,
+    required this.office,
+    required this.status,
+    required this.fromDate,
+    required this.toDate,
+    required this.onSearchChanged,
+    required this.onOfficeChanged,
+    required this.onStatusChanged,
+    required this.onFromDateChanged,
+    required this.onToDateChanged,
+    required this.onApplyFilters,
+    required this.onClearFilters,
+    required this.onDatePreset,
     required this.onOpenRequest,
     required this.onRefresh,
     required this.onPreviousPage,
@@ -1576,6 +2307,19 @@ class _MayorHistoryTab extends StatelessWidget {
 
   final MayorEndorsementListResponse history;
   final bool loading;
+  final String search;
+  final String office;
+  final String status;
+  final DateTime? fromDate;
+  final DateTime? toDate;
+  final ValueChanged<String> onSearchChanged;
+  final ValueChanged<String> onOfficeChanged;
+  final ValueChanged<String> onStatusChanged;
+  final ValueChanged<DateTime?> onFromDateChanged;
+  final ValueChanged<DateTime?> onToDateChanged;
+  final Future<void> Function() onApplyFilters;
+  final VoidCallback onClearFilters;
+  final ValueChanged<String> onDatePreset;
   final ValueChanged<MayorEndorsementRequest> onOpenRequest;
   final Future<void> Function() onRefresh;
   final Future<void> Function() onPreviousPage;
@@ -1585,6 +2329,7 @@ class _MayorHistoryTab extends StatelessWidget {
   Widget build(BuildContext context) {
     final narrow = MediaQuery.sizeOf(context).width < 700;
     return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Row(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -1604,7 +2349,7 @@ class _MayorHistoryTab extends StatelessWidget {
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    'Review processed endorsements and previous decisions.',
+                    'Search and filter processed endorsements. Official letters are preserved.',
                     style: TextStyle(
                       color: AppTheme.dashTextSecondaryOf(context),
                       fontSize: 13.5,
@@ -1626,7 +2371,25 @@ class _MayorHistoryTab extends StatelessWidget {
             ),
           ],
         ),
-        const SizedBox(height: 8),
+        const SizedBox(height: 12),
+        _HistoryFilterBar(
+          narrow: narrow,
+          loading: loading,
+          search: search,
+          office: office,
+          status: status,
+          fromDate: fromDate,
+          toDate: toDate,
+          onSearchChanged: onSearchChanged,
+          onOfficeChanged: onOfficeChanged,
+          onStatusChanged: onStatusChanged,
+          onFromDateChanged: onFromDateChanged,
+          onToDateChanged: onToDateChanged,
+          onDatePreset: onDatePreset,
+          onApply: onApplyFilters,
+          onClear: onClearFilters,
+        ),
+        const SizedBox(height: 10),
         if (loading && history.items.isEmpty)
           const Padding(
             padding: EdgeInsets.symmetric(vertical: 40),
@@ -1635,9 +2398,9 @@ class _MayorHistoryTab extends StatelessWidget {
         else if (history.items.isEmpty)
           const _MayorEmptyState(
             icon: Icons.history_toggle_off_rounded,
-            title: 'No endorsement history yet',
+            title: 'No matching endorsement history',
             subtitle:
-                'Fully endorsed and rejected requests will appear here after Mayor\'s Office completes review.',
+                'Try clearing filters or adjusting the date range. Empty periods show zero results by design.',
           )
         else
           _MayorSectionCard(
@@ -1653,93 +2416,95 @@ class _MayorHistoryTab extends StatelessWidget {
                     ],
                   )
                 : Column(
-              children: [
-                _MayorTableHeader(
-                  columns: const [
-                    'Applicant',
-                    'Office',
-                    'Status',
-                    'Processed Date',
-                  ],
-                ),
-                const SizedBox(height: 6),
-                for (var i = 0; i < history.items.length; i++) ...[
-                  if (i > 0) const Divider(height: 1),
-                  Builder(
-                    builder: (_) {
-                      final item = history.items[i];
-                      final processed =
-                          item.rejectedAt ??
-                          item.officeFormApprovedAt ??
-                          item.approvedAt ??
-                          item.submittedAt;
-                      return InkWell(
-                        onTap: () => onOpenRequest(item),
-                        borderRadius: BorderRadius.circular(10),
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 10,
-                            vertical: 10,
-                          ),
-                          child: Row(
-                            children: [
-                              Expanded(
-                                flex: 3,
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      _MayorTableHeader(
+                        columns: const [
+                          'Applicant / Ref',
+                          'Destination Office',
+                          'Status',
+                          'Endorsement / Decision Date',
+                        ],
+                      ),
+                      const SizedBox(height: 6),
+                      for (var i = 0; i < history.items.length; i++) ...[
+                        if (i > 0) const Divider(height: 1),
+                        Builder(
+                          builder: (_) {
+                            final item = history.items[i];
+                            final processed =
+                                item.rejectedAt ??
+                                item.officeFormApprovedAt ??
+                                item.approvedAt ??
+                                item.submittedAt;
+                            final ref = (item.referenceNumber ?? '').trim();
+                            return InkWell(
+                              onTap: () => onOpenRequest(item),
+                              borderRadius: BorderRadius.circular(10),
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 10,
+                                  vertical: 10,
+                                ),
+                                child: Row(
                                   children: [
-                                    Text(
-                                      item.applicantName,
-                                      style: const TextStyle(
-                                        fontWeight: FontWeight.w700,
+                                    Expanded(
+                                      flex: 3,
+                                      child: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          Text(
+                                            item.applicantName,
+                                            style: const TextStyle(
+                                              fontWeight: FontWeight.w700,
+                                            ),
+                                          ),
+                                          const SizedBox(height: 2),
+                                          Text(
+                                            ref.isNotEmpty
+                                                ? ref
+                                                : item.applicationId,
+                                            style: Theme.of(
+                                              context,
+                                            ).textTheme.bodySmall,
+                                          ),
+                                        ],
                                       ),
                                     ),
-                                    const SizedBox(height: 2),
-                                    Text(
-                                      item.applicationId,
-                                      style: Theme.of(
-                                        context,
-                                      ).textTheme.bodySmall,
+                                    Expanded(
+                                      flex: 3,
+                                      child: Text(item.endorseToOffice),
+                                    ),
+                                    Expanded(
+                                      flex: 2,
+                                      child: Align(
+                                        alignment: Alignment.centerLeft,
+                                        child: _MayorStatusPill(
+                                          status: item.status,
+                                        ),
+                                      ),
+                                    ),
+                                    Expanded(
+                                      flex: 2,
+                                      child: Align(
+                                        alignment: Alignment.centerRight,
+                                        child: Text(
+                                          _fmtDateTime(processed),
+                                          style: Theme.of(
+                                            context,
+                                          ).textTheme.bodySmall,
+                                        ),
+                                      ),
                                     ),
                                   ],
                                 ),
                               ),
-                              Expanded(
-                                flex: 3,
-                                child: Text(
-                                  item.officeName.isEmpty
-                                      ? 'Unassigned'
-                                      : item.officeName,
-                                ),
-                              ),
-                              Expanded(
-                                flex: 2,
-                                child: Align(
-                                  alignment: Alignment.centerLeft,
-                                  child: _MayorStatusPill(status: item.status),
-                                ),
-                              ),
-                              Expanded(
-                                flex: 2,
-                                child: Align(
-                                  alignment: Alignment.centerRight,
-                                  child: Text(
-                                    _fmtDateTime(processed),
-                                    style: Theme.of(
-                                      context,
-                                    ).textTheme.bodySmall,
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
+                            );
+                          },
                         ),
-                      );
-                    },
+                      ],
+                    ],
                   ),
-                ],
-              ],
-            ),
           ),
         const SizedBox(height: 10),
         Row(
@@ -1764,6 +2529,31 @@ class _MayorHistoryTab extends StatelessWidget {
   }
 }
 
+class _MayorMeetingStatusChips extends StatelessWidget {
+  const _MayorMeetingStatusChips({
+    required this.selected,
+    required this.onSelected,
+  });
+
+  final String selected;
+  final ValueChanged<String> onSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    return _MayorFilterPills(
+      selected: selected,
+      onSelected: onSelected,
+      options: const [
+        ('', 'All meetings'),
+        ('submitted', 'Pending Mayor'),
+        ('approved', 'Approved'),
+        ('reschedule_requested', 'Reschedule'),
+        ('declined', 'Declined'),
+      ],
+    );
+  }
+}
+
 class _MayorStatusChips extends StatelessWidget {
   const _MayorStatusChips({required this.selected, required this.onSelected});
 
@@ -1772,42 +2562,16 @@ class _MayorStatusChips extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    const chips = <(String, String)>[
-      ('', 'All'),
-      ('pending', 'Needs Action'),
-      ('mayor_approved', 'Awaiting Office Form'),
-      ('endorsed', 'Endorsed'),
-      ('rejected', 'Rejected'),
-    ];
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      child: Row(
-        children: [
-          for (final chip in chips) ...[
-            Padding(
-              padding: const EdgeInsets.only(right: 8),
-              child: ChoiceChip(
-                label: Text(chip.$2),
-                selected: selected == chip.$1,
-                onSelected: (_) => onSelected(chip.$1),
-                selectedColor: AppTheme.primaryNavy.withValues(alpha: 0.14),
-                labelStyle: TextStyle(
-                  fontWeight: FontWeight.w700,
-                  fontSize: 12.5,
-                  color: selected == chip.$1
-                      ? AppTheme.primaryNavy
-                      : AppTheme.dashTextPrimaryOf(context),
-                ),
-                side: BorderSide(
-                  color: selected == chip.$1
-                      ? AppTheme.primaryNavy
-                      : AppTheme.dashHairlineOf(context),
-                ),
-              ),
-            ),
-          ],
-        ],
-      ),
+    return _MayorFilterPills(
+      selected: selected,
+      onSelected: onSelected,
+      options: const [
+        ('', 'All'),
+        ('pending', 'Needs Action'),
+        ('mayor_approved', 'Awaiting Office Form'),
+        ('endorsed', 'Endorsed'),
+        ('rejected', 'Rejected'),
+      ],
     );
   }
 }
@@ -1852,6 +2616,8 @@ class _MayorHistoryMobileCard extends StatelessWidget {
                 const SizedBox(height: 8),
                 Row(
                   children: [
+                    _MayorMeetingOutcomePill(request: item),
+                    const SizedBox(width: 6),
                     _MayorStatusPill(status: item.status),
                     const Spacer(),
                     Text(
@@ -1864,6 +2630,67 @@ class _MayorHistoryMobileCard extends StatelessWidget {
             ),
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _MayorFilterPills extends StatelessWidget {
+  const _MayorFilterPills({
+    required this.options,
+    required this.selected,
+    required this.onSelected,
+  });
+
+  final List<(String, String)> options;
+  final String selected;
+  final ValueChanged<String> onSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: Row(
+        children: [
+          for (final option in options)
+            Padding(
+              padding: const EdgeInsets.only(right: 6),
+              child: Material(
+                color: selected == option.$1
+                    ? AppTheme.primaryNavy
+                    : AppTheme.dashCanvasOf(context),
+                borderRadius: BorderRadius.circular(20),
+                child: InkWell(
+                  onTap: () => onSelected(option.$1),
+                  borderRadius: BorderRadius.circular(20),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 7,
+                    ),
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(
+                        color: selected == option.$1
+                            ? AppTheme.primaryNavy
+                            : AppTheme.dashHairlineOf(context),
+                      ),
+                    ),
+                    child: Text(
+                      option.$2,
+                      style: TextStyle(
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w700,
+                        color: selected == option.$1
+                            ? Colors.white
+                            : AppTheme.dashTextSecondaryOf(context),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+        ],
       ),
     );
   }
@@ -1884,8 +2711,12 @@ class _FilterPanel extends StatefulWidget {
     required this.onFromDateChanged,
     required this.onToDateChanged,
     required this.onApply,
+    this.leading,
+    this.onResetExtras,
   });
 
+  final Widget? leading;
+  final VoidCallback? onResetExtras;
   final String search;
   final String office;
   final String status;
@@ -1912,157 +2743,398 @@ class _FilterPanelState extends State<_FilterPanel> {
     text: widget.office,
   );
 
+  InputDecoration _field(BuildContext context, String hint, {Widget? icon}) {
+    final radius = BorderRadius.circular(10);
+    final side = BorderSide(color: AppTheme.dashHairlineOf(context));
+    return InputDecoration(
+      hintText: hint,
+      prefixIcon: icon,
+      isDense: true,
+      filled: true,
+      fillColor: AppTheme.dashCanvasOf(context),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+      border: OutlineInputBorder(borderRadius: radius, borderSide: side),
+      enabledBorder: OutlineInputBorder(borderRadius: radius, borderSide: side),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: radius,
+        borderSide: const BorderSide(color: AppTheme.primaryNavy),
+      ),
+    );
+  }
+
+  ButtonStyle get _dateStyle => OutlinedButton.styleFrom(
+    visualDensity: VisualDensity.compact,
+    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+    foregroundColor: AppTheme.primaryNavy,
+    side: const BorderSide(color: AppTheme.primaryNavy),
+  );
+
   @override
   Widget build(BuildContext context) {
-    return Card(
-      elevation: 0,
-      shape: RoundedRectangleBorder(
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: AppTheme.dashPanelOf(context),
         borderRadius: BorderRadius.circular(14),
-        side: BorderSide(color: AppTheme.dashHairlineOf(context)),
+        border: Border.all(color: AppTheme.dashHairlineOf(context)),
       ),
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: [
-            SizedBox(
-              width: 260,
-              child: TextField(
-                controller: _searchController,
-                decoration: const InputDecoration(
-                  labelText: 'Search applicant / application ID',
-                  border: OutlineInputBorder(),
-                ),
-              ),
-            ),
-            SizedBox(
-              width: 220,
-              child: TextField(
-                controller: _officeController,
-                decoration: const InputDecoration(
-                  labelText: 'Office',
-                  border: OutlineInputBorder(),
-                ),
-              ),
-            ),
-            SizedBox(
-              width: 200,
-              child: DropdownButtonFormField<String>(
-                initialValue: widget.status.isEmpty ? '' : widget.status,
-                isExpanded: true,
-                decoration: const InputDecoration(
-                  labelText: 'Status',
-                  border: OutlineInputBorder(),
-                  isDense: true,
-                  contentPadding: EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 14,
-                  ),
-                ),
-                items: const [
-                  DropdownMenuItem(value: '', child: Text('All')),
-                  DropdownMenuItem(value: 'pending', child: Text('Pending')),
-                  DropdownMenuItem(
-                    value: 'mayor_approved',
-                    child: Text(
-                      'Awaiting Office Form',
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                  DropdownMenuItem(value: 'endorsed', child: Text('Endorsed')),
-                  DropdownMenuItem(value: 'rejected', child: Text('Rejected')),
-                ],
-                onChanged: (v) => widget.onStatusChanged(v ?? ''),
-              ),
-            ),
-            SizedBox(
-              width: 150,
-              child: DropdownButtonFormField<String>(
-                initialValue: widget.priority.isEmpty ? '' : widget.priority,
-                isExpanded: true,
-                decoration: const InputDecoration(
-                  labelText: 'Priority',
-                  border: OutlineInputBorder(),
-                  isDense: true,
-                  contentPadding: EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 14,
-                  ),
-                ),
-                items: const [
-                  DropdownMenuItem(value: '', child: Text('All')),
-                  DropdownMenuItem(value: 'low', child: Text('Low')),
-                  DropdownMenuItem(value: 'normal', child: Text('Normal')),
-                  DropdownMenuItem(value: 'high', child: Text('High')),
-                  DropdownMenuItem(value: 'urgent', child: Text('Urgent')),
-                ],
-                onChanged: (v) => widget.onPriorityChanged(v ?? ''),
-              ),
-            ),
-            OutlinedButton.icon(
-              icon: const Icon(Icons.date_range_rounded),
-              label: Text(
-                widget.fromDate == null
-                    ? 'From date'
-                    : _fmtDateOnly(widget.fromDate!),
-              ),
-              onPressed: () async {
-                final picked = await showDatePicker(
-                  context: context,
-                  initialDate: widget.fromDate ?? DateTime.now(),
-                  firstDate: DateTime(2020),
-                  lastDate: DateTime(2100),
-                );
-                widget.onFromDateChanged(picked);
-              },
-            ),
-            OutlinedButton.icon(
-              icon: const Icon(Icons.event_available_rounded),
-              label: Text(
-                widget.toDate == null
-                    ? 'To date'
-                    : _fmtDateOnly(widget.toDate!),
-              ),
-              onPressed: () async {
-                final picked = await showDatePicker(
-                  context: context,
-                  initialDate: widget.toDate ?? DateTime.now(),
-                  firstDate: DateTime(2020),
-                  lastDate: DateTime(2100),
-                );
-                widget.onToDateChanged(picked);
-              },
-            ),
-            FilledButton.icon(
-              icon: const Icon(Icons.search_rounded),
-              label: const Text('Apply'),
-              onPressed: () async {
-                widget.onSearchChanged(_searchController.text.trim());
-                widget.onOfficeChanged(_officeController.text.trim());
-                await widget.onApply();
-              },
-            ),
-            TextButton(
-              onPressed: () async {
-                _searchController.clear();
-                _officeController.clear();
-                widget.onSearchChanged('');
-                widget.onOfficeChanged('');
-                widget.onStatusChanged('');
-                widget.onPriorityChanged('');
-                widget.onFromDateChanged(null);
-                widget.onToDateChanged(null);
-                await widget.onApply();
-              },
-              child: const Text('Clear'),
-            ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (widget.leading != null) ...[
+            widget.leading!,
+            const SizedBox(height: 10),
           ],
-        ),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              SizedBox(
+                width: 240,
+                child: TextField(
+                  controller: _searchController,
+                  decoration: _field(
+                    context,
+                    'Search applicant',
+                    icon: const Icon(Icons.search_rounded, size: 18),
+                  ),
+                  onSubmitted: (_) async {
+                    widget.onSearchChanged(_searchController.text.trim());
+                    widget.onOfficeChanged(_officeController.text.trim());
+                    await widget.onApply();
+                  },
+                ),
+              ),
+              SizedBox(
+                width: 160,
+                child: TextField(
+                  controller: _officeController,
+                  decoration: _field(context, 'Office'),
+                ),
+              ),
+              SizedBox(
+                width: 150,
+                child: DropdownButtonFormField<String>(
+                  initialValue: widget.status.isEmpty ? '' : widget.status,
+                  isExpanded: true,
+                  decoration: _field(context, 'Status'),
+                  items: const [
+                    DropdownMenuItem(value: '', child: Text('Status · All')),
+                    DropdownMenuItem(value: 'pending', child: Text('Pending')),
+                    DropdownMenuItem(
+                      value: 'mayor_approved',
+                      child: Text('Office form'),
+                    ),
+                    DropdownMenuItem(value: 'endorsed', child: Text('Endorsed')),
+                    DropdownMenuItem(value: 'rejected', child: Text('Rejected')),
+                  ],
+                  onChanged: (v) => widget.onStatusChanged(v ?? ''),
+                ),
+              ),
+              SizedBox(
+                width: 130,
+                child: DropdownButtonFormField<String>(
+                  initialValue: widget.priority.isEmpty ? '' : widget.priority,
+                  isExpanded: true,
+                  decoration: _field(context, 'Priority'),
+                  items: const [
+                    DropdownMenuItem(value: '', child: Text('Priority · All')),
+                    DropdownMenuItem(value: 'low', child: Text('Low')),
+                    DropdownMenuItem(value: 'normal', child: Text('Normal')),
+                    DropdownMenuItem(value: 'high', child: Text('High')),
+                    DropdownMenuItem(value: 'urgent', child: Text('Urgent')),
+                  ],
+                  onChanged: (v) => widget.onPriorityChanged(v ?? ''),
+                ),
+              ),
+              OutlinedButton.icon(
+                style: _dateStyle,
+                icon: const Icon(Icons.calendar_today_rounded, size: 16),
+                label: Text(
+                  widget.fromDate == null
+                      ? 'From'
+                      : _fmtDateOnly(widget.fromDate!),
+                ),
+                onPressed: () async {
+                  final picked = await showDatePicker(
+                    context: context,
+                    initialDate: widget.fromDate ?? DateTime.now(),
+                    firstDate: DateTime(2020),
+                    lastDate: DateTime(2100),
+                  );
+                  if (picked != null) widget.onFromDateChanged(picked);
+                },
+              ),
+              OutlinedButton.icon(
+                style: _dateStyle,
+                icon: const Icon(Icons.event_rounded, size: 16),
+                label: Text(
+                  widget.toDate == null ? 'To' : _fmtDateOnly(widget.toDate!),
+                ),
+                onPressed: () async {
+                  final picked = await showDatePicker(
+                    context: context,
+                    initialDate: widget.toDate ?? DateTime.now(),
+                    firstDate: DateTime(2020),
+                    lastDate: DateTime(2100),
+                  );
+                  if (picked != null) widget.onToDateChanged(picked);
+                },
+              ),
+              FilledButton.icon(
+                style: FilledButton.styleFrom(
+                  backgroundColor: AppTheme.primaryNavy,
+                  foregroundColor: Colors.white,
+                  visualDensity: VisualDensity.compact,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 14,
+                    vertical: 14,
+                  ),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                ),
+                icon: const Icon(Icons.search_rounded, size: 18),
+                label: const Text('Apply'),
+                onPressed: () async {
+                  widget.onSearchChanged(_searchController.text.trim());
+                  widget.onOfficeChanged(_officeController.text.trim());
+                  await widget.onApply();
+                },
+              ),
+              TextButton(
+                onPressed: () async {
+                  _searchController.clear();
+                  _officeController.clear();
+                  widget.onSearchChanged('');
+                  widget.onOfficeChanged('');
+                  widget.onStatusChanged('');
+                  widget.onPriorityChanged('');
+                  widget.onFromDateChanged(null);
+                  widget.onToDateChanged(null);
+                  widget.onResetExtras?.call();
+                  await widget.onApply();
+                },
+                child: const Text('Clear'),
+              ),
+            ],
+          ),
+        ],
       ),
     );
   }
 }
+
+class _HistoryFilterBar extends StatelessWidget {
+  const _HistoryFilterBar({
+    required this.narrow,
+    required this.loading,
+    required this.search,
+    required this.office,
+    required this.status,
+    required this.fromDate,
+    required this.toDate,
+    required this.onSearchChanged,
+    required this.onOfficeChanged,
+    required this.onStatusChanged,
+    required this.onFromDateChanged,
+    required this.onToDateChanged,
+    required this.onDatePreset,
+    required this.onApply,
+    required this.onClear,
+  });
+
+  final bool narrow;
+  final bool loading;
+  final String search;
+  final String office;
+  final String status;
+  final DateTime? fromDate;
+  final DateTime? toDate;
+  final ValueChanged<String> onSearchChanged;
+  final ValueChanged<String> onOfficeChanged;
+  final ValueChanged<String> onStatusChanged;
+  final ValueChanged<DateTime?> onFromDateChanged;
+  final ValueChanged<DateTime?> onToDateChanged;
+  final ValueChanged<String> onDatePreset;
+  final Future<void> Function() onApply;
+  final VoidCallback onClear;
+
+  String get _preset {
+    if (fromDate == null && toDate == null) return '';
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final from = fromDate == null
+        ? null
+        : DateTime(fromDate!.year, fromDate!.month, fromDate!.day);
+    final to = toDate == null
+        ? null
+        : DateTime(toDate!.year, toDate!.month, toDate!.day);
+    if (from == today && to == today) return 'today';
+    final weekStart = today.subtract(
+      Duration(days: (today.weekday - DateTime.monday) % 7),
+    );
+    if (from == weekStart && to == today) return 'week';
+    if (from == DateTime(today.year, today.month, 1) && to == today) {
+      return 'month';
+    }
+    return 'custom';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final fieldWidth = narrow ? double.infinity : 220.0;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: AppTheme.dashPanelOf(context),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: AppTheme.dashHairlineOf(context)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _MayorFilterPills(
+            selected: _preset == 'custom' ? '__none__' : _preset,
+            onSelected: onDatePreset,
+            options: const [
+              ('', 'All dates'),
+              ('today', 'Today'),
+              ('week', 'This week'),
+              ('month', 'This month'),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              SizedBox(
+                width: fieldWidth,
+                child: TextFormField(
+                  initialValue: search,
+                  decoration: _historyField(
+                    context,
+                    'Applicant or reference',
+                    icon: const Icon(Icons.search_rounded, size: 18),
+                  ),
+                  onChanged: onSearchChanged,
+                  onFieldSubmitted: (_) => onApply(),
+                ),
+              ),
+              SizedBox(
+                width: narrow ? double.infinity : 180,
+                child: TextFormField(
+                  initialValue: office,
+                  decoration: _historyField(context, 'Destination office'),
+                  onChanged: onOfficeChanged,
+                  onFieldSubmitted: (_) => onApply(),
+                ),
+              ),
+              SizedBox(
+                width: narrow ? double.infinity : 150,
+                child: DropdownButtonFormField<String>(
+                  initialValue: status.isEmpty ? '' : status,
+                  isExpanded: true,
+                  decoration: _historyField(context, 'Status'),
+                  items: const [
+                    DropdownMenuItem(value: '', child: Text('Status · All')),
+                    DropdownMenuItem(value: 'endorsed', child: Text('Endorsed')),
+                    DropdownMenuItem(value: 'rejected', child: Text('Rejected')),
+                  ],
+                  onChanged: loading ? null : (v) => onStatusChanged(v ?? ''),
+                ),
+              ),
+              OutlinedButton.icon(
+                style: _historyDateStyle,
+                onPressed: () async {
+                  final picked = await showDatePicker(
+                    context: context,
+                    initialDate: fromDate ?? DateTime.now(),
+                    firstDate: DateTime(2020),
+                    lastDate: DateTime.now().add(const Duration(days: 365)),
+                  );
+                  if (picked != null) onFromDateChanged(picked);
+                },
+                icon: const Icon(Icons.calendar_today_rounded, size: 16),
+                label: Text(
+                  fromDate == null ? 'From' : _fmtDateOnly(fromDate!),
+                ),
+              ),
+              OutlinedButton.icon(
+                style: _historyDateStyle,
+                onPressed: () async {
+                  final picked = await showDatePicker(
+                    context: context,
+                    initialDate: toDate ?? DateTime.now(),
+                    firstDate: DateTime(2020),
+                    lastDate: DateTime.now().add(const Duration(days: 365)),
+                  );
+                  if (picked != null) onToDateChanged(picked);
+                },
+                icon: const Icon(Icons.event_rounded, size: 16),
+                label: Text(toDate == null ? 'To' : _fmtDateOnly(toDate!)),
+              ),
+              FilledButton.icon(
+                style: FilledButton.styleFrom(
+                  backgroundColor: AppTheme.primaryNavy,
+                  foregroundColor: Colors.white,
+                  visualDensity: VisualDensity.compact,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 14,
+                    vertical: 14,
+                  ),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                ),
+                onPressed: loading ? null : onApply,
+                icon: const Icon(Icons.search_rounded, size: 18),
+                label: const Text('Apply'),
+              ),
+              TextButton(
+                onPressed: loading ? null : onClear,
+                child: const Text('Clear'),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+InputDecoration _historyField(BuildContext context, String hint, {Widget? icon}) {
+  final radius = BorderRadius.circular(10);
+  final side = BorderSide(color: AppTheme.dashHairlineOf(context));
+  return InputDecoration(
+    hintText: hint,
+    prefixIcon: icon,
+    isDense: true,
+    filled: true,
+    fillColor: AppTheme.dashCanvasOf(context),
+    contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+    border: OutlineInputBorder(borderRadius: radius, borderSide: side),
+    enabledBorder: OutlineInputBorder(borderRadius: radius, borderSide: side),
+    focusedBorder: OutlineInputBorder(
+      borderRadius: radius,
+      borderSide: const BorderSide(color: AppTheme.primaryNavy),
+    ),
+  );
+}
+
+ButtonStyle get _historyDateStyle => OutlinedButton.styleFrom(
+  visualDensity: VisualDensity.compact,
+  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+  foregroundColor: AppTheme.primaryNavy,
+  side: const BorderSide(color: AppTheme.primaryNavy),
+);
 
 class _MayorEndorsementIntakeDialog extends StatefulWidget {
   const _MayorEndorsementIntakeDialog();
@@ -2265,7 +3337,8 @@ class _MayorEndorsementIntakeDialogState
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               const Text(
-                'Fill out all applicant fields before submitting endorsement to Mayor.',
+                'Required: Last Name, First Name, Address, Course, and School Address. '
+                'Middle name and work/PRC fields are optional.',
                 style: TextStyle(fontSize: 13),
               ),
               const SizedBox(height: 12),
@@ -2469,15 +3542,21 @@ class _MayorEndorsementIntakeDialogState
 class _MayorReviewDialog extends StatefulWidget {
   const _MayorReviewDialog({
     required this.details,
-    required this.onScheduleMeeting,
-    required this.onMarkNoShow,
-    required this.onMarkMetMayor,
+    required this.canScheduleMeetings,
+    required this.canRecordAttendance,
+    required this.canFinalDecide,
+    this.onScheduleMeeting,
+    this.onMarkNoShow,
+    this.onMarkMetMayor,
   });
 
   final MayorEndorsementDetails details;
-  final Future<bool> Function() onScheduleMeeting;
-  final Future<bool> Function() onMarkNoShow;
-  final Future<bool> Function() onMarkMetMayor;
+  final bool canScheduleMeetings;
+  final bool canRecordAttendance;
+  final bool canFinalDecide;
+  final Future<bool> Function()? onScheduleMeeting;
+  final Future<bool> Function()? onMarkNoShow;
+  final Future<bool> Function()? onMarkMetMayor;
 
   @override
   State<_MayorReviewDialog> createState() => _MayorReviewDialogState();
@@ -2492,6 +3571,7 @@ class _MayorReviewDialogState extends State<_MayorReviewDialog> {
   String? _selectedDestinationOfficeId;
 
   bool get _canEditDecisionFields {
+    if (!widget.canFinalDecide) return false;
     final req = widget.details.request;
     return (req.status == 'pending' && req.hasMetMayor) ||
         req.status == 'mayor_approved';
@@ -2606,8 +3686,11 @@ class _MayorReviewDialogState extends State<_MayorReviewDialog> {
   Widget build(BuildContext context) {
     final req = widget.details.request;
     final applicant = widget.details.applicant;
-    final canMayorApprove = req.status == 'pending' && req.hasMetMayor;
-    final canOfficeApproveForm = req.status == 'mayor_approved';
+    final canMayorApprove = widget.canFinalDecide &&
+        req.status == 'pending' &&
+        req.hasMetMayor;
+    final canOfficeApproveForm =
+        widget.canFinalDecide && req.status == 'mayor_approved';
     final canReject = canMayorApprove || canOfficeApproveForm;
     final statusColor = _statusColor(req.status);
     final priorityColor = _priorityColor(req.priority);
@@ -2622,7 +3705,9 @@ class _MayorReviewDialogState extends State<_MayorReviewDialog> {
       String? helper,
       String? hint,
       IconData? icon,
+      bool? editable,
     }) {
+      final canType = editable ?? _canEditDecisionFields;
       return InputDecoration(
         labelText: label,
         hintText: hint,
@@ -2634,16 +3719,12 @@ class _MayorReviewDialogState extends State<_MayorReviewDialog> {
             : Icon(icon, size: 20, color: AppTheme.primaryNavy),
         prefixIconColor: AppTheme.primaryNavy,
         filled: true,
-        fillColor: _canEditDecisionFields
-            ? Colors.white
-            : const Color(0xFFFAFBFC),
+        fillColor: canType ? Colors.white : const Color(0xFFFAFBFC),
         border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
         enabledBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
           borderSide: BorderSide(
-            color: _canEditDecisionFields
-                ? const Color(0xFFCBD5E1)
-                : const Color(0xFFE2E8F0),
+            color: canType ? const Color(0xFFCBD5E1) : const Color(0xFFE2E8F0),
           ),
         ),
         focusedBorder: OutlineInputBorder(
@@ -2750,25 +3831,36 @@ class _MayorReviewDialogState extends State<_MayorReviewDialog> {
                 padding: const EdgeInsets.fromLTRB(18, 12, 18, 0),
                 child: _MayorReviewSummaryBar(
                   request: req,
-                  onMarkMetMayor: _awaitingMeeting
+                  onMarkMetMayor: _awaitingMeeting &&
+                          widget.canRecordAttendance &&
+                          widget.onMarkMetMayor != null &&
+                          req.meetingRequestStatus == 'approved' &&
+                          (req.appointmentStatus == 'scheduled' ||
+                              req.appointmentStatus == 'no_show')
                       ? () async {
-                          final ok = await widget.onMarkMetMayor();
+                          final ok = await widget.onMarkMetMayor!();
                           if (ok && context.mounted) {
                             Navigator.of(context).pop();
                           }
                         }
                       : null,
-                  onScheduleMeeting: _awaitingMeeting
+                  onScheduleMeeting: _awaitingMeeting &&
+                          widget.canScheduleMeetings &&
+                          widget.onScheduleMeeting != null
                       ? () async {
-                          final ok = await widget.onScheduleMeeting();
+                          final ok = await widget.onScheduleMeeting!();
                           if (ok && context.mounted) {
                             Navigator.of(context).pop();
                           }
                         }
                       : null,
-                  onMarkNoShow: _awaitingMeeting
+                  onMarkNoShow: _awaitingMeeting &&
+                          widget.canRecordAttendance &&
+                          widget.onMarkNoShow != null &&
+                          req.meetingRequestStatus == 'approved' &&
+                          req.appointmentStatus == 'scheduled'
                       ? () async {
-                          final ok = await widget.onMarkNoShow();
+                          final ok = await widget.onMarkNoShow!();
                           if (ok && context.mounted) {
                             Navigator.of(context).pop();
                           }
@@ -2996,22 +4088,19 @@ class _MayorReviewDialogState extends State<_MayorReviewDialog> {
                           const SizedBox(height: 12),
                           TextField(
                             controller: _remarksCtrl,
-                            enabled: _canEditDecisionFields,
+                            enabled: widget.canFinalDecide,
+                            readOnly: !widget.canFinalDecide,
                             minLines: 3,
-                            maxLines: 5,
+                            maxLines: 6,
+                            keyboardType: TextInputType.multiline,
                             textInputAction: TextInputAction.newline,
                             decoration: fieldDec(
-                              label: canOfficeApproveForm
-                                  ? 'Endorsement Remarks / Instructions'
-                                  : 'Endorsement Remarks / Instructions',
-                              hint:
-                                  'Type remarks or instructions for the destination office',
-                              helper: canOfficeApproveForm
-                                  ? 'Optional notes included in the endorsement letter'
-                                  : (canMayorApprove
-                                        ? 'Optional guidance for the destination office'
-                                        : null),
-                              icon: Icons.notes_rounded,
+                              label: 'Endorsement Remarks / Instructions',
+                              hint: 'Type remarks or instructions',
+                              helper: widget.canFinalDecide
+                                  ? 'Optional. Saved when you endorse.'
+                                  : null,
+                              editable: widget.canFinalDecide,
                             ),
                           ),
                           if (canReject) ...[
@@ -3022,11 +4111,9 @@ class _MayorReviewDialogState extends State<_MayorReviewDialog> {
                               minLines: 2,
                               maxLines: 4,
                               decoration: fieldDec(
-                                label: 'Rejection Reason',
-                                hint:
-                                    'Explain why this endorsement is rejected',
-                                helper:
-                                    'Required only when rejecting this endorsement',
+                                label: 'Rejection Reason (optional)',
+                                hint: 'Optional note',
+                                helper: 'Optional when rejecting',
                                 icon: Icons.report_gmailerrorred_outlined,
                               ),
                             ),
@@ -3126,7 +4213,7 @@ class _MayorReviewDialogState extends State<_MayorReviewDialog> {
                                   vertical: 12,
                                 ),
                               ),
-                              label: const Text('Approve (Municipal Mayor)'),
+                              label: const Text('Endorse'),
                             ),
                           if (canOfficeApproveForm)
                             FilledButton.icon(
@@ -3158,9 +4245,7 @@ class _MayorReviewDialogState extends State<_MayorReviewDialog> {
                                   vertical: 12,
                                 ),
                               ),
-                              label: const Text(
-                                'Approve Form (Mayor\'s Office)',
-                              ),
+                              label: const Text('Endorse (legacy form)'),
                             ),
                         ],
                       ),
@@ -3348,6 +4433,8 @@ class _MayorReviewSummaryBar extends StatelessWidget {
               _MayorMetaChip(
                 icon: noShow
                     ? Icons.event_busy_rounded
+                    : request.hasMetMayor
+                    ? Icons.handshake_outlined
                     : Icons.event_available_rounded,
                 label: 'Meeting with Mayor',
                 value: meeting == null
@@ -3356,15 +4443,22 @@ class _MayorReviewSummaryBar extends StatelessWidget {
               ),
             ],
           ),
+          const SizedBox(height: 10),
+          _MayorMeetingOutcomePill(request: request),
           if (showMeetingActions) ...[
             const SizedBox(height: 12),
             Text(
               request.hasMetMayor
                   ? 'They already met the Mayor. You can now approve (and set the office) or reject.'
                   : noShow
-                  ? 'They did not appear. Reschedule, or tap Met the Mayor if they already talked to the Mayor.'
-                  : 'If they already talked to / saw the Mayor, tap Met the Mayor. '
-                        'If not, schedule a meeting. If they miss it, mark Did not appear and reschedule.',
+                  ? (onScheduleMeeting != null
+                      ? 'They did not appear. Reschedule, or tap Met the Mayor if they already talked to the Mayor.'
+                      : 'They did not appear. Tap Met the Mayor if they already talked to the Mayor.')
+                  : onScheduleMeeting != null
+                  ? 'If they already talked to / saw the Mayor, tap Met the Mayor. '
+                        'If not, schedule a meeting. If they miss it, mark Did not appear and reschedule.'
+                  : 'If they already met the Mayor (early or on schedule), tap Met the Mayor. '
+                        'If they did not appear, mark Did not appear.',
               style: TextStyle(fontSize: 12.5, height: 1.4, color: secondary),
             ),
             const SizedBox(height: 8),
@@ -3638,313 +4732,6 @@ class _KvField extends StatelessWidget {
   }
 }
 
-class _StatCard extends StatelessWidget {
-  const _StatCard({
-    required this.title,
-    required this.value,
-    required this.color,
-    required this.icon,
-    this.hint,
-    this.emphasized = false,
-    this.onTap,
-  });
-
-  final String title;
-  final String value;
-  final Color color;
-  final IconData icon;
-  final String? hint;
-  final bool emphasized;
-  final VoidCallback? onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final card = Material(
-      color: AppTheme.dashPanelOf(context),
-      borderRadius: BorderRadius.circular(15),
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(15),
-        child: Ink(
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(15),
-            border: Border.all(
-              color: emphasized
-                  ? color.withValues(alpha: 0.45)
-                  : AppTheme.dashHairlineOf(context),
-            ),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.035),
-                blurRadius: 8,
-                offset: const Offset(0, 2),
-              ),
-            ],
-          ),
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(14, 14, 14, 12),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Container(
-                      width: 32,
-                      height: 32,
-                      decoration: BoxDecoration(
-                        color: color.withValues(alpha: 0.12),
-                        borderRadius: BorderRadius.circular(9),
-                      ),
-                      child: Icon(icon, size: 18, color: color),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        title,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w700,
-                          color: AppTheme.dashTextSecondaryOf(context),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 10),
-                Text(
-                  value,
-                  style: TextStyle(
-                    fontWeight: FontWeight.w800,
-                    fontSize: 28,
-                    height: 1.05,
-                    color: AppTheme.dashTextPrimaryOf(context),
-                    letterSpacing: -0.6,
-                  ),
-                ),
-                if ((hint ?? '').isNotEmpty) ...[
-                  const SizedBox(height: 4),
-                  Text(
-                    hint!,
-                    style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
-                      color: emphasized
-                          ? color
-                          : AppTheme.dashTextSecondaryOf(context),
-                    ),
-                  ),
-                ],
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-    return Semantics(
-      button: onTap != null,
-      label: [
-        title,
-        value,
-        if ((hint ?? '').isNotEmpty) hint!,
-      ].join(', '),
-      child: card,
-    );
-  }
-}
-
-class _MayorKpiRow extends StatelessWidget {
-  const _MayorKpiRow({
-    required this.pending,
-    required this.awaiting,
-    required this.approved,
-    required this.rejected,
-    required this.twoColumns,
-    required this.onOpenFiltered,
-  });
-
-  final int pending;
-  final int awaiting;
-  final int approved;
-  final int rejected;
-  final bool twoColumns;
-  final ValueChanged<String> onOpenFiltered;
-
-  @override
-  Widget build(BuildContext context) {
-    final cards = [
-      _StatCard(
-        title: 'Pending Review',
-        value: pending.toString(),
-        color: const Color(0xFFD97706),
-        icon: Icons.pending_actions_rounded,
-        hint: pending > 0 ? 'Meeting or decision needed' : 'No action needed',
-        emphasized: pending > 0,
-        onTap: () => onOpenFiltered('pending'),
-      ),
-      _StatCard(
-        title: 'Awaiting Office Form',
-        value: awaiting.toString(),
-        color: const Color(0xFF1D4ED8),
-        icon: Icons.assignment_turned_in_outlined,
-        hint: 'Mayor approved, form pending',
-        onTap: () => onOpenFiltered('mayor_approved'),
-      ),
-      _StatCard(
-        title: 'Endorsed',
-        value: approved.toString(),
-        color: const Color(0xFF15803D),
-        icon: Icons.check_circle_rounded,
-        hint: 'Completed endorsements',
-        onTap: () => onOpenFiltered('endorsed'),
-      ),
-      _StatCard(
-        title: 'Rejected',
-        value: rejected.toString(),
-        color: const Color(0xFFB91C1C),
-        icon: Icons.cancel_rounded,
-        onTap: () => onOpenFiltered('rejected'),
-      ),
-    ];
-
-    if (!twoColumns) {
-      return Row(
-        children: [
-          for (var i = 0; i < cards.length; i++) ...[
-            if (i > 0) const SizedBox(width: 12),
-            Expanded(child: cards[i]),
-          ],
-        ],
-      );
-    }
-
-    return Column(
-      children: [
-        Row(
-          children: [
-            Expanded(child: cards[0]),
-            const SizedBox(width: 10),
-            Expanded(child: cards[1]),
-          ],
-        ),
-        const SizedBox(height: 10),
-        Row(
-          children: [
-            Expanded(child: cards[2]),
-            const SizedBox(width: 10),
-            Expanded(child: cards[3]),
-          ],
-        ),
-      ],
-    );
-  }
-}
-
-class _MayorWelcomeBanner extends StatelessWidget {
-  const _MayorWelcomeBanner();
-
-  @override
-  Widget build(BuildContext context) {
-    final primary = AppTheme.dashTextPrimaryOf(context);
-    final secondary = AppTheme.dashTextSecondaryOf(context);
-    final greeting = mayorPortalGreeting();
-    final width = MediaQuery.sizeOf(context).width;
-    final isNarrow = width < 720;
-    final pad = isNarrow ? 16.0 : 20.0;
-
-    final textColumn = Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          'Mayor Portal',
-          style: TextStyle(
-            color: AppTheme.primaryNavy,
-            fontSize: 11,
-            fontWeight: FontWeight.w800,
-            letterSpacing: 0.4,
-          ),
-        ),
-        const SizedBox(height: 6),
-        Text(
-          greeting,
-          style: TextStyle(
-            color: primary,
-            fontSize: isNarrow ? 20 : 22,
-            fontWeight: FontWeight.w800,
-            letterSpacing: -0.5,
-            height: 1.1,
-          ),
-        ),
-        const SizedBox(height: 6),
-        Text(
-          "Here's an overview of today's endorsement activity.",
-          style: TextStyle(
-            color: secondary,
-            fontSize: 13.5,
-            height: 1.35,
-          ),
-        ),
-      ],
-    );
-
-    return Container(
-      padding: EdgeInsets.all(pad),
-      decoration: BoxDecoration(
-        color: AppTheme.dashPanelOf(context),
-        borderRadius: BorderRadius.circular(15),
-        border: Border.all(color: AppTheme.dashHairlineOf(context)),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.03),
-            blurRadius: 8,
-            offset: const Offset(0, 2),
-          ),
-        ],
-      ),
-      child: isNarrow
-          ? Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                textColumn,
-                const SizedBox(height: 12),
-                const Align(
-                  alignment: Alignment.centerLeft,
-                  child: AdminWelcomeStatusCard(
-                    layout: WelcomeStatusLayout.inline,
-                  ),
-                ),
-              ],
-            )
-          : Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Container(
-                  width: 40,
-                  height: 40,
-                  alignment: Alignment.center,
-                  decoration: BoxDecoration(
-                    color: AppTheme.primaryNavy.withValues(alpha: 0.1),
-                    shape: BoxShape.circle,
-                  ),
-                  child: const Icon(
-                    Icons.account_balance_rounded,
-                    size: 20,
-                    color: AppTheme.primaryNavy,
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(child: textColumn),
-                const SizedBox(width: 12),
-                const AdminWelcomeStatusCard(
-                  layout: WelcomeStatusLayout.inline,
-                ),
-              ],
-            ),
-    );
-  }
-}
-
 class _MayorSectionCard extends StatelessWidget {
   const _MayorSectionCard({
     required this.title,
@@ -3998,629 +4785,6 @@ class _MayorSectionCard extends StatelessWidget {
           ],
         ),
       ),
-    );
-  }
-}
-
-class _MayorRecentRequestsPanel extends StatelessWidget {
-  const _MayorRecentRequestsPanel({
-    required this.requests,
-    required this.onOpenRequest,
-    required this.onViewAll,
-    required this.compactTable,
-  });
-
-  final List<MayorEndorsementRequest> requests;
-  final ValueChanged<MayorEndorsementRequest> onOpenRequest;
-  final VoidCallback onViewAll;
-  final bool compactTable;
-
-  @override
-  Widget build(BuildContext context) {
-    final secondary = AppTheme.dashTextSecondaryOf(context);
-    return _MayorSectionCard(
-      title: 'Needs Your Attention',
-      trailing: TextButton(
-        onPressed: onViewAll,
-        child: const Text('View all requests →'),
-      ),
-      child: requests.isEmpty
-          ? const _MayorEmptyState(
-              icon: Icons.inbox_outlined,
-              title: 'No recent endorsement requests',
-              subtitle:
-                  'New submissions from staff will appear in this list.',
-            )
-          : Column(
-              children: [
-                if (compactTable) ...[
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 8),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          flex: 4,
-                          child: Text(
-                            'Applicant',
-                            style: TextStyle(
-                              fontSize: 11,
-                              fontWeight: FontWeight.w700,
-                              color: secondary,
-                            ),
-                          ),
-                        ),
-                        Expanded(
-                          flex: 3,
-                          child: Text(
-                            'Destination',
-                            style: TextStyle(
-                              fontSize: 11,
-                              fontWeight: FontWeight.w700,
-                              color: secondary,
-                            ),
-                          ),
-                        ),
-                        Expanded(
-                          flex: 3,
-                          child: Text(
-                            'Status',
-                            style: TextStyle(
-                              fontSize: 11,
-                              fontWeight: FontWeight.w700,
-                              color: secondary,
-                            ),
-                          ),
-                        ),
-                        SizedBox(
-                          width: 72,
-                          child: Text(
-                            'Date',
-                            textAlign: TextAlign.right,
-                            style: TextStyle(
-                              fontSize: 11,
-                              fontWeight: FontWeight.w700,
-                              color: secondary,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  Divider(height: 1, color: AppTheme.dashHairlineOf(context)),
-                ],
-                for (final r in requests)
-                  compactTable
-                      ? _MayorRecentRequestTableRow(
-                          request: r,
-                          onTap: () => onOpenRequest(r),
-                        )
-                      : _MayorRecentRequestMobileRow(
-                          request: r,
-                          onTap: () => onOpenRequest(r),
-                        ),
-              ],
-            ),
-    );
-  }
-}
-
-class _MayorRecentRequestTableRow extends StatelessWidget {
-  const _MayorRecentRequestTableRow({
-    required this.request,
-    required this.onTap,
-  });
-
-  final MayorEndorsementRequest request;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(8),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 10),
-          child: Row(
-            children: [
-              Expanded(
-                flex: 4,
-                child: Text(
-                  request.applicantName,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    fontSize: 13.5,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              ),
-              Expanded(
-                flex: 3,
-                child: Text(
-                  request.endorseToOffice,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    fontSize: 13,
-                    color: AppTheme.dashTextSecondaryOf(context),
-                  ),
-                ),
-              ),
-              Expanded(
-                flex: 3,
-                child: Align(
-                  alignment: Alignment.centerLeft,
-                  child: FittedBox(
-                    fit: BoxFit.scaleDown,
-                    alignment: Alignment.centerLeft,
-                    child: _MayorStatusPill(status: request.status),
-                  ),
-                ),
-              ),
-              SizedBox(
-                width: 72,
-                child: Text(
-                  _fmtShortDate(request.submittedAt.toLocal()),
-                  textAlign: TextAlign.right,
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: AppTheme.dashTextSecondaryOf(context),
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _MayorRecentRequestMobileRow extends StatelessWidget {
-  const _MayorRecentRequestMobileRow({
-    required this.request,
-    required this.onTap,
-  });
-
-  final MayorEndorsementRequest request;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final secondary = AppTheme.dashTextSecondaryOf(context);
-    final from = (request.submittedByName ?? '').trim();
-    final showFrom = !_isMayorOfficeLabel(from);
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
-      child: Material(
-        color: AppTheme.dashCanvasOf(context),
-        borderRadius: BorderRadius.circular(12),
-        child: InkWell(
-          onTap: onTap,
-          borderRadius: BorderRadius.circular(12),
-          child: Padding(
-            padding: const EdgeInsets.all(12),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  request.applicantName,
-                  style: const TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w800,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  request.endorseToOffice,
-                  style: TextStyle(fontSize: 13, color: secondary),
-                ),
-                if (showFrom) ...[
-                  const SizedBox(height: 2),
-                  Text(
-                    'From $from',
-                    style: TextStyle(fontSize: 12, color: secondary),
-                  ),
-                ],
-                const SizedBox(height: 8),
-                Row(
-                  children: [
-                    _MayorStatusPill(status: request.status),
-                    const Spacer(),
-                    Text(
-                      _fmtShortDate(request.submittedAt.toLocal()),
-                      style: TextStyle(fontSize: 12, color: secondary),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _MayorMonitoringPanel extends StatelessWidget {
-  const _MayorMonitoringPanel({
-    required this.pending,
-    required this.awaiting,
-    required this.endorsed,
-    required this.rejected,
-  });
-
-  final int pending;
-  final int awaiting;
-  final int endorsed;
-  final int rejected;
-
-  static const _pending = Color(0xFFD97706);
-  static const _awaiting = Color(0xFF1D4ED8);
-  static const _endorsed = Color(0xFF15803D);
-  static const _rejected = Color(0xFFC62828);
-
-  @override
-  Widget build(BuildContext context) {
-    final stages = <({String label, int count, Color color})>[
-      (label: 'Pending Review', count: pending, color: _pending),
-      (label: 'Awaiting Office Form', count: awaiting, color: _awaiting),
-      (label: 'Endorsed', count: endorsed, color: _endorsed),
-    ];
-    final bars = <({String label, String tip, int count, Color color})>[
-      (label: 'Pending', tip: 'Pending Review', count: pending, color: _pending),
-      (
-        label: 'Office form',
-        tip: 'Awaiting Office Form',
-        count: awaiting,
-        color: _awaiting,
-      ),
-      (label: 'Endorsed', tip: 'Endorsed', count: endorsed, color: _endorsed),
-      (label: 'Rejected', tip: 'Rejected', count: rejected, color: _rejected),
-    ];
-    final maxVal = bars.fold<int>(0, (m, e) => e.count > m ? e.count : m);
-    final maxY = _axisMax(maxVal);
-    final interval = _axisInterval(maxY);
-
-    return _MayorSectionCard(
-      title: 'Endorsement Monitoring',
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Text(
-            'Where endorsement requests currently are',
-            style: TextStyle(
-              color: AppTheme.dashTextSecondaryOf(context),
-              fontSize: 12,
-              height: 1.35,
-            ),
-          ),
-          const SizedBox(height: 12),
-          LayoutBuilder(
-            builder: (context, constraints) {
-              final compact = constraints.maxWidth < 520;
-              final chips = [
-                for (var i = 0; i < stages.length; i++) ...[
-                  if (compact)
-                    SizedBox(
-                      width: 132,
-                      child: _MayorPipelineChip(
-                        label: stages[i].label,
-                        count: stages[i].count,
-                        color: stages[i].color,
-                      ),
-                    )
-                  else
-                    Expanded(
-                      child: _MayorPipelineChip(
-                        label: stages[i].label,
-                        count: stages[i].count,
-                        color: stages[i].color,
-                      ),
-                    ),
-                  if (i < stages.length - 1)
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 2),
-                      child: Icon(
-                        Icons.chevron_right_rounded,
-                        size: 16,
-                        color: AppTheme.dashTextSecondaryOf(context)
-                            .withValues(alpha: 0.55),
-                      ),
-                    ),
-                ],
-              ];
-              if (compact) {
-                return SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  child: Row(children: chips),
-                );
-              }
-              return Row(children: chips);
-            },
-          ),
-          const SizedBox(height: 16),
-          SizedBox(
-            height: 188,
-            child: BarChart(
-              BarChartData(
-                maxY: maxY,
-                barTouchData: BarTouchData(
-                  enabled: true,
-                  touchTooltipData: BarTouchTooltipData(
-                    getTooltipColor: (_) => const Color(0xFF1F2937),
-                    tooltipPadding: const EdgeInsets.symmetric(
-                      horizontal: 10,
-                      vertical: 8,
-                    ),
-                    getTooltipItem: (group, groupIndex, rod, rodIndex) {
-                      final i = group.x;
-                      if (i < 0 || i >= bars.length) return null;
-                      final n = rod.toY.toInt();
-                      return BarTooltipItem(
-                        '${bars[i].tip}\n$n ${n == 1 ? 'request' : 'requests'}',
-                        const TextStyle(
-                          color: Colors.white,
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600,
-                          height: 1.35,
-                        ),
-                      );
-                    },
-                  ),
-                ),
-                gridData: FlGridData(
-                  show: true,
-                  drawVerticalLine: false,
-                  horizontalInterval: interval,
-                  getDrawingHorizontalLine: (v) => FlLine(
-                    color: AppTheme.dashHairlineOf(context),
-                    strokeWidth: 1,
-                  ),
-                ),
-                borderData: FlBorderData(show: false),
-                titlesData: FlTitlesData(
-                  topTitles: const AxisTitles(
-                    sideTitles: SideTitles(showTitles: false),
-                  ),
-                  rightTitles: const AxisTitles(
-                    sideTitles: SideTitles(showTitles: false),
-                  ),
-                  leftTitles: AxisTitles(
-                    sideTitles: SideTitles(
-                      showTitles: true,
-                      reservedSize: 28,
-                      interval: interval,
-                      getTitlesWidget: (v, meta) {
-                        if ((v - v.roundToDouble()).abs() > 0.01) {
-                          return const SizedBox.shrink();
-                        }
-                        return Text(
-                          v.toInt().toString(),
-                          style: TextStyle(
-                            fontSize: 10,
-                            color: AppTheme.dashTextSecondaryOf(context),
-                          ),
-                        );
-                      },
-                    ),
-                  ),
-                  bottomTitles: AxisTitles(
-                    sideTitles: SideTitles(
-                      showTitles: true,
-                      reservedSize: 28,
-                      getTitlesWidget: (v, meta) {
-                        final i = v.toInt();
-                        if (i < 0 || i >= bars.length) {
-                          return const SizedBox.shrink();
-                        }
-                        return Padding(
-                          padding: const EdgeInsets.only(top: 6),
-                          child: Text(
-                            bars[i].label,
-                            style: TextStyle(
-                              fontSize: 11,
-                              fontWeight: FontWeight.w600,
-                              color: AppTheme.dashTextSecondaryOf(context),
-                            ),
-                          ),
-                        );
-                      },
-                    ),
-                  ),
-                ),
-                barGroups: [
-                  for (var i = 0; i < bars.length; i++)
-                    BarChartGroupData(
-                      x: i,
-                      barRods: [
-                        BarChartRodData(
-                          toY: bars[i].count.toDouble(),
-                          width: 18,
-                          borderRadius: const BorderRadius.vertical(
-                            top: Radius.circular(5),
-                          ),
-                          color: maxVal > 0
-                              ? bars[i].color
-                              : bars[i].color.withValues(alpha: 0.28),
-                        ),
-                      ],
-                    ),
-                ],
-              ),
-              duration: const Duration(milliseconds: 280),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  static double _axisMax(int maxVal) {
-    if (maxVal <= 4) return 4;
-    final step = maxVal <= 10
-        ? 2
-        : maxVal <= 20
-        ? 5
-        : 10;
-    return (((maxVal + 1) / step).ceil() * step).toDouble();
-  }
-
-  static double _axisInterval(double maxY) {
-    if (maxY <= 6) return 1;
-    if (maxY <= 10) return 2;
-    if (maxY <= 20) return 5;
-    return 10;
-  }
-}
-
-class _MayorPipelineChip extends StatelessWidget {
-  const _MayorPipelineChip({
-    required this.label,
-    required this.count,
-    required this.color,
-  });
-
-  final String label;
-  final int count;
-  final Color color;
-
-  @override
-  Widget build(BuildContext context) {
-    final active = count > 0;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
-      decoration: BoxDecoration(
-        color: active
-            ? color.withValues(alpha: 0.08)
-            : AppTheme.dashMutedSurfaceOf(context),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: active
-              ? color.withValues(alpha: 0.28)
-              : AppTheme.dashHairlineOf(context),
-        ),
-      ),
-      child: Column(
-        children: [
-          Text(
-            '$count',
-            style: TextStyle(
-              color: active
-                  ? AppTheme.dashTextPrimaryOf(context)
-                  : AppTheme.dashTextSecondaryOf(context),
-              fontSize: 20,
-              fontWeight: FontWeight.w800,
-              height: 1.1,
-            ),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            label,
-            textAlign: TextAlign.center,
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(
-              color: AppTheme.dashTextSecondaryOf(context),
-              fontSize: 10.5,
-              fontWeight: FontWeight.w600,
-              height: 1.2,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _MayorOfficeOverviewPanel extends StatelessWidget {
-  const _MayorOfficeOverviewPanel({required this.offices});
-
-  final List<MayorOfficeStat> offices;
-
-  @override
-  Widget build(BuildContext context) {
-    final sorted = [...offices]..sort((a, b) => b.total.compareTo(a.total));
-    final maxTotal = sorted.fold<int>(0, (m, s) => s.total > m ? s.total : m);
-    return _MayorSectionCard(
-      title: 'Endorsements by Office',
-      child: sorted.isEmpty
-          ? const _MayorEmptyState(
-              icon: Icons.account_balance_outlined,
-              title: 'No endorsement data available',
-              subtitle:
-                  'Office distribution will appear once requests are reviewed.',
-            )
-          : Column(
-              children: [
-                for (final s in sorted)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 12),
-                    child: _MayorOfficeBar(
-                      name: s.officeName,
-                      total: s.total,
-                      maxTotal: maxTotal <= 0 ? 1 : maxTotal,
-                    ),
-                  ),
-              ],
-            ),
-    );
-  }
-}
-
-class _MayorOfficeBar extends StatelessWidget {
-  const _MayorOfficeBar({
-    required this.name,
-    required this.total,
-    required this.maxTotal,
-  });
-
-  final String name;
-  final int total;
-  final int maxTotal;
-
-  @override
-  Widget build(BuildContext context) {
-    final ratio = (total / maxTotal).clamp(0.0, 1.0);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            Expanded(
-              child: Text(
-                name,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-            ),
-            Text(
-              '$total',
-              style: TextStyle(
-                fontSize: 13,
-                fontWeight: FontWeight.w800,
-                color: AppTheme.dashTextPrimaryOf(context),
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 6),
-        ClipRRect(
-          borderRadius: BorderRadius.circular(99),
-          child: LinearProgressIndicator(
-            value: ratio,
-            minHeight: 8,
-            backgroundColor: AppTheme.dashHairlineOf(context),
-            color: AppTheme.primaryNavy.withValues(alpha: 0.75),
-          ),
-        ),
-      ],
     );
   }
 }
@@ -4684,6 +4848,65 @@ class _MayorStatusPill extends StatelessWidget {
       child: Text(
         label,
         style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: fg),
+      ),
+    );
+  }
+}
+
+/// Clear meeting-outcome badge for Mayor and Staff (met / not yet / no-show).
+class _MayorMeetingOutcomePill extends StatelessWidget {
+  const _MayorMeetingOutcomePill({required this.request});
+  final MayorEndorsementRequest request;
+
+  @override
+  Widget build(BuildContext context) {
+    final status = request.status.toLowerCase();
+    final met = request.hasMetMayor ||
+        status == 'endorsed' ||
+        status == 'mayor_approved';
+    final noShow = request.appointmentStatus.toLowerCase() == 'no_show';
+
+    late final String label;
+    late final Color bg;
+    late final Color fg;
+    late final IconData icon;
+    if (met) {
+      label = 'Met the Mayor';
+      bg = AppTheme.primaryNavy;
+      fg = Colors.white;
+      icon = Icons.handshake_outlined;
+    } else if (noShow) {
+      label = 'Did not appear';
+      bg = const Color(0xFFC62828);
+      fg = Colors.white;
+      icon = Icons.event_busy_rounded;
+    } else {
+      label = 'Not yet met';
+      bg = Colors.orange.shade100;
+      fg = Colors.orange.shade900;
+      icon = Icons.hourglass_empty_rounded;
+    }
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 14, color: fg),
+          const SizedBox(width: 5),
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w700,
+              color: fg,
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -4885,9 +5108,7 @@ class _ApproveEndorsementDialogState extends State<_ApproveEndorsementDialog> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              'You are endorsing ${widget.applicantName} to:',
-            ),
+            Text('You are endorsing ${widget.applicantName} to:'),
             const SizedBox(height: 14),
             Autocomplete<_MayorOfficeOption>(
               initialValue: TextEditingValue(text: _officeCtrl.text),
@@ -4981,11 +5202,32 @@ class MayorEndorsementRepo {
   MayorEndorsementRepo._();
   static final MayorEndorsementRepo instance = MayorEndorsementRepo._();
 
-  Future<MayorDashboardData> fetchDashboard() async {
+  Future<MayorDashboardData> fetchDashboard({bool includeTest = false}) async {
     final res = await ApiClient.instance.get<Map<String, dynamic>>(
       '/api/mayor/endorsements/dashboard',
+      queryParameters: {
+        if (includeTest) 'include_test': '1',
+      },
     );
     return MayorDashboardData.fromJson(res.data ?? {});
+  }
+
+  Future<Map<String, dynamic>> fetchReport({
+    required String period,
+    DateTime? fromDate,
+    DateTime? toDate,
+    bool includeTest = false,
+  }) async {
+    final res = await ApiClient.instance.get<Map<String, dynamic>>(
+      '/api/mayor/endorsements/reports',
+      queryParameters: {
+        'period': period,
+        if (fromDate != null) 'from_date': _fmtDateOnly(fromDate),
+        if (toDate != null) 'to_date': _fmtDateOnly(toDate),
+        if (includeTest) 'include_test': '1',
+      },
+    );
+    return Map<String, dynamic>.from(res.data ?? {});
   }
 
   Future<MayorEndorsementListResponse> listRequests({
@@ -4993,6 +5235,7 @@ class MayorEndorsementRepo {
     String? office,
     String? status,
     String? priority,
+    String? meetingRequestStatus,
     DateTime? fromDate,
     DateTime? toDate,
     int page = 1,
@@ -5005,6 +5248,8 @@ class MayorEndorsementRepo {
         if ((office ?? '').trim().isNotEmpty) 'office': office!.trim(),
         if ((status ?? '').trim().isNotEmpty) 'status': status!.trim(),
         if ((priority ?? '').trim().isNotEmpty) 'priority': priority!.trim(),
+        if ((meetingRequestStatus ?? '').trim().isNotEmpty)
+          'meeting_request_status': meetingRequestStatus!.trim(),
         if (fromDate != null) 'from_date': _fmtDateOnly(fromDate),
         if (toDate != null) 'to_date': _fmtDateOnly(toDate),
         'page': page,
@@ -5021,6 +5266,7 @@ class MayorEndorsementRepo {
     String? priority,
     DateTime? fromDate,
     DateTime? toDate,
+    bool includeTest = false,
     int page = 1,
     int pageSize = 20,
   }) async {
@@ -5033,6 +5279,7 @@ class MayorEndorsementRepo {
         if ((priority ?? '').trim().isNotEmpty) 'priority': priority!.trim(),
         if (fromDate != null) 'from_date': _fmtDateOnly(fromDate),
         if (toDate != null) 'to_date': _fmtDateOnly(toDate),
+        if (includeTest) 'include_test': '1',
         'page': page,
         'page_size': pageSize,
       },
@@ -5065,6 +5312,71 @@ class MayorEndorsementRepo {
     );
   }
 
+  Future<void> endorseRequest(
+    String requestId, {
+    String? destinationOfficeId,
+    String? destinationOfficeName,
+    String? remarks,
+  }) async {
+    await ApiClient.instance.post<void>(
+      '/api/mayor/endorsements/$requestId/endorse',
+      data: {
+        if ((destinationOfficeId ?? '').trim().isNotEmpty)
+          'destinationOfficeId': destinationOfficeId!.trim(),
+        if ((destinationOfficeName ?? '').trim().isNotEmpty)
+          'destinationOfficeName': destinationOfficeName!.trim(),
+        if ((remarks ?? '').trim().isNotEmpty) 'remarks': remarks!.trim(),
+      },
+    );
+  }
+
+  Future<void> submitMeetingRequest(
+    String requestId, {
+    required DateTime proposedAt,
+    required String purpose,
+  }) async {
+    await ApiClient.instance.post<void>(
+      '/api/mayor/endorsements/$requestId/meeting-request',
+      data: {
+        'proposedAt': proposedAt.toUtc().toIso8601String(),
+        'purpose': purpose.trim(),
+      },
+    );
+  }
+
+  Future<void> approveMeeting(String requestId, {String? remarks}) async {
+    await ApiClient.instance.post<void>(
+      '/api/mayor/endorsements/$requestId/meeting/approve',
+      data: {
+        if ((remarks ?? '').trim().isNotEmpty) 'remarks': remarks!.trim(),
+      },
+    );
+  }
+
+  Future<void> rescheduleMeeting(
+    String requestId, {
+    required String remarks,
+    DateTime? alternativeAt,
+  }) async {
+    await ApiClient.instance.post<void>(
+      '/api/mayor/endorsements/$requestId/meeting/reschedule',
+      data: {
+        'remarks': remarks.trim(),
+        if (alternativeAt != null)
+          'alternativeAt': alternativeAt.toUtc().toIso8601String(),
+      },
+    );
+  }
+
+  Future<void> declineMeeting(String requestId, {String? remarks}) async {
+    await ApiClient.instance.post<void>(
+      '/api/mayor/endorsements/$requestId/meeting/decline',
+      data: {
+        if ((remarks ?? '').trim().isNotEmpty) 'remarks': remarks!.trim(),
+      },
+    );
+  }
+
   Future<void> approveEndorsementForm(
     String requestId, {
     String? destinationOfficeId,
@@ -5083,15 +5395,7 @@ class MayorEndorsementRepo {
     );
   }
 
-  Future<void> rejectRequest(String requestId, String reason) async {
-    if (reason.trim().isEmpty) {
-      throw DioException(
-        requestOptions: RequestOptions(
-          path: '/api/mayor/endorsements/$requestId/reject',
-        ),
-        error: 'Rejection reason is required.',
-      );
-    }
+  Future<void> rejectRequest(String requestId, [String reason = '']) async {
     await ApiClient.instance.post<void>(
       '/api/mayor/endorsements/$requestId/reject',
       data: {'reason': reason.trim()},
@@ -5155,26 +5459,178 @@ class MayorDashboardData {
     required this.mayorApprovedCount,
     required this.endorsedCount,
     required this.rejectedCount,
+    required this.totalRequests,
+    required this.endorsedToday,
+    required this.endorsedThisWeek,
+    required this.endorsedThisMonth,
+    required this.pendingMeetingApprovals,
+    required this.pendingFinalDecisions,
+    required this.pendingAttendance,
+    required this.rescheduleRequestedCount,
+    required this.approvedMeetingsCount,
+    required this.completedMeetingsCount,
+    required this.meetingsToday,
+    required this.upcomingMeetingsCount,
+    required this.legacyScheduledWithoutMeetingApproval,
+    this.requestsToday = 0,
+    this.requestsThisWeek = 0,
+    this.requestsThisMonth = 0,
+    this.rejectedToday = 0,
+    this.rejectedThisWeek = 0,
+    this.rejectedThisMonth = 0,
+    this.meetingsOnToday = 0,
+    this.meetingsThisWeek = 0,
+    this.meetingsThisMonth = 0,
     required this.recentRequests,
     required this.officeStatistics,
+    required this.monthlyTrends,
+    required this.recentEndorsements,
+    required this.pendingMayorActions,
+    required this.meetingQueue,
+    required this.upcomingMeetings,
   });
 
   final int pendingCount;
   final int mayorApprovedCount;
   final int endorsedCount;
   final int rejectedCount;
+  final int totalRequests;
+  final int endorsedToday;
+  final int endorsedThisWeek;
+  final int endorsedThisMonth;
+  final int pendingMeetingApprovals;
+  final int pendingFinalDecisions;
+  final int pendingAttendance;
+  final int rescheduleRequestedCount;
+  final int approvedMeetingsCount;
+  final int completedMeetingsCount;
+  final int meetingsToday;
+  final int upcomingMeetingsCount;
+  final int legacyScheduledWithoutMeetingApproval;
+  final int requestsToday;
+  final int requestsThisWeek;
+  final int requestsThisMonth;
+  final int rejectedToday;
+  final int rejectedThisWeek;
+  final int rejectedThisMonth;
+  final int meetingsOnToday;
+  final int meetingsThisWeek;
+  final int meetingsThisMonth;
   final List<MayorEndorsementRequest> recentRequests;
   final List<MayorOfficeStat> officeStatistics;
+  final List<MayorMonthTrend> monthlyTrends;
+  final List<MayorDashListItem> recentEndorsements;
+  final List<MayorDashListItem> pendingMayorActions;
+  final List<MayorDashListItem> meetingQueue;
+  final List<MayorDashListItem> upcomingMeetings;
+
+  MayorMonitoringSummary toMonitoringSummary() => MayorMonitoringSummary(
+        totalRequests: totalRequests,
+        pendingCount: pendingCount,
+        endorsedCount: endorsedCount,
+        rejectedCount: rejectedCount,
+        endorsedToday: endorsedToday,
+        endorsedThisWeek: endorsedThisWeek,
+        endorsedThisMonth: endorsedThisMonth,
+        pendingMeetingApprovals: pendingMeetingApprovals,
+        pendingFinalDecisions: pendingFinalDecisions,
+        pendingAttendance: pendingAttendance,
+        rescheduleRequestedCount: rescheduleRequestedCount,
+        approvedMeetingsCount: approvedMeetingsCount,
+        completedMeetingsCount: completedMeetingsCount,
+        meetingsToday: meetingsToday,
+        upcomingMeetingsCount: upcomingMeetingsCount,
+        legacyScheduledWithoutMeetingApproval:
+            legacyScheduledWithoutMeetingApproval,
+        requestsToday: requestsToday,
+        requestsThisWeek: requestsThisWeek,
+        requestsThisMonth: requestsThisMonth,
+        rejectedToday: rejectedToday,
+        rejectedThisWeek: rejectedThisWeek,
+        rejectedThisMonth: rejectedThisMonth,
+        meetingsOnToday: meetingsOnToday,
+        meetingsThisWeek: meetingsThisWeek,
+        meetingsThisMonth: meetingsThisMonth,
+      );
+
+  static MayorDashListItem _listItemFromJson(Map<String, dynamic> json) {
+    final status = (json['status'] ?? 'pending').toString();
+    String statusLabel;
+    switch (status.toLowerCase()) {
+      case 'endorsed':
+        statusLabel = 'Endorsed';
+        break;
+      case 'rejected':
+        statusLabel = 'Rejected';
+        break;
+      case 'mayor_approved':
+        statusLabel = 'Awaiting Office Form';
+        break;
+      default:
+        statusLabel = 'Pending';
+    }
+    final office = (json['office_name'] ??
+            json['destination_office'] ??
+            'Unassigned')
+        .toString();
+    final ref = json['reference_number']?.toString();
+    return MayorDashListItem(
+      id: (json['id'] ?? '').toString(),
+      applicantName: (json['applicant_name'] ?? '').toString(),
+      subtitle: office,
+      statusLabel: statusLabel,
+      referenceNumber: ref,
+      meetingRequestStatus:
+          (json['meeting_request_status'] ?? 'none').toString(),
+      raw: json,
+    );
+  }
 
   factory MayorDashboardData.fromJson(Map<String, dynamic> json) {
     final summary = Map<String, dynamic>.from((json['summary'] as Map?) ?? {});
     final recentRaw = (json['recent_requests'] as List?) ?? const [];
     final officeRaw = (json['office_statistics'] as List?) ?? const [];
+    final trendRaw = (json['monthly_trends'] as List?) ?? const [];
+    final recentEndorsedRaw =
+        (json['recent_endorsements'] as List?) ?? const [];
+    final pendingActionsRaw =
+        (json['pending_mayor_actions'] as List?) ?? recentRaw;
+    final meetingQueueRaw = (json['meeting_queue'] as List?) ?? const [];
+    final upcomingRaw = (json['upcoming_meetings'] as List?) ?? const [];
+
+    List<MayorDashListItem> mapItems(List raw) => raw
+        .whereType<Map>()
+        .map((e) => _listItemFromJson(Map<String, dynamic>.from(e)))
+        .toList();
+
     return MayorDashboardData(
       pendingCount: _toInt(summary['pending_count']),
       mayorApprovedCount: _toInt(summary['mayor_approved_count']),
       endorsedCount: _toInt(summary['endorsed_count']),
       rejectedCount: _toInt(summary['rejected_count']),
+      totalRequests: _toInt(summary['total_requests']),
+      endorsedToday: _toInt(summary['endorsed_today']),
+      endorsedThisWeek: _toInt(summary['endorsed_this_week']),
+      endorsedThisMonth: _toInt(summary['endorsed_this_month']),
+      pendingMeetingApprovals: _toInt(summary['pending_meeting_approvals']),
+      pendingFinalDecisions: _toInt(summary['pending_final_decisions']),
+      pendingAttendance: _toInt(summary['pending_attendance']),
+      rescheduleRequestedCount: _toInt(summary['reschedule_requested_count']),
+      approvedMeetingsCount: _toInt(summary['approved_meetings_count']),
+      completedMeetingsCount: _toInt(summary['completed_meetings_count']),
+      meetingsToday: _toInt(summary['meetings_today']),
+      upcomingMeetingsCount: _toInt(summary['upcoming_meetings']),
+      legacyScheduledWithoutMeetingApproval:
+          _toInt(summary['legacy_scheduled_without_meeting_approval']),
+      requestsToday: _toInt(summary['requests_today']),
+      requestsThisWeek: _toInt(summary['requests_this_week']),
+      requestsThisMonth: _toInt(summary['requests_this_month']),
+      rejectedToday: _toInt(summary['rejected_today']),
+      rejectedThisWeek: _toInt(summary['rejected_this_week']),
+      rejectedThisMonth: _toInt(summary['rejected_this_month']),
+      meetingsOnToday: _toInt(summary['meetings_on_today']),
+      meetingsThisWeek: _toInt(summary['meetings_this_week']),
+      meetingsThisMonth: _toInt(summary['meetings_this_month']),
       recentRequests: recentRaw
           .whereType<Map>()
           .map(
@@ -5186,6 +5642,19 @@ class MayorDashboardData {
           .whereType<Map>()
           .map((e) => MayorOfficeStat.fromJson(Map<String, dynamic>.from(e)))
           .toList(),
+      monthlyTrends: trendRaw
+          .whereType<Map>()
+          .map(
+            (e) => MayorMonthTrend(
+              month: (e['month'] ?? '').toString(),
+              endorsedCount: _toInt(e['endorsed_count']),
+            ),
+          )
+          .toList(),
+      recentEndorsements: mapItems(recentEndorsedRaw),
+      pendingMayorActions: mapItems(pendingActionsRaw),
+      meetingQueue: mapItems(meetingQueueRaw),
+      upcomingMeetings: mapItems(upcomingRaw),
     );
   }
 }
@@ -5270,6 +5739,14 @@ class MayorEndorsementRequest {
     this.approvedAt,
     this.rejectedAt,
     this.officeFormApprovedAt,
+    this.referenceNumber,
+    this.meetingRequestStatus = 'none',
+    this.meetingProposedAt,
+    this.meetingPurpose,
+    this.meetingDecision,
+    this.meetingDecidedAt,
+    this.meetingDecisionRemarks,
+    this.meetingRescheduleProposedAt,
     this.intakeForm = const MayorIntakeFormData(),
   });
 
@@ -5294,6 +5771,14 @@ class MayorEndorsementRequest {
   final DateTime? approvedAt;
   final DateTime? rejectedAt;
   final DateTime? officeFormApprovedAt;
+  final String? referenceNumber;
+  final String meetingRequestStatus;
+  final DateTime? meetingProposedAt;
+  final String? meetingPurpose;
+  final String? meetingDecision;
+  final DateTime? meetingDecidedAt;
+  final String? meetingDecisionRemarks;
+  final DateTime? meetingRescheduleProposedAt;
   final MayorIntakeFormData intakeForm;
 
   String get endorseToOffice {
@@ -5330,11 +5815,38 @@ class MayorEndorsementRequest {
     }
   }
 
+  String get meetingRequestLabel {
+    switch (meetingRequestStatus.toLowerCase()) {
+      case 'submitted':
+        return 'Awaiting Mayor approval';
+      case 'approved':
+        return appointmentStatus == 'completed'
+            ? 'Met the Mayor'
+            : appointmentStatus == 'no_show'
+            ? 'Approved — no-show'
+            : 'Meeting approved';
+      case 'reschedule_requested':
+        return 'Reschedule required';
+      case 'declined':
+        return 'Meeting declined';
+      default:
+        return meetingLabel;
+    }
+  }
+
   bool get hasMetMayor => appointmentStatus.toLowerCase() == 'completed';
+
+  bool get canStaffSubmitMeetingRequest {
+    if (status != 'pending') return false;
+    final mrs = meetingRequestStatus.toLowerCase();
+    if (mrs == 'submitted') return false;
+    if (mrs == 'approved' && appointmentStatus != 'no_show') return false;
+    return true;
+  }
 
   bool get isOpenRequest => status == 'pending' || status == 'mayor_approved';
 
-  /// 1 = intake done, 2 = wait to meet mayor, 3 = decide endorse/reject.
+  /// 1 = intake done, 2 = meeting workflow, 3 = decide endorse/reject.
   int get flowStep {
     if (status == 'endorsed' ||
         status == 'rejected' ||
@@ -5351,17 +5863,27 @@ class MayorEndorsementRequest {
         if (status == 'endorsed') return 'Step 3: Endorsed';
         if (status == 'rejected') return 'Step 3: Rejected';
         if (status == 'mayor_approved') {
-          return 'Step 3: Approved — confirm office form';
+          return 'Step 3: Legacy — finalize endorse';
         }
-        return 'Step 3: Approve or reject';
+        return 'Step 3: Endorse or reject';
       case 2:
-        if (appointmentStatus == 'scheduled') {
-          return 'Step 2: Scheduled — meet the Mayor';
+        if (meetingRequestStatus == 'submitted') {
+          return 'Step 2: Meeting request awaiting Mayor';
+        }
+        if (meetingRequestStatus == 'approved' &&
+            appointmentStatus == 'scheduled') {
+          return 'Step 2: Meeting approved — record attendance';
         }
         if (appointmentStatus == 'no_show') {
-          return 'Step 2: Did not appear — reschedule';
+          return 'Step 2: No-show — submit new meeting request';
         }
-        return 'Step 2: Meet the Mayor or schedule';
+        if (meetingRequestStatus == 'reschedule_requested') {
+          return 'Step 2: Mayor asked to reschedule';
+        }
+        if (meetingRequestStatus == 'declined') {
+          return 'Step 2: Meeting declined — optional new request';
+        }
+        return 'Step 2: Submit meeting request';
       default:
         return 'Step 1: Intake form submitted';
     }
@@ -5417,6 +5939,16 @@ class MayorEndorsementRequest {
       approvedAt: parseOpt(json['approved_at']),
       rejectedAt: parseOpt(json['rejected_at']),
       officeFormApprovedAt: parseOpt(json['office_form_approved_at']),
+      referenceNumber: json['reference_number']?.toString(),
+      meetingRequestStatus:
+          (json['meeting_request_status'] ?? 'none').toString(),
+      meetingProposedAt: parseOpt(json['meeting_proposed_at']),
+      meetingPurpose: json['meeting_purpose']?.toString(),
+      meetingDecision: json['meeting_decision']?.toString(),
+      meetingDecidedAt: parseOpt(json['meeting_decided_at']),
+      meetingDecisionRemarks: json['meeting_decision_remarks']?.toString(),
+      meetingRescheduleProposedAt:
+          parseOpt(json['meeting_reschedule_proposed_at']),
       intakeForm: MayorIntakeFormData.fromJson(
         Map<String, dynamic>.from((json['intake_form'] as Map?) ?? {}),
       ),
@@ -5607,21 +6139,14 @@ class MayorIntakeFormData {
     'rank_and_code': rankAndCode.trim(),
   };
 
+  /// Required: name + address + education. Middle name and work/PRC fields are optional.
   String? firstMissingLabel() {
     final pairs = <MapEntry<String, String>>[
       MapEntry(lastName, 'Last Name'),
       MapEntry(firstName, 'First Name'),
-      MapEntry(middleNameOrInitial, 'Middle Name / Middle Initial'),
       MapEntry(address, 'Address'),
       MapEntry(course, 'Course'),
       MapEntry(schoolAddress, 'School Address'),
-      MapEntry(positionApplyingFor, 'Position Applying for'),
-      MapEntry(currentWorkDesignation, 'Current Work / Designation'),
-      MapEntry(agencyCompany, 'Agency / Company'),
-      MapEntry(noOfService, 'No. of Service'),
-      MapEntry(currentWorkAddress, 'Add. sa Current Work'),
-      MapEntry(prcCscNo, 'PRC No. / CSC No.'),
-      MapEntry(rankAndCode, 'Rank and Code'),
     ];
     for (final p in pairs) {
       if (p.key.trim().isEmpty) return p.value;

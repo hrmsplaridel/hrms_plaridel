@@ -832,10 +832,24 @@ class RecruitmentRepo {
     );
   }
 
+  Future<void> undoRequiredFormAssignment(String applicationId) async {
+    await ApiClient.instance.post<Map<String, dynamic>>(
+      '/api/rsp/applications/$applicationId/required-form/undo',
+      data: const <String, dynamic>{},
+    );
+  }
+
   Future<void> approveRequiredForm(String applicationId) async {
     await ApiClient.instance.post<Map<String, dynamic>>(
       '/api/rsp/applications/$applicationId/required-form/approve',
       data: const <String, dynamic>{},
+    );
+  }
+
+  Future<void> failRequiredForm(String applicationId, String comment) async {
+    await ApiClient.instance.post<Map<String, dynamic>>(
+      '/api/rsp/applications/$applicationId/required-form/fail',
+      data: <String, dynamic>{'comment': comment},
     );
   }
 

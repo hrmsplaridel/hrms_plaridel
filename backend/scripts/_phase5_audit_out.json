@@ -1,0 +1,358 @@
+﻿[db] New client connected to PostgreSQL
+[db] New client connected to PostgreSQL
+[db] New client connected to PostgreSQL
+[db] New client connected to PostgreSQL
+[db] New client connected to PostgreSQL
+[db] New client connected to PostgreSQL
+[db] New client connected to PostgreSQL
+{
+  "database": {
+    "database": "hrms_plaridel",
+    "db_user": "postgres",
+    "server_addr": "::1/128",
+    "version": "PostgreSQL 18.4 on x86_64-windows, compiled by msvc-19.44.35227, 64-bit",
+    "env_host": "localhost",
+    "timezone_check": "Asia/Manila"
+  },
+  "migrations": {
+    "m1_meeting_columns": {
+      "meeting_request_status": true,
+      "meeting_proposed_at": true,
+      "meeting_purpose": true,
+      "meeting_decision": true,
+      "meeting_decided_at": true
+    },
+    "m2_isolation_fields": {
+      "applicant_full_name": true,
+      "reference_number": true,
+      "intake_form": true
+    },
+    "m3_fk_to_recruitment": {
+      "foreign_keys": [
+        {
+          "conname": "mayor_endorsement_requests_approved_by_fkey",
+          "def": "FOREIGN KEY (approved_by) REFERENCES users(id) ON DELETE SET NULL"
+        },
+        {
+          "conname": "mayor_endorsement_requests_destination_office_id_fkey",
+          "def": "FOREIGN KEY (destination_office_id) REFERENCES offices(id) ON DELETE SET NULL"
+        },
+        {
+          "conname": "mayor_endorsement_requests_meeting_decided_by_fkey",
+          "def": "FOREIGN KEY (meeting_decided_by) REFERENCES users(id) ON DELETE SET NULL"
+        },
+        {
+          "conname": "mayor_endorsement_requests_office_form_approved_by_fkey",
+          "def": "FOREIGN KEY (office_form_approved_by) REFERENCES users(id) ON DELETE SET NULL"
+        },
+        {
+          "conname": "mayor_endorsement_requests_rejected_by_fkey",
+          "def": "FOREIGN KEY (rejected_by) REFERENCES users(id) ON DELETE SET NULL"
+        },
+        {
+          "conname": "mayor_endorsement_requests_requested_office_id_fkey",
+          "def": "FOREIGN KEY (requested_office_id) REFERENCES offices(id) ON DELETE SET NULL"
+        },
+        {
+          "conname": "mayor_endorsement_requests_submitted_by_fkey",
+          "def": "FOREIGN KEY (submitted_by) REFERENCES users(id) ON DELETE SET NULL"
+        }
+      ],
+      "has_fk_to_recruitment_applications": false
+    },
+    "m4_staff_role": {
+      "users_role_allows_mayor_office_staff": true,
+      "role_constraints": [
+        "CHECK ((role = ANY (ARRAY['admin'::text, 'hr'::text, 'employee'::text, 'supervisor'::text, 'mayor'::text, 'mayor_office_staff'::text, 'super_admin'::text])))",
+        "CHECK (((role <> 'super_admin'::text) OR ((employee_number IS NULL) AND (leave_credit_eligible = false))))"
+      ]
+    },
+    "is_test_migration": {
+      "column_present": true,
+      "column_meta": {
+        "column_name": "is_test",
+        "data_type": "boolean",
+        "is_nullable": "NO",
+        "column_default": "false"
+      }
+    }
+  },
+  "is_test": {
+    "known_phase25_rows": [
+      {
+        "id": "1dcdeb69-f310-4f01-bfed-c06c2f304855",
+        "reference_number": "MER-20261020-1DCDEB69",
+        "status": "endorsed",
+        "is_test": true,
+        "letter_prefix": "REPUBLIC OF THE PHILIPPINES\nMUNICIPALITY"
+      },
+      {
+        "id": "bf301de0-0461-45a6-93ff-f350791856c4",
+        "reference_number": "MER-20261020-BF301DE0",
+        "status": "pending",
+        "is_test": true,
+        "letter_prefix": ""
+      },
+      {
+        "id": "c77aa381-4c9c-494d-8e10-f8e282d4fac4",
+        "reference_number": "MER-20261020-C77AA381",
+        "status": "pending",
+        "is_test": true,
+        "letter_prefix": ""
+      }
+    ],
+    "all_known_flagged": true,
+    "counts": {
+      "total": 4,
+      "test_rows": 3,
+      "official_rows": 1,
+      "endorsed_all": 2,
+      "endorsed_official": 1,
+      "letters_present": 2
+    }
+  },
+  "independence": {
+    "total_mer": 4,
+    "null_application_id": 3,
+    "dangling_application_id": 0,
+    "fk_to_ra": false,
+    "note": "Independence OK if no FK to recruitment_applications; dangling/null application_id expected for staff intake.",
+    "legacy_scheduled_without_meeting_approval": 0,
+    "letter_samples": [
+      {
+        "id": "1dcdeb69-f310-4f01-bfed-c06c2f304855",
+        "reference_number": "MER-20261020-1DCDEB69",
+        "status": "endorsed",
+        "letter_len": 492,
+        "endorsed_at": "2026-10-20T06:49:12.016Z",
+        "rejected_at": null
+      },
+      {
+        "id": "2e78e0e1-04f0-405b-857c-3ec376fe4976",
+        "reference_number": "MER-20260902-2E78E0E1",
+        "status": "endorsed",
+        "letter_len": 439,
+        "endorsed_at": "2026-10-03T04:18:14.684Z",
+        "rejected_at": null
+      }
+    ]
+  },
+  "dashboard": {
+    "week_boundary": "monday",
+    "timezone": "Asia/Manila",
+    "official_summary": {
+      "total_requests": 1,
+      "pending_count": 0,
+      "mayor_approved_count": 0,
+      "endorsed_count": 1,
+      "rejected_count": 0,
+      "endorsed_today": 0,
+      "endorsed_this_week": 0,
+      "endorsed_this_month": 1,
+      "pending_meeting_approvals": 0,
+      "pending_final_decisions": 0,
+      "pending_attendance": 0,
+      "reschedule_requested_count": 0,
+      "approved_meetings_count": 0,
+      "completed_meetings_count": 1,
+      "meetings_today": 0,
+      "upcoming_meetings": 0,
+      "legacy_scheduled_without_meeting_approval": 0
+    },
+    "with_test_endorsed": 2,
+    "official_endorsed_matches_sql": true,
+    "meeting_approved_but_not_endorsed": 0,
+    "note": "Meeting-approved non-endorsed rows must not inflate endorsed_count.",
+    "status_distribution_official": [
+      {
+        "status": "endorsed",
+        "c": 1
+      }
+    ]
+  },
+  "reports": {
+    "parse_custom_error": "Custom reports require from_date and to_date as YYYY-MM-DD",
+    "periods": {
+      "daily": {
+        "title": "Daily Endorsement Report",
+        "reporting_period": {
+          "from": "2026-10-20",
+          "to": "2026-10-20"
+        },
+        "totals": {
+          "total_requests": 0,
+          "total_endorsed": 0,
+          "total_rejected": 0,
+          "total_pending": 0
+        },
+        "row_count": 0,
+        "includes_test_rows": false
+      },
+      "weekly": {
+        "title": "Weekly Endorsement Report",
+        "reporting_period": {
+          "from": "2026-10-19",
+          "to": "2026-10-20"
+        },
+        "totals": {
+          "total_requests": 0,
+          "total_endorsed": 0,
+          "total_rejected": 0,
+          "total_pending": 0
+        },
+        "row_count": 0,
+        "includes_test_rows": false
+      },
+      "monthly": {
+        "title": "Monthly Endorsement Report",
+        "reporting_period": {
+          "from": "2026-10-01",
+          "to": "2026-10-20"
+        },
+        "totals": {
+          "total_requests": 1,
+          "total_endorsed": 1,
+          "total_rejected": 0,
+          "total_pending": 0
+        },
+        "row_count": 1,
+        "includes_test_rows": false
+      },
+      "custom_2026": {
+        "title": "Custom Range Endorsement Report",
+        "reporting_period": {
+          "from": "2026-01-01",
+          "to": "2026-12-31"
+        },
+        "totals": {
+          "total_requests": 1,
+          "total_endorsed": 1,
+          "total_rejected": 0,
+          "total_pending": 0
+        },
+        "row_count": 1,
+        "includes_test_rows": false
+      },
+      "custom_2026_with_test": {
+        "totals": {
+          "total_requests": 4,
+          "total_endorsed": 2,
+          "total_rejected": 0,
+          "total_pending": 2
+        },
+        "row_count": 4,
+        "includes_test_rows": true
+      }
+    },
+    "manila_bounds": {
+      "manila_today": "2026-10-20",
+      "week_start": "2026-10-19",
+      "week_start_dow": 1,
+      "monday_expected_dow_is_1": true
+    }
+  },
+  "api_auth": {
+    "creds_file_present": true,
+    "matrix": {
+      "staff_login": {
+        "status": 200,
+        "role": "mayor_office_staff",
+        "hasToken": true
+      },
+      "staff": {
+        "dashboard": {
+          "status": 200,
+          "error": null,
+          "keys": [
+            "timezone",
+            "week_boundary",
+            "include_test",
+            "summary",
+            "monthly_trends",
+            "office_statistics",
+            "recent_endorsements",
+            "pending_mayor_actions"
+          ],
+          "employee_sample_keys": null
+        },
+        "create_request_probe": {
+          "status": 400,
+          "error": "Missing required intake form fields",
+          "keys": [
+            "error",
+            "missing_fields"
+          ],
+          "employee_sample_keys": null
+        },
+        "meeting_approve": {
+          "status": 403,
+          "error": "Mayor access required",
+          "keys": [
+            "error"
+          ],
+          "employee_sample_keys": null
+        },
+        "endorse": {
+          "status": 403,
+          "error": "Mayor access required",
+          "keys": [
+            "error"
+          ],
+          "employee_sample_keys": null
+        },
+        "employees": {
+          "status": 200,
+          "error": null,
+          "keys": [
+            "employees",
+            "total"
+          ],
+          "employee_sample_keys": [
+            "id",
+            "full_name",
+            "avatar_path",
+            "current_department_name",
+            "current_position_name"
+          ]
+        }
+      },
+      "mayor_accounts_inventory": [
+        {
+          "id": "1d13a4dc-6657-4ccf-b107-c1dff48ae764",
+          "email": "mayorsoffice@test.com",
+          "role": "mayor",
+          "is_active": true
+        },
+        {
+          "id": "8f7ba923-3188-48a7-8c12-50d4b93ff5f4",
+          "email": "mayorsrole@test.com",
+          "role": "mayor",
+          "is_active": false
+        },
+        {
+          "id": "1adc43b9-6d66-4105-a3af-43a9b5546243",
+          "email": "mayor.office.staff.test.20261020@unitypillar.test",
+          "role": "mayor_office_staff",
+          "is_active": true
+        }
+      ],
+      "unauthenticated_dashboard": {
+        "status": 401,
+        "json": {
+          "error": "Missing or invalid Authorization header"
+        }
+      },
+      "unauthenticated_employees": {
+        "status": 401,
+        "json": {
+          "error": "Missing or invalid Authorization header"
+        }
+      }
+    }
+  },
+  "employees_endpoint": {},
+  "e2e": {},
+  "notes": [
+    "Mayor password not in creds file ΓÇö mayor API matrix limited"
+  ]
+}

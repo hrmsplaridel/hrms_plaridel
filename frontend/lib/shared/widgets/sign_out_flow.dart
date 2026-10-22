@@ -17,8 +17,8 @@ const Color _kSoTextPrimary = Color(0xFF1F2937);
 const Color _kSoTextMuted = Color(0xFF6B7280);
 const Color _kSoCream = Color(0xFFFFF7ED);
 const Color _kSoPeach = Color(0xFFFFEDD5);
-const String _kSoLogoAsset = 'assets/images/logo.png';
-const String _kSoCenterSealAsset = 'assets/images/Plaridel Logo.jpg';
+const String _kSoLogoAsset = 'assets/images/UnityPillarLogo.png';
+const String _kSoCenterSealAsset = 'assets/images/PlaridelLogo.jpg';
 
 /// Full-screen logout loading experience — branding, animated rings, progress cues, footer.
 class SignOutLoadingOverlay extends StatefulWidget {
@@ -323,15 +323,18 @@ class _SignOutHeader extends StatelessWidget {
             color: Colors.white,
           ),
           clipBehavior: Clip.antiAlias,
-          child: Image.asset(
-            logoAsset,
-            fit: BoxFit.cover,
-            alignment: Alignment.center,
-            filterQuality: FilterQuality.high,
-            errorBuilder: (_, __, ___) => Icon(
-              Icons.account_balance_rounded,
-              size: logoSize * 0.7,
-              color: _kSoOrange,
+          child: Transform.scale(
+            scale: 1.18,
+            child: Image.asset(
+              logoAsset,
+              fit: BoxFit.contain,
+              alignment: Alignment.center,
+              filterQuality: FilterQuality.high,
+              errorBuilder: (_, __, ___) => Icon(
+                Icons.hub_rounded,
+                size: logoSize * 0.62,
+                color: _kSoOrange,
+              ),
             ),
           ),
         ),
@@ -347,35 +350,49 @@ class _SignOutHeader extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisSize: MainAxisSize.min,
             children: [
-              Text(
-                'HUMAN RESOURCE',
-                style: TextStyle(
-                  color: primaryText,
-                  fontSize: isMobile ? 12 : 15,
-                  fontWeight: FontWeight.w700,
-                  height: 1.15,
-                  letterSpacing: 0.2,
+              Text.rich(
+                TextSpan(
+                  style: TextStyle(
+                    fontSize: isMobile ? 16 : 20,
+                    fontWeight: FontWeight.w800,
+                    height: 1.05,
+                    letterSpacing: -0.2,
+                  ),
+                  children: [
+                    TextSpan(
+                      text: 'Unity',
+                      style: TextStyle(
+                        color: isDark
+                            ? const Color(0xFF7FA8F0)
+                            : const Color(0xFF1F4E9E),
+                      ),
+                    ),
+                    const TextSpan(
+                      text: 'Pillar',
+                      style: TextStyle(color: AppTheme.primaryNavy),
+                    ),
+                  ],
                 ),
-              ),
-              Text(
-                'MANAGEMENT SYSTEM',
-                style: TextStyle(
-                  color: primaryText,
-                  fontSize: isMobile ? 12 : 15,
-                  fontWeight: FontWeight.w700,
-                  height: 1.15,
-                  letterSpacing: 0.2,
-                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
               ),
               const SizedBox(height: 3),
               Text(
-                'INTEGRATED SOLUTIONS',
+                'Human Resource',
                 style: TextStyle(
-                  color: mutedText,
-                  fontSize: isMobile ? 9.5 : 11,
-                  fontWeight: FontWeight.w500,
-                  letterSpacing: 1.0,
-                  height: 1.2,
+                  color: primaryText,
+                  fontSize: isMobile ? 12 : 14,
+                  fontWeight: FontWeight.w600,
+                  height: 1.15,
+                ),
+              ),
+              Text(
+                'Management System',
+                style: TextStyle(
+                  color: primaryText,
+                  fontSize: isMobile ? 12 : 14,
+                  fontWeight: FontWeight.w600,
+                  height: 1.15,
                 ),
               ),
             ],

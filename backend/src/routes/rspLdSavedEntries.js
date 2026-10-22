@@ -241,6 +241,7 @@ const TABLE_COLUMNS = {
     'key_strengths',
     'key_concerns',
     'interviewer',
+    'interviewer_signature',
     'updated_at',
   ],
 };
@@ -611,9 +612,15 @@ async function ensureRspLdSavedEntryTables() {
       key_strengths TEXT,
       key_concerns TEXT,
       interviewer TEXT,
+      interviewer_signature TEXT,
       created_at TIMESTAMPTZ DEFAULT now(),
       updated_at TIMESTAMPTZ DEFAULT now()
     );
+  `);
+
+  await pool.query(`
+    ALTER TABLE public.ojt_work_immersion_evaluation_entries
+      ADD COLUMN IF NOT EXISTS interviewer_signature TEXT;
   `);
 
   rspLdSavedEntryTablesReady = true;

@@ -105,6 +105,8 @@ class _EmployeeProfile {
 
   String get roleDisplay => role == 'mayor'
       ? 'Mayor'
+      : role == 'mayor_office_staff'
+      ? "Mayor's Office Staff"
       : role == 'admin'
       ? 'Admin'
       : 'Employee';
@@ -1179,7 +1181,7 @@ class _ManageEmployeeState extends State<ManageEmployee> {
               width: roleWidth,
               child: _buildDropdown(
                 _privilegeFilter,
-                ['All', 'Admin', 'Employee', 'Mayor'],
+                ['All', 'Admin', 'Employee', 'Mayor', "Mayor's Office Staff"],
                 (v) {
                   setState(() {
                     _privilegeFilter = v ?? 'All';

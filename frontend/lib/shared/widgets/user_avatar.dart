@@ -6,7 +6,7 @@ import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/providers/auth_provider.dart';
 
 /// Reusable avatar that shows the user's profile image (from API /api/files/avatar/:userId)
-/// when available, and falls back to the HRMS [logo.png] filling the circle.
+/// when available, and falls back to the UnityPillar logo filling the circle.
 class UserAvatar extends StatelessWidget {
   const UserAvatar({
     super.key,
@@ -27,7 +27,7 @@ class UserAvatar extends StatelessWidget {
   final Color? backgroundColor;
   final Color? placeholderIconColor;
 
-  static const _logoAsset = 'assets/images/logo.png';
+  static const _logoAsset = 'assets/images/UnityPillarLogo.png';
 
   @override
   Widget build(BuildContext context) {

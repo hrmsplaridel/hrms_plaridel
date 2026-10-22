@@ -40,7 +40,7 @@ CREATE TABLE IF NOT EXISTS users (
   email TEXT UNIQUE NOT NULL,
   password_hash TEXT NOT NULL,
   role TEXT NOT NULL DEFAULT 'employee'
-    CHECK (role IN ('admin', 'hr', 'employee', 'supervisor', 'mayor', 'super_admin')),
+    CHECK (role IN ('admin', 'hr', 'employee', 'supervisor', 'mayor', 'mayor_office_staff', 'super_admin')),
 
   first_name TEXT,
   full_name TEXT NOT NULL,
@@ -1893,6 +1893,7 @@ CREATE TABLE IF NOT EXISTS ojt_work_immersion_evaluation_entries (
   key_strengths TEXT,
   key_concerns TEXT,
   interviewer TEXT,
+  interviewer_signature TEXT,
   created_at TIMESTAMPTZ DEFAULT now(),
   updated_at TIMESTAMPTZ DEFAULT now()
 );
@@ -1961,9 +1962,11 @@ CREATE TABLE IF NOT EXISTS ld_training_requirement_records (
   pre_requirements_approved BOOLEAN NOT NULL DEFAULT FALSE,
   post_requirements_approved BOOLEAN NOT NULL DEFAULT FALSE,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  CONSTRAINT uq_ld_training_requirement_employee UNIQUE (employee_id)
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+-- One row per declared training/seminar; an employee can have many.
+CREATE INDEX IF NOT EXISTS idx_ld_training_requirement_employee
+  ON ld_training_requirement_records (employee_id, created_at DESC);
 
 -- =========================================
 -- RSP — RECRUITMENT
@@ -2192,9 +2195,12 @@ CREATE TABLE IF NOT EXISTS recruitment_exam_time_limits (
   updated_at TIMESTAMPTZ DEFAULT now()
 );
 
+-- Mayor endorsements are hard-isolated from RSP (no FK to recruitment_applications).
 CREATE TABLE IF NOT EXISTS mayor_endorsement_requests (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  application_id UUID NOT NULL REFERENCES recruitment_applications(id) ON DELETE CASCADE,
+  application_id UUID,
+  reference_number TEXT,
+  applicant_full_name TEXT,
   requested_office_id UUID REFERENCES offices(id) ON DELETE SET NULL,
   requested_office_name TEXT,
   destination_office_id UUID REFERENCES offices(id) ON DELETE SET NULL,
@@ -2213,6 +2219,7 @@ CREATE TABLE IF NOT EXISTS mayor_endorsement_requests (
   approved_by UUID REFERENCES users(id) ON DELETE SET NULL,
   office_form_approved_at TIMESTAMPTZ,
   office_form_approved_by UUID REFERENCES users(id) ON DELETE SET NULL,
+  endorsed_at TIMESTAMPTZ,
   rejected_at TIMESTAMPTZ,
   rejected_by UUID REFERENCES users(id) ON DELETE SET NULL,
   submitted_by UUID REFERENCES users(id) ON DELETE SET NULL,
@@ -2221,15 +2228,32 @@ CREATE TABLE IF NOT EXISTS mayor_endorsement_requests (
   appointment_status TEXT NOT NULL DEFAULT 'none',
   appointment_notes TEXT,
   no_show_count INT NOT NULL DEFAULT 0,
+  meeting_request_status TEXT NOT NULL DEFAULT 'none'
+    CHECK (meeting_request_status IN ('none', 'submitted', 'approved', 'reschedule_requested', 'declined')),
+  meeting_proposed_at TIMESTAMPTZ,
+  meeting_purpose TEXT,
+  meeting_decision TEXT
+    CHECK (meeting_decision IS NULL OR meeting_decision IN ('approved', 'declined', 'reschedule_requested')),
+  meeting_decided_at TIMESTAMPTZ,
+  meeting_decided_by UUID REFERENCES users(id) ON DELETE SET NULL,
+  meeting_decision_remarks TEXT,
+  meeting_reschedule_proposed_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  UNIQUE (application_id)
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_mayor_endorsement_requests_reference_number
+  ON mayor_endorsement_requests (reference_number)
+  WHERE reference_number IS NOT NULL;
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_mayor_endorsement_requests_application_id_legacy
+  ON mayor_endorsement_requests (application_id)
+  WHERE application_id IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS mayor_endorsement_activity_logs (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   request_id UUID NOT NULL REFERENCES mayor_endorsement_requests(id) ON DELETE CASCADE,
-  application_id UUID REFERENCES recruitment_applications(id) ON DELETE SET NULL,
+  application_id UUID,
   actor_id UUID REFERENCES users(id) ON DELETE SET NULL,
   action TEXT NOT NULL,
   remarks TEXT,

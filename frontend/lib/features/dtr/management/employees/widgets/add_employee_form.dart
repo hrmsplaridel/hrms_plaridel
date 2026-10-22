@@ -320,6 +320,7 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
     final role = switch (privilege) {
       'Admin' => 'admin',
       'Mayor' => 'mayor',
+      "Mayor's Office Staff" => 'mayor_office_staff',
       _ => 'employee',
     };
 
@@ -760,6 +761,10 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
               value: 'Admin',
               child: Text('Administrator'),
             ),
+            const DropdownMenuItem(
+              value: "Mayor's Office Staff",
+              child: Text("Mayor's Office Staff"),
+            ),
             if (context.watch<AuthProvider>().user?.role == 'super_admin')
               const DropdownMenuItem(value: 'Mayor', child: Text('Mayor')),
           ],
@@ -775,6 +780,13 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
             'Only one Mayor account can be active. Deactivate the previous '
             'Mayor in Employee Profiles before creating a replacement. '
             'Department and position can be assigned below.',
+          ),
+        ],
+        if (_privilege == "Mayor's Office Staff") ...[
+          const SizedBox(height: 10),
+          const Text(
+            "Mayor's Office Staff can manage endorsement intake and "
+            'scheduling. They cannot approve final endorsements.',
           ),
         ],
         if (_privilege != null) ...[

@@ -1,6 +1,6 @@
 const { pool } = require('../config/db');
-const { excludeMayorIntakeStubSql } = require('./mayorIntakeStub');
 const { todayInHrmsTimezone } = require('./dateRangeParser');
+const { excludeMayorIntakeStubSql } = require('./mayorIntakeStub');
 
 /** Lowercase, trimmed, without common HR prefixes — used to match applications to vacancies. */
 function normalizePositionKey(raw) {
@@ -196,6 +196,73 @@ function findVacancyForPosition(vacancies, positionAppliedFor) {
     if (vacancyPositionKey(v) === p) return v;
   }
   return null;
+}
+
+function vacancyMinimumStandards(vacancy) {
+  if (!vacancy || typeof vacancy !== 'object') return null;
+  const pick = (value) => {
+    const text = typeof value === 'string' ? value.trim() : '';
+    return text || null;
+  };
+  const standards = {
+    min_education: pick(vacancy.education),
+    min_experience: pick(vacancy.experience),
+    min_training: pick(vacancy.training),
+    min_eligibility: pick(vacancy.eligibility),
+  };
+  if (
+    !standards.min_education &&
+    !standards.min_experience &&
+    !standards.min_training &&
+    !standards.min_eligibility
+  ) {
+    return null;
+  }
+  return standards;
+}
+
+function mergeBlankMinimumStandards(entry, standards) {
+  const next = { ...(entry || {}) };
+  let changed = false;
+  for (const key of ['min_education', 'min_experience', 'min_training', 'min_eligibility']) {
+    const current = typeof next[key] === 'string' ? next[key].trim() : '';
+    const incoming = standards && standards[key] ? standards[key] : null;
+    if (!current && incoming) {
+      next[key] = incoming;
+      changed = true;
+    }
+  }
+  return { entry: next, changed };
+}
+
+function publishedDateOnly(value) {
+  if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value.trim())) {
+    return value.trim();
+  }
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    return todayInHrmsTimezone(value);
+  }
+  return null;
+}
+
+/** Keeps the first landing-page publish date for a job title. New titles use [fallbackDate]. */
+function applyPublishedDates(vacancies, existing, fallbackDate) {
+  const previous = new Map();
+  for (const vacancy of existing || []) {
+    const key = vacancyListedHeadlineKey(vacancy);
+    const published = publishedDateOnly(vacancy && vacancy.published_at);
+    if (key && published && !previous.has(key)) previous.set(key, published);
+  }
+  const fallback = publishedDateOnly(fallbackDate) || todayInHrmsTimezone();
+  return (vacancies || []).map((vacancy) => {
+    if (!vacancy || typeof vacancy !== 'object') return vacancy;
+    const key = vacancyListedHeadlineKey(vacancy);
+    const published =
+      (key && previous.get(key)) ||
+      publishedDateOnly(vacancy.published_at) ||
+      fallback;
+    return { ...vacancy, published_at: published };
+  });
 }
 
 function findListedVacancyForPosition(vacancies, positionAppliedFor) {
@@ -402,6 +469,10 @@ module.exports = {
   loadVacanciesFromDb,
   findVacancyForPosition,
   findListedVacancyForPosition,
+  vacancyMinimumStandards,
+  mergeBlankMinimumStandards,
+  publishedDateOnly,
+  applyPublishedDates,
   enrichVacanciesWithApplicationCounts,
   countTotalApplicationsForPositionKey,
   assertPositionApplicationSlotAvailable,

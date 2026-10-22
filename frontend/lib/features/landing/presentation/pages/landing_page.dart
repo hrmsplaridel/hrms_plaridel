@@ -226,39 +226,66 @@ class _LandingPageState extends State<LandingPage>
                                 _scrollTo(_jobVacanciesKey),
                             onTrackApplicationTap: _onTrackApplication,
                           ),
-                          const SizedBox(height: 8),
+                          // Each nav section fills the visible viewport on its
+                          // own (any monitor/laptop height), so jumping to it
+                          // never reveals the next section underneath.
                           KeyedSubtree(
                             key: _jobVacanciesKey,
-                            child: _loadingAnnouncement
-                                ? const Padding(
-                                    padding: EdgeInsets.symmetric(vertical: 48),
-                                    child: Center(
-                                      child: SizedBox(
-                                        width: 28,
-                                        height: 28,
-                                        child: CircularProgressIndicator(
-                                          strokeWidth: 2.5,
+                            child: ConstrainedBox(
+                              constraints: BoxConstraints(
+                                minHeight: constraints.maxHeight,
+                              ),
+                              child: Center(
+                                child: _loadingAnnouncement
+                                    ? const Padding(
+                                        padding: EdgeInsets.symmetric(
+                                          vertical: 48,
                                         ),
+                                        child: Center(
+                                          child: SizedBox(
+                                            width: 28,
+                                            height: 28,
+                                            child: CircularProgressIndicator(
+                                              strokeWidth: 2.5,
+                                            ),
+                                          ),
+                                        ),
+                                      )
+                                    : JobVacanciesSection(
+                                        hasVacancies:
+                                            _announcement.hasVacancies,
+                                        headline: _announcement.headline,
+                                        body: _announcement.body,
+                                        vacancies:
+                                            _announcement
+                                                .listedVacancies
+                                                .isEmpty
+                                            ? null
+                                            : _announcement.listedVacancies,
+                                        onGoToRecruitmentTap: null,
+                                        onApplyForVacancyTap:
+                                            _announcement
+                                                .isAcceptingApplications
+                                            ? _onApplyForVacancy
+                                            : null,
                                       ),
-                                    ),
-                                  )
-                                : JobVacanciesSection(
-                                    hasVacancies: _announcement.hasVacancies,
-                                    headline: _announcement.headline,
-                                    body: _announcement.body,
-                                    vacancies:
-                                        _announcement.listedVacancies.isEmpty
-                                        ? null
-                                        : _announcement.listedVacancies,
-                                    onGoToRecruitmentTap: null,
-                                    onApplyForVacancyTap:
-                                        _announcement.isAcceptingApplications
-                                        ? _onApplyForVacancy
-                                        : null,
-                                  ),
+                              ),
+                            ),
                           ),
-                          ContactSection(key: _contactKey),
-                          const FooterSection(),
+                          // Contact + footer together fill one viewport.
+                          ConstrainedBox(
+                            constraints: BoxConstraints(
+                              minHeight: constraints.maxHeight,
+                            ),
+                            child: Column(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                const SizedBox.shrink(),
+                                ContactSection(key: _contactKey),
+                                const FooterSection(),
+                              ],
+                            ),
+                          ),
                         ],
                       ),
                     ),

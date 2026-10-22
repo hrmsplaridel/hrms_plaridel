@@ -1823,7 +1823,7 @@ class _LeaveRequestPdfFixedEngine {
     pw.ImageProvider? logoProvider;
     try {
       final logoBytes = await rootBundle.load(
-        'assets/images/Plaridel Logo.jpg',
+        'assets/images/PlaridelLogo.jpg',
       );
       logoProvider = pw.MemoryImage(logoBytes.buffer.asUint8List());
     } catch (_) {

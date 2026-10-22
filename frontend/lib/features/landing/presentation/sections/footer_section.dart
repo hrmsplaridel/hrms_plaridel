@@ -8,7 +8,7 @@ import 'package:hrms_plaridel/features/landing/presentation/widgets/section_cont
 class FooterSection extends StatelessWidget {
   const FooterSection({super.key});
 
-  static const _logoAsset = 'assets/images/Plaridel Logo.jpg';
+  static const _logoAsset = 'assets/images/PlaridelLogo.jpg';
 
   @override
   Widget build(BuildContext context) {
