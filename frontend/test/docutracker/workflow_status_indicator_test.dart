@@ -21,7 +21,7 @@ DocuTrackerDocument _document({
 
 void main() {
   test(
-    'returned document phase says changes are required at its current step',
+    'returned document phase says it is awaiting review at the previous step',
     () {
       final phase = DocuTrackerWorkflowPhase.forDocument(
         doc: _document(status: DocumentStatus.returned, currentStep: 1),
@@ -29,9 +29,10 @@ void main() {
         currentStepLabel: 'Department Review',
       );
 
-      expect(phase.label, 'Returned for changes');
+      expect(phase.label, 'Returned to previous step');
       expect(phase.detail, contains('Step 1 of 3'));
-      expect(phase.detail, contains('Changes are required'));
+      expect(phase.detail, contains('Awaiting review at this step'));
+      expect(phase.detail, isNot(contains('Changes')));
     },
   );
 

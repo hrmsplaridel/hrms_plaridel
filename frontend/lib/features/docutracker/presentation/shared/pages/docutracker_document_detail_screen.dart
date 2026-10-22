@@ -32,6 +32,8 @@ import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/d
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_release_section.dart';
 import 'package:hrms_plaridel/features/docutracker/utils/docutracker_content_lock.dart';
 import 'package:hrms_plaridel/features/docutracker/utils/docutracker_release_text.dart';
+import 'package:hrms_plaridel/features/docutracker/utils/docutracker_return_text.dart';
+import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_returned_info_card.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_content_lock_banner.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_responsive_body.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_status_badge.dart';
@@ -1164,7 +1166,8 @@ class _DocuTrackerDocumentDetailScreenState
           ],
         ),
         const SizedBox(height: 16),
-        if (docuTrackerNativeContentLockMessage(doc) case final lockMessage?) ...[
+        if (docuTrackerNativeContentLockMessage(doc)
+            case final lockMessage?) ...[
           DocuTrackerContentLockBanner(message: lockMessage),
           const SizedBox(height: 16),
         ],
@@ -1224,6 +1227,22 @@ class _DocuTrackerDocumentDetailScreenState
             },
           ),
         ),
+        if (doc.status == DocumentStatus.returned && !doc.sourceOnly) ...[
+          const SizedBox(height: 16),
+          DocuTrackerReturnedInfoCard(
+            returnEntry: docuTrackerLatestReturnEntry(
+              provider.documentHistory.where((e) => e.documentId == doc.id),
+            ),
+            returnedTo: doc.assigneeName,
+            currentStep: currentStepLabel.isNotEmpty
+                ? 'Step $currentStep - $currentStepLabel'
+                : 'Step $currentStep',
+            nextAction: docuTrackerReturnedNextAction(
+              isResponsibleReviewer: isAssignedReviewer,
+              isCreator: doc.createdBy == userId,
+            ),
+          ),
+        ],
         if (doc.status == DocumentStatus.approved ||
             doc.status == DocumentStatus.rejected) ...[
           const SizedBox(height: 16),
@@ -1687,7 +1706,7 @@ class _DocuTrackerDocumentDetailScreenState
         ),
       if (canAct && canReturn)
         Tooltip(
-          message: 'Send back to sender for corrections',
+          message: docuTrackerReturnTooltip,
           child: OutlinedButton.icon(
             onPressed: provider.loading
                 ? null
@@ -1697,15 +1716,28 @@ class _DocuTrackerDocumentDetailScreenState
                       await showDialog<void>(
                         context: context,
                         builder: (ctx) => AlertDialog(
-                          title: const Text('Return document'),
-                          content: TextField(
-                            controller: returnCtrl,
-                            decoration: DocuTrackerStyles.inputDecoration(
-                              context,
-                              'Reason for return (optional)',
-                              Icons.reply_rounded,
-                            ),
-                            maxLines: 3,
+                          title: const Text(docuTrackerReturnDialogTitle),
+                          content: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                docuTrackerReturnDialogExplanation,
+                                style: DocuTrackerTokens.subtitleStyle(
+                                  ctx,
+                                ).copyWith(fontSize: 13),
+                              ),
+                              const SizedBox(height: 12),
+                              TextField(
+                                controller: returnCtrl,
+                                decoration: DocuTrackerStyles.inputDecoration(
+                                  context,
+                                  docuTrackerReturnReasonLabel,
+                                  Icons.reply_rounded,
+                                ),
+                                maxLines: 3,
+                              ),
+                            ],
                           ),
                           actions: [
                             OutlinedButton(
@@ -1727,7 +1759,7 @@ class _DocuTrackerDocumentDetailScreenState
                                 if (!mounted) return;
                                 if (ok) {
                                   _onWorkflowActionSuccess(
-                                    'Document returned.',
+                                    docuTrackerReturnSuccessMessage,
                                   );
                                 } else {
                                   _showActionError(
@@ -1747,7 +1779,7 @@ class _DocuTrackerDocumentDetailScreenState
                     }
                   },
             icon: const Icon(Icons.undo_rounded, size: 18),
-            label: const Text('Return for Changes'),
+            label: const Text(docuTrackerReturnButtonLabel),
             style: DocuTrackerStyles.warningButtonStyle(),
           ),
         ),

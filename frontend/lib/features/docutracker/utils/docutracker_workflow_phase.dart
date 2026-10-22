@@ -98,10 +98,10 @@ class DocuTrackerWorkflowPhase {
     if (doc.status == DocumentStatus.returned) {
       final detail = activeStepDetail();
       return DocuTrackerWorkflowPhase(
-        label: 'Returned for changes',
+        label: 'Returned to previous step',
         detail: detail == null
-            ? 'Changes are required'
-            : '$detail - Changes are required',
+            ? 'Awaiting review at this step'
+            : '$detail - Awaiting review at this step',
       );
     }
     if (doc.status == DocumentStatus.escalated) {
