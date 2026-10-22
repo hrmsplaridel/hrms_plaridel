@@ -49,3 +49,11 @@ test('only approved locator requests can be revoked', () => {
     'locator_not_approved'
   );
 });
+
+test('revocation errors describe final approval independently of the reviewer role', () => {
+  const input = {status:'approved',reason:'The requested date was incorrect.',now:new Date('2026-10-22T12:00:00Z')};
+  assert.equal(evaluateLocatorRevocation(input).error,
+    'Cannot determine the approval time for this locator request.');
+  assert.equal(evaluateLocatorRevocation({...input,approvedAt:'2026-10-18T12:00:00Z'}).error,
+    'The revoke period has expired. Locator approval can only be revoked within 3 days after final approval.');
+});

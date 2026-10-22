@@ -2,6 +2,30 @@
 const test=require('node:test'),assert=require('node:assert/strict');
 const {listInbox}=require('../src/services/sharedWorkflowInbox');
 const engine=require('../src/services/approvalWorkflows');
+const {evaluateLocatorRevocation}=require('../src/services/locatorRevocationPolicy');
+
+for(const sources of [
+ ['submitter_department_reviewers'], ['final_hr_reviewers'], ['active_mayor'],
+ ['submitter_department_reviewers','final_hr_reviewers','active_mayor'],
+]) {
+ test(`approved Locator queue preserves revocation time for ${sources.join(' -> ')}`,async()=>{
+  const approvedAt=new Date('2026-10-22T13:19:05.668Z');
+  const row={id:'locator',employee_id:'applicant',employee_name:'Applicant',status:'approved',
+   created_at:'2026-10-22T13:15:00Z',hr_reviewed_at:approvedAt,
+   workflow_snapshot:{name:'Route',version:1,current_step:sources.length,outcome:'approved',
+    steps:sources.map(assignee_source=>({assignee_source,label:assignee_source,allowed_actions:['approve']})),
+    decisions:[{step:sources.length-1,actor_id:'reviewer',action:'approve'}]}};
+  const db={query:async sql=>({rows:sql.includes('FROM locator_slips')?[row]:[]})};
+  const [entry]=await listInbox(db,{id:'reviewer'},{includeHistory:true});
+  assert.equal(entry.can_review,false);
+  const request=JSON.parse(JSON.stringify(entry.request_data));
+  assert.equal(request.hr_reviewed_at,approvedAt.toISOString());
+  const policyInput={status:request.status,approvedAt:request.hr_reviewed_at,reason:'The requested date was incorrect.'};
+  assert.equal(evaluateLocatorRevocation({...policyInput,now:approvedAt}).ok,true);
+  assert.equal(evaluateLocatorRevocation({...policyInput,now:new Date(approvedAt.getTime()+3*86400000)}).ok,true);
+  assert.equal(evaluateLocatorRevocation({...policyInput,now:new Date(approvedAt.getTime()+3*86400000+1)}).code,'locator_revoke_window_expired');
+ });
+}
 test('assigned queue includes module list fields without exposing storage paths or other modules',async()=>{
  const original=engine.resolveWorkflowReviewers;
  engine.resolveWorkflowReviewers=async()=>[{id:'backup'}];

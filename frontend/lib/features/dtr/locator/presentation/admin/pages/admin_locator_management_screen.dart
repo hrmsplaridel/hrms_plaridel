@@ -2511,7 +2511,7 @@ class _LocatorAdminRecord {
     }
     final approvedAt = hrReviewedAt;
     if (approvedAt == null) {
-      return 'The HR approval time is unavailable.';
+      return 'The approval time is unavailable.';
     }
     final deadline = approvedAt.add(const Duration(days: 3));
     if (DateTime.now().isAfter(deadline)) {

@@ -71,6 +71,7 @@ async function listInbox(db,user,{includeHistory=false}={}) {
      date_filed:official.date_filed||dateOnly(row.created_at),reason:row.reason||'',
      employee_detail_schema_snapshot:leaveSchema,custom_details:customLeaveDetailValues(leaveDetails,leaveSchema),
     }:{employee_id:row.employee_id,department_id:row.department_id,department_name:row.department_name||'',
+     hr_reviewed_at:row.hr_reviewed_at||null,
      slip_date:dateOnly(row.slip_date_text||row.slip_date),request_type:row.request_type,
      request_type_label:row.request_type_label_snapshot,request_type_short_label:row.request_type_short_label_snapshot,
      request_type_location_label:row.request_type_location_label_snapshot,
