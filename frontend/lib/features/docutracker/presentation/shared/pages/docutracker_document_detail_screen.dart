@@ -24,7 +24,9 @@ import 'package:hrms_plaridel/features/docutracker/utils/docutracker_open_attach
 import 'package:hrms_plaridel/features/docutracker/utils/docutracker_permission_reason_label.dart';
 import 'package:hrms_plaridel/features/docutracker/utils/docutracker_source_status_text.dart';
 import 'package:hrms_plaridel/features/docutracker/utils/docutracker_workflow_phase.dart';
+import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_activity_timeline.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_document_attachment_panel.dart';
+import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_slide_in_panel.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_document_detail_ui.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_error_banner.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_release_section.dart';
@@ -2042,23 +2044,40 @@ class _DocuTrackerDocumentDetailScreenState
     ).whenComplete(remarkCtrl.dispose);
   }
 
-  List<DocumentHistoryEntry> _sortedHistory(List<DocumentHistoryEntry> raw) {
-    final copy = [...raw];
-    int key(DocumentHistoryEntry e) => e.createdAt?.millisecondsSinceEpoch ?? 0;
-    copy.sort((a, b) => key(a).compareTo(key(b)));
-    return copy;
+  Future<void> _openAllActivities({
+    String? documentId,
+    List<DocumentHistoryEntry> localEntries = const [],
+  }) {
+    return showDocuTrackerSlideInPanel<void>(
+      context: context,
+      title: 'Activity history',
+      width: 520,
+      child: DocuTrackerActivityHistoryPanel(
+        loadPage: documentId == null
+            ? null
+            : ({required limit, required offset, String? action}) {
+                return DocuTrackerRepository.instance.listDocumentHistoryPage(
+                  documentId,
+                  limit: limit,
+                  offset: offset,
+                  action: action,
+                );
+              },
+        localEntries: documentId == null ? localEntries : const [],
+      ),
+    );
   }
 
-  Future<void> _postNote(
+  Future<bool> _postNote(
     DocuTrackerProvider provider,
     DocuTrackerDocument doc,
     String userId,
   ) async {
     final remarks = _noteController.text.trim();
-    if (remarks.isEmpty || _postingNote) return;
+    if (remarks.isEmpty || _postingNote) return false;
     setState(() => _postingNote = true);
     final ok = await provider.addRemark(doc, actorId: userId, remarks: remarks);
-    if (!mounted) return;
+    if (!mounted) return false;
     setState(() => _postingNote = false);
     if (ok) {
       _noteController.clear();
@@ -2066,9 +2085,10 @@ class _DocuTrackerDocumentDetailScreenState
         context,
       ).showSnackBar(const SnackBar(content: Text('Note posted.')));
       provider.loadDocumentHistory(doc.id!);
-    } else {
-      _showActionError(provider, fallback: 'Failed to post note.');
+      return true;
     }
+    _showActionError(provider, fallback: 'Failed to post note.');
+    return false;
   }
 
   Widget _buildNoteComposer(
@@ -2076,52 +2096,10 @@ class _DocuTrackerDocumentDetailScreenState
     DocuTrackerDocument doc,
     String userId,
   ) {
-    final busy = _postingNote || provider.loading;
-    return Container(
-      key: const Key('docutracker-detail-note-composer'),
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: DocuTrackerTokens.canvasOf(context),
-        borderRadius: BorderRadius.circular(DocuTrackerTokens.radiusSm),
-        border: Border.all(color: DocuTrackerTokens.borderSubtleOf(context)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Text(
-            'ADD INTERNAL NOTE FOR REVIEWERS',
-            style: TextStyle(
-              fontSize: 10.5,
-              fontWeight: FontWeight.w700,
-              letterSpacing: 0.6,
-              color: DocuTrackerTokens.textMutedOf(context),
-            ),
-          ),
-          const SizedBox(height: 8),
-          TextField(
-            controller: _noteController,
-            enabled: !busy,
-            minLines: 2,
-            maxLines: 4,
-            decoration: DocuTrackerStyles.inputDecoration(
-              context,
-              'Write a note (logged to the audit trail)',
-              Icons.edit_note_rounded,
-            ),
-          ),
-          const SizedBox(height: 10),
-          Align(
-            alignment: Alignment.centerRight,
-            child: FilledButton.icon(
-              key: const Key('docutracker-detail-post-note'),
-              onPressed: busy ? null : () => _postNote(provider, doc, userId),
-              style: DocuTrackerStyles.primaryButtonStyle(),
-              icon: const Icon(Icons.send_rounded, size: 16),
-              label: const Text('Post Note'),
-            ),
-          ),
-        ],
-      ),
+    return DocuTrackerInternalNoteComposer(
+      controller: _noteController,
+      busy: _postingNote || provider.loading,
+      onPost: () => _postNote(provider, doc, userId),
     );
   }
 
@@ -2133,7 +2111,7 @@ class _DocuTrackerDocumentDetailScreenState
     if (_usesLinkedLeaveWorkflow(doc)) {
       return _buildLinkedLeaveHistorySection();
     }
-    final sorted = _sortedHistory(provider.documentHistory);
+    final history = provider.documentHistory;
     final showCount = !_permissionsLoading && _canViewAuditTrail;
 
     return DocuTrackerDetailSectionCard(
@@ -2142,7 +2120,7 @@ class _DocuTrackerDocumentDetailScreenState
       subtitle: 'Document updates, status changes, and decisions in order',
       trailing: showCount
           ? Text(
-              '${sorted.length} ${sorted.length == 1 ? 'event' : 'events'} logged',
+              '${history.length} ${history.length == 1 ? 'event' : 'events'} logged',
               style: DocuTrackerTokens.metaStyle(context),
             )
           : null,
@@ -2171,21 +2149,22 @@ class _DocuTrackerDocumentDetailScreenState
                 ),
               ),
             )
-          else if (sorted.isEmpty)
+          else if (history.isEmpty)
             Padding(
-              padding: const EdgeInsets.symmetric(vertical: 16),
-              child: Center(
-                child: Text(
-                  'No history yet.',
-                  style: TextStyle(
-                    color: AppTheme.dashTextSecondaryOf(context),
-                    fontSize: 14,
-                  ),
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              child: Text(
+                'No history yet.',
+                style: TextStyle(
+                  color: AppTheme.dashTextSecondaryOf(context),
+                  fontSize: 14,
                 ),
               ),
             )
           else
-            _Timeline(entries: sorted),
+            DocuTrackerActivityPreview(
+              entries: history,
+              onViewAll: () => _openAllActivities(documentId: doc.id),
+            ),
         ],
       ),
     );
@@ -2280,9 +2259,7 @@ class _DocuTrackerDocumentDetailScreenState
 
   Widget _buildLinkedLeaveHistorySection() {
     final workflow = _linkedLeaveWorkflow;
-    final sorted = _sortedHistory(
-      workflow?.history ?? const <DocumentHistoryEntry>[],
-    );
+    final history = workflow?.history ?? const <DocumentHistoryEntry>[];
     return DocuTrackerDetailSectionCard(
       icon: Icons.history_rounded,
       title: 'Activity & Audit Trail',
@@ -2290,25 +2267,26 @@ class _DocuTrackerDocumentDetailScreenState
       trailing: workflow == null
           ? null
           : Text(
-              '${sorted.length} ${sorted.length == 1 ? 'event' : 'events'} logged',
+              '${history.length} ${history.length == 1 ? 'event' : 'events'} logged',
               style: DocuTrackerTokens.metaStyle(context),
             ),
       child: workflow == null
           ? _linkedLeaveStatusMessage(forHistory: true)
-          : sorted.isEmpty
+          : history.isEmpty
           ? Padding(
-              padding: const EdgeInsets.symmetric(vertical: 16),
-              child: Center(
-                child: Text(
-                  'No history yet.',
-                  style: TextStyle(
-                    color: AppTheme.dashTextSecondaryOf(context),
-                    fontSize: 14,
-                  ),
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              child: Text(
+                'No history yet.',
+                style: TextStyle(
+                  color: AppTheme.dashTextSecondaryOf(context),
+                  fontSize: 14,
                 ),
               ),
             )
-          : _Timeline(entries: sorted),
+          : DocuTrackerActivityPreview(
+              entries: history,
+              onViewAll: () => _openAllActivities(localEntries: history),
+            ),
     );
   }
 
@@ -2782,349 +2760,6 @@ class _InfoRow extends StatelessWidget {
         ],
       ),
     );
-  }
-}
-
-class _Timeline extends StatelessWidget {
-  const _Timeline({required this.entries});
-
-  final List<DocumentHistoryEntry> entries;
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      children: [
-        for (var i = 0; i < entries.length; i++)
-          _TimelineItem(
-            entry: entries[i],
-            isFirst: i == 0,
-            isLast: i == entries.length - 1,
-          ),
-      ],
-    );
-  }
-}
-
-class _TimelineItem extends StatelessWidget {
-  const _TimelineItem({
-    required this.entry,
-    required this.isFirst,
-    required this.isLast,
-  });
-
-  final DocumentHistoryEntry entry;
-  final bool isFirst;
-  final bool isLast;
-
-  @override
-  Widget build(BuildContext context) {
-    final isSystemEvent =
-        entry.isOverdueLog ||
-        entry.isEscalationLog ||
-        entry.action == 'overdue' ||
-        entry.action == 'escalated';
-    final isPositive =
-        entry.action == 'approved' ||
-        entry.action == 'created' ||
-        entry.action == 'forwarded';
-    final isNegative = entry.action == 'rejected' || entry.action == 'returned';
-
-    final dark = DocuTrackerTokens.isDark(context);
-    Color dotColor = DocuTrackerTokens.textMutedOf(context);
-    Color bgColor = DocuTrackerTokens.insetOf(context);
-    Color borderColor = DocuTrackerTokens.borderSubtleOf(context);
-    Color titleColor = DocuTrackerTokens.textPrimaryOf(context);
-    Color timeColor = DocuTrackerTokens.textMutedOf(context);
-
-    if (isSystemEvent) {
-      dotColor = const Color(0xFFF59E0B);
-      bgColor = dark
-          ? dotColor.withValues(alpha: 0.12)
-          : const Color(0xFFFFFBEB);
-      borderColor = dark
-          ? dotColor.withValues(alpha: 0.35)
-          : const Color(0xFFFDE68A);
-      titleColor = dark ? const Color(0xFFFCD34D) : const Color(0xFF92400E);
-      timeColor = dark ? const Color(0xFFFBBF24) : const Color(0xFFB45309);
-    } else if (isPositive) {
-      dotColor = const Color(0xFF10B981);
-    } else if (isNegative) {
-      dotColor = const Color(0xFFEF4444);
-    }
-    final noteColor = DocuTrackerTokens.textSecondaryOf(context);
-
-    return IntrinsicHeight(
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          // Timeline Track
-          SizedBox(
-            width: 32,
-            child: Column(
-              children: [
-                Container(
-                  width: 32,
-                  height: 32,
-                  decoration: BoxDecoration(
-                    color: DocuTrackerTokens.surfaceOf(context),
-                    shape: BoxShape.circle,
-                    border: Border.all(
-                      color: dotColor.withValues(alpha: 0.3),
-                      width: 2,
-                    ),
-                  ),
-                  child: Center(
-                    child: isSystemEvent
-                        ? Icon(
-                            entry.isEscalationLog
-                                ? Icons.trending_up_rounded
-                                : Icons.alarm_rounded,
-                            size: 16,
-                            color: dotColor,
-                          )
-                        : CircleAvatar(
-                            radius: 14,
-                            backgroundColor: dotColor.withValues(alpha: 0.1),
-                            child: Text(
-                              _getInitials(_actorDisplayName(entry)),
-                              style: TextStyle(
-                                color: dotColor,
-                                fontSize: 9,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                          ),
-                  ),
-                ),
-                if (!isLast)
-                  Expanded(
-                    child: Container(
-                      width: 2,
-                      color: DocuTrackerTokens.borderSubtleOf(context),
-                    ),
-                  ),
-              ],
-            ),
-          ),
-          const SizedBox(width: 16),
-          // Content Card
-          Expanded(
-            child: Padding(
-              padding: const EdgeInsets.only(bottom: 24),
-              child: Container(
-                decoration: BoxDecoration(
-                  color: bgColor,
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: borderColor),
-                  boxShadow: [
-                    if (!isSystemEvent)
-                      BoxShadow(
-                        color: Colors.black.withValues(alpha: 0.02),
-                        blurRadius: 4,
-                        offset: const Offset(0, 2),
-                      ),
-                  ],
-                ),
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Expanded(
-                          child: Text(
-                            isSystemEvent
-                                ? _entryLabel(entry)
-                                : '${_entryLabel(entry)} by ${_actorDisplayName(entry)}',
-                            style: TextStyle(
-                              color: titleColor,
-                              fontSize: 14,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                        ),
-                        if (entry.createdAt != null)
-                          Text(
-                            _formatEntryTime(entry.createdAt!),
-                            style: TextStyle(
-                              color: timeColor,
-                              fontSize: 12,
-                              fontWeight: FontWeight.w500,
-                            ),
-                          ),
-                      ],
-                    ),
-                    if (entry.fromStep != null ||
-                        entry.toStep != null ||
-                        entry.fromStatus != null ||
-                        entry.toStatus != null) ...[
-                      const SizedBox(height: 12),
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 10,
-                          vertical: 8,
-                        ),
-                        decoration: BoxDecoration(
-                          color: DocuTrackerTokens.highlightPeachOf(context),
-                          borderRadius: BorderRadius.circular(8),
-                          border: Border.all(
-                            color: DocuTrackerTokens.highlightPeachBorderOf(
-                              context,
-                            ),
-                          ),
-                        ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            if (entry.fromStep != null || entry.toStep != null)
-                              Text(
-                                'Step: ${_stepLine(entry)}',
-                                style: TextStyle(
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.w700,
-                                  letterSpacing: 0.3,
-                                  color: noteColor,
-                                ),
-                              ),
-                            if ((entry.fromStep != null ||
-                                    entry.toStep != null) &&
-                                (entry.fromStatus != null ||
-                                    entry.toStatus != null))
-                              const SizedBox(height: 6),
-                            if (entry.fromStatus != null ||
-                                entry.toStatus != null)
-                              Text(
-                                'Status: ${_statusLine(entry)}',
-                                style: TextStyle(
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.w700,
-                                  letterSpacing: 0.3,
-                                  color: noteColor,
-                                ),
-                              ),
-                          ],
-                        ),
-                      ),
-                    ],
-                    if (entry.remarks != null && entry.remarks!.isNotEmpty) ...[
-                      const SizedBox(height: 12),
-                      Container(
-                        width: double.infinity,
-                        decoration: BoxDecoration(
-                          color: DocuTrackerTokens.highlightPeachOf(context),
-                          borderRadius: BorderRadius.circular(8),
-                          border: Border.all(
-                            color: DocuTrackerTokens.highlightPeachBorderOf(
-                              context,
-                            ),
-                          ),
-                        ),
-                        clipBehavior: Clip.antiAlias,
-                        child: IntrinsicHeight(
-                          child: Row(
-                            crossAxisAlignment: CrossAxisAlignment.stretch,
-                            children: [
-                              Container(
-                                width: 4,
-                                color: isSystemEvent
-                                    ? DocuTrackerTokens.alertOrange
-                                    : DocuTrackerStyles.primaryGreen,
-                              ),
-                              Expanded(
-                                child: Padding(
-                                  padding: const EdgeInsets.all(12),
-                                  child: Text(
-                                    entry.remarks!,
-                                    style: TextStyle(
-                                      color: noteColor,
-                                      fontSize: 12,
-                                      height: 1.4,
-                                      fontWeight: FontWeight.w600,
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ],
-                  ],
-                ),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  String _entryLabel(DocumentHistoryEntry entry) {
-    final department = entry.releasedToDepartmentName;
-    if (entry.action == 'released' && department != null) {
-      return 'Released to $department';
-    }
-    return _actionLabel(entry.action);
-  }
-
-  String _actionLabel(String? action) {
-    return switch (action) {
-      'created' => 'Document Created',
-      'released' => 'Released',
-      'assigned' => 'Document assigned',
-      'approved' => 'Approved',
-      'rejected' => 'Rejected',
-      'returned' => 'Returned to sender',
-      'forwarded' => 'Forwarded',
-      'overdue' => 'Overdue',
-      'escalated' => 'Escalated',
-      'remark' => 'Remark added',
-      'saved_draft' => 'Draft saved',
-      'submitted' => 'Submitted',
-      'signed' => 'Signed',
-      'signature_replaced' => 'Signature replaced',
-      'cancelled' => 'Cancelled',
-      'department_head_approved' => 'Approved by department',
-      'department_head_rejected' => 'Rejected by department',
-      'department_head_returned' => 'Returned by department',
-      _ => action ?? '—',
-    };
-  }
-
-  String _actorDisplayName(DocumentHistoryEntry entry) {
-    final name = entry.actorName?.trim();
-    if (name != null && name.isNotEmpty) return name;
-    final id = entry.actorId?.trim();
-    if (id != null && id.isNotEmpty) {
-      return 'Employee';
-    }
-    return 'Employee';
-  }
-
-  static String _formatEntryTime(DateTime dt) {
-    final local = dt.toLocal();
-    return '${local.year}-${local.month.toString().padLeft(2, '0')}-${local.day.toString().padLeft(2, '0')} • '
-        '${local.hour.toString().padLeft(2, '0')}:${local.minute.toString().padLeft(2, '0')}';
-  }
-
-  static String _stepLine(DocumentHistoryEntry e) {
-    if (e.fromStep != null && e.toStep != null) {
-      return 'Step ${e.fromStep} → ${e.toStep}';
-    }
-    if (e.toStep != null) return 'Step ${e.toStep}';
-    if (e.fromStep != null) return 'Step ${e.fromStep}';
-    return '';
-  }
-
-  static String _statusLine(DocumentHistoryEntry e) {
-    final from = e.fromStatus?.displayName;
-    final to = e.toStatus?.displayName;
-    if (from != null && to != null) return '$from → $to';
-    if (to != null) return to;
-    if (from != null) return from;
-    return '';
   }
 }
 

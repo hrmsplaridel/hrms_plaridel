@@ -1401,8 +1401,25 @@ router.put(
   }
 );
 
+const historySelectSql = `SELECT h.*,
+              COALESCE(NULLIF(h.actor_name, ''), u.full_name) AS actor_name
+       FROM docutracker_document_history h
+       LEFT JOIN users u ON u.id = h.actor_id`;
+
+function parseBoundedInteger(value, { min, max }) {
+  const text = String(value ?? '').trim();
+  if (!/^\d+$/.test(text)) return null;
+  const number = Number(text);
+  if (!Number.isSafeInteger(number) || number < min || number > max) return null;
+  return number;
+}
+
 /**
  * GET /api/docutracker/documents/:id/history
+ *
+ * Without `limit`, returns the full history array (existing clients).
+ * With `limit` and optional `offset` / `action`, returns
+ * `{ items, total, limit, offset }`. Access checks are unchanged.
  */
 router.get('/documents/:id/history', protect, async (req, res) => {
   const { id } = req.params;
@@ -1410,16 +1427,59 @@ router.get('/documents/:id/history', protect, async (req, res) => {
     if (!(await assertDocumentReadable(req, id))) {
       return res.status(403).json({ error: 'Forbidden' });
     }
-    const result = await pool.query(
-      `SELECT h.*,
-              COALESCE(NULLIF(h.actor_name, ''), u.full_name) AS actor_name
-       FROM docutracker_document_history h
-       LEFT JOIN users u ON u.id = h.actor_id
+    const paginate = req.query.limit !== undefined;
+    if (!paginate) {
+      const result = await pool.query(
+        `${historySelectSql}
        WHERE document_id = $1
        ORDER BY h.created_at DESC`,
-      [id]
+        [id]
+      );
+      return res.json(result.rows);
+    }
+
+    const limit = parseBoundedInteger(req.query.limit, { min: 1, max: 100 });
+    const offset = parseBoundedInteger(req.query.offset ?? '0', {
+      min: 0,
+      max: 1000000,
+    });
+    if (limit == null) {
+      return res.status(400).json({ error: 'limit must be an integer from 1 to 100' });
+    }
+    if (offset == null) {
+      return res.status(400).json({ error: 'offset must be a non-negative integer' });
+    }
+    const action = String(req.query.action || '').trim();
+    if (action && !/^[a-z0-9_]{1,64}$/.test(action)) {
+      return res.status(400).json({ error: 'action filter is not valid' });
+    }
+
+    const where = ['h.document_id = $1'];
+    const params = [id];
+    if (action) {
+      params.push(action);
+      where.push(`h.action = $${params.length}`);
+    }
+    const whereSql = where.join(' AND ');
+    const count = await pool.query(
+      `SELECT COUNT(*)::int AS total
+       FROM docutracker_document_history h
+       WHERE ${whereSql}`,
+      params
     );
-    res.json(result.rows);
+    const rows = await pool.query(
+      `${historySelectSql}
+       WHERE ${whereSql}
+       ORDER BY h.created_at DESC, h.id DESC
+       LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
+      [...params, limit, offset]
+    );
+    return res.json({
+      items: rows.rows,
+      total: count.rows[0]?.total ?? 0,
+      limit,
+      offset,
+    });
   } catch (err) {
     console.error('[docutracker GET /documents/:id/history]', err);
     res.status(500).json({ error: 'Failed to fetch history' });

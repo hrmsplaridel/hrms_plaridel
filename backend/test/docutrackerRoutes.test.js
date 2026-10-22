@@ -620,6 +620,112 @@ test('POST /documents/:id/history rejects client-authored audit entries', async 
   delete require.cache[routePath];
 });
 
+test('GET /documents/:id/history paginates without changing the full list or access check', async () => {
+  const docId = '11111111-1111-4111-8111-111111111111';
+  const queries = [];
+  let allowView = true;
+  const restoreWorkflow = withMockedModule(
+    '../src/services/docutrackerWorkflowService',
+    workflowServiceMock({
+      canUserPerformDocumentAction: async () => allowView,
+    })
+  );
+  const restoreDb = withMockedModule('../src/config/db', {
+    pool: {
+      query: async (sql, params) => {
+        queries.push({ sql: String(sql), params });
+        if (String(sql).includes('COUNT(*)')) {
+          return { rows: [{ total: 25 }] };
+        }
+        if (String(sql).includes('FROM docutracker_documents')) {
+          return { rows: [{ id: docId, status: 'pending' }] };
+        }
+        return {
+          rows: [
+            {
+              id: '22222222-2222-4222-8222-222222222222',
+              action: 'signed',
+              created_at: '2026-10-02T00:00:00.000Z',
+              actor_name: 'Ada',
+            },
+          ],
+        };
+      },
+    },
+  });
+  const restoreAuth = withMockedModule('../src/middleware/auth', {
+    authMiddleware: (_req, _res, next) => next?.(),
+  });
+  const restoreRbac = withMockedModule('../src/middleware/rbac', {
+    requireAdmin: (_req, _res, next) => next?.(),
+  });
+  const routePath = require.resolve('../src/routes/docutracker');
+  delete require.cache[routePath];
+  const router = require('../src/routes/docutracker');
+  const handler = getRouteHandler(router, 'get', '/documents/:id/history');
+
+  const full = createMockResponse();
+  await handler(
+    { params: { id: docId }, query: {}, user: { id: 'admin-1', role: 'admin' } },
+    full
+  );
+  assert.equal(full.statusCode, 200);
+  assert.ok(Array.isArray(full.payload));
+  assert.equal(full.payload[0].action, 'signed');
+  assert.equal(queries.some((query) => query.sql.includes('COUNT(*)')), false);
+  assert.equal(queries.some((query) => query.sql.includes('LIMIT')), false);
+
+  queries.length = 0;
+  const page = createMockResponse();
+  await handler(
+    {
+      params: { id: docId },
+      query: { limit: '10', offset: '10', action: 'signed' },
+      user: { id: 'admin-1', role: 'admin' },
+    },
+    page
+  );
+  assert.equal(page.statusCode, 200);
+  assert.equal(page.payload.total, 25);
+  assert.equal(page.payload.limit, 10);
+  assert.equal(page.payload.offset, 10);
+  assert.equal(page.payload.items[0].action, 'signed');
+  const limited = queries.find((query) => query.sql.includes('LIMIT'));
+  assert.ok(limited);
+  assert.deepEqual(limited.params, [docId, 'signed', 10, 10]);
+
+  const invalid = createMockResponse();
+  await handler(
+    {
+      params: { id: docId },
+      query: { limit: '0' },
+      user: { id: 'admin-1', role: 'admin' },
+    },
+    invalid
+  );
+  assert.equal(invalid.statusCode, 400);
+
+  allowView = false;
+  queries.length = 0;
+  const denied = createMockResponse();
+  await handler(
+    {
+      params: { id: docId },
+      query: { limit: '10' },
+      user: { id: 'employee-1', role: 'employee' },
+    },
+    denied
+  );
+  assert.equal(denied.statusCode, 403);
+  assert.equal(queries.some((query) => query.sql.includes('docutracker_document_history')), false);
+
+  restoreWorkflow();
+  restoreDb();
+  restoreAuth();
+  restoreRbac();
+  delete require.cache[routePath];
+});
+
 test('PUT /documents/:id sends metadata through the transactional service', async () => {
   let captured = null;
   const restoreWorkflow = withMockedModule(

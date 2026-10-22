@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart';
 
 import 'package:hrms_plaridel/core/api/client.dart';
 import 'package:hrms_plaridel/features/docutracker/data/dto/docutracker_api_result.dart';
@@ -1048,6 +1049,57 @@ class DocuTrackerRepository implements DocuTrackerPermissionsDataSource {
           )
           .toList();
     } catch (error) {
+      _throwRequestError(error);
+    }
+  }
+
+  /// History page. The endpoint returns either a JSON array of every event
+  /// or `{ items, total, limit, offset }` when the server applies `limit`.
+  Future<DocumentHistoryPage> listDocumentHistoryPage(
+    String documentId, {
+    required int limit,
+    required int offset,
+    String? action,
+  }) async {
+    try {
+      final res = await ApiClient.instance.get<dynamic>(
+        '$_base/documents/$documentId/history',
+        queryParameters: {
+          'limit': limit,
+          'offset': offset,
+          if (action != null && action.isNotEmpty) 'action': action,
+        },
+      );
+      return documentHistoryPageFromResponse(
+        res.data,
+        limit: limit,
+        offset: offset,
+        action: action,
+      );
+    } catch (error) {
+      debugPrint('DocuTracker activity history failed to load: $error');
+      if (error is FormatException) {
+        throw _DocuTrackerRequestException(
+          error.message.trim().isEmpty
+              ? 'Activity history could not be loaded.'
+              : error.message.trim(),
+        );
+      }
+      if (error is DioException) {
+        final data = error.response?.data;
+        if (data is Map) {
+          final serverError = data['error'];
+          if (serverError is String && serverError.trim().isNotEmpty) {
+            throw _DocuTrackerRequestException(serverError.trim());
+          }
+        }
+        final code = error.response?.statusCode;
+        throw _DocuTrackerRequestException(
+          code == null
+              ? 'Activity history could not be loaded.'
+              : 'Activity history could not be loaded (HTTP $code).',
+        );
+      }
       _throwRequestError(error);
     }
   }
