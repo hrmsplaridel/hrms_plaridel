@@ -1,16 +1,23 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
+import 'package:hrms_plaridel/features/docutracker/models/docutracker_memo_template.dart';
+
 Uint8List _decodeBase64Image(String encoded) {
   final normalized = encoded.replaceAll(RegExp(r'\s'), '');
   return Uint8List.fromList(base64Decode(normalized));
 }
 
 /// One A4 page stored as Quill Delta operations.
+///
+/// [delta] only ever holds Quill operations. Template metadata such as the
+/// official Memo fields is kept in [memo] and serialized as a tagged
+/// operation ahead of the delta.
 class DocuTrackerDocumentPage {
-  const DocuTrackerDocumentPage({required this.delta});
+  const DocuTrackerDocumentPage({required this.delta, this.memo});
 
   final List<Map<String, dynamic>> delta;
+  final DocuTrackerMemoTemplate? memo;
 
   factory DocuTrackerDocumentPage.empty() => const DocuTrackerDocumentPage(
     delta: <Map<String, dynamic>>[
@@ -20,18 +27,27 @@ class DocuTrackerDocumentPage {
 
   factory DocuTrackerDocumentPage.fromJson(dynamic json) {
     if (json is! List) return DocuTrackerDocumentPage.empty();
-    final operations = json
-        .whereType<Map>()
-        .map((item) => Map<String, dynamic>.from(item))
-        .toList(growable: false);
+    DocuTrackerMemoTemplate? memo;
+    final operations = <Map<String, dynamic>>[];
+    for (final item in json.whereType<Map>()) {
+      final operation = Map<String, dynamic>.from(item);
+      if (DocuTrackerMemoTemplate.isTemplateOperation(operation)) {
+        memo ??= DocuTrackerMemoTemplate.fromOperation(operation);
+      } else {
+        operations.add(operation);
+      }
+    }
     return DocuTrackerDocumentPage(
       delta: operations.isEmpty
           ? DocuTrackerDocumentPage.empty().delta
-          : operations,
+          : List<Map<String, dynamic>>.unmodifiable(operations),
+      memo: memo,
     );
   }
 
-  List<Map<String, dynamic>> toJson() => delta;
+  List<Map<String, dynamic>> toJson() => memo == null
+      ? delta
+      : <Map<String, dynamic>>[memo!.toOperation(), ...delta];
 }
 
 class DocuTrackerSignatureAsset {
@@ -153,6 +169,7 @@ class DocuTrackerSourceSignatureBundle {
     required this.sourceStatus,
     required this.signatures,
     this.canAssign = false,
+    this.workflowSnapshot,
   });
 
   final String sourceModule;
@@ -161,6 +178,7 @@ class DocuTrackerSourceSignatureBundle {
   final String sourceStatus;
   final List<DocuTrackerSourceSignature> signatures;
   final bool canAssign;
+  final Map<String,dynamic>? workflowSnapshot;
 
   DocuTrackerSourceSignature? signatureFor(String slotKey) {
     for (final signature in signatures) {
@@ -177,6 +195,7 @@ class DocuTrackerSourceSignatureBundle {
       sourceRecordId: json['source_record_id']?.toString() ?? '',
       sourceStatus: json['source_status']?.toString() ?? '',
       canAssign: json['can_assign'] == true,
+      workflowSnapshot: json['workflow_snapshot'] is Map ? Map<String,dynamic>.from(json['workflow_snapshot']) : null,
       signatures: rawSignatures is List
           ? rawSignatures
                 .whereType<Map>()
@@ -335,10 +354,14 @@ class DocuTrackerSignatureField {
     required this.label,
     this.canSign = false,
     this.assignedSignerName,
+    this.assignedSignerPosition,
+    this.assignedSignerRole,
     this.signatureAssetId,
     this.signatureImageBytes,
     this.signedBy,
     this.signerName,
+    this.signerPositionSnapshot,
+    this.signerRoleSnapshot,
     this.signedAt,
     this.lockedAt,
   });
@@ -353,10 +376,19 @@ class DocuTrackerSignatureField {
   final String label;
   final bool canSign;
   final String? assignedSignerName;
+
+  /// Server-resolved from the signer's current assignment; read-only.
+  final String? assignedSignerPosition;
+  final String? assignedSignerRole;
   final String? signatureAssetId;
   final Uint8List? signatureImageBytes;
   final String? signedBy;
   final String? signerName;
+
+  /// Printed position and role frozen when the field was signed. Null for
+  /// unsigned fields and for fields signed before snapshots were recorded.
+  final String? signerPositionSnapshot;
+  final String? signerRoleSnapshot;
   final DateTime? signedAt;
   final DateTime? lockedAt;
 
@@ -373,6 +405,8 @@ class DocuTrackerSignatureField {
       height: (json['height'] as num?)?.toDouble() ?? 0.1,
       assignedSignerId: json['assigned_signer_id']?.toString() ?? '',
       assignedSignerName: json['assigned_signer_name']?.toString(),
+      assignedSignerPosition: json['assigned_signer_position']?.toString(),
+      assignedSignerRole: json['assigned_signer_role']?.toString(),
       label: json['label']?.toString() ?? 'Sign Here',
       canSign: json['can_sign'] == true,
       signatureAssetId: json['signature_asset_id']?.toString(),
@@ -381,6 +415,8 @@ class DocuTrackerSignatureField {
           : _decodeBase64Image(encoded),
       signedBy: json['signed_by']?.toString(),
       signerName: json['signer_name_snapshot']?.toString(),
+      signerPositionSnapshot: json['signer_position_snapshot']?.toString(),
+      signerRoleSnapshot: json['signer_role_snapshot']?.toString(),
       signedAt: DateTime.tryParse(json['signed_at']?.toString() ?? ''),
       lockedAt: DateTime.tryParse(json['locked_at']?.toString() ?? ''),
     );
@@ -415,12 +451,18 @@ class DocuTrackerSignatureField {
     height: height ?? this.height,
     assignedSignerId: assignedSignerId ?? this.assignedSignerId,
     assignedSignerName: assignedSignerName ?? this.assignedSignerName,
+    assignedSignerPosition: assignedSignerId == null
+        ? assignedSignerPosition
+        : null,
+    assignedSignerRole: assignedSignerId == null ? assignedSignerRole : null,
     label: label ?? this.label,
     canSign: canSign,
     signatureAssetId: signatureAssetId,
     signatureImageBytes: signatureImageBytes,
     signedBy: signedBy,
     signerName: signerName,
+    signerPositionSnapshot: signerPositionSnapshot,
+    signerRoleSnapshot: signerRoleSnapshot,
     signedAt: signedAt,
     lockedAt: lockedAt,
   );

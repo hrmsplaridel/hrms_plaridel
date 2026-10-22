@@ -1,8 +1,9 @@
-import '../widgets/leave_routing_settings.dart';
+import 'package:hrms_plaridel/features/dtr/management/approvals/widgets/approval_workflow_picker.dart';
 import '../widgets/leave_print_settings.dart';
 import '../widgets/leave_employment_eligibility_field.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
+import 'package:hrms_plaridel/features/dtr/assistant/presentation/widgets/field_guidance_editor.dart';
 import 'package:hrms_plaridel/shared/widgets/workforce_loading_skeleton.dart';
 import 'package:hrms_plaridel/shared/widgets/form_settings_section.dart';
 
@@ -29,6 +30,7 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
   final _descriptionController = TextEditingController();
   final _maxDaysController = TextEditingController();
   final _minimumAdvanceDaysController = TextEditingController();
+  final _minimumServiceMonthsController = TextEditingController();
   final _attachmentOverDaysController = TextEditingController();
   final _searchController = TextEditingController();
 
@@ -44,15 +46,18 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
     'approval_route': 'hr',
     'mayor_employment_types': null,
   };
+  Map<String, dynamic>? _pendingRouting;
   bool _isActive = true;
   bool _employeeCanFile = true;
   bool _adminOnly = false;
+  bool _adminCanFile = true;
   bool _allowsPastDates = true;
   bool _requiresAttachment = false;
   bool _affectsDtrNormally = true;
   String _balanceLedgerType = 'none';
   String _entitlementBasis = LeaveEntitlementBasis.perRequest;
   String _sexEligibility = 'any';
+  String _firstYearAllowance = 'full';
   List<String>? _eligibleEmploymentTypes;
   List<LeaveCustomFieldDefinition> _customFields = const [];
   List<int> _customFieldUiIds = const [];
@@ -105,6 +110,7 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
     _descriptionController.dispose();
     _maxDaysController.dispose();
     _minimumAdvanceDaysController.dispose();
+    _minimumServiceMonthsController.dispose();
     _attachmentOverDaysController.dispose();
     _searchController.dispose();
     super.dispose();
@@ -152,16 +158,24 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
   }
 
   void _select(LeaveTypeDefinition item) {
+    if (_pendingPrintTypeId != item.id) {
+      _creationPrint = const LeavePrintDraft();
+      _pendingPrintTypeId = null;
+    }
+    _printDraftEpoch++;
     _selected = item;
+    _pendingRouting = null;
     _nameController.text = item.name;
     _displayNameController.text = item.displayName;
     _descriptionController.text = item.description ?? '';
     _maxDaysController.text = item.maxDays?.toString() ?? '';
     _minimumAdvanceDaysController.text =
         item.minimumAdvanceDays?.toString() ?? '';
+    _minimumServiceMonthsController.text = item.minimumServiceMonths.toString();
     _isActive = item.isActive;
     _employeeCanFile = item.employeeCanFile;
     _adminOnly = item.adminOnly;
+    _adminCanFile = item.adminCanFile;
     _allowsPastDates = item.allowsPastDates;
     _requiresAttachment = item.requiresAttachment;
     _attachmentOverDaysController.text = _requiresAttachment
@@ -172,6 +186,7 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
         ? item.balanceLedgerType
         : 'none';
     _entitlementBasis = item.entitlementBasis;
+    _firstYearAllowance = item.firstYearAllowance;
     _sexEligibility = _sexEligibilityTypes.containsKey(item.sexEligibility)
         ? item.sexEligibility
         : 'any';
@@ -208,6 +223,7 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
   void _newCustom() {
     setState(() {
       _selected = null;
+      _pendingRouting = null;
       _creationPrint = const LeavePrintDraft();
       _pendingPrintTypeId = null;
       _printDraftEpoch++;
@@ -220,15 +236,18 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
       _descriptionController.clear();
       _maxDaysController.clear();
       _minimumAdvanceDaysController.clear();
+      _minimumServiceMonthsController.clear();
       _attachmentOverDaysController.clear();
       _isActive = true;
       _employeeCanFile = true;
       _adminOnly = false;
+      _adminCanFile = true;
       _allowsPastDates = true;
       _requiresAttachment = false;
       _affectsDtrNormally = true;
       _balanceLedgerType = 'none';
       _entitlementBasis = LeaveEntitlementBasis.perRequest;
+      _firstYearAllowance = 'full';
       _sexEligibility = 'any';
       _eligibleEmploymentTypes = null;
       _customFields = const [];
@@ -259,6 +278,7 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
   }
 
   Future<void> _save() async {
+    if (_saving) return;
     if (!_formKey.currentState!.validate()) return;
     if (_eligibleEmploymentTypes?.isEmpty == true) {
       _showMessage('Select at least one eligible employment type.');
@@ -269,8 +289,17 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
     final data = selected?.isSystem == true
         ? <String, dynamic>{
             'eligible_employment_types': _eligibleEmploymentTypes,
+            if ((_intOrNull(_minimumServiceMonthsController.text) ?? 0) !=
+                selected!.minimumServiceMonths)
+              'minimum_service_months':
+                  _intOrNull(_minimumServiceMonthsController.text) ?? 0,
           }
         : _payloadFromForm();
+    if (selected?.id == null && _creationRouting['approval_workflow_id']==null) {
+      setState(() => _saving = false);
+      _showMessage('Select an approval workflow before creating the leave type.');
+      return;
+    }
     if (selected?.id == null) data.addAll(_creationRouting);
     try {
       LeaveTypeDefinition? saved;
@@ -309,6 +338,45 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
         );
         final body = res.data;
         if (body != null) saved = LeaveTypeDefinition.fromJson(body);
+        final routing = _pendingRouting;
+        if (routing != null) {
+          try {
+            await ApiClient.instance.post(
+              '/api/leave/routing/types/${selected.id}',
+              data: routing,
+            );
+            _pendingRouting = null;
+          } catch (e) {
+            // The ordinary settings are already saved. Keep routing and print
+            // drafts intact so an overall save can safely retry the remaining work.
+            LeaveTypeDefinitionCache.instance.invalidate();
+            if (!mounted) return;
+            final message = e is DioException ? _messageFromDio(e) : '$e';
+            final saveLabel = selected.isSystem
+                ? 'Save Eligibility'
+                : 'Save Changes';
+            _showMessage(
+              'Leave type updated, but routing could not be saved. $message Retry using $saveLabel or Save workflow.${_creationPrint.hasChanges ? ' Print changes are still unsaved.' : ''}',
+            );
+            return;
+          }
+        }
+        if (_creationPrint.hasChanges) {
+          try {
+            await _creationPrint.save(selected.id!);
+            _creationPrint = const LeavePrintDraft();
+            _pendingPrintTypeId = null;
+          } catch (e) {
+            _pendingPrintTypeId = selected.id;
+            LeaveTypeDefinitionCache.instance.invalidate();
+            if (!mounted) return;
+            if (saved != null) _applySavedType(saved);
+            _showMessage(
+              'Leave type updated, but print settings could not be saved. Retry using Save print settings.',
+            );
+            return;
+          }
+        }
         _showMessage('Leave type updated.');
       }
       LeaveTypeDefinitionCache.instance.invalidate();
@@ -391,6 +459,7 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
       'is_active': isActiveOverride ?? _isActive,
       'employee_can_file': _employeeCanFile,
       'admin_only': _adminOnly,
+      'admin_can_file': _adminCanFile,
       'allows_past_dates': _allowsPastDates,
       'requires_attachment': _requiresAttachment,
       'requires_attachment_when_over_days': _requiresAttachment
@@ -398,9 +467,16 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
           : null,
       'max_days': _numberOrNull(_maxDaysController.text),
       'minimum_advance_days': _intOrNull(_minimumAdvanceDaysController.text),
+      'minimum_service_months':
+          _intOrNull(_minimumServiceMonthsController.text) ?? 0,
       'affects_dtr_normally': _affectsDtrNormally,
       'balance_ledger_type': _balanceLedgerType,
       'entitlement_basis': _entitlementBasis,
+      'first_year_allowance':
+          _entitlementBasis == LeaveEntitlementBasis.annual &&
+              _balanceLedgerType == 'none'
+          ? _firstYearAllowance
+          : 'full',
       'sex_eligibility': _sexEligibility,
       'eligible_employment_types': _eligibleEmploymentTypes,
       'employee_detail_schema': _customFields
@@ -502,10 +578,16 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
     bool? required,
     int? maxLength,
     List<String>? options,
+    String? instruction,
+    String? example,
+    String? sentenceTemplate,
   }) {
     final nextType = type ?? field.type;
     return LeaveCustomFieldDefinition(
       key: key ?? field.key,
+      instruction: instruction ?? field.instruction,
+      example: example ?? field.example,
+      sentenceTemplate: sentenceTemplate ?? field.sentenceTemplate,
       label: label ?? field.label,
       type: nextType,
       required: required ?? field.required,
@@ -660,7 +742,9 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
                       return _LeaveTypeListTile(
                         item: item,
                         selected: selected,
-                        onTap: () => setState(() => _select(item)),
+                        onTap: () {
+                          if (!_saving) setState(() => _select(item));
+                        },
                       );
                     },
                   ),
@@ -739,7 +823,7 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
                         const SizedBox(height: 6),
                         Text(
                           systemLocked
-                              ? 'Built-in rules are protected. Employment-type eligibility and printed forms can be configured.'
+                              ? 'Built-in rules are protected. Employment-type and service eligibility, and printed forms can be configured.'
                               : 'Configure filing, balance, and DTR behavior.',
                           style: TextStyle(
                             color: _mutedColor(context),
@@ -761,7 +845,7 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
                     _InfoPanel(
                       icon: Icons.lock_outline_rounded,
                       text:
-                          'Built-in rules are protected. Employment-type eligibility and printed forms can be configured here.',
+                          'Built-in rules are protected. Employment-type and service eligibility, and printed forms can be configured here.',
                     ),
                   _settingsSection([
                     _sectionTitle('Basic Information'),
@@ -845,6 +929,43 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
                   const SizedBox(height: 16),
                   _settingsSection([
                     _sectionTitle('Filing Requirements'),
+                    ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 360),
+                      child: DropdownButtonFormField<String>(
+                        key: ValueKey(
+                          'filing-$_employeeCanFile-$_adminOnly-$_adminCanFile',
+                        ),
+                        initialValue: _employeeCanFile && !_adminOnly
+                            ? (_adminCanFile ? 'both' : 'employee')
+                            : 'admin',
+                        isExpanded: true,
+                        dropdownColor: AppTheme.dashPanelOf(context),
+                        style: AppTheme.dashFieldTextStyle(context),
+                        decoration: _inputDecoration('Who can file'),
+                        items: const [
+                          DropdownMenuItem(
+                            value: 'employee',
+                            child: Text('Employee only'),
+                          ),
+                          DropdownMenuItem(
+                            value: 'both',
+                            child: Text('Employee and HR/admin'),
+                          ),
+                          DropdownMenuItem(
+                            value: 'admin',
+                            child: Text('HR/admin only'),
+                          ),
+                        ],
+                        onChanged: _saving || systemLocked
+                            ? null
+                            : (value) => setState(() {
+                                _employeeCanFile = value != 'admin';
+                                _adminOnly = value == 'admin';
+                                _adminCanFile = value != 'employee';
+                              }),
+                      ),
+                    ),
+                    const SizedBox(height: 16),
                     Wrap(
                       spacing: 10,
                       runSpacing: 10,
@@ -854,19 +975,6 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
                           value: _isActive,
                           editable: !systemLocked,
                           onChanged: (v) => setState(() => _isActive = v),
-                        ),
-                        _ruleChip(
-                          label: 'Employees can file',
-                          value: _employeeCanFile,
-                          editable: !systemLocked,
-                          onChanged: (v) =>
-                              setState(() => _employeeCanFile = v),
-                        ),
-                        _ruleChip(
-                          label: 'HR/Admin only',
-                          value: _adminOnly,
-                          editable: !systemLocked,
-                          onChanged: (v) => setState(() => _adminOnly = v),
                         ),
                         _ruleChip(
                           label: 'Allow past-date filing',
@@ -882,6 +990,52 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
                           onChanged: _setRequiresAttachment,
                         ),
                       ],
+                    ),
+                    const SizedBox(height: 16),
+                    if (_entitlementBasis == LeaveEntitlementBasis.annual &&
+                        _balanceLedgerType == 'none') ...[
+                      DropdownButtonFormField<String>(
+                        key: ValueKey('first-year-$_firstYearAllowance'),
+                        initialValue: _firstYearAllowance,
+                        isExpanded: true,
+                        decoration: _inputDecoration(
+                          'First-year allowance',
+                          helperText:
+                              'Proration uses months remaining in the hiring year, including the employed fraction of the hiring month. Rounded down to whole days; full allowance from January 1.',
+                        ),
+                        items: const [
+                          DropdownMenuItem(
+                            value: 'full',
+                            child: Text('Full annual allowance'),
+                          ),
+                          DropdownMenuItem(
+                            value: 'prorated',
+                            child: Text('Prorate by date hired (whole days)'),
+                          ),
+                        ],
+                        onChanged: _saving || systemLocked
+                            ? null
+                            : (value) => setState(
+                                () => _firstYearAllowance = value ?? 'full',
+                              ),
+                      ),
+                      const SizedBox(height: 16),
+                    ],
+                    TextFormField(
+                      controller: _minimumServiceMonthsController,
+                      readOnly: _saving,
+                      style: AppTheme.dashFieldTextStyle(context),
+                      keyboardType: TextInputType.number,
+                      decoration: _inputDecoration(
+                        'Minimum months of service',
+                        helperText:
+                            'Blank or 0 means no requirement. Measured from date hired to the first leave date.',
+                      ),
+                      validator: (value) =>
+                          _validateNonNegativeInteger(value) ??
+                          ((int.tryParse(value ?? '') ?? 0) > 1200
+                              ? 'Maximum is 1200 months'
+                              : null),
                     ),
                     const SizedBox(height: 16),
                     LeaveEmploymentEligibilityField(
@@ -1044,36 +1198,54 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
                   ]),
                   const SizedBox(height: 16),
                   _settingsSection([
-                    LeaveRoutingSettings(
+                    ApprovalWorkflowPicker(
                       key: ValueKey('routing-${selected?.id ?? 'new'}'),
                       leaveTypeId: selected?.id,
-                      onChanged: (value) => _creationRouting = value,
+                      enabled: !_saving,
+                      onChanged: (value) {
+                        _creationRouting = value;
+                        if (selected?.id != null) _pendingRouting = value;
+                      },
+                      onSaved: () => _pendingRouting = null,
                     ),
                   ]),
                   const SizedBox(height: 16),
                   _settingsSection([
                     LeavePrintSettings(
                       key: ValueKey(
-                        'print-${selected?.id ?? 'new-$_printDraftEpoch'}',
+                        'print-${selected?.id ?? 'new'}-$_printDraftEpoch',
                       ),
                       leaveTypeId: selected?.id,
+                      onCustomFieldsChanged: systemLocked
+                          ? null
+                          : (fields) => setState(() {
+                              final ids = {
+                                for (var i = 0; i < _customFields.length; i++)
+                                  _customFields[i].key: _customFieldUiIds[i],
+                              };
+                              _customFields = List.of(fields);
+                              _customFieldUiIds = [
+                                for (final field in fields)
+                                  ids[field.key] ?? _nextCustomFieldUiId++,
+                              ];
+                            }),
+                      readLeaveType: () => LeaveTypeDefinition(
+                        name: _nameController.text,
+                        displayName: _displayNameController.text,
+                        employeeDetailSchema: _customFields,
+                      ),
                       enabled: !_saving,
                       onSaved: () {
-                        if (_pendingPrintTypeId == selected?.id) {
-                          setState(() {
-                            _pendingPrintTypeId = null;
-                            _creationPrint = const LeavePrintDraft();
-                          });
-                        }
+                        setState(() {
+                          _pendingPrintTypeId = null;
+                          _creationPrint = const LeavePrintDraft();
+                        });
                       },
-                      initialDraft:
-                          selected?.id != null &&
-                              selected?.id == _pendingPrintTypeId
+                      initialDraft: _creationPrint.hasChanges
                           ? _creationPrint
                           : null,
-                      onChanged: selected?.id == null
-                          ? (value) => _creationPrint = value
-                          : null,
+                      onChanged: (value) =>
+                          setState(() => _creationPrint = value),
                     ),
                   ]),
                 ],
@@ -1143,9 +1315,7 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
       children: [
         Row(
           children: [
-            Expanded(
-              child: _sectionTitle('Custom Form Fields'),
-            ),
+            Expanded(child: _sectionTitle('Custom Form Fields')),
             OutlinedButton(
               onPressed: _saving || _customFields.length >= 20
                   ? null
@@ -1284,6 +1454,19 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
             ],
           ),
           const SizedBox(height: 12),
+          FieldGuidanceEditor(
+            field: field,
+            enabled: !_saving,
+            onChanged: (instruction, example, template) => _replaceCustomField(
+              index,
+              _updatedCustomField(
+                field,
+                instruction: instruction,
+                example: example,
+                sentenceTemplate: template,
+              ),
+            ),
+          ),
           InputDecorator(
             decoration: _inputDecoration(
               'System key',
@@ -1456,10 +1639,7 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
     );
   }
 
-  Widget _statusPill({
-    required String label,
-    required Color color,
-  }) {
+  Widget _statusPill({required String label, required Color color}) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
       decoration: BoxDecoration(

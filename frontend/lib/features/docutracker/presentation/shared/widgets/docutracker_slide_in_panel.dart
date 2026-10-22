@@ -37,7 +37,7 @@ Future<T?> showDocuTrackerSlideInPanel<T>({
         child: Align(
           alignment: Alignment.centerRight,
           child: Material(
-            color: DocuTrackerTokens.surface,
+            color: DocuTrackerTokens.surfaceOf(context),
             elevation: 12,
             child: SizedBox(
               width: panelWidth,
@@ -87,9 +87,11 @@ class _DocuTrackerSlideInPanelScaffold extends StatelessWidget {
         Container(
           padding: const EdgeInsets.fromLTRB(16, 14, 8, 14),
           decoration: BoxDecoration(
-            color: DocuTrackerTokens.surface,
+            color: DocuTrackerTokens.surfaceOf(context),
             border: Border(
-              bottom: BorderSide(color: DocuTrackerTokens.borderSubtle),
+              bottom: BorderSide(
+                color: DocuTrackerTokens.borderSubtleOf(context),
+              ),
             ),
           ),
           child: Row(
@@ -112,7 +114,7 @@ class _DocuTrackerSlideInPanelScaffold extends StatelessWidget {
                 tooltip: 'Close',
                 onPressed: () => Navigator.of(context).pop(),
                 icon: const Icon(Icons.close_rounded),
-                color: DocuTrackerTokens.textMuted,
+                color: DocuTrackerTokens.textMutedOf(context),
               ),
             ],
           ),

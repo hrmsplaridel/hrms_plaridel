@@ -55,6 +55,14 @@ const _accessActions = <_AccessAction>[
         'documents the person can open stay downloadable.',
     Icons.download_outlined,
   ),
+  _AccessAction(
+    'release',
+    'Release approved documents',
+    'Distribute approved documents of this type to a receiving department. '
+        'Applies only to types that require release; administrators need '
+        'an employee exception.',
+    Icons.outbox_outlined,
+  ),
 ];
 
 /// Admin-only DocuTracker system-access editor.
@@ -594,8 +602,8 @@ class _DocuTrackerPermissionEditorScreenState
             Text(
               isRoles
                   ? _documentType == '*'
-                        ? 'These role defaults will be blocked. Document-specific settings and employee exceptions stay in place.'
-                        : 'These roles will use their All document types settings. Access is blocked if no setting exists. Employee exceptions stay in place.'
+                        ? 'These roles return to the system default policy for all document types. Document-specific settings and employee exceptions stay in place.'
+                        : 'These roles return to the system default policy for this document type and otherwise use their All document types settings. Employee exceptions stay in place.'
                   : _documentType == '*'
                   ? 'Role settings will apply. Document-specific employee exceptions stay in place.'
                   : 'All document types exceptions and role settings will apply.',
@@ -1427,7 +1435,8 @@ class _DocuTrackerPermissionEditorScreenState
             title: 'Administrator access is always enabled.',
             badges: [_Pill(label: 'Granted', tone: _Tone.success)],
             description:
-                'Workflow approvals still require assignment to the current step.',
+                'Workflow approvals still require assignment to the current step. '
+                'Releasing approved documents requires an employee exception.',
           )
         else
           for (final action in _accessActions)
@@ -2236,7 +2245,9 @@ class _DocuTrackerPermissionEditorScreenState
       return (inherited, 'Employee exception · All document types');
     }
     final role = _selectedEmployeeRole;
-    if (role == DocuTrackerRoles.admin) return (true, 'Administrator');
+    if (role == DocuTrackerRoles.admin && action != 'release') {
+      return (true, 'Administrator');
+    }
     return (_roleDraft[role]?[action] ?? false, _roleScopeLabel(role, action));
   }
 
@@ -2366,7 +2377,7 @@ class _DocuTrackerPermissionEditorScreenState
 
 Color _brandTint(BuildContext context) => DocuTrackerTokens.isDark(context)
     ? DocuTrackerTokens.brand.withValues(alpha: 0.18)
-    : DocuTrackerTokens.brandSoft;
+    : DocuTrackerTokens.brandSoftOf(context);
 
 enum _Tone { brand, success, danger, info, neutral }
 

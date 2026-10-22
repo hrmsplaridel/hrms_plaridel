@@ -1,4 +1,7 @@
 import 'dart:async';
+import 'package:hrms_plaridel/features/dtr/leave/models/leave_type_definition.dart';
+import '../../shared/widgets/locator_custom_fields.dart';
+import 'package:hrms_plaridel/features/dtr/management/approvals/widgets/approval_workflow_picker.dart';
 
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
@@ -49,6 +52,12 @@ class _LocatorTypeManagementScreenState
   bool _saving = false;
   String? _loadError;
   bool _requiresAttachment = false;
+  String _filingAccess = 'employee';
+  bool _autoApproveAdmin = false;
+  String _approvalRoute = 'hr';
+  String? _workflowId;
+  List<String>? _mayorEmploymentTypes;
+  List<LeaveCustomFieldDefinition> _customFields = const [];
   bool _isActive = true;
   String _coverageMode = 'manual';
   LocatorPrintDraft _printDraft = const LocatorPrintDraft();
@@ -145,6 +154,12 @@ class _LocatorTypeManagementScreenState
       _dtrPrintLabelController.clear();
       _sortOrderController.text = '${(_items.length + 1) * 10}';
       _requiresAttachment = false;
+      _filingAccess = 'employee';
+      _autoApproveAdmin = false;
+      _approvalRoute = 'hr';
+      _workflowId = null;
+      _mayorEmploymentTypes = null;
+      _customFields = const [];
       _isActive = true;
       _coverageMode = 'manual';
     });
@@ -170,6 +185,12 @@ class _LocatorTypeManagementScreenState
       _dtrPrintLabelController.text = item.dtrPrintLabel;
       _sortOrderController.text = item.sortOrder.toString();
       _requiresAttachment = item.requiresAttachment;
+      _filingAccess = item.filingAccess;
+      _autoApproveAdmin = item.autoApproveAdmin;
+      _approvalRoute = item.approvalRoute;
+      _workflowId = item.approvalWorkflowId;
+      _mayorEmploymentTypes = item.mayorEmploymentTypes;
+      _customFields = List.of(item.employeeDetailSchema);
       _isActive = item.isActive;
       _coverageMode = item.coverageMode == 'wfh' ? 'wfh' : 'manual';
     });
@@ -177,6 +198,7 @@ class _LocatorTypeManagementScreenState
 
   Future<void> _save() async {
     if (!_formKey.currentState!.validate()) return;
+    if (_workflowId==null) {_showMessage('Select an approval workflow before saving.');return;}
     setState(() => _saving = true);
     try {
       final data = {
@@ -188,6 +210,12 @@ class _LocatorTypeManagementScreenState
         'dtr_slot_label': _dtrSlotLabelController.text.trim(),
         'dtr_print_label': _dtrPrintLabelController.text.trim(),
         'requires_attachment': _requiresAttachment,
+        'filing_access': _filingAccess,
+        'auto_approve_admin': _autoApproveAdmin,
+        'approval_workflow_id': _workflowId,
+        'approval_route': _approvalRoute,
+        'mayor_employment_types': _mayorEmploymentTypes,
+        'employee_detail_schema': _customFields.map((field)=>field.toJson()).toList(),
         'coverage_mode': _coverageMode,
         'is_active': _isActive,
         'sort_order': int.parse(_sortOrderController.text.trim()),
@@ -201,7 +229,7 @@ class _LocatorTypeManagementScreenState
         );
         if (!mounted) return;
         _select(LocatorRequestType.fromJson(result.data!));
-        if (draft.file != null) {
+        if (draft.hasChanges) {
           setState(() => _printDraft = draft);
           try {
             await draft.save(_selected!.id!);
@@ -214,7 +242,9 @@ class _LocatorTypeManagementScreenState
             LocatorSlipDataCache.instance.invalidateTypes();
             await _load(forceRefresh: true);
             _showMessage(
-              'Locator type created, but its background could not be saved. Retry using Save print settings.',
+              draft.file != null
+                  ? 'Locator type created, but its background could not be saved. Retry using Save print settings.'
+                  : 'Locator type created, but its layout could not be saved. Retry using Save print settings.',
             );
             return;
           }
@@ -225,6 +255,20 @@ class _LocatorTypeManagementScreenState
           '/api/locator-slips/types/${selected.id}',
           data: data,
         );
+        if (_printDraft.hasChanges) {
+          try {
+            await _printDraft.save(selected.id!);
+            if (!mounted) return;
+            setState(() {
+              _printDraft = const LocatorPrintDraft();
+              _printEpoch++;
+            });
+          } catch (_) {
+            setState(() => _printEpoch++);
+            _showMessage('Locator type updated, but its print settings could not be saved. Retry using Save print settings.');
+            return;
+          }
+        }
         _showMessage('Locator type updated.');
       }
       LocatorSlipDataCache.instance.invalidateTypes();
@@ -653,6 +697,13 @@ class _LocatorTypeManagementScreenState
                       _formSection(
                         title: 'Form and DTR Wording',
                         icon: Icons.article_outlined,
+                        footer: LocatorCustomFieldEditor(
+                          key: ValueKey('fields-${_selected?.id ?? 'new'}-$_printEpoch'),
+                          framed: false,
+                          fields: _customFields,
+                          enabled: !_saving,
+                          onChanged: (fields) => setState(() => _customFields = fields),
+                        ),
                         children: [
                           _field(
                             _locationLabelController,
@@ -680,11 +731,42 @@ class _LocatorTypeManagementScreenState
                       _rulesSection(),
                       const SizedBox(height: 16),
                       FormSettingsSection(
+                        child: ApprovalWorkflowPicker(
+                          key: ValueKey(
+                            'routing-${_selected?.id ?? 'new'}-$_printEpoch',
+                          ),
+                          enabled: !_saving,
+                          initialWorkflowId: _workflowId,
+                          onChanged: (routing) => setState(() {
+                            _workflowId = routing['approval_workflow_id'] as String?;
+                            final steps=routing['workflow_steps'] as List? ?? [];
+                            _approvalRoute = steps.any((step) => step == 'mayor' || step is Map && step['assignee_source'] == 'active_mayor') ? 'mayor_direct'
+                                : steps.any((step) => step == 'manual_mayor' || step is Map && step['assignee_source'] == 'manual_mayor') ? 'mayor' : 'hr';
+                            _autoApproveAdmin = false;
+                            _mayorEmploymentTypes =
+                                routing['mayor_employment_types']
+                                    as List<String>?;
+                            if (_approvalRoute != 'hr') {
+                              _autoApproveAdmin = false;
+                            }
+                          }),
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      FormSettingsSection(
                         child: LocatorPrintSettings(
                           key: ValueKey(
                             '${_selected?.id ?? 'new'}-$_printEpoch',
                           ),
                           typeId: _selected?.id,
+                          onCustomFieldsChanged: (fields) => setState(
+                            () => _customFields = List.of(fields),
+                          ),
+                          readRequestType: () => LocatorRequestType.locator.copyWith(
+                            code:_codeController.text.trim(),label:_labelController.text.trim().isEmpty?'Locator Slip':_labelController.text.trim(),
+                            locationLabel:_locationLabelController.text.trim(),locationHint:_locationHintController.text.trim(),approvalRoute:_approvalRoute,
+                            employeeDetailSchema:List.of(_customFields),
+                          ),
                           enabled: !_saving,
                           initialDraft: _printDraft,
                           onChanged: (draft) => _printDraft = draft,
@@ -794,6 +876,39 @@ class _LocatorTypeManagementScreenState
       title: 'Filing Requirements',
       icon: Icons.fact_check_outlined,
       children: [
+        SizedBox(
+          width: 360,
+          child: DropdownButtonFormField<String>(
+            initialValue: _filingAccess,
+            isExpanded: true,
+            decoration: AppTheme.dashInputDecoration(
+              context,
+              labelText: 'Who can file',
+            ),
+            items: const [
+              DropdownMenuItem(
+                value: 'both',
+                child: Text('Employee and HR/admin'),
+              ),
+              DropdownMenuItem(value: 'employee', child: Text('Employee only')),
+              DropdownMenuItem(value: 'admin', child: Text('HR/admin only')),
+            ],
+            onChanged: (value) => setState(() {
+              _filingAccess = value!;
+              if (value == 'employee') _autoApproveAdmin = false;
+            }),
+          ),
+        ),
+        _settingTile(
+          icon: Icons.check_circle_outline,
+          title: 'Auto approve HR/admin filing',
+          subtitle:
+              'Only assigned final reviewers can auto approve. Other staff filings follow normal approval.',
+          value: _autoApproveAdmin,
+          onChanged: _filingAccess == 'employee' || _approvalRoute != 'hr'
+              ? null
+              : (value) => setState(() => _autoApproveAdmin = value),
+        ),
         _settingTile(
           icon: Icons.attach_file_rounded,
           title: 'Require attachment',
@@ -834,6 +949,7 @@ class _LocatorTypeManagementScreenState
     required String title,
     required IconData icon,
     required List<Widget> children,
+    Widget? footer,
   }) {
     return FormSettingsSection(
       child: Column(
@@ -854,6 +970,12 @@ class _LocatorTypeManagementScreenState
           ),
           const SizedBox(height: 14),
           Wrap(spacing: 14, runSpacing: 14, children: children),
+          if (footer != null) ...[
+            const SizedBox(height: 16),
+            const Divider(),
+            const SizedBox(height: 8),
+            footer,
+          ],
         ],
       ),
     );
@@ -864,7 +986,7 @@ class _LocatorTypeManagementScreenState
     required String title,
     required String subtitle,
     required bool value,
-    required ValueChanged<bool> onChanged,
+    required ValueChanged<bool>? onChanged,
   }) {
     return SizedBox(
       width: 360,

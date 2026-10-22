@@ -218,7 +218,7 @@ class _RequestsPanelState extends State<EmployeeLeaveRequestsPanel> {
       if (_searchQuery.trim().isNotEmpty) {
         final q = _searchQuery.trim().toLowerCase();
         final text =
-            '${request.leaveTypeLabel} ${request.reason ?? ''} ${request.status.displayName} ${request.employeeName ?? ''}'
+            '${request.leaveTypeLabel} ${request.reason ?? ''} ${request.statusLabel} ${request.employeeName ?? ''}'
                 .toLowerCase();
         if (!text.contains(q)) return false;
       }
@@ -655,7 +655,10 @@ class _EmployeeLeaveDetailsPanel extends StatelessWidget {
                           ),
                         ],
                         const SizedBox(height: 8),
-                        LeaveStatusChip(status: request.status),
+                        LeaveStatusChip(
+                          status: request.status,
+                          label: request.statusLabel,
+                        ),
                       ],
                     ),
                   ),

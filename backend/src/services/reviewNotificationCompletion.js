@@ -7,6 +7,7 @@ const stages = {
   locator_slip: {
     pending_department_head: ['locator_pending_department_head'],
     pending_hr: ['locator_pending_hr', 'locator_forwarded_to_hr'],
+    pending_mayor: ['locator_pending_mayor'],
   },
 };
 
@@ -21,6 +22,16 @@ async function completeReviewNotifications(db, referenceType, referenceId, fromS
     [referenceType, referenceId, types]);
 }
 
+async function completeWorkflowReviewNotifications(db, kind, requestId, snapshot) {
+  const decision = snapshot?.decisions?.at(-1);
+  if (!decision) return;
+  await db.query(`UPDATE user_notifications SET read_at = now()
+    WHERE reference_type = $1 AND reference_id = $2::uuid AND read_at IS NULL
+      AND metadata->>'workflow_approval' = 'true'
+      AND created_at <= $3::timestamptz`,
+    [kind === 'leave' ? 'leave_request' : 'locator_slip', requestId, decision.acted_at]);
+}
+
 // Repair historical or delayed review alerts without touching employee outcomes.
 async function reconcileReviewNotifications(db, userId) {
   const terms = [];
@@ -30,6 +41,18 @@ async function reconcileReviewNotifications(db, userId) {
     const history = leave ? 'leave_request_history' : 'locator_slip_history';
     const foreignKey = leave ? 'leave_request_id' : 'locator_slip_id';
     const timestamp = leave ? 'acted_at' : 'created_at';
+    terms.push(`(n.reference_type = '${referenceType}' AND n.metadata->>'workflow_approval' = 'true'
+      AND n.metadata ? 'workflow_step'
+      AND EXISTS (SELECT 1 FROM ${table} r WHERE r.id = n.reference_id AND (
+        r.status NOT IN ('pending','pending_hr','pending_mayor')
+        OR r.workflow_snapshot->>'current_step' IS DISTINCT FROM n.metadata->>'workflow_step'
+        OR r.workflow_snapshot->>'version' IS DISTINCT FROM n.metadata->>'workflow_version'
+        OR r.signature_revision::text IS DISTINCT FROM n.metadata->>'signature_revision')))`);
+    terms.push(`(n.reference_type = '${referenceType}' AND n.metadata->>'workflow_approval' = 'true'
+      AND NOT (n.metadata ? 'workflow_step')
+      AND EXISTS (SELECT 1 FROM ${table} r,
+        jsonb_array_elements(COALESCE(r.workflow_snapshot->'decisions','[]'::jsonb)) decision
+        WHERE r.id = n.reference_id AND (decision->>'acted_at')::timestamptz > n.created_at))`);
     for (const [stage, types] of Object.entries(rules)) {
       const statuses = stage === 'pending_hr' ? "'pending', 'pending_hr'" : `'${stage}'`;
       terms.push(`(n.reference_type = '${referenceType}' AND n.type IN (${types.map(t => `'${t}'`).join(', ')})
@@ -94,5 +117,5 @@ function createReviewNotificationReconciler({
 }
 
 const reconcileReviewNotificationsIfNeeded = createReviewNotificationReconciler();
-module.exports = {completeReviewNotifications, reconcileReviewNotifications,
+module.exports = {completeReviewNotifications, completeWorkflowReviewNotifications, reconcileReviewNotifications,
   createReviewNotificationReconciler, reconcileReviewNotificationsIfNeeded};

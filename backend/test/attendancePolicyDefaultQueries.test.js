@@ -9,7 +9,7 @@ const sourceFiles = [
   'src/services/attendancePolicyResolver.js',
   'src/services/biometricProcessing.js',
   'src/services/leaveAttendanceDeduction.js',
-  'src/routes/dtrDailySummary.js',
+  'src/modules/dtr/repositories/attendancePolicies.js',
 ];
 
 test('all attendance calculation paths select only the explicit active default', () => {
@@ -40,16 +40,16 @@ test('all attendance calculation paths select only the explicit active default',
 
 test('DTR and biometric policy queries load the global conversion switch', () => {
   for (const relativePath of [
-    'src/routes/dtrDailySummary.js',
+    'src/modules/dtr/repositories/attendancePolicies.js',
     'src/services/biometricProcessing.js',
   ]) {
     const source = fs.readFileSync(path.join(__dirname, '..', relativePath), 'utf8');
     const policyLoaders = [
       source.match(
-        /async function getActiveDefaultAttendancePolicy\(\)[\s\S]*?\r?\n}\r?\n/
+        /async function getActiveDefaultAttendancePolicy\(\)[\s\S]*?\r?\n[ \t]{0,2}}\r?\n/
       )?.[0],
       source.match(
-        /async function getAttendancePolicyForEmployeeDate\([\s\S]*?\r?\n}\r?\n/
+        /async function getAttendancePolicyForEmployeeDate\([\s\S]*?\r?\n[ \t]{0,2}}\r?\n/
       )?.[0],
     ];
     for (const loader of policyLoaders) {

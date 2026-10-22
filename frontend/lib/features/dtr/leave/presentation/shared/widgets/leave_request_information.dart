@@ -1,3 +1,4 @@
+import 'package:hrms_plaridel/features/dtr/management/approvals/widgets/approval_workflow_summary.dart';
 import 'package:flutter/material.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_request.dart';
@@ -15,6 +16,7 @@ class LeaveRequestInformation extends StatelessWidget {
   Widget build(BuildContext context) => Column(
     crossAxisAlignment: CrossAxisAlignment.stretch,
     children: [
+      ApprovalWorkflowSummary(snapshot:request.workflowSnapshot),
       _AdminLeaveDetailGrid(request: request, employeeInformation: true),
       const SizedBox(height: 20),
       const AdminLeaveSubsectionTitle(title: 'Leave Details'),
@@ -51,7 +53,6 @@ class LeaveRequestInformation extends StatelessWidget {
       ),
       const SizedBox(height: 20),
       _AdminLeaveDetailGrid(request: request),
-      const SizedBox(height: 20),
       if ((request.reason ?? '').trim().isNotEmpty) ...[
         AdminLeaveSubsectionTitle(title: 'Reason / Details'),
         AdminLeaveBodyCard(content: request.reason!.trim()),
@@ -207,6 +208,7 @@ class _AdminLeaveDetailGrid extends StatelessWidget {
               },
             ),
           ),
+        if (!employeeInformation) const SizedBox(height: 20),
       ],
     );
   }
@@ -231,7 +233,7 @@ class _AdminLeaveDetailGrid extends StatelessWidget {
       required String? value,
       required bool applies,
     }) {
-      if (!applies && !_hasValue(value)) return;
+      if (!applies || !_hasValue(value)) return;
       rows.add((label: label, value: _displayValue(value)));
     }
 
@@ -240,7 +242,7 @@ class _AdminLeaveDetailGrid extends StatelessWidget {
       required String? value,
       required bool applies,
     }) {
-      if (!applies && !_hasValue(value)) return;
+      if (!applies || !_hasValue(value)) return;
       rows.add((label: label, value: value ?? '—'));
     }
 
@@ -249,20 +251,18 @@ class _AdminLeaveDetailGrid extends StatelessWidget {
       required DateTime? value,
       required bool applies,
     }) {
-      if (!applies && value == null) return;
+      if (!applies || value == null) return;
       rows.add((
         label: label,
-        value: value != null ? formatAdminLeaveDate(value) : '—',
+        value: formatAdminLeaveDate(value),
       ));
     }
 
     final leaveType = request.leaveType;
+    final usesGenericOtherPurpose =
+        leaveType == LeaveType.others &&
+        request.effectiveLeaveTypeName.toLowerCase() == LeaveType.others.value;
 
-    addRelevant(
-      label: 'Custom Leave Type',
-      value: request.customLeaveTypeText,
-      applies: leaveType == LeaveType.others,
-    );
     addRelevantEnum(
       label: 'Maternity Classification',
       value: request.maternityDeliveryType?.displayName,
@@ -360,12 +360,12 @@ class _AdminLeaveDetailGrid extends StatelessWidget {
     addRelevantEnum(
       label: 'Other Purpose',
       value: request.otherPurpose?.displayName,
-      applies: leaveType == LeaveType.others,
+      applies: usesGenericOtherPurpose,
     );
     addRelevant(
       label: 'Other Purpose Details',
       value: request.otherPurposeDetails,
-      applies: leaveType == LeaveType.others,
+      applies: usesGenericOtherPurpose,
     );
 
     for (final field in request.employeeDetailSchemaSnapshot) {

@@ -48,7 +48,7 @@ Run the complete fresh-install schema (core HR/DTR, **L&D**, **RSP**, DocuTracke
 psql -d hrms_plaridel -v ON_ERROR_STOP=1 -f scripts/init-schema.sql
 ```
 
-Use `psql` for this command because `init-schema.sql` uses relative include commands to install its DocuTracker and RSP policy components. The component scripts remain available for targeted upgrades to existing databases. RSP files are stored under `uploads/rsp-attachments/`.
+You can also open `scripts/init-schema.sql` in pgAdmin Query Tool and execute the entire file against an empty database. All definitions are included directly; no other SQL files are required. The component scripts remain available for targeted upgrades to existing databases. RSP files are stored under `uploads/rsp-attachments/`.
 
 `init-schema-ld.sql` and `init-schema-rsp.sql` are deprecated stubs; new installs only need `init-schema.sql`.
 

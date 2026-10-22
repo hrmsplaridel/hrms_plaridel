@@ -8,6 +8,23 @@ const ENTITLEMENT_BASES = Object.freeze({
 
 const VALID_ENTITLEMENT_BASES = new Set(Object.values(ENTITLEMENT_BASES));
 
+function annualAllowance(rule, hireDate, year) {
+  const full = Number(rule?.max_days) || 0;
+  const result = {limit_days:full, full_limit_days:full, calculated_days:full, prorated:false, error_message:null};
+  if (rule?.first_year_allowance !== 'prorated') return result;
+  const hired = require('./leaveServiceEligibility').isoDate(hireDate);
+  if (!hired) return {...result, limit_days:0, calculated_days:0,
+    error_message:'Your hire date is missing or invalid. Ask HR to update it before filing this leave type.'};
+  const [hireYear, hireMonth, hireDay] = hired.split('-').map(Number);
+  if (hireYear > Number(year)) return {...result, limit_days:0, calculated_days:0, prorated:true};
+  if (hireYear < Number(year)) return result;
+  const daysInMonth = new Date(Date.UTC(hireYear, hireMonth, 0)).getUTCDate();
+  const months = 12 - hireMonth + (daysInMonth - hireDay + 1) / daysInMonth;
+  const calculated = full * months / 12;
+  return {...result, limit_days:Math.floor(calculated + 1e-9),
+    calculated_days:Math.round(calculated * 1000) / 1000, prorated:true};
+}
+
 const SYSTEM_ENTITLEMENT_BASIS = Object.freeze({
   vacationLeave: ENTITLEMENT_BASES.ACCRUAL,
   sickLeave: ENTITLEMENT_BASES.ACCRUAL,
@@ -74,6 +91,7 @@ function countedDatesForCalendarYear(countedDates, year) {
 }
 
 module.exports = {
+  annualAllowance,
   ENTITLEMENT_BASES,
   SYSTEM_ENTITLEMENT_BASIS,
   VALID_ENTITLEMENT_BASES,

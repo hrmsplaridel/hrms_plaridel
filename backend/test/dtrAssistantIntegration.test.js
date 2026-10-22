@@ -148,6 +148,7 @@ function assistantContext(dateRange, userId) {
       },
     ],
     leave_types: [
+      { name: 'wellnessLeave', display_name: 'Wellness Leave', employee_can_file: true, is_active: true, employee_detail_schema: [] },
       {
         id: 'sick-type',
         name: 'sickLeave',
@@ -254,7 +255,12 @@ test('DTR assistant service uses employee-self data for real HRMS scenarios', as
           signalDelayedContextStarted();
           await delayedContextRelease;
         }
-        return assistantContext(dateRange, userId);
+        const context = assistantContext(dateRange, userId);
+        if (userId.endsWith('-no-requests')) {
+          context.recent_leave_requests = [];
+          context.recent_locator_slips = [];
+        }
+        return context;
       },
     }
   );
@@ -289,6 +295,79 @@ test('DTR assistant service uses employee-self data for real HRMS scenarios', as
     id: '33333333-3333-4333-8333-333333333333',
     role: 'employee',
   };
+  const wellnessUser = { ...user, id: `${user.id}-wellness` };
+  const wellnessGuidelines = await chatWithDtrAssistant(pool, {
+    user: {...user, id: `${user.id}-wellness-guidelines`},
+    message: 'I want to file wellness leave give me the guidelines of it',
+  });
+  assert.match(wellnessGuidelines.message.content, /Wellness leave/i);
+  assert.doesNotMatch(wellnessGuidelines.message.content, /Tell me which one|I can explain these leave guideline sections/);
+  await chatWithDtrAssistant(pool, { user: wellnessUser, message: 'help me file leave', intent: 'leave_guided_filing' });
+  const wellness = await chatWithDtrAssistant(pool, { user: wellnessUser, message: 'wellness leave akong eh file' });
+  assert.doesNotMatch(wellness.message.content, /Unsa nga leave type|Which leave type|Anong leave type/i);
+  const wellnessDate = await chatWithDtrAssistant(pool, { user: wellnessUser, message: 'petsa 15 nako eh file' });
+  assert.doesNotMatch(wellnessDate.message.content, /Unsa nga leave type|Which leave type|Anong leave type/i);
+  assert.doesNotMatch(wellnessDate.message.content, /Para asa nga petsa|For what date|Para sa anong petsa/i);
+  assert.equal(loaded.at(-1).dateRange.startDate, `${parseAssistantDateRange('today').startDate.slice(0, 7)}-15`);
+
+  for (const [index, message] of [
+    'what is my status?',
+    'ano ang status ko?',
+    'unsay status nako?',
+    'what is the status of my filed leave and locator?',
+    'approved na ba?',
+  ].entries()) {
+    const statusUser = { ...user, id: `${user.id}-overview-${index}` };
+    const overview = await chatWithDtrAssistant(pool, {
+      user: statusUser,
+      message,
+    });
+    assert.equal(overview.intent, 'request_status_overview', message);
+    assert.equal(loaded.at(-1).userId, statusUser.id);
+    assert.deepEqual(loaded.at(-1).intents, ['latest_leave_request', 'locator_status']);
+    assert.match(overview.message.content, /Sick Leave/i);
+    assert.match(overview.message.content, /rejected/i);
+    assert.match(overview.message.content, /locator/i);
+    assert.match(overview.message.content, /approved|aprubado/i);
+    assert.equal(overview.message.provider, 'hrms');
+    assert.doesNotMatch(overview.message.content, /Which status|not sure what/i);
+  }
+
+  const noRequests = await chatWithDtrAssistant(pool, {
+    user: { ...user, id: `${user.id}-no-requests` },
+    message: 'what is my status?',
+  });
+  assert.match(noRequests.message.content, /no leave request records/i);
+  assert.match(noRequests.message.content, /no locator slip records/i);
+
+  const followUpUser = { ...user, id: `${user.id}-status-follow-up` };
+  await chatWithDtrAssistant(pool, {
+    user: followUpUser,
+    message: 'what is my leave status?',
+    intent: 'latest_leave_request',
+  });
+  const statusFollowUp = await chatWithDtrAssistant(pool, {
+    user: followUpUser,
+    message: 'what about its status?',
+  });
+  assert.equal(statusFollowUp.intent, 'latest_leave_request');
+  assert.equal(statusFollowUp.intentSource, 'selected_request');
+  assert.deepEqual(statusFollowUp.sources.leaveRequestIds, ['leave-rejected']);
+  const ambiguous = await chatWithDtrAssistant(pool, {
+    user: { ...user, id: `${user.id}-overview-0` }, message: 'Is it approved?',
+  });
+  assert.equal(ambiguous.intentSource, 'request_selection');
+  assert.ok(ambiguous.message.actions.length > 1);
+  assert.equal(ambiguous.message.actions[0].type, 'select_request');
+  const unavailable = await chatWithDtrAssistant(pool, {
+    user, message: 'Check this request.',
+    requestReference: {module: 'leave', id: '11111111-1111-4111-8111-111111111111'},
+  });
+  assert.match(unavailable.message.content, /no longer available/);
+  assert.deepEqual(unavailable.sources.leaveRequestIds, []);
+  await assert.rejects(chatWithDtrAssistant(pool, {
+    user, message: 'Check this request.', requestReference: {module: 'leave', id: 'invalid'},
+  }), /valid request/);
 
   const malicious = await chatWithDtrAssistant(pool, {
     user,

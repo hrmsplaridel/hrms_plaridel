@@ -9,6 +9,10 @@ const {
 test('HR workflow mirrors preserve department and final reviewer roles', async () => {
   const db = {
     query: async (sql) => {
+      if(!String(sql).includes('FROM departments'))return {rows:[
+        {module:'leave',type_id:'standard',type_name:'Annual Leave',workflow_id:'standard-workflow',name:'Standard',current_version:1,steps:['department','hr']},
+        {module:'locator',type_id:'standard',type_name:'Locator',workflow_id:'standard-workflow',name:'Standard',current_version:1,steps:['department','hr']},
+      ]};
       assert.match(sql, /FROM departments/);
       return {
         rows: [
@@ -48,8 +52,13 @@ test('HR workflow mirrors preserve department and final reviewer roles', async (
   assert.equal(result.effective_date, '2026-09-29');
   assert.deepEqual(
     result.workflows.map((workflow) => workflow.key),
-    ['leave', 'locator']
+    ['workflow:standard-workflow:v1']
   );
+  assert.equal(result.workflows[0].title,'Standard v1');
+  assert.deepEqual(result.workflows[0].used_by,[
+    {module:'leave',type_id:'standard',type_name:'Annual Leave'},
+    {module:'locator',type_id:'standard',type_name:'Locator'},
+  ]);
   for (const workflow of result.workflows) {
     assert.equal(workflow.system_managed, true);
     assert.equal(workflow.steps[0].groups.length, 2);
@@ -57,6 +66,23 @@ test('HR workflow mirrors preserve department and final reviewer roles', async (
     assert.equal(workflow.steps[1].groups[0].primary.name, 'Primary HR');
     assert.equal(workflow.steps[1].groups[0].backups[0].name, 'Backup HR');
   }
+});
+
+test('mirror grouping keeps different workflow identities and published versions separate',async()=>{
+  const rows=[
+    {module:'leave',type_id:'sick',type_name:'Sick Leave',workflow_id:'a',name:'Review',current_version:1,steps:['department','hr']},
+    {module:'leave',type_id:'vacation',type_name:'Vacation Leave',workflow_id:'a',name:'Review',current_version:1,steps:['department','hr']},
+    {module:'locator',type_id:'business',type_name:'Official Business',workflow_id:'a',name:'Review',current_version:1,steps:['department','hr']},
+    {module:'leave',type_id:'other',type_name:'Other Leave',workflow_id:'b',name:'Review',current_version:1,steps:['hr']},
+    {module:'locator',type_id:'travel',type_name:'Travel Order',workflow_id:'a',name:'Review',current_version:2,steps:['hr']},
+  ];
+  const result=await listHrWorkflowMirrors({query:async sql=>({rows:sql.includes('FROM departments')?[]:rows})},{
+    effectiveDate:'2026-10-16',finalReviewerResolver:async()=>({primary:null,backups:[]}),
+  });
+  assert.equal(result.workflows.length,3);
+  assert.equal(result.workflows.find(w=>w.key==='workflow:a:v1').used_by.length,3);
+  assert.equal(result.workflows.find(w=>w.key==='workflow:b:v1').steps.length,1);
+  assert.equal(result.workflows.find(w=>w.key==='workflow:a:v2').used_by[0].type_name,'Travel Order');
 });
 
 test('HR workflow mirror does not promote a backup into the primary slot', async () => {
@@ -72,10 +98,10 @@ test('HR workflow mirror does not promote a backup into the primary slot', async
     }
   );
 
-  const finalGroup = result.workflows[0].steps[1].groups[0];
+  const finalGroup = result.reviewer_assignments.final_group;
   assert.equal(finalGroup.primary, null);
   assert.equal(finalGroup.backups[0].name, 'Backup Only');
-  assert.match(result.workflows[0].steps[1].assignee_summary, /No primary reviewer/);
+  assert.deepEqual(result.workflows,[],'No configured types must not fabricate two-stage workflows');
 });
 
 test('HR workflow mirror rejects invalid effective dates', () => {

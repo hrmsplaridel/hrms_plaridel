@@ -112,6 +112,13 @@ void main() {
       }
       await tester.pump(const Duration(milliseconds: 300));
       expect(dates, ['2026-10-12']);
+      await tester.tap(find.text('Review my application'));
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(find.text('Application review'), findsOneWidget);
+      expect(find.textContaining('Select at least one IN/OUT marker'), findsOneWidget);
+      expect(find.text('Go to field'), findsWidgets);
+      await tester.tap(find.text('Back to application'));
+      await tester.pump(const Duration(milliseconds: 400));
       expect(find.text('Name'), findsNothing);
       if (single) {
         expect(find.text('IN'), findsOneWidget);

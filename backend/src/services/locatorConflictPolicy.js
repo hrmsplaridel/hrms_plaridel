@@ -8,6 +8,7 @@ const ACTIVE_LOCATOR_STATUSES = Object.freeze([
   'pending',
   'pending_department_head',
   'pending_hr',
+  'pending_mayor',
   'approved',
 ]);
 const APPROVED_LOCATOR_STATUSES = Object.freeze(['approved']);

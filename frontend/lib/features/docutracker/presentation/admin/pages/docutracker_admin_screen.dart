@@ -3,6 +3,7 @@
 // ignore_for_file: unused_element
 
 import 'package:flutter/material.dart';
+import 'package:hrms_plaridel/features/dtr/management/approvals/widgets/approval_workflows_panel.dart';
 import 'package:provider/provider.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/features/docutracker/data/providers/docutracker_provider.dart';
@@ -281,7 +282,7 @@ class _DocuTrackerAdminScreenState extends State<DocuTrackerAdminScreen> {
                   Text(
                     'Select a type or enter a new one. Publishing makes the type available for future documents.',
                     style: TextStyle(
-                      color: AppTheme.textSecondary,
+                      color: AppTheme.dashTextSecondaryOf(context),
                       fontSize: 13,
                       height: 1.3,
                     ),
@@ -576,6 +577,21 @@ class _DocuTrackerAdminScreenState extends State<DocuTrackerAdminScreen> {
             ],
           ),
         ),
+        const SizedBox(height: 12),
+        Align(
+          alignment: Alignment.centerLeft,
+          child: OutlinedButton.icon(
+            icon: const Icon(Icons.account_tree_outlined),
+            label: const Text('Shared approval workflows'),
+            onPressed: () async {
+              await Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => Scaffold(
+                appBar: AppBar(title: const Text('Shared approval workflows')),
+                body: const Padding(padding: EdgeInsets.all(24), child: ApprovalWorkflowsPanel(allowDocumentBinding: true)),
+              )));
+              if (mounted) await _load(forceRefresh: true);
+            },
+          ),
+        ),
         const SizedBox(height: 20),
         if (provider.loading || _hrWorkflowMirrorsLoading)
           const Padding(
@@ -632,6 +648,14 @@ class _DocuTrackerAdminScreenState extends State<DocuTrackerAdminScreen> {
                 child: DocuTrackerActiveWorkflowCard(
                   config: config,
                   onEdit: () async {
+                    if (config.sharedWorkflowId != null) {
+                      await Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => Scaffold(
+                        appBar: AppBar(title: Text('${config.documentType.displayName} · Shared workflow')),
+                        body: Padding(padding: const EdgeInsets.all(24), child: ApprovalWorkflowsPanel(allowDocumentBinding: true, initialWorkflowId: config.sharedWorkflowId)),
+                      )));
+                      if (mounted) await _load(forceRefresh: true);
+                      return;
+                    }
                     final saved = await Navigator.of(context).push<bool>(
                       MaterialPageRoute<bool>(
                         builder: (_) => DocuTrackerWorkflowEditorScreen(
@@ -688,13 +712,11 @@ class _DocuTrackerAdminScreenState extends State<DocuTrackerAdminScreen> {
                           width: 40,
                           height: 40,
                           decoration: BoxDecoration(
-                            color: DocuTrackerTokens.brandSoft,
+                            color: DocuTrackerTokens.brandSoftOf(dialogContext),
                             borderRadius: BorderRadius.circular(8),
                           ),
                           child: Icon(
-                            workflow.key == 'locator'
-                                ? Icons.pin_drop_outlined
-                                : Icons.event_note_outlined,
+                            Icons.account_tree_outlined,
                             color: DocuTrackerTokens.brand,
                             size: 21,
                           ),
@@ -742,6 +764,10 @@ class _DocuTrackerAdminScreenState extends State<DocuTrackerAdminScreen> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
+                          if (workflow.usedBy.isNotEmpty) ...[
+                            DocuTrackerWorkflowUsageDetails(workflow: workflow),
+                            const SizedBox(height: 20),
+                          ],
                           for (
                             var index = 0;
                             index < workflow.steps.length;
@@ -1265,7 +1291,7 @@ class _DocuTrackerAdminScreenState extends State<DocuTrackerAdminScreen> {
                         vertical: 14,
                       ),
                       decoration: BoxDecoration(
-                        color: DocuTrackerTokens.highlightPeach.withValues(
+                        color: DocuTrackerTokens.highlightPeachOf(context).withValues(
                           alpha: 0.5,
                         ),
                         borderRadius: const BorderRadius.vertical(
@@ -1274,14 +1300,14 @@ class _DocuTrackerAdminScreenState extends State<DocuTrackerAdminScreen> {
                       ),
                       child: Row(
                         children: [
-                          const Expanded(
+                          Expanded(
                             flex: 2,
                             child: Text(
                               'User / Role',
                               style: TextStyle(
                                 fontWeight: FontWeight.w800,
                                 fontSize: 12,
-                                color: DocuTrackerTokens.textSecondary,
+                                color: DocuTrackerTokens.textSecondaryOf(context),
                               ),
                             ),
                           ),
@@ -1293,13 +1319,15 @@ class _DocuTrackerAdminScreenState extends State<DocuTrackerAdminScreen> {
                                 style: TextStyle(
                                   fontWeight: FontWeight.w800,
                                   fontSize: 12,
-                                  color: DocuTrackerTokens.textSecondary,
+                                  color: DocuTrackerTokens.textSecondaryOf(
+                                    context,
+                                  ),
                                 ),
                                 maxLines: 2,
                                 overflow: TextOverflow.ellipsis,
                               ),
                             ),
-                          const SizedBox(
+                          SizedBox(
                             width: 40,
                             child: Text(
                               'Actions',
@@ -1307,7 +1335,7 @@ class _DocuTrackerAdminScreenState extends State<DocuTrackerAdminScreen> {
                               style: TextStyle(
                                 fontWeight: FontWeight.w800,
                                 fontSize: 12,
-                                color: DocuTrackerTokens.textSecondary,
+                                color: DocuTrackerTokens.textSecondaryOf(context),
                               ),
                             ),
                           ),
@@ -1356,7 +1384,9 @@ class _DocuTrackerAdminScreenState extends State<DocuTrackerAdminScreen> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       decoration: BoxDecoration(
-        border: Border(top: BorderSide(color: DocuTrackerTokens.borderSubtle)),
+        border: Border(
+          top: BorderSide(color: DocuTrackerTokens.borderSubtleOf(context)),
+        ),
       ),
       child: Row(
         children: [
@@ -1382,13 +1412,13 @@ class _DocuTrackerAdminScreenState extends State<DocuTrackerAdminScreen> {
       decoration: InputDecoration(
         hintText: 'Search',
         hintStyle: TextStyle(
-          color: AppTheme.textSecondary.withValues(alpha: 0.8),
+          color: AppTheme.dashTextSecondaryOf(context).withValues(alpha: 0.8),
           fontSize: 14,
         ),
         prefixIcon: Icon(
           Icons.search_rounded,
           size: 20,
-          color: AppTheme.textSecondary.withValues(alpha: 0.7),
+          color: AppTheme.dashTextSecondaryOf(context).withValues(alpha: 0.7),
         ),
         isDense: true,
         contentPadding: const EdgeInsets.symmetric(
@@ -1396,7 +1426,9 @@ class _DocuTrackerAdminScreenState extends State<DocuTrackerAdminScreen> {
           vertical: 12,
         ),
         filled: true,
-        fillColor: AppTheme.lightGray.withValues(alpha: 0.5),
+        fillColor: AppTheme.dashIsDark(context)
+            ? AppTheme.dashInputFillOf(context)
+            : AppTheme.lightGray.withValues(alpha: 0.5),
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(10),
           borderSide: BorderSide.none,
@@ -1461,7 +1493,7 @@ class _DocuTrackerAdminScreenState extends State<DocuTrackerAdminScreen> {
                 child: LinearProgressIndicator(
                   value: usagePct,
                   minHeight: 8,
-                  backgroundColor: DocuTrackerTokens.borderSubtle,
+                  backgroundColor: DocuTrackerTokens.borderSubtleOf(context),
                   color: DocuTrackerTokens.brand,
                 ),
               ),
@@ -1510,7 +1542,7 @@ class _DocuTrackerAdminScreenState extends State<DocuTrackerAdminScreen> {
         DocuTrackerAdminSidebarCard(
           title: 'Security Tip',
           titleIcon: Icons.security_rounded,
-          backgroundColor: DocuTrackerTokens.highlightPeach,
+          backgroundColor: DocuTrackerTokens.highlightPeachOf(context),
           child: Text(
             "Review 'Denied' permissions weekly to ensure orphan access is removed from terminated accounts.",
             style: DocuTrackerTokens.subtitleStyle(
@@ -1534,7 +1566,7 @@ class _DocuTrackerAdminScreenState extends State<DocuTrackerAdminScreen> {
       children: [
         DocuTrackerAdminSidebarCard(
           title: 'Workflow Tools',
-          backgroundColor: DocuTrackerTokens.highlightPeach,
+          backgroundColor: DocuTrackerTokens.highlightPeachOf(context),
           child: Column(
             children: [
               DocuTrackerAdminToolRow(
@@ -1808,6 +1840,10 @@ class _UserPermissionsDialogState extends State<_UserPermissionsDialog> {
     final roleLabel =
         _DocuTrackerAdminScreenState._userGroups[_selectedRoleId] ??
         _selectedRoleId;
+    final dark = DocuTrackerTokens.isDark(context);
+    final hairline = dark
+        ? DocuTrackerTokens.borderSubtleDark
+        : Colors.black.withValues(alpha: 0.06);
 
     return Dialog(
       insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 48),
@@ -1828,10 +1864,10 @@ class _UserPermissionsDialogState extends State<_UserPermissionsDialog> {
                       Container(
                         padding: const EdgeInsets.fromLTRB(20, 18, 20, 14),
                         decoration: BoxDecoration(
-                          color: Colors.white,
+                          color: dark ? Colors.transparent : Colors.white,
                           border: Border(
                             bottom: BorderSide(
-                              color: Colors.black.withValues(alpha: 0.06),
+                              color: hairline,
                             ),
                           ),
                         ),
@@ -1841,7 +1877,7 @@ class _UserPermissionsDialogState extends State<_UserPermissionsDialog> {
                             Text(
                               'User permissions',
                               style: TextStyle(
-                                color: AppTheme.textPrimary,
+                                color: AppTheme.dashTextPrimaryOf(context),
                                 fontSize: 19,
                                 fontWeight: FontWeight.w800,
                               ),
@@ -1850,7 +1886,7 @@ class _UserPermissionsDialogState extends State<_UserPermissionsDialog> {
                             Text(
                               'Permission toggles update based on the selected user group.',
                               style: TextStyle(
-                                color: AppTheme.textSecondary,
+                                color: AppTheme.dashTextSecondaryOf(context),
                                 fontSize: 12,
                                 height: 1.35,
                               ),
@@ -1862,7 +1898,9 @@ class _UserPermissionsDialogState extends State<_UserPermissionsDialog> {
                       Text(
                         'User Group',
                         style: TextStyle(
-                          color: AppTheme.textSecondary.withValues(alpha: 0.9),
+                          color: AppTheme.dashTextSecondaryOf(
+                            context,
+                          ).withValues(alpha: 0.9),
                           fontSize: 12,
                           fontWeight: FontWeight.w700,
                         ),
@@ -1895,7 +1933,9 @@ class _UserPermissionsDialogState extends State<_UserPermissionsDialog> {
                       Text(
                         roleLabel,
                         style: TextStyle(
-                          color: AppTheme.textSecondary.withValues(alpha: 0.8),
+                          color: AppTheme.dashTextSecondaryOf(
+                            context,
+                          ).withValues(alpha: 0.8),
                           fontSize: 12,
                           fontWeight: FontWeight.w600,
                         ),
@@ -1928,10 +1968,12 @@ class _UserPermissionsDialogState extends State<_UserPermissionsDialog> {
                               vertical: 12,
                             ),
                             decoration: BoxDecoration(
-                              color: AppTheme.lightGray.withValues(alpha: 0.25),
+                              color: dark
+                                  ? AppTheme.dashMutedSurfaceOf(context)
+                                  : AppTheme.lightGray.withValues(alpha: 0.25),
                               borderRadius: BorderRadius.circular(12),
                               border: Border.all(
-                                color: Colors.black.withValues(alpha: 0.06),
+                                color: hairline,
                               ),
                             ),
                             child: Row(
@@ -1955,7 +1997,7 @@ class _UserPermissionsDialogState extends State<_UserPermissionsDialog> {
                                   child: Text(
                                     item.title,
                                     style: TextStyle(
-                                      color: AppTheme.textPrimary,
+                                      color: AppTheme.dashTextPrimaryOf(context),
                                       fontSize: 14,
                                       fontWeight: FontWeight.w600,
                                     ),
@@ -1986,10 +2028,10 @@ class _UserPermissionsDialogState extends State<_UserPermissionsDialog> {
             Container(
               padding: const EdgeInsets.fromLTRB(24, 16, 24, 24),
               decoration: BoxDecoration(
-                color: Colors.grey.shade50,
-                border: Border(
-                  top: BorderSide(color: Colors.black.withValues(alpha: 0.06)),
-                ),
+                color: dark
+                    ? DocuTrackerTokens.insetOf(context)
+                    : Colors.grey.shade50,
+                border: Border(top: BorderSide(color: hairline)),
               ),
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.end,
@@ -2065,7 +2107,9 @@ class _PaginationPill extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Material(
-      color: selected ? DocuTrackerTokens.brand : DocuTrackerTokens.surface,
+      color: selected
+          ? DocuTrackerTokens.brand
+          : DocuTrackerTokens.surfaceOf(context),
       borderRadius: BorderRadius.circular(8),
       child: InkWell(
         onTap: onTap,
@@ -2078,13 +2122,15 @@ class _PaginationPill extends StatelessWidget {
             borderRadius: BorderRadius.circular(8),
             border: selected
                 ? null
-                : Border.all(color: DocuTrackerTokens.borderSubtle),
+                : Border.all(color: DocuTrackerTokens.borderSubtleOf(context)),
           ),
           child: Text(
             label,
             style: TextStyle(
               fontWeight: FontWeight.w700,
-              color: selected ? Colors.white : DocuTrackerTokens.textMuted,
+              color: selected
+                  ? Colors.white
+                  : DocuTrackerTokens.textMutedOf(context),
             ),
           ),
         ),
@@ -2163,7 +2209,7 @@ class _EfficiencyRow extends StatelessWidget {
           child: LinearProgressIndicator(
             value: progress,
             minHeight: 6,
-            backgroundColor: DocuTrackerTokens.borderSubtle,
+            backgroundColor: DocuTrackerTokens.borderSubtleOf(context),
             color: DocuTrackerTokens.brand,
           ),
         ),

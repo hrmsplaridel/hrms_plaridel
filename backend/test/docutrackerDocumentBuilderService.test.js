@@ -52,6 +52,53 @@ test('new builder content starts with the printable letterhead format', async ()
   assert.deepEqual(result.pages, [[{ insert: '\n' }]]);
 });
 
+test('builder fields carry the assigned signer role and current position', async () => {
+  const documentId = '11111111-1111-4111-8111-111111111111';
+  const userId = '33333333-3333-4333-8333-333333333333';
+  const document = {
+    id: documentId,
+    document_type: 'memo',
+    status: 'draft',
+    created_by: userId,
+  };
+  let fieldsSql = '';
+  const pool = {
+    async query(sql) {
+      if (sql.includes('SELECT * FROM docutracker_documents')) {
+        return { rowCount: 1, rows: [document] };
+      }
+      if (sql.includes('SELECT format_version, pages, revision')) {
+        return { rowCount: 0, rows: [] };
+      }
+      if (sql.includes('SELECT f.*')) {
+        fieldsSql = sql;
+        return {
+          rowCount: 1,
+          rows: [{
+            id: 'field-1',
+            assigned_signer_id: userId,
+            assigned_signer_name: 'Prepared Person',
+            assigned_signer_role: 'hr',
+            assigned_signer_position: 'HRMO III',
+            label: 'Prepared by',
+          }],
+        };
+      }
+      throw new Error(`Unexpected query: ${sql}`);
+    },
+  };
+
+  const result = await getDocumentBuilder(pool, { id: userId, role: 'admin' }, documentId);
+
+  assert.match(fieldsSql, /FROM assignments a/);
+  assert.match(fieldsSql, /'Municipal Mayor'/);
+  assert.match(fieldsSql, /AS assigned_signer_position/);
+  assert.match(fieldsSql, /AS assigned_signer_role/);
+  assert.equal(result.signature_fields[0].assigned_signer_position, 'HRMO III');
+  assert.equal(result.signature_fields[0].assigned_signer_role, 'hr');
+  assert.equal(result.signature_fields[0].can_sign, true);
+});
+
 test('first builder save persists printable format version 2', async () => {
   const documentId = '11111111-1111-4111-8111-111111111111';
   const userId = '33333333-3333-4333-8333-333333333333';
@@ -266,6 +313,195 @@ test('saved signature changes do not reveal another user signature', async () =>
   );
 });
 
+test('another user cannot sign a Memo slot assigned to someone else', async () => {
+  const documentId = '11111111-1111-4111-8111-111111111111';
+  const fieldId = '22222222-2222-4222-8222-222222222222';
+  const creatorId = '33333333-3333-4333-8333-333333333333';
+  const mayorId = '66666666-6666-4666-8666-666666666666';
+  const document = {
+    id: documentId,
+    document_type: 'memo',
+    status: 'draft',
+    created_by: creatorId,
+  };
+  const approvedSlot = {
+    id: fieldId,
+    document_id: documentId,
+    page_number: 1,
+    assigned_signer_id: mayorId,
+    label: 'Approved by',
+  };
+  const writes = [];
+  const client = {
+    async query(sql) {
+      if (sql === 'BEGIN' || sql === 'ROLLBACK') return { rowCount: 0, rows: [] };
+      if (sql.includes('SELECT * FROM docutracker_documents')) {
+        return { rowCount: 1, rows: [document] };
+      }
+      if (sql.includes('SELECT * FROM docutracker_signature_fields')) {
+        return { rowCount: 1, rows: [approvedSlot] };
+      }
+      writes.push(sql);
+      return { rowCount: 0, rows: [] };
+    },
+    release() {},
+  };
+  const pool = { async connect() { return client; } };
+
+  await assert.rejects(
+    signDocumentField(
+      pool,
+      { id: creatorId, role: 'admin' },
+      documentId,
+      fieldId,
+      { signature_asset_id: '55555555-5555-4555-8555-555555555555' }
+    ),
+    (error) => error.code === 'FORBIDDEN' && /assigned signer/.test(error.message)
+  );
+  assert.equal(
+    writes.some((sql) => /UPDATE docutracker_signature_fields|INSERT/.test(sql)),
+    false
+  );
+});
+
+test('signing freezes the printed name, position and role of the signer', async () => {
+  const documentId = '11111111-1111-4111-8111-111111111111';
+  const fieldId = '22222222-2222-4222-8222-222222222222';
+  const mayorId = '66666666-6666-4666-8666-666666666666';
+  const assetId = '55555555-5555-4555-8555-555555555555';
+  const document = {
+    id: documentId,
+    document_type: 'memo',
+    status: 'pending',
+    created_by: mayorId,
+  };
+  const approvedSlot = {
+    id: fieldId,
+    document_id: documentId,
+    page_number: 1,
+    assigned_signer_id: mayorId,
+    label: 'Approved by',
+  };
+  let signerSql = '';
+  let updateSql = '';
+  let updateParams;
+  const client = {
+    async query(sql, params = []) {
+      if (sql === 'BEGIN' || sql === 'COMMIT' || sql === 'ROLLBACK') {
+        return { rowCount: 0, rows: [] };
+      }
+      if (sql.includes('SELECT * FROM docutracker_documents')) {
+        return { rowCount: 1, rows: [document] };
+      }
+      if (sql.includes('SELECT * FROM docutracker_signature_fields')) {
+        return { rowCount: 1, rows: [approvedSlot] };
+      }
+      if (sql.includes('SELECT id FROM docutracker_signature_assets')) {
+        return { rowCount: 1, rows: [{ id: assetId }] };
+      }
+      if (sql.includes('FROM users signer')) {
+        signerSql = sql;
+        return {
+          rowCount: 1,
+          rows: [{ full_name: 'Signing Mayor', signer_role: 'mayor', signer_position: 'Municipal Mayor' }],
+        };
+      }
+      if (sql.includes('UPDATE docutracker_signature_fields SET')) {
+        updateSql = sql;
+        updateParams = params;
+        return { rowCount: 1, rows: [{}] };
+      }
+      if (sql.includes('INSERT INTO docutracker_document_history')) {
+        return { rowCount: 1, rows: [] };
+      }
+      throw new Error(`Unexpected transaction query: ${sql}`);
+    },
+    release() {},
+  };
+  const pool = {
+    async connect() {
+      return client;
+    },
+    async query(sql) {
+      if (sql.includes('SELECT * FROM docutracker_documents')) {
+        return { rowCount: 1, rows: [document] };
+      }
+      return { rowCount: 0, rows: [] };
+    },
+  };
+
+  await signDocumentField(pool, { id: mayorId, role: 'admin' }, documentId, fieldId, {
+    signature_asset_id: assetId,
+  });
+
+  // Same identity rule as the live (unsigned) signatory line.
+  assert.match(signerSql, /FROM assignments a/);
+  assert.match(signerSql, /'Municipal Mayor'/);
+  assert.match(signerSql, /is_active = true/);
+  assert.match(updateSql, /signer_name_snapshot = \$3/);
+  assert.match(updateSql, /signer_position_snapshot = \$6/);
+  assert.match(updateSql, /signer_role_snapshot = \$7/);
+  assert.match(updateSql, /assigned_signer_id = \$2/);
+  assert.deepEqual(updateParams, [
+    assetId,
+    mayorId,
+    'Signing Mayor',
+    fieldId,
+    documentId,
+    'Municipal Mayor',
+    'mayor',
+  ]);
+});
+
+test('signed fields keep their snapshot when the live directory changes', async () => {
+  const documentId = '11111111-1111-4111-8111-111111111111';
+  const preparerId = '33333333-3333-4333-8333-333333333333';
+  const document = {
+    id: documentId,
+    document_type: 'memo',
+    status: 'approved',
+    created_by: preparerId,
+  };
+  const pool = {
+    async query(sql) {
+      if (sql.includes('SELECT * FROM docutracker_documents')) {
+        return { rowCount: 1, rows: [document] };
+      }
+      if (sql.includes('SELECT format_version, pages, revision')) {
+        return { rowCount: 0, rows: [] };
+      }
+      if (sql.includes('SELECT f.*')) {
+        return {
+          rowCount: 1,
+          rows: [{
+            id: 'field-1',
+            assigned_signer_id: preparerId,
+            label: 'Prepared by',
+            signed_by: preparerId,
+            signed_at: new Date('2026-10-01T00:00:00.000Z'),
+            locked_at: new Date('2026-10-01T00:00:00.000Z'),
+            signer_name_snapshot: 'Original Name',
+            signer_position_snapshot: 'HRMO III',
+            signer_role_snapshot: 'hr',
+            assigned_signer_name: 'Renamed Person',
+            assigned_signer_role: 'hr',
+            assigned_signer_position: 'HRMO IV',
+          }],
+        };
+      }
+      return { rowCount: 0, rows: [] };
+    },
+  };
+
+  const result = await getDocumentBuilder(pool, { id: preparerId, role: 'admin' }, documentId);
+  const field = result.signature_fields[0];
+
+  assert.equal(field.signer_name_snapshot, 'Original Name');
+  assert.equal(field.signer_position_snapshot, 'HRMO III');
+  assert.equal(field.signer_role_snapshot, 'hr');
+  assert.equal(field.assigned_signer_position, 'HRMO IV');
+});
+
 test('assigned signer can replace a locked signature with a new audit entry', async () => {
   const documentId = '11111111-1111-4111-8111-111111111111';
   const fieldId = '22222222-2222-4222-8222-222222222222';
@@ -309,8 +545,11 @@ test('assigned signer can replace a locked signature with a new audit entry', as
       if (sql.includes('SELECT id FROM docutracker_signature_assets')) {
         return { rowCount: 1, rows: [{ id: replacementAssetId }] };
       }
-      if (sql.includes('SELECT full_name FROM users')) {
-        return { rowCount: 1, rows: [{ full_name: 'Assigned Signer' }] };
+      if (sql.includes('FROM users signer')) {
+        return {
+          rowCount: 1,
+          rows: [{ full_name: 'Assigned Signer', signer_role: 'admin', signer_position: null }],
+        };
       }
       if (sql.includes('UPDATE docutracker_signature_fields SET')) {
         updateParams = params;
@@ -367,6 +606,8 @@ test('assigned signer can replace a locked signature with a new audit entry', as
     'Assigned Signer',
     fieldId,
     documentId,
+    null,
+    'admin',
   ]);
   assert.equal(historyParams[3], 'Replaced signature field: Sign Here');
   assert.equal(result.signature_fields[0].can_sign, true);
@@ -618,8 +859,11 @@ function ownSignatureHarness({ assigned, status = 'in_review' }) {
       if (sql.includes('SELECT id FROM docutracker_signature_assets')) {
         return { rowCount: 1, rows: [{ id: assetId }] };
       }
-      if (sql.includes('SELECT full_name FROM users')) {
-        return { rowCount: 1, rows: [{ full_name: 'Department Head' }] };
+      if (sql.includes('FROM users signer')) {
+        return {
+          rowCount: 1,
+          rows: [{ full_name: 'Department Head', signer_role: 'employee', signer_position: 'Department Head' }],
+        };
       }
       if (sql.includes('UPDATE docutracker_signature_fields SET')) {
         state.signedParams = params;

@@ -8,8 +8,31 @@ const {
 const EMPLOYEE_ID = '00000000-0000-0000-0000-000000000101';
 const DEPARTMENT_ID = '00000000-0000-0000-0000-000000000201';
 const HEAD_ID = '00000000-0000-0000-0000-000000000301';
+test('custom fields are required and snapshot validated answers for employee and staff filing', async () => {
+  const detailSchema = [{key:'vehicle',label:'Vehicle plate number',type:'text',required:true,max_length:20}];
+  for (const filedBy of [null,{id:HEAD_ID,role:'hr'}]) {
+    const {service,state} = createHarness({detailSchema});
+    await assert.rejects(service.submit(validInput({filedBy})), /Vehicle plate number is required/);
+    assert.equal(state.inserts.length,0);
+    await service.submit(validInput({filedBy,additionalDetails:JSON.stringify({vehicle:' ABC 123 ',unknown:'discard'})}));
+    assert.deepEqual(JSON.parse(state.inserts[0].params[25]),detailSchema);
+    assert.deepEqual(JSON.parse(state.inserts[0].params[26]),{vehicle:'ABC 123'});
+  }
+});
+test('direct Mayor submission snapshots routing and cannot be auto approved by HR',async()=>{
+ const {service,state}=createHarness({autoApprove:true,reviewerAvailable:false,
+   routing:{route:'mayor_direct',status:'pending_mayor',mayorId:HEAD_ID}});
+ await service.submit(validInput({filedBy:{id:HEAD_ID,role:'hr'},autoApprove:true}));
+ assert.equal(state.inserts[0].params[13],'pending_mayor');
+ assert.equal(state.inserts[0].params[14],null);
+ assert.equal(state.inserts[0].params[23],'mayor_direct');
+ assert.equal(state.inserts[0].params[24],HEAD_ID);
+ assert.equal(state.history.some(e=>e.action==='hr_approved'),false);
+ assert.equal(state.notifications[0].status,'pending_mayor');
+ assert.deepEqual(state.reviewerSnapshots[0].reviewers,[]);
+});
 
-function createHarness({ reviewerAvailable = true, signatureFailure = false, singleSession = false } = {}) {
+function createHarness({ reviewerAvailable = true, signatureFailure = false, singleSession = false, autoApprove = false, filingAccess = 'both', approvalAllowed = autoApprove, routing, detailSchema = [], realReviewerCheck = false, finalReviewerIds = [HEAD_ID], departmentReviewerIds = [HEAD_ID] } = {}) {
   const state = {
     queries: [],
     inserts: [],
@@ -25,6 +48,8 @@ function createHarness({ reviewerAvailable = true, signatureFailure = false, sin
     async query(sql, params = []) {
       const text = String(sql);
       state.queries.push(text);
+      if (text.includes('primary_reviewer_designations')) return {rows:finalReviewerIds.slice(0,1).map(id=>({id,role:'hr'}))};
+      if (text.includes('leave_final_reviewer_backups')) return {rows:finalReviewerIds.slice(1).map(id=>({id,role:'hr'}))};
       if (text.includes('INSERT INTO locator_slips')) {
         const row = {
           id: 'locator-' + state.nextId++,
@@ -71,23 +96,25 @@ function createHarness({ reviewerAvailable = true, signatureFailure = false, sin
   };
   const service = createLocatorSubmissionService({
     dbPool,
+    resolveRouting: routing ? async()=>routing : undefined,
     getReviewSnapshot: async (_client, _employeeId, effectiveDate) => {
       state.reviewSnapshotDates.push(effectiveDate);
       return {
         departmentId: DEPARTMENT_ID,
-        departmentHeadUserId: HEAD_ID,
-        reviewerUserIds: [HEAD_ID],
-        reviewers: [{
-          reviewerId: HEAD_ID,
+        departmentHeadUserId: departmentReviewerIds[0] || null,
+        reviewerUserIds: departmentReviewerIds,
+        reviewers: departmentReviewerIds.map((id,index)=>({
+          reviewerId: id,
           reviewerName: 'Department Head',
-          reviewerRole: 'primary',
-          backupRank: null,
-        }],
+          reviewerRole: index===0 ? 'primary' : 'backup',
+          backupRank: index===0 ? null : index,
+        })),
       };
     },
     validateWorkingDay: async (_db,_employee,_date,slots) => singleSession && (slots.amOut || slots.pmIn)
       ? {ok:false,error:'Single-session shifts use IN and OUT only.'} : {ok:true},
     getLocatorTypeByCode: async (_client, code) => ({
+      employee_detail_schema: detailSchema,
       code,
       label:
         code === 'work_from_home'
@@ -104,6 +131,7 @@ function createHarness({ reviewerAvailable = true, signatureFailure = false, sin
       dtr_print_label: code === 'work_from_home' ? 'WFH' : 'ON FIELD',
       requires_attachment: code === 'work_from_home',
       coverage_mode: code === 'work_from_home' ? 'wfh' : 'manual',
+      filing_access: filingAccess, auto_approve_admin: autoApprove,
     }),
     findConflicts: async () => ({
       ok: true,
@@ -137,24 +165,89 @@ function createHarness({ reviewerAvailable = true, signatureFailure = false, sin
       assert.ok(state.queries.lastIndexOf('BEGIN') > state.queries.lastIndexOf('COMMIT'));
       if (signatureFailure) throw new Error('Signature required');
     },
-    assertSubmissionReviewer: async () => {
+    assertSubmissionReviewer: async (db, employeeId, snapshot) => {
       if (!reviewerAvailable) {
         const error = new Error('No eligible final reviewer is configured');
         error.statusCode = 409;
         throw error;
       }
+      if (realReviewerCheck) {
+        await require('../src/services/leaveFinalReviewerService').assertLeaveSubmissionReviewer(db,employeeId,'locator',null,snapshot);
+      }
     },
+    canApproveForEmployee: async (_db, employeeId, actor) => approvalAllowed && actor.id !== employeeId,
+    saveApprovalSignature: async () => { if (signatureFailure) throw new Error('Approval signature required'); },
     nowProvider: () => new Date('2026-08-11T00:00:00.000Z'),
     logger: { error() {} },
   });
   return { service, state };
 }
 
+test('locator filing validates distinct stages before insertion, preserving valid backup paths and auto approval', async () => {
+  const alternative = '00000000-0000-0000-0000-000000000302';
+  const blocked = createHarness({realReviewerCheck:true});
+  await assert.rejects(blocked.service.submit(validInput()),{statusCode:409});
+  assert.equal(blocked.state.inserts.length,0);
+  assert.equal(blocked.state.history.length,0);
+  assert.equal(blocked.state.notifications.length,0);
+  for (const config of [
+    {finalReviewerIds:[HEAD_ID,alternative]},
+    {departmentReviewerIds:[HEAD_ID,alternative]},
+    {departmentReviewerIds:[]},
+  ]) {
+    const allowed = createHarness({realReviewerCheck:true,...config});
+    await allowed.service.submit(validInput());
+    assert.equal(allowed.state.inserts.length,1);
+  }
+  const auto = createHarness({realReviewerCheck:true,autoApprove:true});
+  await auto.service.submit(validInput({filedBy:{id:HEAD_ID,role:'hr'},autoApprove:true}));
+  assert.equal(auto.state.inserts[0].row.status,'approved');
+  const manual = createHarness({reviewerAvailable:false,
+    routing:{route:'mayor',status:'pending_department_head',mayorId:alternative}});
+  await manual.service.submit(validInput());
+  assert.equal(manual.state.inserts[0].row.status,'pending_department_head');
+});
+
 test('locator filing is blocked before insertion when no final reviewer is available', async () => {
   const { service, state } = createHarness({ reviewerAvailable: false });
   await assert.rejects(service.submit(validInput()), /No eligible final reviewer/);
   assert.equal(state.inserts.length, 0);
   assert.equal(state.notifications.length, 0);
+});
+
+test('staff filing records the actual actor without signing as the employee', async () => {
+  const {service,state}=createHarness();
+  await service.submit(validInput({filedBy:{id:HEAD_ID,role:'hr'}, autoApprove:true}));
+  assert.equal(state.history[0].actorId,HEAD_ID);
+  assert.equal(state.history[0].metadata.filed_for_employee,true);
+  assert.equal(state.inserts[0].row.status,'pending_department_head');
+});
+test('type policy blocks forbidden filing and staff without approval authority stay pending',async()=>{
+  const staff=createHarness({filingAccess:'employee'});
+  await assert.rejects(staff.service.submit(validInput({filedBy:{id:HEAD_ID,role:'hr'}})),/employee filing only/);
+  assert.equal(staff.state.inserts.length,0);
+  const employee=createHarness({filingAccess:'admin'});
+  await assert.rejects(employee.service.submit(validInput()),/filed by HR/);
+  assert.equal(employee.state.inserts.length,0);
+  const noApproval=createHarness({autoApprove:true,approvalAllowed:false});
+  await noApproval.service.submit(validInput({filedBy:{id:HEAD_ID,role:'hr'},autoApprove:true}));
+  assert.equal(noApproval.state.inserts[0].row.status,'pending_department_head');
+});
+
+test('authorized staff filing approves and records the approver in the same transaction', async () => {
+  const {service,state}=createHarness({autoApprove:true});
+  await service.submit(validInput({filedBy:{id:HEAD_ID,role:'hr'},autoApprove:true,approvalSignature:{signature_asset_id:'saved'}}));
+  assert.equal(state.history.at(-1).action,'hr_approved');
+  assert.equal(state.history.at(-1).actorId,HEAD_ID);
+  assert.ok(state.queries.some(q=>q.includes("status = 'approved'")));
+});
+
+test('failed bulk approval signature rolls back; self filing follows employee signature rules', async () => {
+  const {service,state}=createHarness({autoApprove:true,signatureFailure:true});
+  await assert.rejects(service.submit(validInput({filedBy:{id:HEAD_ID,role:'hr'},autoApprove:true})),/Approval signature/);
+  assert.equal(state.queries.includes('COMMIT'),false);
+  const self=createHarness({signatureFailure:true});
+  await assert.rejects(self.service.submit(validInput({filedBy:{id:EMPLOYEE_ID,role:'admin'},autoApprove:true})),/Signature required/);
 });
 
 test('single-session invalid middle segments are validated before insertion', async()=>{

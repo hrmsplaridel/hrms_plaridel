@@ -131,7 +131,7 @@ class _LeaveTableHeader extends StatelessWidget {
           Expanded(
             flex: _columnFlex[4],
             child: Align(
-              alignment: Alignment.centerRight,
+              alignment: Alignment.center,
               child: Text('Status', style: style),
             ),
           ),
@@ -204,8 +204,11 @@ class _LeaveTableRow extends StatelessWidget {
               Expanded(
                 flex: _columnFlex[4],
                 child: Align(
-                  alignment: Alignment.centerRight,
-                  child: LeaveStatusChip(status: request.status),
+                  alignment: Alignment.center,
+                  child: LeaveStatusChip(
+                    status: request.status,
+                    label: request.statusLabel,
+                  ),
                 ),
               ),
             ],

@@ -149,6 +149,7 @@ class LeaveRequest {
     this.attachmentPath,
     this.attachmentName,
     this.status = LeaveRequestStatus.pending,
+    this.applicantSignatureAssetId,
     this.hrRemarks,
     this.recommendationRemarks,
     this.disapprovalReason,
@@ -160,8 +161,11 @@ class LeaveRequest {
     this.reviewerName,
     this.reviewerRole,
     this.finalReviewRoute = 'hr',
+    this.workflowSnapshot,
     this.reviewerTitle,
     this.reviewedAt,
+    this.approvedAt,
+    this.canRevokeApproval,
     this.departmentHeadReviewerId,
     this.departmentHeadReviewerName,
     this.departmentHeadReviewedAt,
@@ -232,8 +236,11 @@ class LeaveRequest {
   final String? reviewerName;
   final String? reviewerRole;
   final String finalReviewRoute;
+  final Map<String,dynamic>? workflowSnapshot;
   final String? reviewerTitle;
   final DateTime? reviewedAt;
+  final DateTime? approvedAt;
+  final bool? canRevokeApproval;
   final String? departmentHeadReviewerId;
   final String? departmentHeadReviewerName;
   final DateTime? departmentHeadReviewedAt;
@@ -244,7 +251,29 @@ class LeaveRequest {
   final DateTime? updatedAt;
 
   static const String tableName = 'leave_requests';
+  /// Explicit submission confirmation only; never populated from API responses.
+  final String? applicantSignatureAssetId;
   static const String storageBucket = 'leave-attachments';
+
+  /// Shared workflows use compatibility statuses; display their actual stage.
+  String get statusLabel {
+    if (!status.isPending || workflowSnapshot?['outcome'] != null) {
+      return status.displayName;
+    }
+    final steps = workflowSnapshot?['steps'];
+    final current = workflowSnapshot?['current_step'];
+    if (steps is List &&
+        current is int &&
+        current >= 0 &&
+        current < steps.length) {
+      final step = steps[current];
+      final label = step is Map ? step['label'] : null;
+      if (label is String && label.trim().isNotEmpty) {
+        return 'Pending ${label.trim()}';
+      }
+    }
+    return status.displayName;
+  }
 
   factory LeaveRequest.fromJson(Map<String, dynamic> json) {
     return LeaveRequest(
@@ -360,8 +389,11 @@ class LeaveRequest {
       reviewerName: json['reviewer_name']?.toString(),
       reviewerRole: json['reviewer_role']?.toString(),
       finalReviewRoute: json['final_review_route']?.toString() ?? 'hr',
+      workflowSnapshot: json['workflow_snapshot'] is Map ? Map<String,dynamic>.from(json['workflow_snapshot']) : null,
       reviewerTitle: json['reviewer_title']?.toString(),
       reviewedAt: _parseDateTime(json['reviewed_at']),
+      approvedAt: _parseDateTime(json['approved_at']),
+      canRevokeApproval: json['can_revoke_approval'] is bool ? json['can_revoke_approval'] as bool : null,
       departmentHeadReviewerId: json['department_head_reviewer_id']?.toString(),
       departmentHeadReviewerName: json['department_head_reviewer_name']
           ?.toString(),
@@ -416,6 +448,8 @@ class LeaveRequest {
       'attachment_path': attachmentPath,
       'attachment_name': attachmentName,
       'status': status.value,
+      if (status.isPending && applicantSignatureAssetId != null)
+        'applicant_signature_asset_id': applicantSignatureAssetId,
       'hr_remarks': _trimOrNull(hrRemarks),
       'recommendation_remarks': _trimOrNull(recommendationRemarks),
       'disapproval_reason': _trimOrNull(disapprovalReason),
@@ -427,8 +461,11 @@ class LeaveRequest {
       'reviewer_name': _trimOrNull(reviewerName),
       'reviewer_role': _trimOrNull(reviewerRole),
       'final_review_route': finalReviewRoute,
+      'workflow_snapshot': workflowSnapshot,
       'reviewer_title': _trimOrNull(reviewerTitle),
       'reviewed_at': reviewedAt?.toIso8601String(),
+      'approved_at': approvedAt?.toIso8601String(),
+      'can_revoke_approval': canRevokeApproval,
       'department_head_reviewer_id': departmentHeadReviewerId,
       'department_head_reviewer_name': _trimOrNull(departmentHeadReviewerName),
       'department_head_reviewed_at': departmentHeadReviewedAt
@@ -440,6 +477,7 @@ class LeaveRequest {
   }
 
   LeaveRequest copyWith({
+    String? applicantSignatureAssetId,
     String? id,
     String? userId,
     String? employeeName,
@@ -492,8 +530,11 @@ class LeaveRequest {
     String? reviewerName,
     String? reviewerRole,
     String? finalReviewRoute,
+    Map<String,dynamic>? workflowSnapshot,
     String? reviewerTitle,
     DateTime? reviewedAt,
+    DateTime? approvedAt,
+    bool? canRevokeApproval,
     String? departmentHeadReviewerId,
     String? departmentHeadReviewerName,
     DateTime? departmentHeadReviewedAt,
@@ -503,6 +544,8 @@ class LeaveRequest {
     DateTime? updatedAt,
   }) {
     return LeaveRequest(
+      applicantSignatureAssetId:
+          applicantSignatureAssetId ?? this.applicantSignatureAssetId,
       id: id ?? this.id,
       userId: userId ?? this.userId,
       employeeName: employeeName ?? this.employeeName,
@@ -562,8 +605,11 @@ class LeaveRequest {
       reviewerName: reviewerName ?? this.reviewerName,
       reviewerRole: reviewerRole ?? this.reviewerRole,
       finalReviewRoute: finalReviewRoute ?? this.finalReviewRoute,
+      workflowSnapshot:workflowSnapshot ?? this.workflowSnapshot,
       reviewerTitle: reviewerTitle ?? this.reviewerTitle,
       reviewedAt: reviewedAt ?? this.reviewedAt,
+      approvedAt: approvedAt ?? this.approvedAt,
+      canRevokeApproval: canRevokeApproval ?? this.canRevokeApproval,
       departmentHeadReviewerId:
           departmentHeadReviewerId ?? this.departmentHeadReviewerId,
       departmentHeadReviewerName:

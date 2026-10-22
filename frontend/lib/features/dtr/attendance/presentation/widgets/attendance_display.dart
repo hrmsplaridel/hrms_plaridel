@@ -55,14 +55,14 @@ String normalizeAttendanceRemark(String remark) {
 }
 
 String compactLocatorRemark(String remark) {
-  for (final label in [
-    'On Field',
-    'Pass Slip',
-    'Locator / Official Business',
-  ]) {
-    if (remark.startsWith('$label (') && remark.endsWith(')')) return label;
-  }
-  return remark;
+  // Strip only a trailing list of DTR slots, preserving other parentheses
+  // in custom locator names and unrelated attendance remarks.
+  return remark.replaceFirst(
+    RegExp(
+      r'\s+\((?:AM IN|AM OUT|PM IN|PM OUT|IN|OUT)(?:,\s*(?:AM IN|AM OUT|PM IN|PM OUT|IN|OUT))*\)$',
+    ),
+    '',
+  );
 }
 
 /// Whether a record represents a completed workday attendance. Late and/or

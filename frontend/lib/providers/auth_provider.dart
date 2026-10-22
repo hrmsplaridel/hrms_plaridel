@@ -1,4 +1,6 @@
+import 'package:hrms_plaridel/features/dtr/assistant/presentation/widgets/application_review.dart';
 import 'dart:async';
+import 'package:hrms_plaridel/features/dtr/assistant/presentation/widgets/active_assistant_field.dart';
 
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
@@ -69,6 +71,8 @@ class AuthProvider extends ChangeNotifier {
     final currentRole = (_user?.role ?? '').trim().toLowerCase();
     final nextRole = (nextUser?.role ?? '').trim().toLowerCase();
     if (currentId != nextId || currentRole != nextRole) {
+      ActiveAssistantForm.current = null;
+      ActiveApplicationReview.clear();
       LocatorSlipDataCache.instance.invalidateAll();
       LeaveTypeDefinitionCache.instance.invalidate();
     }

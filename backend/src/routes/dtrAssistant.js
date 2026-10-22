@@ -83,6 +83,8 @@ router.post(
         modelProfile: req.body?.modelProfile,
         conversationId: req.body?.conversationId,
         externalConsentVersion: req.body?.externalConsentVersion,
+        formContext: req.body?.formContext,
+        requestReference: req.body?.requestReference,
         signal: controller.signal,
       });
       if (controller.signal.aborted || res.destroyed) return;

@@ -79,7 +79,7 @@ test('locator HR list excludes requests that never reached final review', async 
     await route.route.stack.at(-1).handle({ query: {} }, response);
     assert.equal(response.statusCode, 200);
     const listQuery = statements.find((statement) => statement.includes('COUNT(*)::integer AS total'));
-    assert.match(listQuery, /review_history\.to_status IN \('pending', 'pending_hr'\)/);
+    assert.match(listQuery, /review_history\.to_status IN \('pending', 'pending_hr','pending_mayor','approved'\)/);
     assert.match(listQuery, /ls\.is_retroactive_correction = true/);
   } finally {
     clearModule('../src/routes/locatorSlips');

@@ -477,7 +477,7 @@ function parseAssistantDateRangeUnchecked(message, options = {}) {
   }
 
   const markedDayOnly = text.match(
-    /\b(?:sa|pag|noong|nung|adtong|adtung|atong|niadtong|niadtung)\s+(\d{1,2})(?:st|nd|rd|th)?\b(?!\s*(?:day|days|adlaw|ka adlaw))/i
+    /\b(?:(?:sa|pag|noong|nung|adtong|adtung|atong|niadtong|niadtung|petsa|date)\s+|on\s+the\s+|ika[-\s]*)(\d{1,2})(?:st|nd|rd|th)?\b(?!\s*(?:days?\b|adlaw\b|araw\b|ka\s+adlaw\b))/i
   );
   if (markedDayOnly) {
     const currentYear = Number(today.slice(0, 4));

@@ -9,6 +9,7 @@ class LocatorSlipFormInitialValues {
     this.pmIn,
     this.pmOut,
     this.existingAttachmentName,
+    this.additionalDetails = const {},
   });
 
   final DateTime? slipDate;
@@ -20,6 +21,7 @@ class LocatorSlipFormInitialValues {
   final bool? pmIn;
   final bool? pmOut;
   final String? existingAttachmentName;
+  final Map<String,dynamic> additionalDetails;
 
   bool get hasSlotSelection =>
       amIn != null || amOut != null || pmIn != null || pmOut != null;

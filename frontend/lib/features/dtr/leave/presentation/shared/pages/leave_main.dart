@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
+import 'package:hrms_plaridel/core/api/client.dart';
+import 'package:hrms_plaridel/features/dtr/management/approvals/pages/workflow_approval_inbox_page.dart';
 import 'package:hrms_plaridel/providers/auth_provider.dart';
 import 'package:hrms_plaridel/features/dtr/assistant/presentation/widgets/employee_hrms_assistant_overlay.dart';
 import 'package:hrms_plaridel/features/dtr/leave/data/providers/leave_provider.dart';
@@ -35,6 +37,7 @@ class LeaveMain extends StatefulWidget {
     this.isAdmin = false,
     this.isDepartmentHead = false,
     this.canReviewPending = true,
+    this.canAccessApprovals = false,
     this.employeeRequestsContent,
     this.employeeBalancesContent,
     this.adminApprovalsContent,
@@ -57,6 +60,9 @@ class LeaveMain extends StatefulWidget {
   /// Whether current user is a department head (non-admin reviewer).
   final bool isDepartmentHead;
   final bool canReviewPending;
+
+  /// Reviewer or history access already confirmed by the containing page.
+  final bool canAccessApprovals;
 
   /// Optional injected content for employee requests.
   final Widget? employeeRequestsContent;
@@ -83,6 +89,56 @@ class LeaveMain extends StatefulWidget {
 
 class _LeaveMainState extends State<LeaveMain> {
   LeaveSection _currentSection = LeaveSection.requests;
+  bool _hasReviewAccess = false;
+  bool _hasProviderReviewAccess = false;
+  bool _accessInitialized = false;
+  (String?, String?)? _accessIdentity;
+  int _accessGeneration = 0;
+
+  bool get _canAccessApprovals =>
+      widget.isAdmin ||
+      widget.isDepartmentHead ||
+      widget.canAccessApprovals ||
+      _hasProviderReviewAccess ||
+      _hasReviewAccess;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final auth = context.watch<AuthProvider?>();
+    final access = context.watch<LeaveProvider?>();
+    _hasProviderReviewAccess =
+        access?.canReviewPendingLeave == true ||
+        access?.canViewReviewHistory == true;
+    final identity = (auth?.user?.id, auth?.user?.role);
+    if (!_accessInitialized || _accessIdentity != identity) {
+      _accessInitialized = true;
+      _accessIdentity = identity;
+      _hasReviewAccess = false;
+      final generation = ++_accessGeneration;
+      if (!_canAccessApprovals) {
+        _checkReviewAccess(generation);
+      }
+    }
+  }
+
+  Future<void> _checkReviewAccess(int generation) async {
+    final access = await Future.wait<bool>([
+      ApiClient.instance
+          .get<Map<String, dynamic>>('/api/leave/final-reviewer/me')
+          .then((response) => response.data?['can_review'] == true)
+          .catchError((_) => false),
+      loadAssignedWorkflowRequests(
+        'leave',
+      ).then((requests) => requests.isNotEmpty).catchError((_) => false),
+    ]);
+    if (!mounted || generation != _accessGeneration) return;
+    final previous = _activeSection;
+    setState(() => _hasReviewAccess = access.any((allowed) => allowed));
+    if (_activeSection != previous) {
+      widget.onSectionChanged?.call(_activeSection);
+    }
+  }
 
   @override
   void initState() {
@@ -101,9 +157,12 @@ class _LeaveMainState extends State<LeaveMain> {
   }
 
   LeaveSection get _activeSection {
-    if (widget.section != null) return widget.section!;
-    if (widget.isAdmin) return LeaveSection.approvals;
-    return _currentSection;
+    final selected =
+        widget.section ??
+        (widget.isAdmin ? LeaveSection.approvals : _currentSection);
+    return selected == LeaveSection.approvals && !_canAccessApprovals
+        ? LeaveSection.requests
+        : selected;
   }
 
   @override
@@ -151,6 +210,10 @@ class _LeaveMainState extends State<LeaveMain> {
           ],
           const SizedBox(height: 24),
         ],
+        if (hideMobileEmployeeChrome) ...[
+          _buildSectionNav(),
+          const SizedBox(height: 16),
+        ],
         KeyedSubtree(key: widget.tutorialContentKey, child: _buildContent()),
       ],
     );
@@ -159,9 +222,10 @@ class _LeaveMainState extends State<LeaveMain> {
   Widget _buildSectionNav() {
     final sections = widget.isAdmin
         ? [LeaveSection.approvals]
-        : widget.isDepartmentHead
-        ? [LeaveSection.requests, LeaveSection.approvals]
-        : [LeaveSection.requests];
+        : [
+            LeaveSection.requests,
+            if (_canAccessApprovals) LeaveSection.approvals,
+          ];
 
     if (sections.length <= 1) return const SizedBox.shrink();
 
@@ -169,7 +233,7 @@ class _LeaveMainState extends State<LeaveMain> {
       spacing: 12,
       runSpacing: 8,
       children: sections.map((section) {
-        final isSelected = _currentSection == section;
+        final isSelected = _activeSection == section;
         final dark = AppTheme.dashIsDark(context);
         return Material(
           color: isSelected

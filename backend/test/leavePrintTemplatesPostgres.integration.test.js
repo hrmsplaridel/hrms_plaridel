@@ -24,6 +24,28 @@ test('migration snapshots submitted forms, updates drafts, preserves versions on
  assert.equal(rows.find(r=>r.id===draft).print_template_version_id,v2);
  await db.query("UPDATE leave_requests SET status='approved' WHERE id=$1",[draft]);
  assert.equal((await db.query('SELECT print_template_version_id FROM leave_requests WHERE id=$1',[draft])).rows[0].print_template_version_id,v2);
+ const customSql=fs.readFileSync(path.join(__dirname,'../scripts/migrations/dtr/20261013_leave_print_layouts.sql'),'utf8');
+ await db.query(customSql);
+ const definition={version:1,orientation:'portrait',elements:[{id:'name',kind:'field',source:'employee_name',x:40,y:160,width:200,height:40,font_size:10}]};
+ const v3=(await db.query("INSERT INTO leave_print_template_versions(leave_type_id,layout,print_layout)VALUES($1,'custom',$2::jsonb)RETURNING id",[type,JSON.stringify(definition)])).rows[0].id;
+ await db.query('UPDATE leave_types SET print_template_version_id=$1 WHERE id=$2',[v3,type]);
+ const newRequest=(await db.query("INSERT INTO leave_requests(leave_type_id,status)VALUES($1,'pending_hr')RETURNING id",[type])).rows[0].id;
+ const pointers=(await db.query('SELECT id,print_template_version_id FROM leave_requests')).rows;
+ assert.equal(pointers.find(r=>r.id===old).print_template_version_id,v1);
+ assert.equal(pointers.find(r=>r.id===draft).print_template_version_id,v2);
+ assert.equal(pointers.find(r=>r.id===newRequest).print_template_version_id,v3);
+ await db.query(customSql);
+ assert.deepEqual((await db.query('SELECT print_layout FROM leave_print_template_versions WHERE id=$1',[v3])).rows[0].print_layout,definition);
+ assert.equal((await db.query('SELECT print_layout FROM leave_print_template_versions WHERE id=$1',[v1])).rows[0].print_layout,null);
+ await assert.rejects(db.query("INSERT INTO leave_print_template_versions(leave_type_id,layout)VALUES($1,'custom')",[type]),/chk_leave_print_layout/);
+ const tableLayout={version:1,orientation:'portrait',paper_size:'long',margins:{top:36,right:36,bottom:36,left:36},font_family:'serif',default_font_size:14,elements:[{id:'table',kind:'table',x:40,y:180,width:400,height:120,font_size:11,column_widths:[1,2],header_row:true,borders:true,cells:[[{kind:'text',text:'Name'},{kind:'text',text:'Days'}],[{kind:'field',source:'employee_name'},{kind:'field',source:'working_days'}]]}]};
+ const normalizedTable=require('../src/services/leavePrintLayout').normalizeLeavePrintLayout(tableLayout);
+ const tableVersion=(await db.query("INSERT INTO leave_print_template_versions(leave_type_id,layout,print_layout)VALUES($1,'custom',$2::jsonb)RETURNING id",[type,JSON.stringify(normalizedTable)])).rows[0].id;
+ await db.query('UPDATE leave_types SET print_template_version_id=$1 WHERE id=$2',[tableVersion,type]);
+ const tableRequest=(await db.query("INSERT INTO leave_requests(leave_type_id,status)VALUES($1,'pending_hr')RETURNING id",[type])).rows[0].id;
+ assert.equal((await db.query('SELECT print_template_version_id FROM leave_requests WHERE id=$1',[tableRequest])).rows[0].print_template_version_id,tableVersion);
+ assert.equal((await db.query('SELECT print_template_version_id FROM leave_requests WHERE id=$1',[newRequest])).rows[0].print_template_version_id,v3);
+ assert.deepEqual((await db.query('SELECT print_layout FROM leave_print_template_versions WHERE id=$1',[tableVersion])).rows[0].print_layout,normalizedTable);
  const next=(await db.query('INSERT INTO leave_types DEFAULT VALUES RETURNING id')).rows[0].id;
  assert.ok((await db.query('SELECT print_template_version_id FROM leave_types WHERE id=$1',[next])).rows[0].print_template_version_id);
  }finally{await db.query('ROLLBACK');await db.query(`DROP SCHEMA IF EXISTS ${schema} CASCADE`);await db.end();}

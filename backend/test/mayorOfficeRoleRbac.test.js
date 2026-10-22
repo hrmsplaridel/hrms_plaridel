@@ -107,10 +107,20 @@ test('M4 migration adds mayor_office_staff without changing single-mayor index',
   );
 });
 
+function readJavaScriptTree(dir) {
+  let text = '';
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) text += readJavaScriptTree(full);
+    else if (entry.name.endsWith('.js')) text += fs.readFileSync(full, 'utf8');
+  }
+  return text;
+}
+
 test('Leave and DocuTracker still key off mayor role only', () => {
-  const leave = fs.readFileSync(
-    path.join(__dirname, '../src/routes/leaveRoutes.js'),
-    'utf8',
+  // Leave authorization moved out of the compatibility router into the module.
+  const leave = readJavaScriptTree(
+    path.join(__dirname, '../src/modules/leave'),
   );
   assert.match(leave, /role\s*===\s*'mayor'/);
   assert.doesNotMatch(leave, /mayor_office_staff/);

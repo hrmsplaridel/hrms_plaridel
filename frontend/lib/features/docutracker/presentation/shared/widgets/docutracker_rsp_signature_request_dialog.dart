@@ -227,10 +227,10 @@ class _RspSignatureRequestDialogState
                 color: Colors.grey,
               ),
               const SizedBox(height: 12),
-              const Text(
+              Text(
                 'Sign first — load the form preview only when you need it.',
                 textAlign: TextAlign.center,
-                style: TextStyle(color: DocuTrackerTokens.textMuted),
+                style: TextStyle(color: DocuTrackerTokens.textMutedOf(context)),
               ),
               const SizedBox(height: 16),
               FilledButton.tonalIcon(
@@ -244,7 +244,7 @@ class _RspSignatureRequestDialogState
       );
     }
     if (_pdfLoading && _pdfBytes == null) {
-      return const Center(
+      return Center(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -252,7 +252,7 @@ class _RspSignatureRequestDialogState
             SizedBox(height: 12),
             Text(
               'Preparing form preview…',
-              style: TextStyle(color: DocuTrackerTokens.textMuted),
+              style: TextStyle(color: DocuTrackerTokens.textMutedOf(context)),
             ),
           ],
         ),

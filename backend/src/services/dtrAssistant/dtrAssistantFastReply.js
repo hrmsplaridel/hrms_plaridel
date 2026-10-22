@@ -1,4 +1,5 @@
 const HRMS_TIMEZONE = process.env.HRMS_TIMEZONE || 'Asia/Manila';
+const { configuredLeaveType } = require('./configuredLeaveType');
 const {
   getDtrPolicySectionsForMessage,
   getLocatorPolicySectionsForMessage,
@@ -775,6 +776,8 @@ function mentionedLeaveTypeRecords(context, message) {
 }
 
 function requestedLeaveTypeRecord(message, context) {
+  const configured = configuredLeaveType(message, context.leave_types);
+  if (configured) return configured;
   const type = requestedLeaveType(message);
   if (type) {
     return (context.leave_types || []).find((record) => leaveTypeRecordMatches(record, type)) || null;
@@ -1852,10 +1855,10 @@ function dtrDailyRecordReply(context, message) {
         summary:
           locatorEvaluation.isFullCoverage
             ? language === 'bisaya'
-              ? 'Status: On field. Walay DTR punches, pero ang approved locator kompleto para sa imong assigned shift.'
+              ? `Status: ${locatorAttendanceLabel(locatorEvaluation)}. Walay DTR punches, pero ang approved locator kompleto para sa imong assigned shift.`
               : language === 'tagalog'
-                ? 'Status: On field. Walang DTR punches, pero kumpleto ang approved locator para sa assigned shift mo.'
-                : 'Status: On field. No DTR punches were found, but approved locator coverage satisfies the assigned shift.'
+                ? `Status: ${locatorAttendanceLabel(locatorEvaluation)}. Walang DTR punches, pero kumpleto ang approved locator para sa assigned shift mo.`
+                : `Status: ${locatorAttendanceLabel(locatorEvaluation)}. No DTR punches were found, but approved locator coverage satisfies the assigned shift.`
             : language === 'bisaya'
               ? 'Status: Absent/no DTR record. Scheduled workday ni pero wala koy nakitang kompletong DTR o locator coverage.'
               : language === 'tagalog'
@@ -2319,7 +2322,7 @@ function locatorCoversSlot(slip, slot) {
 function approvedLocatorCoverageForDate(context, date) {
   const dateKey = fmtDate(date);
   const slips = (context.recent_locator_slips || []).filter((slip) => {
-    return slip.slip_date === dateKey && approvedStatus(slip.status);
+    return slip.slip_date === dateKey && approvedStatus(slip.status) && !slip.revoked_at;
   });
   const day = calendarDayForDate(context, dateKey);
   const holidayInfo = day?.holiday_coverage && day.holiday_coverage !== 'none'
@@ -2335,6 +2338,13 @@ function approvedLocatorCoverageForDate(context, date) {
       date: dateKey,
     }),
   };
+}
+
+function locatorAttendanceLabel(evaluation) {
+  const labels = evaluation.slips
+    .filter((slip) => evaluation.expectedSlots.some((slot) => normalizeLocatorCoverage(slip)[slot]))
+    .map((slip) => slip.dtr_slot_label || slip.dtr_print_label || 'On field');
+  return [...new Set(labels)].join(' / ') || 'On field';
 }
 
 function locatorCoverageForMissingSlots(context, date, missingSlots = []) {
@@ -2451,10 +2461,10 @@ function dtrStatusExplanationReply(context, message) {
         summary:
           locatorEvaluation.isFullCoverage
             ? language === 'bisaya'
-              ? 'Status: On field. Ang approved locator kompleto para sa imong assigned shift.'
+              ? `Status: ${locatorAttendanceLabel(locatorEvaluation)}. Ang approved locator kompleto para sa imong assigned shift.`
               : language === 'tagalog'
-                ? 'Status: On field. Kumpleto ang approved locator para sa assigned shift mo.'
-                : 'Status: On field. Approved locator coverage satisfies the assigned shift.'
+                ? `Status: ${locatorAttendanceLabel(locatorEvaluation)}. Kumpleto ang approved locator para sa assigned shift mo.`
+                : `Status: ${locatorAttendanceLabel(locatorEvaluation)}. Approved locator coverage satisfies the assigned shift.`
             : language === 'bisaya'
               ? 'Status: Absent/no DTR record. Scheduled workday ni pero walay kompletong DTR o locator coverage.'
               : language === 'tagalog'
@@ -4967,6 +4977,22 @@ function leaveGuidelineSectionReply(context, message) {
 
   if (guidance) {
     return leaveTypeGuidanceDetailReply(context, message, type, guidance);
+  }
+
+  // Custom types do not have a built-in statutory guideline entry. Their
+  // configured description and filing rules are still valid answer sources.
+  if (type) {
+    const fieldInstructions = (type.employee_detail_schema || [])
+      .filter((field) => field.instruction)
+      .map((field) => `${field.label}: ${field.instruction}`)
+      .join(' ');
+    return leaveTypeGuidanceDetailReply(context, message, type, {
+      description: type.description || '',
+      requirements: fieldInstructions,
+      notes: !type.description && !fieldInstructions
+        ? 'No additional written guidelines are configured for this leave type. Ask HR for policy details beyond the configured filing rules.'
+        : '',
+    });
   }
 
   if (sections.length === 0) {

@@ -1,5 +1,8 @@
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
+import 'package:hrms_plaridel/features/dtr/leave/presentation/admin/admin_leave_screen.dart';
+import 'package:hrms_plaridel/features/dtr/locator/presentation/admin/pages/admin_locator_management_screen.dart';
+import 'package:hrms_plaridel/features/notifications/models/notification_tap_result.dart';
 import 'package:hrms_plaridel/core/api/client.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/core/api/user_facing_api_error.dart';
@@ -34,6 +37,8 @@ enum _MayorMenu {
   requests,
   scheduling,
   history,
+  locator,
+  leave,
   profile,
 }
 
@@ -1015,6 +1020,14 @@ class _MayorDashboardPageState extends State<MayorDashboardPage> {
     }
   }
 
+  void _onNotificationTap(NotificationTapResult? result) {
+    if (result?.kind == NotificationTapKind.adminDtrLocatorManagement) {
+      _onMenuSelected(_MayorMenu.locator);
+    } else if(result?.kind == NotificationTapKind.adminDtrLeaveManagement) {
+      _onMenuSelected(_MayorMenu.leave);
+    }
+  }
+
   void _openProfile() {
     if (DashboardContentNavigator.isSettingsOnTop(
       _contentNavKey.currentState,
@@ -1111,6 +1124,10 @@ class _MayorDashboardPageState extends State<MayorDashboardPage> {
   Widget _buildContent() {
     final caps = _caps;
     switch (_selectedMenu) {
+      case _MayorMenu.leave:
+        return const AdminLeaveScreen(isMayor:true);
+      case _MayorMenu.locator:
+        return const AdminLocatorManagementScreen();
       case _MayorMenu.dashboard:
         return _MayorDashboardTab(
           dashboardFuture: _dashboardFuture,
@@ -1184,6 +1201,13 @@ class _MayorDashboardPageState extends State<MayorDashboardPage> {
 
   List<DashboardMobileNavItem> get _mobileNavItems {
     final caps = _caps;
+    const approvals = <DashboardMobileNavItem>[
+      DashboardMobileNavItem(
+        icon: Icons.location_on_outlined,
+        label: 'Locators',
+      ),
+      DashboardMobileNavItem(icon: Icons.event_note_outlined, label: 'Leave'),
+    ];
     if (caps.isMayor) {
       return const [
         DashboardMobileNavItem(
@@ -1193,6 +1217,7 @@ class _MayorDashboardPageState extends State<MayorDashboardPage> {
         DashboardMobileNavItem(icon: Icons.event_outlined, label: 'Meetings'),
         DashboardMobileNavItem(icon: Icons.gavel_outlined, label: 'Decisions'),
         DashboardMobileNavItem(icon: Icons.history_outlined, label: 'History'),
+        ...approvals,
       ];
     }
     return const [
@@ -1209,6 +1234,7 @@ class _MayorDashboardPageState extends State<MayorDashboardPage> {
         label: 'Scheduling',
       ),
       DashboardMobileNavItem(icon: Icons.history_outlined, label: 'History'),
+      ...approvals,
     ];
   }
 
@@ -1219,6 +1245,8 @@ class _MayorDashboardPageState extends State<MayorDashboardPage> {
         _MayorMenu.meetings => 1,
         _MayorMenu.decisions => 2,
         _MayorMenu.history => 3,
+        _MayorMenu.locator => 4,
+        _MayorMenu.leave => 5,
         _MayorMenu.profile => -1,
         _ => 0,
       };
@@ -1227,6 +1255,8 @@ class _MayorDashboardPageState extends State<MayorDashboardPage> {
       _MayorMenu.requests => 1,
       _MayorMenu.scheduling => 2,
       _MayorMenu.history => 3,
+      _MayorMenu.locator => 4,
+      _MayorMenu.leave => 5,
       _MayorMenu.profile => -1,
       _ => 0,
     };
@@ -1242,6 +1272,10 @@ class _MayorDashboardPageState extends State<MayorDashboardPage> {
           _onMenuSelected(_MayorMenu.decisions);
         case 3:
           _onMenuSelected(_MayorMenu.history);
+        case 4:
+          _onMenuSelected(_MayorMenu.locator);
+        case 5:
+          _onMenuSelected(_MayorMenu.leave);
         default:
           _onMenuSelected(_MayorMenu.dashboard);
       }
@@ -1254,6 +1288,10 @@ class _MayorDashboardPageState extends State<MayorDashboardPage> {
         _onMenuSelected(_MayorMenu.scheduling);
       case 3:
         _onMenuSelected(_MayorMenu.history);
+      case 4:
+        _onMenuSelected(_MayorMenu.locator);
+      case 5:
+        _onMenuSelected(_MayorMenu.leave);
       default:
         _onMenuSelected(_MayorMenu.dashboard);
     }
@@ -1322,6 +1360,7 @@ class _MayorDashboardPageState extends State<MayorDashboardPage> {
                     child: Column(
                       children: [
                         DashboardAppHeaderBar(
+                          onNotificationTap: _onNotificationTap,
                           showBrand: false,
                           showSidebarToggle: true,
                           sidebarCollapsed: _sidebarCollapsed,
@@ -1329,6 +1368,12 @@ class _MayorDashboardPageState extends State<MayorDashboardPage> {
                             () => _sidebarCollapsed = !_sidebarCollapsed,
                           ),
                           compactActions: width < 600,
+                          trailing: DashboardAccountMenuButton(
+                            avatarPath: avatarPath,
+                            compact: width < 600,
+                            tooltip: displayName,
+                            onProfile: _openProfile,
+                          ),
                         ),
                         Expanded(
                           child: ColoredBox(
@@ -1359,11 +1404,18 @@ class _MayorDashboardPageState extends State<MayorDashboardPage> {
                 children: [
                   Builder(
                     builder: (innerContext) => DashboardAppHeaderBar(
+                      onNotificationTap: _onNotificationTap,
                       showBrand: true,
                       showMenuButton: true,
                       onMenuPressed: () =>
                           Scaffold.of(innerContext).openDrawer(),
                       compactActions: true,
+                      trailing: DashboardAccountMenuButton(
+                        avatarPath: avatarPath,
+                        compact: true,
+                        tooltip: displayName,
+                        onProfile: _openProfile,
+                      ),
                     ),
                   ),
                   Expanded(
@@ -1467,6 +1519,18 @@ class _MayorSidebar extends StatelessWidget {
         onTap: () => onTap(_MayorMenu.history),
       ),
       const SizedBox(height: 12),
+      DashboardSidebarNavTile(
+        icon: Icons.location_on_outlined,
+        label: 'Locator approvals',
+        selected: selectedMenu == _MayorMenu.locator,
+        onTap: () => onTap(_MayorMenu.locator),
+      ),
+      DashboardSidebarNavTile(
+        icon: Icons.event_note_outlined,
+        label: 'Leave approvals',
+        selected: selectedMenu == _MayorMenu.leave,
+        onTap: () => onTap(_MayorMenu.leave),
+      ),
     ]);
     return Column(mainAxisSize: MainAxisSize.min, children: navChildren);
   }

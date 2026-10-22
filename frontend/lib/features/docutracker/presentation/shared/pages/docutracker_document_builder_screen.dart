@@ -13,13 +13,17 @@ import 'package:provider/provider.dart';
 import 'package:hrms_plaridel/features/docutracker/data/providers/docutracker_provider.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document_builder.dart';
+import 'package:hrms_plaridel/features/docutracker/models/docutracker_memo_template.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_error_banner.dart';
+import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_memo_sheet.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_printable_page_frame.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_signature_field_visual.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_signature_fields_panel.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_signature_dialog.dart';
 import 'package:hrms_plaridel/features/docutracker/services/employee_directory_lookup.dart';
 import 'package:hrms_plaridel/features/docutracker/theme/docutracker_tokens.dart';
+import 'package:hrms_plaridel/features/docutracker/utils/docutracker_memo_layout.dart';
+import 'package:hrms_plaridel/features/docutracker/utils/docutracker_memo_pdf.dart';
 import 'package:hrms_plaridel/features/docutracker/utils/docutracker_pdf_export.dart';
 import 'package:hrms_plaridel/features/docutracker/utils/docutracker_printable_template.dart';
 import 'package:hrms_plaridel/features/docutracker/utils/docutracker_signature_geometry.dart';
@@ -84,11 +88,23 @@ class _DocuTrackerDocumentBuilderScreenState
   TextSelection? _formatSelection;
   bool get _busy => _saving || _exporting || _loadingDirectory;
 
+  /// Last saved Memo metadata; non-null renders the official Memo template.
+  DocuTrackerMemoTemplate? _memoBaseline;
+  DocuTrackerDocument? _latestDocument;
+  final TextEditingController _memoTo = TextEditingController();
+  final TextEditingController _memoSubject = TextEditingController();
+  final TextEditingController _memoDate = TextEditingController();
+  final TextEditingController _memoCc = TextEditingController();
+  bool get _isMemo => _memoBaseline != null;
+
   DocuTrackerProvider get _provider => context.read<DocuTrackerProvider>();
 
   @override
   void initState() {
     super.initState();
+    for (final controller in _memoControllers) {
+      controller.addListener(_onMemoChanged);
+    }
     WidgetsBinding.instance.addPostFrameCallback((_) => _load());
   }
 
@@ -97,7 +113,182 @@ class _DocuTrackerDocumentBuilderScreenState
     for (final page in _pages) {
       page.dispose();
     }
+    for (final controller in _memoControllers) {
+      controller.dispose();
+    }
     super.dispose();
+  }
+
+  List<TextEditingController> get _memoControllers => [
+    _memoTo,
+    _memoSubject,
+    _memoDate,
+    _memoCc,
+  ];
+
+  DocuTrackerMemoTemplate _currentMemo() => DocuTrackerMemoTemplate(
+    to: _memoTo.text,
+    subject: _memoSubject.text,
+    date: _memoDate.text,
+    cc: _memoCc.text,
+  );
+
+  void _setMemo(DocuTrackerMemoTemplate memo) {
+    _memoTo.text = memo.to;
+    _memoSubject.text = memo.subject;
+    _memoDate.text = memo.date;
+    _memoCc.text = memo.cc;
+  }
+
+  void _onMemoChanged() {
+    final baseline = _memoBaseline;
+    if (baseline == null || _dirty || !mounted) return;
+    final current = _currentMemo();
+    if (current.to != baseline.to ||
+        current.subject != baseline.subject ||
+        current.date != baseline.date ||
+        current.cc != baseline.cc) {
+      setState(() => _dirty = true);
+    }
+  }
+
+  Future<void> _refreshMemoRelease() async {
+    final documentId = widget.document.id;
+    if (documentId == null) return;
+    final latest = await _provider.fetchDocument(documentId);
+    if (latest != null && mounted) setState(() => _latestDocument = latest);
+  }
+
+  /// Official Memo signatory slots are fixed: never moved, resized, deleted
+  /// or relabelled, and their printed name/position come from the signer.
+  bool _isMemoSlot(DocuTrackerSignatureField field) =>
+      _isMemo && DocuTrackerMemoSignatory.isSlotField(field);
+
+  DocuTrackerMemoSignatory _memoSignatory(DocuTrackerMemoSlot slot) =>
+      DocuTrackerMemoSignatory.resolve(slot, _signatureFields);
+
+  /// Memo: the creator may only fill an unassigned Prepared by slot, and a
+  /// reviewer keeps the existing add-own-signature flow.
+  bool get _canInsertOwnOnDocument => !_isMemo
+      ? _canInsertOwnSignature
+      : _canAddOwnSignature ||
+            (_canEditLayout &&
+                !_memoSignatory(DocuTrackerMemoSlot.preparedBy).isAssigned);
+
+  /// The Memo slot the current user's own signature fills, if any: the
+  /// creator fills an unassigned Prepared by; the Mayor an unassigned
+  /// Approved by. Other reviewers sign outside the fixed slots.
+  Future<DocuTrackerMemoSlot?> _memoOwnSlot() async {
+    if (_canEditLayout) {
+      return _memoSignatory(DocuTrackerMemoSlot.preparedBy).isAssigned
+          ? null
+          : DocuTrackerMemoSlot.preparedBy;
+    }
+    if (_memoSignatory(DocuTrackerMemoSlot.approvedBy).isAssigned) return null;
+    final entries = await _provider.loadEmployeeDirectoryEntries();
+    final me = entries.where((item) => item.id == _currentUserId).firstOrNull;
+    return me?.roleId?.trim().toLowerCase() == 'mayor'
+        ? DocuTrackerMemoSlot.approvedBy
+        : null;
+  }
+
+  /// Signing a Memo slot: a not-yet-saved draft is saved first so the slot
+  /// exists on the server, then the normal signature dialog opens.
+  Future<void> _signMemoSlot(DocuTrackerSignatureField field) async {
+    if (_busy || !field.canSign) return;
+    var target = field;
+    if (target.id.startsWith('local-')) {
+      if (!await _save() || !mounted) return;
+      final saved = _signatureFields
+          .where(
+            (item) =>
+                item.pageNumber == 1 &&
+                item.label == field.label &&
+                item.assignedSignerId == field.assignedSignerId,
+          )
+          .firstOrNull;
+      if (saved == null) {
+        setState(() => _error = 'The signature field could not be prepared.');
+        return;
+      }
+      target = saved;
+    }
+    await _signField(target);
+  }
+
+  /// Prepared by = the drafting user; Approved by = the active Mayor when the
+  /// directory identifies exactly one. Names and positions are the signers'
+  /// own; the creator cannot retype or move them.
+  Future<void> _addDefaultMemoSignatureFields() async {
+    final entries = await _provider.loadEmployeeDirectoryEntries();
+    if (!mounted || !_canEditLayout) return;
+    EmployeeDirectoryEntry? entry(String id) {
+      for (final item in entries) {
+        if (item.id == id) return item;
+      }
+      return null;
+    }
+
+    final mayors = entries
+        .where((item) => item.roleId?.trim().toLowerCase() == 'mayor')
+        .toList(growable: false);
+    bool hasLabel(String label) =>
+        _signatureFields.any((field) => field.label == label);
+    // Until the first save returns the server's values, show the same
+    // directory name/position the server resolves.
+    DocuTrackerSignatureField field(
+      Rect rect,
+      String signerId,
+      EmployeeDirectoryEntry? signer,
+      String label,
+    ) {
+      final role = signer?.roleId?.trim().toLowerCase();
+      final position = signer?.positionName?.trim();
+      return DocuTrackerSignatureField(
+        id: 'local-${DateTime.now().microsecondsSinceEpoch}-${_localFieldCounter++}',
+        pageNumber: 1,
+        x: rect.left,
+        y: rect.top,
+        width: rect.width,
+        height: rect.height,
+        assignedSignerId: signerId,
+        assignedSignerName: signer?.fullName,
+        assignedSignerRole: role,
+        assignedSignerPosition: position != null && position.isNotEmpty
+            ? position
+            : role == 'mayor'
+            ? 'Municipal Mayor'
+            : null,
+        canSign: signerId == _currentUserId,
+        label: label,
+      );
+    }
+
+    setState(() {
+      if (_currentUserId.isNotEmpty &&
+          !hasLabel(DocuTrackerMemoLayout.preparedFieldLabel)) {
+        _signatureFields.add(
+          field(
+            DocuTrackerMemoLayout.preparedField,
+            _currentUserId,
+            entry(_currentUserId),
+            DocuTrackerMemoLayout.preparedFieldLabel,
+          ),
+        );
+      }
+      if (mayors.length == 1 &&
+          !hasLabel(DocuTrackerMemoLayout.approvedFieldLabel)) {
+        _signatureFields.add(
+          field(
+            DocuTrackerMemoLayout.approvedField,
+            mayors.single.id,
+            mayors.single,
+            DocuTrackerMemoLayout.approvedFieldLabel,
+          ),
+        );
+      }
+      _dirty = true;
+    });
   }
 
   Future<void> _load() async {
@@ -119,7 +310,15 @@ class _DocuTrackerDocumentBuilderScreenState
       });
       return;
     }
-    if (data.formatVersion >= _letterheadFormatVersion) {
+    final starter =
+        widget.prefillNewDraft && DocuTrackerDraftText.canPrefill(data)
+        ? DocuTrackerDraftText.composePage(widget.document)
+        : null;
+    final memo = data.pages.isNotEmpty && data.pages.first.memo != null;
+    final memoStarter = starter?.memo;
+    if (!memo &&
+        memoStarter == null &&
+        data.formatVersion >= _letterheadFormatVersion) {
       final background =
           await DocuTrackerPrintableTemplate.loadA4LetterheadPng();
       if (!mounted) return;
@@ -132,16 +331,21 @@ class _DocuTrackerDocumentBuilderScreenState
       _letterheadBackgroundBytes = background;
     }
     _replaceFromServer(data);
-    if (widget.prefillNewDraft && DocuTrackerDraftText.canPrefill(data)) {
+    if (starter != null) {
+      if (memoStarter != null) {
+        _memoBaseline = const DocuTrackerMemoTemplate();
+        _setMemo(memoStarter);
+      }
       _pages.first.controller.replaceText(
         0,
         0,
-        quill.Document.fromJson(
-          DocuTrackerDraftText.composePage(widget.document).delta,
-        ).toDelta(),
+        quill.Document.fromJson(starter.delta).toDelta(),
         const TextSelection.collapsed(offset: 0),
       );
       setState(() => _dirty = true);
+      if (memoStarter != null) await _addDefaultMemoSignatureFields();
+    } else if (_isMemo) {
+      await _refreshMemoRelease();
     }
   }
 
@@ -171,6 +375,9 @@ class _DocuTrackerDocumentBuilderScreenState
       _pages.add(editorPage);
       _pageKeys.add(GlobalKey());
     }
+    final memo = data.pages.isEmpty ? null : data.pages.first.memo;
+    _memoBaseline = memo;
+    if (memo != null) _setMemo(memo);
     setState(() {
       _signatureFields = List<DocuTrackerSignatureField>.from(
         data.signatureFields,
@@ -188,14 +395,19 @@ class _DocuTrackerDocumentBuilderScreenState
     });
   }
 
-  List<DocuTrackerDocumentPage> _serializePages() => _pages
+  List<Map<String, dynamic>> _pageDelta(_EditorPage page) => page
+      .controller
+      .document
+      .toDelta()
+      .toJson()
+      .map((item) => Map<String, dynamic>.from(item))
+      .toList(growable: false);
+
+  List<DocuTrackerDocumentPage> _serializePages() => _pages.indexed
       .map(
-        (page) => DocuTrackerDocumentPage(
-          delta: page.controller.document
-              .toDelta()
-              .toJson()
-              .map((item) => Map<String, dynamic>.from(item))
-              .toList(growable: false),
+        (entry) => DocuTrackerDocumentPage(
+          delta: _pageDelta(entry.$2),
+          memo: entry.$1 == 0 && _isMemo ? _currentMemo() : null,
         ),
       )
       .toList(growable: false);
@@ -230,7 +442,7 @@ class _DocuTrackerDocumentBuilderScreenState
   }
 
   void _addPage() {
-    if (!_canEditLayout || _busy || _pages.length >= 50) return;
+    if (!_canEditLayout || _busy || _isMemo || _pages.length >= 50) return;
     final controller = quill.QuillController.basic();
     final page = _EditorPage(controller: controller);
     final pageIndex = _pages.length;
@@ -396,16 +608,37 @@ class _DocuTrackerDocumentBuilderScreenState
   }
 
   Future<void> _insertOwnSignature() async {
-    if (!_canInsertOwnSignature || _currentUserId.isEmpty || _busy) return;
+    if (!_canInsertOwnOnDocument || _currentUserId.isEmpty || _busy) return;
+    final memoSlot = _isMemo ? await _memoOwnSlot() : null;
+    if (!mounted || (_isMemo && memoSlot == null && _canEditLayout)) return;
     final choice = await showDocuTrackerSignatureDialog(
       context,
       provider: _provider,
     );
     if (choice == null || !mounted) return;
-    final pageNumber = _activePage + 1;
-    final placement = _nextSignaturePlacement();
+    final slotRect = switch (memoSlot) {
+      DocuTrackerMemoSlot.preparedBy => DocuTrackerMemoLayout.preparedField,
+      DocuTrackerMemoSlot.approvedBy => DocuTrackerMemoLayout.approvedField,
+      null => null,
+    };
+    final pageNumber = slotRect == null ? _activePage + 1 : 1;
+    final placement = slotRect == null
+        ? _nextSignaturePlacement()
+        : (x: slotRect.left, y: slotRect.top);
+    final size = slotRect == null
+        ? const Size(0.3, 0.12)
+        : Size(slotRect.width, slotRect.height);
+    final label = memoSlot == null
+        ? 'Signature'
+        : DocuTrackerMemoSignatory.labelOf(memoSlot);
     if (!_canEditLayout) {
-      await _addOwnSignatureAsReviewer(pageNumber, placement, choice);
+      await _addOwnSignatureAsReviewer(
+        pageNumber,
+        placement,
+        choice,
+        size: size,
+        label: label,
+      );
       return;
     }
     final localId =
@@ -418,11 +651,11 @@ class _DocuTrackerDocumentBuilderScreenState
           pageNumber: pageNumber,
           x: placement.x,
           y: placement.y,
-          width: 0.3,
-          height: 0.12,
+          width: size.width,
+          height: size.height,
           assignedSignerId: _currentUserId,
           assignedSignerName: signer?.fullName,
-          label: 'Signature',
+          label: label,
         ),
       );
       _selectedFieldId = localId;
@@ -435,7 +668,7 @@ class _DocuTrackerDocumentBuilderScreenState
               !field.isSigned &&
               field.pageNumber == pageNumber &&
               field.assignedSignerId == _currentUserId &&
-              field.label == 'Signature',
+              field.label == label,
         )
         .toList(growable: false);
     if (savedFields.isEmpty) {
@@ -448,8 +681,10 @@ class _DocuTrackerDocumentBuilderScreenState
   Future<void> _addOwnSignatureAsReviewer(
     int pageNumber,
     ({double x, double y}) placement,
-    DocuTrackerSignatureChoice choice,
-  ) async {
+    DocuTrackerSignatureChoice choice, {
+    Size size = const Size(0.3, 0.12),
+    String? label,
+  }) async {
     final existingIds = _signatureFields.map((field) => field.id).toSet();
     setState(() => _saving = true);
     final result = await _provider.addOwnSignatureField(
@@ -457,8 +692,9 @@ class _DocuTrackerDocumentBuilderScreenState
       pageNumber: pageNumber,
       x: placement.x,
       y: placement.y,
-      width: 0.3,
-      height: 0.12,
+      width: size.width,
+      height: size.height,
+      label: label,
       signatureAssetId: choice.signatureAssetId,
       imageBytes: choice.imageBytes,
       mimeType: choice.mimeType,
@@ -558,6 +794,7 @@ class _DocuTrackerDocumentBuilderScreenState
     double? width,
     double? height,
   }) {
+    if (_isMemoSlot(field)) return;
     final canMoveSigned = field.isSigned && field.canSign;
     if (!canMoveSigned && (!_canEditLayout || field.isSigned)) return;
     final index = _signatureFields.indexWhere((item) => item.id == field.id);
@@ -590,7 +827,9 @@ class _DocuTrackerDocumentBuilderScreenState
   }
 
   void _startSignedFieldDrag(DocuTrackerSignatureField field) {
-    if (!field.isSigned || !field.canSign || _saving) return;
+    if (!field.isSigned || !field.canSign || _saving || _isMemoSlot(field)) {
+      return;
+    }
     final current = _signatureFields.firstWhere((item) => item.id == field.id);
     setState(() {
       _draggingSignedFieldId = field.id;
@@ -689,7 +928,9 @@ class _DocuTrackerDocumentBuilderScreenState
   }
 
   void _deleteSignatureField(DocuTrackerSignatureField field) {
-    if (!_canEditLayout || field.isSigned || _busy) return;
+    if (!_canEditLayout || field.isSigned || _busy || _isMemoSlot(field)) {
+      return;
+    }
     setState(() {
       _signatureFields.removeWhere((item) => item.id == field.id);
       if (_selectedFieldId == field.id) _selectedFieldId = null;
@@ -758,16 +999,21 @@ class _DocuTrackerDocumentBuilderScreenState
               selectedFieldId: _selectedFieldId,
               canEditLayout: _canEditLayout,
               isBusy: _busy,
-              onAddField: _canEditLayout
+              isLocked: _isMemoSlot,
+              onAddField: _canEditLayout && !_isMemo
                   ? () => closeThen(() => unawaited(_addSignatureField()))
                   : null,
-              onInsertOwn: _canInsertOwnSignature
+              onInsertOwn: _canInsertOwnOnDocument
                   ? () => closeThen(() => unawaited(_insertOwnSignature()))
                   : null,
               onClose: () => Navigator.of(sheetContext).pop(),
               onSelect: (field) =>
                   closeThen(() => unawaited(_focusSignatureField(field))),
-              onSign: (field) => closeThen(() => unawaited(_signField(field))),
+              onSign: (field) => closeThen(
+                () => unawaited(
+                  _isMemoSlot(field) ? _signMemoSlot(field) : _signField(field),
+                ),
+              ),
               onDelete: (field) =>
                   closeThen(() => _deleteSignatureField(field)),
             ),
@@ -891,10 +1137,43 @@ class _DocuTrackerDocumentBuilderScreenState
     }
   }
 
+  /// Vector Memo PDF; release details come from a fresh copy of the document
+  /// so only an officially released Memo prints its release block.
+  Future<Uint8List> _buildMemoPdf() async {
+    if (_busy || _pages.isEmpty) throw StateError('Document is busy.');
+    setState(() {
+      _exporting = true;
+      _selectedFieldId = null;
+    });
+    FocusManager.instance.primaryFocus?.unfocus();
+    try {
+      final documentId = widget.document.id;
+      final latest = documentId == null
+          ? null
+          : await _provider.fetchDocument(documentId);
+      if (!mounted) throw StateError('Document was closed.');
+      if (latest != null) _latestDocument = latest;
+      final assets = await DocuTrackerMemoPdfAssets.load();
+      final theme = await loadDocuTrackerMemoPdfTheme();
+      return await buildDocuTrackerMemoPdf(
+        memo: _currentMemo(),
+        body: _pageDelta(_pages.first),
+        signatureFields: _signatureFields,
+        release: DocuTrackerMemoRelease.fromDocument(
+          _latestDocument ?? widget.document,
+        ),
+        assets: assets,
+        theme: theme,
+      );
+    } finally {
+      if (mounted) setState(() => _exporting = false);
+    }
+  }
+
   Future<void> _printDocument() async {
     if (_busy) return;
     try {
-      final bytes = await _buildPdf();
+      final bytes = _isMemo ? await _buildMemoPdf() : await _buildPdf();
       await Printing.layoutPdf(
         onLayout: (_) async => bytes,
         format: PdfPageFormat.a4,
@@ -912,7 +1191,7 @@ class _DocuTrackerDocumentBuilderScreenState
   Future<void> _exportPdf() async {
     if (_busy) return;
     try {
-      final bytes = await _buildPdf();
+      final bytes = _isMemo ? await _buildMemoPdf() : await _buildPdf();
       final safeName = widget.document.title
           .replaceAll(RegExp(r'[^A-Za-z0-9._-]+'), '_')
           .replaceAll(RegExp(r'_+'), '_');
@@ -1050,7 +1329,7 @@ class _DocuTrackerDocumentBuilderScreenState
                             value: 'format',
                             child: Text('Format'),
                           ),
-                        if (_canEditLayout && _pages.length < 50)
+                        if (_canEditLayout && !_isMemo && _pages.length < 50)
                           const PopupMenuItem(
                             value: 'add',
                             child: Text('Add Page'),
@@ -1276,15 +1555,20 @@ class _DocuTrackerDocumentBuilderScreenState
                     selectedFieldId: _selectedFieldId,
                     canEditLayout: _canEditLayout,
                     isBusy: _busy,
+                    isLocked: _isMemoSlot,
                     onClose: () => setState(() => _signaturePanelOpen = false),
-                    onAddField: _canEditLayout
+                    onAddField: _canEditLayout && !_isMemo
                         ? () => unawaited(_addSignatureField())
                         : null,
-                    onInsertOwn: _canInsertOwnSignature
+                    onInsertOwn: _canInsertOwnOnDocument
                         ? () => unawaited(_insertOwnSignature())
                         : null,
                     onSelect: (field) => unawaited(_focusSignatureField(field)),
-                    onSign: (field) => unawaited(_signField(field)),
+                    onSign: (field) => unawaited(
+                      _isMemoSlot(field)
+                          ? _signMemoSlot(field)
+                          : _signField(field),
+                    ),
                     onDelete: _deleteSignatureField,
                   ),
                 ),
@@ -1487,7 +1771,7 @@ class _DocuTrackerDocumentBuilderScreenState
   Widget _buildPage(int index, double scale) {
     final page = _pages[index];
     final fields = _signatureFields
-        .where((field) => field.pageNumber == index + 1)
+        .where((field) => field.pageNumber == index + 1 && !_isMemoSlot(field))
         .toList(growable: false);
     return Column(
       mainAxisSize: MainAxisSize.min,
@@ -1526,7 +1810,30 @@ class _DocuTrackerDocumentBuilderScreenState
                       clipBehavior: Clip.none,
                       children: [
                         Positioned.fill(
-                          child: _formatVersion >= _letterheadFormatVersion
+                          child: _isMemo && index == 0
+                              ? DocuTrackerMemoSheet(
+                                  size: const Size(_paperWidth, _paperHeight),
+                                  toController: _memoTo,
+                                  subjectController: _memoSubject,
+                                  dateController: _memoDate,
+                                  ccController: _memoCc,
+                                  editable: _canEditLayout && !_busy,
+                                  preparedBy: _memoSignatory(
+                                    DocuTrackerMemoSlot.preparedBy,
+                                  ),
+                                  approvedBy: _memoSignatory(
+                                    DocuTrackerMemoSlot.approvedBy,
+                                  ),
+                                  onSign: _exporting || _saving
+                                      ? null
+                                      : (field) =>
+                                            unawaited(_signMemoSlot(field)),
+                                  release: DocuTrackerMemoRelease.fromDocument(
+                                    _latestDocument ?? widget.document,
+                                  ),
+                                  body: _buildPageEditor(page, memo: true),
+                                )
+                              : _formatVersion >= _letterheadFormatVersion
                               ? DocuTrackerPrintablePageFrame(
                                   documentTitle: widget.document.title,
                                   letterheadImageBytes:
@@ -1556,7 +1863,7 @@ class _DocuTrackerDocumentBuilderScreenState
     );
   }
 
-  Widget _buildPageEditor(_EditorPage page) {
+  Widget _buildPageEditor(_EditorPage page, {bool memo = false}) {
     return quill.QuillEditor.basic(
       key: ObjectKey(page),
       controller: page.controller,
@@ -1568,12 +1875,17 @@ class _DocuTrackerDocumentBuilderScreenState
             editable: _canEditLayout && !_busy,
           ),
         ],
-        scrollable: false,
+        // A long Memo body scrolls here and flows onto extra printed pages,
+        // so it never runs into the fixed signature block.
+        scrollable: memo,
+        customStyles: memo ? docuTrackerMemoBodyStyles() : null,
         expands: true,
         padding: EdgeInsets.zero,
         autoFocus: false,
         placeholder: _canEditLayout && !_exporting
-            ? 'Start typing your document…'
+            ? memo
+                  ? 'Write the memorandum body…'
+                  : 'Start typing your document…'
             : null,
         enableInteractiveSelection: true,
       ),

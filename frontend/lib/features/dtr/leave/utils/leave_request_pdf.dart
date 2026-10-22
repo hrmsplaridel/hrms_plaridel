@@ -1,3 +1,4 @@
+import 'leave_design_capture.dart';
 import 'configured_leave_pdf.dart';
 // ignore_for_file: unused_element
 
@@ -13,7 +14,6 @@ import 'package:hrms_plaridel/features/dtr/leave/utils/leave_certification_balan
 import 'package:hrms_plaridel/features/dtr/leave/utils/leave_form_remarks.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_request.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_type.dart';
-import 'package:hrms_plaridel/features/dtr/leave/models/leave_type_definition.dart';
 
 /// Loaded once; kept for the app lifetime. [pw.Page.build] runs **lazily** on
 /// `doc.save()` / print — must not rely on fonts that were cleared after
@@ -288,6 +288,7 @@ class LeaveRequestPdf {
     Uint8List? departmentHeadSignatureBytes,
     Uint8List? hrApproverSignatureBytes,
     Uint8List? certificationOfficerSignatureBytes,
+    LeaveDesignCapture? designCapture,
   }) async {
     return _LeaveRequestPdfFixedEngine.buildPdf(
       request: request,
@@ -302,6 +303,7 @@ class LeaveRequestPdf {
       departmentHeadSignatureBytes: departmentHeadSignatureBytes,
       hrApproverSignatureBytes: hrApproverSignatureBytes,
       certificationOfficerSignatureBytes: certificationOfficerSignatureBytes,
+      designCapture: designCapture,
     );
   }
 
@@ -339,7 +341,14 @@ class LeaveRequestPdf {
     final bytes = await saveConfiguredLeavePdf(
       request: request,
       document: document,
+      balances: balances,
       departmentReviewer: recommendationOfficerName,
+      departmentReviewerTitle: recommendationOfficerTitle,
+      approvingAuthorityName: approvingAuthorityName,
+      approvingAuthorityTitle: approvingAuthorityTitle,
+      certificationOfficerName: certificationOfficerName,
+      certificationOfficerTitle: certificationOfficerTitle,
+      certificationSignature: certificationOfficerSignatureBytes,
       applicantSignature: applicantSignatureBytes,
       departmentSignature: departmentHeadSignatureBytes,
       finalSignature: hrApproverSignatureBytes,
@@ -1468,19 +1477,6 @@ class _LeaveRequestPdfFixedEngine {
     return '${d.year}-$mm-$dd';
   }
 
-  static String _customDetailValue(
-    LeaveCustomFieldDefinition field,
-    dynamic value,
-  ) {
-    if (field.type == LeaveCustomFieldType.boolean) {
-      return value == true ? 'Yes' : 'No';
-    }
-    if (field.type == LeaveCustomFieldType.date) {
-      return _fmtDate(DateTime.tryParse(value.toString()));
-    }
-    return value.toString();
-  }
-
   static ({String last, String first, String middle}) _nameParts(String full) {
     final parts = full
         .trim()
@@ -1548,20 +1544,26 @@ class _LeaveRequestPdfFixedEngine {
     ),
   );
 
-  static pw.Widget _underlineValue(String value, {double h = 14}) =>
-      pw.Container(
-        height: h,
-        alignment: pw.Alignment.bottomLeft,
-        decoration: const pw.BoxDecoration(
-          border: pw.Border(
-            bottom: pw.BorderSide(color: _borderColor, width: 0.8),
+  static pw.Widget _underlineValue(
+    String value, {
+    double h = 14,
+    String? source,
+    LeaveDesignCapture? capture,
+  }) => capture != null && source != null
+      ? capture.field(source, _underlineValue(value, h: h), underline: true)
+      : pw.Container(
+          height: h,
+          alignment: pw.Alignment.bottomLeft,
+          decoration: const pw.BoxDecoration(
+            border: pw.Border(
+              bottom: pw.BorderSide(color: _borderColor, width: 0.8),
+            ),
           ),
-        ),
-        child: pw.Text(
-          value.isEmpty ? ' ' : value,
-          style: const pw.TextStyle(fontSize: _fontSize),
-        ),
-      );
+          child: pw.Text(
+            value.isEmpty ? ' ' : value,
+            style: const pw.TextStyle(fontSize: _fontSize),
+          ),
+        );
 
   static pw.Widget _approvalValueLine({
     required String? value,
@@ -1745,7 +1747,13 @@ class _LeaveRequestPdfFixedEngine {
     Uint8List? departmentHeadSignatureBytes,
     Uint8List? hrApproverSignatureBytes,
     Uint8List? certificationOfficerSignatureBytes,
+    LeaveDesignCapture? designCapture,
   }) async {
+    pw.Widget signature(String source, List<pw.Widget> children) {
+      final node = pw.Column(children: children);
+      return designCapture?.signature(source, node) ?? node;
+    }
+
     final b = balances ?? const <LeaveBalance>[];
     final vl = b
         .where((e) => e.leaveType == LeaveType.vacationLeave)
@@ -1766,12 +1774,24 @@ class _LeaveRequestPdfFixedEngine {
         ? _s(request.employeeName)
         : request.userId;
     final n = _nameParts(fullName);
-    final reviewerName = _s(approvingAuthorityName);
-    final reviewerTitle = _s(approvingAuthorityTitle);
-    final certifierName = _s(certificationOfficerName);
-    final certifierTitle = _s(certificationOfficerTitle);
-    final recommendationName = _s(recommendationOfficerName);
-    final recommendationTitle = _s(recommendationOfficerTitle);
+    final reviewerName = designCapture == null
+        ? _s(approvingAuthorityName)
+        : 'Sample signer';
+    final reviewerTitle = designCapture == null
+        ? _s(approvingAuthorityTitle)
+        : 'Approving Authority';
+    final certifierName = designCapture == null
+        ? _s(certificationOfficerName)
+        : 'Sample signer';
+    final certifierTitle = designCapture == null
+        ? _s(certificationOfficerTitle)
+        : 'HR Officer';
+    final recommendationName = designCapture == null
+        ? _s(recommendationOfficerName)
+        : 'Sample signer';
+    final recommendationTitle = designCapture == null
+        ? _s(recommendationOfficerTitle)
+        : 'Department Head';
     final applicantSignatureImage =
         applicantSignatureBytes == null || applicantSignatureBytes.isEmpty
         ? null
@@ -1797,19 +1817,6 @@ class _LeaveRequestPdfFixedEngine {
         request.departmentHeadAction == 'department_head_rejected' ||
         request.status == LeaveRequestStatus.rejectedByDepartmentHead;
     final disapprovalReason = leaveFormDisapprovalReason(request);
-    final customDetails = request.employeeDetailSchemaSnapshot
-        .where((field) {
-          final value = request.customDetails[field.key];
-          return value != null && value.toString().trim().isNotEmpty;
-        })
-        .map(
-          (field) => (
-            label: field.label,
-            value: _customDetailValue(field, request.customDetails[field.key]),
-          ),
-        )
-        .toList(growable: false);
-
     final vlDed =
         (request.leaveType == LeaveType.vacationLeave ||
             request.leaveType == LeaveType.mandatoryForcedLeave)
@@ -1833,9 +1840,14 @@ class _LeaveRequestPdfFixedEngine {
     final doc = pw.Document(theme: fonts.theme);
     doc.addPage(
       pw.Page(
-        pageFormat: PdfPageFormat(612, 1008, marginAll: 16), // Legal size
+        pageFormat: designCapture?.renderingLayout == null
+            ? PdfPageFormat(612, 1008, marginAll: 16)
+            : PdfPageFormat(
+                designCapture!.renderingLayout!.pageWidth,
+                designCapture.renderingLayout!.pageHeight,
+              ), // Legal size
         build: (_) {
-          return pw.DefaultTextStyle(
+          final native = pw.DefaultTextStyle(
             style: pw.TextStyle(
               fontSize: _fontSize,
               font: fonts.base,
@@ -1892,6 +1904,8 @@ class _LeaveRequestPdfFixedEngine {
                                     _underlineValue(
                                       _s(request.officeDepartment),
                                       h: 12,
+                                      source: 'office',
+                                      capture: designCapture,
                                     ),
                                   ],
                                 ),
@@ -1917,13 +1931,20 @@ class _LeaveRequestPdfFixedEngine {
                                     pw.Row(
                                       children: [
                                         pw.Expanded(
-                                          child: _underlineValue(n.last, h: 12),
+                                          child: _underlineValue(
+                                            n.last,
+                                            h: 12,
+                                            source: 'employee_last_name',
+                                            capture: designCapture,
+                                          ),
                                         ),
                                         pw.SizedBox(width: 4),
                                         pw.Expanded(
                                           child: _underlineValue(
                                             n.first,
                                             h: 12,
+                                            source: 'employee_first_name',
+                                            capture: designCapture,
                                           ),
                                         ),
                                         pw.SizedBox(width: 4),
@@ -1931,6 +1952,8 @@ class _LeaveRequestPdfFixedEngine {
                                           child: _underlineValue(
                                             n.middle,
                                             h: 12,
+                                            source: 'employee_middle_name',
+                                            capture: designCapture,
                                           ),
                                         ),
                                       ],
@@ -1979,6 +2002,8 @@ class _LeaveRequestPdfFixedEngine {
                                     _underlineValue(
                                       _fmtDate(request.dateFiled),
                                       h: 12,
+                                      source: 'date',
+                                      capture: designCapture,
                                     ),
                                   ],
                                 ),
@@ -2004,6 +2029,8 @@ class _LeaveRequestPdfFixedEngine {
                                     _underlineValue(
                                       _s(request.positionTitle),
                                       h: 12,
+                                      source: 'position',
+                                      capture: designCapture,
                                     ),
                                   ],
                                 ),
@@ -2031,6 +2058,8 @@ class _LeaveRequestPdfFixedEngine {
                                           ? request.salary!.toStringAsFixed(2)
                                           : '',
                                       h: 12,
+                                      source: 'salary',
+                                      capture: designCapture,
                                     ),
                                   ],
                                 ),
@@ -2185,6 +2214,8 @@ class _LeaveRequestPdfFixedEngine {
                                     ),
                                     _underlineValue(
                                       _s(request.locationDetails),
+                                      source: 'location_details',
+                                      capture: designCapture,
                                     ),
                                     pw.SizedBox(height: 3),
                                     pw.Text(
@@ -2206,6 +2237,8 @@ class _LeaveRequestPdfFixedEngine {
                                     ),
                                     _underlineValue(
                                       _s(request.sickIllnessDetails),
+                                      source: 'sick_illness_details',
+                                      capture: designCapture,
                                     ),
                                     pw.SizedBox(height: 3),
                                     pw.Text(
@@ -2236,6 +2269,8 @@ class _LeaveRequestPdfFixedEngine {
                                     ),
                                     _underlineValue(
                                       _s(request.womenIllnessDetails),
+                                      source: 'women_illness_details',
+                                      capture: designCapture,
                                     ),
                                     pw.SizedBox(height: 3),
                                     pw.Text(
@@ -2314,7 +2349,11 @@ class _LeaveRequestPdfFixedEngine {
                                         fontWeight: pw.FontWeight.bold,
                                       ),
                                     ),
-                                    _underlineValue(daysText),
+                                    _underlineValue(
+                                      daysText,
+                                      source: 'working_days',
+                                      capture: designCapture,
+                                    ),
                                     pw.SizedBox(height: 3),
                                     pw.Text(
                                       'INCLUSIVE DATES',
@@ -2338,6 +2377,8 @@ class _LeaveRequestPdfFixedEngine {
                                               ),
                                               _underlineValue(
                                                 _fmtDate(request.startDate),
+                                                source: 'start_date',
+                                                capture: designCapture,
                                               ),
                                             ],
                                           ),
@@ -2356,6 +2397,8 @@ class _LeaveRequestPdfFixedEngine {
                                               ),
                                               _underlineValue(
                                                 _fmtDate(request.endDate),
+                                                source: 'end_date',
+                                                capture: designCapture,
                                               ),
                                             ],
                                           ),
@@ -2382,31 +2425,37 @@ class _LeaveRequestPdfFixedEngine {
                                       request.commutation ==
                                           LeaveCommutationOption.requested,
                                     ),
-                                    if (applicantSignatureImage != null)
-                                      pw.Container(
-                                        height: 28,
-                                        width: double.infinity,
-                                        alignment: pw.Alignment.center,
-                                        child: pw.Image(
-                                          applicantSignatureImage,
-                                          width: 140,
+                                    signature('applicant', [
+                                      if (applicantSignatureImage != null)
+                                        pw.Container(
                                           height: 28,
-                                          fit: pw.BoxFit.contain,
+                                          width: double.infinity,
+                                          alignment: pw.Alignment.center,
+                                          child: pw.Image(
+                                            applicantSignatureImage,
+                                            width: 140,
+                                            height: 28,
+                                            fit: pw.BoxFit.contain,
+                                          ),
+                                        )
+                                      else
+                                        pw.SizedBox(
+                                          height: designCapture == null
+                                              ? 12
+                                              : 28,
                                         ),
-                                      )
-                                    else
-                                      pw.SizedBox(height: 12),
-                                    pw.Container(
-                                      height: 1,
-                                      color: _borderColor,
-                                    ),
-                                    pw.SizedBox(height: 4),
-                                    pw.Center(
-                                      child: pw.Text(
-                                        '(Signature of Applicant)',
-                                        style: pw.TextStyle(fontSize: _small),
+                                      pw.Container(
+                                        height: 1,
+                                        color: _borderColor,
                                       ),
-                                    ),
+                                      pw.SizedBox(height: 4),
+                                      pw.Center(
+                                        child: pw.Text(
+                                          '(Signature of Applicant)',
+                                          style: pw.TextStyle(fontSize: _small),
+                                        ),
+                                      ),
+                                    ]),
                                   ],
                                 ),
                               ),
@@ -2691,45 +2740,47 @@ class _LeaveRequestPdfFixedEngine {
                                         ),
                                       ),
                                     ),
-                                    pw.SizedBox(
-                                      height: 30,
-                                      child:
-                                          certificationOfficerSignatureImage ==
-                                              null
-                                          ? null
-                                          : pw.Center(
-                                              child: pw.Image(
-                                                certificationOfficerSignatureImage,
-                                                height: 28,
-                                                width: 110,
-                                                fit: pw.BoxFit.contain,
+                                    signature('certification_officer', [
+                                      pw.SizedBox(
+                                        height: 30,
+                                        child:
+                                            certificationOfficerSignatureImage ==
+                                                null
+                                            ? null
+                                            : pw.Center(
+                                                child: pw.Image(
+                                                  certificationOfficerSignatureImage,
+                                                  height: 28,
+                                                  width: 110,
+                                                  fit: pw.BoxFit.contain,
+                                                ),
                                               ),
+                                      ),
+                                      pw.Container(
+                                        height: 1,
+                                        color: _borderColor,
+                                      ),
+                                      pw.SizedBox(height: 4),
+                                      if (certifierName.isNotEmpty)
+                                        pw.Center(
+                                          child: pw.Text(
+                                            certifierName,
+                                            style: pw.TextStyle(
+                                              fontSize: _small,
+                                              fontWeight: pw.FontWeight.bold,
                                             ),
-                                    ),
-                                    pw.Container(
-                                      height: 1,
-                                      color: _borderColor,
-                                    ),
-                                    pw.SizedBox(height: 4),
-                                    if (certifierName.isNotEmpty)
-                                      pw.Center(
-                                        child: pw.Text(
-                                          certifierName,
-                                          style: pw.TextStyle(
-                                            fontSize: _small,
-                                            fontWeight: pw.FontWeight.bold,
                                           ),
                                         ),
-                                      ),
-                                    if (certifierTitle.isNotEmpty)
-                                      pw.Center(
-                                        child: pw.Text(
-                                          certifierTitle,
-                                          style: const pw.TextStyle(
-                                            fontSize: _small,
+                                      if (certifierTitle.isNotEmpty)
+                                        pw.Center(
+                                          child: pw.Text(
+                                            certifierTitle,
+                                            style: const pw.TextStyle(
+                                              fontSize: _small,
+                                            ),
                                           ),
                                         ),
-                                      ),
+                                    ]),
                                   ],
                                 ),
                               ),
@@ -2758,51 +2809,55 @@ class _LeaveRequestPdfFixedEngine {
                                       font: fonts.base,
                                       gap: 8,
                                     ),
-                                    if (departmentHeadSignatureImage != null)
-                                      pw.Container(
-                                        height: 30,
-                                        width: double.infinity,
-                                        alignment: pw.Alignment.center,
-                                        child: pw.Image(
-                                          departmentHeadSignatureImage,
-                                          width: 140,
+                                    signature('department_head', [
+                                      if (departmentHeadSignatureImage != null)
+                                        pw.Container(
                                           height: 30,
-                                          fit: pw.BoxFit.contain,
-                                        ),
-                                      )
-                                    else
-                                      pw.SizedBox(height: 30),
-                                    pw.Container(
-                                      height: 1,
-                                      color: _borderColor,
-                                    ),
-                                    pw.SizedBox(height: 4),
-                                    if (recommendationName.isNotEmpty)
-                                      pw.Center(
-                                        child: pw.Text(
-                                          recommendationName,
-                                          style: pw.TextStyle(
-                                            fontSize: _small,
-                                            fontWeight: pw.FontWeight.bold,
+                                          width: double.infinity,
+                                          alignment: pw.Alignment.center,
+                                          child: pw.Image(
+                                            departmentHeadSignatureImage,
+                                            width: 140,
+                                            height: 30,
+                                            fit: pw.BoxFit.contain,
+                                          ),
+                                        )
+                                      else
+                                        pw.SizedBox(height: 30),
+                                      pw.Container(
+                                        height: 1,
+                                        color: _borderColor,
+                                      ),
+                                      pw.SizedBox(height: 4),
+                                      if (recommendationName.isNotEmpty)
+                                        pw.Center(
+                                          child: pw.Text(
+                                            recommendationName,
+                                            style: pw.TextStyle(
+                                              fontSize: _small,
+                                              fontWeight: pw.FontWeight.bold,
+                                            ),
+                                          ),
+                                        )
+                                      else
+                                        pw.Center(
+                                          child: pw.Text(
+                                            '(Authorized Officer)',
+                                            style: pw.TextStyle(
+                                              fontSize: _small,
+                                            ),
                                           ),
                                         ),
-                                      )
-                                    else
-                                      pw.Center(
-                                        child: pw.Text(
-                                          '(Authorized Officer)',
-                                          style: pw.TextStyle(fontSize: _small),
-                                        ),
-                                      ),
-                                    if (recommendationTitle.isNotEmpty)
-                                      pw.Center(
-                                        child: pw.Text(
-                                          recommendationTitle,
-                                          style: const pw.TextStyle(
-                                            fontSize: _small,
+                                      if (recommendationTitle.isNotEmpty)
+                                        pw.Center(
+                                          child: pw.Text(
+                                            recommendationTitle,
+                                            style: const pw.TextStyle(
+                                              fontSize: _small,
+                                            ),
                                           ),
                                         ),
-                                      ),
+                                    ]),
                                   ],
                                 ),
                               ),
@@ -2885,45 +2940,47 @@ class _LeaveRequestPdfFixedEngine {
                               padding: const pw.EdgeInsets.fromLTRB(8, 6, 8, 8),
                               child: pw.Column(
                                 children: [
-                                  if (hrApproverSignatureImage != null)
-                                    pw.Container(
-                                      height: 30,
-                                      width: double.infinity,
-                                      alignment: pw.Alignment.center,
-                                      child: pw.Image(
-                                        hrApproverSignatureImage,
-                                        width: 140,
+                                  signature('hr_approver', [
+                                    if (hrApproverSignatureImage != null)
+                                      pw.Container(
                                         height: 30,
-                                        fit: pw.BoxFit.contain,
+                                        width: double.infinity,
+                                        alignment: pw.Alignment.center,
+                                        child: pw.Image(
+                                          hrApproverSignatureImage,
+                                          width: 140,
+                                          height: 30,
+                                          fit: pw.BoxFit.contain,
+                                        ),
+                                      )
+                                    else
+                                      pw.SizedBox(height: 20),
+                                    pw.Container(
+                                      height: 1,
+                                      color: _borderColor,
+                                      margin: const pw.EdgeInsets.symmetric(
+                                        horizontal: 180,
                                       ),
-                                    )
-                                  else
-                                    pw.SizedBox(height: 20),
-                                  pw.Container(
-                                    height: 1,
-                                    color: _borderColor,
-                                    margin: const pw.EdgeInsets.symmetric(
-                                      horizontal: 180,
                                     ),
-                                  ),
-                                  pw.SizedBox(height: 3),
-                                  if (reviewerName.isNotEmpty)
-                                    pw.Text(
-                                      reviewerName,
-                                      style: pw.TextStyle(
-                                        fontSize: _small,
-                                        fontWeight: pw.FontWeight.bold,
+                                    pw.SizedBox(height: 3),
+                                    if (reviewerName.isNotEmpty)
+                                      pw.Text(
+                                        reviewerName,
+                                        style: pw.TextStyle(
+                                          fontSize: _small,
+                                          fontWeight: pw.FontWeight.bold,
+                                        ),
+                                        textAlign: pw.TextAlign.center,
                                       ),
-                                      textAlign: pw.TextAlign.center,
-                                    ),
-                                  if (reviewerTitle.isNotEmpty)
-                                    pw.Text(
-                                      reviewerTitle,
-                                      style: const pw.TextStyle(
-                                        fontSize: _small,
+                                    if (reviewerTitle.isNotEmpty)
+                                      pw.Text(
+                                        reviewerTitle,
+                                        style: const pw.TextStyle(
+                                          fontSize: _small,
+                                        ),
+                                        textAlign: pw.TextAlign.center,
                                       ),
-                                      textAlign: pw.TextAlign.center,
-                                    ),
+                                  ]),
                                 ],
                               ),
                             ),
@@ -2936,53 +2993,16 @@ class _LeaveRequestPdfFixedEngine {
               ],
             ),
           );
+          return designCapture?.page(
+                native,
+                width: 612,
+                height: 1008,
+                margin: 16,
+              ) ??
+              native;
         },
       ),
     );
-    if (customDetails.isNotEmpty) {
-      doc.addPage(
-        pw.MultiPage(
-          pageFormat: PdfPageFormat(612, 1008, marginAll: 28),
-          build: (_) => [
-            pw.Text(
-              'ADDITIONAL LEAVE INFORMATION',
-              style: pw.TextStyle(fontSize: 16, fontWeight: pw.FontWeight.bold),
-            ),
-            pw.SizedBox(height: 6),
-            pw.Text(
-              '${request.leaveTypeLabel} - $fullName',
-              style: const pw.TextStyle(fontSize: 10),
-            ),
-            pw.SizedBox(height: 16),
-            pw.Table(
-              border: pw.TableBorder.all(color: _borderColor, width: 0.6),
-              columnWidths: const {
-                0: pw.FlexColumnWidth(1.1),
-                1: pw.FlexColumnWidth(2.4),
-              },
-              children: [
-                for (final detail in customDetails)
-                  pw.TableRow(
-                    children: [
-                      pw.Padding(
-                        padding: const pw.EdgeInsets.all(8),
-                        child: pw.Text(
-                          detail.label,
-                          style: pw.TextStyle(fontWeight: pw.FontWeight.bold),
-                        ),
-                      ),
-                      pw.Padding(
-                        padding: const pw.EdgeInsets.all(8),
-                        child: pw.Text(detail.value),
-                      ),
-                    ],
-                  ),
-              ],
-            ),
-          ],
-        ),
-      );
-    }
     return doc;
   }
 

@@ -41,6 +41,7 @@ class ApiLeaveRepository implements LeaveRepository {
     'commutation',
     'details',
     'status',
+    'applicant_signature_asset_id',
   };
 
   const ApiLeaveRepository();

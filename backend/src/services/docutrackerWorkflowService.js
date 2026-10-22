@@ -2,17 +2,20 @@ const { normalizeStatus, mapDocumentRow } = require('./docutrackerDocumentMapper
 const { sameEntityId } = require('../utils/sameEntityId');
 const { todayInHrmsTimezone } = require('../utils/dateRangeParser');
 const { resolveActiveMayor } = require('./officialSignatoryService');
-const { GENERAL_PERMISSION_ACTIONS } = require('./docutrackerSystemAccessActions');
-const { excludeMayorIntakeStubSql } = require('../utils/mayorIntakeStub');
+const {
+  GENERAL_PERMISSION_ACTIONS,
+  RELEASE_ACTION,
+} = require('./docutrackerSystemAccessActions');
 const {
   getEmployeeDepartmentForDate,
-  getEmployeeReviewSnapshot,
   resolveDepartmentReviewers,
 } = require('./departmentReviewerService');
 
 const DYNAMIC_DEPARTMENT_ASSIGNEE_SOURCES = new Set([
   'department_reviewers',
   'submitter_department_reviewers',
+  'final_hr_reviewers',
+  'active_mayor',
 ]);
 
 function isDynamicDepartmentAssigneeSource(source) {
@@ -49,6 +52,7 @@ const DOC_ACTIONS = new Set([
   'approve',
   'reject',
   'submit',
+  RELEASE_ACTION,
 ]);
 // Overdue is still "at holder / active review" — same holder actions as in_review / escalated.
 const TRANSITION_ALLOWED_FROM = {
@@ -113,23 +117,14 @@ async function recordInitialDocumentFile(client, { documentId, fileName, filePat
 }
 
 /**
- * Next step owned by the RSP / L&D source module. Only admins act on these
- * records (RSP applications and L&D report review are admin-only routes);
- * DocuTracker links to the module and never transitions the record itself.
+ * Next step owned by the L&D source module. Only admins act on these records
+ * (L&D report review is an admin-only route); DocuTracker links to the module
+ * and never transitions the record itself.
  */
-const RSP_APPLICATION_ADMIN_ACTIONS = Object.freeze({
-  submitted: { action: 'review_documents_in_rsp', label: 'Review applicant documents in RSP' },
-  exam_taken: { action: 'grade_exam_in_rsp', label: 'Complete exam grading in RSP' },
-  passed: { action: 'continue_hiring_in_rsp', label: 'Continue hiring steps in RSP' },
-});
-
 function sourceModuleActionForRow(row, user) {
   const role = String(user?.role || '').trim().toLowerCase();
   if (role !== 'admin') return null;
   const status = String(row.source_status || '').trim().toLowerCase();
-  if (row.source_module === 'rsp' && row.source_table === 'recruitment_applications') {
-    return RSP_APPLICATION_ADMIN_ACTIONS[status] || null;
-  }
   if (
     row.source_module === 'ld' &&
     row.source_table === 'training_daily_reports' &&
@@ -141,7 +136,7 @@ function sourceModuleActionForRow(row, user) {
 }
 
 function sourceActionForRow(row, user) {
-  if (row.source_module === 'rsp' || row.source_module === 'ld') {
+  if (row.source_module === 'ld') {
     return sourceModuleActionForRow(row, user);
   }
   if (row.source_module !== 'dtr' || row.source_table !== 'leave_requests') {
@@ -208,17 +203,6 @@ function mapSourceStatusToDocuTracker(sourceModule, sourceStatus) {
     return 'pending';
   }
 
-  if (sourceModule === 'rsp') {
-    // Applicants may resubmit declined documents; hiring completes at registered.
-    if (status === 'document_declined') return 'returned';
-    if (status === 'failed') return 'rejected';
-    if (status === 'registered') return 'approved';
-    if (status === 'document_approved' || status === 'exam_taken' || status === 'passed') {
-      return 'in_review';
-    }
-    return 'pending';
-  }
-
   if (sourceModule === 'dtr') {
     if (status === 'approved') return 'approved';
     if (status === 'returned') return 'returned';
@@ -241,6 +225,9 @@ function mapSourceStatusToDocuTracker(sourceModule, sourceStatus) {
 
   return 'pending';
 }
+
+/** Deepest list offset served; bounds the native rows fetched for a merged page. */
+const MAX_LIST_OFFSET = 10000;
 
 function parseLimitOffset(filters = {}) {
   const limitVal = Number.isNaN(Number(filters.limit)) ? 50 : Math.min(Number(filters.limit), 200);
@@ -415,27 +402,8 @@ async function listSourceBackedDocuments(pool, user, filters = {}) {
     );
     pieces.push(...leaveRows);
   }
-
-  if (shouldInclude('rsp') && user.role === 'admin' && (await canViewModule('rsp'))) {
-    const rspRows = await safeSourceQuery(
-      'rsp.recruitment_applications',
-      `SELECT
-         a.id::text AS source_record_id,
-         'rsp'::text AS source_module,
-         'recruitment_applications'::text AS source_table,
-         COALESCE(NULLIF(a.position_applied_for, ''), a.full_name, 'Recruitment application') AS source_title,
-         COALESCE(NULLIF(a.resume_notes, ''), 'Applicant: ' || a.full_name) AS description,
-         NULL::text AS created_by,
-         a.full_name AS creator_name,
-         a.created_at AS created_at,
-         a.updated_at AS updated_at,
-         a.status AS source_status
-       FROM recruitment_applications a
-       WHERE ${excludeMayorIntakeStubSql('a')}
-         AND a.status NOT IN ('endorsed', 'rejected')`
-    );
-    pieces.push(...rspRows);
-  }
+  // Recruitment records stay in RSP. RSP forms reach DocuTracker only as
+  // signature requests (docutrackerRspSignatureService), never as list rows.
 
   const q = String(filters.q || '').toLowerCase().trim();
   const statusFilter = normalizeStatus(filters.status);
@@ -1086,6 +1054,24 @@ async function filterDocumentsViewableByUser(pool, user, rows, { includeDepartme
     ? new Set((await listReviewedDepartments(pool, uid)).map((d) => String(d.id)))
     : new Set();
 
+  const releaseRows = rows.filter(isReleaseTrackedDocument);
+  const releasePermissionRows = releaseRows.length
+    ? await fetchAllPermissionRowsForAction(pool, { role: user.role, userId: uid, action: RELEASE_ACTION })
+    : [];
+  const userDepartmentIds = releaseRows.some((r) => r.released_at && r.released_to_department_id)
+    ? new Set(await listUserDepartmentIds(pool, uid))
+    : new Set();
+  const hasReleaseAccess = (row) => {
+    if (!isReleaseTrackedDocument(row)) return false;
+    const context = permissionContext(user, row.document_type);
+    if (resolvePermissionDecisionFromRows(releasePermissionRows, context) === true) return true;
+    return Boolean(
+      row.released_at &&
+      row.released_to_department_id &&
+      userDepartmentIds.has(String(row.released_to_department_id))
+    );
+  };
+
   const out = [];
   for (const row of rows) {
     const userSpecificView = resolveUserSpecificPermissionFromRows(
@@ -1114,12 +1100,124 @@ async function filterDocumentsViewableByUser(pool, user, rows, { includeDepartme
       });
       continue;
     }
+    if (hasReleaseAccess(row)) {
+      out.push({ ...row, viewer_release_access: true });
+      continue;
+    }
     if (isDepartmentQueueDocument(row, reviewedDepartmentIds)) {
       out.push(row);
     }
   }
 
   return out;
+}
+
+/** SQL twin of isDraftOrWipDocument for alias `d`. */
+const DRAFT_OR_WIP_SQL = `(
+  lower(btrim(COALESCE(d.status, ''))) = 'draft'
+  OR (
+    lower(btrim(COALESCE(d.status, ''))) = 'pending'
+    AND d.current_holder_id IS NULL
+    AND (d.current_step IS NULL OR d.current_step <= 0)
+    AND d.sent_time IS NULL
+  )
+)`;
+
+/** Stands in for "any document type without its own permission row". */
+const UNLISTED_DOCUMENT_TYPE = '\u0000unlisted';
+
+/**
+ * Per-type outcome of a permission resolver: the explicitly configured types
+ * it allows, and whether every other type (resolved via '*' rows) is allowed.
+ */
+function resolveTypeSet(explicitTypes, decide) {
+  return {
+    allowed: explicitTypes.filter((type) => decide(type)),
+    unlisted: decide(UNLISTED_DOCUMENT_TYPE),
+  };
+}
+
+/**
+ * WHERE predicate (alias `d`) selecting the native documents
+ * filterDocumentsViewableByUser keeps, so LIMIT/OFFSET page through visible
+ * rows only. Permission precedence is resolved here with the same resolvers
+ * and passed in as per-type sets; the JS filter still runs on the page.
+ */
+async function buildNativeVisibilityPredicate(pool, user, startIndex, { includeDepartmentQueue = false } = {}) {
+  const uid = user.id;
+  const [viewRows, releaseRows, userDepartmentIds, reviewedDepartments] = await Promise.all([
+    fetchAllPermissionRowsForAction(pool, { role: user.role, userId: uid, action: 'view' }),
+    fetchAllPermissionRowsForAction(pool, { role: user.role, userId: uid, action: RELEASE_ACTION }),
+    listUserDepartmentIds(pool, uid),
+    includeDepartmentQueue ? listReviewedDepartments(pool, uid) : Promise.resolve([]),
+  ]);
+  const explicitTypes = [
+    ...new Set(
+      [...viewRows, ...releaseRows]
+        .map((row) => String(row.document_type || ''))
+        .filter((type) => type && type !== '*')
+    ),
+  ];
+  const denied = resolveTypeSet(explicitTypes, (type) =>
+    resolveUserSpecificPermissionFromRows(viewRows, { userId: uid, documentType: type }) === false
+  );
+  const releasable = resolveTypeSet(explicitTypes, (type) =>
+    resolvePermissionDecisionFromRows(releaseRows, permissionContext(user, type)) === true
+  );
+
+  const params = [
+    uid,
+    explicitTypes,
+    denied.allowed,
+    denied.unlisted,
+    releasable.allowed,
+    releasable.unlisted,
+    userDepartmentIds,
+    reviewedDepartments.map((department) => String(department.id)),
+  ];
+  const p = (offset) => `$${startIndex + offset}`;
+  const typeIn = (allowedIndex, unlistedIndex) =>
+    `(d.document_type = ANY(${p(allowedIndex)}::text[])
+      OR (${p(unlistedIndex)}::boolean AND d.document_type <> ALL(${p(1)}::text[])))`;
+
+  const sql = `(
+    NOT ${typeIn(2, 3)}
+    AND (
+      d.created_by = ${p(0)}::uuid
+      OR d.current_holder_id = ${p(0)}::uuid
+      OR EXISTS (
+        SELECT 1
+        FROM docutracker_routing_records rr
+        INNER JOIN docutracker_routing_record_assignees ra ON ra.routing_record_id = rr.id
+        WHERE rr.document_id = d.id AND ra.user_id = ${p(0)}::uuid
+      )
+      OR EXISTS (
+        SELECT 1 FROM docutracker_document_history h
+        WHERE h.document_id = d.id AND h.actor_id = ${p(0)}::uuid
+      )
+      OR EXISTS (
+        SELECT 1 FROM docutracker_signature_fields sf
+        WHERE sf.document_id = d.id AND sf.assigned_signer_id = ${p(0)}::uuid
+      )
+      OR (
+        d.release_required = true
+        AND NULLIF(btrim(COALESCE(d.source_module, '')), '') IS NULL
+        AND lower(btrim(COALESCE(d.status, ''))) = 'approved'
+        AND (
+          ${typeIn(4, 5)}
+          OR (
+            d.released_at IS NOT NULL
+            AND d.released_to_department_id::text = ANY(${p(6)}::text[])
+          )
+        )
+      )
+      OR (
+        d.originating_department_id::text = ANY(${p(7)}::text[])
+        AND NOT ${DRAFT_OR_WIP_SQL}
+      )
+    )
+  )`;
+  return { sql, params };
 }
 
 function permissionPriority(row, { userId, roleIds, documentType }) {
@@ -1178,6 +1276,117 @@ async function hasPermission(client, { role, userId, documentType, action }) {
   });
 }
 
+/** Approved native document whose type required a release at final approval. */
+function isReleaseTrackedDocument(document) {
+  return (
+    document?.release_required === true &&
+    !document?.source_module &&
+    normalizeStatus(document?.status) === 'approved'
+  );
+}
+
+/** Departments of the user's active assignments on [effectiveDate]. */
+async function listUserDepartmentIds(client, userId, effectiveDate = todayInHrmsTimezone()) {
+  if (!userId) return [];
+  const result = await client.query(
+    `SELECT DISTINCT a.department_id::text AS department_id
+     FROM assignments a
+     WHERE a.employee_id = $1::uuid
+       AND a.department_id IS NOT NULL
+       AND COALESCE(a.is_active, true) = true
+       AND a.effective_from <= $2::date
+       AND (a.effective_to IS NULL OR a.effective_to >= $2::date)`,
+    [userId, effectiveDate]
+  );
+  return result.rows.map((row) => String(row.department_id));
+}
+
+function permissionContext(user, documentType) {
+  return { userId: user.id, roleIds: getRoleVariants(user.role), documentType };
+}
+
+/** Release authority from permission rows only: administrators get no bypass. */
+async function hasReleasePermission(client, { user, documentType }) {
+  if (!user?.id || !documentType) return false;
+  const rows = await fetchPermissionRows(client, {
+    role: user.role,
+    userId: user.id,
+    documentType,
+    action: RELEASE_ACTION,
+  });
+  return resolvePermissionDecisionFromRows(rows, permissionContext(user, documentType)) === true;
+}
+
+/**
+ * View granted by the release stage (never any other authority): authorized
+ * releasers of the type, and — once released — members of the receiving
+ * department. Like every other document relationship, receiving the document
+ * is not gated by role-level `view` rows; a user-specific view deny blocks it.
+ */
+async function getReleaseViewAccess(client, { user, document, viewRows }) {
+  const none = { releaser: false, recipient: false };
+  if (!user?.id || !isReleaseTrackedDocument(document)) return none;
+  const documentType = document.document_type;
+  const releaser = await hasReleasePermission(client, { user, documentType });
+  let recipient = false;
+  if (document.released_at && document.released_to_department_id) {
+    const userDenied =
+      resolveUserSpecificPermissionFromRows(viewRows || [], { userId: user.id, documentType }) === false;
+    if (!userDenied) {
+      const departmentIds = await listUserDepartmentIds(client, user.id);
+      recipient = departmentIds.includes(String(document.released_to_department_id));
+    }
+  }
+  return { releaser, recipient };
+}
+
+/** Whether [user] may release [document] now (before any release exists). */
+async function canReleaseDocument(client, { user, document }) {
+  if (!isReleaseTrackedDocument(document) || document.released_at) return false;
+  const viewRows = await fetchPermissionRows(client, {
+    role: user.role,
+    userId: user.id,
+    documentType: document.document_type,
+    action: 'view',
+  });
+  const userSpecificView = resolveUserSpecificPermissionFromRows(viewRows, {
+    userId: user.id,
+    documentType: document.document_type,
+  });
+  if (userSpecificView === false) return false;
+  return hasReleasePermission(client, { user, documentType: document.document_type });
+}
+
+/** Viewer flags for an already-authorized document response. */
+async function describeViewerReleaseAccess(client, { user, document }) {
+  if (!user?.id || !isReleaseTrackedDocument(document)) {
+    return { viewer_release_access: false, viewer_can_release: false };
+  }
+  const viewRows = await fetchPermissionRows(client, {
+    role: user.role,
+    userId: user.id,
+    documentType: document.document_type,
+    action: 'view',
+  });
+  const access = await getReleaseViewAccess(client, { user, document, viewRows });
+  return {
+    viewer_release_access: access.releaser || access.recipient,
+    viewer_can_release: await canReleaseDocument(client, { user, document }),
+  };
+}
+
+/** Per-type policy; native documents only. Missing type rows mean no release. */
+async function typeRequiresRelease(client, documentType) {
+  const result = await client.query(
+    `SELECT requires_release
+     FROM docutracker_document_types
+     WHERE document_type = $1
+     LIMIT 1`,
+    [documentType]
+  );
+  return result.rows?.[0]?.requires_release === true;
+}
+
 function getRelationshipFlags(document, user) {
   if (!user || !document) {
     return { isAdmin: false, isCreator: false, isReviewer: false };
@@ -1207,10 +1416,117 @@ function isCurrentHolder(document, userId) {
   return !!document && !!userId && sameEntityId(document.current_holder_id, userId);
 }
 
-async function getWorkflowStepAssigneeRecord(client, { document, userId }) {
+async function resolveEligibleDepartmentReviewers(client, { document, stepConfig, workflowVersion }) {
+  return (await resolveStepAssignees(client, {
+    explicitAssigneeId: null,
+    stepConfig,
+    currentHolderId: document.current_holder_id || null,
+    documentType: document.document_type,
+    workflowVersion,
+    submitterUserId: document.created_by || null,
+  })).map(String);
+}
+
+/**
+ * Department review steps have one active reviewer: the persisted current holder,
+ * and only while they are still an eligible reviewer. Authority never moves to
+ * another reviewer here; that requires a persisted Admin Recovery reassignment.
+ * The creator is never eligible. With activeOnly=false any eligible reviewer
+ * matches (used to validate an admin recovery target).
+ */
+async function getDepartmentReviewAssigneeRecord(client, { document, userId, stepConfig, workflowVersion, activeOnly }) {
+  if (document.created_by && sameEntityId(document.created_by, userId)) return null;
+  if (activeOnly && !sameEntityId(document.current_holder_id, userId)) return null;
+  let eligible;
+  try {
+    eligible = await resolveEligibleDepartmentReviewers(client, { document, stepConfig, workflowVersion });
+  } catch (error) {
+    if (activeOnly && error?.code === 'VALIDATION') return null;
+    throw error;
+  }
+  const index = eligible.indexOf(String(userId));
+  if (index < 0) return null;
+  return {
+    is_enabled: true,
+    is_primary: index === 0,
+    backup_rank: index === 0 ? null : index,
+    allowed_actions: Array.isArray(stepConfig.allowed_actions)
+      ? stepConfig.allowed_actions
+      : ['approve', 'forward', 'return', 'reject'],
+  };
+}
+
+const DEPARTMENT_REVIEW_REASSIGNMENT_MESSAGE =
+  'The assigned reviewer for this department review step is no longer an eligible reviewer. An administrator must reassign this document through Admin Recovery before any workflow action can be taken.';
+
+/** Null for non-department steps; otherwise whether the persisted holder may still review. */
+async function getDepartmentReviewHolderStatus(client, document) {
+  if (!document) return null;
+  const config = await getRoutingConfig(client, document.document_type, document.workflow_version || null);
+  const stepConfig = getStepByOrder(parseSteps(config?.steps || []), Number(document.current_step || 1));
+  if (!stepConfig || !isDynamicDepartmentAssigneeSource(stepConfig.assignee_source)) return null;
+  let eligible = [];
+  try {
+    eligible = await resolveEligibleDepartmentReviewers(client, {
+      document,
+      stepConfig,
+      workflowVersion: document.workflow_version || config?.version || null,
+    });
+  } catch (error) {
+    if (error?.code !== 'VALIDATION') throw error;
+  }
+  const holder = document.current_holder_id ? String(document.current_holder_id) : null;
+  return {
+    eligible,
+    holderEligible: Boolean(
+      holder && eligible.includes(holder) && !sameEntityId(holder, document.created_by)
+    ),
+  };
+}
+
+/**
+ * Escalation target for an overdue department review step, or null for other steps.
+ * Escalation only moves to the next eligible reviewer after the persisted holder
+ * (primary, then backups by rank). An ineligible holder or an exhausted reviewer
+ * chain yields no target so the document goes to Admin Recovery instead.
+ */
+async function resolveDepartmentReviewEscalation(client, document) {
+  const status = await getDepartmentReviewHolderStatus(client, document);
+  if (!status) return null;
+  if (!status.holderEligible) {
+    return { nextReviewerId: null, backupRank: null, reason: 'HOLDER_NOT_ELIGIBLE_REVIEWER' };
+  }
+  const candidates = status.eligible.filter((id) => !sameEntityId(id, document.created_by));
+  const nextIndex = candidates.indexOf(String(document.current_holder_id)) + 1;
+  const nextReviewerId = candidates[nextIndex] || null;
+  if (!nextReviewerId) {
+    return { nextReviewerId: null, backupRank: null, reason: 'NO_OTHER_ELIGIBLE_REVIEWER' };
+  }
+  return {
+    nextReviewerId,
+    backupRank: status.eligible.indexOf(nextReviewerId) || null,
+    reason: null,
+  };
+}
+
+async function getWorkflowStepAssigneeRecord(client, { document, userId, activeOnly = true }) {
   if (!document || !userId) return null;
   const step = Number(document.current_step || 1);
   const docType = document.document_type;
+
+  const config = await getRoutingConfig(client, docType, document.workflow_version || null);
+  const configuredStep = getStepByOrder(parseSteps(config?.steps || []), step);
+  if (configuredStep && isDynamicDepartmentAssigneeSource(configuredStep.assignee_source)) {
+    if (configuredStep.enabled === false) return null;
+    // Stored step-assignee rows are ignored here: department review is always dynamic.
+    return getDepartmentReviewAssigneeRecord(client, {
+      document,
+      userId,
+      stepConfig: configuredStep,
+      workflowVersion: document.workflow_version || config?.version || null,
+      activeOnly,
+    });
+  }
 
   let r;
   if (document.workflow_version != null) {
@@ -1257,25 +1573,17 @@ async function getWorkflowStepAssigneeRecord(client, { document, userId }) {
   const stored = r.rows?.[0] || null;
   if (stored) return stored;
 
-  // Compatibility path for dynamic department-reviewer and legacy JSON steps.
-  const config = await getRoutingConfig(
-    client,
-    docType,
-    document.workflow_version || null
-  );
-  const steps = parseSteps(config?.steps || []);
-  const stepConfig = getStepByOrder(steps, step);
+  // Compatibility path for legacy JSON steps.
+  const stepConfig = configuredStep;
   if (!stepConfig || stepConfig.enabled === false) return null;
-  if (!isDynamicDepartmentAssigneeSource(stepConfig.assignee_source)) {
-    const normalizedStep = await client.query(
-      `SELECT id FROM docutracker_workflow_steps
-       WHERE document_type = $1 AND workflow_version = $2 AND step_order = $3
-       LIMIT 1`,
-      [docType, document.workflow_version || config?.version || null, step]
-    );
-    // A removed assignment must not be resurrected from stale legacy JSON.
-    if (normalizedStep.rows?.length) return null;
-  }
+  const normalizedStep = await client.query(
+    `SELECT id FROM docutracker_workflow_steps
+     WHERE document_type = $1 AND workflow_version = $2 AND step_order = $3
+     LIMIT 1`,
+    [docType, document.workflow_version || config?.version || null, step]
+  );
+  // A removed assignment must not be resurrected from stale legacy JSON.
+  if (normalizedStep.rows?.length) return null;
   const assignees = await resolveStepAssignees(client, {
     explicitAssigneeId: null,
     stepConfig,
@@ -1316,8 +1624,11 @@ async function canUserPerformWorkflowAction(client, { user, document, action }) 
 }
 
 async function canUserPerformGeneralAction(client, { user, documentType, action }) {
-  if (user?.role === 'admin') return true;
   const canonicalAction = canonicalPermissionAction(action);
+  if (canonicalAction === RELEASE_ACTION) {
+    return hasReleasePermission(client, { user, documentType });
+  }
+  if (user?.role === 'admin') return true;
   if (!GENERAL_PERMISSION_ACTIONS.has(canonicalAction)) return false;
   const explicit = await hasPermission(client, {
     role: user.role,
@@ -1326,6 +1637,74 @@ async function canUserPerformGeneralAction(client, { user, documentType, action 
     action: canonicalAction,
   });
   return explicit === true;
+}
+
+async function getDepartmentName(client, departmentId) {
+  const result = await client.query(
+    'SELECT name FROM departments WHERE id = $1::uuid LIMIT 1',
+    [departmentId]
+  );
+  return result.rows?.[0]?.name || null;
+}
+
+/**
+ * Department review: primary reviewer first, then backups by rank. The
+ * submitter is never eligible; when nobody else remains the step is blocked.
+ */
+async function resolveDepartmentReviewStepAssignees(client, { stepConfig, source, submitterUserId }) {
+  const stepLabel = stepConfig?.step_order ?? 'unknown';
+  const effectiveDate = todayInHrmsTimezone();
+  let departmentId = null;
+  let departmentName = null;
+
+  if (source === 'submitter_department_reviewers') {
+    if (!submitterUserId) {
+      throw validationError(
+        `Submitter department reviewer step ${stepLabel} has no document creator`
+      );
+    }
+    const department = await getEmployeeDepartmentForDate(client, submitterUserId, effectiveDate);
+    if (!department?.departmentId) {
+      throw validationError(
+        'The submitter has no active department assignment, so no department reviewer can be resolved. Assign the submitter to a department before submitting.'
+      );
+    }
+    departmentId = department.departmentId;
+    departmentName = department.departmentName;
+  } else {
+    if (!stepConfig?.department_id) {
+      throw validationError(`Department reviewer step ${stepLabel} has no department`);
+    }
+    departmentId = stepConfig.department_id;
+  }
+
+  const resolved = await resolveDepartmentReviewers(client, {
+    departmentId,
+    effectiveDate,
+    excludeUserId: submitterUserId || null,
+  });
+  const reviewerIds = resolved.reviewers
+    .map((reviewer) => String(reviewer.reviewerId))
+    .filter((id) => id && !(submitterUserId && sameEntityId(id, submitterUserId)));
+  if (reviewerIds.length) return reviewerIds;
+
+  const name = departmentName || (await getDepartmentName(client, departmentId)) || 'this department';
+  const configured = submitterUserId
+    ? await resolveDepartmentReviewers(client, { departmentId, effectiveDate })
+    : { primary: null, reviewers: [] };
+  if (configured.primary && sameEntityId(configured.primary.reviewerId, submitterUserId)) {
+    throw validationError(
+      `No eligible reviewer is configured for ${name}. The primary reviewer cannot review their own document. Assign a backup reviewer before submitting.`
+    );
+  }
+  if (configured.reviewers.length) {
+    throw validationError(
+      `No eligible reviewer is configured for ${name}. The submitter is the only configured reviewer and cannot review their own document. Assign another reviewer before submitting.`
+    );
+  }
+  throw validationError(
+    `No reviewer is configured for ${name}. Assign a primary reviewer (Department Head) or a backup reviewer before submitting.`
+  );
 }
 
 async function resolveStepAssignees(client, {
@@ -1343,48 +1722,30 @@ async function resolveStepAssignees(client, {
 
   // Explicit assignee (must be pre-sanitized at workflow entry points for non-admins).
   if (explicitAssigneeId) {
+    if (
+      isDynamicDepartmentAssigneeSource(source) &&
+      submitterUserId &&
+      sameEntityId(explicitAssigneeId, submitterUserId)
+    ) {
+      throw validationError(
+        'The document creator cannot review their own document at a department review step.'
+      );
+    }
     const valid = await validateAssignee(client, explicitAssigneeId);
     if (!valid) throw validationError(`Invalid assignee '${explicitAssigneeId}'`);
     return [explicitAssigneeId];
   }
 
-  if (source === 'submitter_department_reviewers') {
-    const submitterId = submitterUserId || null;
-    if (!submitterId) {
-      throw validationError(
-        `Submitter department reviewer step ${stepConfig?.step_order ?? 'unknown'} has no document creator`
-      );
+  if (isDynamicDepartmentAssigneeSource(source)) {
+    if(source==='active_mayor' || source==='final_hr_reviewers') {
+      const reviewers=source==='active_mayor'
+        ? await resolveActiveMayor(client,todayInHrmsTimezone()).then(m=>m?[m.employee_id]:[])
+        : await require('./leaveFinalReviewerService').resolveFinalLeaveReviewerConfiguration(client).then(c=>c.reviewers.map(r=>r.id));
+      const ids=reviewers.filter(id=>!submitterUserId || !sameEntityId(id,submitterUserId));
+      if(!ids.length)throw validationError('No eligible active authority is available for this workflow step. Configure another reviewer or backup.');
+      return ids;
     }
-    const snapshot = await getEmployeeReviewSnapshot(client, {
-      employeeUserId: submitterId,
-      effectiveDate: todayInHrmsTimezone(),
-    });
-    const reviewerIds = (snapshot?.reviewerUserIds || []).map(String).filter(Boolean);
-    if (!reviewerIds.length) {
-      throw validationError(
-        `No active Department Head or backup reviewer is configured for the submitter's department (step ${stepConfig?.step_order ?? 'unknown'})`
-      );
-    }
-    return reviewerIds;
-  }
-
-  if (source === 'department_reviewers') {
-    if (!stepConfig?.department_id) {
-      throw validationError(
-        `Department reviewer step ${stepConfig?.step_order ?? 'unknown'} has no department`
-      );
-    }
-    const resolved = await resolveDepartmentReviewers(client, {
-      departmentId: stepConfig.department_id,
-      effectiveDate: todayInHrmsTimezone(),
-    });
-    const reviewerIds = resolved.reviewers.map((reviewer) => reviewer.reviewerId);
-    if (!reviewerIds.length) {
-      throw validationError(
-        `No active Department Head or backup reviewer is configured for step ${stepConfig?.step_order ?? 'unknown'}`
-      );
-    }
-    return reviewerIds;
+    return resolveDepartmentReviewStepAssignees(client, { stepConfig, source, submitterUserId });
   }
 
   if (type === 'user' || !type) {
@@ -1537,6 +1898,7 @@ async function isUserAssignedSignature(client, { document, userId }) {
 }
 
 async function canUserPerformDocumentAction(client, { user, document, action }) {
+  if (action === RELEASE_ACTION) return canReleaseDocument(client, { user, document });
   const relationship = getRelationshipFlags(document, user);
   if (relationship.isAdmin && !WORKFLOW_STEP_ACTIONS.has(action)) return true;
 
@@ -1641,7 +2003,8 @@ async function canUserPerformDocumentAction(client, { user, document, action }) 
         return true;
       }
     }
-    return false;
+    const releaseAccess = await getReleaseViewAccess(client, { user, document, viewRows });
+    return releaseAccess.releaser || releaseAccess.recipient;
   }
 
   // Other general type-level actions: create_draft / download use permission rows.
@@ -1671,7 +2034,11 @@ async function getEffectivePermissionExplanation(client, { user, action, documen
   const canonicalAction = canonicalPermissionAction(action);
   const relationship = getRelationshipFlags(document, user);
   const scopeType = document ? 'document' : 'type';
-  if (relationship.isAdmin && !WORKFLOW_STEP_ACTIONS.has(canonicalAction)) {
+  if (
+    relationship.isAdmin &&
+    !WORKFLOW_STEP_ACTIONS.has(canonicalAction) &&
+    canonicalAction !== RELEASE_ACTION
+  ) {
     return {
       scope: scopeType,
       action: canonicalAction,
@@ -1711,8 +2078,11 @@ async function getEffectivePermissionExplanation(client, { user, action, documen
       document,
       action: canonicalAction,
     });
+    const holderStatus = allowed ? null : await getDepartmentReviewHolderStatus(client, document);
     const reason = allowed
       ? (isHolder ? 'current_holder' : 'step_assignee')
+      : holderStatus && !holderStatus.holderEligible && !isDraftOrWipDocument(document)
+          ? 'reassignment_required'
       : !stepAssigneeRow
           ? 'not_assigned_to_step'
           : !allowedByAssignedRule
@@ -1748,6 +2118,40 @@ async function getEffectivePermissionExplanation(client, { user, action, documen
     }))
     .filter((entry) => entry.score >= 0)
     .sort((a, b) => b.score - a.score);
+  const explicitMatches = ranked.map((entry) => ({
+    score: entry.score,
+    user_id: entry.row.user_id,
+    role_id: entry.row.role_id,
+    document_type: entry.row.document_type,
+    granted: entry.row.granted === true,
+  }));
+
+  if (canonicalAction === RELEASE_ACTION && document) {
+    const explicitDecision = ranked.length ? ranked[0].row.granted === true : null;
+    const allowed = await canReleaseDocument(client, { user, document });
+    const reason = allowed
+      ? 'explicit_permission'
+      : !document.release_required || document.source_module
+        ? 'release_not_required'
+        : normalizeStatus(document.status) !== 'approved'
+          ? 'awaiting_final_approval'
+          : document.released_at
+            ? 'already_released'
+            : explicitDecision === true
+              ? 'view_blocked'
+              : 'release_permission_required';
+    return {
+      scope: scopeType,
+      action: canonicalAction,
+      document_type: documentType,
+      explicit_matches: explicitMatches,
+      explicit_decision: explicitDecision,
+      fallback_decision: false,
+      final_decision: allowed,
+      relationship,
+      reason,
+    };
+  }
 
   if (canonicalAction === 'view' && document) {
     const userSpecificDecision = resolveUserSpecificPermissionFromRows(rows, {
@@ -1763,12 +2167,17 @@ async function getEffectivePermissionExplanation(client, { user, action, documen
       document,
       userId: user.id,
     });
-    const relationshipAllowed =
+    const directRelationship =
       relationship.isCreator ||
       isHolder ||
       isAssigned ||
       isSignatureSigner ||
       (await isUserAssignedToAnyStep(client, { document, userId: user.id }));
+    const releaseAccess = directRelationship
+      ? { releaser: false, recipient: false }
+      : await getReleaseViewAccess(client, { user, document, viewRows: rows });
+    const relationshipAllowed =
+      directRelationship || releaseAccess.releaser || releaseAccess.recipient;
 
     if (userSpecificDecision === false) {
       return {
@@ -1808,6 +2217,10 @@ async function getEffectivePermissionExplanation(client, { user, action, documen
               ? 'step_assignee'
               : isSignatureSigner
                 ? 'signature_signer'
+              : releaseAccess.recipient
+                ? 'release_recipient'
+              : releaseAccess.releaser
+                ? 'authorized_releaser'
               : 'past_participant'
       : 'relationship_required';
 
@@ -1867,6 +2280,9 @@ async function ensureDocumentViewAccess(client, document, user) {
 }
 
 async function listDocuments(pool, user, filters = {}) {
+  if (parseLimitOffset(filters).offsetVal > MAX_LIST_OFFSET) {
+    throw validationError(`offset must be at most ${MAX_LIST_OFFSET}.`);
+  }
   const where = [];
   const params = [];
   let i = 1;
@@ -1911,11 +2327,26 @@ async function listDocuments(pool, user, filters = {}) {
     if (!reviewed.length) return { documents: [], source_warnings: [] };
     where.push(`d.originating_department_id = ANY($${i++}::uuid[])`);
     params.push(reviewed.map((d) => d.id));
+    where.push(`NOT ${DRAFT_OR_WIP_SQL}`);
+  }
+
+  if (user.role !== 'admin') {
+    const visibility = await buildNativeVisibilityPredicate(pool, user, i, {
+      includeDepartmentQueue: departmentScope,
+    });
+    where.push(visibility.sql);
+    params.push(...visibility.params);
+    i += visibility.params.length;
   }
 
   const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
   const { limitVal, offsetVal } = parseLimitOffset(filters);
-  params.push(limitVal, offsetVal);
+  // The default list merges source-backed rows and pages the merged result,
+  // so native rows are fetched from the top through the end of the page.
+  params.push(
+    departmentScope ? limitVal : offsetVal + limitVal,
+    departmentScope ? offsetVal : 0
+  );
 
   const result = await pool.query(
     `SELECT d.*,
@@ -1933,7 +2364,7 @@ async function listDocuments(pool, user, filters = {}) {
      LEFT JOIN users creator ON creator.id = d.created_by
      LEFT JOIN users holder ON holder.id = d.current_holder_id
      ${whereSql}
-     ORDER BY d.created_at DESC
+     ORDER BY d.created_at DESC, d.id DESC
      LIMIT $${i} OFFSET $${i + 1}`,
     params
   );
@@ -1987,6 +2418,7 @@ async function getDocumentBundle(pool, id, user) {
   docRow.viewer_is_routing_assignee =
     await isUserAssignedToCurrentStep(pool, { document: docRow, userId: user.id }) ||
     await isUserAssignedToAnyStep(pool, { document: docRow, userId: user.id });
+  Object.assign(docRow, await describeViewerReleaseAccess(pool, { user, document: docRow }));
 
   const [routingResult, historyResult] = await Promise.all([
     pool.query(
@@ -2360,6 +2792,13 @@ async function transitionDocument(pool, user, documentId, action, payload = {}) 
       }
     }
 
+    if (WORKFLOW_STEP_ACTIONS.has(action)) {
+      const holderStatus = await getDepartmentReviewHolderStatus(client, doc);
+      if (holderStatus && !holderStatus.holderEligible) {
+        throw validationError(DEPARTMENT_REVIEW_REASSIGNMENT_MESSAGE);
+      }
+    }
+
     const allowed = await canUserPerformDocumentAction(client, {
       user,
       document: doc,
@@ -2635,7 +3074,25 @@ async function transitionDocument(pool, user, documentId, action, payload = {}) 
       ]
     );
 
-    const updated = docUpdate.rows[0];
+    let updated = docUpdate.rows[0];
+
+    // The type policy is snapshotted at final approval so later policy edits
+    // never move existing approved documents into or out of "awaiting release".
+    if (
+      action === 'approve' &&
+      nextStatus === 'approved' &&
+      !doc.source_module &&
+      (await typeRequiresRelease(client, doc.document_type))
+    ) {
+      const releaseUpdate = await client.query(
+        `UPDATE docutracker_documents
+         SET release_required = true
+         WHERE id = $1
+         RETURNING *`,
+        [documentId]
+      );
+      updated = releaseUpdate.rows[0] || { ...updated, release_required: true };
+    }
 
     // Mark the CURRENT step as reviewed/closed when moving away or ending.
     // (Submit is opening step 1, so it should not mark anything reviewed.)
@@ -2662,7 +3119,10 @@ async function transitionDocument(pool, user, documentId, action, payload = {}) 
     if (nextHolder) {
       // Snapshot the assignee list for this step (allows multiple reviewers).
       const nextStepCfg = getStepByOrder(steps, nextStep);
-      const resolvedAssignees = nextStepCfg
+      // Department review backups are fallback candidates, not co-reviewers.
+      const resolvedAssignees = nextStepCfg && isDynamicDepartmentAssigneeSource(nextStepCfg.assignee_source)
+        ? [nextHolder]
+        : nextStepCfg
         ? await resolveStepAssignees(client, {
             explicitAssigneeId: transitionExplicitSanitized,
             stepConfig: nextStepCfg,
@@ -2916,6 +3376,7 @@ async function recoverDocumentAssignment(pool, user, documentId, payload = {}) {
     const configuredAssignee = await getWorkflowStepAssigneeRecord(client, {
       document: doc,
       userId: assigneeId,
+      activeOnly: false,
     });
     if (!configuredAssignee || configuredAssignee.is_enabled === false) {
       throw validationError('The recovery assignee is not configured for the current workflow step');
@@ -2965,14 +3426,16 @@ async function recoverDocumentAssignment(pool, user, documentId, payload = {}) {
       [assigneeId, deadline, status, remarks, routingRecordId]
     );
 
-    const resolvedAssignees = await resolveStepAssignees(client, {
-      explicitAssigneeId: null,
-      stepConfig,
-      currentHolderId: assigneeId,
-      documentType: doc.document_type,
-      workflowVersion: doc.workflow_version || config?.version || null,
-      submitterUserId: doc.created_by || null,
-    });
+    const resolvedAssignees = isDynamicDepartmentAssigneeSource(stepConfig.assignee_source)
+      ? [assigneeId]
+      : await resolveStepAssignees(client, {
+          explicitAssigneeId: null,
+          stepConfig,
+          currentHolderId: assigneeId,
+          documentType: doc.document_type,
+          workflowVersion: doc.workflow_version || config?.version || null,
+          submitterUserId: doc.created_by || null,
+        });
     const snapshotAssignees = Array.from(
       new Set([...resolvedAssignees, assigneeId].map(String).filter(Boolean))
     );
@@ -3070,6 +3533,7 @@ module.exports = {
   isReviewedSourceCompletion,
   permissionPriority,
   resolvePermissionDecisionFromRows,
+  resolveUserSpecificPermissionFromRows,
   ensureValidWorkflowConfig,
   hasPermission,
   canUserPerformDocumentAction,
@@ -3080,6 +3544,7 @@ module.exports = {
   getEffectivePermissionExplanation,
   parseSteps,
   resolveStepAssignees,
+  resolveDepartmentReviewEscalation,
   isDraftOrWipDocument,
   listDocuments,
   getDocumentBundle,
@@ -3089,4 +3554,9 @@ module.exports = {
   updateDocumentMetadata,
   recoverDocumentAssignment,
   addDocumentRemark,
+  isReleaseTrackedDocument,
+  hasReleasePermission,
+  canReleaseDocument,
+  describeViewerReleaseAccess,
+  typeRequiresRelease,
 };

@@ -295,7 +295,8 @@ void main() {
     // Two user rows for the same employee count as one exception.
     expect(find.descendant(of: tabs, matching: find.text('1')), findsOneWidget);
     expect(find.text('Hierarchy notice'), findsOneWidget);
-    expect(find.text('Restricted'), findsNWidgets(4));
+    // Includes Release, which administrators do not inherit.
+    expect(find.text('Restricted'), findsNWidgets(5));
   });
 
   testWidgets('renders in dark mode without layout errors', (tester) async {
@@ -679,7 +680,9 @@ void main() {
       expect(find.text('Document type: All document types'), findsOneWidget);
       expect(
         find.textContaining(
-          'Document-specific settings and employee exceptions stay in place.',
+          'These roles return to the system default policy for all document '
+          'types. Document-specific settings and employee exceptions stay in '
+          'place.',
         ),
         findsOneWidget,
       );
@@ -701,7 +704,7 @@ void main() {
     expect(find.text('Document type: Memo'), findsOneWidget);
     expect(
       find.textContaining(
-        'These roles will use their All document types settings.',
+        'These roles return to the system default policy for this document type',
       ),
       findsOneWidget,
     );
@@ -709,7 +712,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(savedPayload?['document_type'], 'memo');
     final changes = (savedPayload!['changes'] as List).cast<Map>();
-    expect(changes, hasLength(12));
+    expect(changes, hasLength(15));
     expect(changes.map((change) => change['role_id']).toSet(), {
       'hr',
       'supervisor',

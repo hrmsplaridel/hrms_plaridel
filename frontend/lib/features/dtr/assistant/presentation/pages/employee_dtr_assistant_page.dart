@@ -1,4 +1,6 @@
+import 'package:hrms_plaridel/features/dtr/assistant/presentation/widgets/application_review.dart';
 import 'dart:async';
+import 'package:hrms_plaridel/features/dtr/assistant/presentation/widgets/active_assistant_field.dart';
 import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
@@ -59,6 +61,8 @@ class _EmployeeDtrAssistantPageState extends State<EmployeeDtrAssistantPage> {
   final _messages = <DtrAssistantMessage>[];
   final _feedbackByMessageId = <String, String>{};
   final _autoExecutedActionKeys = <String>{};
+  final _fieldBindings = <String, ActiveAssistantFieldBinding>{};
+  final _fieldValues = <String, String>{};
   List<DtrAssistantModelProfile> _modelProfiles = const [
     DtrAssistantModelProfile(
       id: 'tools_ollama',
@@ -169,6 +173,8 @@ class _EmployeeDtrAssistantPageState extends State<EmployeeDtrAssistantPage> {
         ..add(_welcomeMessage());
       _feedbackByMessageId.clear();
       _autoExecutedActionKeys.clear();
+      _fieldBindings.clear();
+      _fieldValues.clear();
       _resettingChat = false;
     });
     _scrollToBottom();
@@ -327,13 +333,20 @@ class _EmployeeDtrAssistantPageState extends State<EmployeeDtrAssistantPage> {
     await action();
   }
 
-  Future<void> _send(String text, {String? intent}) async {
+  Future<void> _send(
+    String text, {
+    String? intent,
+    Map<String, dynamic>? requestReference,
+  }) async {
     if (_sending) return;
     final selectedProfile = _modelProfiles.firstWhere(
       (item) => item.id == _selectedModelProfile,
       orElse: () => _modelProfiles.first,
     );
-    if (selectedProfile.external &&
+    final reviewRequested =
+        requestReference == null && ActiveApplicationReview.matches(text);
+    if (!reviewRequested &&
+        selectedProfile.external &&
         selectedProfile.requiresConsent &&
         _selectedExternalConsentVersion != selectedProfile.consentVersion) {
       await _handleModelChanged(selectedProfile.id);
@@ -353,15 +366,31 @@ class _EmployeeDtrAssistantPageState extends State<EmployeeDtrAssistantPage> {
     _cancelToken = cancelToken;
 
     try {
-      final reply = await _api.sendMessage(
-        text,
-        intent: intent,
-        modelProfile: _selectedModelProfile,
-        conversationId: _conversationId,
-        externalConsentVersion: _selectedExternalConsentVersion,
-        cancelToken: cancelToken,
-      );
+      final fieldBinding = requestReference == null
+          ? ActiveAssistantForm.current
+          : null;
+      final fieldValue = fieldBinding?.read();
+      final reply = reviewRequested
+          ? DtrAssistantMessage(
+              role: 'assistant',
+              content: ActiveApplicationReview.reply(),
+              createdAt: DateTime.now(),
+            )
+          : await _api.sendMessage(
+              text,
+              intent: intent,
+              modelProfile: _selectedModelProfile,
+              conversationId: _conversationId,
+              externalConsentVersion: _selectedExternalConsentVersion,
+              cancelToken: cancelToken,
+              formContext: fieldBinding?.context,
+              requestReference: requestReference,
+            );
       if (!mounted || !_turnGuard.isCurrent(turnGeneration)) return;
+      if (fieldBinding != null && reply.id != null) {
+        _fieldBindings[reply.id!] = fieldBinding;
+        _fieldValues[reply.id!] = fieldValue ?? '';
+      }
       setState(() {
         _messages.add(reply);
       });
@@ -602,6 +631,28 @@ class _EmployeeDtrAssistantPageState extends State<EmployeeDtrAssistantPage> {
     DtrAssistantAction action,
   ) async {
     switch (action.type) {
+      case 'select_request':
+        await _send(
+          action.prompt ?? 'Check this request.',
+          requestReference: action.payload,
+        );
+        return;
+      case 'apply_field_suggestion':
+        final binding = _fieldBindings[message.id];
+        final applied =
+            binding != null &&
+            binding.read() == _fieldValues[message.id] &&
+            ActiveAssistantForm.apply(binding, action.payload);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              applied
+                  ? 'Suggestion inserted. Review your form before submitting.'
+                  : 'That field is no longer active. Focus the field and ask again.',
+            ),
+          ),
+        );
+        return;
       case 'send_prompt':
         final prompt = _resolvedActionPrompt(action);
         if (prompt == null || prompt.isEmpty) return;
@@ -989,24 +1040,29 @@ class _AssistantActionChips extends StatelessWidget {
         child: Wrap(
           spacing: 8,
           runSpacing: 8,
-          children: actions.take(4).map((action) {
-            return FilledButton.tonalIcon(
-              onPressed: enabled ? () => onSelected(action) : null,
-              icon: Icon(_iconForAction(action), size: 16),
-              label: Text(action.label, overflow: TextOverflow.ellipsis),
-              style: FilledButton.styleFrom(
-                visualDensity: VisualDensity.compact,
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 10,
-                ),
-                textStyle: const TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-            );
-          }).toList(),
+          children: actions
+              .take(
+                actions.any((item) => item.type == 'select_request') ? 10 : 4,
+              )
+              .map((action) {
+                return FilledButton.tonalIcon(
+                  onPressed: enabled ? () => onSelected(action) : null,
+                  icon: Icon(_iconForAction(action), size: 16),
+                  label: Text(action.label, overflow: TextOverflow.ellipsis),
+                  style: FilledButton.styleFrom(
+                    visualDensity: VisualDensity.compact,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 10,
+                    ),
+                    textStyle: const TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                );
+              })
+              .toList(),
         ),
       ),
     );

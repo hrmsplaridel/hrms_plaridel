@@ -1,6 +1,8 @@
 import 'package:file_picker/file_picker.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
+import 'package:hrms_plaridel/features/dtr/assistant/presentation/widgets/application_review.dart';
+import 'package:hrms_plaridel/features/dtr/assistant/presentation/widgets/active_assistant_field.dart';
 import 'package:provider/provider.dart';
 
 import 'package:hrms_plaridel/core/api/client.dart';
@@ -89,6 +91,7 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
   String? _workingDaysHelperText;
   int _workingDaysRequestSerial = 0;
   LeaveAnnualEntitlementPreview? _annualEntitlementPreview;
+  Map<String, dynamic>? _serviceEligibility;
   Map<String, dynamic> _customDetailValues = {};
   DocuTrackerSourceSignatureBundle? _leaveSignatures;
 
@@ -106,6 +109,7 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
   @override
   void initState() {
     super.initState();
+    ActiveApplicationReview.register(this, 'leave', _reviewApplication);
     final initial = widget.initialRequest;
     _savedRequest = initial;
     _checkingStatus = (initial?.id ?? '').isNotEmpty;
@@ -281,6 +285,7 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
 
   @override
   void dispose() {
+    ActiveApplicationReview.clear(this);
     _customLeaveTypeController.dispose();
     _reasonController.dispose();
     _locationDetailsController.dispose();
@@ -295,6 +300,10 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
   }
 
   void _showMessage(String text) {
+    if (_reviewIssues != null) {
+      _reviewIssues!.add(ApplicationReviewIssue(text, target: _reviewTarget));
+      return;
+    }
     if (!mounted) return;
     final messenger = _messengerKey.currentState;
     if (messenger != null) {
@@ -494,7 +503,9 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
   String? _leaveTypeDefinitionAccountEligibilityMessage(
     LeaveTypeDefinition definition,
   ) {
-    if (!definition.isEmploymentTypeEligible(context.read<AuthProvider>().user?.employmentType)) {
+    if (!definition.isEmploymentTypeEligible(
+      context.read<AuthProvider>().user?.employmentType,
+    )) {
       return '${definition.displayName} is not available for your employment type.';
     }
     return _accountEligibilityMessage(
@@ -675,6 +686,59 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
     await _submit(isDraft: true);
   }
 
+  List<ApplicationReviewIssue>? _reviewIssues;
+  BuildContext? _reviewTarget;
+  final _reviewDatesKey = GlobalKey();
+  final _reviewDetailsKey = GlobalKey();
+  final _reviewAttachmentKey = GlobalKey();
+
+  List<ApplicationReviewIssue> _reviewApplication() {
+    if (_busy || _submitFlowInFlight || _checkingStatus || !_canEditRequest) {
+      return [
+        const ApplicationReviewIssue(
+          'The application is busy or cannot be edited. Please try again when it is ready.',
+        ),
+      ];
+    }
+    final issues = reviewFormFields(_formKey.currentState);
+    _reviewIssues = issues;
+    try {
+      if (!_leaveTypesLoaded || _definitionForName(_leaveTypeName) == null) {
+        _showMessage('Choose an active leave type before submitting.');
+      }
+      final eligibility = _selectedAccountEligibilityMessage();
+      if (eligibility != null) _showMessage(eligibility);
+      _reviewTarget = _reviewDatesKey.currentContext;
+      if (_startDate == null || _endDate == null) {
+        _showMessage('Please select start and end dates.');
+      } else {
+        _validateSelectedDates();
+      }
+      if (_workingDaysLoading) {
+        _showMessage('Please wait while working days are computed.');
+      } else if (_currentWorkingDaysApplied == null ||
+          _currentWorkingDaysApplied! <= 0) {
+        _showMessage('Enter a valid number of working days greater than zero.');
+      }
+      _validateAnnualQuotaLimit();
+      _reviewTarget = _reviewDetailsKey.currentContext;
+      _validateRequiredLeaveDetails();
+      if (_leaveType == LeaveType.maternityLeave &&
+          _maternityDeliveryType == null) {
+        _showMessage('Please choose the maternity leave classification.');
+      }
+      _validateEventDateRules();
+      _reviewTarget = _reviewAttachmentKey.currentContext;
+      if (_shouldShowAttachmentSection() && !_hasAttachment()) {
+        _showMessage('Attachment is required for this leave type.');
+      }
+    } finally {
+      _reviewIssues = null;
+      _reviewTarget = null;
+    }
+    return issues;
+  }
+
   Future<void> _submitRequest() async {
     if (_submitFlowInFlight || _busy || _checkingStatus || !_canEditRequest) {
       return;
@@ -725,6 +789,7 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
         return;
       }
       if (!_validateEventDateRules()) return;
+      if (!_validateServiceRequirement()) return;
       if (!_validateAnnualQuotaLimit()) return;
       if (_shouldShowAttachmentSection() && !_hasAttachment()) {
         _showMessage('Attachment is required for this leave type.');
@@ -796,6 +861,7 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
         _workingDaysHelperText = 'Select dates to auto-compute';
         _workingDaysController.clear();
         _annualEntitlementPreview = null;
+        _serviceEligibility = null;
       });
       return;
     }
@@ -806,6 +872,7 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
       _workingDaysHelperText = 'Computing from assigned shift and holidays...';
       _workingDaysController.text = fallback?.toString() ?? '';
       _annualEntitlementPreview = null;
+      _serviceEligibility = null;
     });
 
     try {
@@ -835,6 +902,7 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
               ? 'Could not verify shift-aware annual entitlement'
               : 'Could not compute from shift; using Mon-Fri fallback';
           _annualEntitlementPreview = null;
+          _serviceEligibility = null;
         });
         return;
       }
@@ -851,6 +919,10 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
         _workingDaysController.text = _formatWorkingDays(days);
         _workingDaysHelperText = '$helper: ${_formatWorkingDays(days)} day(s)';
         _annualEntitlementPreview = annualPreview;
+        final service = data['service_eligibility'];
+        _serviceEligibility = service is Map
+            ? Map<String, dynamic>.from(service)
+            : null;
       });
     } catch (_) {
       if (!mounted || serial != _workingDaysRequestSerial) return;
@@ -861,6 +933,7 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
             ? 'Server estimate unavailable; annual entitlement cannot be verified'
             : 'Server estimate unavailable; using Mon-Fri fallback';
         _annualEntitlementPreview = null;
+        _serviceEligibility = null;
       });
     }
   }
@@ -1133,6 +1206,24 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
     return true;
   }
 
+  bool _validateServiceRequirement() {
+    if ((_selectedLeaveTypeDefinition?.minimumServiceMonths ?? 0) <= 0) {
+      return true;
+    }
+    if (_serviceEligibility == null) {
+      _showMessage(
+        'Service eligibility could not be verified. Please reselect the leave dates and try again.',
+      );
+      return false;
+    }
+    if (_serviceEligibility!['eligible'] == true) return true;
+    _showMessage(
+      _serviceEligibility!['message']?.toString() ??
+          'The minimum service requirement is not met.',
+    );
+    return false;
+  }
+
   bool _validateAnnualQuotaLimit() {
     if (_selectedEntitlementBasis != LeaveEntitlementBasis.annual ||
         _selectedMaxDays == null) {
@@ -1359,6 +1450,9 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
         attachmentPath:
             _savedRequest?.attachmentPath ?? initial?.attachmentPath,
         status: isDraft ? LeaveRequestStatus.draft : LeaveRequestStatus.pending,
+        applicantSignatureAssetId: isDraft
+            ? null
+            : _leaveSignatures?.signatureFor('applicant')?.signatureAssetId,
       );
 
       if (isDraft) {
@@ -1649,7 +1743,12 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.stretch,
                                 children: [
-                                  _buildSectionTitle('2. Dates of Leave'),
+                                  KeyedSubtree(
+                                    key: _reviewDatesKey,
+                                    child: _buildSectionTitle(
+                                      '2. Dates of Leave',
+                                    ),
+                                  ),
                                   const SizedBox(height: 16),
                                   Row(
                                     children: [
@@ -1686,63 +1785,67 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
                                     builder: (context) {
                                       final applied =
                                           _currentWorkingDaysApplied;
-                                      return TextFormField(
-                                        controller: _workingDaysController,
-                                        readOnly: true,
-                                        keyboardType:
-                                            TextInputType.numberWithOptions(
-                                              decimal: true,
-                                            ),
-                                        decoration:
-                                            _inputDecoration(
-                                              'Number of Working Days Applied For',
-                                            ).copyWith(
-                                              prefixIcon: const Icon(
-                                                Icons.calculate_outlined,
+                                      return _activeAssistantField(
+                                        'reason',
+                                        TextFormField(
+                                          controller: _workingDaysController,
+                                          readOnly: true,
+                                          keyboardType:
+                                              TextInputType.numberWithOptions(
+                                                decimal: true,
                                               ),
-                                              suffixIcon: _workingDaysLoading
-                                                  ? const Padding(
-                                                      padding: EdgeInsets.all(
-                                                        14,
-                                                      ),
-                                                      child: SizedBox(
-                                                        width: 18,
-                                                        height: 18,
-                                                        child:
-                                                            CircularProgressIndicator(
-                                                              strokeWidth: 2,
-                                                            ),
-                                                      ),
-                                                    )
-                                                  : null,
-                                              helperText:
-                                                  _workingDaysHelperText ??
-                                                  (applied != null
-                                                      ? 'Auto-applied from selected dates: ${_formatWorkingDays(applied)} day(s)'
-                                                      : 'Select dates to auto-compute'),
-                                            ),
-                                        validator: (val) {
-                                          if (val == null ||
-                                              val.trim().isEmpty) {
-                                            return 'Required';
-                                          }
-                                          final entered = double.tryParse(
-                                            val.trim(),
-                                          );
-                                          if (entered == null) {
-                                            return 'Must be a number';
-                                          }
-                                          if (entered <= 0) {
-                                            return 'Must be greater than 0';
-                                          }
-                                          // Warn about max days for leave type
-                                          final maxDays = _selectedMaxDays;
-                                          if (maxDays != null &&
-                                              entered > maxDays) {
-                                            return '$_selectedLeaveTypeLabel allows max ${maxDays.toStringAsFixed(maxDays % 1 == 0 ? 0 : 1)} days';
-                                          }
-                                          return null;
-                                        },
+                                          decoration:
+                                              _inputDecoration(
+                                                'Number of Working Days Applied For',
+                                              ).copyWith(
+                                                prefixIcon: const Icon(
+                                                  Icons.calculate_outlined,
+                                                ),
+                                                suffixIcon: _workingDaysLoading
+                                                    ? const Padding(
+                                                        padding: EdgeInsets.all(
+                                                          14,
+                                                        ),
+                                                        child: SizedBox(
+                                                          width: 18,
+                                                          height: 18,
+                                                          child:
+                                                              CircularProgressIndicator(
+                                                                strokeWidth: 2,
+                                                              ),
+                                                        ),
+                                                      )
+                                                    : null,
+                                                helperText:
+                                                    _workingDaysHelperText ??
+                                                    (applied != null
+                                                        ? 'Auto-applied from selected dates: ${_formatWorkingDays(applied)} day(s)'
+                                                        : 'Select dates to auto-compute'),
+                                              ),
+                                          validator: (val) {
+                                            if (val == null ||
+                                                val.trim().isEmpty) {
+                                              return 'Required';
+                                            }
+                                            final entered = double.tryParse(
+                                              val.trim(),
+                                            );
+                                            if (entered == null) {
+                                              return 'Must be a number';
+                                            }
+                                            if (entered <= 0) {
+                                              return 'Must be greater than 0';
+                                            }
+                                            // Warn about max days for leave type
+                                            final maxDays = _selectedMaxDays;
+                                            if (maxDays != null &&
+                                                entered > maxDays) {
+                                              return '$_selectedLeaveTypeLabel allows max ${maxDays.toStringAsFixed(maxDays % 1 == 0 ? 0 : 1)} days';
+                                            }
+                                            return null;
+                                          },
+                                        ),
+                                        _reasonController,
                                       );
                                     },
                                   ),
@@ -1752,7 +1855,10 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
                             const SizedBox(height: 16),
 
                             // Card 3: Dynamic Details based on leave type
-                            _buildDetailsCard(),
+                            KeyedSubtree(
+                              key: _reviewDetailsKey,
+                              child: _buildDetailsCard(),
+                            ),
 
                             const SizedBox(height: 16),
 
@@ -1795,7 +1901,10 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
                                   ),
                                   if (_shouldShowAttachmentSection()) ...[
                                     const Divider(height: 32),
-                                    _buildAttachmentSection(),
+                                    KeyedSubtree(
+                                      key: _reviewAttachmentKey,
+                                      child: _buildAttachmentSection(),
+                                    ),
                                   ],
                                 ],
                               ),
@@ -2017,6 +2126,21 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
       message = 'Leave policy information is not available.';
     }
 
+    final serviceMonths =
+        _selectedLeaveTypeDefinition?.minimumServiceMonths ?? 0;
+    if (serviceMonths > 0) {
+      final serviceMessage = _serviceEligibility?['message']?.toString();
+      message +=
+          ' Minimum service: $serviceMonths month(s) from date hired, measured at the first leave date.';
+      if (serviceMessage != null && serviceMessage.isNotEmpty) {
+        message += ' $serviceMessage';
+      }
+    }
+    if (_selectedLeaveTypeDefinition?.firstYearAllowance == 'prorated') {
+      message +=
+          ' The hiring-year allowance is prorated by date hired and rounded down to whole days. The full annual allowance applies from January 1 of the next year.';
+    }
+
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(14),
@@ -2159,16 +2283,41 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
     );
   }
 
+  int _assistantFieldRevision = 0;
+  Widget _activeAssistantField(
+    String key,
+    Widget child, [
+    TextEditingController? controller,
+  ]) => ActiveAssistantField(
+    module: 'leave',
+    type: _leaveTypeName,
+    fieldKey: key,
+    read: () => controller?.text ?? _customDetailValues[key]?.toString() ?? '',
+    apply: (value) => setState(() {
+      if (controller != null) {
+        controller.text = value;
+      } else {
+        _customDetailValues[key] = value;
+        _assistantFieldRevision++;
+      }
+    }),
+    child: child,
+  );
+
   Widget _buildDetailsCard() {
     List<Widget> children = [_buildSectionTitle('3. Leave Details')];
 
     // Shared Reasons
     children.addAll([
       const SizedBox(height: 16),
-      TextFormField(
-        controller: _reasonController,
-        maxLines: 2,
-        decoration: _inputDecoration('General Reason / Remarks (Optional)'),
+      _activeAssistantField(
+        'reason',
+        TextFormField(
+          controller: _reasonController,
+          maxLines: 2,
+          decoration: _inputDecoration('General Reason / Remarks (Optional)'),
+        ),
+        _reasonController,
       ),
     ]);
 
@@ -2202,11 +2351,15 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
         ),
         if (_locationOption != null) ...[
           const SizedBox(height: 8),
-          TextFormField(
-            controller: _locationDetailsController,
-            decoration: _inputDecoration('Specify location...'),
-            validator: (v) =>
-                (v == null || v.trim().isEmpty) ? 'Required' : null,
+          _activeAssistantField(
+            'location_details',
+            TextFormField(
+              controller: _locationDetailsController,
+              decoration: _inputDecoration('Specify location...'),
+              validator: (v) =>
+                  (v == null || v.trim().isEmpty) ? 'Required' : null,
+            ),
+            _locationDetailsController,
           ),
         ],
       ]);
@@ -2238,11 +2391,15 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
         ),
         if (_sickLeaveNature != null) ...[
           const SizedBox(height: 8),
-          TextFormField(
-            controller: _sickIllnessController,
-            decoration: _inputDecoration('Specify illness details...'),
-            validator: (v) =>
-                (v == null || v.trim().isEmpty) ? 'Required' : null,
+          _activeAssistantField(
+            'sick_illness_details',
+            TextFormField(
+              controller: _sickIllnessController,
+              decoration: _inputDecoration('Specify illness details...'),
+              validator: (v) =>
+                  (v == null || v.trim().isEmpty) ? 'Required' : null,
+            ),
+            _sickIllnessController,
           ),
         ],
       ]);
@@ -2424,28 +2581,36 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
               : null,
         ),
         const SizedBox(height: 12),
-        TextFormField(
-          controller: _vawcCaseDetailsController,
-          maxLines: 2,
-          decoration: _inputDecoration('Case / protection order details'),
-          validator: (v) =>
-              _leaveType == LeaveType.tenDayVawcLeave &&
-                  (v == null || v.trim().isEmpty)
-              ? 'Required'
-              : null,
+        _activeAssistantField(
+          'vawc_case_details',
+          TextFormField(
+            controller: _vawcCaseDetailsController,
+            maxLines: 2,
+            decoration: _inputDecoration('Case / protection order details'),
+            validator: (v) =>
+                _leaveType == LeaveType.tenDayVawcLeave &&
+                    (v == null || v.trim().isEmpty)
+                ? 'Required'
+                : null,
+          ),
+          _vawcCaseDetailsController,
         ),
       ]);
     } else if (_leaveType == LeaveType.soloParentLeave) {
       children.addAll([
         const SizedBox(height: 16),
-        TextFormField(
-          controller: _soloParentIdNumberController,
-          decoration: _inputDecoration('Solo Parent ID Number'),
-          validator: (v) =>
-              _leaveType == LeaveType.soloParentLeave &&
-                  (v == null || v.trim().isEmpty)
-              ? 'Required'
-              : null,
+        _activeAssistantField(
+          'solo_parent_id_number',
+          TextFormField(
+            controller: _soloParentIdNumberController,
+            decoration: _inputDecoration('Solo Parent ID Number'),
+            validator: (v) =>
+                _leaveType == LeaveType.soloParentLeave &&
+                    (v == null || v.trim().isEmpty)
+                ? 'Required'
+                : null,
+          ),
+          _soloParentIdNumberController,
         ),
         const SizedBox(height: 12),
         _buildDatePicker(
@@ -2458,10 +2623,15 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
     } else if (_leaveType == LeaveType.specialLeaveBenefitsForWomen) {
       children.addAll([
         const SizedBox(height: 16),
-        TextFormField(
-          controller: _womenIllnessController,
-          decoration: _inputDecoration('Specify illness details...'),
-          validator: (v) => (v == null || v.trim().isEmpty) ? 'Required' : null,
+        _activeAssistantField(
+          'women_illness_details',
+          TextFormField(
+            controller: _womenIllnessController,
+            decoration: _inputDecoration('Specify illness details...'),
+            validator: (v) =>
+                (v == null || v.trim().isEmpty) ? 'Required' : null,
+          ),
+          _womenIllnessController,
         ),
       ]);
     } else if (_leaveType == LeaveType.studyLeave) {
@@ -2492,9 +2662,13 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
         ),
         if (_studyPurpose != null) ...[
           const SizedBox(height: 8),
-          TextFormField(
-            controller: _studyPurposeDetailsController,
-            decoration: _inputDecoration('Specify study leave details...'),
+          _activeAssistantField(
+            'study_purpose_details',
+            TextFormField(
+              controller: _studyPurposeDetailsController,
+              decoration: _inputDecoration('Specify study leave details...'),
+            ),
+            _studyPurposeDetailsController,
           ),
         ],
       ]);
@@ -2512,7 +2686,7 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
         ),
         const SizedBox(height: 12),
         for (final field in _selectedCustomFields) ...[
-          _buildCustomDetailField(field),
+          _activeAssistantField(field.key, _buildCustomDetailField(field)),
           const SizedBox(height: 12),
         ],
       ]);
@@ -2592,7 +2766,9 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
       case LeaveCustomFieldType.text:
       case LeaveCustomFieldType.longText:
         return TextFormField(
-          key: ValueKey('custom-$_leaveTypeName-${field.key}'),
+          key: ValueKey(
+            'custom-$_leaveTypeName-${field.key}-$_assistantFieldRevision',
+          ),
           initialValue: value?.toString() ?? '',
           keyboardType: field.type == LeaveCustomFieldType.number
               ? const TextInputType.numberWithOptions(decimal: true)

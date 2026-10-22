@@ -122,7 +122,10 @@ class _MobileLeaveRequestCard extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(width: 8),
-                  LeaveStatusChip(status: request.status),
+                  LeaveStatusChip(
+                    status: request.status,
+                    label: request.statusLabel,
+                  ),
                 ],
               ),
               const SizedBox(height: 6),

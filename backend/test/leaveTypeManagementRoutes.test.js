@@ -34,6 +34,9 @@ function rowFromCreateParams(params) {
     sex_eligibility: params[14],
     employee_detail_schema: JSON.parse(params[15]),
     eligible_employment_types: params[16],
+    admin_can_file: params[19],
+    minimum_service_months: params[21],
+    first_year_allowance: params[22],
   };
 }
 
@@ -64,6 +67,17 @@ async function withCreateRoute(run, { insertError = null } = {}) {
   }
 }
 
+test('employee-only filing permission is stored and returned', async () => {
+  await withCreateRoute(async (handle, inserts) => {
+    const res = responseRecorder();
+    await handle({body:{name:'employeeOnly',display_name:'Employee Only',
+      employee_can_file:true,admin_only:false,admin_can_file:false}},res);
+    assert.equal(res.statusCode,201);
+    assert.equal(res.body.admin_can_file,false);
+    assert.equal(inserts[0].params[19],false);
+  });
+});
+
 async function withUpdateRoute(existing, run) {
   const updates = [];
   const query = async (sql, params = []) => {
@@ -73,7 +87,7 @@ async function withUpdateRoute(existing, run) {
     }
     if (statement.startsWith('UPDATE leave_types SET eligible_employment_types')) {
       updates.push({statement,params});
-      return {rows:[{...existing,eligible_employment_types:params[0]}]};
+      return {rows:[{...existing,eligible_employment_types:params[0], minimum_service_months:params[2] ?? existing.minimum_service_months}]};
     }
     if (statement.startsWith('UPDATE leave_types SET name =')) {
       updates.push({ statement, params });
@@ -99,6 +113,9 @@ async function withUpdateRoute(existing, run) {
           sex_eligibility: params[15],
           employee_detail_schema: JSON.parse(params[16]),
           eligible_employment_types: params[18],
+          admin_can_file: params[19],
+          minimum_service_months: params[20],
+          first_year_allowance: params[21],
         }],
       };
     }
@@ -119,6 +136,19 @@ async function withUpdateRoute(existing, run) {
     restoreDb();
   }
 }
+
+test('editing preserves employee-only filing when its permission is omitted', async () => {
+  const existing = {id:'11111111-1111-4111-8111-111111111111',name:'customLeave',
+    display_name:'Custom Leave',employee_can_file:true,admin_only:false,admin_can_file:false};
+  await withUpdateRoute(existing,async(handle,updates)=>{
+    const res=responseRecorder();
+    await handle({params:{id:existing.id},body:{display_name:'Updated Custom Leave'}},res);
+    assert.equal(res.statusCode,200);
+    assert.equal(res.body.admin_can_file,false);
+    assert.equal(updates[0].params[19],false);
+    assert.match(updates[0].statement,/admin_can_file = \$20/);
+  });
+});
 
 async function withListRoute(run) {
   const includeInactiveValues = [];
@@ -384,4 +414,79 @@ test('new leave type creation saves conditional Mayor routing in its insert',asy
  assert.equal(res.statusCode,201);assert.equal(inserts[0].params[17],'mayor');
  assert.deepEqual(inserts[0].params[18],['job_order','contract_of_service']);
  });
+});
+
+test('minimum service is persisted on create and preserved on update', async () => {
+  await withCreateRoute(async (handle, inserts) => {
+    const res = responseRecorder();
+    await handle({body:{...basePayload, minimum_service_months:6}}, res);
+    assert.equal(res.statusCode, 201);
+    assert.equal(res.body.minimum_service_months, 6);
+    assert.match(inserts[0].statement, /minimum_service_months/);
+  });
+  const existing = {id:'11111111-1111-4111-8111-111111111111', name:'customLeave', display_name:'Custom', minimum_service_months:6};
+  await withUpdateRoute(existing, async (handle, updates) => {
+    const res = responseRecorder();
+    await handle({params:{id:existing.id}, body:{display_name:'Updated'}}, res);
+    assert.equal(res.statusCode, 200);
+    assert.equal(res.body.minimum_service_months, 6);
+    assert.equal(updates[0].params[20], 6);
+  });
+});
+
+test('invalid minimum service values are rejected before writing', async () => {
+  await withCreateRoute(async (handle, inserts) => {
+    for (const value of [-1, 1.5, 'six']) {
+      const res = responseRecorder();
+      await handle({body:{...basePayload, minimum_service_months:value}}, res);
+      assert.equal(res.statusCode, 400);
+    }
+    assert.equal(inserts.length, 0);
+  });
+});
+
+test('service eligibility can be configured on a protected type without changing its other rules', async () => {
+  const existing = {id:'11111111-1111-4111-8111-111111111111', name:'soloParentLeave', is_system:true, max_days:7, minimum_service_months:0};
+  await withUpdateRoute(existing, async (handle, updates) => {
+    const res = responseRecorder();
+    await handle({params:{id:existing.id},body:{minimum_service_months:6}}, res);
+    assert.equal(res.statusCode,200);
+    assert.equal(res.body.minimum_service_months,6);
+    assert.equal(res.body.max_days,7);
+    assert.equal(updates.length,1);
+  });
+});
+
+for (const basis of ['per_request','accrual','per_event']) {
+  test(`proration is rejected for ${basis} entitlement`, async () => {
+    await withCreateRoute(async handle => {
+      const res=responseRecorder();
+      await handle({body:{...basePayload, entitlement_basis:basis, max_days:5, first_year_allowance:'prorated'}},res);
+      assert.equal(res.statusCode,400);
+      assert.match(res.body.error,/annual/i);
+    });
+  });
+}
+test('annual proration is saved and preserved on unrelated edits', async () => {
+  await withCreateRoute(async (handle,inserts) => {
+    const res=responseRecorder();
+    await handle({body:{...basePayload, entitlement_basis:'annual',max_days:5,first_year_allowance:'prorated'}},res);
+    assert.equal(res.statusCode,201);
+    assert.equal(res.body.first_year_allowance,'prorated');
+    assert.equal(inserts[0].params[22],'prorated');
+  });
+  const existing={id:'11111111-1111-4111-8111-111111111111',name:'customLeave',display_name:'Custom',entitlement_basis:'annual',max_days:5,first_year_allowance:'prorated'};
+  await withUpdateRoute(existing,async(handle,updates)=>{
+    const res=responseRecorder();
+    await handle({params:{id:existing.id},body:{display_name:'Updated'}},res);
+    assert.equal(res.statusCode,200);
+    assert.equal(updates[0].params[21],'prorated');
+  });
+});
+test('invalid proration mode and proration without an annual limit are rejected', async () => {
+  await withCreateRoute(async handle => {
+    for (const fields of [{first_year_allowance:'anything'},{first_year_allowance:'prorated',entitlement_basis:'annual',max_days:null}]) {
+      const res=responseRecorder();await handle({body:{...basePayload,...fields}},res);assert.equal(res.statusCode,400);
+    }
+  });
 });

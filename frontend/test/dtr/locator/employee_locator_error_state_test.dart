@@ -315,6 +315,8 @@ class _LocatorErrorStateAdapter implements HttpClientAdapter {
     Future<void>? cancelFuture,
   ) async {
     switch (options.uri.path) {
+      case '/api/approval-workflows/inbox':
+        return _jsonResponse([]);
       case '/api/locator-slips/types':
         return _jsonResponse([
           {
@@ -363,6 +365,8 @@ class _LocatorRefreshAdapter implements HttpClientAdapter {
     Future<void>? cancelFuture,
   ) async {
     switch (options.uri.path) {
+      case '/api/approval-workflows/inbox':
+        return _jsonResponse([]);
       case '/api/locator-slips/types':
         typeRequestCount += 1;
         return _jsonResponse([
@@ -434,6 +438,8 @@ class _LocatorHistoryAdapter implements HttpClientAdapter {
     Future<void>? cancelFuture,
   ) async {
     switch (options.uri.path) {
+      case '/api/approval-workflows/inbox':
+        return _jsonResponse([]);
       case '/api/locator-slips/types':
         return _jsonResponse([
           {

@@ -41,6 +41,9 @@ class LeaveCustomFieldDefinition {
     this.required = false,
     this.maxLength,
     this.options = const [],
+    this.instruction = '',
+    this.example = '',
+    this.sentenceTemplate = '',
   });
 
   final String key;
@@ -49,12 +52,18 @@ class LeaveCustomFieldDefinition {
   final bool required;
   final int? maxLength;
   final List<String> options;
+  final String instruction;
+  final String example;
+  final String sentenceTemplate;
 
   factory LeaveCustomFieldDefinition.fromJson(Map<String, dynamic> json) {
     final rawOptions = json['options'];
     return LeaveCustomFieldDefinition(
       key: json['key']?.toString() ?? '',
       label: json['label']?.toString() ?? '',
+      instruction: json['instruction']?.toString() ?? '',
+      example: json['example']?.toString() ?? '',
+      sentenceTemplate: json['sentence_template']?.toString() ?? '',
       type: leaveCustomFieldTypeFromString(json['type']?.toString()),
       required: json['required'] == true,
       maxLength: LeaveTypeDefinition._parseInt(
@@ -74,6 +83,10 @@ class LeaveCustomFieldDefinition {
     'label': label.trim(),
     'type': type.value,
     'required': required,
+    if (instruction.trim().isNotEmpty) 'instruction': instruction.trim(),
+    if (example.trim().isNotEmpty) 'example': example.trim(),
+    if (sentenceTemplate.trim().isNotEmpty)
+      'sentence_template': sentenceTemplate.trim(),
     if (type == LeaveCustomFieldType.text ||
         type == LeaveCustomFieldType.longText)
       'max_length':
@@ -107,11 +120,14 @@ class LeaveTypeDefinition {
     this.isSystem = false,
     this.employeeCanFile = true,
     this.adminOnly = false,
+    this.adminCanFile = true,
     this.allowsPastDates = true,
     this.requiresAttachment = false,
     this.requiresAttachmentWhenOverDays,
     this.maxDays,
     this.minimumAdvanceDays,
+    this.minimumServiceMonths = 0,
+    this.firstYearAllowance = 'full',
     this.affectsDtrNormally = true,
     this.balanceLedgerType = 'none',
     this.entitlementBasis = LeaveEntitlementBasis.perRequest,
@@ -128,11 +144,14 @@ class LeaveTypeDefinition {
   final bool isSystem;
   final bool employeeCanFile;
   final bool adminOnly;
+  final bool adminCanFile;
   final bool allowsPastDates;
   final bool requiresAttachment;
   final double? requiresAttachmentWhenOverDays;
   final double? maxDays;
   final int? minimumAdvanceDays;
+  final int minimumServiceMonths;
+  final String firstYearAllowance;
   final bool affectsDtrNormally;
   final String balanceLedgerType;
   final String entitlementBasis;
@@ -160,6 +179,8 @@ class LeaveTypeDefinition {
           json['employee_can_file'] != false &&
           json['employeeCanFile'] != false,
       adminOnly: json['admin_only'] == true || json['adminOnly'] == true,
+      adminCanFile:
+          json['admin_can_file'] != false && json['adminCanFile'] != false,
       allowsPastDates:
           json['allows_past_dates'] != false &&
           json['allowsPastDates'] != false,
@@ -170,6 +191,8 @@ class LeaveTypeDefinition {
         json['requires_attachment_when_over_days'] ??
             json['requiresAttachmentWhenOverDays'],
       ),
+      minimumServiceMonths: _parseInt(json['minimum_service_months']) ?? 0,
+      firstYearAllowance: json['first_year_allowance']?.toString() ?? 'full',
       maxDays: _parseDouble(json['max_days'] ?? json['maxDays']),
       minimumAdvanceDays: _parseInt(
         json['minimum_advance_days'] ?? json['minimumAdvanceDays'],
@@ -210,11 +233,14 @@ class LeaveTypeDefinition {
       'is_active': isActive,
       'employee_can_file': employeeCanFile,
       'admin_only': adminOnly,
+      'admin_can_file': adminCanFile,
       'allows_past_dates': allowsPastDates,
       'requires_attachment': requiresAttachment,
       'requires_attachment_when_over_days': requiresAttachmentWhenOverDays,
       'max_days': maxDays,
       'minimum_advance_days': minimumAdvanceDays,
+      'minimum_service_months': minimumServiceMonths,
+      'first_year_allowance': firstYearAllowance,
       'affects_dtr_normally': affectsDtrNormally,
       'balance_ledger_type': balanceLedgerType,
       'entitlement_basis': entitlementBasis,
@@ -235,11 +261,14 @@ class LeaveTypeDefinition {
     bool? isSystem,
     bool? employeeCanFile,
     bool? adminOnly,
+    bool? adminCanFile,
     bool? allowsPastDates,
     bool? requiresAttachment,
     double? requiresAttachmentWhenOverDays,
     double? maxDays,
     int? minimumAdvanceDays,
+    int? minimumServiceMonths,
+    String? firstYearAllowance,
     bool? affectsDtrNormally,
     String? balanceLedgerType,
     String? entitlementBasis,
@@ -256,12 +285,15 @@ class LeaveTypeDefinition {
       isSystem: isSystem ?? this.isSystem,
       employeeCanFile: employeeCanFile ?? this.employeeCanFile,
       adminOnly: adminOnly ?? this.adminOnly,
+      adminCanFile: adminCanFile ?? this.adminCanFile,
       allowsPastDates: allowsPastDates ?? this.allowsPastDates,
       requiresAttachment: requiresAttachment ?? this.requiresAttachment,
       requiresAttachmentWhenOverDays:
           requiresAttachmentWhenOverDays ?? this.requiresAttachmentWhenOverDays,
       maxDays: maxDays ?? this.maxDays,
       minimumAdvanceDays: minimumAdvanceDays ?? this.minimumAdvanceDays,
+      minimumServiceMonths: minimumServiceMonths ?? this.minimumServiceMonths,
+      firstYearAllowance: firstYearAllowance ?? this.firstYearAllowance,
       affectsDtrNormally: affectsDtrNormally ?? this.affectsDtrNormally,
       balanceLedgerType: balanceLedgerType ?? this.balanceLedgerType,
       entitlementBasis: entitlementBasis ?? this.entitlementBasis,

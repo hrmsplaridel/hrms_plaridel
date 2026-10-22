@@ -55,6 +55,7 @@ LeaveFormSignatories composeLeaveFormSignatories({
   DocuTrackerSourceSignature? applicantSignature,
   DocuTrackerSourceSignature? departmentHeadSignature,
   DocuTrackerSourceSignature? hrApproverSignature,
+  DocuTrackerSourceSignature? certificationOfficerSignature,
 }) {
   DocuTrackerSourceSignature? officialSignature(
     LeaveFormSignatoryInfo? official,
@@ -74,7 +75,7 @@ LeaveFormSignatories composeLeaveFormSignatories({
         : null,
     certificationOfficerSignature: officialSignature(
       certificationOfficer,
-      hrApproverSignature,
+      certificationOfficerSignature ?? hrApproverSignature,
     ),
     recommendationOfficer: recommendationOfficer,
     approvingAuthority: approvingAuthority,
@@ -112,11 +113,38 @@ Future<LeaveFormSignatories> loadLeaveFormSignatories({
   DocuTrackerSourceSignature? applicantSignature;
   DocuTrackerSourceSignature? departmentHeadSignature;
   DocuTrackerSourceSignature? hrApproverSignature;
+  DocuTrackerSourceSignature? certificationSignature;
   final sigResult = results[1];
   if (sigResult is DocuTrackerSuccess<DocuTrackerSourceSignatureBundle>) {
     applicantSignature = sigResult.value.signatureFor('applicant');
     departmentHeadSignature = sigResult.value.signatureFor('department_head');
     hrApproverSignature = sigResult.value.signatureFor('hr_approver');
+    certificationSignature = sigResult.value.signatureFor('certification_officer');
+    final shared = (sigResult.value.workflowSnapshot?['steps'] as List? ?? []).any((step) => step is Map);
+    if (shared) {
+      final steps = sigResult.value.workflowSnapshot!['steps'] as List;
+      final lastStep = steps.last;
+      final manualMayor = lastStep is Map &&
+          lastStep['assignee_source'] == 'manual_mayor';
+      final approved = sigResult.value.sourceStatus == 'approved';
+      final active = approved || const [
+        'pending', 'pending_department_head', 'pending_hr', 'pending_mayor',
+      ].contains(sigResult.value.sourceStatus);
+      DocuTrackerSourceSignature? confirmedFor(LeaveFormSignatoryInfo? official) {
+        if (!active || official?.userId == null ||
+            (manualMayor && official?.userId == roles.approvingAuthority?.userId)) {
+          return null;
+        }
+        return sigResult.value.signatures.where(
+          (signature) => signature.slotKey.startsWith('workflow_step_') &&
+              signature.signedBy == official!.userId && signature.isSigned,
+        ).firstOrNull;
+      }
+
+      departmentHeadSignature = confirmedFor(roles.recommendation);
+      certificationSignature = confirmedFor(roles.certification);
+      hrApproverSignature = approved ? confirmedFor(roles.approvingAuthority) : null;
+    }
   }
 
   return composeLeaveFormSignatories(
@@ -126,6 +154,7 @@ Future<LeaveFormSignatories> loadLeaveFormSignatories({
     applicantSignature: applicantSignature,
     departmentHeadSignature: departmentHeadSignature,
     hrApproverSignature: hrApproverSignature,
+    certificationOfficerSignature: certificationSignature,
   );
 }
 

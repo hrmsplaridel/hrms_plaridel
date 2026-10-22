@@ -10,6 +10,7 @@ import 'package:flutter/material.dart';
 import 'package:shimmer/shimmer.dart';
 import 'package:hrms_plaridel/core/api/user_facing_api_error.dart';
 import 'package:hrms_plaridel/core/api/client.dart';
+import 'package:hrms_plaridel/core/api/access_check.dart';
 import 'package:provider/provider.dart';
 import 'package:hrms_plaridel/providers/auth_provider.dart';
 import 'package:hrms_plaridel/features/recruitment/models/job_vacancy_announcement.dart';
@@ -329,11 +330,13 @@ class _AdminDashboardState extends State<AdminDashboard>
   Future<void> _loadAccountCreationAccess() async {
     final version = ++_accountAccessVersion;
     try {
-      final response = await ApiClient.instance.get<Map<String, dynamic>>(
-        '/api/account-creation-access/me',
+      final data = await fetchAccessCheck(
+        () async => (await ApiClient.instance.get<Map<String, dynamic>>(
+          '/api/account-creation-access/me',
+        )).data,
       );
-      if (!mounted || version != _accountAccessVersion) return;
-      final allowed = response.data?['allowed'] == true;
+      if (!mounted || version != _accountAccessVersion || data == null) return;
+      final allowed = data['allowed'] == true;
       if (_canCreateAccount == allowed) return;
       setState(() {
         _canCreateAccount = allowed;
@@ -342,26 +345,21 @@ class _AdminDashboardState extends State<AdminDashboard>
         }
       });
     } catch (_) {
-      if (mounted && version == _accountAccessVersion) {
-        setState(() {
-          _canCreateAccount = false;
-          if (_selectedMenu == AdminMenu.createAccount) {
-            _selectedMenu = AdminMenu.dashboard;
-          }
-        });
-      }
+      // Preserve the last verified state if applying the refresh fails.
     }
   }
 
   Future<void> _loadDtrAccess() async {
     final version = ++_dtrAccessVersion;
     try {
-      final response = await ApiClient.instance.get<Map<String, dynamic>>(
-        '/api/dtr-access/me',
+      final data = await fetchAccessCheck(
+        () async => (await ApiClient.instance.get<Map<String, dynamic>>(
+          '/api/dtr-access/me',
+        )).data,
       );
-      if (!mounted || version != _dtrAccessVersion) return;
-      final reports = response.data?['reports_allowed'] == true;
-      final manage = response.data?['manage_allowed'] == true;
+      if (!mounted || version != _dtrAccessVersion || data == null) return;
+      final reports = data['reports_allowed'] == true;
+      final manage = data['manage_allowed'] == true;
       final features = {
         for (final field in const [
           'employees_allowed',
@@ -369,7 +367,7 @@ class _AdminDashboardState extends State<AdminDashboard>
           'approvals_allowed',
           'locator_allowed',
         ])
-          field: response.data?[field] == true,
+          field: data[field] == true,
       };
       if (_canViewDtrReports == reports &&
           _canManageDtr == manage &&
@@ -383,14 +381,7 @@ class _AdminDashboardState extends State<AdminDashboard>
       });
       _closeUnavailableDtr();
     } catch (_) {
-      if (mounted && version == _dtrAccessVersion) {
-        setState(() {
-          _canViewDtrReports = false;
-          _canManageDtr = false;
-          _dtrFeatureAccess = {};
-        });
-        _closeUnavailableDtr();
-      }
+      // Preserve the last verified state if applying the refresh fails.
     }
   }
 

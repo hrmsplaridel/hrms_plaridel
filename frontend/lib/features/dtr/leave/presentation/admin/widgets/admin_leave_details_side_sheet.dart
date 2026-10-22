@@ -7,6 +7,7 @@ import 'package:provider/provider.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/features/dtr/leave/data/providers/leave_provider.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_request.dart';
+import 'package:hrms_plaridel/features/dtr/leave/utils/leave_workflow_history.dart';
 import 'package:hrms_plaridel/features/dtr/leave/utils/open_attachment_io.dart'
     if (dart.library.html) 'package:hrms_plaridel/features/dtr/leave/utils/open_attachment_web.dart'
     as open_attachment;
@@ -46,6 +47,73 @@ class AdminLeaveDetailsSideSheet extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    return AdminLeaveDetailsFrame(
+      child: Consumer<LeaveProvider>(
+        builder: (context, provider, _) {
+          var req = initial;
+          final id = initial.id;
+          if (id != null && id.isNotEmpty) {
+            final hit =
+                (isDepartmentHead
+                        ? provider.departmentHeadRequests
+                        : provider.requests)
+                    .where((r) => r.id == id)
+                    .toList();
+            if (hit.isNotEmpty) req = hit.first;
+          }
+          final isOwnRequest =
+              currentReviewerId != null && currentReviewerId == req.userId;
+          final sharedWorkflow = (req.workflowSnapshot?['steps'] as List? ?? [])
+              .any((step) => step is Map);
+          final canReview =
+              !isOwnRequest &&
+              !sharedWorkflow &&
+              (isDepartmentHead
+                  ? canReviewPending &&
+                        req.status == LeaveRequestStatus.pendingDepartmentHead
+                  : canReviewPending && req.status.isPending);
+          final approved = req.status == LeaveRequestStatus.approved;
+          final canRevoke =
+              approved &&
+              !isOwnRequest &&
+              onRevoke != null &&
+              (!sharedWorkflow || req.canRevokeApproval == true);
+          final revokeDisabledReason = canRevoke
+              ? adminLeaveRevokeDisabledReason(req)
+              : null;
+          return AdminLeaveRequestDetailsPanel(
+            request: req,
+            isDepartmentHead: isDepartmentHead,
+            reviewing: provider.reviewing,
+            onApprove: canReview ? () => onApprove(req) : null,
+            onReturn: canReview ? () => onReturn(req) : null,
+            onReject: canReview ? () => onReject(req) : null,
+            onPreview: onPreview == null ? null : () => onPreview!(req),
+            onRevoke: canRevoke && revokeDisabledReason == null
+                ? () => onRevoke!(req)
+                : null,
+            revokeDisabledReason: canRevoke ? revokeDisabledReason : null,
+            onPrint: () => onPrint(req),
+          );
+        },
+      ),
+    );
+  }
+}
+
+/// The existing leave details header and body host, shared by every route.
+class AdminLeaveDetailsFrame extends StatelessWidget {
+  const AdminLeaveDetailsFrame({
+    super.key,
+    required this.child,
+    this.canClose = true,
+  });
+
+  final Widget child;
+  final bool canClose;
+
+  @override
+  Widget build(BuildContext context) {
     return SafeArea(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -69,7 +137,9 @@ class AdminLeaveDetailsSideSheet extends StatelessWidget {
                   ),
                   IconButton(
                     tooltip: 'Close',
-                    onPressed: () => Navigator.of(context).pop(),
+                    onPressed: canClose
+                        ? () => Navigator.of(context).pop()
+                        : null,
                     icon: Icon(
                       Icons.close_rounded,
                       color: AppTheme.dashTextSecondaryOf(context),
@@ -79,67 +149,16 @@ class AdminLeaveDetailsSideSheet extends StatelessWidget {
               ),
             ),
           ),
-          Expanded(
-            child: Consumer<LeaveProvider>(
-              builder: (context, provider, _) {
-                var req = initial;
-                final id = initial.id;
-                if (id != null && id.isNotEmpty) {
-                  final hit =
-                      (isDepartmentHead
-                              ? provider.departmentHeadRequests
-                              : provider.requests)
-                          .where((r) => r.id == id)
-                          .toList();
-                  if (hit.isNotEmpty) req = hit.first;
-                }
-                final isOwnRequest =
-                    currentReviewerId != null &&
-                    currentReviewerId == req.userId;
-                final canReview =
-                    !isOwnRequest &&
-                    (isDepartmentHead
-                        ? canReviewPending &&
-                              req.status ==
-                                  LeaveRequestStatus.pendingDepartmentHead
-                        : canReviewPending && req.status.isPending);
-                final approved = req.status == LeaveRequestStatus.approved;
-                final revokeDisabledReason = approved && onRevoke != null
-                    ? adminLeaveRevokeDisabledReason(req)
-                    : null;
-                return SingleChildScrollView(
-                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
-                  child: _AdminLeaveRequestDetailsPanel(
-                    request: req,
-                    isDepartmentHead: isDepartmentHead,
-                    reviewing: provider.reviewing,
-                    onApprove: canReview ? () => onApprove(req) : null,
-                    onReturn: canReview ? () => onReturn(req) : null,
-                    onReject: canReview ? () => onReject(req) : null,
-                    onPreview: onPreview == null ? null : () => onPreview!(req),
-                    onRevoke:
-                        approved &&
-                            onRevoke != null &&
-                            revokeDisabledReason == null
-                        ? () => onRevoke!(req)
-                        : null,
-                    revokeDisabledReason: approved && onRevoke != null
-                        ? revokeDisabledReason
-                        : null,
-                    onPrint: () => onPrint(req),
-                  ),
-                );
-              },
-            ),
-          ),
+          Expanded(child: child),
         ],
       ),
     );
   }
 }
 
-class _AdminLeaveRequestDetailsPanel extends StatelessWidget {
-  const _AdminLeaveRequestDetailsPanel({
+class AdminLeaveRequestDetailsPanel extends StatelessWidget {
+  const AdminLeaveRequestDetailsPanel({
+    super.key,
     required this.request,
     required this.isDepartmentHead,
     required this.reviewing,
@@ -150,6 +169,11 @@ class _AdminLeaveRequestDetailsPanel extends StatelessWidget {
     this.onPreview,
     this.revokeDisabledReason,
     this.onPrint,
+    this.historyEvents,
+    this.reviewFields,
+    this.approvalEnabled = true,
+    this.statusLabel,
+    this.onOpenAttachment,
   });
 
   final LeaveRequest? request;
@@ -162,6 +186,11 @@ class _AdminLeaveRequestDetailsPanel extends StatelessWidget {
   final VoidCallback? onPreview;
   final String? revokeDisabledReason;
   final VoidCallback? onPrint;
+  final List<LeaveHistoryEvent>? historyEvents;
+  final Widget? reviewFields;
+  final bool approvalEnabled;
+  final String? statusLabel;
+  final VoidCallback? onOpenAttachment;
 
   @override
   Widget build(BuildContext context) {
@@ -174,109 +203,171 @@ class _AdminLeaveRequestDetailsPanel extends StatelessWidget {
     }
 
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    request!.employeeName ?? 'Unknown employee',
-                    style: TextStyle(
-                      color: AppTheme.dashTextPrimaryOf(context),
-                      fontSize: 26,
-                      fontWeight: FontWeight.w700,
+        Expanded(
+          child: SingleChildScrollView(
+            key: const ValueKey('leave-request-details-scroll'),
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            request!.employeeName ?? 'Unknown employee',
+                            style: TextStyle(
+                              color: AppTheme.dashTextPrimaryOf(context),
+                              fontSize: 26,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
+                    LeaveStatusChip(
+                      status: request!.status,
+                      label:
+                          statusLabel ??
+                          adminLeaveStatusLabel(
+                            request!.status,
+                            finalReviewRoute: request!.finalReviewRoute,
+                            isDepartmentHead: isDepartmentHead,
+                          ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 18),
+                Divider(height: 1, color: AppTheme.dashHairlineOf(context)),
+                const SizedBox(height: 20),
+                LeaveRequestInformation(request: request!),
+                if ((request!.attachmentName ?? '').trim().isNotEmpty) ...[
+                  _AdminLeaveAttachmentTile(
+                    requestId: request!.id,
+                    attachmentName: request!.attachmentName,
+                    hasAttachment: true,
+                    onOpen: onOpenAttachment,
                   ),
+                  const SizedBox(height: 16),
                 ],
-              ),
+                AdminLeaveSubsectionTitle(title: 'Approval History'),
+                const SizedBox(height: 8),
+                HistoryTimeline(
+                  events: historyEvents ?? _buildHistoryEvents(request!),
+                ),
+                const SizedBox(height: 10),
+                if (reviewFields != null) ...[
+                  reviewFields!,
+                  const SizedBox(height: 16),
+                ],
+              ],
             ),
-            LeaveStatusChip(
-              status: request!.status,
-              label: adminLeaveStatusLabel(
-                request!.status,
-                finalReviewRoute: request!.finalReviewRoute,
-                isDepartmentHead: isDepartmentHead,
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 18),
-        Divider(height: 1, color: AppTheme.dashHairlineOf(context)),
-        const SizedBox(height: 20),
-        LeaveRequestInformation(request: request!),
-        if ((request!.attachmentName ?? '').trim().isNotEmpty) ...[
-          _AdminLeaveAttachmentTile(
-            requestId: request!.id,
-            attachmentName: request!.attachmentName,
-            hasAttachment: true,
           ),
-          const SizedBox(height: 16),
-        ],
-        AdminLeaveSubsectionTitle(title: 'Approval History'),
-        const SizedBox(height: 8),
-        HistoryTimeline(events: _buildHistoryEvents(request!)),
-        const SizedBox(height: 10),
-        AdminLeaveSubsectionTitle(title: 'Actions'),
-        const SizedBox(height: 10),
-        Wrap(
-          spacing: 12,
-          runSpacing: 12,
-          children: [
-            if (onApprove != null)
-              FilledButton.icon(
-                onPressed: reviewing ? null : onApprove,
-                icon: const Icon(Icons.check_circle_rounded),
-                label: const Text('Approve'),
-              ),
-            if (onReturn != null)
-              OutlinedButton.icon(
-                onPressed: reviewing ? null : onReturn,
-                icon: const Icon(Icons.reply_rounded),
-                label: const Text('Return'),
-              ),
-            if (onReject != null)
-              OutlinedButton.icon(
-                onPressed: reviewing ? null : onReject,
-                icon: const Icon(Icons.cancel_rounded),
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: Colors.red.shade700,
-                  side: BorderSide(color: Colors.red.shade300),
-                ),
-                label: const Text('Reject'),
-              ),
-            if (onRevoke != null)
-              OutlinedButton.icon(
-                onPressed: reviewing ? null : onRevoke,
-                icon: const Icon(Icons.undo_rounded),
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: Colors.orange.shade800,
-                  side: BorderSide(color: Colors.orange.shade300),
-                ),
-                label: const Text('Revoke Approval'),
-              ),
-            if (onPreview != null)
-              OutlinedButton.icon(
-                onPressed: reviewing ? null : onPreview,
-                icon: const Icon(Icons.visibility_outlined),
-                label: const Text('Preview Form'),
-              ),
-            if (onPrint != null)
-              OutlinedButton.icon(
-                onPressed: reviewing ? null : onPrint,
-                icon: const Icon(Icons.print_rounded),
-                label: const Text('Print Form'),
-              ),
-          ],
         ),
+        _buildActionsFooter(context),
       ],
     );
   }
 
+  Widget _buildActionsFooter(BuildContext context) {
+    return DecoratedBox(
+      key: const ValueKey('leave-request-actions-footer'),
+      decoration: BoxDecoration(
+        color: AppTheme.dashIsDark(context)
+            ? AppTheme.dashMutedSurfaceOf(context)
+            : AppTheme.offWhite,
+        border: Border(
+          top: BorderSide(color: AppTheme.dashHairlineOf(context)),
+        ),
+      ),
+      child: SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 12, 20, 16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              if (revokeDisabledReason != null) ...[
+                Text(
+                  revokeDisabledReason!,
+                  style: TextStyle(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+                ),
+                const SizedBox(height: 10),
+              ],
+              Wrap(
+                alignment: WrapAlignment.end,
+                spacing: 12,
+                runSpacing: 12,
+                children: [
+                  if (onApprove != null)
+                    FilledButton.icon(
+                      onPressed: reviewing || !approvalEnabled
+                          ? null
+                          : onApprove,
+                      icon: const Icon(Icons.check_circle_rounded),
+                      label: const Text('Approve'),
+                    ),
+                  if (onReturn != null)
+                    OutlinedButton.icon(
+                      onPressed: reviewing ? null : onReturn,
+                      icon: const Icon(Icons.reply_rounded),
+                      label: const Text('Return'),
+                    ),
+                  if (onReject != null)
+                    OutlinedButton.icon(
+                      onPressed: reviewing ? null : onReject,
+                      icon: const Icon(Icons.cancel_rounded),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: Colors.red.shade700,
+                        side: BorderSide(color: Colors.red.shade300),
+                      ),
+                      label: const Text('Reject'),
+                    ),
+                  if (onRevoke != null)
+                    OutlinedButton.icon(
+                      onPressed: reviewing ? null : onRevoke,
+                      icon: const Icon(Icons.undo_rounded),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: Colors.orange.shade800,
+                        side: BorderSide(color: Colors.orange.shade300),
+                      ),
+                      label: const Text('Revoke Approval'),
+                    ),
+                  if (onPreview != null)
+                    OutlinedButton.icon(
+                      onPressed: reviewing ? null : onPreview,
+                      icon: const Icon(Icons.visibility_outlined),
+                      label: const Text('Preview Form'),
+                    ),
+                  if (onPrint != null)
+                    OutlinedButton.icon(
+                      onPressed: reviewing ? null : onPrint,
+                      icon: const Icon(Icons.print_rounded),
+                      label: const Text('Print Form'),
+                    ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   List<LeaveHistoryEvent> _buildHistoryEvents(LeaveRequest request) {
+    if ((request.workflowSnapshot?['steps'] as List? ?? []).any(
+      (step) => step is Map,
+    )) {
+      return leaveWorkflowHistory(request);
+    }
     final reviewer = (request.reviewerName ?? '').trim().isNotEmpty
         ? request.reviewerName!.trim()
         : 'HR/Admin';
@@ -292,7 +383,9 @@ class _AdminLeaveRequestDetailsPanel extends StatelessWidget {
     final submittedAt = request.dateFiled ?? request.createdAt;
     final reviewedAt = request.reviewedAt;
     final status = request.status;
-    final finalStage = request.finalReviewRoute == 'mayor' ? 'Department' : 'HR';
+    final finalStage = request.finalReviewRoute == 'mayor'
+        ? 'Department'
+        : 'HR';
     final departmentHeadAction = request.departmentHeadAction;
 
     final deptHeadApprovedStage =
@@ -367,7 +460,8 @@ class _AdminLeaveRequestDetailsPanel extends StatelessWidget {
           actor: finalStage,
           completed: false,
         ),
-      if (hrApproved && (!deptHeadApprovedStage || request.finalReviewRoute != 'mayor'))
+      if (hrApproved &&
+          (!deptHeadApprovedStage || request.finalReviewRoute != 'mayor'))
         LeaveHistoryEvent(
           label: 'Approved by $finalStage',
           dateTime: reviewedAt,
@@ -406,11 +500,13 @@ class _AdminLeaveAttachmentTile extends StatelessWidget {
     required this.requestId,
     required this.attachmentName,
     required this.hasAttachment,
+    this.onOpen,
   });
 
   final String? requestId;
   final String? attachmentName;
   final bool hasAttachment;
+  final VoidCallback? onOpen;
 
   @override
   Widget build(BuildContext context) {
@@ -455,9 +551,11 @@ class _AdminLeaveAttachmentTile extends StatelessWidget {
                   ),
                 ),
                 TextButton.icon(
-                  onPressed: requestId != null && requestId!.isNotEmpty
-                      ? () => _previewAttachment(context)
-                      : null,
+                  onPressed:
+                      onOpen ??
+                      (requestId != null && requestId!.isNotEmpty
+                          ? () => _previewAttachment(context)
+                          : null),
                   icon: const Icon(Icons.visibility_rounded, size: 18),
                   label: const Text('Preview'),
                   style: TextButton.styleFrom(

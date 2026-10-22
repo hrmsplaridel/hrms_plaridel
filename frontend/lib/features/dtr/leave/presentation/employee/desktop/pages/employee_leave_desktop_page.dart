@@ -690,6 +690,22 @@ class _CompactBalanceRow extends StatelessWidget {
                         fontWeight: FontWeight.w600,
                       ),
                     ),
+                    if (annual && balance.prorated)
+                      Text(
+                        'First year: rounded down to whole days',
+                        style: TextStyle(
+                          color: AppTheme.dashTextSecondaryOf(context),
+                          fontSize: 11,
+                        ),
+                      ),
+                    if (annual && balance.eligibilityMessage != null)
+                      Text(
+                        balance.eligibilityMessage!,
+                        style: TextStyle(
+                          color: AppTheme.dashTextSecondaryOf(context),
+                          fontSize: 11,
+                        ),
+                      ),
                     if (annual && balance.entitlementYear != null)
                       Text(
                         '${balance.entitlementYear}',
@@ -703,8 +719,15 @@ class _CompactBalanceRow extends StatelessWidget {
               ),
               _BalanceAmount(
                 label: annual ? 'Entitled' : 'Earned',
-                value: _days(balance.earnedDays),
+                value: _days(
+                  annual ? balance.annualEntitlementDays : balance.earnedDays,
+                ),
               ),
+              if (annual && balance.prorated)
+                _BalanceAmount(
+                  label: 'Prorated',
+                  value: _days(balance.earnedDays),
+                ),
               _BalanceAmount(label: 'Used', value: _days(balance.usedDays)),
               _BalanceAmount(
                 label: 'Pending',

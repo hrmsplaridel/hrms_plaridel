@@ -18,6 +18,7 @@ class DocumentHistoryEntry {
     this.isEscalationLog = false,
     this.escalationLevel,
     this.createdAt,
+    this.metadata = const {},
   });
 
   final String? id;
@@ -36,6 +37,15 @@ class DocumentHistoryEntry {
   final bool isEscalationLog;
   final int? escalationLevel;
   final DateTime? createdAt;
+
+  /// Structured event details, e.g. the receiving department of a release.
+  final Map<String, dynamic> metadata;
+
+  /// Department name recorded on a `released` event.
+  String? get releasedToDepartmentName {
+    final name = metadata['released_to_department_name']?.toString().trim();
+    return name == null || name.isEmpty ? null : name;
+  }
 
   static const String tableName = 'docutracker_document_history';
 
@@ -57,6 +67,9 @@ class DocumentHistoryEntry {
       createdAt: json['created_at'] != null
           ? DateTime.tryParse(json['created_at'] as String)
           : null,
+      metadata: json['metadata'] is Map
+          ? Map<String, dynamic>.from(json['metadata'] as Map)
+          : const {},
     );
   }
 

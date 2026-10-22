@@ -56,18 +56,18 @@ DocuTrackerRspSignatureRequest _request(List<Map<String, dynamic>> slots) =>
     });
 
 void main() {
-  test('source rows keep server-owned RSP/L&D status and next step', () {
+  test('source rows keep server-owned L&D status and next step', () {
     final doc = _sourceDocument(
-      module: 'rsp',
-      table: 'recruitment_applications',
-      status: 'exam_taken',
-      action: 'grade_exam_in_rsp',
-      actionLabel: 'Complete exam grading in RSP',
+      module: 'ld',
+      table: 'training_daily_reports',
+      status: 'submitted',
+      action: 'review_report_in_ld',
+      actionLabel: 'Review training report in L&D',
     );
     expect(doc.sourceOnly, isTrue);
     expect(doc.status, DocumentStatus.pending);
-    expect(doc.sourceStatus, 'exam_taken');
-    expect(doc.sourceActionLabel, 'Complete exam grading in RSP');
+    expect(doc.sourceStatus, 'submitted');
+    expect(doc.sourceActionLabel, 'Review training report in L&D');
   });
 
   test('Required actions only lists RSP/L&D rows with a module action', () {

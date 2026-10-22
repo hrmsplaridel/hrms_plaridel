@@ -65,3 +65,26 @@ test('submission needs a final reviewer other than the applicant', async () => {
   await assertLeaveSubmissionReviewer(dbWithReviewers([primary, backup]), primary);
   await assertLeaveSubmissionReviewer(dbWithReviewers([backup]), applicant);
 });
+
+for (const kind of ['leave', 'locator']) {
+  test(`${kind} readiness does not count an admin whose module access is disabled`, async () => {
+    const db = {query: async sql => ({rows:sql.includes('primary_reviewer_designations') ?
+      [{id:primary,role:'admin',leave_allowed:false,locator_allowed:false}] : []})};
+    await assert.rejects(assertLeaveSubmissionReviewer(db,applicant,kind), {statusCode:409});
+  });
+  test(`${kind} filing rejects a sole reviewer shared by both required stages`, async () => {
+    await assert.rejects(
+      assertLeaveSubmissionReviewer(dbWithReviewers([primary]), applicant, kind, null,
+        {departmentHeadUserId: primary, reviewerUserIds: [primary]}),
+      error => error.statusCode === 409 && /different|distinct|another/i.test(error.message)
+    );
+  });
+
+  test(`${kind} filing permits a distinct final backup or department backup`, async () => {
+    await assertLeaveSubmissionReviewer(dbWithReviewers([primary, backup]), applicant, kind, null,
+      {departmentHeadUserId: primary, reviewerUserIds: [primary]});
+    await assertLeaveSubmissionReviewer(dbWithReviewers([primary]), applicant, kind, null,
+      {departmentHeadUserId: primary, reviewerUserIds: [primary, backup]});
+    await assertLeaveSubmissionReviewer(dbWithReviewers([primary]), applicant, kind, null, null);
+  });
+}

@@ -99,4 +99,5 @@ test('history listing preserves database order and exposes readable titles', asy
   assert.equal(events[0].title, 'Submitted');
   assert.equal(events[1].title, 'Returned by Department Head');
   assert.equal(locatorHistoryTitle('custom_action'), 'Custom Action');
+  assert.equal(locatorHistoryTitle('mayor_reassigned'), 'Reassigned to Current Mayor');
 });

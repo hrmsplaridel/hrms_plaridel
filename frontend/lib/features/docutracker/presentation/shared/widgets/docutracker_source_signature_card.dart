@@ -20,6 +20,7 @@ class DocuTrackerSourceSignatureCard extends StatefulWidget {
     this.savedMessage = 'Signature saved.',
     this.initialBundle,
     this.onChanged,
+    this.readOnly = false,
   });
 
   final String sourceModule;
@@ -34,6 +35,7 @@ class DocuTrackerSourceSignatureCard extends StatefulWidget {
   /// When provided (e.g. from Required actions), skip the extra network fetch.
   final DocuTrackerSourceSignatureBundle? initialBundle;
   final ValueChanged<DocuTrackerSourceSignatureBundle>? onChanged;
+  final bool readOnly;
 
   @override
   State<DocuTrackerSourceSignatureCard> createState() =>
@@ -310,8 +312,8 @@ class _DocuTrackerSourceSignatureCardState
   @override
   Widget build(BuildContext context) {
     final signature = _bundle?.signatureFor(widget.slotKey);
-    final canAssign = signature?.canAssign ?? (_bundle?.canAssign == true);
-    final canSign = signature?.canSign == true;
+    final canAssign = !widget.readOnly && (signature?.canAssign ?? (_bundle?.canAssign == true));
+    final canSign = !widget.readOnly && signature?.canSign == true;
     final isCreatorAssigned = signature?.assignmentSource == 'creator';
     final hasAssignedSigner = (signature?.assignedSignerId ?? '')
         .trim()
@@ -415,8 +417,8 @@ class _DocuTrackerSourceSignatureCardState
                     .where((value) => value.isNotEmpty)
                     .join(' | '),
                 textAlign: TextAlign.center,
-                style: const TextStyle(
-                  color: DocuTrackerTokens.textMuted,
+                style: TextStyle(
+                  color: DocuTrackerTokens.textMutedOf(context),
                   fontSize: 11,
                 ),
               ),
@@ -430,14 +432,14 @@ class _DocuTrackerSourceSignatureCardState
                     ? 'Automatically assigned to ${signature!.assignedSignerName}'
                     : 'Assigned to ${signature!.assignedSignerName}',
                 textAlign: TextAlign.center,
-                style: const TextStyle(
-                  color: DocuTrackerTokens.textMuted,
+                style: TextStyle(
+                  color: DocuTrackerTokens.textMutedOf(context),
                   fontSize: 12,
                 ),
               ),
             ],
             const SizedBox(height: 12),
-            if (signature?.canSign == true && waitingOnLabel == null)
+            if (canSign && waitingOnLabel == null)
               FilledButton.icon(
                 onPressed: _signing ? null : _sign,
                 icon: _signing
@@ -462,18 +464,18 @@ class _DocuTrackerSourceSignatureCardState
                     ? 'The signature is saved on this form.'
                     : waitingMessage,
                 textAlign: TextAlign.center,
-                style: const TextStyle(
-                  color: DocuTrackerTokens.textMuted,
+                style: TextStyle(
+                  color: DocuTrackerTokens.textMutedOf(context),
                   fontSize: 12,
                 ),
               ),
             if (isCreatorAssigned) ...[
               const SizedBox(height: 8),
-              const Text(
+              Text(
                 'This field belongs to the person who created the form.',
                 textAlign: TextAlign.center,
                 style: TextStyle(
-                  color: DocuTrackerTokens.textMuted,
+                  color: DocuTrackerTokens.textMutedOf(context),
                   fontSize: 12,
                 ),
               ),

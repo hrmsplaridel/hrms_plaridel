@@ -102,7 +102,7 @@ class _MobileEmployeePortalState extends State<MobileEmployeePortal> {
       child: Padding(
         padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
         child: Container(
-          decoration: DocuTrackerTokens.cardDecoration(),
+          decoration: DocuTrackerTokens.cardDecoration(context: context),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -115,7 +115,7 @@ class _MobileEmployeePortalState extends State<MobileEmployeePortal> {
                     Text(
                       'Mobile employee portal',
                       style: TextStyle(
-                        color: DocuTrackerTokens.textSecondary,
+                        color: DocuTrackerTokens.textSecondaryOf(context),
                         fontWeight: FontWeight.w700,
                         fontSize: 13,
                       ),
@@ -221,7 +221,7 @@ class _MobileMyFilesTab extends StatelessWidget {
             },
             child: Container(
               padding: const EdgeInsets.all(12),
-              decoration: DocuTrackerTokens.cardDecoration(),
+              decoration: DocuTrackerTokens.cardDecoration(context: context),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -327,7 +327,7 @@ class _MobileProfileTab extends StatelessWidget {
       children: [
         Container(
           padding: const EdgeInsets.all(14),
-          decoration: DocuTrackerTokens.cardDecoration(),
+          decoration: DocuTrackerTokens.cardDecoration(context: context),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -371,7 +371,7 @@ class _MetricCard extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-      decoration: DocuTrackerTokens.cardDecoration(),
+      decoration: DocuTrackerTokens.cardDecoration(context: context),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [

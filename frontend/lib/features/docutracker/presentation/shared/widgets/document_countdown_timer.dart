@@ -38,7 +38,7 @@ class DocumentCountdownTimer extends StatelessWidget {
       if (remaining.inMinutes < 60) {
         color = Colors.orange;
       } else {
-        color = AppTheme.textSecondary;
+        color = AppTheme.dashTextSecondaryOf(context);
       }
     }
 

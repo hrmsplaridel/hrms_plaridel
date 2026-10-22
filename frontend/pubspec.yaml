@@ -94,6 +94,7 @@ flutter:
     - assets/forms/a4_letter.pdf
     - assets/forms/long_letter.pdf
     - assets/fonts/
+    - assets/fonts/form-layout/
     - assets/data/ph_psgc/index.json
     - assets/data/ph_psgc/provinces/
     - assets/animations/
@@ -104,6 +105,16 @@ flutter:
       fonts:
         - asset: assets/fonts/NotoSans-Regular.ttf
         - asset: assets/fonts/NotoSans-Bold.ttf
+          weight: 700
+    - family: NotoSerif
+      fonts:
+        - asset: assets/fonts/form-layout/NotoSerif-Regular.ttf
+        - asset: assets/fonts/form-layout/NotoSerif-Bold.ttf
+          weight: 700
+    - family: NotoSansMono
+      fonts:
+        - asset: assets/fonts/form-layout/NotoSansMono-Regular.ttf
+        - asset: assets/fonts/form-layout/NotoSansMono-Bold.ttf
           weight: 700
     - family: Milanello
       fonts:

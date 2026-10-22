@@ -5,6 +5,43 @@ import 'package:hrms_plaridel/features/dtr/leave/models/leave_entitlement_basis.
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_type_definition.dart';
 
 void main() {
+  test('hire-date rule settings survive API round trips and copies', () {
+    final rule = LeaveTypeDefinition.fromJson({
+      'name': 'wellnessLeave',
+      'display_name': 'Wellness Leave',
+      'minimum_service_months': 6,
+      'first_year_allowance': 'prorated',
+    });
+    expect(rule.minimumServiceMonths, 6);
+    expect(
+      rule.copyWith(displayName: 'Wellness').firstYearAllowance,
+      'prorated',
+    );
+    expect(rule.toJson()['minimum_service_months'], 6);
+    expect(rule.toJson()['first_year_allowance'], 'prorated');
+  });
+
+  test('annual availability stays zero until service requirements are met', () {
+    final row = LeaveBalance.fromJson({
+      'user_id': 'employee',
+      'leave_type': 'wellnessLeave',
+      'record_kind': 'annual_entitlement',
+      'entitlement_basis': 'annual',
+      'earned_days': 5,
+      'eligible': false,
+      'eligible_from': '2027-04-01',
+      'eligibility_message': 'Eligible on 2027-04-01',
+      'prorated': true,
+      'calculated_days': 1.25,
+    });
+    expect(row.availableDays, 0);
+    expect(row.eligibilityMessage, 'Eligible on 2027-04-01');
+    expect(row.calculatedDays, 1.25);
+    expect(row.toJson()['eligible'], false);
+    expect(row.copyWith(pendingDays: 1).availableDays, 0);
+    expect(row.copyWith(pendingDays: 1).eligibilityMessage, row.eligibilityMessage);
+    expect(row.copyWith(eligible: true, earnedDays: 1, usedDays: 5).availableDays, 0);
+  });
   test('event leave definition is not treated as an annual balance', () {
     final maternity = LeaveTypeDefinition.fromJson({
       'name': 'maternityLeave',

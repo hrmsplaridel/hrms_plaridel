@@ -590,7 +590,7 @@ extension _ManageAssignmentPageSections on _ManageAssignmentState {
               padding: const EdgeInsets.symmetric(vertical: 48),
               child: Center(
                 child: Text(
-                  'No primary assignment yet',
+                  _primaryAssignmentEmptyMessage,
                   style: TextStyle(color: _mutedColor(context)),
                 ),
               ),

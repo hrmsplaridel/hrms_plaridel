@@ -170,6 +170,47 @@ function resultForSql(sql) {
   throw new Error(`Unhandled SQL in test: ${sql.slice(0, 80)}`);
 }
 
+test('DTR status loads Travel Order coverage without punches and respects approval and slots', async () => {
+  const { buildFastEmployeeAssistantReply } = require('../src/services/dtrAssistant/dtrAssistantFastReply');
+  for (const scenario of ['approved', 'pending_hr', 'revoked', 'partial', 'other_date']) {
+    const pool = { query: async (query) => {
+      const sql = typeof query === 'string' ? query : query.text;
+      if (/FROM dtr_daily_summary/i.test(sql)) return { rows: [] };
+      const result = resultForSql(sql);
+      if (/FROM generate_series/i.test(sql)) {
+        result.rows[0].attendance_date = '2026-10-13';
+      }
+      if (/FROM locator_slips/i.test(sql)) {
+        Object.assign(result.rows[0], {
+          slip_date: scenario === 'other_date' ? '2026-10-12' : '2026-10-13',
+          request_type: 'travel_order',
+          request_type_label: 'Travel Order',
+          dtr_slot_label: 'Travel Order',
+          status: scenario === 'pending_hr' ? 'pending_hr' : 'approved',
+          revoked_at: scenario === 'revoked' ? '2026-10-14T00:00:00Z' : null,
+          pm_out: scenario !== 'partial',
+        });
+      }
+      return result;
+    } };
+    const context = await loadEmployeeAssistantContext(pool, {
+      userId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+      message: 'check my dtr status yesterday',
+      intents: ['dtr_status_explanation'],
+      dateRange: { label: 'yesterday', startDate: '2026-10-13', endDate: '2026-10-13' },
+    });
+    const reply = buildFastEmployeeAssistantReply(
+      'check my dtr status yesterday', context, 'dtr_status_explanation'
+    );
+    if (scenario === 'approved') {
+      assert.match(reply, /Status: Travel Order/);
+      assert.doesNotMatch(reply, /Status: Absent/);
+    } else {
+      assert.doesNotMatch(reply, /Status: Travel Order/, scenario);
+    }
+  }
+});
+
 test('DTR assistant data loader scopes every employee query and normalizes rows', async () => {
   const calls = [];
   const userId = '55555555-5555-4555-8555-555555555555';
@@ -280,12 +321,16 @@ test('DTR assistant data loader uses intent-specific query plans', async () => {
   assert.deepEqual(leave.context.recent_locator_slips, []);
 
   const dtr = await loadFor(['dtr_range_summary']);
-  assert.equal(dtr.calls.length, 3);
+  assert.equal(dtr.calls.length, 4);
   assert.deepEqual(dtr.context.context_sources.loaded, [
     'employee',
     'dtrRecords',
     'dtrCalendarDays',
+    'locatorSlips',
   ]);
+  const coverageQuery = dtr.calls.find((sql) => /FROM locator_slips/i.test(sql));
+  assert.match(coverageQuery, /AND ls.slip_date BETWEEN \$2::date AND \$3::date/);
+  assert.doesNotMatch(coverageQuery, /LIMIT 30/);
   assert.equal(dtr.context.data_completeness.dtr_export.complete, true);
 
   const locator = await loadFor(['locator_status']);

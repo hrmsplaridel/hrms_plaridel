@@ -157,10 +157,11 @@ class DocuTrackerStyles {
     child: child,
   );
 
-  static BoxDecoration cardDecoration() => DocuTrackerTokens.cardDecoration();
+  static BoxDecoration cardDecoration([BuildContext? context]) =>
+      DocuTrackerTokens.cardDecoration(context: context);
 
-  static BoxDecoration listCardDecoration() =>
-      DocuTrackerTokens.cardDecoration();
+  static BoxDecoration listCardDecoration([BuildContext? context]) =>
+      DocuTrackerTokens.cardDecoration(context: context);
 
   static Widget stateMessage({
     required IconData icon,

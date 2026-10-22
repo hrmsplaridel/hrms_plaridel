@@ -3,6 +3,8 @@ const assert = require('node:assert/strict');
 const { withMockedModule, clearModule } = require('./helpers/moduleMocks');
 
 const scenarios = [
+  { label:'prorated hire-year allowance cannot be reserved twice', secondPath:'/submit', limit:5, prorated:true,
+    firstDates:['2026-11-02','2026-11-02'],secondDates:['2026-11-03','2026-11-03'],allowed:false },
   ...['/submit', '/submit-with-attachment', '/:id'].map(secondPath => ({
     label: `annual quota JSON versus ${secondPath}`, secondPath, limit: 2,
     firstDates: ['2026-11-02', '2026-11-03'], secondDates: ['2026-11-04', '2026-11-05'], allowed: false,
@@ -14,7 +16,7 @@ const scenarios = [
   { label: 'cross-year request uses separate calendar-year allowances', secondPath: '/submit', limit: 2,
     firstDates: ['2026-12-31', '2027-01-01'], secondDates: ['2027-01-04', '2027-01-04'], allowed: true },
 ];
-for (const { label, secondPath, limit, firstDates, secondDates, allowed } of scenarios) {
+for (const { label, secondPath, limit, firstDates, secondDates, allowed, prorated } of scenarios) {
   test(label, async () => {
     const rows = new Map([['draft-2', { id: 'draft-2', status: 'draft', user_id: 'employee', employee_id: 'employee' }]]);
     let owner = null;
@@ -41,7 +43,8 @@ for (const { label, secondPath, limit, firstDates, secondDates, allowed } of sce
             }
             if (sql.includes('FROM leave_requests') && sql.includes('FOR UPDATE')) return { rows: [{ ...rows.get(params[0]) }] };
             if (sql.startsWith('SELECT id FROM leave_types')) return { rows: [{ id: 'type' }] };
-            if (sql.includes('SELECT *') && sql.includes('FROM leave_types')) return { rows: [{ id: 'type', name: 'testAnnualLeave', display_name: 'Test Annual Leave', employee_can_file: true, requires_attachment: false, minimum_advance_days: 0, balance_ledger_type: 'none', entitlement_basis: 'annual', max_days: limit }] };
+            if (sql.includes('date_hired') && sql.includes('FROM users')) return {rows:[{date_hired:'2026-10-01'}]};
+            if (sql.includes('SELECT *') && sql.includes('FROM leave_types')) return { rows: [{ id: 'type', name: 'testAnnualLeave', display_name: 'Test Annual Leave', employee_can_file: true, requires_attachment: false, minimum_advance_days: 0, balance_ledger_type: 'none', entitlement_basis: 'annual', max_days: limit,first_year_allowance:prorated?'prorated':'full' }] };
             if (sql.includes('FROM generate_series')) {
               const days = [];
               for (let date = new Date(params[1] + 'T12:00:00Z'); date.toISOString().slice(0,10) <= params[2]; date.setUTCDate(date.getUTCDate()+1)) {
@@ -51,7 +54,7 @@ for (const { label, secondPath, limit, firstDates, secondDates, allowed } of sce
             }
             if (sql.includes('SELECT 1') && sql.includes('FROM leave_requests')) return { rows: [] }; // Disjoint ranges.
             if (sql.includes('max_days') && sql.includes('FROM leave_types')) {
-              return { rows: [{ display_name: 'Test Annual Leave', max_days: limit, entitlement_basis: 'annual' }] };
+              return { rows: [{ display_name: 'Test Annual Leave', max_days: limit, entitlement_basis: 'annual',first_year_allowance:prorated?'prorated':'full' }] };
             }
             if (sql.includes('SELECT lr.id, lr.start_date, lr.end_date, lr.status')) {
               const usage = committed ? [...rows.values()].filter(r => r.status === 'pending_hr' && r.id !== params[5]) : [];

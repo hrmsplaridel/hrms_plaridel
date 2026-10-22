@@ -37,6 +37,15 @@ class DocuTrackerDocument {
     this.signatureSignerIds = const <String>[],
     this.viewerIsRoutingAssignee = false,
     this.viewerParticipatedInSource = false,
+    this.releaseRequired = false,
+    this.releasedAt,
+    this.releasedToDepartmentId,
+    this.releasedToDepartmentName,
+    this.releasedById,
+    this.releasedByName,
+    this.releaseRemarks,
+    this.viewerReleaseAccess = false,
+    this.viewerCanRelease = false,
   });
 
   final String? id;
@@ -109,6 +118,29 @@ class DocuTrackerDocument {
   /// Source-backed leave (and similar): viewer already reviewed/signed or is
   /// the assigned department reviewer — kept for Required actions after acting.
   final bool viewerParticipatedInSource;
+
+  /// Set at final approval when the document type requires a release.
+  final bool releaseRequired;
+  final DateTime? releasedAt;
+  final String? releasedToDepartmentId;
+  final String? releasedToDepartmentName;
+  final String? releasedById;
+  final String? releasedByName;
+  final String? releaseRemarks;
+
+  /// The viewer sees this document because of the release stage (authorized
+  /// releaser or receiving-department member). Decided by the backend.
+  final bool viewerReleaseAccess;
+
+  /// The backend allows the viewer to release this document now.
+  final bool viewerCanRelease;
+
+  bool get isAwaitingRelease =>
+      releaseRequired &&
+      status == DocumentStatus.approved &&
+      releasedAt == null;
+
+  bool get isReleased => releaseRequired && releasedAt != null;
 
   static const String tableName = 'docutracker_documents';
 
@@ -183,6 +215,17 @@ class DocuTrackerDocument {
           const <String>[],
       viewerIsRoutingAssignee: json['viewer_is_routing_assignee'] == true,
       viewerParticipatedInSource: json['viewer_participated_in_source'] == true,
+      releaseRequired: json['release_required'] == true,
+      releasedAt: json['released_at'] != null
+          ? DateTime.tryParse(json['released_at'].toString())
+          : null,
+      releasedToDepartmentId: json['released_to_department_id']?.toString(),
+      releasedToDepartmentName: json['released_to_department_name']?.toString(),
+      releasedById: json['released_by']?.toString(),
+      releasedByName: json['released_by_name']?.toString(),
+      releaseRemarks: json['release_remarks']?.toString(),
+      viewerReleaseAccess: json['viewer_release_access'] == true,
+      viewerCanRelease: json['viewer_can_release'] == true,
     );
   }
 
@@ -217,6 +260,17 @@ class DocuTrackerDocument {
     'signature_signer_ids': signatureSignerIds,
     'viewer_is_routing_assignee': viewerIsRoutingAssignee,
     'viewer_participated_in_source': viewerParticipatedInSource,
+    'release_required': releaseRequired,
+    if (releasedAt != null) 'released_at': releasedAt!.toIso8601String(),
+    if (releasedToDepartmentId != null)
+      'released_to_department_id': releasedToDepartmentId,
+    if (releasedToDepartmentName != null)
+      'released_to_department_name': releasedToDepartmentName,
+    if (releasedById != null) 'released_by': releasedById,
+    if (releasedByName != null) 'released_by_name': releasedByName,
+    if (releaseRemarks != null) 'release_remarks': releaseRemarks,
+    'viewer_release_access': viewerReleaseAccess,
+    'viewer_can_release': viewerCanRelease,
     'updated_at': DateTime.now().toIso8601String(),
   };
 
@@ -290,6 +344,15 @@ class DocuTrackerDocument {
           viewerIsRoutingAssignee ?? this.viewerIsRoutingAssignee,
       viewerParticipatedInSource:
           viewerParticipatedInSource ?? this.viewerParticipatedInSource,
+      releaseRequired: releaseRequired,
+      releasedAt: releasedAt,
+      releasedToDepartmentId: releasedToDepartmentId,
+      releasedToDepartmentName: releasedToDepartmentName,
+      releasedById: releasedById,
+      releasedByName: releasedByName,
+      releaseRemarks: releaseRemarks,
+      viewerReleaseAccess: viewerReleaseAccess,
+      viewerCanRelease: viewerCanRelease,
     );
   }
 }

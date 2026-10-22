@@ -10,6 +10,7 @@ class DocumentRoutingConfig {
     required this.steps,
     this.reviewDeadlineHours = 1,
     this.version = 1,
+    this.sharedWorkflowId,
   });
 
   final DocumentType documentType;
@@ -20,6 +21,7 @@ class DocumentRoutingConfig {
 
   /// Latest workflow version for this document type.
   final int version;
+  final String? sharedWorkflowId;
 
   factory DocumentRoutingConfig.fromJson(Map<String, dynamic> json) {
     final stepsRaw = json['steps'];
@@ -37,6 +39,7 @@ class DocumentRoutingConfig {
       reviewDeadlineHours:
           (json['review_deadline_hours'] as num?)?.toInt() ?? 1,
       version: (json['version'] as num?)?.toInt() ?? 1,
+      sharedWorkflowId: json['shared_workflow_id']?.toString(),
     );
   }
 

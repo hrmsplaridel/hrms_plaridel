@@ -95,6 +95,7 @@ class _ManageAssignmentState extends State<ManageAssignment> {
   final _prefillRequestGuard = AssignmentRequestGuard();
 
   List<_AssignmentRecord> _assignments = [];
+  DateTime? _upcomingAssignmentStart;
   bool _loadingAssignments = false;
   List<_DesignationRecord> _designations = [];
   bool _loadingDesignations = false;
@@ -523,7 +524,10 @@ class _ManageAssignmentState extends State<ManageAssignment> {
       _assignmentQueryContext(),
     );
     final request = _assignmentRequestGuard.begin(context);
-    _updateAssignmentFormState(() => _loadingAssignments = true);
+    _updateAssignmentFormState(() {
+      _loadingAssignments = true;
+      _upcomingAssignmentStart = null;
+    });
     try {
       final contextRes = await ApiClient.instance.get<Map<String, dynamic>>(
         '/api/assignments/context',
@@ -567,6 +571,33 @@ class _ManageAssignmentState extends State<ManageAssignment> {
         return;
       }
       final data = res.data ?? [];
+      DateTime? upcomingStart;
+      if (context['status'] == 'Current' && data.isEmpty) {
+        try {
+          final upcoming = await ApiClient.instance.get<List<dynamic>>(
+            '/api/assignments',
+            queryParameters: {'employee_id': employeeId, 'status': 'Upcoming'},
+          );
+          for (final row in upcoming.data ?? []) {
+            final start = _assignmentDateFromApi(row['effective_from']);
+            if (start != null &&
+                row['is_active'] != false &&
+                start.isAfter(officialDate) &&
+                (upcomingStart == null || start.isBefore(upcomingStart))) {
+              upcomingStart = start;
+            }
+          }
+        } catch (e) {
+          debugPrint('Load upcoming assignment start failed: $e');
+        }
+      }
+      if (!mounted ||
+          !_assignmentRequestGuard.accepts(
+            request,
+            _assignmentQueryContext(),
+          )) {
+        return;
+      }
       final assignments = data.map((e) {
         final m = e as Map<String, dynamic>;
         final st = m['start_time'] ?? m['override_start_time'];
@@ -600,6 +631,7 @@ class _ManageAssignmentState extends State<ManageAssignment> {
       }).toList();
       _updateAssignmentFormState(() {
         _assignments = assignments;
+        _upcomingAssignmentStart = upcomingStart;
         _loadingAssignments = false;
         _selectedAssignment = null;
         _officialHrmsDate = officialDate;
@@ -718,6 +750,31 @@ class _ManageAssignmentState extends State<ManageAssignment> {
 
   String _dateStr(DateTime d) =>
       '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
+
+  String get _primaryAssignmentEmptyMessage {
+    if (_assignmentStatusFilter != 'Current') {
+      return 'No primary assignment yet';
+    }
+    final start = _upcomingAssignmentStart;
+    if (start == null) return 'No current assignment.';
+    const months = [
+      'January',
+      'February',
+      'March',
+      'April',
+      'May',
+      'June',
+      'July',
+      'August',
+      'September',
+      'October',
+      'November',
+      'December',
+    ];
+    final year = start.year == _officialHrmsDate?.year ? '' : ', ${start.year}';
+    return 'No current assignment. Upcoming assignment starts '
+        '${months[start.month - 1]} ${start.day}$year.';
+  }
 
   String _effectivePeriodStr(_AssignmentRecord assignment) {
     final from = _dateStr(assignment.effectiveFrom);
@@ -842,6 +899,7 @@ class _ManageAssignmentState extends State<ManageAssignment> {
     _assignmentPickerFirstDate = null;
     _assignmentPickerLastDate = null;
     _assignments = [];
+    _upcomingAssignmentStart = null;
     _designations = [];
     _loadingAssignments = false;
     _loadingDesignations = false;

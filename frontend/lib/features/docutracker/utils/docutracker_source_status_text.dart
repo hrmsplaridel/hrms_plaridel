@@ -1,5 +1,4 @@
 import 'package:hrms_plaridel/features/docutracker/models/document.dart';
-import 'package:hrms_plaridel/features/recruitment/utils/rsp_applications_report_export.dart';
 
 /// Read-only status wording for records owned by other HRMS modules.
 class DocuTrackerSourceStatusText {
@@ -26,7 +25,6 @@ DocuTrackerSourceStatusText docuTrackerLinkedSourceStatusText({
 }) {
   final raw = status.trim().toLowerCase();
   if (sourceModule == 'ld') return _trainingReportStatusText(raw);
-  if (sourceModule == 'rsp') return _recruitmentStatusText(raw);
   return DocuTrackerSourceStatusText(
     label: _humanize(raw),
     description: 'Status is managed by the source module.',
@@ -66,32 +64,6 @@ DocuTrackerSourceStatusText _trainingReportStatusText(String raw) {
   };
   return DocuTrackerSourceStatusText(
     label: raw == 'seen' ? 'Reviewed' : _humanize(raw),
-    description: description,
-  );
-}
-
-DocuTrackerSourceStatusText _recruitmentStatusText(String raw) {
-  final description = switch (raw) {
-    'submitted' =>
-      'The application is waiting for HR to review the submitted documents.',
-    'document_approved' =>
-      'HR approved the documents. The applicant may take the screening exam.',
-    'document_declined' =>
-      'HR did not approve the documents. The applicant must replace them '
-          'and resubmit.',
-    'exam_taken' =>
-      'The applicant submitted the screening exam and is waiting for the '
-          'result.',
-    'passed' => 'The applicant passed the screening exam.',
-    'failed' =>
-      'The applicant did not pass the screening exam and cannot continue '
-          'this application.',
-    'registered' =>
-      'The applicant was hired and an employee account was set up.',
-    _ => 'Status is managed by the RSP module.',
-  };
-  return DocuTrackerSourceStatusText(
-    label: RspApplicationsReportExport.statusDisplayLabel(raw),
     description: description,
   );
 }

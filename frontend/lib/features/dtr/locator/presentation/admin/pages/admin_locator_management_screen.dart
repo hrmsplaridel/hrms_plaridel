@@ -1,10 +1,14 @@
 import 'dart:async';
+import 'package:hrms_plaridel/features/dtr/management/approvals/pages/workflow_approval_inbox_page.dart';
+import 'dart:convert';
+import '../../shared/widgets/locator_custom_fields.dart';
 
 import 'package:hrms_plaridel/shared/widgets/reviewer_access_notice.dart';
 
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:hrms_plaridel/shared/widgets/workforce_loading_skeleton.dart';
+import 'package:hrms_plaridel/shared/widgets/skeleton_bone.dart';
 import 'package:provider/provider.dart';
 
 import 'package:hrms_plaridel/core/api/client.dart';
@@ -17,10 +21,11 @@ import 'package:hrms_plaridel/core/widgets/form_pdf_preview.dart';
 import 'package:hrms_plaridel/core/services/app_realtime_provider.dart';
 import 'package:hrms_plaridel/features/dtr/locator/presentation/admin/pages/locator_type_management_screen.dart';
 import 'package:hrms_plaridel/features/dtr/locator/presentation/admin/widgets/admin_locator_correction_dialog.dart';
+import 'package:hrms_plaridel/features/dtr/locator/presentation/admin/widgets/admin_locator_filing_dialog.dart';
 import 'package:hrms_plaridel/features/dtr/locator/utils/locator_slip_print.dart';
 import 'package:hrms_plaridel/features/dtr/locator/utils/locator_form_signatories.dart';
+import 'package:hrms_plaridel/features/dtr/locator/utils/locator_workflow_labels.dart';
 import 'package:hrms_plaridel/features/dtr/locator/utils/locator_signature_prompt.dart';
-import 'package:hrms_plaridel/features/dtr/locator/presentation/shared/widgets/locator_signature_section.dart';
 import 'package:hrms_plaridel/features/dtr/locator/utils/open_locator_attachment_io.dart'
     if (dart.library.html) 'package:hrms_plaridel/features/dtr/locator/utils/open_locator_attachment_web.dart'
     as locator_attachment;
@@ -38,6 +43,7 @@ enum _LocatorAdminQueue {
   all('All'),
   pendingDeptHead('Pending Department Review'),
   pendingHrAdmin('Pending HR Admin'),
+  pendingMayor('Pending Mayor'),
   returned('Returned for Correction'),
   approved('Approved'),
   revoked('Revoked'),
@@ -48,7 +54,7 @@ enum _LocatorAdminQueue {
   final String label;
 }
 
-enum _LocatorHeaderAction { recordCorrection, manageTypes }
+enum _LocatorHeaderAction { fileForEmployees, recordCorrection, manageTypes }
 
 class AdminLocatorManagementScreen extends StatefulWidget {
   const AdminLocatorManagementScreen({super.key});
@@ -71,7 +77,9 @@ class _AdminLocatorManagementScreenState
   String? _employeeFilter;
   DateTime? _fromDate;
   DateTime? _toDate;
+  Map<String, Map<String, dynamic>> _assignedRequests = {};
   bool _loading = false;
+  bool _queueLoaded = false;
   String? _error;
   List<LocatorRequestType> _locatorTypes = [];
   List<LocatorAdminFilterOption> _departmentOptions = [];
@@ -181,56 +189,67 @@ class _AdminLocatorManagementScreenState
         ),
         const SizedBox(height: 8),
         Text(
-          'Manage locator, pass slip, and work-from-home requests from endorsement to HR approval.',
+          'Manage locator, pass slip, and work-from-home requests through their configured approval routes.',
           style: TextStyle(color: _mutedColor(context), fontSize: 14),
         ),
         const SizedBox(height: 16),
-        Align(
-          alignment: Alignment.centerRight,
-          child: PopupMenuButton<_LocatorHeaderAction>(
-            tooltip: 'More actions',
-            icon: Icon(
-              Icons.more_vert_rounded,
-              color: AppTheme.dashTextSecondaryOf(context),
-            ),
-            color: AppTheme.dashPanelOf(context),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(8),
-            ),
-            onSelected: (action) {
-              switch (action) {
-                case _LocatorHeaderAction.recordCorrection:
-                  unawaited(_recordLocatorCorrection());
-                case _LocatorHeaderAction.manageTypes:
-                  unawaited(_openTypeManagement());
-              }
-            },
-            itemBuilder: (context) => const [
-              PopupMenuItem<_LocatorHeaderAction>(
-                value: _LocatorHeaderAction.recordCorrection,
-                child: Row(
-                  children: [
-                    Icon(Icons.edit_calendar_outlined, size: 18),
-                    SizedBox(width: 10),
-                    Text('Record Correction'),
-                  ],
-                ),
+        if (context.read<AuthProvider>().user?.role != 'mayor')
+          Align(
+            alignment: Alignment.centerRight,
+            child: PopupMenuButton<_LocatorHeaderAction>(
+              tooltip: 'More actions',
+              icon: Icon(
+                Icons.more_vert_rounded,
+                color: AppTheme.dashTextSecondaryOf(context),
               ),
-              PopupMenuItem<_LocatorHeaderAction>(
-                value: _LocatorHeaderAction.manageTypes,
-                child: Row(
-                  children: [
-                    Icon(Icons.tune_rounded, size: 18),
-                    SizedBox(width: 10),
-                    Text('Manage Types'),
-                  ],
-                ),
+              color: AppTheme.dashPanelOf(context),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
               ),
-            ],
+              onSelected: (action) {
+                switch (action) {
+                  case _LocatorHeaderAction.fileForEmployees:
+                    unawaited(_fileForEmployees());
+                  case _LocatorHeaderAction.recordCorrection:
+                    unawaited(_recordLocatorCorrection());
+                  case _LocatorHeaderAction.manageTypes:
+                    unawaited(_openTypeManagement());
+                }
+              },
+              itemBuilder: (context) => [
+                if (_locatorTypes.any(
+                  (type) => type.isActive && type.adminCanFile,
+                ))
+                  const PopupMenuItem<_LocatorHeaderAction>(
+                    value: _LocatorHeaderAction.fileForEmployees,
+                    child: Text('File for employees'),
+                  ),
+                const PopupMenuItem<_LocatorHeaderAction>(
+                  value: _LocatorHeaderAction.recordCorrection,
+                  child: Row(
+                    children: [
+                      Icon(Icons.edit_calendar_outlined, size: 18),
+                      SizedBox(width: 10),
+                      Expanded(child: Text('Record Correction')),
+                    ],
+                  ),
+                ),
+                const PopupMenuItem<_LocatorHeaderAction>(
+                  value: _LocatorHeaderAction.manageTypes,
+                  child: Row(
+                    children: [
+                      Icon(Icons.tune_rounded, size: 18),
+                      SizedBox(width: 10),
+                      Expanded(child: Text('Manage Types')),
+                    ],
+                  ),
+                ),
+              ],
+            ),
           ),
-        ),
         const SizedBox(height: 12),
         _buildFilterPanel(context),
+
         const SizedBox(height: 16),
         Container(
           width: double.infinity,
@@ -257,7 +276,18 @@ class _AdminLocatorManagementScreenState
                   ),
                 ],
               ),
-              const SizedBox(height: 8),
+              const SizedBox(height: 4),
+              SizedBox(
+                height: 4,
+                width: double.infinity,
+                child: _loading && _queueLoaded &&
+                        (_canFinalReview || _assignedRequests.isNotEmpty)
+                    ? Semantics(
+                        label: 'Refreshing locator requests',
+                        child: const SkeletonBone(height: 4),
+                      )
+                    : null,
+              ),
               if (_error != null)
                 Container(
                   width: double.infinity,
@@ -272,7 +302,7 @@ class _AdminLocatorManagementScreenState
                     style: TextStyle(color: Colors.red.shade900, fontSize: 12),
                   ),
                 ),
-              if (!_canFinalReview)
+              if (!_canFinalReview && _assignedRequests.isEmpty)
                 ReviewerAccessNotice(
                   requestType: 'locator',
                   checking: _checkingReviewer,
@@ -281,7 +311,7 @@ class _AdminLocatorManagementScreenState
                     await _load(forceRefresh: true);
                   },
                 )
-              else if (_loading && _items.isEmpty)
+              else if (_loading && !_queueLoaded && _items.isEmpty)
                 Padding(
                   padding: const EdgeInsets.only(top: 10),
                   child: SizedBox(
@@ -315,33 +345,10 @@ class _AdminLocatorManagementScreenState
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      Stack(
-                        children: [
-                          _adminItemsTable(
-                            items: pageItems,
-                            maxHeight: maxListHeight,
-                            useScrollableList: useScrollableList,
-                          ),
-                          if (_loading)
-                            Positioned.fill(
-                              child: ColoredBox(
-                                color: AppTheme.dashPanelOf(
-                                  context,
-                                ).withValues(alpha: 0.72),
-                                child: Center(
-                                  child: Semantics(
-                                    label: 'Refreshing locator requests',
-                                    child: const SingleChildScrollView(
-                                      child: WorkforceRowsSkeleton(
-                                        columns: [2, 2, 1],
-                                        rows: 3,
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ),
-                        ],
+                      _adminItemsTable(
+                        items: pageItems,
+                        maxHeight: maxListHeight,
+                        useScrollableList: useScrollableList,
                       ),
                       if (_totalItems > _rowsPerPage) ...[
                         const SizedBox(height: 12),
@@ -848,15 +855,79 @@ class _AdminLocatorManagementScreenState
   }
 
   void _openItemDetailsFromRow(_LocatorAdminRecord item) {
+    final assigned = _assignedRequests[item.id];
+    if (assigned != null || item.hasSharedWorkflow) {
+      unawaited(_reviewAssigned(assigned ?? _workflowHistoryRequest(item), item: item));
+      return;
+    }
     setState(() => _selectedItemId = item.id);
     _showDetailsDialog(item);
+  }
+
+  Future<void> _reviewAssigned(Map<String, dynamic> request, {required _LocatorAdminRecord item}) async {
+    if (await reviewAssignedWorkflowRequest(
+      context,
+      request,
+      onRevoke: _canFinalReview && item.status == 'approved' ? () => _revokeApproval(item) : null,
+      revokeDisabledReason: item.revokeDisabledReason,
+    ) && mounted) {
+      await _load(forceRefresh: true);
+    }
+  }
+
+  Map<String, dynamic> _workflowHistoryRequest(_LocatorAdminRecord item) {
+    final snapshot = item.workflowSnapshot!;
+    final steps = snapshot['steps'] as List;
+    return {
+      'kind': 'locator', 'id': item.id, 'employee_name': item.employeeName,
+      'status': item.status, 'can_review': false, 'allowed_actions': <String>[],
+      'status_label': item.statusLabel,
+      'workflow_name': snapshot['name'], 'workflow_version': snapshot['version'],
+      'current_step': snapshot['current_step'], 'step_count': steps.length,
+      'step_label': pendingWorkflowStepLabel(snapshot),
+      'created_at': item.createdAt?.toIso8601String(),
+      'attachment_name': item.attachmentName,
+      'request_data': {
+        'id': item.id, 'employee_id': item.employeeId, 'employee_name': item.employeeName,
+        'department_name': item.departmentName, 'status': item.status,
+        'slip_date': item.slipDate, 'workflow_snapshot': snapshot,
+        'request_type': item.requestType.code, 'request_type_label': item.requestType.label,
+        'request_type_location_label': item.requestType.locationLabel,
+        'office': item.office, 'reason': item.reason,
+        'employee_detail_schema_snapshot': item.requestType.employeeDetailSchema.map((field) => field.toJson()).toList(),
+        'additional_details': item.additionalDetails,
+        'am_in': item.amIn, 'am_out': item.amOut, 'pm_in': item.pmIn, 'pm_out': item.pmOut,
+        'revocation_reason': item.revocationReason,
+        'revoked_by_name': item.revokedByName,
+        'revoked_at': item.revokedAt?.toIso8601String(),
+        'month_end_reconciliation_required': item.monthEndReconciliationRequired,
+        'service_month': item.serviceMonthLabel,
+        'hr_remarks': item.hrRemarks,
+        'dept_head_remarks': item.deptHeadRemarks,
+        'retroactive_correction_reason': item.retroactiveCorrectionReason,
+      },
+      'decisions': [
+        for (final decision in (snapshot['decisions'] as List? ?? []).whereType<Map>())
+          {
+            'step_label': steps[(decision['step'] as num).toInt()]['label'],
+            'action': decision['action'],
+            'reviewer_name': decision['signature']?['signer_name_snapshot'] ?? decision['reviewer']?['name'],
+            'acted_at': decision['acted_at'],
+          },
+      ],
+    };
   }
 
   void _showDetailsDialog(_LocatorAdminRecord item) {
     final actorId = context.read<AuthProvider>().user?.id.trim() ?? '';
     final isOwnRequest = actorId.isNotEmpty && actorId == item.employeeId;
-    final canReview = _canFinalReview && item.canHrReview &&
-        actorId.isNotEmpty && item.employeeId.isNotEmpty && !isOwnRequest;
+    final canReview =
+        _canFinalReview &&
+        !item.hasSharedWorkflow &&
+        item.canHrReview &&
+        actorId.isNotEmpty &&
+        item.employeeId.isNotEmpty &&
+        !isOwnRequest;
     final slipDate = item.slipDateValue;
     final returnBlockedByPastDate =
         canReview &&
@@ -895,7 +966,9 @@ class _AdminLocatorManagementScreenState
               if (isOwnRequest && item.canHrReview)
                 const Padding(
                   padding: EdgeInsets.all(16),
-                  child: Text('Another assigned reviewer must review your request.'),
+                  child: Text(
+                    'Another assigned reviewer must review your request.',
+                  ),
                 ),
               Padding(
                 padding: const EdgeInsets.fromLTRB(24, 18, 10, 16),
@@ -1045,6 +1118,7 @@ class _AdminLocatorManagementScreenState
                         ),
                       ),
                       const SizedBox(height: 16),
+                      LocatorCustomFieldDetails(fields:item.requestType.employeeDetailSchema,values:item.additionalDetails),
                       _locatorDetailsSection(
                         dialogContext,
                         title: 'Review information',
@@ -1057,7 +1131,9 @@ class _AdminLocatorManagementScreenState
                                 item.deptHeadReviewerName ?? '—',
                               ),
                               MapEntry(
-                                'HR Reviewer',
+                                item.finalReviewRoute == 'mayor_direct'
+                                    ? 'Mayor Reviewer'
+                                    : 'HR Reviewer',
                                 item.hrReviewerName ?? '—',
                               ),
                             ]),
@@ -1075,7 +1151,9 @@ class _AdminLocatorManagementScreenState
                                 padding: const EdgeInsets.only(top: 12),
                                 child: _locatorDetailField(
                                   dialogContext,
-                                  'HR Remarks',
+                                  item.finalReviewRoute == 'mayor_direct'
+                                      ? 'Mayor Remarks'
+                                      : 'HR Remarks',
                                   item.hrRemarks!,
                                 ),
                               ),
@@ -1164,7 +1242,6 @@ class _AdminLocatorManagementScreenState
                           ],
                         ),
                       ),
-                      LocatorSignatureSection(requestId: item.id),
                     ],
                   ),
                 ),
@@ -1247,22 +1324,29 @@ class _AdminLocatorManagementScreenState
                           OutlinedButton.icon(
                             onPressed: () async {
                               try {
-                                final bytes = await LocatorSlipPrint.buildPdf(
-                                  signatories: await loadLocatorFormSignatories(
-                                    item.id,
-                                  ),
-                                  id: item.id,
-                                  employeeName: item.employeeName,
-                                  dateText: item.slipDateLabel,
-                                  requestTypeLabel: item.requestType.label,
-                                  locationLabel: item.requestType.locationLabel,
-                                  office: item.office,
-                                  remarks: item.reason,
-                                  amIn: item.amIn,
-                                  amOut: item.amOut,
-                                  pmIn: item.pmIn,
-                                  pmOut: item.pmOut,
-                                );
+                                final bytes =
+                                    await LocatorSlipPrint.loadPreview(
+                                      dialogContext,
+                                      () async => LocatorSlipPrint.buildPdf(
+                                        signatories:
+                                            await loadLocatorFormSignatories(
+                                              item.id,
+                                            ),
+                                        id: item.id,
+                                        employeeName: item.employeeName,
+                                        dateText: item.slipDateLabel,
+                                        requestTypeLabel:
+                                            item.requestType.label,
+                                        locationLabel:
+                                            item.requestType.locationLabel,
+                                        office: item.office,
+                                        remarks: item.reason,
+                                        amIn: item.amIn,
+                                        amOut: item.amOut,
+                                        pmIn: item.pmIn,
+                                        pmOut: item.pmOut,
+                                      ),
+                                    );
                                 if (!dialogContext.mounted) return;
                                 await showFormPdfPreview(
                                   context: dialogContext,
@@ -1349,9 +1433,13 @@ class _AdminLocatorManagementScreenState
             remarks: null,
             completed: false,
           ));
-        } else if (item.status == 'pending_hr' || item.status == 'pending') {
+        } else if (item.status == 'pending_hr' ||
+            item.status == 'pending' ||
+            item.status == 'pending_mayor') {
           history.add((
-            title: 'Pending HR Admin',
+            title: item.status == 'pending_mayor'
+                ? 'Pending Mayor'
+                : 'Pending HR Admin',
             actor: item.hrReviewerName,
             date: null,
             remarks: null,
@@ -1658,14 +1746,15 @@ class _AdminLocatorManagementScreenState
           remarks: null,
           completed: false,
         ),
-      if (item.deptHeadReviewedAt != null ||
-          item.status == 'pending_hr' ||
-          item.status == 'pending' ||
-          item.status == 'approved' ||
-          item.status == 'revoked' ||
-          item.status == 'rejected_by_hr' ||
-          item.status == 'returned_for_correction' ||
-          item.status == 'rejected_by_department_head')
+      if (item.finalReviewRoute != 'mayor_direct' &&
+          (item.deptHeadReviewedAt != null ||
+              item.status == 'pending_hr' ||
+              item.status == 'pending' ||
+              item.status == 'approved' ||
+              item.status == 'revoked' ||
+              item.status == 'rejected_by_hr' ||
+              item.status == 'returned_for_correction' ||
+              item.status == 'rejected_by_department_head'))
         (
           title: item.status == 'rejected_by_department_head'
               ? 'Rejected by Department Head'
@@ -1680,7 +1769,9 @@ class _AdminLocatorManagementScreenState
         ),
       if (item.canHrReview)
         (
-          title: 'Pending HR Admin',
+          title: item.status == 'pending_mayor'
+              ? 'Pending Mayor'
+              : 'Pending HR Admin',
           actor: item.hrReviewerName,
           date: null,
           remarks: null,
@@ -1688,9 +1779,13 @@ class _AdminLocatorManagementScreenState
         ),
       if (item.status == 'approved' || item.status == 'revoked')
         (
-          title: 'Approved by HR',
-          actor: item.hrReviewerName,
-          date: item.hrReviewedAt,
+          title: locatorApprovedStatusLabel(item.finalReviewRoute),
+          actor: item.finalReviewRoute == 'mayor'
+              ? item.deptHeadReviewerName
+              : item.hrReviewerName,
+          date: item.finalReviewRoute == 'mayor'
+              ? item.deptHeadReviewedAt
+              : item.hrReviewedAt,
           remarks: item.hrRemarks,
           completed: true,
         ),
@@ -1704,7 +1799,7 @@ class _AdminLocatorManagementScreenState
         ),
       if (item.status == 'rejected_by_hr')
         (
-          title: 'Rejected by HR',
+          title: locatorFinalRejectionLabel(item.finalReviewRoute),
           actor: item.hrReviewerName,
           date: item.hrReviewedAt,
           remarks: item.hrRemarks,
@@ -1712,7 +1807,9 @@ class _AdminLocatorManagementScreenState
         ),
       if (item.status == 'returned_for_correction' && item.hrReviewedAt != null)
         (
-          title: 'Returned by HR',
+          title: item.finalReviewRoute == 'mayor_direct'
+              ? 'Returned by Mayor'
+              : 'Returned by HR',
           actor: item.hrReviewerName,
           date: item.hrReviewedAt,
           remarks: item.hrRemarks,
@@ -1874,7 +1971,19 @@ class _AdminLocatorManagementScreenState
     });
     try {
       await _loadFinalReviewerAccess();
-      if (!mounted || loadVersion != _loadVersion || !_canFinalReview) return;
+      if (!mounted || loadVersion != _loadVersion) return;
+      final assigned = await loadAssignedWorkflowRequests('locator');
+      if (!mounted || loadVersion != _loadVersion) return;
+      setState(() => _assignedRequests = assigned);
+      if (!_canFinalReview) {
+        setState(() {
+          _items = _matchingAssignedRecords(assigned);
+          _queueLoaded = true;
+          _totalItems = _items.length;
+          _serverPageCount = 1;
+        });
+        return;
+      }
       final user = context.read<AuthProvider>().user;
       final userId = (user?.id ?? '').trim();
       final role = (user?.role ?? '').trim().toLowerCase();
@@ -1885,6 +1994,7 @@ class _AdminLocatorManagementScreenState
         _LocatorAdminQueue.all => null,
         _LocatorAdminQueue.pendingDeptHead => 'pending_department_head',
         _LocatorAdminQueue.pendingHrAdmin => 'pending_hr',
+        _LocatorAdminQueue.pendingMayor => 'pending_mayor',
         _LocatorAdminQueue.returned => 'returned_for_correction',
         _LocatorAdminQueue.approved => 'approved',
         _LocatorAdminQueue.revoked => 'revoked',
@@ -1918,10 +2028,25 @@ class _AdminLocatorManagementScreenState
       final items = result.items
           .map((item) => _LocatorAdminRecord.fromJson(item))
           .toList();
+      final assignedItems = _matchingAssignedRecords(assigned);
+      final actionableIds = assignedItems
+          .where((item) => assigned[item.id]?['can_review'] != false)
+          .map((item) => item.id)
+          .toSet();
+      final mergedItems = <String, _LocatorAdminRecord>{
+        for (final item in items) item.id: item,
+        for (final item in assignedItems) item.id: item,
+      };
       setState(() {
-        _items = items;
+        _queueLoaded = true;
+        _items = [
+          for (final item in assignedItems)
+            if (actionableIds.contains(item.id)) item,
+          for (final item in mergedItems.values)
+            if (!actionableIds.contains(item.id)) item,
+        ];
         _page = result.page - 1;
-        _totalItems = result.total;
+        _totalItems = result.total + assignedItems.where((assignedItem) => !items.any((item) => item.id == assignedItem.id)).length;
         _serverPageCount = result.pageCount;
         _departmentOptions = result.departments;
         _employeeOptions = result.employees;
@@ -1940,6 +2065,23 @@ class _AdminLocatorManagementScreenState
     }
   }
 
+  List<_LocatorAdminRecord> _matchingAssignedRecords(Map<String, Map<String, dynamic>> assigned) => assigned.values
+      .map((entry) => _LocatorAdminRecord.fromJson(Map<String, dynamic>.from(entry['request_data'] as Map)))
+      .where((item) => (_queue == _LocatorAdminQueue.all ||
+          (_queue == _LocatorAdminQueue.pendingHrAdmin && item.status == 'pending_hr') ||
+          (_queue == _LocatorAdminQueue.pendingMayor && item.status == 'pending_mayor') ||
+          (_queue == _LocatorAdminQueue.returned && item.status == 'returned_for_correction') ||
+          (_queue == _LocatorAdminQueue.approved && item.status == 'approved') ||
+          (_queue == _LocatorAdminQueue.revoked && item.status == 'revoked') ||
+          (_queue == _LocatorAdminQueue.rejected && item.status.startsWith('rejected')) ||
+          (_queue == _LocatorAdminQueue.cancelled && item.status == 'cancelled')) &&
+        (_requestTypeFilter == null || item.requestType.code == _requestTypeFilter!.code) &&
+        (_employeeFilter == null || item.employeeId == _employeeFilter) &&
+        (_departmentFilter == null || assigned[item.id]?['request_data']?['department_id'] == _departmentFilter) &&
+        (_fromDate == null || (item.slipDateValue != null && !item.slipDateValue!.isBefore(_fromDate!))) &&
+        (_toDate == null || (item.slipDateValue != null && !item.slipDateValue!.isAfter(_toDate!))))
+      .toList();
+
   Future<void> _approve(_LocatorAdminRecord item) async {
     try {
       final signature = await promptLocatorSignature(
@@ -1948,14 +2090,14 @@ class _AdminLocatorManagementScreenState
         slot: 'hr_approver',
       );
       if (signature == null || !mounted) return;
-      await ApiClient.instance.patch<Map<String, dynamic>>(
+      final response=await ApiClient.instance.patch<Map<String, dynamic>>(
         '/api/locator-slips/${item.id}/approve',
         data: signature.isEmpty ? const {} : {'signature': signature},
       );
       LocatorSlipDataCache.instance.invalidateRequests();
       await _load(forceRefresh: true);
       if (!mounted) return;
-      _showLocatorSnack('Request approved.');
+      _showLocatorSnack(response.data?['status']=='approved'?'Request approved.':'Review completed. Awaiting the next workflow approver.');
     } catch (e) {
       if (!mounted) return;
       setState(() => _error = 'Approve failed: $e');
@@ -1994,7 +2136,7 @@ class _AdminLocatorManagementScreenState
   Future<String?> _promptLocatorRevocationReason(
     _LocatorAdminRecord item,
   ) async {
-    final controller = TextEditingController();
+    var reason = '';
     final formKey = GlobalKey<FormState>();
     final result = await showDialog<String>(
       context: context,
@@ -2013,7 +2155,8 @@ class _AdminLocatorManagementScreenState
                 ),
                 const SizedBox(height: 16),
                 TextFormField(
-                  controller: controller,
+                  initialValue: reason,
+                  onChanged: (value) => reason = value,
                   autofocus: true,
                   minLines: 3,
                   maxLines: 6,
@@ -2041,7 +2184,7 @@ class _AdminLocatorManagementScreenState
           FilledButton.icon(
             onPressed: () {
               if (!formKey.currentState!.validate()) return;
-              Navigator.of(dialogContext).pop(controller.text.trim());
+              Navigator.of(dialogContext).pop(reason.trim());
             },
             icon: const Icon(Icons.undo_rounded, size: 18),
             label: const Text('Revoke Approval'),
@@ -2049,8 +2192,31 @@ class _AdminLocatorManagementScreenState
         ],
       ),
     );
-    controller.dispose();
     return result;
+  }
+
+  Future<void> _fileForEmployees() async {
+    final types = _locatorTypes
+        .where((t) => t.isActive && t.adminCanFile)
+        .toList();
+    if (types.isEmpty) {
+      _showLocatorSnack(
+        'No locator types allow HR/admin filing. Configure a type first.',
+      );
+      return;
+    }
+    final created = await openResponsiveRightSidePanel<bool>(
+      context: context,
+      barrierLabel: 'Close locator filing form',
+      breakpoint: 0,
+      minWidth: 620,
+      initialWidthFraction: 0.45,
+      builder: (_) => AdminLocatorFilingDialog(requestTypes: types),
+    );
+    if (created == true && mounted) {
+      LocatorSlipDataCache.instance.invalidateRequests();
+      await _load(forceRefresh: true);
+    }
   }
 
   Future<void> _recordLocatorCorrection() async {
@@ -2073,6 +2239,7 @@ class _AdminLocatorManagementScreenState
       'request_type': draft.requestType.code,
       'office': draft.office,
       'reason': draft.reason,
+      'additional_details': jsonEncode(draft.additionalDetails),
       'retroactive_correction_reason': draft.correctionReason,
       'am_in': draft.amIn.toString(),
       'am_out': draft.amOut.toString(),
@@ -2270,8 +2437,11 @@ class _LocatorAdminRecord {
     this.requestType = LocatorRequestType.locator,
     required this.office,
     required this.reason,
+    this.additionalDetails = const {},
     this.attachmentName,
     required this.status,
+    this.finalReviewRoute = 'hr',
+    this.workflowSnapshot,
     this.deptHeadReviewerName,
     this.deptHeadReviewedAt,
     this.deptHeadRemarks,
@@ -2301,8 +2471,13 @@ class _LocatorAdminRecord {
   final LocatorRequestType requestType;
   final String office;
   final String reason;
+  final Map<String,dynamic> additionalDetails;
   final String? attachmentName;
   final String status;
+  final String finalReviewRoute;
+  final Map<String, dynamic>? workflowSnapshot;
+  bool get hasSharedWorkflow => workflowSnapshot?['steps'] is List &&
+      (workflowSnapshot!['steps'] as List).any((step) => step is Map);
   final String? deptHeadReviewerName;
   final DateTime? deptHeadReviewedAt;
   final String? deptHeadRemarks;
@@ -2325,7 +2500,9 @@ class _LocatorAdminRecord {
 
   bool get canHrReview {
     final normalized = status.toLowerCase();
-    return normalized == 'pending_hr' || normalized == 'pending';
+    return normalized == 'pending_hr' ||
+        normalized == 'pending' ||
+        normalized == 'pending_mayor';
   }
 
   String? get revokeDisabledReason {
@@ -2334,7 +2511,7 @@ class _LocatorAdminRecord {
     }
     final approvedAt = hrReviewedAt;
     if (approvedAt == null) {
-      return 'The HR approval time is unavailable.';
+      return 'The approval time is unavailable.';
     }
     final deadline = approvedAt.add(const Duration(days: 3));
     if (DateTime.now().isAfter(deadline)) {
@@ -2344,9 +2521,13 @@ class _LocatorAdminRecord {
   }
 
   String get statusLabel {
+    final named = pendingWorkflowStepLabel(workflowSnapshot);
+    if (status.startsWith('pending') && named != null) return 'Pending $named';
     switch (status.toLowerCase()) {
       case 'pending_department_head':
         return 'Pending Department Review';
+      case 'pending_mayor':
+        return 'Pending Mayor';
       case 'pending_hr':
       case 'pending':
         return 'Pending HR Admin';
@@ -2359,7 +2540,7 @@ class _LocatorAdminRecord {
       case 'rejected_by_department_head':
         return 'Rejected by Dept Head';
       case 'rejected_by_hr':
-        return 'Rejected by HR';
+        return locatorFinalRejectionLabel(finalReviewRoute);
       case 'cancelled':
         return 'Cancelled';
     }
@@ -2396,6 +2577,7 @@ class _LocatorAdminRecord {
       departmentName: (json['department_name'] ?? '').toString(),
       slipDate: (json['slip_date'] ?? '').toString(),
       requestType: LocatorRequestType.fromJson({
+        'employee_detail_schema': json['employee_detail_schema_snapshot'],
         'code': json['request_type'],
         'label': json['request_type_label'],
         'short_label': json['request_type_short_label'],
@@ -2408,8 +2590,11 @@ class _LocatorAdminRecord {
       }),
       office: (json['office'] ?? '').toString(),
       reason: (json['reason'] ?? '').toString(),
+      additionalDetails:Map<String,dynamic>.from(json['additional_details'] as Map? ?? {}),
       attachmentName: _trimOrNull(json['attachment_name']),
       status: (json['status'] ?? '').toString(),
+      finalReviewRoute: (json['final_review_route'] ?? 'hr').toString(),
+      workflowSnapshot: json['workflow_snapshot'] is Map ? Map<String,dynamic>.from(json['workflow_snapshot'] as Map) : null,
       deptHeadReviewerName: _trimOrNull(json['dept_head_reviewer_name']),
       deptHeadReviewedAt: _parseDateTime(json['dept_head_reviewed_at']),
       deptHeadRemarks: _trimOrNull(json['dept_head_remarks']),

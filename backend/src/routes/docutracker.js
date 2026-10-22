@@ -17,7 +17,14 @@ const {
   isDraftOrWipDocument,
   updateDocumentMetadata,
   recoverDocumentAssignment,
+  describeViewerReleaseAccess,
 } = require('../services/docutrackerWorkflowService');
+const {
+  getReleaseOptions,
+  listReleasePolicies,
+  releaseDocument,
+  setReleasePolicy,
+} = require('../services/docutrackerReleaseService');
 const { mapDocumentRow } = require('../services/docutrackerDocumentMapper');
 const {
   ACTIVE_WORKFLOW_STATUSES_FOR_OVERDUE,
@@ -49,6 +56,7 @@ const {
   signLeaveSourceDepartmentHead,
   signLeaveSourceHrApprover,
 } = require('../services/docutrackerLeaveSignatureService');
+const { getLeaveSourceWorkflow } = require('../services/docutrackerLeaveSourceWorkflowService');
 const { getLocatorSourceSignatures, signLocatorSourceSlot } = require('../services/locatorSignatureService');
 const {
   getSourceSignatures,
@@ -399,6 +407,7 @@ router.get('/documents', protect, async (req, res) => {
 
     res.json(documents.map((row) => mapDocumentRow(row)));
   } catch (err) {
+    if (err?.code === 'VALIDATION') return res.status(400).json({ error: err.message });
     console.error('[docutracker GET /documents]', err);
     res.status(500).json({ error: 'Failed to fetch documents' });
   }
@@ -596,6 +605,29 @@ router.post(
         '[docutracker POST /sources/:sourceModule/signature-assignments/re-resolve]',
         err
       );
+      const mapped = mapWorkflowServiceError(err);
+      res.status(mapped.status).json({ error: mapped.error });
+    }
+  }
+);
+
+/** GET read-only DTR workflow stages + history for a linked leave request. */
+router.get(
+  '/sources/dtr/leave_requests/:sourceRecordId/workflow',
+  protect,
+  async (req, res) => {
+    try {
+      const id = String(req.params.sourceRecordId || '').trim();
+      if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) {
+        return res.status(404).json({ error: 'Leave request not found' });
+      }
+      const workflow = await getLeaveSourceWorkflow(pool, req.user, id);
+      if (!workflow) {
+        return res.status(404).json({ error: 'Leave request not found' });
+      }
+      res.json(workflow);
+    } catch (err) {
+      console.error('[docutracker GET /sources/dtr/leave_requests/:id/workflow]', err);
       const mapped = mapWorkflowServiceError(err);
       res.status(mapped.status).json({ error: mapped.error });
     }
@@ -1481,8 +1513,13 @@ router.get('/documents/:id', protect, async (req, res) => {
       ),
     ]);
 
+    const releaseFlags = await describeViewerReleaseAccess(pool, {
+      user: req.user,
+      document: docRow,
+    });
+
     res.json({
-      document: mapDocumentRow(docRow),
+      document: mapDocumentRow({ ...docRow, ...releaseFlags }),
       routing: routingResult.rows,
       history: historyResult.rows,
     });
@@ -1579,7 +1616,8 @@ router.get('/routing-configs', protect, async (req, res) => {
       `SELECT v.document_type,
               v.steps,
               v.review_deadline_hours,
-              v.version
+              v.version,
+              v.shared_workflow_id
        FROM docutracker_routing_config_versions v
        JOIN (
          SELECT document_type, MAX(version) AS version
@@ -1633,7 +1671,6 @@ router.post('/routing-configs', protect, requireAdmin, async (req, res) => {
     if (!document_type || !Array.isArray(steps)) {
       return res.status(400).json({ error: 'document_type and steps[] are required' });
     }
-
     // Validate step structure before saving (basic guards).
     const normalizedSteps = steps
       .map((s) => ({
@@ -1690,6 +1727,8 @@ router.post('/routing-configs', protect, requireAdmin, async (req, res) => {
         'specific_users',
         'department_reviewers',
         'submitter_department_reviewers',
+        'final_hr_reviewers',
+        'active_mayor',
       ].includes(s.assignee_source)) {
         return res.status(400).json({ error: `Invalid assignee_source for step ${s.step_order}.` });
       }
@@ -1746,6 +1785,12 @@ router.post('/routing-configs', protect, requireAdmin, async (req, res) => {
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
+      await client.query("SELECT pg_advisory_xact_lock(hashtext('document-workflow:' || $1::text))",[document_type]);
+      const shared=(await client.query('SELECT workflow_id FROM approval_workflow_document_types WHERE document_type=$1',[document_type])).rows[0];
+      if(shared) {
+        await client.query('ROLLBACK');
+        return res.status(409).json({error:'This document type uses a shared approval workflow. Edit it in Shared approval workflows so Leave, Locator and DocuTracker keep the same configuration.'});
+      }
 
       // If a "user" step provides a department_id, enforce that the PRIMARY user
       // currently belongs to that department (active assignment).
@@ -2097,9 +2142,12 @@ router.put('/workflow-steps/:stepId/assignees', protect, requireAdmin, async (re
     try {
       await client.query('BEGIN');
       const stepExists = await client.query(
-        `SELECT id, department_id, assignee_source
-         FROM docutracker_workflow_steps
-         WHERE id = $1::uuid
+        `SELECT id, department_id, assignee_source,
+            EXISTS(SELECT 1 FROM docutracker_routing_config_versions v
+              WHERE v.document_type=s.document_type AND v.version=s.workflow_version
+                AND v.shared_workflow_id IS NOT NULL) AS shared_version
+         FROM docutracker_workflow_steps s
+         WHERE s.id = $1::uuid
          LIMIT 1`,
         [stepId]
       );
@@ -2107,9 +2155,14 @@ router.put('/workflow-steps/:stepId/assignees', protect, requireAdmin, async (re
         await client.query('ROLLBACK');
         return res.status(404).json({ error: 'Workflow step not found' });
       }
+      if(stepExists.rows[0]?.shared_version) {
+        await client.query('ROLLBACK');
+        return res.status(409).json({error:'Publish changes through Shared approval workflows. A shared workflow version cannot be edited in place.'});
+      }
       if (
         stepExists.rows[0]?.assignee_source === 'department_reviewers' ||
-        stepExists.rows[0]?.assignee_source === 'submitter_department_reviewers'
+        stepExists.rows[0]?.assignee_source === 'submitter_department_reviewers' ||
+        ['final_hr_reviewers','active_mayor'].includes(stepExists.rows[0]?.assignee_source)
       ) {
         await client.query('ROLLBACK');
         return res.status(409).json({
@@ -2408,6 +2461,84 @@ router.post('/documents/:id/transition', protect, async (req, res) => {
     return res.json(updated);
   } catch (err) {
     console.error('[docutracker POST /documents/:id/transition]', err);
+    const mapped = mapWorkflowServiceError(err);
+    return res.status(mapped.status).json({ error: mapped.error });
+  }
+});
+
+/**
+ * GET /api/docutracker/documents/:id/release-options
+ * Release state for the viewer, plus active departments when they may release.
+ */
+router.get('/documents/:id/release-options', protect, async (req, res) => {
+  const { id } = req.params;
+  try {
+    if (isSourceOnlyDocumentId(id)) return sourceOnlyDocumentResponse(res);
+    if (!isUuid(id)) return res.status(404).json({ error: 'Document not found' });
+    return res.json(await getReleaseOptions(pool, req.user, id));
+  } catch (err) {
+    console.error('[docutracker GET /documents/:id/release-options]', err);
+    const mapped = mapWorkflowServiceError(err);
+    return res.status(mapped.status).json({ error: mapped.error });
+  }
+});
+
+/**
+ * POST /api/docutracker/documents/:id/release
+ *
+ * Body: { department_id: uuid, remarks?: string, idempotency_key?: string }
+ *
+ * Releases an approved, release-required document to one department. Repeating
+ * the same release returns `already_released: true`; a different department
+ * is rejected with 409.
+ */
+router.post('/documents/:id/release', protect, async (req, res) => {
+  const { id } = req.params;
+  const b = req.body || {};
+  try {
+    if (isSourceOnlyDocumentId(id)) return sourceOnlyDocumentResponse(res);
+    if (!isUuid(id)) return res.status(404).json({ error: 'Document not found' });
+    const result = await releaseDocument(pool, req.user, id, {
+      department_id: b.department_id,
+      remarks: b.remarks,
+      idempotency_key: b.idempotency_key,
+    });
+    return res.json(result);
+  } catch (err) {
+    console.error('[docutracker POST /documents/:id/release]', err);
+    const mapped = mapWorkflowServiceError(err);
+    return res.status(mapped.status).json({ error: mapped.error });
+  }
+});
+
+/**
+ * GET /api/docutracker/release-policies (admin)
+ */
+router.get('/release-policies', protect, requireAdmin, async (_req, res) => {
+  try {
+    return res.json({ policies: await listReleasePolicies(pool) });
+  } catch (err) {
+    console.error('[docutracker GET /release-policies]', err);
+    return res.status(500).json({ error: 'Failed to load release policies' });
+  }
+});
+
+/**
+ * PUT /api/docutracker/release-policies/:documentType (admin)
+ * Body: { requires_release: boolean }
+ */
+router.put('/release-policies/:documentType', protect, requireAdmin, async (req, res) => {
+  try {
+    const policy = await setReleasePolicy(
+      pool,
+      req.user,
+      req.params.documentType,
+      req.body?.requires_release,
+      { writeAudit: writeGovernanceAudit }
+    );
+    return res.json(policy);
+  } catch (err) {
+    console.error('[docutracker PUT /release-policies/:documentType]', err);
     const mapped = mapWorkflowServiceError(err);
     return res.status(mapped.status).json({ error: mapped.error });
   }
