@@ -92,6 +92,25 @@ void main() {
       }
     });
 
+    test('admin workflow editors label the return action accurately', () {
+      expect(docuTrackerReturnActionLabel, 'Return to previous step');
+      expect(
+        docuTrackerReturnActionExplanation,
+        'Returns the document to the previous workflow reviewer. '
+        'Document content remains read-only.',
+      );
+      for (final path in [
+        'lib/features/docutracker/presentation/admin/pages/'
+            'docutracker_workflow_editor_screen.dart',
+        'lib/features/docutracker/presentation/admin/widgets/'
+            'simplified_workflow_step_editor.dart',
+      ]) {
+        final source = File(path).readAsStringSync();
+        expect(source, isNot(contains('Return for changes')), reason: path);
+        expect(source, contains('docuTrackerReturnActionLabel'), reason: path);
+      }
+    });
+
     test('detail screen no longer uses the old Return wording', () {
       final source = File(
         'lib/features/docutracker/presentation/shared/pages/'

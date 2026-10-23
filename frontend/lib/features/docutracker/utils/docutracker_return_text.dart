@@ -11,6 +11,13 @@ const String docuTrackerReturnTooltip =
 
 const String docuTrackerReturnDialogTitle = 'Return to previous step';
 
+/// Admin workflow-editor label for the stored `return` action.
+const String docuTrackerReturnActionLabel = 'Return to previous step';
+
+const String docuTrackerReturnActionExplanation =
+    'Returns the document to the previous workflow reviewer. Document content '
+    'remains read-only.';
+
 const String docuTrackerReturnDialogExplanation =
     'The reviewer of the previous workflow step becomes responsible for this '
     'document. Its content stays read-only, and no correction task is created '

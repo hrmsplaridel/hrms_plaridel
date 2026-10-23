@@ -19,6 +19,7 @@ import 'package:hrms_plaridel/features/docutracker/models/document_type.dart';
 import 'package:hrms_plaridel/features/docutracker/models/workflow_step.dart';
 import 'package:hrms_plaridel/features/docutracker/services/docutracker_workflow_config_validator.dart';
 import 'package:hrms_plaridel/features/docutracker/theme/docutracker_tokens.dart';
+import 'package:hrms_plaridel/features/docutracker/utils/docutracker_return_text.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_error_banner.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_responsive_body.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_section_header.dart';
@@ -2589,7 +2590,7 @@ String _workflowActionLabel(String raw) {
   return switch (raw.trim().toLowerCase()) {
     'approve' => 'Approve and continue',
     'forward' => 'Forward without approval',
-    'return' => 'Return for changes',
+    'return' => docuTrackerReturnActionLabel,
     'reject' => 'Reject and stop',
     final value when value.isNotEmpty =>
       '${value[0].toUpperCase()}${value.substring(1)}',

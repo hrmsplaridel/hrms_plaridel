@@ -5,6 +5,7 @@ import 'package:hrms_plaridel/features/docutracker/data/styles/docutracker_style
 import 'package:hrms_plaridel/features/docutracker/models/workflow_step.dart';
 import 'package:hrms_plaridel/features/docutracker/services/employee_directory_lookup.dart';
 import 'package:hrms_plaridel/features/docutracker/theme/docutracker_tokens.dart';
+import 'package:hrms_plaridel/features/docutracker/utils/docutracker_return_text.dart';
 import 'package:hrms_plaridel/features/dtr/management/approvals/widgets/workflow_reviewer_configuration.dart';
 
 enum _AssigneeMode {
@@ -38,7 +39,7 @@ class _SimplifiedWorkflowStepEditorState
   static const _actionLabels = <String, String>{
     'approve': 'Approve and continue',
     'forward': 'Forward without approval',
-    'return': 'Return for changes',
+    'return': docuTrackerReturnActionLabel,
     'reject': 'Reject and stop',
   };
 
@@ -542,6 +543,15 @@ class _SimplifiedWorkflowStepEditorState
                         dense: true,
                         contentPadding: EdgeInsets.zero,
                         title: Text(entry.value),
+                        subtitle: entry.key == 'return'
+                            ? Text(
+                                docuTrackerReturnActionExplanation,
+                                style: TextStyle(
+                                  color: AppTheme.dashTextSecondaryOf(context),
+                                  fontSize: 12,
+                                ),
+                              )
+                            : null,
                         value: _allowedActions.contains(entry.key),
                         controlAffinity: ListTileControlAffinity.leading,
                         onChanged: widget.approvalOnly && entry.key == 'approve'
