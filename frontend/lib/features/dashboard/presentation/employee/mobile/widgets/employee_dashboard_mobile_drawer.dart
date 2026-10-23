@@ -52,20 +52,6 @@ class EmployeeDashboardMobileDrawer extends StatelessWidget {
               padding: EdgeInsets.fromLTRB(16, 16, 16, 12),
               child: DashboardHeaderBrand(compact: true),
             ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
-              child: DashboardSidebarProfileCard(
-                displayName: displayName,
-                subtitle: context.select<AuthProvider, String>(
-                  (auth) => dashboardAccountRoleLabel(auth.user?.role),
-                ),
-                avatarPath: avatarPath,
-                onProfile: () {
-                  Navigator.of(context).pop();
-                  onProfile();
-                },
-              ),
-            ),
             Divider(height: 1, color: hairline),
             Expanded(
               child: ListView(
@@ -85,6 +71,20 @@ class EmployeeDashboardMobileDrawer extends StatelessWidget {
               ),
             ),
             Divider(height: 1, color: hairline),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
+              child: DashboardSidebarProfileCard(
+                displayName: displayName,
+                subtitle: context.select<AuthProvider, String>(
+                  (auth) => dashboardAccountRoleLabel(auth.user?.role),
+                ),
+                avatarPath: avatarPath,
+                onProfile: () {
+                  Navigator.of(context).pop();
+                  onProfile();
+                },
+              ),
+            ),
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 10, 16, 12),
               child: Text(
