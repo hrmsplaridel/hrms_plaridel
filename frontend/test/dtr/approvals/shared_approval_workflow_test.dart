@@ -81,7 +81,7 @@ void main() {
       addTearDown(tester.view.resetPhysicalSize);
       addTearDown(tester.view.resetDevicePixelRatio);
       await tester.pumpWidget(
-        const MaterialApp(home: Scaffold(body: ApprovalWorkflowsPanel())),
+        const MaterialApp(home: Scaffold(body: ApprovalWorkflowsPanel(useSidePanel: true))),
       );
       await tester.pumpAndSettle();
       await tester.tap(find.text('New workflow'));
