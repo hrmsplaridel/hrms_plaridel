@@ -20,7 +20,7 @@ String? dashboardAccountIdLabel(AppUser? user) {
   return 'User ID · $empId';
 }
 
-/// Sidebar profile subtitle from the account that was created for this user.
+/// Human-readable account role for account details and unassigned positions.
 String dashboardAccountRoleLabel(String? role) {
   switch ((role ?? '').trim().toLowerCase()) {
     case 'admin':
@@ -49,6 +49,12 @@ String dashboardAccountRoleLabel(String? role) {
           )
           .join(' ');
   }
+}
+
+/// Sidebar subtitle prefers the assigned job title over the account role.
+String dashboardAccountPositionLabel(AppUser? user) {
+  final position = (user?.positionName ?? '').trim();
+  return position.isNotEmpty ? position : dashboardAccountRoleLabel(user?.role);
 }
 
 /// Theme toggle + notifications bell for admin/employee dashboard top bars.

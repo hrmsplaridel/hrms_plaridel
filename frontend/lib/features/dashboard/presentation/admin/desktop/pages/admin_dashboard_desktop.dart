@@ -1103,7 +1103,7 @@ class _Sidebar extends StatelessWidget {
           child: DashboardSidebarProfileCard(
             displayName: displayName,
             subtitle: context.select<AuthProvider, String>(
-              (auth) => dashboardAccountRoleLabel(auth.user?.role),
+              (auth) => dashboardAccountPositionLabel(auth.user),
             ),
             avatarPath: avatarPath,
             onProfile: onProfile,

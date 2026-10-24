@@ -9,13 +9,24 @@ import 'package:hrms_plaridel/providers/auth_provider.dart';
 import 'package:hrms_plaridel/shared/widgets/dashboard_header_actions.dart';
 
 class _EmployeeAuth extends AuthProvider {
+  _EmployeeAuth({String? positionName = 'Administrative Assistant'})
+    : _positionName = positionName;
+
+  String? _positionName;
+
+  void updatePosition(String? positionName) {
+    _positionName = positionName;
+    notifyListeners();
+  }
+
   @override
-  AppUser get user => const AppUser(
+  AppUser get user => AppUser(
     id: 'mobile-drawer-employee',
     email: 'employee@example.test',
     role: 'employee',
     firstName: 'Johnley',
     lastName: 'Matabalan',
+    positionName: _positionName,
   );
 }
 
@@ -24,10 +35,11 @@ Future<GlobalKey<ScaffoldState>> _openDrawer(
   Size size, {
   ValueChanged<int>? onNavSelected,
   VoidCallback? onProfile,
+  _EmployeeAuth? employeeAuth,
 }) async {
   await tester.binding.setSurfaceSize(size);
   addTearDown(() => tester.binding.setSurfaceSize(null));
-  final auth = _EmployeeAuth();
+  final auth = employeeAuth ?? _EmployeeAuth();
   final documents = DocuTrackerProvider();
   addTearDown(auth.dispose);
   addTearDown(documents.dispose);
@@ -67,10 +79,34 @@ Future<GlobalKey<ScaffoldState>> _openDrawer(
 }
 
 void main() {
+  testWidgets(
+    'drawer follows position updates and falls back when unassigned',
+    (tester) async {
+      final auth = _EmployeeAuth(positionName: null);
+      await _openDrawer(tester, const Size(390, 844), employeeAuth: auth);
+      final profile = find.byType(DashboardSidebarProfileCard);
+      String subtitle() =>
+          tester.widget<DashboardSidebarProfileCard>(profile).subtitle;
+
+      expect(subtitle(), 'Employee');
+      auth.updatePosition('  Human Resource Management Officer  ');
+      await tester.pump();
+      expect(subtitle(), 'Human Resource Management Officer');
+      auth.updatePosition('   ');
+      await tester.pump();
+      expect(subtitle(), 'Employee');
+      expect(tester.takeException(), isNull);
+    },
+  );
+
   for (final size in [const Size(390, 844), const Size(360, 640)]) {
     testWidgets('profile stays in the drawer footer at $size', (tester) async {
       await _openDrawer(tester, size);
       final profile = find.byType(DashboardSidebarProfileCard);
+      expect(
+        tester.widget<DashboardSidebarProfileCard>(profile).subtitle,
+        'Administrative Assistant',
+      );
       final navigation = find.byType(ListView);
       final copyright = find.textContaining('©');
 
@@ -89,7 +125,10 @@ void main() {
       await tester.pump(const Duration(milliseconds: 350));
       final footerAfterScroll = tester.getRect(profile);
       expect(footerAfterScroll.top, closeTo(footerBeforeScroll.top, 0.01));
-      expect(footerAfterScroll.bottom, closeTo(footerBeforeScroll.bottom, 0.01));
+      expect(
+        footerAfterScroll.bottom,
+        closeTo(footerBeforeScroll.bottom, 0.01),
+      );
       expect(find.text('DocuTracker').hitTestable(), findsOneWidget);
       expect(tester.takeException(), isNull);
     });
