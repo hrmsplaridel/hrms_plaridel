@@ -28,6 +28,7 @@ class EmploymentTypeField extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => DropdownButtonFormField<String>(
+    isExpanded: true,
     initialValue: value,
     decoration: decoration,
     hint: hint,

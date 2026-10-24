@@ -542,6 +542,7 @@ class _EditEmployeeDialogState extends State<_EditEmployeeDialog> {
           ),
           const SizedBox(height: 16),
           DropdownButtonFormField<String>(
+            isExpanded: true,
             initialValue: _privilege,
             dropdownColor: AppTheme.dashPanelOf(context),
             style: AppTheme.dashFieldTextStyle(context),
@@ -697,6 +698,7 @@ class _EditEmployeeDialogState extends State<_EditEmployeeDialog> {
           ),
           const SizedBox(height: 16),
           DropdownButtonFormField<String>(
+            isExpanded: true,
             initialValue: _suffix ?? 'None',
             decoration: _inputDecoration('Suffix (e.g. Jr., Sr., or None)'),
             hint: const Text(
@@ -716,6 +718,7 @@ class _EditEmployeeDialogState extends State<_EditEmployeeDialog> {
           ),
           const SizedBox(height: 16),
           DropdownButtonFormField<String>(
+            isExpanded: true,
             initialValue: _sex,
             decoration: _inputDecoration('Sex (Male / Female)'),
             hint: const Text(

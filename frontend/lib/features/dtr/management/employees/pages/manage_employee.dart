@@ -2284,13 +2284,21 @@ class _ManageEmployeeState extends State<ManageEmployee> {
           if (hasSelection) ...[
             const SizedBox(height: 12),
             TextButton(
-              onPressed: () => openResponsiveRightSidePanel<void>(
-                context: context,
-                barrierLabel: 'Close employee details',
-                breakpoint: 900,
-                initialWidthFraction: 0.52,
-                builder: (_) => EmployeeDetailsView(employeeId: sel.id),
-              ),
+              onPressed: () async {
+                final editRequested = await openResponsiveRightSidePanel<bool>(
+                  context: context,
+                  barrierLabel: 'Close employee details',
+                  breakpoint: 900,
+                  initialWidthFraction: 0.52,
+                  builder: (panelContext) => EmployeeDetailsView(
+                    employeeId: sel.id,
+                    onEdit: () => Navigator.of(panelContext).pop(true),
+                  ),
+                );
+                if (editRequested == true && mounted) {
+                  await _openEditEmployeePanel(sel);
+                }
+              },
               child: const Text('View full details'),
             ),
           ],
