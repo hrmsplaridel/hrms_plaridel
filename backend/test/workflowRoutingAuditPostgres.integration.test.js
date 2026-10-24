@@ -2,6 +2,7 @@
 const test=require('node:test'),assert=require('node:assert/strict');
 const {Client}=require('pg');
 const engine=require('../src/services/approvalWorkflows');
+const {selfFilingOfficial}=require('../src/services/workflowPrintPolicy');
 const {listInbox}=require('../src/services/sharedWorkflowInbox');
 const id=n=>`22222222-2222-4222-8222-${String(n).padStart(12,'0')}`;
 
@@ -44,25 +45,37 @@ test('configured primary/backups, custom steps, Mayor and manual routes execute 
   const step=(source,label,user_ids=[])=>({label,assignee_source:source,user_ids,assignee_type:'user',requires_signature:true,allowed_actions:['approve','return','reject']});
   const department=step('submitter_department_reviewers','Department Review'),hr=step('final_hr_reviewers','Final HR Review');
   const finance=step('specific_users','Finance Review',[id(4),id(5)]),mayor=step('active_mayor','Mayor Approval'),manual=step('manual_mayor','Manual Mayor Signing');
-  const routes=[[department,hr],[department,finance,hr,mayor],[finance],[department,manual]];
+  const routes=[[department],[department,hr],[department,finance,hr,mayor],[finance],[department,hr,manual]];
+  const policies=['mayor','blank','actual_reviewer'];
+  const policyIndependentRoutes=new Map();
   let sequence=100;
-  for(const kind of ['leave','locator'])for(const useBackup of [false,true])for(const route of routes){
+  let checked=0;
+  for(const kind of ['leave','locator'])for(const policy of policies)for(const ownership of ['neither','department','hr','both'])for(const useBackup of [false,true])for(const route of routes){
+   const ownsDepartment=['department','both'].includes(ownership),ownsHr=['hr','both'].includes(ownership);
+   await db.query("UPDATE primary_reviewer_designations SET employee_id=CASE WHEN scope_key='final_hr' THEN $2::uuid ELSE $1::uuid END",[ownsDepartment?id(1):id(2),ownsHr?id(1):id(6)]);
    const request=id(sequence++),workflow=id(sequence++);
    const steps=route.map((s,i)=>({...s,step_order:i+1}));
    await db.query("INSERT INTO approval_workflows(id,name,current_version) VALUES($1,'Audit route',1)",[workflow]);
-   await db.query('INSERT INTO approval_workflow_versions(workflow_id,version,steps,employment_types) VALUES($1,1,$2,NULL)',[workflow,JSON.stringify(steps)]);
+   await db.query('INSERT INTO approval_workflow_versions(workflow_id,version,steps,employment_types,self_filing_signatory_policy) VALUES($1,1,$2,NULL,$3)',[workflow,JSON.stringify(steps),policy]);
    await db.query(`INSERT INTO ${engine.tableFor(kind)}(id,employee_id,user_id,status,department_id) VALUES($1,$2,$2,'draft',$3)`,[request,id(1),id(20)]);
    const prepared=await engine.prepareWorkflow(db,kind,{approval_workflow_id:workflow},id(1));
+   assert.equal(prepared.self_filing_signatory_policy,policy);
    await engine.initialWorkflow(db,kind,request,prepared);
+   const mayorProfile=await require('../src/services/officialSignatoryService').resolveActiveMayor(db,require('../src/utils/dateRangeParser').todayInHrmsTimezone());
+   for(const role of ['department','hr'])if(role==='department'?ownsDepartment:ownsHr){
+    const before=await selfFilingOfficial(db,{employee_id:id(1),workflow_snapshot:prepared},role,mayorProfile);
+    assert.equal(before.id || before.employee_id || null,policy==='mayor'?id(8):null,'Actual reviewer stays blank until that role approves');
+   }
    for(let stage=0;stage<steps.length;stage++){
     if(steps[stage].assignee_source==='manual_mayor')continue;
     const row=(await db.query(`SELECT * FROM ${engine.tableFor(kind)} WHERE id=$1`,[request])).rows[0];
-    const expected=steps[stage].assignee_source==='submitter_department_reviewers'?[id(2),id(3)]:steps[stage].assignee_source==='final_hr_reviewers'?[id(6),id(7)]:steps[stage].assignee_source==='active_mayor'?[id(8)]:[id(4),id(5)];
+    const expected=steps[stage].assignee_source==='submitter_department_reviewers'?(ownsDepartment?[id(3)]:[id(2),id(3)]):steps[stage].assignee_source==='final_hr_reviewers'?(ownsHr?[id(7)]:[id(6),id(7)]):steps[stage].assignee_source==='active_mayor'?[id(8)]:[id(4),id(5)];
     const resolved=await engine.resolveWorkflowReviewers(db,kind,row);
     assert.deepEqual(resolved.map(r=>r.id),expected);
     for(const who of [...expected,id(9),id(1)])assert.equal((await listInbox(db,{id:who})).some(r=>r.id===request),expected.includes(who));
     await assert.rejects(engine.workflowDecision(db,kind,request,id(9),'approve',{step:stage,revision:1}),{statusCode:403});
     const actor=useBackup&&expected.length>1?expected[1]:expected[0];
+    await assert.rejects(engine.workflowDecision(db,kind,request,id(1),'approve',{step:stage,revision:1}),{statusCode:403},'Applicant cannot approve their own request');
     const decision=await engine.workflowDecision(db,kind,request,actor,'approve',{step:stage,revision:1});
     const asset=id(sequence++);
     await db.query("INSERT INTO docutracker_signature_assets VALUES($1,$2,'image/png',$3)",[asset,actor,Buffer.from(`ink ${actor}`)]);
@@ -72,12 +85,38 @@ test('configured primary/backups, custom steps, Mayor and manual routes execute 
    }
    const saved=(await db.query(`SELECT * FROM ${engine.tableFor(kind)} WHERE id=$1`,[request])).rows[0];
    assert.equal(saved.status,'approved');assert.equal(saved.workflow_snapshot.version,1);
+   const routingKey=JSON.stringify([kind,ownership,useBackup,steps.map(s=>s.assignee_source)]);
+   const actors=saved.workflow_snapshot.decisions.map(d=>d.actor_id);
+   if(policyIndependentRoutes.has(routingKey))assert.deepEqual(actors,policyIndependentRoutes.get(routingKey),'Printed signatory policy must not change approval routing');
+   else policyIndependentRoutes.set(routingKey,actors);
    const signatures=await engine.decisionSignatures(db,saved);
    assert.equal(signatures.length,steps.filter(s=>s.assignee_source!=='manual_mayor').length);
    assert.ok(signatures.every(s=>Buffer.from(s.signature_image_base64,'base64').toString()===`ink ${s.signed_by}`));
    const officials=await engine.printOfficials(db,kind,saved);
-   assert.equal(officials.hr_approver.id,steps.at(-1).assignee_source==='manual_mayor'?id(8):saved.workflow_snapshot.decisions.at(-1).actor_id);
+   assert.equal(officials.hr_approver.id,engine.isDepartmentOnlyWorkflow(saved.workflow_snapshot)?null:steps.at(-1).assignee_source==='manual_mayor'?id(8):saved.workflow_snapshot.decisions.at(-1).actor_id);
+   if(engine.isDepartmentOnlyWorkflow(saved.workflow_snapshot))assert.equal(officials.department_head.id,actors.at(-1));
+   if(steps.at(-1).assignee_source==='manual_mayor'){
+    assert.equal(saved.workflow_snapshot.manual_signing_required,true);
+    assert.ok(!signatures.some(signature=>signature.signed_by===id(8)),'Manual signing must not create an electronic Mayor signature');
+   }
+   for(const role of ['department','hr'])if(role==='department'?ownsDepartment:ownsHr){
+    const official=await selfFilingOfficial(db,saved,role,mayorProfile);
+    const explicit=role==='department'?steps.findIndex(s=>s.assignee_source==='submitter_department_reviewers'):steps.findLastIndex(s=>s.assignee_source==='final_hr_reviewers');
+    const stage=explicit>=0?explicit:role==='department'?steps.findIndex(s=>s.assignee_source==='specific_users'):steps.findLastIndex(s=>s.assignee_source==='specific_users');
+    const actor=saved.workflow_snapshot.decisions.find(d=>d.step===stage)?.actor_id;
+    assert.equal(official.id || official.employee_id || null,policy==='mayor'?id(8):policy==='actual_reviewer'?actor || null:null,`${kind}/${ownership}/${policy}: correct printed ${role} identity`);
+   }
+   const nextPolicy=policies[(policies.indexOf(policy)+1)%policies.length];
+   await db.query('INSERT INTO approval_workflow_versions(workflow_id,version,steps,self_filing_signatory_policy) VALUES($1,2,$2,$3)',[workflow,JSON.stringify(steps),nextPolicy]);
+   await db.query('UPDATE approval_workflows SET current_version=2 WHERE id=$1',[workflow]);
+   const next=await engine.prepareWorkflow(db,kind,{approval_workflow_id:workflow},id(1));
+   assert.equal(next.self_filing_signatory_policy,nextPolicy,'New filings use the newly published policy');
+   const resubmitted=await engine.prepareWorkflow(db,kind,{approval_workflow_snapshot:saved.workflow_snapshot},id(1));
+   assert.equal(resubmitted.version,1);
+   assert.equal(resubmitted.self_filing_signatory_policy,policy,'Existing filings and corrections retain their saved policy');
+   checked++;
   }
+  assert.equal(checked,240,'Both modules cover all three policies, all applicant roles, primary/backup approvals and five routes');
   await db.query("UPDATE primary_reviewer_designations SET employee_id=$1 WHERE scope_key LIKE 'department:%'",[id(1)]);
   assert.deepEqual((await engine.resolveWorkflowReviewers(db,'leave',{employee_id:id(1),workflow_snapshot:{steps:[department],current_step:0,decisions:[]}})).map(r=>r.id),[id(3)],'Applicant-primary falls back to the eligible department backup');
  }finally{await db.query('ROLLBACK');await db.end();}
