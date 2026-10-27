@@ -176,7 +176,7 @@ void main() {
       await tester.tap(find.byTooltip('More actions'));
       await tester.pumpAndSettle();
       expect(
-        find.text('Certificate of Appearance'),
+        find.text('File for employees'),
         policy.$3 ? findsOneWidget : findsNothing,
       );
       expect(find.text('Record Correction'), findsOneWidget);

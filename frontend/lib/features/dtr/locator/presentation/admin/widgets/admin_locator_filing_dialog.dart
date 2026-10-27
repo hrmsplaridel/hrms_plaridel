@@ -25,12 +25,20 @@ class _AdminLocatorFilingDialogState extends State<AdminLocatorFilingDialog> {
       _office = TextEditingController(),
       _reason = TextEditingController();
   final _selected = <String>{};
-  final _additionalDetails = <String,dynamic>{};
+  final _profiles = <String, Map<String, dynamic>>{};
+  final _unavailable = <String>{};
+  final _employeeScroll = ScrollController();
+  final _detailsScroll = ScrollController();
+  final _reviewScroll = ScrollController();
+  final _additionalDetails = <String, dynamic>{};
   List<Map<String, dynamic>> _employees = [];
   List<Map<String, dynamic>> _results = [];
   late LocatorRequestType _type;
   DateTime _date = DateTime.now();
   bool _loading = false, _saving = false, _canReview = false, _created = false;
+  bool _validatingEmployees = false;
+  int _step = 0, _availabilityGeneration = 0;
+  String? _availabilityError, _employeeError;
   final _slots = {
     'am_in': false,
     'am_out': false,
@@ -53,6 +61,9 @@ class _AdminLocatorFilingDialogState extends State<AdminLocatorFilingDialog> {
     _search.dispose();
     _office.dispose();
     _reason.dispose();
+    _employeeScroll.dispose();
+    _detailsScroll.dispose();
+    _reviewScroll.dispose();
     super.dispose();
   }
 
@@ -73,10 +84,9 @@ class _AdminLocatorFilingDialogState extends State<AdminLocatorFilingDialog> {
     final generation = ++_generation;
     setState(() {
       _loading = true;
-      _error = null;
+      _employeeError = null;
       if (!more) {
         _employees = [];
-        _selected.clear();
       }
     });
     try {
@@ -90,16 +100,21 @@ class _AdminLocatorFilingDialogState extends State<AdminLocatorFilingDialog> {
       );
       if (!mounted || generation != _generation) return;
       setState(() {
-        _employees.addAll(
-          (r.data?['employees'] as List? ?? []).map(
-            (e) => Map<String, dynamic>.from(e as Map),
-          ),
-        );
+        final rows = (r.data?['employees'] as List? ?? [])
+            .map((e) => Map<String, dynamic>.from(e as Map))
+            .toList();
+        for (final employee in rows) {
+          _profiles[employee['id'].toString()] = employee;
+        }
+        _employees = <String, Map<String, dynamic>>{
+          for (final employee in [..._employees, ...rows])
+            employee['id'].toString(): employee,
+        }.values.toList();
         _total = (r.data?['total'] as num?)?.toInt() ?? 0;
       });
     } catch (e) {
       if (mounted && generation == _generation) {
-        setState(() => _error = userFacingApiError(e));
+        setState(() => _employeeError = userFacingApiError(e));
       }
     } finally {
       if (mounted && generation == _generation) {
@@ -108,18 +123,140 @@ class _AdminLocatorFilingDialogState extends State<AdminLocatorFilingDialog> {
     }
   }
 
-  Future<void> _submit() async {
-    if (!_form.currentState!.validate()) return;
+  bool _validateSelection() {
     if (_selected.isEmpty) {
       setState(() => _error = 'Select at least one employee.');
-      return;
+      return false;
+    }
+    if (_validatingEmployees || _availabilityError != null) {
+      setState(() => _error = 'Check employee availability before continuing.');
+      return false;
+    }
+    if (_unavailable.isNotEmpty) {
+      setState(
+        () => _error =
+            'Remove unavailable employees or choose another locator date.',
+      );
+      return false;
+    }
+    return true;
+  }
+
+  bool _validateDetails() {
+    if (!_validateSelection()) return false;
+    if (_form.currentState?.validate() != true) {
+      setState(() => _error = 'Complete the required request details.');
+      return false;
     }
     if (!_slots.values.any((v) => v)) {
       setState(() => _error = 'Select the covered time segments.');
-      return;
+      return false;
     }
     if (_type.requiresAttachment && _attachment?.bytes == null) {
       setState(() => _error = 'Upload the required attachment.');
+      return false;
+    }
+    return true;
+  }
+
+  void _goToStep(int step) {
+    FocusScope.of(context).unfocus();
+    setState(() {
+      _step = step;
+      _error = null;
+    });
+  }
+
+  void _continue() {
+    if (_saving || _loading || _validatingEmployees) return;
+    if (_step == 0 && _validateSelection()) {
+      _goToStep(1);
+    } else if (_step == 1 && _validateDetails()) {
+      _goToStep(2);
+    }
+  }
+
+  void _removeEmployee(String id) {
+    setState(() {
+      _selected.remove(id);
+      _unavailable.remove(id);
+      _error = null;
+    });
+  }
+
+  Future<void> _revalidateEmployees() async {
+    final generation = ++_availabilityGeneration;
+    final date = _dateString;
+    final ids = _selected.toList();
+    if (ids.isEmpty) {
+      setState(() {
+        _unavailable.clear();
+        _availabilityError = null;
+        _validatingEmployees = false;
+      });
+      return;
+    }
+    setState(() {
+      _validatingEmployees = true;
+      _availabilityError = null;
+      _error = null;
+    });
+    try {
+      final response = await ApiClient.instance.get<Map<String, dynamic>>(
+        '/api/locator-slips/admin/filing-employees',
+        queryParameters: {'slip_date': date, 'employee_ids': jsonEncode(ids)},
+      );
+      if (!mounted ||
+          generation != _availabilityGeneration ||
+          date != _dateString) {
+        return;
+      }
+      final rows = (response.data?['employees'] as List? ?? [])
+          .map((e) => Map<String, dynamic>.from(e as Map))
+          .toList();
+      final available = rows.map((e) => e['id'].toString()).toSet();
+      setState(() {
+        for (final employee in rows) {
+          _profiles[employee['id'].toString()] = employee;
+        }
+        _unavailable
+          ..clear()
+          ..addAll(ids.where((id) => !available.contains(id)));
+      });
+    } catch (_) {
+      if (mounted && generation == _availabilityGeneration) {
+        setState(
+          () => _availabilityError =
+              'Unable to check selected employees for this date. Retry before continuing.',
+        );
+      }
+    } finally {
+      if (mounted && generation == _availabilityGeneration) {
+        setState(() => _validatingEmployees = false);
+      }
+    }
+  }
+
+  Future<void> _pickDate() async {
+    final now = DateTime.now();
+    final picked = await showHrmsDatePicker(
+      context: context,
+      initialDate: _date,
+      firstDate: DateTime(now.year, now.month, now.day),
+      lastDate: DateTime(now.year + 1, 12, 31),
+    );
+    if (!mounted || picked == null || DateUtils.isSameDay(picked, _date)) {
+      return;
+    }
+    setState(() {
+      _date = picked;
+      _results = [];
+    });
+    await Future.wait([_load(), _revalidateEmployees()]);
+  }
+
+  Future<void> _submit() async {
+    if (_saving || _loading || _validatingEmployees || !_validateDetails()) {
       return;
     }
     setState(() {
@@ -183,6 +320,7 @@ class _AdminLocatorFilingDialogState extends State<AdminLocatorFilingDialog> {
 
   InputDecoration _decoration(String label) =>
       AppTheme.dashInputDecoration(context, labelText: label);
+
   Widget _section(String title, List<Widget> children) => FormSettingsSection(
     child: Material(
       color: Colors.transparent,
@@ -196,54 +334,227 @@ class _AdminLocatorFilingDialogState extends State<AdminLocatorFilingDialog> {
       ),
     ),
   );
+
   String _employeeName(String id) =>
-      _employees
-          .where((e) => e['id'] == id)
-          .firstOrNull?['full_name']
-          ?.toString() ??
-      id;
+      _profiles[id]?['full_name']?.toString() ?? id;
   int get _successCount => _results.where((r) => r['request'] != null).length;
-  int get _failureCount => _results.length - _successCount;
-  @override
-  Widget build(BuildContext context) => Scaffold(
-    backgroundColor: AppTheme.dashPanelOf(context),
-    appBar: AppBar(
-      title: const Text('File locator for employees'),
-      automaticallyImplyLeading: false,
-      actions: [
-        IconButton(
-          onPressed: _saving ? null : () => Navigator.pop(context, _created),
-          icon: const Icon(Icons.close),
+  int get _failureCount => _results.where((r) => r['request'] == null).length;
+  bool get _busy => _saving || _loading || _validatingEmployees;
+  bool get _finished => _created && _selected.isEmpty;
+  String get _formattedDate =>
+      MaterialLocalizations.of(context).formatMediumDate(_date);
+  String get _approvalMessage {
+    if (_type.approvalWorkflowId != null) {
+      return _type.autoApproveAdmin && _canReview
+          ? 'Requests follow the configured workflow. Eligible requests may use your approval signature when that workflow permits it.'
+          : 'Requests follow the configured approval workflow.';
+    }
+    if (_type.approvalRoute == 'mayor_direct') {
+      return 'Requests go directly to the Mayor for approval.';
+    }
+    if (_type.approvalRoute == 'mayor') {
+      return 'Department approval is followed by manual Mayor signing for the selected employment types.';
+    }
+    return _type.autoApproveAdmin && _canReview
+        ? 'Eligible requests will use your approval signature. Final approval depends on each employee’s configured routing.'
+        : 'Requests follow the normal department and HR approval route.';
+  }
+
+  Widget _availabilityNotice() => Column(
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: [
+      if (_validatingEmployees) ...[
+        const LinearProgressIndicator(),
+        const SizedBox(height: 8),
+        const Text('Checking selected employees for this date…'),
+      ],
+      if (_availabilityError != null) ...[
+        Text(
+          _availabilityError!,
+          style: TextStyle(color: Theme.of(context).colorScheme.error),
+        ),
+        Align(
+          alignment: Alignment.centerLeft,
+          child: TextButton.icon(
+            onPressed: _busy ? null : _revalidateEmployees,
+            icon: const Icon(Icons.refresh, size: 18),
+            label: const Text('Retry availability check'),
+          ),
         ),
       ],
-    ),
-    body: Form(
-      key: _form,
-      child: ListView(
-        padding: const EdgeInsets.all(24),
+      for (final id in _unavailable)
+        Padding(
+          padding: const EdgeInsets.only(bottom: 8),
+          child: Text(
+            '${_employeeName(id)} is unavailable on $_formattedDate. Remove this employee or choose another date.',
+            style: TextStyle(color: Theme.of(context).colorScheme.error),
+          ),
+        ),
+    ],
+  );
+
+  Widget _selectedEmployees({bool editable = false}) => _section(
+    'Selected employees (${_selected.length})',
+    [
+      if (_selected.isEmpty) const Text('No employees selected.'),
+      Wrap(
+        spacing: 8,
+        runSpacing: 8,
         children: [
+          for (final id in _selected)
+            InputChip(
+              label: Text(_employeeName(id)),
+              avatar: Icon(
+                _unavailable.contains(id)
+                    ? Icons.person_off_outlined
+                    : Icons.person_outline,
+                size: 18,
+              ),
+              deleteButtonTooltipMessage: 'Remove ${_employeeName(id)}',
+              onDeleted: editable && !_busy ? () => _removeEmployee(id) : null,
+            ),
+        ],
+      ),
+      if (!editable && !_finished)
+        Align(
+          alignment: Alignment.centerLeft,
+          child: TextButton.icon(
+            onPressed: _saving ? null : () => _goToStep(0),
+            icon: const Icon(Icons.people_outline, size: 18),
+            label: const Text('Change employees'),
+          ),
+        ),
+      _availabilityNotice(),
+    ],
+  );
+
+  Widget _employeeStep() => ListView(
+    controller: _employeeScroll,
+    padding: const EdgeInsets.all(20),
+    children: [
+      const Text(
+        'Choose the employees to file for. The same request details will apply to everyone selected.',
+      ),
+      Align(
+        alignment: Alignment.centerLeft,
+        child: TextButton.icon(
+          onPressed: _saving || _validatingEmployees ? null : _pickDate,
+          icon: const Icon(Icons.calendar_today_outlined, size: 18),
+          label: Text('Locator date: $_formattedDate'),
+        ),
+      ),
+      Text(
+        'Employees are listed based on the selected date.',
+        style: TextStyle(color: AppTheme.dashTextSecondaryOf(context)),
+      ),
+      const SizedBox(height: 12),
+      if (_selected.isNotEmpty) ...[
+        _selectedEmployees(editable: true),
+        const SizedBox(height: 16),
+      ],
+      _section('Employees', [
+        TextField(
+          key: const ValueKey('locator-filing-search'),
+          controller: _search,
+          enabled: !_saving,
+          decoration: _decoration('Search employee or department'),
+          onSubmitted: (_) {
+            if (!_busy) _load();
+          },
+        ),
+        Align(
+          alignment: Alignment.centerLeft,
+          child: TextButton.icon(
+            onPressed: _busy ? null : () => _load(),
+            icon: const Icon(Icons.search, size: 18),
+            label: const Text('Search'),
+          ),
+        ),
+        Text(
+          '${_selected.length} selected · ${_employees.length} of $_total employees',
+        ),
+        Align(
+          alignment: Alignment.centerLeft,
+          child: TextButton(
+            onPressed: _busy
+                ? null
+                : () => setState(() {
+                    for (final employee in _employees) {
+                      if (_selected.length >= 100) break;
+                      _selected.add(employee['id'].toString());
+                    }
+                    _error = null;
+                  }),
+            child: const Text('Select loaded employees (up to 100)'),
+          ),
+        ),
+        if (_loading) const LinearProgressIndicator(),
+        if (_employeeError != null) ...[
+          Text(
+            _employeeError!,
+            style: TextStyle(color: Theme.of(context).colorScheme.error),
+          ),
+          TextButton(
+            onPressed: _busy ? null : () => _load(),
+            child: const Text('Retry employees'),
+          ),
+        ],
+        if (!_loading && _employeeError == null && _employees.isEmpty)
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 16),
+            child: Text('No employees match this date or search.'),
+          ),
+        ..._employees.map(
+          (employee) => CheckboxListTile(
+            contentPadding: EdgeInsets.zero,
+            title: Text(employee['full_name']?.toString() ?? 'Employee'),
+            subtitle: Text(employee['department_name']?.toString() ?? ''),
+            value: _selected.contains(employee['id'].toString()),
+            onChanged: _busy
+                ? null
+                : (value) => setState(() {
+                    final id = employee['id'].toString();
+                    if (value == true && _selected.length < 100) {
+                      _selected.add(id);
+                    } else if (value != true) {
+                      _selected.remove(id);
+                      _unavailable.remove(id);
+                    }
+                    _error = null;
+                  }),
+          ),
+        ),
+        if (_employees.length < _total)
+          TextButton(
+            onPressed: _busy ? null : () => _load(more: true),
+            child: const Text('Load more employees'),
+          ),
+      ]),
+    ],
+  );
+
+  Widget _detailsStep() => Form(
+    key: _form,
+    child: SingleChildScrollView(
+      controller: _detailsScroll,
+      padding: const EdgeInsets.all(20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          _selectedEmployees(),
+          const SizedBox(height: 16),
           _section('Request details', [
             InkWell(
-              onTap: _saving
-                  ? null
-                  : () async {
-                      final now = DateTime.now();
-                      final picked = await showHrmsDatePicker(
-                        context: context,
-                        initialDate: _date,
-                        firstDate: DateTime(now.year, now.month, now.day),
-                        lastDate: DateTime(now.year + 1, 12, 31),
-                      );
-                      if (picked != null && mounted) {
-                        setState(() => _date = picked);
-                        _load();
-                      }
-                    },
+              key: const ValueKey('locator-filing-date'),
+              onTap: _saving || _validatingEmployees ? null : _pickDate,
               child: InputDecorator(
-                decoration: _decoration('Locator Date'),
-                child: Text(
-                  MaterialLocalizations.of(context).formatMediumDate(_date),
+                decoration: _decoration('Locator Date').copyWith(
+                  suffixIcon: const Icon(
+                    Icons.calendar_today_outlined,
+                    size: 20,
+                  ),
                 ),
+                child: Text(_formattedDate),
               ),
             ),
             const SizedBox(height: 12),
@@ -256,204 +567,335 @@ class _AdminLocatorFilingDialogState extends State<AdminLocatorFilingDialog> {
                   .toList(),
               onChanged: _saving
                   ? null
-                  : (t) => setState(() {
-                      _type = t!;
+                  : (type) => setState(() {
+                      _type = type!;
                       _additionalDetails.clear();
                       _attachment = null;
+                      _results = [];
+                      _error = null;
                     }),
             ),
             const SizedBox(height: 12),
-            Text(
-              _type.approvalRoute == 'mayor_direct'
-                  ? 'Requests go directly to the Mayor for approval.'
-                  : _type.approvalRoute == 'mayor'
-                  ? 'Department approval is followed by manual Mayor signing for the selected employment types.'
-                  : _type.autoApproveAdmin && _canReview
-                  ? 'Valid requests will be approved using your signature.'
-                  : 'Requests follow the normal department and HR approval route.',
-            ),
-            const SizedBox(height: 12),
+            Text(_approvalMessage),
+            const SizedBox(height: 16),
             const Text('Covered DTR slots'),
             Wrap(
               spacing: 8,
               runSpacing: 8,
-              children: _slots.entries
-                  .map(
-                    (s) => FilterChip(
-                      label: Text(s.key.toUpperCase().replaceAll('_', ' ')),
-                      selected: s.value,
-                      onSelected: _saving
-                          ? null
-                          : (v) => setState(() => _slots[s.key] = v),
-                    ),
-                  )
-                  .toList(),
+              children: [
+                for (final slot in _slots.entries)
+                  FilterChip(
+                    label: Text(slot.key.toUpperCase().replaceAll('_', ' ')),
+                    selected: slot.value,
+                    onSelected: _saving
+                        ? null
+                        : (value) => setState(() => _slots[slot.key] = value),
+                  ),
+              ],
             ),
             const SizedBox(height: 8),
             const Text(
               'Select the slots to cover. Selecting all four covers the full shift, including IN/OUT for single-session employees.',
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 16),
             TextFormField(
+              key: const ValueKey('locator-filing-destination'),
               controller: _office,
               enabled: !_saving,
               decoration: _decoration(_type.locationLabel),
-              validator: (v) =>
-                  (v ?? '').trim().isEmpty ? 'Enter the destination' : null,
+              validator: (value) =>
+                  (value ?? '').trim().isEmpty ? 'Enter the destination' : null,
             ),
             const SizedBox(height: 12),
             TextFormField(
+              key: const ValueKey('locator-filing-reason'),
               controller: _reason,
               enabled: !_saving,
               minLines: 2,
               maxLines: 4,
               decoration: _decoration('Purpose / Reason'),
-              validator: (v) =>
-                  (v ?? '').trim().isEmpty ? 'Enter the reason' : null,
+              validator: (value) =>
+                  (value ?? '').trim().isEmpty ? 'Enter the reason' : null,
             ),
-            if (_type.employeeDetailSchema.isNotEmpty) Padding(
-              padding:const EdgeInsets.only(top:12),
-              child:AbsorbPointer(absorbing:_saving,child:LocatorCustomFieldInputs(
-                key:ValueKey('fields-${_type.code}'),fields:_type.employeeDetailSchema,values:_additionalDetails,
-              )),
-            ),
-            if (_type.requiresAttachment)
-              OutlinedButton(
-                onPressed: _saving
-                    ? null
-                    : () async {
-                        final r = await FilePicker.platform.pickFiles(
-                          type: FileType.custom,
-                          allowedExtensions: ['pdf', 'png', 'jpg', 'jpeg'],
-                          withData: true,
-                        );
-                        if (r != null && mounted) {
-                          setState(() => _attachment = r.files.single);
-                        }
-                      },
-                child: Text(_attachment?.name ?? 'Upload required attachment'),
-              ),
-          ]),
-          const SizedBox(height: 16),
-          _section('Employees', [
-            TextField(
-              controller: _search,
-              enabled: !_saving,
-              decoration: _decoration('Search employee or department'),
-              onSubmitted: (_) => _load(),
-            ),
-            TextButton(
-              onPressed: _saving || _loading ? null : () => _load(),
-              child: const Text('Search'),
-            ),
-            Text(
-              '${_selected.length} selected · ${_employees.length} of $_total employees',
-            ),
-            TextButton(
-              onPressed: _saving || _loading
-                  ? null
-                  : () => setState(() {
-                      for (final e in _employees) {
-                        if (_selected.length >= 100) break;
-                        _selected.add(e['id'].toString());
-                      }
-                    }),
-              child: const Text('Select loaded employees (up to 100)'),
-            ),
-            if (_loading) const LinearProgressIndicator(),
-            ..._employees.map(
-              (e) => CheckboxListTile(
-                contentPadding: EdgeInsets.zero,
-                title: Text(e['full_name']?.toString() ?? 'Employee'),
-                subtitle: Text(e['department_name']?.toString() ?? ''),
-                value: _selected.contains(e['id']),
-                onChanged: _saving
-                    ? null
-                    : (v) => setState(() {
-                        if (v == true && _selected.length < 100) {
-                          _selected.add(e['id'].toString());
-                        } else {
-                          _selected.remove(e['id']);
-                        }
-                      }),
-              ),
-            ),
-            if (_employees.length < _total)
-              TextButton(
-                onPressed: _loading || _saving ? null : () => _load(more: true),
-                child: const Text('Load more employees'),
-              ),
-          ]),
-          if (_results.isNotEmpty) ...[
-            const SizedBox(height: 16),
-            _section(
-              'Filing results',
-              _results
-                  .map(
-                    (r) => ListTile(
-                      contentPadding: EdgeInsets.zero,
-                      title: Text(_employeeName(r['employee_id'].toString())),
-                      subtitle: Text(
-                        r['error']?.toString() ??
-                            'Created: ${r['request']['status']}',
-                      ),
-                      trailing: Text(r['error'] != null ? 'Failed' : 'Created'),
-                    ),
-                  )
-                  .toList(),
-            ),
-          ],
-        ],
-      ),
-    ),
-    bottomNavigationBar: SafeArea(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            if (_error != null)
+            if (_type.employeeDetailSchema.isNotEmpty)
               Padding(
-                padding: const EdgeInsets.only(bottom: 12),
-                child: Text(_error!, style: const TextStyle(color: Colors.red)),
-              ),
-            if (_results.isNotEmpty) ...[
-              Semantics(
-                liveRegion: true,
-                child: Text(
-                  '$_successCount ${_successCount == 1 ? 'request' : 'requests'} filed successfully · $_failureCount failed',
-                  style: TextStyle(
-                    fontWeight: FontWeight.bold,
-                    color: _failureCount > 0 ? Colors.deepOrange : Colors.green,
+                padding: const EdgeInsets.only(top: 12),
+                child: AbsorbPointer(
+                  absorbing: _saving,
+                  child: LocatorCustomFieldInputs(
+                    key: ValueKey('fields-${_type.code}'),
+                    fields: _type.employeeDetailSchema,
+                    values: _additionalDetails,
                   ),
                 ),
               ),
-              if (_failureCount > 0)
-                const Text(
-                  'Failed employees remain selected. Review Filing results below before retrying.',
-                ),
-              const SizedBox(height: 12),
-            ],
-            Row(
-              mainAxisAlignment: MainAxisAlignment.end,
-              children: [
-                TextButton(
+            if (_type.requiresAttachment)
+              Padding(
+                padding: const EdgeInsets.only(top: 12),
+                child: OutlinedButton.icon(
                   onPressed: _saving
                       ? null
-                      : () => Navigator.pop(context, _created),
-                  child: const Text('Close'),
+                      : () async {
+                          final result = await FilePicker.platform.pickFiles(
+                            type: FileType.custom,
+                            allowedExtensions: ['pdf', 'png', 'jpg', 'jpeg'],
+                            withData: true,
+                          );
+                          if (result != null && mounted) {
+                            setState(() => _attachment = result.files.single);
+                          }
+                        },
+                  icon: const Icon(Icons.attach_file),
+                  label: Text(
+                    _attachment?.name ?? 'Upload required attachment',
+                  ),
                 ),
-                const SizedBox(width: 12),
-                FilledButton(
-                  onPressed: _saving || _loading ? null : _submit,
-                  child: Text(_saving ? 'Filing…' : 'File requests'),
-                ),
-              ],
-            ),
-          ],
-        ),
+              ),
+          ]),
+        ],
       ),
     ),
+  );
+
+  Widget _reviewLine(String label, String value) => Padding(
+    padding: const EdgeInsets.only(bottom: 14),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          label,
+          style: TextStyle(
+            fontSize: 12,
+            color: AppTheme.dashTextSecondaryOf(context),
+          ),
+        ),
+        const SizedBox(height: 4),
+        Text(value, style: const TextStyle(fontWeight: FontWeight.w600)),
+      ],
+    ),
+  );
+
+  Widget _reviewStep() => SingleChildScrollView(
+    controller: _reviewScroll,
+    padding: const EdgeInsets.all(20),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const Text(
+          'Review the employees and request details before filing. Each employee receives a separate request.',
+        ),
+        const SizedBox(height: 16),
+        _selectedEmployees(),
+        const SizedBox(height: 16),
+        _section('Request summary', [
+          _reviewLine('Locator date', _formattedDate),
+          _reviewLine('Request type', _type.label),
+          _reviewLine(
+            'Covered DTR slots',
+            _slots.entries
+                .where((slot) => slot.value)
+                .map((slot) => slot.key.toUpperCase().replaceAll('_', ' '))
+                .join(', '),
+          ),
+          _reviewLine(_type.locationLabel, _office.text.trim()),
+          _reviewLine('Purpose / Reason', _reason.text.trim()),
+          for (final line in locatorAdditionalFieldLines(
+            _type.employeeDetailSchema,
+            _additionalDetails,
+          ))
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Text(line),
+            ),
+          if (_attachment != null) _reviewLine('Attachment', _attachment!.name),
+        ]),
+        const SizedBox(height: 16),
+        _section('Approval', [Text(_approvalMessage)]),
+        if (_results.isNotEmpty) ...[
+          const SizedBox(height: 16),
+          _section('Filing results', [
+            for (final result in _results)
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                title: Text(_employeeName(result['employee_id'].toString())),
+                subtitle: Text(
+                  result['error']?.toString() ??
+                      'Created: ${result['request']['status']}',
+                ),
+                trailing: Icon(
+                  result['request'] == null
+                      ? Icons.error_outline
+                      : Icons.check_circle_outline,
+                  color: result['request'] == null
+                      ? Theme.of(context).colorScheme.error
+                      : Colors.green,
+                ),
+              ),
+          ]),
+        ],
+      ],
+    ),
+  );
+
+  Widget _footer() {
+    final nextLabel = _step == 0
+        ? 'Continue'
+        : _step == 1
+        ? 'Review requests'
+        : _finished
+        ? 'Done'
+        : _results.isNotEmpty
+        ? 'Retry failed requests'
+        : 'File requests';
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: AppTheme.dashPanelOf(context),
+        border: Border(
+          top: BorderSide(color: AppTheme.dashHairlineOf(context)),
+        ),
+      ),
+      child: SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              if (_error != null)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 12),
+                  child: Text(
+                    _error!,
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.error,
+                    ),
+                  ),
+                ),
+              if (_step == 2 && _results.isNotEmpty) ...[
+                Semantics(
+                  liveRegion: true,
+                  child: Text(
+                    '$_successCount ${_successCount == 1 ? 'request' : 'requests'} filed successfully · $_failureCount failed',
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      color: _failureCount > 0
+                          ? Colors.deepOrange
+                          : Colors.green,
+                    ),
+                  ),
+                ),
+                if (_failureCount > 0)
+                  const Text(
+                    'Failed employees remain selected. Review Filing results below before retrying.',
+                  ),
+                const SizedBox(height: 12),
+              ],
+              Row(
+                children: [
+                  if (_step > 0) ...[
+                    TextButton.icon(
+                      onPressed: _saving
+                          ? null
+                          : () {
+                              _goToStep(_step - 1);
+                            },
+                      icon: const Icon(Icons.arrow_back, size: 18),
+                      label: const Text('Back'),
+                    ),
+                    const SizedBox(width: 12),
+                  ],
+                  Expanded(
+                    child: Align(
+                      alignment: Alignment.centerRight,
+                      child: FilledButton.icon(
+                        onPressed: _busy
+                            ? null
+                            : _step < 2
+                            ? _continue
+                            : _finished
+                            ? () => Navigator.pop(context, _created)
+                            : _submit,
+                        icon: Icon(
+                          _step < 2
+                              ? Icons.arrow_forward
+                              : _finished
+                              ? Icons.check
+                              : Icons.send_outlined,
+                          size: 18,
+                        ),
+                        label: Text(_saving ? 'Filing…' : nextLabel),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+    backgroundColor: AppTheme.dashPanelOf(context),
+    appBar: AppBar(
+      title: const Text('File locator for employees'),
+      automaticallyImplyLeading: false,
+      actions: [
+        IconButton(
+          tooltip: 'Close filing',
+          onPressed: _saving ? null : () => Navigator.pop(context, _created),
+          icon: const Icon(Icons.close),
+        ),
+      ],
+    ),
+    body: Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(20, 16, 20, 12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(
+                'Step ${_step + 1} of 3 • ${['Employees', 'Request details', 'Review and submit'][_step]}',
+                style: TextStyle(
+                  color: Theme.of(context).colorScheme.primary,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  for (var index = 0; index < 3; index++) ...[
+                    if (index > 0) const SizedBox(width: 8),
+                    Expanded(
+                      child: Container(
+                        height: 4,
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(4),
+                          color: index <= _step
+                              ? Theme.of(context).colorScheme.primary
+                              : AppTheme.dashHairlineOf(context),
+                        ),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ],
+          ),
+        ),
+        Expanded(
+          child: IndexedStack(
+            index: _step,
+            children: [_employeeStep(), _detailsStep(), _reviewStep()],
+          ),
+        ),
+      ],
+    ),
+    bottomNavigationBar: _footer(),
   );
 }

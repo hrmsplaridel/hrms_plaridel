@@ -23,3 +23,29 @@ test('staff route adapts full coverage, records the server actor and reports fai
     assert.equal(res.statusCode,400);assert.equal(submissions.length,1);
   }finally{clearModule('../src/routes/locatorSlips');restoreService();restoreDb();}
 });
+
+test('staff employee picker can revalidate selected IDs for a changed date without search or page limits hiding them',async()=>{
+  const {parseLocatorDateOnly}=require('../src/services/locatorFilingRules');
+  const {validateStaffBatch}=require('../src/services/locatorStaffFiling');
+  const calls=[];
+  const controller=require('../src/modules/locator/controllers/staffFiling.controller')({
+    parseLocatorDateOnly,validateStaffBatch,
+    pool:{query:async(sql,params)=>{calls.push({sql,params});return {rows:[{id:EMPLOYEE,full_name:'Alice',total:1}]};}},
+  });
+  const response=()=>({statusCode:200,status(code){this.statusCode=code;return this;},json(body){this.body=body;return this;}});
+  const res=response();
+  await controller.listFilingEmployees({user:{id:ACTOR},query:{slip_date:'2026-10-29',employee_ids:JSON.stringify([EMPLOYEE]),search:'unrelated search',offset:'200'}},res);
+  assert.equal(res.statusCode,200);
+  assert.match(calls[0].sql,/u\.id\s*=\s*ANY\(\$5::uuid\[\]\)/);
+  assert.deepEqual(calls[0].params,['2026-10-29',ACTOR,'',0,[EMPLOYEE]]);
+  assert.equal(res.body.employees[0].id,EMPLOYEE);
+  for(const employee_ids of ['invalid json','[]','["not-a-uuid"]']){
+    const invalid=response();
+    await controller.listFilingEmployees({user:{id:ACTOR},query:{slip_date:'2026-10-29',employee_ids}},invalid);
+    assert.equal(invalid.statusCode,400);
+  }
+  assert.equal(calls.length,1,'Invalid selected IDs never reach the database');
+  const normal=response();
+  await controller.listFilingEmployees({user:{id:ACTOR},query:{slip_date:'2026-10-29',search:'HR',offset:'100'}},normal);
+  assert.deepEqual(calls[1].params,['2026-10-29',ACTOR,'HR',100,null]);
+});

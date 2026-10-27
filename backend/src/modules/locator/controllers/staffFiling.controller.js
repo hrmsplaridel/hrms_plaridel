@@ -24,6 +24,16 @@ module.exports = function createLocatorControllers({
       const search = String(req.query.search || '')
         .trim()
         .slice(0, 100);
+      let selectedIds = null;
+      if (req.query.employee_ids != null) {
+        try {
+          const value = typeof req.query.employee_ids === 'string'
+            ? JSON.parse(req.query.employee_ids) : req.query.employee_ids;
+          selectedIds = validateStaffBatch(value);
+        } catch (_) {
+          return res.status(400).json({ error: 'Select between 1 and 100 employees with valid IDs.' });
+        }
+      }
       try {
         const result = await pool.query(
           `SELECT u.id,u.full_name,d.name AS department_name,count(*) OVER()::int AS total
@@ -34,8 +44,9 @@ module.exports = function createLocatorControllers({
       WHERE u.id <> $2::uuid AND u.is_active=true AND COALESCE(u.employment_status,'active')='active'
         AND (u.date_hired IS NULL OR u.date_hired <= $1::date) AND (u.separation_date IS NULL OR u.separation_date >= $1::date)
         AND ($3::text='' OR u.full_name ILIKE '%' || $3 || '%' OR d.name ILIKE '%' || $3 || '%')
+        AND ($5::uuid[] IS NULL OR u.id = ANY($5::uuid[]))
       ORDER BY u.full_name,u.id LIMIT 100 OFFSET $4`,
-          [date, req.user.id, search, offset]
+          [date, req.user.id, selectedIds ? '' : search, selectedIds ? 0 : offset, selectedIds]
         );
         res.json({ employees: result.rows, total: result.rows[0]?.total || 0 });
       } catch (error) {

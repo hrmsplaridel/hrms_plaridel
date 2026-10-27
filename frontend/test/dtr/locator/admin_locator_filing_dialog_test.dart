@@ -63,12 +63,24 @@ void main() {
       await t.pumpWidget(
         MaterialApp(
           home: AdminLocatorFilingDialog(
-            requestTypes: [LocatorRequestType.locator.copyWith(employeeDetailSchema:const[
-              LeaveCustomFieldDefinition(key:'contact',label:'Contact person',required:true),
-            ])],
+            requestTypes: [
+              LocatorRequestType.locator.copyWith(
+                employeeDetailSchema: const [
+                  LeaveCustomFieldDefinition(
+                    key: 'contact',
+                    label: 'Contact person',
+                    required: true,
+                  ),
+                ],
+              ),
+            ],
           ),
         ),
       );
+      await t.pumpAndSettle();
+      await t.tap(find.text('Select loaded employees (up to 100)'));
+      await t.pump();
+      await t.tap(find.text('Continue'));
       await t.pumpAndSettle();
       expect(find.text('Cover the full shift'), findsNothing);
       expect(find.text('Covered DTR slots'), findsOneWidget);
@@ -85,14 +97,14 @@ void main() {
       await t.enterText(find.byType(TextFormField).at(0), 'Municipal office');
       await t.enterText(find.byType(TextFormField).at(1), 'No electricity');
       await t.enterText(find.byType(TextFormField).at(2), 'Alice');
-      await t.tap(find.text('Select loaded employees (up to 100)'));
-      await t.pump();
-      await t.tap(find.text('File requests'));
+      await t.tap(find.text('Review requests'));
       await t.pumpAndSettle();
       expect(find.text('Select the covered time segments.'), findsOneWidget);
       expect(requests.where((r) => r.method == 'POST'), isEmpty);
       await t.tap(find.widgetWithText(FilterChip, 'AM IN'));
       await t.tap(find.widgetWithText(FilterChip, 'AM OUT'));
+      await t.tap(find.text('Review requests'));
+      await t.pumpAndSettle();
       await t.tap(find.text('File requests'));
       await t.pumpAndSettle();
       expect(find.text('Created: pending_department_head'), findsOneWidget);
@@ -101,7 +113,7 @@ void main() {
       expect(summary, findsOneWidget);
       expect(
         t.getRect(summary).bottom,
-        lessThan(t.getRect(find.text('File requests')).top),
+        lessThan(t.getRect(find.text('Retry failed requests')).top),
       );
       expect(
         find.text(
@@ -109,10 +121,15 @@ void main() {
         ),
         findsOneWidget,
       );
+      await t.tap(find.text('Back'));
+      await t.pumpAndSettle();
+      await t.ensureVisible(find.text('Change employees'));
+      await t.tap(find.text('Change employees'));
+      await t.pumpAndSettle();
       expect(find.text('1 selected · 2 of 2 employees'), findsOneWidget);
       final post = requests.singleWhere((r) => r.method == 'POST');
       final fields = (post.data as FormData).fields.toMap();
-      expect(jsonDecode(fields['additional_details']!),{'contact':'Alice'});
+      expect(jsonDecode(fields['additional_details']!), {'contact': 'Alice'});
       expect(fields['employee_ids'], contains('11111111'));
       expect(fields['full_shift'], 'false');
       expect(fields['am_in'], 'true');
@@ -137,13 +154,18 @@ void main() {
       ),
     );
     await t.pumpAndSettle();
+    await t.tap(find.text('Select loaded employees (up to 100)'));
+    await t.pump();
+    await t.tap(find.text('Continue'));
+    await t.pumpAndSettle();
     await t.enterText(find.byType(TextFormField).at(0), 'Municipal office');
     await t.enterText(find.byType(TextFormField).at(1), 'Power outage');
-    await t.tap(find.text('Select loaded employees (up to 100)'));
     for (final label in ['AM IN', 'AM OUT', 'PM IN', 'PM OUT']) {
       await t.tap(find.widgetWithText(FilterChip, label));
       await t.pump();
     }
+    await t.tap(find.text('Review requests'));
+    await t.pumpAndSettle();
     await t.tap(find.text('File requests'));
     await t.pumpAndSettle();
     final fields =
