@@ -611,6 +611,41 @@ void main() {
     },
   );
 
+  test(
+    'turn-around time keeps blank underlines and draws filled values',
+    () async {
+      final document = await FormPdf.buildTurnAroundTimePdf(
+        TurnAroundTimeEntry.fromJson(<String, dynamic>{
+          'position': 'Administrative Officer V',
+          'office': '',
+          'no_of_vacant_position': '   ',
+          'date_of_publication': null,
+          'end_search': '',
+          'qs': '',
+          'applicants': <dynamic>[],
+          'prepared_by_name': 'Prepared Person',
+          'noted_by_name': 'Noting Person',
+        }),
+        signatures: _signatures(TurnAroundTimeEntry.tableName, const [
+          'prepared_by',
+          'noted_by',
+        ]),
+      );
+      final bytes = await document.save();
+      expect(bytes.length, greaterThan(500));
+      expect(ascii.decode(bytes.take(4).toList()), '%PDF');
+      final raw = latin1.decode(bytes, allowInvalid: true);
+      expect(raw.contains('792'), isTrue);
+      expect(raw.contains('612'), isTrue);
+      final text = _pdfVisibleText(bytes);
+      expect(text, contains('AdministrativeOfficerV'));
+      expect(text, contains('Office:'));
+      expect(text, contains('DateofPublication:'));
+      expect(text, contains('Q.S.:'));
+      expect(text, contains('VerifiedSigner'));
+    },
+  );
+
   test('RSP PDF text uses Noto Sans for ñ, ₱, and bold Unicode', () async {
     final previousPrinting = PrintingPlatform.instance;
     PrintingPlatform.instance = _NoRasterPrinting();
