@@ -486,20 +486,16 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
   @override
   Widget build(BuildContext context) {
     final provider = context.watch<LeaveProvider>();
-    final mergedRequests = <String?, LeaveRequest>{
+    final requests = <String?, LeaveRequest>{
       for (final request in (widget.isDepartmentHead ? provider.departmentHeadRequests : _canReviewFinal ? provider.requests : <LeaveRequest>[])) request.id: request,
       for (final entry in _assignedRequests.values) entry['id'].toString(): LeaveRequest.fromJson(Map<String,dynamic>.from(entry['request_data'] as Map)),
-    }.values.toList();
-    final actionableIds = _assignedRequests.entries
-        .where((entry) => entry.value['can_review'] != false)
-        .map((entry) => entry.key)
-        .toSet();
-    final requests = [
-      for (final request in mergedRequests)
-        if (actionableIds.contains(request.id)) request,
-      for (final request in mergedRequests)
-        if (!actionableIds.contains(request.id)) request,
-    ];
+    }.values.toList()..sort((a, b) {
+      final unknownDate = DateTime.fromMillisecondsSinceEpoch(0, isUtc: true);
+      final aFiled = a.createdAt ?? a.dateFiled ?? unknownDate;
+      final bFiled = b.createdAt ?? b.dateFiled ?? unknownDate;
+      final byFiled = bFiled.compareTo(aFiled);
+      return byFiled != 0 ? byFiled : (b.id ?? '').compareTo(a.id ?? '');
+    });
     final filterOptions = [..._reviewFilterOptions, ...requests.map(
             (request) => LeaveReviewFilterOption(
               userId: request.userId,

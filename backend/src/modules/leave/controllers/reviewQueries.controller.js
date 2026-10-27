@@ -105,7 +105,7 @@ module.exports = function createLeaveControllers({
               dhh.department_head_reviewed_at,
               dhh.department_head_remarks
        ${fromWhere}
-       ORDER BY lr.updated_at DESC NULLS LAST, lr.created_at DESC, lr.id DESC
+       ORDER BY lr.created_at DESC, lr.id DESC
        ${safeLimit ? `LIMIT ${safeLimit}` : ''}
        ${paginated ? `OFFSET ${offset}` : ''}`,
           params,
@@ -164,7 +164,7 @@ module.exports = function createLeaveControllers({
        WHERE ${finalReviewScope(req, '$1::uuid')} AND lr.status IN ('pending', 'pending_hr', 'pending_mayor')
          AND ${finalQueueVisibilitySql('leave', 'lr', '$1::uuid')}
          AND COALESCE(lr.user_id, lr.employee_id) <> $1::uuid
-       ORDER BY lr.updated_at DESC NULLS LAST, lr.created_at DESC
+       ORDER BY lr.created_at DESC, lr.id DESC
        LIMIT 200`,
           [req.user?.id],
         );
@@ -353,7 +353,7 @@ module.exports = function createLeaveControllers({
               dhh.department_head_reviewed_at,
               dhh.department_head_remarks
        ${fromWhere}
-       ORDER BY lr.updated_at DESC NULLS LAST, lr.created_at DESC, lr.id DESC
+       ORDER BY lr.created_at DESC, lr.id DESC
        LIMIT ${limit}
        ${paginated ? `OFFSET ${offset}` : ''}`,
           params,
