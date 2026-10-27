@@ -94,6 +94,40 @@ LeaveFormSignatories composeLeaveFormSignatories({
 Future<LeaveFormSignatories> loadLeaveFormSignatories({
   required LeaveRequest request,
 }) async {
+  if (request.isPaperRecord) {
+    final record=request.paperApprovalRecord!;
+    Map<String,dynamic> frozenSignatures = {};
+    final hasCopies = ['final_approver','certification_officer','department_reviewer','applicant'].any((group)=>record[group] is Map && record[group]['signature'] is Map && record[group]['signature']['signature_asset_id'] != null);
+    if (hasCopies && (request.id ?? '').isNotEmpty) {
+      try {
+        final response = await ApiClient.instance.get<Map<String,dynamic>>('/api/leave/signatories',queryParameters:{'employee_id':request.userId,'leave_request_id':request.id});
+        final data = response.data?['paper_signatures'];
+        if (data is Map) frozenSignatures = Map<String,dynamic>.from(data);
+      } catch (_) {
+        // Keep the recorded names; never substitute another signature on failure.
+      }
+    }
+    DocuTrackerSourceSignature? signature(String group) {
+      final person=record[group];
+      final data=frozenSignatures[group];
+      if (person is! Map || person['signature'] is! Map || data is! Map) return null;
+      if (group == 'applicant' && person['user_id'] != request.userId) return null;
+      final expected=person['signature'] as Map;
+      if (person['user_id']==null || data['signed_by']!=person['user_id'] || data['signature_asset_id']!=expected['signature_asset_id']) return null;
+      final copy=DocuTrackerSourceSignature.fromJson(Map<String,dynamic>.from(data));
+      return copy.isSigned ? copy : null;
+    }
+    return LeaveFormSignatories(
+      certificationOfficer:LeaveFormSignatoryInfo.fromJson(record['certification_officer']),
+      recommendationOfficer:LeaveFormSignatoryInfo.fromJson(record['department_reviewer']),
+      approvingAuthority:LeaveFormSignatoryInfo.fromJson(record['final_approver']),
+      certificationOfficerSignature:signature('certification_officer'),
+      departmentHeadSignature:signature('department_reviewer'),
+      hrApproverSignature:signature('final_approver'),
+      applicantSignature:signature('applicant'),
+    );
+  }
+
   // Fire both independent API calls concurrently — the signatories endpoint
   // and the DocuTracker signature lookup do not depend on each other.
   final requestId = request.id;

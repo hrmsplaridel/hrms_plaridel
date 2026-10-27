@@ -121,6 +121,7 @@ class LeaveTypeDefinition {
     this.employeeCanFile = true,
     this.adminOnly = false,
     this.adminCanFile = true,
+    this.allowApprovedPaperFiling = false,
     this.allowsPastDates = true,
     this.requiresAttachment = false,
     this.requiresAttachmentWhenOverDays,
@@ -145,6 +146,7 @@ class LeaveTypeDefinition {
   final bool employeeCanFile;
   final bool adminOnly;
   final bool adminCanFile;
+  final bool allowApprovedPaperFiling;
   final bool allowsPastDates;
   final bool requiresAttachment;
   final double? requiresAttachmentWhenOverDays;
@@ -179,6 +181,7 @@ class LeaveTypeDefinition {
           json['employee_can_file'] != false &&
           json['employeeCanFile'] != false,
       adminOnly: json['admin_only'] == true || json['adminOnly'] == true,
+      allowApprovedPaperFiling: json['allow_approved_paper_filing'] == true || json['allowApprovedPaperFiling'] == true,
       adminCanFile:
           json['admin_can_file'] != false && json['adminCanFile'] != false,
       allowsPastDates:
@@ -234,6 +237,7 @@ class LeaveTypeDefinition {
       'employee_can_file': employeeCanFile,
       'admin_only': adminOnly,
       'admin_can_file': adminCanFile,
+      'allow_approved_paper_filing': allowApprovedPaperFiling,
       'allows_past_dates': allowsPastDates,
       'requires_attachment': requiresAttachment,
       'requires_attachment_when_over_days': requiresAttachmentWhenOverDays,
@@ -262,6 +266,7 @@ class LeaveTypeDefinition {
     bool? employeeCanFile,
     bool? adminOnly,
     bool? adminCanFile,
+    bool? allowApprovedPaperFiling,
     bool? allowsPastDates,
     bool? requiresAttachment,
     double? requiresAttachmentWhenOverDays,
@@ -286,6 +291,7 @@ class LeaveTypeDefinition {
       employeeCanFile: employeeCanFile ?? this.employeeCanFile,
       adminOnly: adminOnly ?? this.adminOnly,
       adminCanFile: adminCanFile ?? this.adminCanFile,
+      allowApprovedPaperFiling: allowApprovedPaperFiling ?? this.allowApprovedPaperFiling,
       allowsPastDates: allowsPastDates ?? this.allowsPastDates,
       requiresAttachment: requiresAttachment ?? this.requiresAttachment,
       requiresAttachmentWhenOverDays:

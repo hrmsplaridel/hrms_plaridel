@@ -10,11 +10,15 @@ class AdminLeaveApproveDialog extends StatefulWidget {
   const AdminLeaveApproveDialog({
     super.key,
     required this.request,
+    this.title = 'Approve Leave Request',
+    this.confirmLabel = 'Approve',
     this.leaveBalance,
     this.creditSummary,
   });
 
   final LeaveRequest request;
+  final String title;
+  final String confirmLabel;
   final LeaveBalance? leaveBalance;
   final String? creditSummary;
 
@@ -90,7 +94,7 @@ class _AdminLeaveApproveDialogState extends State<AdminLeaveApproveDialog> {
             : 'No balance record for this leave type');
 
     return AlertDialog(
-      title: const Text('Approve Leave Request'),
+      title: Text(widget.title),
       content: SizedBox(
         width: 440,
         child: Form(
@@ -194,7 +198,7 @@ class _AdminLeaveApproveDialogState extends State<AdminLeaveApproveDialog> {
               ),
             );
           },
-          child: const Text('Approve'),
+          child: Text(widget.confirmLabel),
         ),
       ],
     );

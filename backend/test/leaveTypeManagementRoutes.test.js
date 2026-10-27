@@ -35,6 +35,7 @@ function rowFromCreateParams(params) {
     employee_detail_schema: JSON.parse(params[15]),
     eligible_employment_types: params[16],
     admin_can_file: params[19],
+    allow_approved_paper_filing: params[23],
     minimum_service_months: params[21],
     first_year_allowance: params[22],
   };
@@ -87,7 +88,7 @@ async function withUpdateRoute(existing, run) {
     }
     if (statement.startsWith('UPDATE leave_types SET eligible_employment_types')) {
       updates.push({statement,params});
-      return {rows:[{...existing,eligible_employment_types:params[0], minimum_service_months:params[2] ?? existing.minimum_service_months}]};
+      return {rows:[{...existing,eligible_employment_types:params[0], minimum_service_months:params[2] ?? existing.minimum_service_months, allow_approved_paper_filing:params[3]}]};
     }
     if (statement.startsWith('UPDATE leave_types SET name =')) {
       updates.push({ statement, params });
@@ -489,4 +490,55 @@ test('invalid proration mode and proration without an annual limit are rejected'
       const res=responseRecorder();await handle({body:{...basePayload,...fields}},res);assert.equal(res.statusCode,400);
     }
   });
+});
+
+ test('approved paper recording is opt-in and persisted per leave type', async () => {
+  await withCreateRoute(async (handle, inserts) => {
+    const res=responseRecorder();
+    await handle({body:{name:'staffAuto',display_name:'Staff Auto',allow_approved_paper_filing:true,admin_can_file:true}},res);
+    assert.equal(res.statusCode,201);
+    assert.equal(inserts[0].params[23],true);
+    assert.equal(res.body.allow_approved_paper_filing,true);
+  });
+ });
+ test('paper recording cannot be enabled when staff filing is disabled', async () => {
+  await withCreateRoute(async (handle) => {
+    const res=responseRecorder();
+    await handle({body:{name:'noStaff',display_name:'No Staff',allow_approved_paper_filing:true,admin_can_file:false}},res);
+    assert.equal(res.statusCode,400);
+  });
+ });
+
+
+test('built-in paper recording defaults on while new custom types remain opt-in', async () => {
+  await withCreateRoute(async (handle, inserts) => {
+    for (const [name, expected] of [['vacationLeave',true],['sickLeave',true],['customPaperLeave',false]]) {
+      const res=responseRecorder();
+      await handle({body:{name,display_name:name}},res);
+      assert.equal(res.statusCode,201);
+      assert.equal(res.body.allow_approved_paper_filing,expected,name);
+      assert.equal(inserts.at(-1).params[23],expected);
+    }
+    const explicit=responseRecorder();
+    await handle({body:{name:'studyLeave',display_name:'Study Leave',allow_approved_paper_filing:false}},explicit);
+    assert.equal(explicit.body.allow_approved_paper_filing,false);
+  });
+});
+
+test('protected paper recording can be disabled and unrelated eligibility edits preserve it',async()=>{
+  for(const enabled of [true,false]) {
+    const existing={id:'11111111-1111-4111-8111-111111111111',name:'vacationLeave',is_system:true,admin_can_file:true,allow_approved_paper_filing:enabled};
+    await withUpdateRoute(existing,async(handle,updates)=>{
+      const unchanged=responseRecorder();
+      await handle({params:{id:existing.id},body:{minimum_service_months:6}},unchanged);
+      assert.equal(unchanged.statusCode,200);
+      assert.equal(unchanged.body.allow_approved_paper_filing,enabled);
+      assert.equal(updates[0].params[3],enabled);
+      const disabled=responseRecorder();
+      await handle({params:{id:existing.id},body:{allow_approved_paper_filing:false}},disabled);
+      assert.equal(disabled.statusCode,200);
+      assert.equal(disabled.body.allow_approved_paper_filing,false);
+      assert.match(updates[1].statement,/updated_at = now\(\)/);
+    });
+  }
 });

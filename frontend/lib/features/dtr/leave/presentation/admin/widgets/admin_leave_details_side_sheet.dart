@@ -75,6 +75,7 @@ class AdminLeaveDetailsSideSheet extends StatelessWidget {
           final approved = req.status == LeaveRequestStatus.approved;
           final canRevoke =
               approved &&
+              !req.isPaperRecord &&
               !isOwnRequest &&
               onRevoke != null &&
               (!sharedWorkflow || req.canRevokeApproval == true);
@@ -236,6 +237,7 @@ class AdminLeaveRequestDetailsPanel extends StatelessWidget {
                           statusLabel ??
                           adminLeaveStatusLabel(
                             request!.status,
+                            paperRecorded:request!.isPaperRecord,
                             finalReviewRoute: request!.finalReviewRoute,
                             isDepartmentHead: isDepartmentHead,
                           ),
@@ -380,6 +382,12 @@ class AdminLeaveRequestDetailsPanel extends StatelessWidget {
         (request.departmentHeadRemarks ?? '').trim().isNotEmpty
         ? request.departmentHeadRemarks
         : null;
+    if(request.isPaperRecord) {
+      final paper=request.paperApprovalRecord!;
+      return [LeaveHistoryEvent(label:'Approved paper leave recorded',
+        dateTime:DateTime.tryParse(paper['encoded_at']?.toString() ?? ''),actor:paper['encoded_by_name']?.toString() ?? 'HR encoder',
+        remarks:'Original paper approval: ${paper['approval_date']} by ${paper['final_approver']?['name'] ?? ''}',completed:true)];
+    }
     final submittedAt = request.dateFiled ?? request.createdAt;
     final reviewedAt = request.reviewedAt;
     final status = request.status;

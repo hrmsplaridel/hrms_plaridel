@@ -1,3 +1,5 @@
+import 'package:hrms_plaridel/features/dtr/leave/presentation/admin/widgets/admin_leave_filing_panel.dart';
+import 'package:hrms_plaridel/features/dtr/leave/presentation/shared/pages/leave_request_form_screen.dart';
 import 'package:hrms_plaridel/features/dtr/management/approvals/pages/workflow_approval_inbox_page.dart';
 import 'package:hrms_plaridel/features/dtr/leave/utils/configured_leave_pdf.dart';
 import 'dart:async';
@@ -630,6 +632,7 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
               _loadRequests(forceRefresh: true),
             ]);
           },
+          onFileForEmployee: !widget.isDepartmentHead && !widget.isMayor && ['admin','hr'].contains(context.read<AuthProvider>().user?.role) ? _fileForEmployee : null,
           onManageSignatures: _openSignatureLibrary,
           onForcedLeaveDeduction: widget.isDepartmentHead || widget.isMayor
               ? null
@@ -1592,6 +1595,14 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
     if (ok) await _loadRequests();
   }
 
+  Future<void> _fileForEmployee() async {
+    final result=await openResponsiveRightSidePanel<String>(context:context,
+      barrierDismissible:false,builder:(_)=>const AdminLeaveFilingPanel());
+    if(!mounted || result!=kLeaveFormResultSubmitted)return;
+    await _loadRequests(forceRefresh:true);
+    if(mounted)ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content:Text('Approved paper leave recorded.')));
+  }
+
   Future<void> _openLeaveTypeRules() async {
     await openResponsiveRightSidePanel<void>(
       context: context,
@@ -1632,6 +1643,7 @@ class _AdminHeaderCard extends StatelessWidget {
     this.onEmployeeLeaveCard,
     this.onLeaveLedger,
     this.onLeaveTypeRules,
+    this.onFileForEmployee,
   });
 
   final int totalRequests;
@@ -1648,10 +1660,12 @@ class _AdminHeaderCard extends StatelessWidget {
   final Future<void> Function()? onEmployeeLeaveCard;
   final VoidCallback? onLeaveLedger;
   final Future<void> Function()? onLeaveTypeRules;
+  final Future<void> Function()? onFileForEmployee;
 
   @override
   Widget build(BuildContext context) {
     final menuActions = <_HeaderMenuAction>[
+      if(onFileForEmployee!=null) _HeaderMenuAction(label:'Record approved paper leave',icon:Icons.person_add_alt_1_outlined,onSelected:onFileForEmployee!),
       _HeaderMenuAction(
         label: 'My Signatures',
         icon: Icons.draw_outlined,

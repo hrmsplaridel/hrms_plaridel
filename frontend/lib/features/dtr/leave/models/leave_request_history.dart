@@ -41,6 +41,7 @@ class LeaveRequestHistoryEntry {
     return switch (action) {
       'saved_draft' => 'Draft saved',
       'submitted' => 'Submitted',
+      'paper_approved_recorded' => 'Approved paper leave recorded',
       'updated' => 'Request updated',
       'resubmitted' => 'Resubmitted',
       'department_head_approved' => 'Approved by Department Reviewer',

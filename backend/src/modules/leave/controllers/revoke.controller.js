@@ -32,7 +32,7 @@ module.exports = function createLeaveControllers({
               COALESCE(lr.number_of_days, lr.total_days) AS days,
               lr.user_id, lr.employee_id,
               lr.start_date, lr.end_date,
-              lr.approved_at, lr.reviewed_at,
+              lr.approved_at, lr.reviewed_at, lr.paper_approval_record,
               lr.approved_days_with_pay, lr.approved_days_without_pay,
               lt.name AS leave_type_name
        FROM leave_requests lr
@@ -47,6 +47,10 @@ module.exports = function createLeaveControllers({
         }
         const r = current.rows[0];
         await assertFinalLeaveReviewer(client, r.user_id || r.employee_id, reviewerId, 'leave', id);
+        if (r.paper_approval_record) {
+          await client.query('ROLLBACK');
+          return res.status(409).json({error:'Approved paper records require a documented paper correction or cancellation; digital approval revocation is not available.'});
+        }
         if (r.status !== 'approved') {
           await client.query('ROLLBACK');
           return res.status(400).json({

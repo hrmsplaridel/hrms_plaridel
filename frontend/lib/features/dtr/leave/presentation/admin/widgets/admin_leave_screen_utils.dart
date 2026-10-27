@@ -70,7 +70,9 @@ String adminLeaveStatusLabel(
   required bool isDepartmentHead,
   String finalReviewRoute = 'hr',
   Map<String, dynamic>? workflowSnapshot,
+  bool paperRecorded = false,
 }) {
+  if(paperRecorded && status==LeaveRequestStatus.approved)return 'Approved (paper record)';
   final named = pendingWorkflowStepLabel(workflowSnapshot);
   if (status.isPending && named != null) return 'Pending $named';
   if (!isDepartmentHead) return status.displayName;

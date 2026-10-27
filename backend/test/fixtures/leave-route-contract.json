@@ -16,6 +16,56 @@
     "regexp": "/^\\/routing\\/?(?=\\/|$)/i"
   },
   {
+    "path": "/admin/filing-employees",
+    "methods": [
+      "get"
+    ],
+    "middleware": [
+      "authMiddleware",
+      "requireAdminOrHr",
+      ""
+    ]
+  },
+  {
+    "path": "/admin/paper-signatories",
+    "methods": ["get"],
+    "middleware": ["authMiddleware", "requireAdminOrHr", ""]
+  },
+  {
+    "path": "/admin/submission-availability",
+    "methods": [
+      "get"
+    ],
+    "middleware": [
+      "authMiddleware",
+      "requireAdminOrHr",
+      ""
+    ]
+  },
+  {
+    "path": "/admin/working-days",
+    "methods": [
+      "get"
+    ],
+    "middleware": [
+      "authMiddleware",
+      "requireAdminOrHr",
+      ""
+    ]
+  },
+  {
+    "path": "/admin/file",
+    "methods": [
+      "post"
+    ],
+    "middleware": [
+      "authMiddleware",
+      "requireAdminOrHr",
+      "",
+      "uploadLeaveAttachmentMemoryMw"
+    ]
+  },
+  {
     "path": "/final-reviewer/me",
     "methods": [
       "get"

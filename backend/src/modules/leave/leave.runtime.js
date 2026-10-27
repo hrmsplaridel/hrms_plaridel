@@ -18,6 +18,7 @@ function createLeaveRuntime(dependencies) {
   Object.assign(runtime, require('./services/annualEntitlements')(runtime));
   Object.assign(runtime, require('./repositories/leaveTypes')(runtime));
   Object.assign(runtime, require('./use-cases/finalizeApproval')(runtime));
+  Object.assign(runtime, require('./use-cases/staffFiling')(runtime));
   return runtime;
 }
 module.exports = { createLeaveRuntime };

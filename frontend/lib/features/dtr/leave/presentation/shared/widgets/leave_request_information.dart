@@ -16,6 +16,15 @@ class LeaveRequestInformation extends StatelessWidget {
   Widget build(BuildContext context) => Column(
     crossAxisAlignment: CrossAxisAlignment.stretch,
     children: [
+      if(request.isPaperRecord) ...[
+        const AdminLeaveSubsectionTitle(title:'Approved paper leave record'),
+        AdminLeaveBodyCard(content:'Original approval: ${request.paperApprovalRecord!['approval_date']}\n'
+          'Approved by: ${request.paperApprovalRecord!['final_approver']?['name'] ?? ''}\n'
+          'Encoded by: ${request.paperApprovalRecord!['encoded_by_name'] ?? ''}\n'
+          'Encoded at: ${request.paperApprovalRecord!['encoded_at'] ?? ''}\n'
+          'The attachment is the signed original. Generated copies include the employee’s and selected officials’ saved signatures copied when this record was encoded, where available.'),
+        const SizedBox(height:16),
+      ],
       ApprovalWorkflowSummary(snapshot:request.workflowSnapshot),
       _AdminLeaveDetailGrid(request: request, employeeInformation: true),
       const SizedBox(height: 20),

@@ -1,4 +1,5 @@
 'use strict';
+const {publicPaperRecord,paperSignaturePayload}=require('../services/paperSignatures');
 const { selfFilingOfficial } = require('../../../services/workflowPrintPolicy');
 module.exports = function createLeaveControllers({
   findAssignmentProfileByUserIdAtDate,
@@ -44,7 +45,7 @@ module.exports = function createLeaveControllers({
                 )::date::text AS submitted_on,
                 lr.review_department_id,
                 lr.approved_at::date::text AS approved_on,
-                lr.approving_authority_snapshot,lr.final_review_route,lr.final_reviewer_user_id,lr.workflow_snapshot,
+                lr.paper_approval_record,lr.approving_authority_snapshot,lr.final_review_route,lr.final_reviewer_user_id,lr.workflow_snapshot,
                 lr.assigned_department_head_id,
                 d.name AS review_department_name,
                 EXISTS (
@@ -116,6 +117,13 @@ module.exports = function createLeaveControllers({
           }
         }
 
+        if (requestContext?.paper_approval_record) {
+          const source=requestContext.paper_approval_record;
+          const paper=publicPaperRecord(source);
+          return res.json({hr_certification_officer:paper.certification_officer || null,
+            recommendation_officer:paper.department_reviewer || null,approving_authority:paper.final_approver,
+            paper_signatures:paperSignaturePayload(source)});
+        }
         const signatoryDate =
           requestContext?.approved_on || requestContext?.submitted_on || todayInHrmsTimezone();
         const { primary: hrCertifier } = await resolveFinalLeaveReviewerConfiguration(

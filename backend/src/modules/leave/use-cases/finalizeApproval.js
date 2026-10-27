@@ -1,4 +1,5 @@
 'use strict';
+const {publicPaperRecord}=require('../services/paperSignatures');
 module.exports = function createLeaveComponent({
   assertAnnualQuotaLeaveLimit,
   assertCoverageMatchesRequestedDays,
@@ -30,6 +31,7 @@ module.exports = function createLeaveComponent({
       reviewerId,
       remarks,
       departmentFinal = false,
+      paperRecord = null,
       recommendationRemarks = null,
       approvedOtherDetails = null,
       approvedDaysWithPayRaw,
@@ -67,16 +69,16 @@ module.exports = function createLeaveComponent({
       approvedDaysWithPay: departmentFinal ? approvalDays : approvedDaysWithPayRaw,
       approvedDaysWithoutPay: departmentFinal ? 0 : approvedDaysWithoutPayRaw,
     });
-    const { historyAction } = departmentFinal
+    const { historyAction } = paperRecord ? {historyAction:'paper_approved_recorded'} : departmentFinal
       ? validateDepartmentHeadTransition({
           currentStatus: r.status,
           desiredStatus: 'pending_hr',
           finalReviewRoute: 'mayor',
         })
       : validateAdminTransition({ currentStatus: r.status, desiredStatus: 'approved' });
-    if (!departmentFinal) await requireHrApprovalSignature(client, id, reviewerId);
-    const requestWorkflow = await workflowEngine.loadRequestWorkflow(client, 'leave', id);
-    const approvingAuthority =
+    if (!departmentFinal && !paperRecord) await requireHrApprovalSignature(client, id, reviewerId);
+    const requestWorkflow = paperRecord ? null : await workflowEngine.loadRequestWorkflow(client, 'leave', id);
+    const approvingAuthority = paperRecord ? {...publicPaperRecord(paperRecord).final_approver,source:'approved_paper'} :
       workflowEngine.isShared(requestWorkflow) &&
       workflowEngine.workflowRoute(requestWorkflow) !== 'mayor'
         ? await workflowEngine.reviewerProfile(client, reviewerId)
@@ -92,22 +94,23 @@ module.exports = function createLeaveComponent({
          approved_days_without_pay = $6::numeric,
          approved_other_details = $7::text,
          reserved_credit_days = 0,
-         reviewed_at = now(),
+         reviewed_at = COALESCE($9::timestamptz,now()),
          approved_by = $2::uuid,
-         approved_at = now(),
+         approved_at = COALESCE($9::timestamptz,now()),
          approving_authority_snapshot = $8::jsonb,
          updated_at = now()
      WHERE id = $1
      RETURNING *`,
       [
         id,
-        reviewerId,
+        paperRecord ? null : reviewerId,
         remarks,
         recommendationRemarks,
         allocation.approvedDaysWithPay,
         allocation.approvedDaysWithoutPay,
         approvedOtherDetails,
         JSON.stringify(approvingAuthority || {}),
+        paperRecord ? `${paperRecord.approval_date}T00:00:00+08:00` : null,
       ],
     );
     const row = updated.rows[0];
@@ -159,6 +162,7 @@ module.exports = function createLeaveComponent({
               ? 'user'
               : 'admin',
           metadataJson: {
+            ...(paperRecord ? {approval_source:'approved_paper',encoded_by:reviewerId,original_approval_date:paperRecord.approval_date} : {}),
             requested_days: allocation.requestedDays,
             approved_days_with_pay: allocation.approvedDaysWithPay,
             approved_days_without_pay: allocation.approvedDaysWithoutPay,
@@ -176,6 +180,7 @@ module.exports = function createLeaveComponent({
       actedBy: reviewerId,
       remarks: remarks || null,
       metadataJson: {
+        ...(paperRecord ? {paper_approval_record:publicPaperRecord(paperRecord)} : {}),
         revision: row.signature_revision,
         leave_type: leaveTypeName,
         start_date: startStr,

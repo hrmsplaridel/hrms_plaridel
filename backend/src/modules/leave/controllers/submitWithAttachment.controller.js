@@ -5,6 +5,9 @@ module.exports = function createLeaveControllers({
   assertLeaveServiceEligibility,
   assertLeaveSubmissionReviewer,
   broadcastLeaveUpdated,
+  broadcastDtrLeaveRefresh,
+  prepareStaffLeave,
+  completeStaffLeave,
   cleanupStoredLeaveAttachment,
   computeEmployeeLeaveWorkingDays,
   computeNumberOfDaysSync,
@@ -37,8 +40,9 @@ module.exports = function createLeaveControllers({
   workflowEngine,
 }) {
   return {
-    submitWithAttachment: async (req, res) => {
-      const userId = req.user?.id;
+    submitWithAttachment: async (req, res, staffEmployeeId) => {
+      const staffFiling = typeof staffEmployeeId === 'string';
+      const userId = staffFiling ? staffEmployeeId : req.user?.id;
       if (!userId) return res.status(401).json({ error: 'Not authenticated' });
       if (!req.file) {
         return res
@@ -74,18 +78,19 @@ module.exports = function createLeaveControllers({
             return res.status(400).json({ error: 'Invalid leave type' });
           }
 
-          const leaveRule = await getLeaveTypeDefinition(client, leave_type);
+          let leaveRule = await getLeaveTypeDefinition(client, leave_type);
+          const staffPlan = staffFiling ? await prepareStaffLeave(client, {
+            actor:req.user, employeeId:userId, rule:leaveRule, start:startStr, end:endStr,
+            paperApproval:req.body?.paper_approval,hasAttachment:Boolean(req.file?.buffer?.length),
+          }) : null;
+          if (staffPlan) leaveRule = staffPlan.rule;
           await assertLeaveEmploymentEligibility(client, leaveRule, userId);
           await assertLeaveServiceEligibility(client, leaveRule, userId, startStr);
-          const reviewSnapshot = await getDepartmentReviewSnapshot(client, userId);
-          const preparedWorkflow = await workflowEngine.prepareWorkflow(
-            client,
-            'leave',
-            leaveRule,
-            userId,
-            reviewSnapshot,
+          const reviewSnapshot = staffFiling ? {} : await getDepartmentReviewSnapshot(client, userId);
+          const preparedWorkflow = staffFiling ? null : await workflowEngine.prepareWorkflow(
+            client, 'leave', leaveRule, userId, reviewSnapshot,
           );
-          await assertLeaveSubmissionReviewer(client, userId, 'leave', leaveRule, reviewSnapshot);
+          if (!staffFiling) await assertLeaveSubmissionReviewer(client,userId,'leave',leaveRule,reviewSnapshot);
           const customFieldSchema = normalizeEmployeeDetailSchema(
             leaveRule?.employee_detail_schema,
           );
@@ -94,7 +99,8 @@ module.exports = function createLeaveControllers({
             rest,
             customFieldSchema,
           });
-          const officialSnapshot = await loadEmployeeOfficialSnapshot(client, userId);
+          const officialSnapshot = await loadEmployeeOfficialSnapshot(client,userId,staffPlan?.paperRecord.original_filing_date);
+          if (staffPlan) officialSnapshot.date_filed = staffPlan.paperRecord.original_filing_date;
           const otherPurpose = (
             payloadDetails.other_purpose ||
             payloadDetails.otherPurpose ||
@@ -114,7 +120,7 @@ module.exports = function createLeaveControllers({
 
           const userSex = await getUserSexForLeaveValidation(client, userId);
           const validation = validateEmployeeLeaveRequestWithRule({
-            rule: leaveRule,
+            rule: staffFiling ? {...leaveRule,employee_can_file:true,admin_only:false} : leaveRule,
             leaveType: leave_type,
             otherPurpose: otherPurpose || null,
             startDateStr: startStr,
@@ -127,6 +133,7 @@ module.exports = function createLeaveControllers({
             eventDates,
             details: payloadDetails,
             enforceEventDateRules: true,
+            filingDateStr:staffPlan?.paperRecord.original_filing_date,
           });
           if (!validation.valid) {
             await client.query('ROLLBACK');
@@ -211,8 +218,8 @@ module.exports = function createLeaveControllers({
             ],
           );
 
-          const row = q.rows[0];
-          if (!leaveRule?.approval_workflow_id && leaveRule?.approval_route === 'mayor') {
+          let row = q.rows[0];
+          if (!staffFiling && !leaveRule?.approval_workflow_id && leaveRule?.approval_route === 'mayor') {
             const type = (
               await client.query('SELECT employment_type FROM users WHERE id=$1', [userId])
             ).rows[0]?.employment_type;
@@ -228,7 +235,7 @@ module.exports = function createLeaveControllers({
               throw error;
             }
           }
-          const submitStatus = preparedWorkflow
+          const submitStatus = staffFiling ? 'pending_hr' : preparedWorkflow
             ? workflowEngine.workflowStatus(preparedWorkflow)
             : reviewSnapshot?.departmentHeadUserId
               ? 'pending_department_head'
@@ -268,12 +275,12 @@ module.exports = function createLeaveControllers({
                 : reviewSnapshot?.reviewers || [],
           });
 
-          await insertLeaveRequestHistory(client, {
+          if (!staffFiling) await insertLeaveRequestHistory(client, {
             leaveRequestId: row.id,
             action: 'submitted',
             fromStatus: null,
             toStatus: submitStatus,
-            actedBy: userId,
+            actedBy: staffFiling ? req.user.id : userId,
             remarks: reason || null,
             metadataJson: {
               leave_type: leave_type || null,
@@ -294,9 +301,9 @@ module.exports = function createLeaveControllers({
                 leaveTypeName,
                 days: effectiveDaysSubmit,
                 leaveRequestId: row.id,
-                actorUserId: userId,
+                actorUserId: staffFiling ? req.user.id : userId,
                 actorKind: 'user',
-                action: 'leave_submitted',
+                action: staffFiling ? 'paper_leave_recording' : 'leave_submitted',
                 metadataJson: {
                   number_of_days: effectiveDaysSubmit,
                   attachment_name: storedAttachment.originalName,
@@ -307,18 +314,28 @@ module.exports = function createLeaveControllers({
           }
 
           const typeName = leave_type ? String(leave_type) : null;
-          await require('../../../services/docutrackerLeaveSignatureService').confirmSubmittedApplicantSignature(
+          if (!staffFiling) await require('../../../services/docutrackerLeaveSignatureService').confirmSubmittedApplicantSignature(
             client,
             req.user,
             row.id,
             req.body?.applicant_signature_asset_id,
           );
+          if (staffPlan) row = await completeStaffLeave(client, {
+            actor:req.user,row,leaveTypeName:typeName,paperRecord:staffPlan.paperRecord,
+            approvedDaysWithPay:req.body?.approved_days_with_pay,approvedDaysWithoutPay:req.body?.approved_days_without_pay,
+            remarks:req.body?.reviewer_remarks,
+          });
           await client.query('COMMIT');
           storedAttachmentRelPath = null;
 
           const nameRow = await pool.query('SELECT full_name FROM users WHERE id = $1', [userId]);
           const submitEmpName = nameRow.rows[0]?.full_name || 'Employee';
-          notifySafe(() =>
+          if (staffPlan) {
+            notifySafe(() => leaveNotifications.notifyEmployee(pool, {employeeUserId:userId,
+              leaveRequestId:row.id,type:'leave_approved',title:'Approved paper leave recorded',
+              body:'Your approved paper leave was recorded by HR.',metadata:{filed_by:req.user.id}}));
+            broadcastDtrLeaveRefresh('leave_approved_applied_to_dtr', {userId,leaveRequestId:row.id,dateFrom:startStr,dateTo:endStr});
+          } else notifySafe(() =>
             leaveNotifications.notifyAfterSubmit(pool, {
               leaveRequestId: row.id,
               status: row.status,
@@ -332,7 +349,7 @@ module.exports = function createLeaveControllers({
             }),
           );
           const mapped = mapLeaveRowToApi({ ...row, leave_type_name: typeName });
-          broadcastLeaveUpdated('submitted', mapped);
+          broadcastLeaveUpdated(staffPlan ? 'paper_recorded' : 'submitted', mapped);
           res.status(201).json(mapped);
         } catch (e) {
           try {

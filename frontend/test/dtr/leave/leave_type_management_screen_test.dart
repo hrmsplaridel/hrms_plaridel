@@ -295,7 +295,7 @@ void main() {
       rows = [existingType('existing', system: system)];
       await mount(tester);
       await changeToMayor(tester);
-      await tester.tap(find.text(system ? 'Save Eligibility' : 'Save Changes'));
+      await tester.tap(find.text(system ? 'Save Settings' : 'Save Changes'));
       await tester.pumpAndSettle();
       final write = requests.singleWhere((r) => r.method == 'PUT');
       final routingWrites = requests.where((r) => r.method == 'POST' && r.path.startsWith('/api/leave/routing/types/')).toList();
@@ -663,14 +663,14 @@ void main() {
       },
     ];
     await mount(tester);
-    expect(find.text('Save Eligibility'), findsOneWidget);
+    expect(find.text('Save Settings'), findsOneWidget);
     tester
         .widget<LeaveEmploymentEligibilityField>(
           find.byType(LeaveEmploymentEligibilityField),
         )
         .onChanged(['permanent', 'casual']);
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Save Eligibility'));
+    await tester.tap(find.text('Save Settings'));
     await tester.pumpAndSettle();
     final write = requests.firstWhere((request) => request.method == 'PUT');
     expect(write.data, {
@@ -1048,4 +1048,17 @@ void main() {
     expect(find.text('Leave type key already exists'), findsOneWidget);
     expect(find.text('0 leave types'), findsOneWidget);
   });
+  for(final system in [false,true])testWidgets('approved paper recording can be configured for system=$system', (tester) async {
+    rows=[existingType('existing',system:system)];
+    await mount(tester);
+    final toggle=find.text('Allow recording approved paper leave');
+    await tester.scrollUntilVisible(toggle,200,scrollable:formScrollable());
+    await tester.ensureVisible(toggle);await tester.tap(toggle);await tester.pumpAndSettle();
+    await tester.tap(find.text(system ? 'Save Settings' : 'Save Changes'));await tester.pumpAndSettle();
+    final payload=requests.singleWhere((r)=>r.method=='PUT').data as Map;
+    expect(payload['allow_approved_paper_filing'],true);
+    if(system)expect(payload.keys.toSet(),{'eligible_employment_types','allow_approved_paper_filing'});
+    expect(tester.takeException(),isNull);
+  });
+
 }

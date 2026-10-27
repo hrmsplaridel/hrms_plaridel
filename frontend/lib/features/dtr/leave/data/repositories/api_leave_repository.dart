@@ -112,6 +112,25 @@ class ApiLeaveRepository implements LeaveRepository {
     return fields;
   }
 
+  Future<LeaveRequest> recordApprovedPaperLeave(LeaveRequest request, {
+    required Map<String,dynamic> paperApproval, required LeaveApprovalInput approval,
+    required List<int> fileBytes, required String fileName,
+  }) async {
+    final payload=_toApiPayload(request)..remove('applicant_signature_asset_id');
+    payload.addAll({'employee_ids':[request.userId],'paper_approval':paperApproval,
+      'approved_days_with_pay':approval.approvedDaysWithPay,'approved_days_without_pay':approval.approvedDaysWithoutPay,
+      'reviewer_remarks':approval.hrRemarks});
+    try {
+      final response=await ApiClient.instance.uploadBytes<Map<String,dynamic>>('/api/leave/admin/file',
+        bytes:fileBytes,fileName:fileName,fieldName:'file',extraFields:{for(final entry in payload.entries)
+          if(entry.value!=null) entry.key:entry.value is Map || entry.value is List ? jsonEncode(entry.value) : entry.value.toString()});
+      final results=response.data?['results'];
+      final result=results is List && results.isNotEmpty ? results.first : null;
+      if(result is! Map || result['request'] is! Map) {throw Exception(result is Map ? result['error'] ?? 'Unable to record approved paper leave.' : 'No recording result returned.');}
+      return LeaveRequest.fromJson(Map<String,dynamic>.from(result['request'] as Map));
+    } on DioException catch(error) {throw Exception(_messageFromDio(error,submissionMayHaveCompleted:true));}
+  }
+
   @override
   Future<LeaveRequest> saveDraft(LeaveRequest request) async {
     try {

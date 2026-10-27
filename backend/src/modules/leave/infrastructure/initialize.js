@@ -19,6 +19,7 @@ module.exports = function initializeLeaveCompatibility({
         ADD COLUMN IF NOT EXISTS employee_can_file BOOLEAN NOT NULL DEFAULT true,
         ADD COLUMN IF NOT EXISTS admin_only BOOLEAN NOT NULL DEFAULT false,
         ADD COLUMN IF NOT EXISTS admin_can_file BOOLEAN NOT NULL DEFAULT true,
+        ADD COLUMN IF NOT EXISTS allow_approved_paper_filing BOOLEAN NOT NULL DEFAULT false,
         ADD COLUMN IF NOT EXISTS allows_past_dates BOOLEAN NOT NULL DEFAULT true,
         ADD COLUMN IF NOT EXISTS requires_attachment BOOLEAN NOT NULL DEFAULT false,
         ADD COLUMN IF NOT EXISTS requires_attachment_when_over_days NUMERIC,
@@ -137,6 +138,17 @@ module.exports = function initializeLeaveCompatibility({
     `,
         [SYSTEM_LEAVE_TYPE_NAMES],
       );
+
+      // Paper recording was introduced on 2026-10-26. Only untouched legacy
+      // defaults may be enabled; saved choices from that day onward are preserved.
+      await pool.query(`
+        UPDATE leave_types
+        SET allow_approved_paper_filing = true, updated_at = now()
+        WHERE name = ANY($1::text[])
+          AND admin_can_file = true
+          AND allow_approved_paper_filing = false
+          AND updated_at < TIMESTAMPTZ '2026-10-26 00:00:00+08';
+      `, [SYSTEM_LEAVE_TYPE_NAMES]);
 
       await pool.query(`
       CREATE TABLE IF NOT EXISTS leave_balance_deduction_history (

@@ -51,6 +51,7 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
   bool _employeeCanFile = true;
   bool _adminOnly = false;
   bool _adminCanFile = true;
+  bool _allowApprovedPaperFiling = false;
   bool _allowsPastDates = true;
   bool _requiresAttachment = false;
   bool _affectsDtrNormally = true;
@@ -176,6 +177,7 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
     _employeeCanFile = item.employeeCanFile;
     _adminOnly = item.adminOnly;
     _adminCanFile = item.adminCanFile;
+    _allowApprovedPaperFiling = item.allowApprovedPaperFiling;
     _allowsPastDates = item.allowsPastDates;
     _requiresAttachment = item.requiresAttachment;
     _attachmentOverDaysController.text = _requiresAttachment
@@ -242,6 +244,7 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
       _employeeCanFile = true;
       _adminOnly = false;
       _adminCanFile = true;
+      _allowApprovedPaperFiling = false;
       _allowsPastDates = true;
       _requiresAttachment = false;
       _affectsDtrNormally = true;
@@ -289,8 +292,9 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
     final data = selected?.isSystem == true
         ? <String, dynamic>{
             'eligible_employment_types': _eligibleEmploymentTypes,
+            if (_allowApprovedPaperFiling != selected!.allowApprovedPaperFiling) 'allow_approved_paper_filing': _allowApprovedPaperFiling,
             if ((_intOrNull(_minimumServiceMonthsController.text) ?? 0) !=
-                selected!.minimumServiceMonths)
+                selected.minimumServiceMonths)
               'minimum_service_months':
                   _intOrNull(_minimumServiceMonthsController.text) ?? 0,
           }
@@ -353,7 +357,7 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
             if (!mounted) return;
             final message = e is DioException ? _messageFromDio(e) : '$e';
             final saveLabel = selected.isSystem
-                ? 'Save Eligibility'
+                ? 'Save Settings'
                 : 'Save Changes';
             _showMessage(
               'Leave type updated, but routing could not be saved. $message Retry using $saveLabel or Save workflow.${_creationPrint.hasChanges ? ' Print changes are still unsaved.' : ''}',
@@ -460,6 +464,7 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
       'employee_can_file': _employeeCanFile,
       'admin_only': _adminOnly,
       'admin_can_file': _adminCanFile,
+      'allow_approved_paper_filing': _allowApprovedPaperFiling,
       'allows_past_dates': _allowsPastDates,
       'requires_attachment': _requiresAttachment,
       'requires_attachment_when_over_days': _requiresAttachment
@@ -823,7 +828,7 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
                         const SizedBox(height: 6),
                         Text(
                           systemLocked
-                              ? 'Built-in rules are protected. Employment-type and service eligibility, and printed forms can be configured.'
+                              ? 'Built-in rules are protected. Employment-type and service eligibility, approved paper recording, and printed forms can be configured.'
                               : 'Configure filing, balance, and DTR behavior.',
                           style: TextStyle(
                             color: _mutedColor(context),
@@ -845,7 +850,7 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
                     _InfoPanel(
                       icon: Icons.lock_outline_rounded,
                       text:
-                          'Built-in rules are protected. Employment-type and service eligibility, and printed forms can be configured here.',
+                          'Built-in rules are protected. Employment-type and service eligibility, approved paper recording, and printed forms can be configured here.',
                     ),
                   _settingsSection([
                     _sectionTitle('Basic Information'),
@@ -962,10 +967,18 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
                                 _employeeCanFile = value != 'admin';
                                 _adminOnly = value == 'admin';
                                 _adminCanFile = value != 'employee';
+                                if (!_adminCanFile) _allowApprovedPaperFiling = false;
                               }),
                       ),
                     ),
                     const SizedBox(height: 16),
+                    Material(color:Colors.transparent,child:SwitchListTile.adaptive(
+                      contentPadding: EdgeInsets.zero,
+                      title: const Text('Allow recording approved paper leave'),
+                      subtitle: const Text('Authorized HR encoders must upload the fully approved signed paper form and record its original approvers. No further routing or digital approval is required.'),
+                      value: _allowApprovedPaperFiling,
+                      onChanged: _saving || !_adminCanFile ? null : (value) => setState(() => _allowApprovedPaperFiling = value),
+                    )),
                     Wrap(
                       spacing: 10,
                       runSpacing: 10,
@@ -1275,7 +1288,7 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
           Expanded(
             child: Text(
               systemLocked
-                  ? 'Built-in rules are protected. You can save employment-type eligibility.'
+                  ? 'Built-in rules are protected. You can save eligibility and approved paper recording settings.'
                   : isCreating
                   ? 'Create this leave type to make it available under the configured filing rules.'
                   : isSelectedActive
@@ -1300,7 +1313,7 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
                   : (isCreating
                         ? 'Create Leave Type'
                         : systemLocked
-                        ? 'Save Eligibility'
+                        ? 'Save Settings'
                         : 'Save Changes'),
             ),
           ),
