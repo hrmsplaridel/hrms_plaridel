@@ -172,10 +172,11 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
+      expect(find.text('Locator & Pass Management'), findsOneWidget);
       await tester.tap(find.byTooltip('More actions'));
       await tester.pumpAndSettle();
       expect(
-        find.text('File for employees'),
+        find.text('Certificate of Appearance'),
         policy.$3 ? findsOneWidget : findsNothing,
       );
       expect(find.text('Record Correction'), findsOneWidget);

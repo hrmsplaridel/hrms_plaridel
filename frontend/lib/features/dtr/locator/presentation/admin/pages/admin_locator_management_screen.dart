@@ -180,7 +180,7 @@ class _AdminLocatorManagementScreenState
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          'Locator Request Management',
+          'Locator & Pass Management',
           style: TextStyle(
             color: _headingColor(context),
             fontSize: 22,
@@ -280,7 +280,9 @@ class _AdminLocatorManagementScreenState
               SizedBox(
                 height: 4,
                 width: double.infinity,
-                child: _loading && _queueLoaded &&
+                child:
+                    _loading &&
+                        _queueLoaded &&
                         (_canFinalReview || _assignedRequests.isNotEmpty)
                     ? Semantics(
                         label: 'Refreshing locator requests',
@@ -375,7 +377,8 @@ class _AdminLocatorManagementScreenState
                   _assignedRequests = rows;
                   final merged = <String, _LocatorAdminRecord>{
                     for (final item in _items) item.id: item,
-                    for (final item in _matchingAssignedRecords(rows)) item.id: item,
+                    for (final item in _matchingAssignedRecords(rows))
+                      item.id: item,
                   };
                   _totalItems += merged.length - _items.length;
                   _items = merged.values.toList();
@@ -869,20 +872,28 @@ class _AdminLocatorManagementScreenState
   void _openItemDetailsFromRow(_LocatorAdminRecord item) {
     final assigned = _assignedRequests[item.id];
     if (assigned != null || item.hasSharedWorkflow) {
-      unawaited(_reviewAssigned(assigned ?? _workflowHistoryRequest(item), item: item));
+      unawaited(
+        _reviewAssigned(assigned ?? _workflowHistoryRequest(item), item: item),
+      );
       return;
     }
     setState(() => _selectedItemId = item.id);
     _showDetailsDialog(item);
   }
 
-  Future<void> _reviewAssigned(Map<String, dynamic> request, {required _LocatorAdminRecord item}) async {
+  Future<void> _reviewAssigned(
+    Map<String, dynamic> request, {
+    required _LocatorAdminRecord item,
+  }) async {
     if (await reviewAssignedWorkflowRequest(
-      context,
-      request,
-      onRevoke: _canFinalReview && item.status == 'approved' ? () => _revokeApproval(item) : null,
-      revokeDisabledReason: item.revokeDisabledReason,
-    ) && mounted) {
+          context,
+          request,
+          onRevoke: _canFinalReview && item.status == 'approved'
+              ? () => _revokeApproval(item)
+              : null,
+          revokeDisabledReason: item.revokeDisabledReason,
+        ) &&
+        mounted) {
       await _load(forceRefresh: true);
     }
   }
@@ -891,39 +902,60 @@ class _AdminLocatorManagementScreenState
     final snapshot = item.workflowSnapshot!;
     final steps = snapshot['steps'] as List;
     return {
-      'kind': 'locator', 'id': item.id, 'employee_name': item.employeeName,
-      'status': item.status, 'can_review': false, 'allowed_actions': <String>[],
+      'kind': 'locator',
+      'id': item.id,
+      'employee_name': item.employeeName,
+      'status': item.status,
+      'can_review': false,
+      'allowed_actions': <String>[],
       'status_label': item.statusLabel,
-      'workflow_name': snapshot['name'], 'workflow_version': snapshot['version'],
-      'current_step': snapshot['current_step'], 'step_count': steps.length,
+      'workflow_name': snapshot['name'],
+      'workflow_version': snapshot['version'],
+      'current_step': snapshot['current_step'],
+      'step_count': steps.length,
       'step_label': pendingWorkflowStepLabel(snapshot),
       'created_at': item.createdAt?.toIso8601String(),
       'attachment_name': item.attachmentName,
       'request_data': {
-        'id': item.id, 'employee_id': item.employeeId, 'employee_name': item.employeeName,
-        'department_name': item.departmentName, 'status': item.status,
-        'slip_date': item.slipDate, 'workflow_snapshot': snapshot,
-        'request_type': item.requestType.code, 'request_type_label': item.requestType.label,
+        'id': item.id,
+        'employee_id': item.employeeId,
+        'employee_name': item.employeeName,
+        'department_name': item.departmentName,
+        'status': item.status,
+        'slip_date': item.slipDate,
+        'workflow_snapshot': snapshot,
+        'request_type': item.requestType.code,
+        'request_type_label': item.requestType.label,
         'request_type_location_label': item.requestType.locationLabel,
-        'office': item.office, 'reason': item.reason,
-        'employee_detail_schema_snapshot': item.requestType.employeeDetailSchema.map((field) => field.toJson()).toList(),
+        'office': item.office,
+        'reason': item.reason,
+        'employee_detail_schema_snapshot': item.requestType.employeeDetailSchema
+            .map((field) => field.toJson())
+            .toList(),
         'additional_details': item.additionalDetails,
-        'am_in': item.amIn, 'am_out': item.amOut, 'pm_in': item.pmIn, 'pm_out': item.pmOut,
+        'am_in': item.amIn,
+        'am_out': item.amOut,
+        'pm_in': item.pmIn,
+        'pm_out': item.pmOut,
         'revocation_reason': item.revocationReason,
         'revoked_by_name': item.revokedByName,
         'revoked_at': item.revokedAt?.toIso8601String(),
-        'month_end_reconciliation_required': item.monthEndReconciliationRequired,
+        'month_end_reconciliation_required':
+            item.monthEndReconciliationRequired,
         'service_month': item.serviceMonthLabel,
         'hr_remarks': item.hrRemarks,
         'dept_head_remarks': item.deptHeadRemarks,
         'retroactive_correction_reason': item.retroactiveCorrectionReason,
       },
       'decisions': [
-        for (final decision in (snapshot['decisions'] as List? ?? []).whereType<Map>())
+        for (final decision
+            in (snapshot['decisions'] as List? ?? []).whereType<Map>())
           {
             'step_label': steps[(decision['step'] as num).toInt()]['label'],
             'action': decision['action'],
-            'reviewer_name': decision['signature']?['signer_name_snapshot'] ?? decision['reviewer']?['name'],
+            'reviewer_name':
+                decision['signature']?['signer_name_snapshot'] ??
+                decision['reviewer']?['name'],
             'acted_at': decision['acted_at'],
           },
       ],
@@ -1130,7 +1162,10 @@ class _AdminLocatorManagementScreenState
                         ),
                       ),
                       const SizedBox(height: 16),
-                      LocatorCustomFieldDetails(fields:item.requestType.employeeDetailSchema,values:item.additionalDetails),
+                      LocatorCustomFieldDetails(
+                        fields: item.requestType.employeeDetailSchema,
+                        values: item.additionalDetails,
+                      ),
                       _locatorDetailsSection(
                         dialogContext,
                         title: 'Review information',
@@ -2061,7 +2096,14 @@ class _AdminLocatorManagementScreenState
             if (!actionableIds.contains(item.id)) item,
         ];
         _page = result.page - 1;
-        _totalItems = result.total + assignedItems.where((assignedItem) => !items.any((item) => item.id == assignedItem.id)).length;
+        _totalItems =
+            result.total +
+            assignedItems
+                .where(
+                  (assignedItem) =>
+                      !items.any((item) => item.id == assignedItem.id),
+                )
+                .length;
         _serverPageCount = result.pageCount;
         _departmentOptions = result.departments;
         _employeeOptions = result.employees;
@@ -2080,21 +2122,44 @@ class _AdminLocatorManagementScreenState
     }
   }
 
-  List<_LocatorAdminRecord> _matchingAssignedRecords(Map<String, Map<String, dynamic>> assigned) => assigned.values
-      .map((entry) => _LocatorAdminRecord.fromJson(Map<String, dynamic>.from(entry['request_data'] as Map)))
-      .where((item) => (_queue == _LocatorAdminQueue.all ||
-          (_queue == _LocatorAdminQueue.pendingHrAdmin && item.status == 'pending_hr') ||
-          (_queue == _LocatorAdminQueue.pendingMayor && item.status == 'pending_mayor') ||
-          (_queue == _LocatorAdminQueue.returned && item.status == 'returned_for_correction') ||
-          (_queue == _LocatorAdminQueue.approved && item.status == 'approved') ||
-          (_queue == _LocatorAdminQueue.revoked && item.status == 'revoked') ||
-          (_queue == _LocatorAdminQueue.rejected && item.status.startsWith('rejected')) ||
-          (_queue == _LocatorAdminQueue.cancelled && item.status == 'cancelled')) &&
-        (_requestTypeFilter == null || item.requestType.code == _requestTypeFilter!.code) &&
-        (_employeeFilter == null || item.employeeId == _employeeFilter) &&
-        (_departmentFilter == null || assigned[item.id]?['request_data']?['department_id'] == _departmentFilter) &&
-        (_fromDate == null || (item.slipDateValue != null && !item.slipDateValue!.isBefore(_fromDate!))) &&
-        (_toDate == null || (item.slipDateValue != null && !item.slipDateValue!.isAfter(_toDate!))))
+  List<_LocatorAdminRecord> _matchingAssignedRecords(
+    Map<String, Map<String, dynamic>> assigned,
+  ) => assigned.values
+      .map(
+        (entry) => _LocatorAdminRecord.fromJson(
+          Map<String, dynamic>.from(entry['request_data'] as Map),
+        ),
+      )
+      .where(
+        (item) =>
+            (_queue == _LocatorAdminQueue.all ||
+                (_queue == _LocatorAdminQueue.pendingHrAdmin &&
+                    item.status == 'pending_hr') ||
+                (_queue == _LocatorAdminQueue.pendingMayor &&
+                    item.status == 'pending_mayor') ||
+                (_queue == _LocatorAdminQueue.returned &&
+                    item.status == 'returned_for_correction') ||
+                (_queue == _LocatorAdminQueue.approved &&
+                    item.status == 'approved') ||
+                (_queue == _LocatorAdminQueue.revoked &&
+                    item.status == 'revoked') ||
+                (_queue == _LocatorAdminQueue.rejected &&
+                    item.status.startsWith('rejected')) ||
+                (_queue == _LocatorAdminQueue.cancelled &&
+                    item.status == 'cancelled')) &&
+            (_requestTypeFilter == null ||
+                item.requestType.code == _requestTypeFilter!.code) &&
+            (_employeeFilter == null || item.employeeId == _employeeFilter) &&
+            (_departmentFilter == null ||
+                assigned[item.id]?['request_data']?['department_id'] ==
+                    _departmentFilter) &&
+            (_fromDate == null ||
+                (item.slipDateValue != null &&
+                    !item.slipDateValue!.isBefore(_fromDate!))) &&
+            (_toDate == null ||
+                (item.slipDateValue != null &&
+                    !item.slipDateValue!.isAfter(_toDate!))),
+      )
       .toList();
 
   Future<void> _approve(_LocatorAdminRecord item) async {
@@ -2105,14 +2170,18 @@ class _AdminLocatorManagementScreenState
         slot: 'hr_approver',
       );
       if (signature == null || !mounted) return;
-      final response=await ApiClient.instance.patch<Map<String, dynamic>>(
+      final response = await ApiClient.instance.patch<Map<String, dynamic>>(
         '/api/locator-slips/${item.id}/approve',
         data: signature.isEmpty ? const {} : {'signature': signature},
       );
       LocatorSlipDataCache.instance.invalidateRequests();
       await _load(forceRefresh: true);
       if (!mounted) return;
-      _showLocatorSnack(response.data?['status']=='approved'?'Request approved.':'Review completed. Awaiting the next workflow approver.');
+      _showLocatorSnack(
+        response.data?['status'] == 'approved'
+            ? 'Request approved.'
+            : 'Review completed. Awaiting the next workflow approver.',
+      );
     } catch (e) {
       if (!mounted) return;
       setState(() => _error = 'Approve failed: $e');
@@ -2486,12 +2555,13 @@ class _LocatorAdminRecord {
   final LocatorRequestType requestType;
   final String office;
   final String reason;
-  final Map<String,dynamic> additionalDetails;
+  final Map<String, dynamic> additionalDetails;
   final String? attachmentName;
   final String status;
   final String finalReviewRoute;
   final Map<String, dynamic>? workflowSnapshot;
-  bool get hasSharedWorkflow => workflowSnapshot?['steps'] is List &&
+  bool get hasSharedWorkflow =>
+      workflowSnapshot?['steps'] is List &&
       (workflowSnapshot!['steps'] as List).any((step) => step is Map);
   final String? deptHeadReviewerName;
   final DateTime? deptHeadReviewedAt;
@@ -2605,11 +2675,15 @@ class _LocatorAdminRecord {
       }),
       office: (json['office'] ?? '').toString(),
       reason: (json['reason'] ?? '').toString(),
-      additionalDetails:Map<String,dynamic>.from(json['additional_details'] as Map? ?? {}),
+      additionalDetails: Map<String, dynamic>.from(
+        json['additional_details'] as Map? ?? {},
+      ),
       attachmentName: _trimOrNull(json['attachment_name']),
       status: (json['status'] ?? '').toString(),
       finalReviewRoute: (json['final_review_route'] ?? 'hr').toString(),
-      workflowSnapshot: json['workflow_snapshot'] is Map ? Map<String,dynamic>.from(json['workflow_snapshot'] as Map) : null,
+      workflowSnapshot: json['workflow_snapshot'] is Map
+          ? Map<String, dynamic>.from(json['workflow_snapshot'] as Map)
+          : null,
       deptHeadReviewerName: _trimOrNull(json['dept_head_reviewer_name']),
       deptHeadReviewedAt: _parseDateTime(json['dept_head_reviewed_at']),
       deptHeadRemarks: _trimOrNull(json['dept_head_remarks']),

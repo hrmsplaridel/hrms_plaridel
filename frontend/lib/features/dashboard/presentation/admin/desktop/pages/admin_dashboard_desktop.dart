@@ -1734,7 +1734,7 @@ class _DtrContentState extends State<_DtrContent> {
   /// 0 = menu, 1 = Time Logs, 2 = Reports, 3 = Employees, 4 = Assignment,
   /// 5 = Department, 6 = Position, 7 = Shift, 8 = Leave Management,
   /// 9–10 = Holiday / Policy via [_ManageContent], 11 = Biometric Devices,
-  /// 12 = Locator Slip Management, 13 = Weekly Schedule,
+  /// 12 = Locator & Pass Management, 13 = Weekly Schedule,
   /// 14 = Approvals & Signatories
   int _dtrSectionIndex = 0;
   final Map<int, _DtrFeatureCacheEntry> _featureCache = {};
@@ -1784,7 +1784,7 @@ class _DtrContentState extends State<_DtrContent> {
     _openDtrSection(8);
   }
 
-  /// Opens **Locator Slip Management** (notification deep-link).
+  /// Opens **Locator & Pass Management** (notification deep-link).
   void openLocatorManagement() {
     _openDtrSection(12);
   }
@@ -2012,7 +2012,7 @@ class _DtrContentState extends State<_DtrContent> {
                       ),
                     if (widget.featureAccess['locator_allowed'] == true)
                       FeatureCard(
-                        title: 'Locator Slip Management',
+                        title: 'Locator & Pass Management',
                         subtitle:
                             'Review locator slip approvals, department-head endorsements, and HR final decisions.',
                         icon: Icons.pin_drop_rounded,

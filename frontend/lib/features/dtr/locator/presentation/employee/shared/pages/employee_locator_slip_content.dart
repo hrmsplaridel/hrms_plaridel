@@ -88,6 +88,7 @@ class EmployeeLocatorSlipContentState extends State<EmployeeLocatorSlipContent>
   final List<_LocatorSlipDraft> _slips = [];
   Map<String, Map<String, dynamic>> _assignedRequests = {};
   final List<_LocatorSlipDraft> _deptHeadQueue = [];
+  final Set<String> _departmentApprovalIds = {};
   final ScrollController _myRequestsScrollController = ScrollController();
   final ScrollController _approvalItemsScrollController = ScrollController();
   List<LocatorRequestType> _locatorTypes = const [];
@@ -265,6 +266,7 @@ class EmployeeLocatorSlipContentState extends State<EmployeeLocatorSlipContent>
     _locatorTypesLoadGeneration += 1;
     _slips.clear();
     _deptHeadQueue.clear();
+    _departmentApprovalIds.clear();
     _assignedRequests = {};
     _currentSection = _LocatorSection.requests;
     _appliedDeptHeadDefaultSection = false;
@@ -1387,7 +1389,7 @@ class EmployeeLocatorSlipContentState extends State<EmployeeLocatorSlipContent>
                   onLoaded: (rows) => setState(() {
                     _assignedRequests = rows;
                     final previousCount = _deptHeadQueue.length;
-                    _mergeLocatorPage(_deptHeadQueue, rows.values.map((entry) =>
+                    _mergeApprovalPage(rows.values.map((entry) =>
                       _LocatorSlipDraft.fromApi(Map<String, dynamic>.from(entry['request_data'] as Map)),
                     ).toList(), append: true);
                     _approvalTotal += _deptHeadQueue.length - previousCount;
@@ -2321,6 +2323,26 @@ class EmployeeLocatorSlipContentState extends State<EmployeeLocatorSlipContent>
     }
   }
 
+  void _mergeApprovalPage(
+    List<_LocatorSlipDraft> incoming, {
+    required bool append,
+  }) {
+    final merged = <String, _LocatorSlipDraft>{
+      if (append)
+        for (final item in _deptHeadQueue) _slipSelectionKey(item): item,
+      for (final item in incoming) _slipSelectionKey(item): item,
+    };
+    _deptHeadQueue
+      ..clear()
+      ..addAll(merged.values)
+      ..sort((a, b) {
+        final byFiled = (b.createdAt ?? b.date).compareTo(a.createdAt ?? a.date);
+        return byFiled != 0
+            ? byFiled
+            : _slipSelectionKey(b).compareTo(_slipSelectionKey(a));
+      });
+  }
+
   void _onMyStatusChanged(String? value) {
     setState(() {
       _selectedStatusFilter = value;
@@ -2481,10 +2503,11 @@ class EmployeeLocatorSlipContentState extends State<EmployeeLocatorSlipContent>
         setState(() {
           _assignedRequests = assigned;
           if (assigned.isNotEmpty) _isDeptHeadFuture = Future<bool>.value(true);
-          _mergeLocatorPage(_deptHeadQueue, assignedItems, append: false);
+          _departmentApprovalIds.clear();
+          _mergeApprovalPage(assignedItems, append: false);
           _approvalPage = 1;
           _approvalPageCount = 1;
-          _approvalTotal = assignedItems.length;
+          _approvalTotal = _deptHeadQueue.length;
           _approvalHistoryLoaded = true;
         });
         return;
@@ -2506,7 +2529,9 @@ class EmployeeLocatorSlipContentState extends State<EmployeeLocatorSlipContent>
       setState(() {
         _assignedRequests = assigned;
         if (assigned.isNotEmpty) _isDeptHeadFuture = Future<bool>.value(true);
-        _mergeLocatorPage(_deptHeadQueue, [
+        if (!loadMore) _departmentApprovalIds.clear();
+        _departmentApprovalIds.addAll(items.map(_slipSelectionKey));
+        _mergeApprovalPage([
           ...items,
           ...assignedItems,
         ], append: loadMore);
@@ -2517,7 +2542,7 @@ class EmployeeLocatorSlipContentState extends State<EmployeeLocatorSlipContent>
             assignedItems
                 .where(
                   (assignedItem) =>
-                      !items.any((item) => item.id == assignedItem.id),
+                      !_departmentApprovalIds.contains(_slipSelectionKey(assignedItem)),
                 )
                 .length;
         _approvalHistoryLoaded = true;

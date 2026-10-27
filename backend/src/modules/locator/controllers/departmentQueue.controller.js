@@ -84,7 +84,7 @@ module.exports = function createLocatorControllers({
               lrt.requires_attachment AS request_type_requires_attachment,
               lrt.coverage_mode AS request_type_coverage_mode
        ${filterSql}
-       ORDER BY ls.updated_at DESC, ls.created_at DESC, ls.id DESC
+       ORDER BY ls.created_at DESC, ls.id DESC
        LIMIT $7::integer OFFSET $8::integer`,
           [...filterParams, pageSize, offset]
         );
