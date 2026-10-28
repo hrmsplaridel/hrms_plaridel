@@ -16,16 +16,28 @@ class LeaveRequestInformation extends StatelessWidget {
   Widget build(BuildContext context) => Column(
     crossAxisAlignment: CrossAxisAlignment.stretch,
     children: [
-      if(request.isPaperRecord) ...[
-        const AdminLeaveSubsectionTitle(title:'Approved paper leave record'),
-        AdminLeaveBodyCard(content:'Original approval: ${request.paperApprovalRecord!['approval_date']}\n'
-          'Approved by: ${request.paperApprovalRecord!['final_approver']?['name'] ?? ''}\n'
-          'Encoded by: ${request.paperApprovalRecord!['encoded_by_name'] ?? ''}\n'
-          'Encoded at: ${request.paperApprovalRecord!['encoded_at'] ?? ''}\n'
-          'The attachment is the signed original. Generated copies include the employee’s and selected officials’ saved signatures copied when this record was encoded, where available.'),
-        const SizedBox(height:16),
+      if (request.isPaperRecord) ...[
+        AdminLeaveSubsectionTitle(
+          title: request.status == LeaveRequestStatus.cancelled
+              ? 'Revoked paper leave record'
+              : 'Approved paper leave record',
+        ),
+        AdminLeaveBodyCard(
+          content:
+              'Original approval: ${request.paperApprovalRecord!['approval_date']}\n'
+              'Approved by: ${request.paperApprovalRecord!['final_approver']?['name'] ?? ''}\n'
+              'Encoded by: ${request.paperApprovalRecord!['encoded_by_name'] ?? ''}\n'
+              'Encoded at: ${request.paperApprovalRecord!['encoded_at'] ?? ''}\n'
+              'The attachment is the signed original. Generated copies include the employee’s and selected officials’ saved signatures copied when this record was encoded, where available.',
+        ),
+        if (request.paperApprovalRecord?['revocation'] is Map)
+          AdminLeaveBodyCard(
+            content:
+                'Paper record revoked: ${request.paperApprovalRecord!['revocation']['reason']}',
+          ),
+        const SizedBox(height: 16),
       ],
-      ApprovalWorkflowSummary(snapshot:request.workflowSnapshot),
+      ApprovalWorkflowSummary(snapshot: request.workflowSnapshot),
       _AdminLeaveDetailGrid(request: request, employeeInformation: true),
       const SizedBox(height: 20),
       const AdminLeaveSubsectionTitle(title: 'Leave Details'),
@@ -261,10 +273,7 @@ class _AdminLeaveDetailGrid extends StatelessWidget {
       required bool applies,
     }) {
       if (!applies || value == null) return;
-      rows.add((
-        label: label,
-        value: formatAdminLeaveDate(value),
-      ));
+      rows.add((label: label, value: formatAdminLeaveDate(value)));
     }
 
     final leaveType = request.leaveType;

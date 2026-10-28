@@ -32,7 +32,7 @@ module.exports = function createLeaveControllers({
               COALESCE(lr.number_of_days, lr.total_days) AS days,
               lr.user_id, lr.employee_id,
               lr.start_date, lr.end_date,
-              lr.approved_at, lr.reviewed_at, lr.paper_approval_record,
+              lr.approved_at, lr.reviewed_at, lr.paper_approval_record, lr.created_at,
               lr.approved_days_with_pay, lr.approved_days_without_pay,
               lt.name AS leave_type_name
        FROM leave_requests lr
@@ -46,11 +46,22 @@ module.exports = function createLeaveControllers({
           return res.status(404).json({ error: 'Leave request not found' });
         }
         const r = current.rows[0];
-        await assertFinalLeaveReviewer(client, r.user_id || r.employee_id, reviewerId, 'leave', id);
         if (r.paper_approval_record) {
-          await client.query('ROLLBACK');
-          return res.status(409).json({error:'Approved paper records require a documented paper correction or cancellation; digital approval revocation is not available.'});
+          const result=await require('../use-cases/revokePaperApproval')(client,r,req.user,remarks,{
+            LEAVE_REVOKE_WINDOW_MS,insertLeaveBalanceLedger,removeApprovedLeaveCoverage,toIsoDateStr,insertLeaveRequestHistory,
+          });
+          await client.query('COMMIT');
+          const out=await pool.query(`SELECT lr.*,lt.name AS leave_type_name,u.full_name AS employee_full_name
+            FROM leave_requests lr LEFT JOIN leave_types lt ON lt.id=lr.leave_type_id
+            LEFT JOIN users u ON u.id=COALESCE(lr.user_id,lr.employee_id) WHERE lr.id=$1`,[id]);
+          const mapped=mapLeaveRowToApi(out.rows[0]);
+          notifySafe(()=>leaveNotifications.notifyEmployee(pool,{employeeUserId:result.employeeId,leaveRequestId:id,type:'leave_revoked',
+            title:'Paper leave record revoked',body:remarks,metadata:{approval_source:'approved_paper',...result.revocation}}));
+          broadcastDtrLeaveRefresh('leave_revoked_removed_from_dtr',{userId:result.employeeId,leaveRequestId:id,dateFrom:result.dateFrom,dateTo:result.dateTo});
+          broadcastLeaveUpdated('revoked',mapped);
+          return res.json(mapped);
         }
+        await assertFinalLeaveReviewer(client, r.user_id || r.employee_id, reviewerId, 'leave', id);
         if (r.status !== 'approved') {
           await client.query('ROLLBACK');
           return res.status(400).json({

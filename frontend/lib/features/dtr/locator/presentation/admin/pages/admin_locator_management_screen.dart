@@ -897,7 +897,7 @@ class _AdminLocatorManagementScreenState
           onRevoke: _canFinalReview && item.status == 'approved'
               ? () => _revokeApproval(item)
               : null,
-          revokeDisabledReason: item.revokeDisabledReason,
+          revokeDisabledReason: _paperRevocationAccessReason(item) ?? item.revokeDisabledReason,
         ) &&
         mounted) {
       await _load(forceRefresh: true);
@@ -998,7 +998,7 @@ class _AdminLocatorManagementScreenState
     final canShowHistory = !isPending;
     final canPrint = normalizedStatus == 'approved';
     final isApproved = normalizedStatus == 'approved';
-    final revokeDisabledReason = isApproved ? item.revokeDisabledReason : null;
+    final revokeDisabledReason = isApproved ? (_paperRevocationAccessReason(item) ?? item.revokeDisabledReason) : null;
     final showFooter = canShowHistory || canReview || canPrint || isApproved;
     unawaited(
       openResponsiveRightSidePanel<void>(
@@ -2197,7 +2197,7 @@ class _AdminLocatorManagementScreenState
   }
 
   Future<void> _revokeApproval(_LocatorAdminRecord item) async {
-    final disabledReason = item.revokeDisabledReason;
+    final disabledReason = _paperRevocationAccessReason(item) ?? item.revokeDisabledReason;
     if (disabledReason != null) {
       _showLocatorSnack(disabledReason);
       return;
@@ -2225,6 +2225,14 @@ class _AdminLocatorManagementScreenState
     }
   }
 
+  String? _paperRevocationAccessReason(_LocatorAdminRecord item) {
+    if (item.paperApprovalRecord == null) return null;
+    final user = context.read<AuthProvider>().user;
+    if (!['admin', 'hr'].contains(user?.role)) return 'Only authorized HR staff can revoke a paper record.';
+    if (user?.id == item.employeeId) return 'You cannot revoke your own paper record.';
+    return null;
+  }
+
   Future<String?> _promptLocatorRevocationReason(
     _LocatorAdminRecord item,
   ) async {
@@ -2243,7 +2251,7 @@ class _AdminLocatorManagementScreenState
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 Text(
-                  'This removes locator coverage from ${item.employeeName}\'s DTR for ${item.slipDateLabel}. Physical punches will remain unchanged.',
+                  '${item.paperApprovalRecord != null ? 'This reverses the system record. The original signed paper and audit history will be preserved. ' : ''}This removes locator coverage from ${item.employeeName}\'s DTR for ${item.slipDateLabel}. Physical punches will remain unchanged.',
                 ),
                 const SizedBox(height: 16),
                 TextFormField(
@@ -2604,11 +2612,12 @@ class _LocatorAdminRecord {
   }
 
   String? get revokeDisabledReason {
-    if (paperApprovalRecord != null) return 'Paper approvals require a documented HR correction; digital revocation is unavailable.';
     if (status.toLowerCase() != 'approved') {
       return 'Only approved locator requests can be revoked.';
     }
-    final approvedAt = hrReviewedAt;
+    final approvedAt = paperApprovalRecord != null
+        ? DateTime.tryParse(paperApprovalRecord!['encoded_at']?.toString() ?? '') ?? createdAt
+        : hrReviewedAt;
     if (approvedAt == null) {
       return 'The approval time is unavailable.';
     }

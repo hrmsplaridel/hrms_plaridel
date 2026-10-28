@@ -1299,12 +1299,18 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
     final request = await leaveProvider.refreshRequestById(id);
     if (!mounted) return;
     if (request == null) {
-      _showMessage(leaveProvider.error ?? 'Could not refresh this request. Try again.');
+      _showMessage(
+        leaveProvider.error ?? 'Could not refresh this request. Try again.',
+      );
       return;
     }
-    final shared = (request.workflowSnapshot?['steps'] as List? ?? []).any((step) => step is Map);
-    if (request.status != LeaveRequestStatus.approved || request.userId == auth.user?.id ||
-        (shared && request.canRevokeApproval != true)) {
+    final shared = (request.workflowSnapshot?['steps'] as List? ?? []).any(
+      (step) => step is Map,
+    );
+    if (request.status != LeaveRequestStatus.approved ||
+        request.userId == auth.user?.id ||
+        (shared && request.canRevokeApproval != true) ||
+        (request.isPaperRecord && !['admin', 'hr'].contains(auth.user?.role))) {
       _showMessage('This approval can no longer be revoked by your account.');
       return;
     }
@@ -1313,18 +1319,22 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
       _showMessage(revokeDisabledReason);
       return;
     }
-    final restoresCredits = _creditPolicyForRequest(request) != 'none' &&
+    final restoresCredits =
+        _creditPolicyForRequest(request) != 'none' &&
         (request.approvedDaysWithPay ?? request.workingDaysApplied ?? 0) > 0;
     final input = await showDialog<LeaveReviewDecisionInput>(
       context: context,
       builder: (_) => AdminLeaveDecisionDialog(
         title: 'Revoke Approval',
-        subtitle:
-            'This will revoke the approval and remove its DTR leave entries. '
-            '${restoresCredits ? 'Leave credits will be restored. ' : ''}'
-            'The request returns to the employee for correction.',
+        subtitle: request.isPaperRecord
+            ? 'This reverses the system record and removes its DTR coverage. The original signed paper and audit history will be preserved. Only credits actually deducted will be restored. Record a corrected paper entry if needed.'
+            : 'This will revoke the approval and remove its DTR leave entries. '
+                  '${restoresCredits ? 'Leave credits will be restored. ' : ''}'
+                  'The request returns to the employee for correction.',
         confirmLabel: 'Revoke Approval',
-        requireReason: false,
+        requireReason: request.isPaperRecord,
+        minReasonLength: request.isPaperRecord ? 10 : 1,
+        maxReasonLength: request.isPaperRecord ? 1000 : null,
         request: request,
       ),
     );
@@ -1353,13 +1363,25 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
     final result = await leaveProvider.revokeApproval(finalInput);
     final ok = result != null;
     if (!mounted) return;
-    _showMessage(
-      ok
-          ? (restoresCredits
-              ? 'Approval revoked. Leave credits restored.'
-              : 'Approval revoked. The request was returned to the employee.')
-          : (leaveProvider.error ?? 'Revoke failed.'),
-    );
+    if (ok && request.isPaperRecord) {
+      final metadata = result.paperApprovalRecord?['revocation'];
+      final restored = metadata is Map
+          ? (metadata['restored_credit_days'] as num? ?? 0)
+          : 0;
+      final reconcile =
+          metadata is Map && metadata['reconciliation_required'] == true;
+      _showMessage(
+        'Paper record revoked. DTR coverage removed.${restored > 0 ? ' Leave credits restored: $restored day(s).' : ''}${reconcile ? ' Month-end reconciliation is required.' : ''}',
+      );
+    } else {
+      _showMessage(
+        ok
+            ? (restoresCredits
+                  ? 'Approval revoked. Leave credits restored.'
+                  : 'Approval revoked. The request was returned to the employee.')
+            : (leaveProvider.error ?? 'Revoke failed.'),
+      );
+    }
     if (ok) await _loadRequests();
   }
 

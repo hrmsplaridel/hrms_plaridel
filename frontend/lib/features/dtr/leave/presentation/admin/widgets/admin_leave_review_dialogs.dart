@@ -213,6 +213,8 @@ class AdminLeaveDecisionDialog extends StatefulWidget {
     required this.confirmLabel,
     required this.requireReason,
     required this.request,
+    this.minReasonLength = 1,
+    this.maxReasonLength,
   });
 
   final String title;
@@ -220,6 +222,8 @@ class AdminLeaveDecisionDialog extends StatefulWidget {
   final String confirmLabel;
   final bool requireReason;
   final LeaveRequest request;
+  final int minReasonLength;
+  final int? maxReasonLength;
 
   @override
   State<AdminLeaveDecisionDialog> createState() =>
@@ -276,6 +280,14 @@ class _AdminLeaveDecisionDialogState extends State<AdminLeaveDecisionDialog> {
                       ? (value) {
                           if ((value ?? '').trim().isEmpty) {
                             return 'Reason is required.';
+                          }
+                          final length = (value ?? '').trim().length;
+                          if (length < widget.minReasonLength) {
+                            return 'Enter at least ${widget.minReasonLength} characters.';
+                          }
+                          if (widget.maxReasonLength != null &&
+                              length > widget.maxReasonLength!) {
+                            return 'Enter no more than ${widget.maxReasonLength} characters.';
                           }
                           return null;
                         }

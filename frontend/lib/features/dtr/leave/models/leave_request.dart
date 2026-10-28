@@ -261,6 +261,7 @@ class LeaveRequest {
   /// Shared workflows use compatibility statuses; display their actual stage.
   String get statusLabel {
     if(isPaperRecord && status==LeaveRequestStatus.approved)return 'Approved (paper record)';
+    if(isPaperRecord && status==LeaveRequestStatus.cancelled)return 'Revoked (paper record)';
     if (!status.isPending || workflowSnapshot?['outcome'] != null) {
       return status.displayName;
     }

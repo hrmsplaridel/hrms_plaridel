@@ -122,7 +122,7 @@ module.exports = function createLeaveControllers({
           const paper=publicPaperRecord(source);
           return res.json({hr_certification_officer:paper.certification_officer || null,
             recommendation_officer:paper.department_reviewer || null,approving_authority:paper.final_approver,
-            paper_signatures:paperSignaturePayload(source)});
+            paper_signatures:requestContext.status==='approved'?paperSignaturePayload(source):{}});
         }
         const signatoryDate =
           requestContext?.approved_on || requestContext?.submitted_on || todayInHrmsTimezone();

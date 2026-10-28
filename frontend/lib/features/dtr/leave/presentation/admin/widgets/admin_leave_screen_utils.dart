@@ -47,7 +47,12 @@ String formatAdminLeaveDateTime(DateTime value) {
 const adminLeaveRevokeWindow = Duration(days: 3);
 
 DateTime? adminLeaveRevokeDeadline(LeaveRequest request) {
-  final reviewedAt = request.approvedAt ?? request.reviewedAt;
+  final reviewedAt = request.isPaperRecord
+      ? DateTime.tryParse(
+              request.paperApprovalRecord?['encoded_at']?.toString() ?? '',
+            ) ??
+            request.createdAt
+      : request.approvedAt ?? request.reviewedAt;
   if (reviewedAt == null) return null;
   return reviewedAt.add(adminLeaveRevokeWindow);
 }
@@ -56,7 +61,9 @@ String? adminLeaveRevokeDisabledReason(LeaveRequest request, {DateTime? now}) {
   if (request.status != LeaveRequestStatus.approved) return null;
   final deadline = adminLeaveRevokeDeadline(request);
   if (deadline == null) {
-    return 'Cannot determine the final approval date for this request.';
+    return request.isPaperRecord
+        ? 'The paper recording time is unavailable.'
+        : 'Cannot determine the final approval date for this request.';
   }
   final effectiveNow = now ?? DateTime.now();
   if (effectiveNow.isAfter(deadline)) {
@@ -72,7 +79,12 @@ String adminLeaveStatusLabel(
   Map<String, dynamic>? workflowSnapshot,
   bool paperRecorded = false,
 }) {
-  if(paperRecorded && status==LeaveRequestStatus.approved)return 'Approved (paper record)';
+  if (paperRecorded && status == LeaveRequestStatus.approved) {
+    return 'Approved (paper record)';
+  }
+  if (paperRecorded && status == LeaveRequestStatus.cancelled) {
+    return 'Revoked (paper record)';
+  }
   final named = pendingWorkflowStepLabel(workflowSnapshot);
   if (status.isPending && named != null) return 'Pending $named';
   if (!isDepartmentHead) return status.displayName;
@@ -81,7 +93,9 @@ String adminLeaveStatusLabel(
     LeaveRequestStatus.pendingMayor => 'Forwarded to Mayor',
     LeaveRequestStatus.pendingHr => 'Forwarded to HR',
     LeaveRequestStatus.approved =>
-      finalReviewRoute == 'mayor' ? 'Approved by department reviewer' : 'Approved by HR',
+      finalReviewRoute == 'mayor'
+          ? 'Approved by department reviewer'
+          : 'Approved by HR',
     LeaveRequestStatus.rejectedByDepartmentHead => 'Rejected',
     LeaveRequestStatus.rejectedByHr => 'Rejected by HR',
     LeaveRequestStatus.returned => 'Returned',

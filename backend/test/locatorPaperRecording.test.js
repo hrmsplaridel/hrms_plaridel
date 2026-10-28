@@ -40,7 +40,7 @@ test('paper locator requires HR authority, complete evidence, valid dates and pr
  assert.ok(h.calls.includes('ROLLBACK'));assert.equal(h.calls.some(sql=>sql.includes('INSERT INTO')),false);
 });
 
-test('failed paper uploads are removed and paper approvals cannot be digitally revoked',async()=>{
+test('failed paper uploads are removed and unauthorized paper revocation is blocked',async()=>{
  const removed=[];
  const controller=require('../src/modules/locator/controllers/paperRecording.controller')({
   LOCATOR_ATTACHMENT_SUBDIR:'locator-attachments',boolField:v=>v===true,normalizeRequestType:v=>v,
@@ -52,6 +52,6 @@ test('failed paper uploads are removed and paper approvals cannot be digitally r
  assert.equal(failed.code,400);assert.deepEqual(removed,['locator-attachments/new.pdf']);
  const queries=[];const client={query:async sql=>{queries.push(sql);return {rows:sql.includes('SELECT id')?[{id:id(20),status:'approved',paper_approval_record:{source:'approved_paper'}}]:[]};},release(){}};
  const revoke=require('../src/modules/locator/controllers/revoke.controller')({pool:{connect:async()=>client},evaluateLocatorRevocation(){throw Error('Paper approvals must not enter the digital policy');}});
- const blocked=res();await revoke.revokeRequest({user:{id:id(1),role:'hr'},params:{id:id(20)},body:{reason:'Recorded on paper'}},blocked);
- assert.equal(blocked.code,409);assert.ok(queries.includes('ROLLBACK'));assert.equal(queries.some(sql=>/^\s*UPDATE\b/.test(sql)),false);
+ const blocked=res();await revoke.revokeRequest({user:{id:id(1),role:'employee'},params:{id:id(20)},body:{reason:'Recorded on paper'}},blocked);
+ assert.equal(blocked.code,403);assert.ok(queries.includes('ROLLBACK'));assert.equal(queries.some(sql=>/^\s*UPDATE\b/.test(sql)),false);
 });

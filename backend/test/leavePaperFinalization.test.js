@@ -24,9 +24,9 @@ test('paper finalization records actual paper approval and encoder without fabri
  assert.equal(calls.filter(c=>c.deduction).length,1);
 });
 
-test('digital revocation does not reopen an approved paper record for employee editing',async()=>{
+test('paper revocation does not allow an employee to reverse a record',async()=>{
  const controller=require('../src/modules/leave/controllers/revoke.controller')({assertFinalLeaveReviewer:async()=>{},pool:{connect:async()=>({query:async(sql)=>({rows:sql.includes('FROM leave_requests')?[{id:'paper',status:'approved',paper_approval_record:{source:'approved_paper'}}]:[]}),release(){}})}}).revokeLeave;
  const res={status(code){this.code=code;return this;},json(body){this.body=body;return this;}};
- await controller({user:{id:'reviewer'},params:{id:'paper'},body:{}},res);
- assert.equal(res.code,409);assert.match(res.body.error,/paper/i);
+ await controller({user:{id:'reviewer',role:'employee'},params:{id:'paper'},body:{}},res);
+ assert.equal(res.code,403);
 });

@@ -13,3 +13,14 @@ test('paper form signatures are served only after the existing request access ch
  await handler({user:{id:'stranger',role:'employee'},query:{employee_id:'employee',leave_request_id:'record'}},res);
  assert.equal(res.code,403);
 });
+
+test('revoked paper leave keeps named officials but generated copies no longer apply saved signatures',async()=>{
+ const paper={final_approver:{user_id:'mayor',name:'Original Mayor',position_title:'Mayor',signature:{source:'saved_signature_copy',owner_user_id:'mayor',signature_asset_id:'asset',signature_image_base64:'original-ink'}}};
+ for(const status of ['approved','cancelled']){
+  const handler=require('../src/modules/leave/controllers/signatories.controller')({pool:{query:async()=>({rows:[{id:'record',employee_id:'employee',status,paper_approval_record:paper}]})},workflowEngine:{isShared:()=>false}}).getSignatories;
+  const res={status(code){this.code=code;return this;},json(body){this.body=body;return this;}};
+  await handler({user:{id:'encoder',role:'hr'},query:{employee_id:'employee',leave_request_id:'record'}},res);
+  assert.equal(res.body.approving_authority.name,'Original Mayor');
+  assert.equal(!!res.body.paper_signatures.final_approver,status==='approved');
+ }
+});
