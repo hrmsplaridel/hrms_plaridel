@@ -4,6 +4,34 @@ const {
 
 const PUNCH_FIELDS = { am_in: 'time_in', am_out: 'break_out', pm_in: 'break_in', pm_out: 'time_out' };
 
+function localClock(context = {}) {
+  const now = context.as_of_time ? new Date(context.as_of_time) : new Date();
+  const parts = new Intl.DateTimeFormat('en-CA', {timeZone: process.env.HRMS_TIMEZONE || 'Asia/Manila',
+    year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).formatToParts(now);
+  const get = key => parts.find(p => p.type === key)?.value;
+  return {date: context.as_of_date || `${get('year')}-${get('month')}-${get('day')}`, minutes: Number(get('hour')) * 60 + Number(get('minute'))};
+}
+function timeMinutes(time) { const m = String(time || '').match(/^(\d{1,2}):(\d{2})/); return m ? Number(m[1])*60+Number(m[2]) : null; }
+function dueSlots(context, day, slots) {
+  if (!day) return slots;
+  const clock = localClock(context), date = String(day.attendance_date).slice(0,10);
+  if (date > clock.date) return [];
+  const start = timeMinutes(day.start_time), end = timeMinutes(day.end_time);
+  if (start == null || end == null) return date < clock.date ? slots : []; // Unknown due time is not proof of an overdue punch today.
+  // An overnight assignment belongs to its start date; its final punches are due the next date.
+  const overnight = end <= start;
+  const daysElapsed = Math.round((Date.parse(clock.date) - Date.parse(date)) / 86400000);
+  const elapsed = clock.minutes + daysElapsed * 1440;
+  const breakDeadline = value => { const minutes=timeMinutes(value); return minutes == null ? null : minutes + (overnight && minutes < start ? 1440 : 0); };
+  const deadlines = {am_in:start + Number(day.grace_period_minutes || 0),
+    am_out:breakDeadline(day.break_start), pm_in:breakDeadline(day.break_end), pm_out:overnight ? end+1440 : end};
+  return slots.filter(slot => {const key=locatorSlotKey(slot); const deadline=deadlines[key] ?? (overnight ? end+1440 : end); return elapsed > deadline;});
+}
+function dayIsNotDue(context, day) {
+  const slots = coverageForDate(context, day.attendance_date).expectedSlots;
+  return slots.length > 0 && dueSlots(context, day, slots).length === 0;
+}
+
 function hrmsToday() {
   const parts = new Intl.DateTimeFormat('en-CA', {
     timeZone: process.env.HRMS_TIMEZONE || 'Asia/Manila', year: 'numeric', month: '2-digit', day: '2-digit',
@@ -46,19 +74,29 @@ function effectiveDtrRecords(context) {
       remarks: [base.remarks, `Approved locator: ${coverage.label}`].filter(Boolean).join('; '),
     });
   }
+  for (const [date, row] of records) {
+    const coverage=coverageForDate(context,date), day=coverage.day;
+    if (!day || row.leave_type || ['on_leave','holiday','rest_day'].includes(row.status) || row.locator_fully_covered) continue;
+    if (coverage.expectedSlots.length && coverage.expectedSlots.every(slot=>row[PUNCH_FIELDS[slot]]||coverage.coverage[slot])) continue;
+    const due=dueSlots(context,day,coverage.expectedSlots);
+    if (!coverage.expectedSlots.length || due.length===coverage.expectedSlots.length) continue;
+    const overdueMissing=due.some(slot=>!row[PUNCH_FIELDS[slot]]&&!coverage.coverage[slot]);
+    records.set(date,{...row,status:overdueMissing?'incomplete':due.length?'in_progress':'not_due',
+      undertime_minutes:0, overtime_minutes:0});
+  }
   return [...records.values()].sort((a, b) => String(a.attendance_date).localeCompare(String(b.attendance_date)));
 }
 
 function effectiveExportStatus(context, day, record) {
   if (record?.attendance_label) return `${record.attendance_label}${record.locator_fully_covered ? '' : ' (partial coverage)'}`;
-  if (day.attendance_date > (context.as_of_date || hrmsToday()) &&
-      !Object.values(PUNCH_FIELDS).some(field => record?.[field]) && !record?.leave_type) return 'not_due';
-  if (record?.status) return record.status;
+  if (record?.leave_type || record?.status === 'on_leave') return record.status || 'on_leave';
   if (day.holiday_coverage === 'whole_day') return 'holiday';
+  if (day.shift_id) {
+    if (!coverageForDate(context, day.attendance_date).expectedSlots.length) return 'rest_day';
+    if (!Object.values(PUNCH_FIELDS).some(field => record?.[field]) && dayIsNotDue(context, day)) return 'not_due';
+  }
+  if (record?.status) return record.status;
   if (!day.shift_id) return 'no_schedule';
-  const coverage = coverageForDate(context, day.attendance_date);
-  if (!coverage.expectedSlots.length) return 'rest_day';
-  if (day.attendance_date > (context.as_of_date || hrmsToday())) return 'not_due';
   return 'no_record';
 }
 
@@ -67,4 +105,4 @@ function coveredMissingSlot(context, date, slot) {
   return Boolean(key && coverageForDate(context, String(date).slice(0, 10)).coverage[key]);
 }
 
-module.exports = { coverageForDate, effectiveDtrRecords, effectiveExportStatus, coveredMissingSlot, hrmsToday, PUNCH_FIELDS };
+module.exports = { coverageForDate, effectiveDtrRecords, effectiveExportStatus, coveredMissingSlot, hrmsToday, PUNCH_FIELDS, localClock, dueSlots, dayIsNotDue };

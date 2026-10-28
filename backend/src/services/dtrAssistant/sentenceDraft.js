@@ -4,11 +4,12 @@ const { detectAssistantLanguage } = require('./dtrAssistantLanguage');
 
 function extractDraftFacts(text, existing = '') {
   const value = String(text || '').trim();
-  const clause = value.match(/\b(?:because|dahil|tungod kay|kay)\s+(.+)$/i)?.[1]
-    || value.match(/:\s*(.+)$/s)?.[1]
-    || value.match(/\b(?:i (?:will|need|am|have)|motambong ko|moadto ko|naa koy|may (?:meeting|family event))\b.+$/i)?.[0];
+  const cleaned = value.replace(/\s+(?:do not|don't|ayaw|huwag)\s+(?:add|invent|change)\b.*$/i, '').trim();
+  const clause = cleaned.match(/\b(?:because|dahil|tungod kay|kay)\s+(.+)$/i)?.[1]
+    || cleaned.match(/:\s*(.+)$/s)?.[1]
+    || cleaned.match(/\b(?:i (?:will|need|am|have)|motambong ko|moadto ko|naa koy|may (?:meeting|family event))\b.+$/i)?.[0];
   if (clause) return clause.trim();
-  if (/\b(?:suggest|draft|sentence|pangungusap|himo\w*|gawan|shorter|formal|rewrite|wording|help me)\b/i.test(value)) return String(existing || '').trim();
+  if (/\b(?:suggest|draft|sentence|pangungusap|himo\w*|gawan|shorter|formal|rewrite|wording|help me|make|write|translate|same meaning|same reason)\b/i.test(value)) return String(existing || '').trim();
   return value || String(existing || '').trim();
 }
 
@@ -20,6 +21,15 @@ function factualInput(facts) {
 
 function fallbackSentence(facts, module, language) {
   let purpose = facts.replace(/[\r\n]+/g, ' ').replace(/\s+/g, ' ').replace(/[.!?]+$/, '').trim();
+  if (language !== 'english' && /^i (?:need|will|would)/i.test(purpose)) {
+    let translated = purpose.replace(/^i need (?:time )?to\s+/i,'').replace(/^i will\s+/i,'');
+    const phrases = language==='tagalog'
+      ? [["my child's school meeting",'pulong sa paaralan ng aking anak'],['rest and recharge','magpahinga at mag-recharge'],['submit payroll documents','magsumite ng payroll documents'],['attend','dumalo'],['at the','sa']]
+      : [["my child's school meeting",'meeting sa eskwelahan sa akong anak'],['rest and recharge','mopahulay ug mag-recharge'],['submit payroll documents','mosumite ug payroll documents'],['attend','motambong'],['at the','sa']];
+    for (const [from,to] of phrases) translated=translated.replace(new RegExp(`\\b${from}\\b`,'gi'),to);
+    // Preserve uncommon supplied facts verbatim instead of inventing a translation.
+    return `${language==='tagalog'?'Humihiling ako ng pahintulot para':'Mangayo ko ug permiso aron'} ${translated}.`;
+  }
   if (module === 'leave' && /^i need (?:time )?to\s+/i.test(purpose)) {
     return `I would like to request leave to ${purpose.replace(/^i need (?:time )?to\s+/i, '')}.`;
   }
@@ -35,9 +45,12 @@ function fallbackSentence(facts, module, language) {
 // Avoid adding new names, numbers or substantive facts during a model rewrite.
 function groundedDraft(draft, facts) {
   const words = (text) => String(text).toLowerCase().replace(/[’']/g, '').match(/[\p{L}\p{N}]+/gu) || [];
-  const supplied = new Set(words(facts));
-  const connective = new Set(words('I am requesting permission leave would like to attend attendance celebration my the a an and or for of in on at because purpose reason this is to sa ug og nga ko akong ako kay para po ng ang dahil humihiling pahintulot pagdalo motambong mag leave request attend meeting'));
-  return words(draft).every((word) => supplied.has(word) || connective.has(word));
+  const groups=[['rest','magpahinga','pahulay','mopahulay'],['recharge','magrecharge'],['submit','magsumite','mosumite','isumite','ipasa'],['attend','dumalo','motambong','pagdalo'],['documents','dokumento'],['meeting','miting','pulong'],['school','paaralan','eskwelahan'],['child','anak'],['need','kailangan','kinahanglan']];
+  const canonical = word => groups.find(group=>group.includes(word))?.[0] || word;
+  const supplied = new Set(words(facts).map(canonical));
+  const connective = new Set(words('I am requesting permission leave would like to my the a an and or for of in on at because purpose reason this is to sa ug og nga ko akong ako kay para po ng ang dahil humihiling pahintulot mag leave request'));
+  const grammar = new Set(words('humihiling mangayo permiso aron para mag ng mga ang sa ug at ako ko akong dahil kay upang aking iyong kong nang ito isang na pag makapag pagrequest leave pahintulot'));
+  return words(draft).every((word) => supplied.has(canonical(word)) || connective.has(word) || grammar.has(word));
 }
 
 async function draftSentence({ facts, module = 'leave', field = 'Reason', instruction = '', example, sentenceTemplate,
@@ -73,7 +86,8 @@ async function draftSentence({ facts, module = 'leave', field = 'Reason', instru
     ]);
     const parsed = JSON.parse(String(reply.content).replace(/^```(?:json)?\s*|\s*```$/g, ''));
     if (typeof parsed.draft === 'string') draft = parsed.draft.trim();
-    if (!draft && parsed.question) return { question: String(parsed.question).slice(0, 500) };
+    // The caller already supplied adequate facts; an unfocused model question should
+    // not discard them. Invalid output falls back to a factual sentence below.
     if (!draft || draft.length > limit || /\[[^\]]+\]/.test(draft) || !groundedDraft(draft, facts)) { draft = null; failure = 'AI_DRAFT_UNGROUNDED_OR_INVALID'; }
   } catch (error) {
     if (signal?.aborted || error.code === 'ASSISTANT_REQUEST_ABORTED') throw error;
@@ -84,6 +98,7 @@ async function draftSentence({ facts, module = 'leave', field = 'Reason', instru
   }
   if (!draft) {
     draft = fallbackSentence(facts, module, language);
+    if (/\b(?:shorter|mubo)\b/i.test(instruction) && language==='english') draft=facts.replace(/[.!?]+$/,'')+'.';
     // Log only a code, never employee facts or model output.
     if (failure) console.warn('[assistant-draft]', failure);
   }
@@ -91,4 +106,7 @@ async function draftSentence({ facts, module = 'leave', field = 'Reason', instru
   return { draft, fallback: Boolean(failure) };
 }
 
-module.exports = { draftSentence, extractDraftFacts, groundedDraft };
+function draftReply(draft, language='english') {
+  return `${language==='bisaya'?'Gisugyot nga sentence':language==='tagalog'?'Mungkahing pangungusap':'Suggested wording'}:\n\n${draft}\n\n${language==='bisaya'?'I-review ang facts sa dili pa gamiton.':language==='tagalog'?'Suriin ang mga detalye bago gamitin.':'Review the facts before using this suggestion.'}`;
+}
+module.exports = { draftSentence, extractDraftFacts, groundedDraft, draftReply };

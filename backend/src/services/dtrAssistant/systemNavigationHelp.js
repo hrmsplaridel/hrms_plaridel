@@ -37,7 +37,13 @@ function systemNavigationHelp(text) {
       'Makakatulong ako sa attendance, missing logs, schedule, leave balances/requests, locator status/coverage, filing requirements at DTR exports mo. Maaari akong magpaliwanag ng fields, magmungkahi ng sentence mula sa facts mo at mag-review ng open leave/locator form. Maaari rin kitang gabayan sa Profile, DocuTracker at Training Reports; hindi pa konektado ang live lookup ng mga module na iyon.',
     ],
   };
-  return messages[topic]?.[index] || null;
+  const reply=messages[topic]?.[index];
+  if(topic==='capabilities')return reply+' '+[
+    'Record lookups are limited to your own employee account. My chat actions provide navigation, downloads, suggestions and review; I cannot submit, approve, cancel, or edit HR records or attendance punches.',
+    'Imong kaugalingong employee account ra ang records nga ma-lookup. Navigation, downloads, suggestions ug review ra ang chat actions; dili ko maka-submit, approve, cancel o edit sa HR records/punches.',
+    'Sarili mong employee account lang ang records na maaaring tingnan. Navigation, downloads, suggestions at review lang ang chat actions; hindi ako nagsusumite, nag-aapruba, nagkakansela o nag-eedit ng HR records/punches.',
+  ][index];
+  return reply || null;
 }
 
 module.exports = { systemNavigationHelp };

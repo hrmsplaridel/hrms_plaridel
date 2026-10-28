@@ -19,6 +19,8 @@ function invalid(message) {
 }
 
 async function assistLeaveField(pool, form, signal) {
+  const language = form.language || detectAssistantLanguage(form.facts || '');
+  const local = (english,bisaya,tagalog) => language==='bisaya'?bisaya:language==='tagalog'?tagalog:english;
   const module = form?.module || 'leave';
   const typeCode = module === 'locator' ? form?.locatorType : form?.leaveType;
   if (!['leave', 'locator'].includes(module) || typeof typeCode !== 'string' || typeof form?.fieldKey !== 'string' ||
@@ -61,23 +63,26 @@ async function assistLeaveField(pool, form, signal) {
     text: '[Your factual information]', long_text: '[Your brief factual explanation]',
     select: field.options?.[0], boolean: 'Yes / No', number: '3 (only if this is your actual value)', date: 'YYYY-MM-DD',
   }[field.type];
-  const help = `${leave.display_name || leave.name} — ${field.label}\n\n${guidance}\n${field.required ? 'Required field.' : 'Optional field.'}${writable ? ` Maximum ${maximum} characters.` : ''}\n\nExample template (sample only; use your own facts): ${example || 'Use the configured choices.'}${field.sentence_template ? `\n\nSentence template: ${field.sentence_template}` : ''}${field.type === 'select' ? `\nAllowed choices: ${field.options.join(', ')}` : ''}`;
+  const translatedStandard = form.fieldKey==='reason'
+    ? local(guidance,'Isulat ang mubo ug tinuod nga rason. Ayaw pag-invent ug diagnosis o approval.','Isulat ang maikli at totoong dahilan. Huwag mag-imbento ng diagnosis o approval.')
+    : form.fieldKey==='office' ? local(guidance,'Ibutang ang tinuod nga destination o purpose sumala sa label sa field.','Ilagay ang totoong destination o purpose ayon sa label ng field.') : guidance;
+  const help = `${leave.display_name || leave.name} — ${field.label}\n\n${translatedStandard}\n${local(field.required?'Required field.':'Optional field.',field.required?'Required kini nga field.':'Optional kini nga field.',field.required?'Required ang field na ito.':'Optional ang field na ito.')}${writable ? local(` Maximum ${maximum} characters.`,` Maximum ${maximum} characters.`,` Hanggang ${maximum} characters.`) : ''}\n\n${local('Example template (sample only; use your own facts)','Sample template (pananglitan ra; gamita imong tinuod nga facts)','Halimbawang template (sample lang; gamitin ang totoong detalye mo)')}: ${example || 'Use the configured choices.'}${field.sentence_template ? `\n\nSentence template: ${field.sentence_template}` : ''}${field.type === 'select' ? `\nAllowed choices: ${field.options.join(', ')}` : ''}`;
   if (form.task !== 'draft') return { content: help, actions: [] };
   const facts = typeof form.facts === 'string' ? form.facts.trim() : '';
   if (!writable) return { content: help, actions: [] };
-  if (!facts) return { content: `${help}\n\nTell me the actual details you want included so I can draft a sentence.`, actions: [] };
+  if (!facts) return { content: `${help}\n\n${local('Tell me the actual details you want included so I can draft a sentence.','Ihatag ang tinuod nga detalye nga imong ipaapil sa sentence.','Ibigay ang totoong detalye na gusto mong isama sa pangungusap.')}`, actions: [] };
   if (facts.length > 2000) throw invalid('Please keep your drafting details under 2,000 characters.');
-  const language = form.language || detectAssistantLanguage(facts);
   const generated = await draftSentence({ module, facts, field: field.label,
-    instruction: field.instruction || standard?.[1], example: field.example,
+    example: field.example,
     sentenceTemplate: field.sentence_template, maxLength: maximum, language,
-    signal, complete: chatCompletion });
+    signal, complete: chatCompletion, instruction: [field.instruction || standard?.[1], form.rewriteInstruction].filter(Boolean).join(' ') });
   if (generated.question) return { content: generated.question, actions: [] };
   const draft = generated.draft;
   const heading = language === 'bisaya' ? 'Gisugyot nga sentence' : language === 'tagalog' ? 'Mungkahing pangungusap' : 'Suggested wording';
   const review = language === 'bisaya' ? 'I-review ang facts sa dili pa gamiton.' : language === 'tagalog' ? 'Suriin ang mga detalye bago gamitin.' : 'Review the facts before using this suggestion.';
   return {
     content: `${heading}:\n\n${draft}\n\n${review}`,
+    draft,
     actions: [{ id: 'use_field_suggestion', type: 'apply_field_suggestion', label: 'Use this suggestion', payload: { module, ...(module === 'locator' ? { locatorType: leave.name } : { leaveType: leave.name }), fieldKey: field.key, value: draft } }],
   };
 }

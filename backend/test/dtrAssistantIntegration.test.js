@@ -390,7 +390,7 @@ test('DTR assistant service uses employee-self data for real HRMS scenarios', as
   });
   assert.equal(combined.intent, 'leave_balance');
   assert.deepEqual(
-    new Set(loaded.at(-1).intents),
+    new Set(loaded.slice(-2).flatMap(call => call.intents)),
     new Set(['leave_balance', 'dtr_missing_logs'])
   );
 

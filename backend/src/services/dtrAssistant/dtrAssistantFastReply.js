@@ -1557,6 +1557,7 @@ function isNonWorkingDtrRecord(record) {
     status === 'on_leave' ||
     status === 'holiday' ||
     status === 'rest_day' ||
+    status === 'not_due' ||
     !!record?.leave_type ||
     !!record?.holiday_name
   );
@@ -1593,7 +1594,7 @@ function isIncompleteDtrRecordForContext(context, record) {
   if (!record) return true;
   if (isNonWorkingDtrRecord(record)) return false;
   const status = lower(record.status);
-  return status === 'incomplete' || missingDtrSlotsForContext(context, record).length > 0;
+  return missingDtrSlotsForContext(context, record).length > 0;
 }
 
 function isAbsentDtrRecord(record) {
@@ -1641,14 +1642,21 @@ function todayIsoInHrmsTimezone() {
 }
 
 function noRecordWorkingDays(context) {
-  const today = todayIsoInHrmsTimezone();
+  const today = require('./effectiveAttendance').localClock(context).date;
   return dtrCalendarDays(context).filter((day) => {
     if (day.attendance_date > today) return false;
     if (!isCalendarWorkingDay(day)) return false;
+    if (require('./effectiveAttendance').dayIsNotDue(context, day)) return false;
     if (dtrRecordForDate(context, day.attendance_date)) return false;
     if (firstMatchingLeave(context, day.attendance_date)) return false;
     return true;
   });
+}
+
+function calendarShiftFinished(context, day) {
+  const {coverageForDate,dueSlots}=require('./effectiveAttendance');
+  const expected=coverageForDate(context,day.attendance_date).expectedSlots;
+  return expected.length>0 && dueSlots(context,day,expected).length===expected.length;
 }
 
 function fmtMinutes(value) {
@@ -1778,12 +1786,37 @@ function missingDtrSlotsForContext(context, recordOrDate) {
       : dtrRecordForDate(context, date);
   const day = calendarDayForDate(context, date);
   if (!record) {
-    if (day && isCalendarWorkingDay(day)) return ['no DTR record'];
+    if (day && isCalendarWorkingDay(day) && !require('./effectiveAttendance').dayIsNotDue(context, day)) return ['no DTR record'];
     return [];
   }
   if (isNonWorkingDtrRecord(record)) return [];
   const expected = day ? expectedSlotsForCalendarDay(day) : ['AM in', 'AM out', 'PM in', 'PM out'];
-  return expected.filter((slot) => !slotValue(record, slot) && !coveredMissingSlot(context, date, slot));
+  return require('./effectiveAttendance').dueSlots(context, day, expected)
+    .filter((slot) => !slotValue(record, slot) && !coveredMissingSlot(context, date, slot));
+}
+
+function notDueReply(context, message) {
+  const date = context.date_range?.startDate;
+  const day = calendarDayForDate(context, date);
+  if (!day || !isCalendarWorkingDay(day) || calendarShiftFinished(context,day)) return null;
+  if (firstMatchingLeave(context, date) || approvedLocatorCoverageForDate(context, date).isFullCoverage) return null;
+  const record = (context.dtr_records || []).find(row => fmtDate(row.attendance_date) === date);
+  if (record && ['time_in','break_out','break_in','time_out'].some(key => record[key])) return null;
+  const language = languageOf(message);
+  const {coverageForDate,dueSlots}=require('./effectiveAttendance');
+  const coverage=coverageForDate(context,date);
+  const missing=dueSlots(context,day,coverage.expectedSlots).filter(slot=>!coverage.coverage[slot]);
+  if(missing.length)return structuredReply(language,{title:`DTR check for ${fmtFriendlyDate(date)}`,
+    summary:language==='bisaya'?'Nagpadayon pa ang shift; adunay overdue punch, pero dili pa final whole-day absence.'
+      :language==='tagalog'?'Tuloy pa ang shift; may overdue punch, pero hindi pa final whole-day absence.'
+        :'The shift is still in progress: some punches are overdue, but a full-day absence is not yet established.',
+    details:[`Overdue missing slots: ${missing.join(', ')}`,`Shift: ${day.shift_name || 'assigned shift'} ${fmtScheduleRange(day)}`]});
+  return structuredReply(language, {title:`DTR check for ${fmtFriendlyDate(date)}`,
+    summary: language === 'bisaya' ? 'Wala pay overdue nga required punch sa maong shift. Dili pa kini basehan nga absent ka.'
+      : language === 'tagalog' ? 'Wala pang overdue na required punch sa shift na ito. Hindi pa ito batayan na absent ka.'
+        : 'No required punches are overdue for this shift yet. This is not an absence.',
+    details:[`Status: Not yet due`, `Shift: ${day.shift_name || 'assigned shift'} ${fmtScheduleRange(day)}`],
+  });
 }
 
 function dtrRecordLine(record, context = null) {
@@ -1812,6 +1845,8 @@ function dtrRecordLine(record, context = null) {
 }
 
 function dtrDailyRecordReply(context, message) {
+  const notDue = notDueReply(context, message);
+  if (notDue) return notDue;
   const language = languageOf(message);
   const rawRecord = (context.dtr_records || [])[0];
   const record = rawRecord ? dtrRecords(context).find(row => row.attendance_date === rawRecord.attendance_date) || rawRecord : null;
@@ -1971,7 +2006,7 @@ function dtrRangeSummaryReply(context, message) {
       }
       if (status === 'present' || status === 'complete') acc.present += 1;
       else if (isAbsentDtrRecord(record)) acc.absent += 1;
-      else if (isIncompleteDtrRecord(record)) acc.incomplete += 1;
+      else if (isIncompleteDtrRecordForContext(context,record)) acc.incomplete += 1;
       else if (status === 'on_leave' || record.leave_type) acc.onLeave += 1;
       else if (status === 'holiday' || record.holiday_name) acc.holiday += 1;
       else acc.other += 1;
@@ -1979,8 +2014,10 @@ function dtrRangeSummaryReply(context, message) {
     },
     { hours: 0, late: 0, undertime: 0, overtime: 0, present: 0, absent: 0, incomplete: 0, onLeave: 0, holiday: 0, other: 0 }
   );
-  const issues = totals.incomplete + totals.absent + noRecords.length;
-  const possibleAbsentOrNoRecord = totals.absent + noRecords.length;
+  const overdueNoRecords=noRecords.filter(day=>calendarShiftFinished(context,day));
+  totals.incomplete+=noRecords.length-overdueNoRecords.length;
+  const issues = totals.incomplete + totals.absent + overdueNoRecords.length;
+  const possibleAbsentOrNoRecord = totals.absent + overdueNoRecords.length;
   const wantsPresent =
     /\b(present|complete|kompleto|kumpleto)\b/.test(lower(message)) &&
     /\b(pila|ilan|how many|count|counts|total)\b/.test(lower(message));
@@ -2281,7 +2318,7 @@ function dtrAbsentSummaryReply(context, message) {
   const label = context.date_range?.label || 'selected period';
   const displayLabel = displayPeriodLabel(label, language);
   const absent = dtrIssueRecords(dtrRecords(context), isAbsentDtrRecord);
-  const noRecords = noRecordWorkingDays(context);
+  const noRecords = noRecordWorkingDays(context).filter(day=>calendarShiftFinished(context,day));
   if (absent.length === 0 && noRecords.length === 0) {
     if (language === 'bisaya') return `Wala koy nakitang absent or no-record DTR para sa ${displayLabel}.`;
     if (language === 'tagalog') return `Wala akong nakitang DTR record na marked absent sa ${displayLabel}.`;
@@ -2421,6 +2458,8 @@ function dtrStatusExplanationReply(context, message) {
   if (range.startDate && range.endDate && range.startDate !== range.endDate) {
     return dtrRangeSummaryReply(context, message);
   }
+  const notDue = notDueReply(context, message);
+  if (notDue) return notDue;
   const rawRecord = (context.dtr_records || [])[0];
   const record = rawRecord ? dtrRecords(context).find(row => row.attendance_date === rawRecord.attendance_date) || rawRecord : null;
   if (!record) {
@@ -5126,7 +5165,7 @@ function leaveGuidedFilingReply(context, message) {
       days
     )} I-submit sa leave module; hindi ako mag-auto-submit.`;
   }
-  return `${check} Next in the form: ${form.fields.join(' ')} Submit it in the leave module; I will not auto-submit it.`;
+  return `${check} Next in the form: ${localizedLeaveFormGuideLine(type, language, days)} Submit it in the leave module; I will not auto-submit it.`;
 }
 
 function leaveOverlapCheckReply(context, message) {
@@ -5206,10 +5245,10 @@ function leavePendingDaysExplanationReply(context, message) {
     title: 'Pending leave days',
     summary:
       language === 'bisaya'
-        ? 'Mao ni kung asa gikan ang pending leave days.'
+        ? 'Ang pending days gi-reserve samtang naghulat sa approval, busa mokunhod ang available apan dili pa approved used leave; ma-release kini kung rejected o cancelled.'
         : language === 'tagalog'
-          ? 'Ito kung saan galing ang pending leave days.'
-          : 'Here is where the pending leave days are coming from.',
+          ? 'Nakareserba ang pending days habang naghihintay ng approval, kaya bumababa ang available ngunit hindi pa ito approved used leave; nare-release kapag rejected o cancelled.'
+          : 'Pending days reserve credits while approval is outstanding, reducing the available balance without becoming approved used leave; rejection or cancellation releases the reservation.',
     details,
     limit: 6,
   });
@@ -6245,8 +6284,11 @@ function locatorAvailabilityReply(context, message) {
     title,
     summary,
     details,
-    nextStep:
-      language === 'bisaya'
+    nextStep: hasBlockingIssue
+      ? language === 'bisaya' ? 'Sulbara una ang issue; kontaka ang HR/Admin para sa past-date o approved-paper recording.'
+        : language === 'tagalog' ? 'Ayusin muna ang issue; kontakin ang HR/Admin para sa past-date o approved-paper recording.'
+          : 'Resolve the blocking issue first. Contact HR/Admin for past-date or approved-paper recording.'
+      : language === 'bisaya'
         ? 'Submit gihapon sa normal approval workflow; dili pa ni final approval.'
         : language === 'tagalog'
           ? 'I-submit pa rin sa normal approval workflow; hindi pa ito final approval.'
@@ -6424,6 +6466,8 @@ function locatorPolicyGuidanceReply(context, message) {
 }
 
 function buildFastEmployeeAssistantReply(message, context, intent) {
+  const focusedReply = require('./questionReplies').questionReply(message, context, intent);
+  if (focusedReply) return focusedReply;
   const greetingReply = assistantGreetingReply(message);
   if (greetingReply) return greetingReply;
 
@@ -6727,6 +6771,8 @@ function dtrHoursSummaryReply(context, message) {
 // ─── Leave Balance Projection ─────────────────────────────────────────────────
 // Answers: "If I take N days of sick/vacation leave, how many days will be left?"
 function parseRequestedDaysFromProjection(message) {
+  const duration = require('./dayQuantity').dayQuantity(message);
+  if (duration != null) return duration;
   const text = lower(message);
   const wordToNum = { one: 1, isa: 1, uno: 1, two: 2, duha: 2, dos: 2, three: 3, tulo: 3, tres: 3, four: 4, upat: 4, kwatro: 4, apat: 4, five: 5, lima: 5, singko: 5 };
   const patterns = [

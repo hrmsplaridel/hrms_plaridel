@@ -100,6 +100,8 @@ function isLeaveTypeExplanationQuestion(text) {
 function normalizeIntent(value) {
   const intent = String(value || '').trim().toLowerCase();
   return [
+    'assistant_action_guidance', 'request_policy_guidance', 'request_checklist', 'leave_type_selection',
+    'leave_annual_remaining', 'dtr_date_validation', 'dtr_undertime_reason', 'dtr_comparison',
     'system_navigation_help',
     'form_sentence_suggestion',
     'locator_policy_guidance',

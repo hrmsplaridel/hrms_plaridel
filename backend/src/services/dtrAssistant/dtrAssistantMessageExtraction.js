@@ -192,6 +192,8 @@ function parseDayCountToken(token) {
 }
 
 function extractDayCount(text) {
+  const duration = require('./dayQuantity').dayQuantity(text);
+  if (duration != null) return duration;
   const source = lower(String(text || '').trim());
   if (!source) return null;
 

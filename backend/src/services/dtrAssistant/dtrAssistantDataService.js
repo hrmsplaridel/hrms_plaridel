@@ -72,6 +72,7 @@ const ASSISTANT_CONTEXT_SOURCES = [
 ];
 
 const DTR_RECORD_INTENTS = new Set([
+  'dtr_undertime_reason',
   'today_dtr',
   'missing_logs',
   'dtr_daily_record',
@@ -163,6 +164,7 @@ function assistantContextLoadPlan(intents) {
       plan.leaveTypes = true;
       continue;
     }
+    if (intent === 'request_policy_guidance') { plan.leaveRequests = true; continue; }
     if (intent === 'dtr_locator_coverage_check') {
       plan.dtrCalendarDays = true;
       plan.locatorSlips = true;
@@ -170,6 +172,9 @@ function assistantContextLoadPlan(intents) {
       continue;
     }
     if (intent === 'dtr_policy_guidance') continue;
+    if (intent==='dtr_date_validation') continue;
+    if (intent==='assistant_action_guidance') { plan.dtrRecords=true; plan.dtrCalendarDays=true; continue; }
+    if (intent === 'request_checklist') { plan.leaveTypes=true; plan.locatorTypes=true; continue; }
 
     if (intent.startsWith('leave_') || LEAVE_REQUEST_INTENTS.has(intent)) {
       plan.leaveTypes = true;
@@ -252,7 +257,7 @@ function parseJsonArray(value) {
 async function loadEmployeeProfile(pool, userId) {
   const result = await runAssistantQuery(
     pool,
-    `SELECT id, full_name, role, sex, civil_status, date_of_birth::text AS date_of_birth
+    `SELECT id, full_name, role, sex, civil_status, date_hired::text AS date_hired, date_of_birth::text AS date_of_birth
      FROM users
      WHERE id = $1::uuid
      LIMIT 1`,
@@ -266,6 +271,7 @@ async function loadEmployeeProfile(pool, userId) {
         role: row.role,
         sex: row.sex,
         civil_status: row.civil_status,
+        date_hired: row.date_hired,
         date_of_birth: row.date_of_birth,
       }
     : null;
@@ -342,6 +348,7 @@ async function loadDtrCalendarDays(pool, userId, dateRange) {
             shift.name AS shift_name,
             COALESCE(assignment.override_start_time, shift.start_time)::text AS start_time,
             COALESCE(assignment.override_end_time, shift.end_time)::text AS end_time,
+            shift.break_start::text AS break_start,
             COALESCE(assignment.override_break_end, shift.break_end)::text AS break_end,
             shift.punch_mode,
             shift.grace_period_minutes,
@@ -395,6 +402,7 @@ async function loadDtrCalendarDays(pool, userId, dateRange) {
     shift_name: row.shift_name,
     start_time: row.start_time,
     end_time: row.end_time,
+    break_start: row.break_start,
     break_end: row.break_end,
     punch_mode: row.punch_mode,
     grace_period_minutes: row.grace_period_minutes ?? 0,
@@ -634,6 +642,7 @@ async function queryLeaveTypes(pool) {
             affects_dtr_normally,
             balance_ledger_type,
             entitlement_basis,
+            first_year_allowance,
             employee_detail_schema,
             is_active
      FROM leave_types
@@ -657,6 +666,7 @@ async function queryLeaveTypes(pool) {
     affects_dtr_normally: row.affects_dtr_normally !== false,
     balance_ledger_type: row.balance_ledger_type,
     entitlement_basis: row.entitlement_basis,
+    first_year_allowance: row.first_year_allowance,
     employee_detail_schema: normalizeEmployeeDetailSchema(
       row.employee_detail_schema
     ),
@@ -853,6 +863,9 @@ async function loadEmployeeAssistantContext(
     ]);
   throwIfAssistantQueryAborted(signal);
 
+  const annualEntitlements = (Array.isArray(intents) ? intents : [intents]).includes('leave_annual_remaining')
+    ? await require('./annualEntitlementContext').loadAnnualEntitlements(pool, userId, leaveTypes, employee, dateRange) : [];
+  throwIfAssistantQueryAborted(signal);
   return {
     scope: 'employee_self',
     date_range: dateRange,
@@ -881,6 +894,7 @@ async function loadEmployeeAssistantContext(
     leave_balances: leaveBalances,
     recent_leave_requests: leaveRequests,
     leave_annual_usage: leaveAnnualUsage,
+    annual_entitlements: annualEntitlements,
     leave_types: leaveTypes,
     leave_guidelines: buildGuidelinesForTypes(leaveTypes),
     leave_guideline_catalog: buildAllLeaveGuidelines(),

@@ -41,7 +41,11 @@ function formChatContext(form, text, memory) {
   const help = writing || /\b(here|field|put|enter|write|wording|phrase|sentence|draft|example|sample|fill|dito|ilagay|isulat|dinhi|ibutang)\b/i.test(text);
   if (!help && !sameField) return null;
   const draft = writing || /\b(draft|sentence|rewrite|phrase|wording|shorter|formal|suggest.*write)\b/i.test(text) || (!help && sameField);
-  return { ...form, task: draft ? 'draft' : 'explain', facts: draft ? extractDraftFacts(text, form.facts) : undefined, language: detectAssistantLanguage(text) };
+  const restyle=require('./dtrAssistantQuestion').isDraftRestyle(text);
+  const previous=sameField&&restyle?memory?.draftFocus:null;
+  const language=/\b(?:tagalog|bisaya|english|filipino|cebuano)\b/i.test(text)?detectAssistantLanguage(text):previous?.language||detectAssistantLanguage(text);
+  return { ...form, task: draft ? 'draft' : 'explain', facts: draft ? extractDraftFacts(text, previous?.facts||form.facts) : undefined,
+    language,rewriteInstruction:restyle?text:undefined };
 }
 
 module.exports = { requestChoices, choiceActions, isRequestFollowUp, formChatContext };

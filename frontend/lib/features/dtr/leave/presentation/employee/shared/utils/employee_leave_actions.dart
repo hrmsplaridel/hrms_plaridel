@@ -43,7 +43,7 @@ class EmployeeLeaveActions {
     required LeaveRequest request,
   }) {
     return EmployeeHrmsAssistantOverlay(
-      initialBottom: 36,
+      initialBottom: 92,
       child: LeaveRequestFormScreen(
         initialRequest: request,
         onSaveDraft: (updated) async {
