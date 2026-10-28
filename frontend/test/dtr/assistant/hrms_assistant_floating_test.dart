@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:hrms_plaridel/features/dtr/assistant/presentation/widgets/dtr_assistant_fab.dart';
 import 'package:provider/provider.dart';
 
 import 'package:hrms_plaridel/core/api/app_user.dart';
@@ -37,6 +38,47 @@ class _FakeAssistantApi extends DtrAssistantApi {
 }
 
 void main() {
+  testWidgets('dashboard launcher returns after a filing form closes', (
+    tester,
+  ) async {
+    for (final width in [390.0, 1280.0]) {
+      await tester.binding.setSurfaceSize(Size(width, 900));
+      var filing = false;
+      late StateSetter update;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: StatefulBuilder(
+            builder: (context, setState) {
+              update = setState;
+              return EmployeeHrmsAssistantOverlay(
+                isDashboard: true,
+                child: filing
+                    ? const EmployeeHrmsAssistantOverlay(
+                        child: Scaffold(body: Text('Filing')),
+                      )
+                    : const Scaffold(body: Text('Attendance')),
+              );
+            },
+          ),
+        ),
+      );
+      await tester.pump();
+      expect(find.byType(DraggableDtrAssistantLauncher), findsOneWidget);
+      update(() => filing = true);
+      await tester.pump();
+      await tester.pump();
+      expect(find.byType(DraggableDtrAssistantLauncher), findsOneWidget);
+      update(() => filing = false);
+      await tester.pump();
+      await tester.pump();
+      expect(find.text('Attendance'), findsOneWidget);
+      expect(find.byType(DraggableDtrAssistantLauncher), findsOneWidget);
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pump();
+    }
+    await tester.binding.setSurfaceSize(null);
+  });
+
   testWidgets('desktop assistant panel drags freely inside the viewport', (
     tester,
   ) async {

@@ -640,7 +640,13 @@ class _EmployeeDashboardState extends State<EmployeeDashboardDesktopPage>
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => EmployeeHrmsAssistantOverlay(
+    isDashboard: true,
+    initialBottom: 92,
+    child: _buildDashboard(context),
+  );
+
+  Widget _buildDashboard(BuildContext context) {
     final userId = context.select<AuthProvider, String?>((a) => a.user?.id);
     if (userId != null && userId.isNotEmpty) {
       WidgetsBinding.instance.addPostFrameCallback((_) {

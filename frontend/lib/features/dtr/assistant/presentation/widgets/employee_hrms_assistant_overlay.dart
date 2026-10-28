@@ -12,11 +12,13 @@ class EmployeeHrmsAssistantOverlay extends StatefulWidget {
     required this.child,
     this.initialRight = 20,
     this.initialBottom = 28,
+    this.isDashboard = false,
   });
 
   final Widget child;
   final double initialRight;
   final double initialBottom;
+  final bool isDashboard;
 
   @override
   State<EmployeeHrmsAssistantOverlay> createState() =>
@@ -31,7 +33,7 @@ class _EmployeeHrmsAssistantOverlayState
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted || _ownsEmbeddedLauncher) return;
+      if (!mounted || _ownsEmbeddedLauncher || widget.isDashboard) return;
       _ownsEmbeddedLauncher = true;
       EmployeeHrmsAssistantController.instance.acquireEmbeddedLauncher();
     });
@@ -57,10 +59,18 @@ class _EmployeeHrmsAssistantOverlayState
       fit: StackFit.expand,
       children: [
         Positioned.fill(child: widget.child),
-        ValueListenableBuilder<bool>(
-          valueListenable:
-              EmployeeHrmsAssistantController.instance.floatingVisible,
-          builder: (context, assistantOpen, _) => assistantOpen
+        AnimatedBuilder(
+          animation: Listenable.merge([
+            EmployeeHrmsAssistantController.instance.floatingVisible,
+            EmployeeHrmsAssistantController.instance.baseLauncherSuppressed,
+          ]),
+          builder: (context, _) =>
+              EmployeeHrmsAssistantController.instance.floatingVisible.value ||
+                  (widget.isDashboard &&
+                      EmployeeHrmsAssistantController
+                          .instance
+                          .baseLauncherSuppressed
+                          .value)
               ? const SizedBox.shrink()
               : DraggableDtrAssistantLauncher(
                   onPressed: () => _openAssistant(context),
