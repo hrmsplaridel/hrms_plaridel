@@ -1,3 +1,4 @@
+import 'package:hrms_plaridel/shared/widgets/profile_modern_ui.dart' show ProfileLabeledField;
 import 'package:flutter/material.dart';
 import 'package:hrms_plaridel/features/dtr/assistant/presentation/widgets/active_assistant_field.dart';
 import 'package:hrms_plaridel/features/dtr/assistant/presentation/widgets/field_guidance_editor.dart';
@@ -291,17 +292,20 @@ class LocatorCustomFieldEditor extends StatelessWidget {
                 Row(
                   children: [
                     Expanded(
-                      child: TextFormField(
-                        initialValue: entry.value.label,
-                        enabled: enabled,
-                        maxLength: 100,
-                        decoration: AppTheme.dashInputDecoration(
-                          context,
-                        ).copyWith(labelText: 'Field label'),
-                        validator: (v) => (v ?? '').trim().isEmpty
-                            ? 'Enter a field label.'
-                            : null,
-                        onChanged: (v) => _replace(entry.key, label: v),
+                      child: ProfileLabeledField(
+                        label: 'Field label',
+                        child: TextFormField(
+                          initialValue: entry.value.label,
+                          enabled: enabled,
+                          maxLength: 100,
+                          decoration: AppTheme.dashInputDecoration(
+                            context,
+                          ),
+                          validator: (v) => (v ?? '').trim().isEmpty
+                              ? 'Enter a field label.'
+                              : null,
+                          onChanged: (v) => _replace(entry.key, label: v),
+                        ),
                       ),
                     ),
                     IconButton(
@@ -318,23 +322,26 @@ class LocatorCustomFieldEditor extends StatelessWidget {
                     ),
                   ],
                 ),
-                DropdownButtonFormField<LeaveCustomFieldType>(
-                  initialValue: entry.value.type,
-                  decoration: AppTheme.dashInputDecoration(
-                    context,
-                  ).copyWith(labelText: 'Input type'),
-                  items: [
-                    for (final type in LeaveCustomFieldType.values)
-                      DropdownMenuItem(
-                        value: type,
-                        child: Text(type.displayName),
-                      ),
-                  ],
-                  onChanged: !enabled
-                      ? null
-                      : (v) {
-                          if (v != null) _replace(entry.key, type: v);
-                        },
+                ProfileLabeledField(
+                  label: 'Input type',
+                  child: DropdownButtonFormField<LeaveCustomFieldType>(
+                    initialValue: entry.value.type,
+                    decoration: AppTheme.dashInputDecoration(
+                      context,
+                    ),
+                    items: [
+                      for (final type in LeaveCustomFieldType.values)
+                        DropdownMenuItem(
+                          value: type,
+                          child: Text(type.displayName),
+                        ),
+                    ],
+                    onChanged: !enabled
+                        ? null
+                        : (v) {
+                            if (v != null) _replace(entry.key, type: v);
+                          },
+                  ),
                 ),
                 Material(
                   color: Colors.transparent,
@@ -348,25 +355,28 @@ class LocatorCustomFieldEditor extends StatelessWidget {
                   ),
                 ),
                 if (entry.value.type == LeaveCustomFieldType.select)
-                  TextFormField(
-                    key: ValueKey('options-${entry.value.key}'),
-                    initialValue: entry.value.options.join('\n'),
-                    enabled: enabled,
-                    maxLines: 3,
-                    decoration: AppTheme.dashInputDecoration(
-                      context,
-                    ).copyWith(labelText: 'Options (one per line)'),
-                    validator: (v) => (v ?? '').trim().isEmpty
-                        ? 'Enter at least one option.'
-                        : null,
-                    onChanged: (v) => _replace(
-                      entry.key,
-                      options: v
-                          .split('\n')
-                          .map((s) => s.trim())
-                          .where((s) => s.isNotEmpty)
-                          .toSet()
-                          .toList(),
+                  ProfileLabeledField(
+                    label: 'Options (one per line)',
+                    child: TextFormField(
+                      key: ValueKey('options-${entry.value.key}'),
+                      initialValue: entry.value.options.join('\n'),
+                      enabled: enabled,
+                      maxLines: 3,
+                      decoration: AppTheme.dashInputDecoration(
+                        context,
+                      ),
+                      validator: (v) => (v ?? '').trim().isEmpty
+                          ? 'Enter at least one option.'
+                          : null,
+                      onChanged: (v) => _replace(
+                        entry.key,
+                        options: v
+                            .split('\n')
+                            .map((s) => s.trim())
+                            .where((s) => s.isNotEmpty)
+                            .toSet()
+                            .toList(),
+                      ),
                     ),
                   ),
                 FieldGuidanceEditor(

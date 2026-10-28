@@ -1,3 +1,4 @@
+import 'package:hrms_plaridel/shared/widgets/profile_modern_ui.dart' show ProfileLabeledField;
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_type_definition.dart';
@@ -93,7 +94,10 @@ void main() {
     await t.pump();
     expect(fields.length, 1);
     await t.enterText(
-      find.widgetWithText(TextFormField, 'Field label'),
+      find.descendant(
+        of: find.byWidgetPredicate((w) => w is ProfileLabeledField && w.label == 'Field label'),
+        matching: find.byType(TextFormField),
+      ),
       'Transport',
     );
     await t.tap(find.byType(DropdownButtonFormField<LeaveCustomFieldType>));
@@ -101,7 +105,10 @@ void main() {
     await t.tap(find.text('Select').last);
     await t.pumpAndSettle();
     await t.enterText(
-      find.widgetWithText(TextFormField, 'Options (one per line)'),
+      find.descendant(
+        of: find.byWidgetPredicate((w) => w is ProfileLabeledField && w.label == 'Options (one per line)'),
+        matching: find.byType(TextFormField),
+      ),
       'Car\nBus',
     );
     expect(fields.single.label, 'Transport');

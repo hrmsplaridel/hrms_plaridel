@@ -6,12 +6,14 @@ import 'package:flutter/material.dart';
 import 'package:hrms_plaridel/features/dtr/assistant/presentation/widgets/field_guidance_editor.dart';
 import 'package:hrms_plaridel/shared/widgets/workforce_loading_skeleton.dart';
 import 'package:hrms_plaridel/shared/widgets/form_settings_section.dart';
+import 'package:hrms_plaridel/shared/widgets/profile_modern_ui.dart' show ProfileLabeledField;
 
 import 'package:hrms_plaridel/core/api/client.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/features/dtr/leave/data/repositories/leave_type_definition_cache.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_entitlement_basis.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_type_definition.dart';
+import 'package:hrms_plaridel/features/dtr/leave/utils/leave_guidance.dart';
 
 class LeaveTypeManagementScreen extends StatefulWidget {
   const LeaveTypeManagementScreen({super.key});
@@ -168,7 +170,9 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
     _pendingRouting = null;
     _nameController.text = item.name;
     _displayNameController.text = item.displayName;
-    _descriptionController.text = item.description ?? '';
+    _descriptionController.text = item.isSystem
+        ? LeaveGuidance.forDefinition(item).description
+        : item.description ?? '';
     _maxDaysController.text = item.maxDays?.toString() ?? '';
     _minimumAdvanceDaysController.text =
         item.minimumAdvanceDays?.toString() ?? '';
@@ -701,7 +705,7 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
                   style: AppTheme.dashFieldTextStyle(context),
                   decoration: AppTheme.dashInputDecoration(
                     context,
-                    hintText: 'Search type or key',
+                    hintText: 'Search leave types',
                     prefixIcon: Icon(
                       Icons.search_rounded,
                       size: 20,
@@ -807,7 +811,7 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
                             ),
                             _statusPill(
                               label: systemLocked
-                                  ? 'Protected'
+                                  ? 'Standard'
                                   : (isDraft ? 'Draft' : 'Custom'),
                               color: systemLocked
                                   ? AppTheme.primaryNavy
@@ -825,16 +829,13 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
                               ),
                           ],
                         ),
-                        const SizedBox(height: 6),
-                        Text(
-                          systemLocked
-                              ? 'Built-in rules are protected. Employment-type and service eligibility, approved paper recording, and printed forms can be configured.'
-                              : 'Configure filing, balance, and DTR behavior.',
-                          style: TextStyle(
-                            color: _mutedColor(context),
-                            fontSize: 13,
+                        if (!systemLocked) ...[
+                          const SizedBox(height: 6),
+                          Text(
+                            'Set who can file, the leave limits and the required documents.',
+                            style: TextStyle(color: _mutedColor(context), fontSize: 13),
                           ),
-                        ),
+                        ],
                       ],
                     ),
                   ),
@@ -850,132 +851,143 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
                     _InfoPanel(
                       icon: Icons.lock_outline_rounded,
                       text:
-                          'Built-in rules are protected. Employment-type and service eligibility, approved paper recording, and printed forms can be configured here.',
+                          'Standard leave rules are read-only. You can change eligibility, paper recording and print settings.',
                     ),
                   _settingsSection([
-                    _sectionTitle('Basic Information'),
-                    TextFormField(
-                      controller: _displayNameController,
-                      readOnly: _saving || systemLocked,
-                      style: AppTheme.dashFieldTextStyle(context),
-                      decoration: _inputDecoration('Leave type name'),
-                      validator: (v) =>
-                          v == null || v.trim().isEmpty ? 'Required' : null,
+                    _sectionTitle('Leave details'),
+                    ProfileLabeledField(
+                      label: 'Leave type name',
+                      child: TextFormField(
+                        controller: _displayNameController,
+                        readOnly: _saving || systemLocked,
+                        style: AppTheme.dashFieldTextStyle(context),
+                        decoration: _inputDecoration(),
+                        validator: (v) =>
+                            v == null || v.trim().isEmpty ? 'Required' : null,
+                      ),
                     ),
                     const SizedBox(height: 12),
                     if (systemLocked)
                       _ReadOnlyValue(
-                        label: 'Entitlement basis',
+                        label: 'How the day limit applies',
                         value: LeaveEntitlementBasis.label(
                           _selected?.entitlementBasis ?? _entitlementBasis,
                         ),
-                        helperText:
-                            'Defines whether the limit is accrued, annual, event-based, request-based, or compliance-based.',
+                        helperText: _dayLimitHelp,
                       )
                     else
-                      DropdownButtonFormField<String>(
-                        key: ValueKey(_entitlementBasis),
-                        initialValue: _entitlementBasis,
-                        isExpanded: true,
-                        dropdownColor: AppTheme.dashPanelOf(context),
+                      ProfileLabeledField(
+                        label: 'How the day limit applies',
+                        child: DropdownButtonFormField<String>(
+                          key: ValueKey(_entitlementBasis),
+                          initialValue: _entitlementBasis,
+                          isExpanded: true,
+                          dropdownColor: AppTheme.dashPanelOf(context),
+                          style: AppTheme.dashFieldTextStyle(context),
+                          decoration: _inputDecoration(
+                            helperText: _dayLimitHelp,
+                          ),
+                          items: _entitlementBasisTypes.entries
+                              .map(
+                                (entry) => DropdownMenuItem<String>(
+                                  value: entry.key,
+                                  child: Text(
+                                    entry.value,
+                                    style: AppTheme.dashFieldTextStyle(context),
+                                  ),
+                                ),
+                              )
+                              .toList(),
+                          onChanged: _saving
+                              ? null
+                              : (value) => setState(
+                                  () => _entitlementBasis =
+                                      value ?? LeaveEntitlementBasis.perRequest,
+                                ),
+                        ),
+                      ),
+                    const SizedBox(height: 12),
+                    ProfileLabeledField(
+                      label: 'Leave type code',
+                      child: TextFormField(
+                        controller: _nameController,
+                        readOnly: _saving || systemLocked,
                         style: AppTheme.dashFieldTextStyle(context),
                         decoration: _inputDecoration(
-                          'Entitlement basis',
-                          helperText:
-                              'Defines how Max working days is applied.',
+                          helperText: systemLocked ? 'Fixed code for this standard leave type.' : 'Generated from the leave name. Must be unique.',
                         ),
-                        items: _entitlementBasisTypes.entries
-                            .map(
-                              (entry) => DropdownMenuItem<String>(
-                                value: entry.key,
-                                child: Text(
-                                  entry.value,
-                                  style: AppTheme.dashFieldTextStyle(context),
-                                ),
-                              ),
-                            )
-                            .toList(),
-                        onChanged: _saving
-                            ? null
-                            : (value) => setState(
-                                () => _entitlementBasis =
-                                    value ?? LeaveEntitlementBasis.perRequest,
-                              ),
+                        validator: (v) {
+                          final text = v?.trim() ?? '';
+                          if (text.isEmpty) return 'Required';
+                          if (!RegExp(
+                            r'^[A-Za-z][A-Za-z0-9_]*$',
+                          ).hasMatch(text)) {
+                            return 'Use letters, numbers, or underscore only';
+                          }
+                          return null;
+                        },
                       ),
-                    const SizedBox(height: 12),
-                    TextFormField(
-                      controller: _nameController,
-                      readOnly: _saving || systemLocked,
-                      style: AppTheme.dashFieldTextStyle(context),
-                      decoration: _inputDecoration(
-                        'System code',
-                        helperText: 'Example: bereavementLeave',
-                      ),
-                      validator: (v) {
-                        final text = v?.trim() ?? '';
-                        if (text.isEmpty) return 'Required';
-                        if (!RegExp(
-                          r'^[A-Za-z][A-Za-z0-9_]*$',
-                        ).hasMatch(text)) {
-                          return 'Use letters, numbers, or underscore only';
-                        }
-                        return null;
-                      },
                     ),
                     const SizedBox(height: 12),
-                    TextFormField(
-                      controller: _descriptionController,
-                      readOnly: _saving || systemLocked,
-                      style: AppTheme.dashFieldTextStyle(context),
-                      decoration: _inputDecoration('Description'),
-                      maxLines: 2,
+                    ProfileLabeledField(
+                      label: 'When to use this leave',
+                      child: TextFormField(
+                        controller: _descriptionController,
+                        readOnly: _saving || systemLocked,
+                        style: AppTheme.dashFieldTextStyle(context),
+                        decoration: _inputDecoration( hintText: 'Explain who can use this leave and when it applies.'),
+                        maxLines: 2,
+                      ),
                     ),
                   ]),
                   const SizedBox(height: 16),
                   _settingsSection([
-                    _sectionTitle('Filing Requirements'),
+                    _sectionTitle('Filing rules'),
                     ConstrainedBox(
                       constraints: const BoxConstraints(maxWidth: 360),
-                      child: DropdownButtonFormField<String>(
-                        key: ValueKey(
-                          'filing-$_employeeCanFile-$_adminOnly-$_adminCanFile',
+                      child: ProfileLabeledField(
+                        label: 'Who can submit',
+                        child: DropdownButtonFormField<String>(
+                          key: ValueKey(
+                            'filing-$_employeeCanFile-$_adminOnly-$_adminCanFile',
+                          ),
+                          initialValue: _employeeCanFile && !_adminOnly
+                              ? (_adminCanFile ? 'both' : 'employee')
+                              : 'admin',
+                          isExpanded: true,
+                          dropdownColor: AppTheme.dashPanelOf(context),
+                          style: AppTheme.dashFieldTextStyle(context),
+                          decoration: _inputDecoration(),
+                          items: const [
+                            DropdownMenuItem(
+                              value: 'employee',
+                              child: Text('Employee only'),
+                            ),
+                            DropdownMenuItem(
+                              value: 'both',
+                              child: Text('Employee and HR/admin'),
+                            ),
+                            DropdownMenuItem(
+                              value: 'admin',
+                              child: Text('HR/admin only'),
+                            ),
+                          ],
+                          onChanged: _saving || systemLocked
+                              ? null
+                              : (value) => setState(() {
+                                  _employeeCanFile = value != 'admin';
+                                  _adminOnly = value == 'admin';
+                                  _adminCanFile = value != 'employee';
+                                  if (!_adminCanFile) _allowApprovedPaperFiling = false;
+                                }),
                         ),
-                        initialValue: _employeeCanFile && !_adminOnly
-                            ? (_adminCanFile ? 'both' : 'employee')
-                            : 'admin',
-                        isExpanded: true,
-                        dropdownColor: AppTheme.dashPanelOf(context),
-                        style: AppTheme.dashFieldTextStyle(context),
-                        decoration: _inputDecoration('Who can file'),
-                        items: const [
-                          DropdownMenuItem(
-                            value: 'employee',
-                            child: Text('Employee only'),
-                          ),
-                          DropdownMenuItem(
-                            value: 'both',
-                            child: Text('Employee and HR/admin'),
-                          ),
-                          DropdownMenuItem(
-                            value: 'admin',
-                            child: Text('HR/admin only'),
-                          ),
-                        ],
-                        onChanged: _saving || systemLocked
-                            ? null
-                            : (value) => setState(() {
-                                _employeeCanFile = value != 'admin';
-                                _adminOnly = value == 'admin';
-                                _adminCanFile = value != 'employee';
-                                if (!_adminCanFile) _allowApprovedPaperFiling = false;
-                              }),
                       ),
                     ),
                     const SizedBox(height: 16),
                     Material(color:Colors.transparent,child:SwitchListTile.adaptive(
                       contentPadding: EdgeInsets.zero,
                       title: const Text('Allow recording approved paper leave'),
-                      subtitle: const Text('Authorized HR encoders must upload the fully approved signed paper form and record its original approvers. No further routing or digital approval is required.'),
+                      subtitle: const Text('HR can record a signed, approved paper form. The request will be saved as approved.'),
                       value: _allowApprovedPaperFiling,
                       onChanged: _saving || !_adminCanFile ? null : (value) => setState(() => _allowApprovedPaperFiling = value),
                     )),
@@ -1007,48 +1019,52 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
                     const SizedBox(height: 16),
                     if (_entitlementBasis == LeaveEntitlementBasis.annual &&
                         _balanceLedgerType == 'none') ...[
-                      DropdownButtonFormField<String>(
-                        key: ValueKey('first-year-$_firstYearAllowance'),
-                        initialValue: _firstYearAllowance,
-                        isExpanded: true,
-                        decoration: _inputDecoration(
-                          'First-year allowance',
-                          helperText:
-                              'Proration uses months remaining in the hiring year, including the employed fraction of the hiring month. Rounded down to whole days; full allowance from January 1.',
+                      ProfileLabeledField(
+                        label: 'First-year allowance',
+                        child: DropdownButtonFormField<String>(
+                          key: ValueKey('first-year-$_firstYearAllowance'),
+                          initialValue: _firstYearAllowance,
+                          isExpanded: true,
+                          decoration: _inputDecoration(
+                            helperText:
+                                'Proration uses months remaining in the hiring year, including the employed fraction of the hiring month. Rounded down to whole days; full allowance from January 1.',
+                          ),
+                          items: const [
+                            DropdownMenuItem(
+                              value: 'full',
+                              child: Text('Full annual allowance'),
+                            ),
+                            DropdownMenuItem(
+                              value: 'prorated',
+                              child: Text('Prorate by date hired (whole days)'),
+                            ),
+                          ],
+                          onChanged: _saving || systemLocked
+                              ? null
+                              : (value) => setState(
+                                  () => _firstYearAllowance = value ?? 'full',
+                                ),
                         ),
-                        items: const [
-                          DropdownMenuItem(
-                            value: 'full',
-                            child: Text('Full annual allowance'),
-                          ),
-                          DropdownMenuItem(
-                            value: 'prorated',
-                            child: Text('Prorate by date hired (whole days)'),
-                          ),
-                        ],
-                        onChanged: _saving || systemLocked
-                            ? null
-                            : (value) => setState(
-                                () => _firstYearAllowance = value ?? 'full',
-                              ),
                       ),
                       const SizedBox(height: 16),
                     ],
-                    TextFormField(
-                      controller: _minimumServiceMonthsController,
-                      readOnly: _saving,
-                      style: AppTheme.dashFieldTextStyle(context),
-                      keyboardType: TextInputType.number,
-                      decoration: _inputDecoration(
-                        'Minimum months of service',
-                        helperText:
-                            'Blank or 0 means no requirement. Measured from date hired to the first leave date.',
+                    ProfileLabeledField(
+                      label: 'Minimum months of service',
+                      child: TextFormField(
+                        controller: _minimumServiceMonthsController,
+                        readOnly: _saving,
+                        style: AppTheme.dashFieldTextStyle(context),
+                        keyboardType: TextInputType.number,
+                        decoration: _inputDecoration(
+                          helperText:
+                              'Counted from the hire date to the first leave day. Enter 0 for no minimum.',
+                        ),
+                        validator: (value) =>
+                            _validateNonNegativeInteger(value) ??
+                            ((int.tryParse(value ?? '') ?? 0) > 1200
+                                ? 'Maximum is 1200 months'
+                                : null),
                       ),
-                      validator: (value) =>
-                          _validateNonNegativeInteger(value) ??
-                          ((int.tryParse(value ?? '') ?? 0) > 1200
-                              ? 'Maximum is 1200 months'
-                              : null),
                     ),
                     const SizedBox(height: 16),
                     LeaveEmploymentEligibilityField(
@@ -1064,98 +1080,109 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
                         value:
                             _sexEligibilityTypes[_sexEligibility] ??
                             leaveTypeSexEligibilityLabel(_sexEligibility),
-                        helperText:
-                            'Protected types keep their assigned eligibility rule.',
                       )
                     else
-                      DropdownButtonFormField<String>(
-                        key: ValueKey('sex-$_sexEligibility'),
-                        initialValue: _sexEligibility,
-                        isExpanded: true,
-                        dropdownColor: AppTheme.dashPanelOf(context),
-                        style: AppTheme.dashFieldTextStyle(context),
-                        decoration: _inputDecoration(
-                          'Employee sex eligibility',
-                          helperText:
-                              'Controls which employee accounts can file this leave type.',
-                        ),
-                        items: _sexEligibilityTypes.entries
-                            .map(
-                              (entry) => DropdownMenuItem(
-                                value: entry.key,
-                                child: Text(
-                                  entry.value,
-                                  style: AppTheme.dashFieldTextStyle(context),
+                      ProfileLabeledField(
+                        label: 'Employee sex eligibility',
+                        child: DropdownButtonFormField<String>(
+                          key: ValueKey('sex-$_sexEligibility'),
+                          initialValue: _sexEligibility,
+                          isExpanded: true,
+                          dropdownColor: AppTheme.dashPanelOf(context),
+                          style: AppTheme.dashFieldTextStyle(context),
+                          decoration: _inputDecoration(
+                            helperText:
+                                'Controls which employee accounts can file this leave type.',
+                          ),
+                          items: _sexEligibilityTypes.entries
+                              .map(
+                                (entry) => DropdownMenuItem(
+                                  value: entry.key,
+                                  child: Text(
+                                    entry.value,
+                                    style: AppTheme.dashFieldTextStyle(context),
+                                  ),
                                 ),
-                              ),
-                            )
-                            .toList(),
-                        onChanged: _saving
-                            ? null
-                            : (v) =>
-                                  setState(() => _sexEligibility = v ?? 'any'),
+                              )
+                              .toList(),
+                          onChanged: _saving
+                              ? null
+                              : (v) =>
+                                    setState(() => _sexEligibility = v ?? 'any'),
+                        ),
                       ),
                     const SizedBox(height: 16),
                     Row(
                       children: [
                         Expanded(
-                          child: TextFormField(
-                            controller: _minimumAdvanceDaysController,
-                            readOnly: _saving || systemLocked,
-                            style: AppTheme.dashFieldTextStyle(context),
-                            keyboardType: TextInputType.number,
-                            decoration: _inputDecoration(
-                              'Minimum advance days',
-                              helperText: 'Blank means no advance rule',
+                          child: ProfileLabeledField(
+                            label: 'Minimum advance days',
+                            child: TextFormField(
+                              controller: _minimumAdvanceDaysController,
+                              readOnly: _saving || systemLocked,
+                              style: AppTheme.dashFieldTextStyle(context),
+                              keyboardType: TextInputType.number,
+                              decoration: _inputDecoration(
+                                hintText: 'No advance period set',
+                                helperText: 'Calendar days before the leave starts.',
+                              ),
+                              validator: _validateNonNegativeInteger,
                             ),
-                            validator: _validateNonNegativeInteger,
                           ),
                         ),
                         const SizedBox(width: 12),
                         Expanded(
-                          child: TextFormField(
-                            controller: _maxDaysController,
-                            readOnly: _saving || systemLocked,
-                            style: AppTheme.dashFieldTextStyle(context),
-                            keyboardType: const TextInputType.numberWithOptions(
-                              decimal: true,
-                            ),
-                            decoration: _inputDecoration(
-                              'Max working days',
-                              helperText: 'Blank means no limit',
-                            ),
-                            validator: (value) => _validatePositiveNumber(
-                              value,
-                              label: 'Maximum working days',
+                          child: ProfileLabeledField(
+                            label: 'Max working days',
+                            child: TextFormField(
+                              controller: _maxDaysController,
+                              readOnly: _saving || systemLocked,
+                              style: AppTheme.dashFieldTextStyle(context),
+                              keyboardType: const TextInputType.numberWithOptions(
+                                decimal: true,
+                              ),
+                              decoration: _inputDecoration(
+                                hintText: 'No fixed day limit',
+                                helperText: 'Count working days only.',
+                              ),
+                              validator: (value) => _validatePositiveNumber(
+                                value,
+                                label: 'Maximum working days',
+                              ),
                             ),
                           ),
                         ),
                       ],
                     ),
                     const SizedBox(height: 12),
-                    TextFormField(
-                      controller: _attachmentOverDaysController,
-                      enabled:
-                          systemLocked || (!_saving && _requiresAttachment),
-                      readOnly: _saving || systemLocked || !_requiresAttachment,
-                      style: AppTheme.dashFieldTextStyle(context),
-                      keyboardType: const TextInputType.numberWithOptions(
-                        decimal: true,
+                    ProfileLabeledField(
+                      label: 'Attachment threshold (days)',
+                      child: TextFormField(
+                        controller: _attachmentOverDaysController,
+                        enabled:
+                            systemLocked || (!_saving && _requiresAttachment),
+                        readOnly: _saving || systemLocked || !_requiresAttachment,
+                        style: AppTheme.dashFieldTextStyle(context),
+                        keyboardType: const TextInputType.numberWithOptions(
+                          decimal: true,
+                        ),
+                        decoration: _inputDecoration(
+                          hintText: _requiresAttachment ? 'Required for every request' : 'Not required by default',
+                          helperText: systemLocked && _selected?.name == 'sickLeave'
+                              ? 'Protected rule: medical certificate required for more than 5 days.'
+                              : systemLocked
+                              ? null
+                              : _requiresAttachment
+                              ? 'Applies at this day count or above; empty means every request.'
+                              : 'Turn on Require attachment to set a day threshold',
+                        ),
+                        validator: _requiresAttachment
+                            ? (value) => _validatePositiveNumber(
+                                value,
+                                label: 'Attachment threshold days',
+                              )
+                            : null,
                       ),
-                      decoration: _inputDecoration(
-                        'Require attachment over days',
-                        helperText: systemLocked && _selected?.name == 'sickLeave'
-                            ? 'Protected rule: medical certificate required for more than 5 days.'
-                            : _requiresAttachment
-                            ? 'Optional threshold'
-                            : 'Turn on Require attachment first',
-                      ),
-                      validator: _requiresAttachment
-                          ? (value) => _validatePositiveNumber(
-                              value,
-                              label: 'Attachment threshold days',
-                            )
-                          : null,
                     ),
                   ]),
                   if (!systemLocked) ...[
@@ -1178,37 +1205,37 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
                         value:
                             _ledgerTypes[_balanceLedgerType] ??
                             'Does not use leave credits',
-                        helperText:
-                            'Protected types keep their assigned credit policy.',
                       )
                     else
-                      DropdownButtonFormField<String>(
-                        key: ValueKey(_balanceLedgerType),
-                        initialValue: _balanceLedgerType,
-                        isExpanded: true,
-                        dropdownColor: AppTheme.dashPanelOf(context),
-                        style: AppTheme.dashFieldTextStyle(context),
-                        decoration: _inputDecoration(
-                          'Credit handling',
-                          helperText:
-                              'Choose whether this type deducts VL/SL, has its own balance, or needs no credits.',
-                        ),
-                        items: _ledgerTypes.entries
-                            .map(
-                              (entry) => DropdownMenuItem(
-                                value: entry.key,
-                                child: Text(
-                                  entry.value,
-                                  style: AppTheme.dashFieldTextStyle(context),
+                      ProfileLabeledField(
+                        label: 'Credit handling',
+                        child: DropdownButtonFormField<String>(
+                          key: ValueKey(_balanceLedgerType),
+                          initialValue: _balanceLedgerType,
+                          isExpanded: true,
+                          dropdownColor: AppTheme.dashPanelOf(context),
+                          style: AppTheme.dashFieldTextStyle(context),
+                          decoration: _inputDecoration(
+                            helperText:
+                                'Choose whether this type deducts VL/SL, has its own balance, or needs no credits.',
+                          ),
+                          items: _ledgerTypes.entries
+                              .map(
+                                (entry) => DropdownMenuItem(
+                                  value: entry.key,
+                                  child: Text(
+                                    entry.value,
+                                    style: AppTheme.dashFieldTextStyle(context),
+                                  ),
                                 ),
-                              ),
-                            )
-                            .toList(),
-                        onChanged: _saving
-                            ? null
-                            : (v) => setState(
-                                () => _balanceLedgerType = v ?? 'none',
-                              ),
+                              )
+                              .toList(),
+                          onChanged: _saving
+                              ? null
+                              : (v) => setState(
+                                  () => _balanceLedgerType = v ?? 'none',
+                                ),
+                        ),
                       ),
                   ]),
                   const SizedBox(height: 16),
@@ -1290,7 +1317,7 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
           Expanded(
             child: Text(
               systemLocked
-                  ? 'Built-in rules are protected. You can save eligibility and approved paper recording settings.'
+                  ? 'Save your eligibility and paper recording changes.'
                   : isCreating
                   ? 'Create this leave type to make it available under the configured filing rules.'
                   : isSelectedActive
@@ -1416,54 +1443,60 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Expanded(
-                child: TextFormField(
-                  initialValue: field.label,
-                  readOnly: _saving,
-                  style: AppTheme.dashFieldTextStyle(context),
-                  decoration: _inputDecoration('Field label'),
-                  maxLength: 80,
-                  validator: (value) =>
-                      value == null || value.trim().isEmpty ? 'Required' : null,
-                  onChanged: (value) {
-                    final shouldUpdateKey = _autoCustomFieldUiIds.contains(
-                      _customFieldUiIds[index],
-                    );
-                    final nextKey = shouldUpdateKey
-                        ? _uniqueCustomFieldKey(value, excludingIndex: index)
-                        : field.key;
-                    _replaceCustomField(
-                      index,
-                      _updatedCustomField(field, label: value, key: nextKey),
-                    );
-                  },
+                child: ProfileLabeledField(
+                  label: 'Field label',
+                  child: TextFormField(
+                    initialValue: field.label,
+                    readOnly: _saving,
+                    style: AppTheme.dashFieldTextStyle(context),
+                    decoration: _inputDecoration(),
+                    maxLength: 80,
+                    validator: (value) =>
+                        value == null || value.trim().isEmpty ? 'Required' : null,
+                    onChanged: (value) {
+                      final shouldUpdateKey = _autoCustomFieldUiIds.contains(
+                        _customFieldUiIds[index],
+                      );
+                      final nextKey = shouldUpdateKey
+                          ? _uniqueCustomFieldKey(value, excludingIndex: index)
+                          : field.key;
+                      _replaceCustomField(
+                        index,
+                        _updatedCustomField(field, label: value, key: nextKey),
+                      );
+                    },
+                  ),
                 ),
               ),
               const SizedBox(width: 12),
               Expanded(
-                child: DropdownButtonFormField<LeaveCustomFieldType>(
-                  key: ValueKey('custom-type-${field.key}-${field.type}'),
-                  initialValue: field.type,
-                  isExpanded: true,
-                  dropdownColor: AppTheme.dashPanelOf(context),
-                  style: AppTheme.dashFieldTextStyle(context),
-                  decoration: _inputDecoration('Field type'),
-                  items: LeaveCustomFieldType.values
-                      .map(
-                        (type) => DropdownMenuItem(
-                          value: type,
-                          child: Text(type.displayName),
-                        ),
-                      )
-                      .toList(),
-                  onChanged: _saving
-                      ? null
-                      : (type) {
-                          if (type == null) return;
-                          _replaceCustomField(
-                            index,
-                            _updatedCustomField(field, type: type),
-                          );
-                        },
+                child: ProfileLabeledField(
+                  label: 'Field type',
+                  child: DropdownButtonFormField<LeaveCustomFieldType>(
+                    key: ValueKey('custom-type-${field.key}-${field.type}'),
+                    initialValue: field.type,
+                    isExpanded: true,
+                    dropdownColor: AppTheme.dashPanelOf(context),
+                    style: AppTheme.dashFieldTextStyle(context),
+                    decoration: _inputDecoration(),
+                    items: LeaveCustomFieldType.values
+                        .map(
+                          (type) => DropdownMenuItem(
+                            value: type,
+                            child: Text(type.displayName),
+                          ),
+                        )
+                        .toList(),
+                    onChanged: _saving
+                        ? null
+                        : (type) {
+                            if (type == null) return;
+                            _replaceCustomField(
+                              index,
+                              _updatedCustomField(field, type: type),
+                            );
+                          },
+                  ),
                 ),
               ),
             ],
@@ -1482,12 +1515,14 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
               ),
             ),
           ),
-          InputDecorator(
-            decoration: _inputDecoration(
-              'System key',
-              helperText: 'Generated from the label and stored with requests.',
+          ProfileLabeledField(
+            label: 'System key',
+            child: InputDecorator(
+              decoration: _inputDecoration(
+                helperText: 'Generated from the label and stored with requests.',
+              ),
+              child: Text(field.key, style: AppTheme.dashFieldTextStyle(context)),
             ),
-            child: Text(field.key, style: AppTheme.dashFieldTextStyle(context)),
           ),
           const SizedBox(height: 10),
           Material(
@@ -1508,66 +1543,71 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
           ),
           if (isText) ...[
             const SizedBox(height: 8),
-            TextFormField(
-              key: ValueKey('max-${field.key}-${field.type.value}'),
-              initialValue:
-                  (field.maxLength ??
-                          (field.type == LeaveCustomFieldType.longText
-                              ? 2000
-                              : 255))
-                      .toString(),
-              readOnly: _saving,
-              keyboardType: TextInputType.number,
-              style: AppTheme.dashFieldTextStyle(context),
-              decoration: _inputDecoration('Maximum characters'),
-              validator: (value) {
-                final parsed = int.tryParse(value?.trim() ?? '');
-                return parsed == null || parsed < 1 || parsed > 5000
-                    ? 'Enter 1 to 5000'
-                    : null;
-              },
-              onChanged: (value) => _replaceCustomField(
-                index,
-                _updatedCustomField(
-                  field,
-                  maxLength: int.tryParse(value.trim()),
+            ProfileLabeledField(
+              label: 'Maximum characters',
+              child: TextFormField(
+                key: ValueKey('max-${field.key}-${field.type.value}'),
+                initialValue:
+                    (field.maxLength ??
+                            (field.type == LeaveCustomFieldType.longText
+                                ? 2000
+                                : 255))
+                        .toString(),
+                readOnly: _saving,
+                keyboardType: TextInputType.number,
+                style: AppTheme.dashFieldTextStyle(context),
+                decoration: _inputDecoration(),
+                validator: (value) {
+                  final parsed = int.tryParse(value?.trim() ?? '');
+                  return parsed == null || parsed < 1 || parsed > 5000
+                      ? 'Enter 1 to 5000'
+                      : null;
+                },
+                onChanged: (value) => _replaceCustomField(
+                  index,
+                  _updatedCustomField(
+                    field,
+                    maxLength: int.tryParse(value.trim()),
+                  ),
                 ),
               ),
             ),
           ],
           if (field.type == LeaveCustomFieldType.select) ...[
             const SizedBox(height: 8),
-            TextFormField(
-              key: ValueKey('options-${field.key}'),
-              initialValue: field.options.join(', '),
-              readOnly: _saving,
-              style: AppTheme.dashFieldTextStyle(context),
-              decoration: _inputDecoration(
-                'Options',
-                helperText: 'Separate choices with commas.',
-              ),
-              validator: (value) {
-                final options = (value ?? '')
-                    .split(',')
-                    .map((item) => item.trim())
-                    .where((item) => item.isNotEmpty)
-                    .toList();
-                if (options.isEmpty) return 'Add at least one option';
-                if (options.length > 20) return 'Use at most 20 options';
-                if (options.any((option) => option.length > 80)) {
-                  return 'Each option must be 80 characters or less';
-                }
-                return null;
-              },
-              onChanged: (value) => _replaceCustomField(
-                index,
-                _updatedCustomField(
-                  field,
-                  options: value
+            ProfileLabeledField(
+              label: 'Options',
+              child: TextFormField(
+                key: ValueKey('options-${field.key}'),
+                initialValue: field.options.join(', '),
+                readOnly: _saving,
+                style: AppTheme.dashFieldTextStyle(context),
+                decoration: _inputDecoration(
+                  helperText: 'Separate choices with commas.',
+                ),
+                validator: (value) {
+                  final options = (value ?? '')
                       .split(',')
                       .map((item) => item.trim())
                       .where((item) => item.isNotEmpty)
-                      .toList(growable: false),
+                      .toList();
+                  if (options.isEmpty) return 'Add at least one option';
+                  if (options.length > 20) return 'Use at most 20 options';
+                  if (options.any((option) => option.length > 80)) {
+                    return 'Each option must be 80 characters or less';
+                  }
+                  return null;
+                },
+                onChanged: (value) => _replaceCustomField(
+                  index,
+                  _updatedCustomField(
+                    field,
+                    options: value
+                        .split(',')
+                        .map((item) => item.trim())
+                        .where((item) => item.isNotEmpty)
+                        .toList(growable: false),
+                  ),
                 ),
               ),
             ),
@@ -1577,10 +1617,18 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
     );
   }
 
-  InputDecoration _inputDecoration(String label, {String? helperText}) {
+  String get _dayLimitHelp => switch (_entitlementBasis) {
+    LeaveEntitlementBasis.accrual => 'Days are charged against the employee’s available leave credits.',
+    LeaveEntitlementBasis.annual => 'The day limit applies within each calendar year.',
+    LeaveEntitlementBasis.perEvent => 'The day limit applies to each qualifying event.',
+    LeaveEntitlementBasis.compliance => 'Days count toward the employee’s required annual leave.',
+    _ => 'The day limit applies to each leave request.',
+  };
+
+  InputDecoration _inputDecoration({String? helperText, String? hintText}) {
     return AppTheme.dashInputDecoration(
       context,
-      labelText: label,
+      hintText: hintText,
       helperText: helperText,
       radius: 8,
     );
@@ -1901,18 +1949,20 @@ class _ReadOnlyValue extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return InputDecorator(
-      decoration: AppTheme.dashInputDecoration(
-        context,
-        labelText: label,
-        helperText: helperText,
-        radius: 8,
-      ),
-      child: Text(
-        value,
-        style: TextStyle(
-          color: AppTheme.dashTextPrimaryOf(context),
-          fontWeight: FontWeight.w700,
+    return ProfileLabeledField(
+      label: label,
+      child: InputDecorator(
+        decoration: AppTheme.dashInputDecoration(
+          context,
+          helperText: helperText,
+          radius: 8,
+        ),
+        child: Text(
+          value,
+          style: TextStyle(
+            color: AppTheme.dashTextPrimaryOf(context),
+            fontWeight: FontWeight.w700,
+          ),
         ),
       ),
     );

@@ -4,6 +4,7 @@ import 'dart:async';
 import '../locator/designer_field_test_helpers.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
+import 'package:hrms_plaridel/shared/widgets/profile_modern_ui.dart' show ProfileLabeledField;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:file_picker/file_picker.dart';
 import 'dart:typed_data';
@@ -179,13 +180,36 @@ void main() {
     ApiClient.instance.dio.interceptors.clear();
   });
 
-  Finder textField(String label) =>
-      find.ancestor(of: find.text(label), matching: find.byType(TextFormField));
+  Finder labeledControl(String label, bool Function(Widget) matches) =>
+      find.byElementPredicate((element) {
+        if (!matches(element.widget)) return false;
+        final widget = element.widget;
+        if (widget is DropdownButtonFormField<String> &&
+            widget.decoration.labelText == label) {
+          return true;
+        }
+        var found = false;
+        element.visitAncestorElements((ancestor) {
+          final wrapper = ancestor.widget;
+          if (wrapper is ProfileLabeledField && wrapper.label == label) {
+            found = true;
+            return false;
+          }
+          return true;
+        });
+        if (found) {
+          return true;
+        }
+        // Shared guidance editors retain their existing inline labels.
+        return widget is TextFormField && find.ancestor(
+          of: find.text(label), matching: find.byType(TextFormField),
+        ).evaluate().contains(element);
+      });
 
-  Finder stringDropdown(String label) => find.byWidgetPredicate(
-    (widget) =>
-        widget is DropdownButtonFormField<String> &&
-        widget.decoration.labelText == label,
+  Finder textField(String label) => labeledControl(label, (w) => w is TextFormField);
+
+  Finder stringDropdown(String label) => labeledControl(
+    label, (w) => w is DropdownButtonFormField<String>,
   );
 
   Finder formScrollable() => find
@@ -234,6 +258,20 @@ void main() {
     'is_system': system, 'is_active': true,
   };
 
+  testWidgets('settings labels stay above the input border when focused', (tester) async {
+    rows = [existingType('existing')];
+    await mount(tester);
+    final field = textField('Leave type name');
+    final label = find.text('Leave type name');
+    final input = find.descendant(of: field, matching: find.byType(InputDecorator));
+    expect(tester.getBottomLeft(label).dy, lessThan(tester.getTopLeft(input).dy));
+    await tester.tap(field);
+    await tester.pumpAndSettle();
+    expect(tester.getBottomLeft(label).dy, lessThan(tester.getTopLeft(input).dy));
+    expect(tester.widget<InputDecorator>(input).decoration.labelText, isNull);
+    expect(tester.widget<InputDecorator>(input).decoration.label, isNull);
+  });
+
   testWidgets('minimum service can be saved and restored for a custom type', (
     tester,
   ) async {
@@ -268,7 +306,8 @@ void main() {
     await mount(tester);
     final field = stringDropdown('First-year allowance');
     await tester.scrollUntilVisible(field, 200, scrollable: formScrollable());
-    await tester.ensureVisible(field);
+    await Scrollable.ensureVisible(tester.element(field), alignment: .5);
+    await tester.pumpAndSettle();
     await tester.tap(field);
     await tester.pumpAndSettle();
     await tester.tap(find.text('Prorate by date hired (whole days)').last);
@@ -437,17 +476,17 @@ void main() {
       await mount(tester);
       await enterRequiredName(tester, 'Custom Filing');
       await tester.scrollUntilVisible(
-        stringDropdown('Who can file'),
+        stringDropdown('Who can submit'),
         250,
         scrollable: formScrollable(),
       );
       expect(find.text('Employees can file'), findsNothing);
       expect(find.text('HR/Admin only'), findsNothing);
       final dropdown = tester.widget<DropdownButtonFormField<String>>(
-        stringDropdown('Who can file'),
+        stringDropdown('Who can submit'),
       );
       expect(dropdown.initialValue, 'both');
-      await tester.tap(stringDropdown('Who can file'));
+      await tester.tap(stringDropdown('Who can submit'));
       await tester.pumpAndSettle();
       expect(find.text('Employee only'), findsWidgets);
       await tester.tap(find.text('Employee and HR/admin').last);
@@ -471,8 +510,8 @@ void main() {
   ) async {
     await mount(tester);
     for (final title in [
-      'Basic Information',
-      'Filing Requirements',
+      'Leave details',
+      'Filing rules',
       'Custom Form Fields',
       'Balance and DTR',
       'Approval workflow',
@@ -654,7 +693,7 @@ void main() {
       'requires_attachment':false, 'requires_attachment_when_over_days':5,
     }];
     await mount(tester);
-    final field = textField('Require attachment over days');
+    final field = textField('Attachment threshold (days)');
     await tester.ensureVisible(field);
     expect(tester.widget<TextFormField>(field).controller!.text, '5');
     expect(tester.widget<EditableText>(find.descendant(of:field,matching:find.byType(EditableText))).readOnly, true);
@@ -673,8 +712,10 @@ void main() {
     rows = [
       {
         'id': 'protected',
-        'name': 'vacationLeave',
-        'display_name': 'Vacation Leave',
+        'name': 'paternityLeave',
+        'display_name': 'Paternity Leave',
+        'description': 'Paternity Leave',
+        'requires_attachment': true,
         'is_system': true,
         'is_active': true,
         'eligible_employment_types': ['permanent'],
@@ -683,6 +724,13 @@ void main() {
     ];
     await mount(tester);
     expect(find.text('Save Settings'), findsOneWidget);
+    final description = textField('When to use this leave');
+    expect(tester.widget<TextFormField>(description).controller!.text, isNot('Paternity Leave'),
+        reason:'The protected description should explain the leave instead of repeating its name');
+    expect(tester.widget<EditableText>(find.descendant(of:description,matching:find.byType(EditableText))).readOnly,true);
+    final attachment = textField('Attachment threshold (days)');
+    expect(tester.widget<TextField>(find.descendant(of:attachment,matching:find.byType(TextField))).decoration?.hintText,'Required for every request');
+
     tester
         .widget<LeaveEmploymentEligibilityField>(
           find.byType(LeaveEmploymentEligibilityField),
@@ -714,8 +762,8 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.text('Require attachment'));
       await tester.pump();
-      await tester.ensureVisible(textField('Require attachment over days'));
-      await tester.enterText(textField('Require attachment over days'), '2');
+      await tester.ensureVisible(textField('Attachment threshold (days)'));
+      await tester.enterText(textField('Attachment threshold (days)'), '2');
 
       await tester.scrollUntilVisible(
         find.text('Add field'),
@@ -827,7 +875,7 @@ void main() {
     await tester.scrollUntilVisible(textField('Leave type name'), -250, scrollable: formScrollable());
     await tester.pumpAndSettle();
     await tester.enterText(textField('Leave type name'), 'Wellness Leave Updated');
-    await tester.tap(stringDropdown('Entitlement basis'));
+    await tester.tap(stringDropdown('How the day limit applies'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Annual entitlement').last);
     await tester.pumpAndSettle();

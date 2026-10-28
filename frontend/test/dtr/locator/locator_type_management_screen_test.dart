@@ -1,3 +1,4 @@
+import 'package:hrms_plaridel/shared/widgets/profile_modern_ui.dart' show ProfileLabeledField;
 import '../approvals/workflow_test_fixtures.dart';
 import 'designer_field_test_helpers.dart';
 import 'dart:async';
@@ -118,14 +119,39 @@ void main() {
     ApiClient.instance.dio.interceptors.clear();
   });
 
-  Finder textField(String label) =>
-      find.ancestor(of: find.text(label), matching: find.byType(TextFormField));
+  Finder labeledControl(String label, bool Function(Widget) matches) =>
+      find.byElementPredicate((element) {
+        if (!matches(element.widget)) return false;
+        final widget = element.widget;
+        if (widget is DropdownButtonFormField<String> &&
+            widget.decoration.labelText == label) {
+          return true;
+        }
+        var found = false;
+        element.visitAncestorElements((ancestor) {
+          final wrapper = ancestor.widget;
+          if (wrapper is ProfileLabeledField && wrapper.label == label) {
+            found = true;
+            return false;
+          }
+          return true;
+        });
+        if (found) {
+          return true;
+        }
+        // Shared guidance editors retain their existing inline labels.
+        return widget is TextFormField && find.ancestor(
+          of: find.text(label), matching: find.byType(TextFormField),
+        ).evaluate().contains(element);
+      });
 
-  Finder coverageDropdown() => find.byWidgetPredicate(
-    (widget) =>
-        widget is DropdownButtonFormField<String> &&
-        widget.decoration.labelText == 'Time coverage behavior',
+  Finder textField(String label) => labeledControl(label, (w) => w is TextFormField);
+
+  Finder stringDropdown(String label) => labeledControl(
+    label, (w) => w is DropdownButtonFormField<String>,
   );
+
+  Finder coverageDropdown() => stringDropdown('Time coverage behavior');
 
   Future<_FakeRealtimeProvider> mount(
     WidgetTester tester, {
@@ -148,6 +174,20 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
+    if (find.text('Could not load locator types').evaluate().isNotEmpty) {
+      return provider;
+    }
+    final scrollable = find.descendant(
+      of: find.byType(ListView).last, matching: find.byType(Scrollable),
+    ).first;
+    // Visit routing explicitly; taller external labels can put it outside
+    // ListView's initial build cache.
+    await tester.scrollUntilVisible(stringDropdown('Select workflow'), 250,
+      scrollable: scrollable);
+    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(textField('System code'), -250,
+      scrollable: scrollable);
+    await tester.pumpAndSettle();
     return provider;
   }
 
@@ -158,6 +198,19 @@ void main() {
     await tester.enterText(textField('DTR display text'), 'Remote');
     await tester.enterText(textField('DTR print text'), 'REMOTE');
   }
+  testWidgets('locator settings labels remain above input borders on focus', (tester) async {
+    await mount(tester);
+    final field = textField('Request type name');
+    final label = find.text('Request type name');
+    final input = find.descendant(of: field, matching: find.byType(InputDecorator));
+    expect(tester.getBottomLeft(label).dy, lessThan(tester.getTopLeft(input).dy));
+    await tester.tap(field);
+    await tester.pumpAndSettle();
+    expect(tester.getBottomLeft(label).dy, lessThan(tester.getTopLeft(input).dy));
+    expect(tester.widget<InputDecorator>(input).decoration.labelText, isNull);
+    expect(tester.widget<InputDecorator>(input).decoration.label, isNull);
+  });
+
   testWidgets('designer-created locator field appears in type fields and saves its print binding', (tester) async {
     await mount(tester);await enterRequiredFields(tester);
     final scrollable=find.descendant(of:find.byType(ListView).last,matching:find.byType(Scrollable)).first;
@@ -477,11 +530,7 @@ void main() {
     await tester.enterText(textField('Sort order'), '30');
     tester
         .widget<DropdownButtonFormField<String>>(
-          find.byWidgetPredicate(
-            (w) =>
-                w is DropdownButtonFormField<String> &&
-                w.decoration.labelText == 'Who can file',
-          ),
+          stringDropdown('Who can file'),
         )
         .onChanged!('admin');
     await tester.pump();
