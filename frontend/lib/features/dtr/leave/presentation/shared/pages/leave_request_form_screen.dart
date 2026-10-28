@@ -984,13 +984,14 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
         status == LeaveRequestStatus.returned;
   }
 
-  /// Visible only when an attachment is mandatory: sick leave ≥5 working days,
+  /// Visible only when an attachment is mandatory: sick leave >5 working days,
   /// or any non–sick type with [LeaveType.requiresAttachment].
   bool _shouldShowAttachmentSection() {
     if (_hasPaperReview) return false;
     if (_isStaffFiling) return true;
     if (_leaveType == LeaveType.sickLeave) {
-      return (_currentWorkingDaysApplied ?? 0) >= 5;
+      final days = _currentWorkingDaysApplied ?? 0;
+      return _selectedLeaveTypeDefinition?.requiresAttachmentForDays(days) ?? days > 5;
     }
     return _selectedRequiresAttachment;
   }

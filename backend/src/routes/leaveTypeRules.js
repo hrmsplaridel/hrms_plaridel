@@ -7,7 +7,7 @@
  * - admin_only: Only admin/HR can create; blocks employee submission
  * - allows_past_dates: Past-date filing allowed
  * - requires_attachment: Supporting document required (TODO: enforce when upload is implemented)
- * - requires_attachment_when_over_days: Supporting document required if working days >= this value
+ * - requires_attachment_when_over_days: Custom types use >=; Sick Leave uses > its five-day threshold.
  * - max_days: Maximum working days for this leave type (null = no limit)
  * - minimum_advance_days: Minimum calendar days before start date for employee filing (null = no limit)
  * - special_process_only: Not normal DTR leave; HR/admin process (e.g. monetization, terminal)
@@ -832,7 +832,7 @@ function mustBlockMissingAttachment(rule, leaveType, days, hasAttachment) {
     if (!Number.isFinite(requestedDays) || !Number.isFinite(threshold)) {
       return false;
     }
-    return requestedDays >= threshold;
+    return leaveType === 'sickLeave' ? requestedDays > threshold : requestedDays >= threshold;
   }
 
   return !!rule.requires_attachment;

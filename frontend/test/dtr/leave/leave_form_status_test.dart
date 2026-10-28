@@ -97,6 +97,7 @@ Future<void> _openForm(
   bool signed = false,
   LeaveRequestAction? onSubmit,
   Map<String, dynamic>? serviceEligibility,
+  double? workingDays,
 }) async {
   ApiClient.instance.init();
   ApiClient.instance.dio.interceptors.insert(
@@ -104,13 +105,13 @@ Future<void> _openForm(
     InterceptorsWrapper(
       onRequest: (options, handler) {
         if (options.path == '/api/leave/working-days' &&
-            serviceEligibility != null) {
+            (serviceEligibility != null || workingDays != null)) {
           handler.resolve(
             Response(
               requestOptions: options,
               statusCode: 200,
               data: {
-                'working_days_applied': 1,
+                'working_days_applied': workingDays ?? 1,
                 'service_eligibility': serviceEligibility,
               },
             ),
@@ -178,6 +179,24 @@ Future<void> _openForm(
 }
 
 void main() {
+  for (final days in [5.0,6.0]) {
+    testWidgets('Sick Leave attachment section follows the five-day boundary: $days', (tester) async {
+      ApiClient.instance.init();
+      ApiClient.instance.dio.interceptors.clear();
+      LeaveTypeDefinitionCache.instance.invalidate();
+      ApiClient.instance.dio.interceptors.add(InterceptorsWrapper(onRequest:(o,h)=>h.reject(DioException(requestOptions:o))));
+      final date = _futureWorkingDate();
+      final initial = draft.copyWith(startDate:date,endDate:date.add(const Duration(days:8)),workingDaysApplied:days,
+          sickLeaveNature:SickLeaveNature.outPatient,sickIllnessDetails:'Fever');
+      await _openForm(tester,_Repository(),initial:initial,workingDays:days);
+      await tester.pumpAndSettle();
+      expect(find.text('Attachments'),days>5?findsOneWidget:findsNothing);
+      expect(tester.takeException(),isNull);
+      await tester.pumpWidget(const SizedBox.shrink());
+      ApiClient.instance.dio.interceptors.clear();
+      LeaveTypeDefinitionCache.instance.invalidate();
+    });
+  }
   testWidgets(
     'service requirement blocks submission before signing or saving',
     (tester) async {

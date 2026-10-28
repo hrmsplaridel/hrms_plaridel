@@ -180,9 +180,9 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
     _allowApprovedPaperFiling = item.allowApprovedPaperFiling;
     _allowsPastDates = item.allowsPastDates;
     _requiresAttachment = item.requiresAttachment;
-    _attachmentOverDaysController.text = _requiresAttachment
-        ? item.requiresAttachmentWhenOverDays?.toString() ?? ''
-        : '';
+    final threshold = item.requiresAttachmentWhenOverDays ?? (item.name == 'sickLeave' ? 5 : null);
+    _attachmentOverDaysController.text = threshold == null ? ''
+        : threshold % 1 == 0 ? threshold.toInt().toString() : threshold.toString();
     _affectsDtrNormally = item.affectsDtrNormally;
     _balanceLedgerType = _ledgerTypes.containsKey(item.balanceLedgerType)
         ? item.balanceLedgerType
@@ -1144,7 +1144,9 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
                       ),
                       decoration: _inputDecoration(
                         'Require attachment over days',
-                        helperText: _requiresAttachment
+                        helperText: systemLocked && _selected?.name == 'sickLeave'
+                            ? 'Protected rule: medical certificate required for more than 5 days.'
+                            : _requiresAttachment
                             ? 'Optional threshold'
                             : 'Turn on Require attachment first',
                       ),

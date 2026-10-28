@@ -1961,12 +1961,12 @@ class _LeaveRequestPrintLayoutState extends State<LeaveRequestPrintLayout> {
         return false;
       }
       final wd = _workingDaysApplied;
-      if (wd != null && wd >= 5) {
+      if (wd != null && wd > 5) {
         final cur = _savedRequest ?? widget.initialRequest;
         final hasAtt = (cur?.attachmentName ?? '').trim().isNotEmpty;
         if (!hasAtt) {
           _showMessage(
-            'Sick leave of 5 or more working days requires a medical certificate. '
+            'Sick leave of more than 5 working days requires a medical certificate. '
             'Save as draft, upload the document, then submit.',
           );
           return false;

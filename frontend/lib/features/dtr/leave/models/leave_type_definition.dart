@@ -150,6 +150,14 @@ class LeaveTypeDefinition {
   final bool allowsPastDates;
   final bool requiresAttachment;
   final double? requiresAttachmentWhenOverDays;
+
+  bool requiresAttachmentForDays(num days) {
+    final threshold = requiresAttachmentWhenOverDays ?? (name == 'sickLeave' ? 5 : null);
+    if (threshold != null) {
+      return name == 'sickLeave' ? days > threshold : days >= threshold;
+    }
+    return requiresAttachment;
+  }
   final double? maxDays;
   final int? minimumAdvanceDays;
   final int minimumServiceMonths;

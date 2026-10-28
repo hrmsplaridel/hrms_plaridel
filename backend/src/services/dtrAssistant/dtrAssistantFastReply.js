@@ -1392,15 +1392,18 @@ function balanceFormulaLine(b, language = 'english') {
 
 function attachmentRequiredForType(type, days) {
   if (!type) return false;
-  const threshold = asNumber(type.requires_attachment_when_over_days);
-  if (threshold != null && days != null) return days >= threshold;
+  const threshold = asNumber(type.requires_attachment_when_over_days) ?? (type.name === 'sickLeave' ? 5 : null);
+  if (threshold != null && days != null) return require('../../routes/leaveTypeRules').mustBlockMissingAttachment(type,type.name,days,false);
   return type.requires_attachment === true;
 }
 
 function attachmentRuleText(type, days) {
-  const threshold = asNumber(type.requires_attachment_when_over_days);
+  const threshold = asNumber(type.requires_attachment_when_over_days) ?? (type.name === 'sickLeave' ? 5 : null);
   if (threshold != null) {
-    const requiredNow = days != null && days >= threshold;
+    const requiredNow = days != null && (type.name === 'sickLeave' ? days > threshold : days >= threshold);
+    if (type.name === 'sickLeave') return requiredNow
+      ? `attachment (medical certificate) required because the request is more than ${fmtDayCount(threshold)}`
+      : `attachment (medical certificate) required when filing more than ${fmtDayCount(threshold)}`;
     return requiredNow
       ? `attachment required because the request reaches ${fmtDayCount(threshold)}`
       : `attachment required when filing ${fmtDayCount(threshold)} or more`;
@@ -1409,10 +1412,16 @@ function attachmentRuleText(type, days) {
 }
 
 function localizedAttachmentRuleText(type, days, language) {
-  const threshold = asNumber(type.requires_attachment_when_over_days);
+  const threshold = asNumber(type.requires_attachment_when_over_days) ?? (type.name === 'sickLeave' ? 5 : null);
   if (threshold != null) {
     const count = fmtLocalizedDayCount(threshold, language);
-    const requiredNow = days != null && days >= threshold;
+    const requiredNow = days != null && (type.name === 'sickLeave' ? days > threshold : days >= threshold);
+    if (type.name === 'sickLeave' && language === 'bisaya') return requiredNow
+      ? `kinahanglan ug attachment (medical certificate) kay molapas sa ${count} ang request`
+      : `kinahanglan lang ug attachment (medical certificate) kung molapas sa ${count} ang i-file`;
+    if (type.name === 'sickLeave' && language === 'tagalog') return requiredNow
+      ? `kailangan ng attachment (medical certificate) dahil lampas sa ${count} ang request`
+      : `kailangan lang ng attachment (medical certificate) kapag lampas sa ${count} ang i-file`;
     if (language === 'bisaya') {
       return requiredNow
         ? `kinahanglan ug attachment kay niabot sa ${count} ang request`

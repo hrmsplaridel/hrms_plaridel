@@ -18,7 +18,7 @@ const GUIDELINES = {
     description:
       'Granted when an employee is unable to report due to personal illness, injury, or medical appointment.',
     requirements:
-      'Choose In Hospital or Out Patient and enter illness details. Medical certificate required if the absence is 5 or more consecutive days, or at the discretion of the head of office.',
+      'Choose In Hospital or Out Patient and enter illness details. Medical certificate required if the absence is more than 5 days, or at the discretion of the head of office.',
     advanceFiling: 'Apply immediately upon return or during absence if possible.',
   },
   maternityLeave: {
@@ -195,7 +195,7 @@ const GUIDELINE_SECTIONS = [
     title: 'Supporting Documents',
     aliases: ['supporting', 'supporting documents', 'attachments', 'attachment', 'documents', 'docs'],
     points: [
-      'Sick leave normally needs a medical certificate for 5 or more consecutive days, or when required by the head of office.',
+      'Sick leave normally needs a medical certificate for more than 5 days, or when required by the head of office.',
       'Maternity, paternity, solo parent, VAWC, calamity, rehabilitation, adoption, and special women leave commonly need supporting documents.',
       'Some leave types also require form details before submission, such as location, illness nature, delivery date, placement date, VAWC case details, or Solo Parent ID validity.',
     ],
@@ -291,7 +291,7 @@ const FORM_FIELD_GUIDANCE = {
     'Select Sick Leave.',
     'Enter the absence dates and number of days.',
     'Choose In Hospital or Out Patient, then enter illness details.',
-    'Attach a medical certificate when required, especially for 5 or more consecutive days.',
+    'Attach a medical certificate when required, especially for more than 5 days.',
   ],
   maternityLeave: [
     'Select Maternity Leave.',

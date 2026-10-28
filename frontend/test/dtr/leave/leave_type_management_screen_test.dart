@@ -648,6 +648,25 @@ void main() {
     },
   );
 
+  testWidgets('protected Sick Leave displays its conditional threshold while always-required is off', (tester) async {
+    rows = [{
+      'id':'protected-sick', 'name':'sickLeave', 'display_name':'Sick Leave', 'is_system':true, 'is_active':true,
+      'requires_attachment':false, 'requires_attachment_when_over_days':5,
+    }];
+    await mount(tester);
+    final field = textField('Require attachment over days');
+    await tester.ensureVisible(field);
+    expect(tester.widget<TextFormField>(field).controller!.text, '5');
+    expect(tester.widget<EditableText>(find.descendant(of:field,matching:find.byType(EditableText))).readOnly, true);
+    expect(find.text('Protected rule: medical certificate required for more than 5 days.'), findsOneWidget);
+    expect(find.text('Turn on Require attachment first'), findsNothing);
+    await tester.tap(find.text('Save Settings'));
+    await tester.pumpAndSettle();
+    final write = requests.firstWhere((request) => request.method == 'PUT');
+    expect((write.data as Map).containsKey('requires_attachment_when_over_days'),false,
+        reason:'Saving allowed settings must not erase the protected threshold');
+  });
+
   testWidgets('protected type saves only employment eligibility', (
     tester,
   ) async {

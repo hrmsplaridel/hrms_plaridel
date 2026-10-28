@@ -1,6 +1,17 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
+test('Sick Leave assistant guidance uses the exclusive five-day boundary', () => {
+  const context={leave_types:[{name:'sickLeave',display_name:'Sick Leave',employee_can_file:true,requires_attachment:false,requires_attachment_when_over_days:5}]};
+  for(const days of [4,5]){
+    const reply=buildFastEmployeeAssistantReply(`what attachment for ${days} days sick leave?`,context,'leave_attachment_requirement');
+    assert.match(reply,/more than 5 days/i);
+    assert.doesNotMatch(reply,/required because/i);
+  }
+  const reply=buildFastEmployeeAssistantReply('what attachment for 6 days sick leave?',context,'leave_attachment_requirement');
+  assert.match(reply,/required because/i);
+});
+
 const {
   detectEmployeeAssistantIntent,
   isLeaveCreditRequirementQuestion,
@@ -365,7 +376,8 @@ test('DTR assistant regression: leave form field help gives safe examples in the
   );
   assert.match(attachment, /Supporting Attachment/i);
   assert.match(attachment, /Medical certificate/i);
-  assert.match(attachment, /required because the request reaches 5 days/i);
+  assert.match(attachment, /required when filing more than 5 days/i);
+  assert.doesNotMatch(attachment, /required because/i);
 
   const commutation = buildFastEmployeeAssistantReply(
     'What is Commutation leave of request?',
@@ -1525,7 +1537,7 @@ test('DTR assistant regression: language restyle follow-ups keep previous HRMS a
   );
 
   assert.match(reply, /Mao ni ang attachment rule/i);
-  assert.match(reply, /kinahanglan ug attachment/i);
+  assert.match(reply, /kinahanglan (?:lang )?ug attachment/i);
   assert.doesNotMatch(reply, /Leave balance/i);
 
   assert.equal(
@@ -1559,7 +1571,7 @@ test('DTR assistant regression: language restyle follow-ups keep previous HRMS a
   );
 
   assert.match(tagalogReply, /Ito ang attachment rule/i);
-  assert.match(tagalogReply, /kailangan ng attachment/i);
+  assert.match(tagalogReply, /kailangan (?:lang )?ng attachment/i);
   assert.doesNotMatch(tagalogReply, /Mao ni ang attachment rule/i);
 });
 
@@ -4298,7 +4310,7 @@ test('DTR assistant regression: calendar dates are not mistaken for leave day co
     'leave_attachment_requirement'
   );
 
-  assert.match(reply, /required when filing 5 days or more/i);
+  assert.match(reply, /required when filing more than 5 days/i);
   assert.doesNotMatch(reply, /request reaches 5 days/i);
 });
 
