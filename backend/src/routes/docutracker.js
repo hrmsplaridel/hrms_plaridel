@@ -18,8 +18,10 @@ const {
   nativeDocumentContentIsLocked,
   nativeDocumentContentLockMessage,
   updateDocumentMetadata,
+  listRecoveryCandidates,
   recoverDocumentAssignment,
   describeViewerReleaseAccess,
+  typeRequiresRelease,
 } = require('../services/docutrackerWorkflowService');
 const {
   getReleaseOptions,
@@ -1601,9 +1603,16 @@ router.get('/documents/:id', protect, async (req, res) => {
       user: req.user,
       document: docRow,
     });
+    const typeRequiresReleaseFlag = docRow.source_module
+      ? false
+      : await typeRequiresRelease(pool, docRow.document_type);
 
     res.json({
-      document: mapDocumentRow({ ...docRow, ...releaseFlags }),
+      document: mapDocumentRow({
+        ...docRow,
+        ...releaseFlags,
+        type_requires_release: typeRequiresReleaseFlag,
+      }),
       routing: routingResult.rows,
       history: historyResult.rows,
     });
@@ -1652,6 +1661,21 @@ router.get('/permission-explain', protect, async (req, res) => {
   } catch (err) {
     console.error('[docutracker GET /permission-explain]', err);
     return res.status(500).json({ error: 'Failed to explain permission' });
+  }
+});
+
+/**
+ * GET /api/docutracker/documents/:id/recovery-candidates
+ * Admin-only read of the reviewers the current step can be reassigned to.
+ */
+router.get('/documents/:id/recovery-candidates', protect, requireAdmin, async (req, res) => {
+  try {
+    const candidates = await listRecoveryCandidates(pool, req.user, req.params.id);
+    return res.json(candidates);
+  } catch (err) {
+    console.error('[docutracker GET /documents/:id/recovery-candidates]', err);
+    const mapped = mapWorkflowServiceError(err);
+    return res.status(mapped.status).json({ error: mapped.error });
   }
 });
 

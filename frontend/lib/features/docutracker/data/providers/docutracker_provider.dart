@@ -919,6 +919,34 @@ class DocuTrackerProvider extends ChangeNotifier {
     return _isCurrentAuthGeneration(authGeneration);
   }
 
+  /// Reassigns the current step through the existing admin recovery route,
+  /// then reloads the document and its full history. Returns the backend
+  /// error message when the reassignment is rejected.
+  Future<String?> recoverDocumentAssignment({
+    required String documentId,
+    required String assigneeId,
+    required String remarks,
+  }) async {
+    final authGeneration = _authGeneration;
+    final result = await _repo.recoverDocumentAssignment(
+      documentId: documentId,
+      currentHolderId: assigneeId,
+      remarks: remarks,
+    );
+    if (!_isCurrentAuthGeneration(authGeneration)) {
+      return 'The session changed before recovery finished.';
+    }
+    switch (result) {
+      case DocuTrackerFailure<DocuTrackerDocument>(:final message):
+        return message.isEmpty
+            ? 'The assignment could not be recovered.'
+            : message;
+      case DocuTrackerSuccess<DocuTrackerDocument>():
+        await refreshDocument(documentId, reloadHistory: true);
+        return null;
+    }
+  }
+
   /// Refresh a single document from backend and update local state.
   /// Useful when server-side workflows (escalation worker) update status/holder.
   Future<void> refreshDocument(

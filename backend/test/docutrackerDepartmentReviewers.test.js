@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const {
   canUserPerformDocumentAction,
   getEffectivePermissionExplanation,
+  listRecoveryCandidates,
   parseSteps,
   recoverDocumentAssignment,
   resolveStepAssignees,
@@ -264,15 +265,32 @@ const MEMO_ROUTING = {
   ],
 };
 
-function memoPool({ document, directory = {}, storedAssigneeFor = null, routing = MEMO_ROUTING }) {
+function memoPool({
+  document,
+  directory = {},
+  storedAssigneeFor = null,
+  routing = MEMO_ROUTING,
+  requiresRelease = false,
+}) {
   const directoryHandle = reviewerDirectoryHandler(directory);
   const calls = [];
   const client = {
     async query(sql, params = []) {
       calls.push({ sql, params });
       const text = String(sql);
-      if (text.includes('SELECT * FROM docutracker_documents WHERE id = $1 FOR UPDATE')) {
+      if (text.includes('SELECT * FROM docutracker_documents WHERE id = $1')) {
         return { rowCount: 1, rows: [{ ...document }] };
+      }
+      if (text.includes('SET release_required')) {
+        return {
+          rowCount: 1,
+          rows: [{
+            ...document,
+            status: 'approved',
+            current_holder_id: null,
+            release_required: true,
+          }],
+        };
       }
       if (text.includes('UPDATE docutracker_documents')) {
         return {
@@ -305,6 +323,11 @@ function memoPool({ document, directory = {}, storedAssigneeFor = null, routing 
       }
       if (text.includes('routing_config')) {
         return { rowCount: 1, rows: [routing] };
+      }
+      if (text.includes('FROM docutracker_document_types')) {
+        return requiresRelease
+          ? { rowCount: 1, rows: [{ requires_release: true }] }
+          : { rowCount: 0, rows: [] };
       }
       if (text.includes('FROM docutracker_permissions')) {
         return {
@@ -428,10 +451,11 @@ test('specific-person steps keep their configured assignee, including the creato
 
 // --- One active department reviewer; backups are fallback candidates ---
 
-function inReviewMemo({ createdBy, holder }) {
+function inReviewMemo({ createdBy, holder, ...overrides }) {
   return {
     id: 'doc-memo', document_type: 'memo', workflow_version: 1, status: 'in_review',
     current_step: 1, created_by: createdBy, current_holder_id: holder, title: 'Memo',
+    ...overrides,
   };
 }
 
@@ -809,3 +833,273 @@ test('escalation notifies the creator only when configured, and never the backup
   assert.equal(creatorNotice.params[2], 'escalated');
   assert.equal(result.notifiedUsers.includes('eng-backup-2'), false);
 });
+
+function notificationBodies(calls) {
+  return calls
+    .filter((call) => String(call.sql).includes('INSERT INTO docutracker_notifications'))
+    .map((call) => ({
+      userId: call.params[1],
+      type: call.params[2],
+      title: call.params[4],
+      body: call.params[5],
+    }));
+}
+
+test('submit, approve, forward, and return notifications describe the actual event', async () => {
+  const submitted = memoPool({
+    document: {
+      id: 'doc-memo', document_type: 'memo', workflow_version: 1, status: 'draft',
+      current_step: 1, created_by: 'eng-staff', current_holder_id: null, title: 'Supply request',
+    },
+  });
+  await transitionDocument(
+    submitted.pool,
+    { id: 'eng-staff', role: 'employee' },
+    'doc-memo',
+    'submit',
+    {}
+  );
+  const submitNotes = notificationBodies(submitted.calls);
+  assert.equal(submitNotes.length, 1);
+  assert.equal(submitNotes[0].userId, 'eng-head');
+  assert.equal(submitNotes[0].title, 'Document submitted for your review');
+  assert.match(submitNotes[0].body, /submitted and requires your review/);
+  assert.equal(submitNotes[0].body.includes('forwarded'), false);
+
+  const approved = memoPool({
+    document: inReviewMemo({ createdBy: 'eng-staff', holder: 'eng-head', title: 'Supply request' }),
+  });
+  await transitionDocument(
+    approved.pool,
+    { id: 'eng-head', role: 'employee' },
+    'doc-memo',
+    'approve',
+    {}
+  );
+  const approveNotes = notificationBodies(approved.calls);
+  assert.equal(approveNotes.length, 1);
+  assert.equal(approveNotes[0].userId, 'mayor-1');
+  assert.match(approveNotes[0].body, /approved at the previous step/);
+  assert.match(approveNotes[0].body, /requires your review/);
+  assert.equal(approveNotes[0].body.includes('forwarded'), false);
+  assert.equal(approveNotes[0].body.toLowerCase().includes('final'), false);
+  const approveHistory = approved.calls.find((call) =>
+    String(call.sql).includes('INSERT INTO docutracker_document_history')
+  );
+  assert.equal(approveHistory.params.includes('approved'), true);
+
+  const forwarded = memoPool({
+    document: inReviewMemo({ createdBy: 'eng-staff', holder: 'eng-head', title: 'Supply request' }),
+    routing: {
+      ...MEMO_ROUTING,
+      steps: [
+        { ...MEMO_ROUTING.steps[0], allowed_actions: ['approve', 'forward', 'return', 'reject'] },
+        MEMO_ROUTING.steps[1],
+      ],
+    },
+  });
+  await transitionDocument(
+    forwarded.pool,
+    { id: 'eng-head', role: 'employee' },
+    'doc-memo',
+    'forward',
+    {}
+  );
+  const forwardNotes = notificationBodies(forwarded.calls);
+  assert.equal(forwardNotes.length, 1);
+  assert.equal(forwardNotes[0].userId, 'mayor-1');
+  assert.match(forwardNotes[0].body, /forwarded to the next workflow step/);
+  assert.equal(forwardNotes[0].body.toLowerCase().includes('approved'), false);
+  const forwardHistory = forwarded.calls.find((call) =>
+    String(call.sql).includes('INSERT INTO docutracker_document_history')
+  );
+  assert.equal(forwardHistory.params.includes('forwarded'), true);
+
+  const returned = memoPool({
+    document: inReviewMemo({
+      createdBy: 'eng-staff',
+      holder: 'mayor-1',
+      title: 'Supply request',
+      current_step: 2,
+    }),
+  });
+  await transitionDocument(
+    returned.pool,
+    { id: 'mayor-1', role: 'employee' },
+    'doc-memo',
+    'return',
+    {}
+  );
+  const returnNotes = notificationBodies(returned.calls);
+  assert.equal(returnNotes.length, 1);
+  assert.equal(returnNotes[0].type, 'returned');
+  assert.match(returnNotes[0].body, /returned for your review/);
+  assert.equal(returnNotes[0].body.toLowerCase().includes('edit'), false);
+  assert.equal(returnNotes[0].body.toLowerCase().includes('resubmit'), false);
+  const returnHistory = returned.calls.find((call) =>
+    String(call.sql).includes('INSERT INTO docutracker_document_history')
+  );
+  assert.equal(returnHistory.params.includes('returned'), true);
+});
+
+test('final approval notifies nobody new and records release only when the type requires it', async () => {
+  const document = inReviewMemo({
+    createdBy: 'eng-staff',
+    holder: 'mayor-1',
+    title: 'Supply request',
+    current_step: 2,
+    document_type: 'letter',
+  });
+
+  const withoutRelease = memoPool({ document });
+  const finished = await transitionDocument(
+    withoutRelease.pool,
+    { id: 'mayor-1', role: 'employee' },
+    'doc-memo',
+    'approve',
+    {}
+  );
+  assert.equal(finished.status, 'approved');
+  assert.equal(finished.release_required, false);
+  assert.equal(notificationBodies(withoutRelease.calls).length, 0);
+  assert.equal(
+    withoutRelease.calls.some((call) => String(call.sql).includes('SET release_required')),
+    false
+  );
+  const finishedHistory = withoutRelease.calls.find((call) =>
+    String(call.sql).includes('INSERT INTO docutracker_document_history')
+  );
+  assert.equal(finishedHistory.params.includes('approved'), true);
+
+  const withRelease = memoPool({ document, requiresRelease: true });
+  const awaiting = await transitionDocument(
+    withRelease.pool,
+    { id: 'mayor-1', role: 'employee' },
+    'doc-memo',
+    'approve',
+    {}
+  );
+  assert.equal(awaiting.status, 'approved');
+  assert.equal(awaiting.release_required, true);
+  assert.equal(notificationBodies(withRelease.calls).length, 0);
+  assert.equal(
+    withRelease.calls.filter((call) => String(call.sql).includes('SET release_required')).length,
+    1
+  );
+});
+
+
+function recoveryDocument(overrides = {}) {
+  return {
+    id: 'doc-memo',
+    document_type: 'memo',
+    workflow_version: 1,
+    status: 'overdue',
+    current_step: 1,
+    created_by: 'eng-staff',
+    current_holder_id: 'eng-head',
+    title: 'Supply request',
+    ...overrides,
+  };
+}
+
+test('submitter-department recovery lists the resolved department and eligible backups', async () => {
+  const { pool, calls } = memoPool({ document: recoveryDocument() });
+  const listed = await listRecoveryCandidates(pool, { id: 'admin-1', role: 'admin' }, 'doc-memo');
+
+  assert.equal(listed.department_name, 'Engineering');
+  assert.equal(listed.assignee_source, 'submitter_department_reviewers');
+  assert.equal(listed.current_holder_id, 'eng-head');
+  assert.deepEqual(listed.candidates.map((person) => person.user_id), ['eng-backup-1', 'eng-backup-2']);
+  assert.equal(listed.candidates[0].role_label, 'Backup 1');
+  assert.equal(listed.candidates[1].role_label, 'Backup 2');
+  assert.equal(listed.message, null);
+  assert.equal(
+    calls.some((call) => String(call.sql).includes('u.is_active = true')),
+    true
+  );
+});
+
+test('submitter-department recovery excludes the creator and the current holder', async () => {
+  const { pool } = memoPool({
+    document: recoveryDocument({
+      created_by: 'eng-head',
+      current_holder_id: 'eng-backup-1',
+    }),
+  });
+  const listed = await listRecoveryCandidates(pool, { id: 'admin-1', role: 'admin' }, 'doc-memo');
+
+  assert.deepEqual(listed.candidates.map((person) => person.user_id), ['eng-backup-2']);
+  assert.equal(listed.candidates.some((person) => person.user_id === 'eng-head'), false);
+  assert.equal(listed.candidates.some((person) => person.user_id === 'eng-backup-1'), false);
+});
+
+test('an inactive primary is absent and an exhausted step explains that nobody can replace the holder', async () => {
+  const inactivePrimary = memoPool({
+    document: recoveryDocument(),
+    directory: { primary: null },
+  });
+  const withoutPrimary = await listRecoveryCandidates(
+    inactivePrimary.pool,
+    { id: 'admin-1', role: 'admin' },
+    'doc-memo'
+  );
+  assert.equal(withoutPrimary.candidates.some((person) => person.user_id === 'eng-head'), false);
+  assert.deepEqual(withoutPrimary.candidates.map((person) => person.user_id), ['eng-backup-1', 'eng-backup-2']);
+
+  const exhausted = memoPool({
+    document: recoveryDocument(),
+    directory: { backups: [] },
+  });
+  const none = await listRecoveryCandidates(
+    exhausted.pool,
+    { id: 'admin-1', role: 'admin' },
+    'doc-memo'
+  );
+  assert.deepEqual(none.candidates, []);
+  assert.match(none.message, /No eligible replacement reviewer/);
+});
+
+test('employees cannot list recovery candidates', async () => {
+  const { pool, calls } = memoPool({ document: recoveryDocument() });
+  await assert.rejects(
+    () => listRecoveryCandidates(pool, { id: 'eng-staff', role: 'employee' }, 'doc-memo'),
+    (error) => error.code === 'FORBIDDEN'
+  );
+  assert.equal(calls.some((call) => String(call.sql).includes('docutracker_documents')), false);
+});
+
+test('a listed backup can be recovered, and a stale creator target is rejected', async () => {
+  const document = recoveryDocument({ created_by: 'eng-staff', current_holder_id: 'eng-head' });
+  const listedPool = memoPool({ document });
+  const listed = await listRecoveryCandidates(
+    listedPool.pool,
+    { id: 'admin-1', role: 'admin' },
+    'doc-memo'
+  );
+  assert.equal(listed.candidates[0].user_id, 'eng-backup-1');
+
+  const stale = memoPool({ document });
+  await assert.rejects(
+    () => recoverDocumentAssignment(stale.pool, { id: 'admin-1', role: 'admin' }, 'doc-memo', {
+      current_holder_id: 'eng-staff',
+      remarks: 'Give it back to the creator',
+    }),
+    /not configured for the current workflow step/
+  );
+  assert.equal(stale.calls.some((call) => String(call.sql).includes('UPDATE docutracker_documents')), false);
+
+  const { pool, calls } = memoPool({ document });
+  await recoverDocumentAssignment(pool, { id: 'admin-1', role: 'admin' }, 'doc-memo', {
+    current_holder_id: 'eng-backup-1',
+    remarks: 'Primary reviewer unavailable',
+  });
+  const history = calls.find((call) => String(call.sql).includes('INSERT INTO docutracker_document_history'));
+  assert.equal(history.params.includes('assigned'), true);
+  assert.equal(history.params.includes('Primary reviewer unavailable'), true);
+  const notified = calls.filter((call) => String(call.sql).includes('INSERT INTO docutracker_notifications'));
+  assert.equal(notified.length, 1);
+  assert.equal(notified[0].params.includes('eng-backup-1'), true);
+  assert.equal(calls.some((call) => call.sql === 'COMMIT'), true);
+});
+

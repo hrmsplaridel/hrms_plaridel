@@ -585,6 +585,41 @@ class DocuTrackerRepository implements DocuTrackerPermissionsDataSource {
     }
   }
 
+  /// Admin recovery. The body is only the current reviewer and the reason.
+  Future<DocuTrackerResult<DocuTrackerDocument>> recoverDocumentAssignment({
+    required String documentId,
+    required String currentHolderId,
+    required String remarks,
+  }) async {
+    try {
+      final res = await ApiClient.instance.patch<Map<String, dynamic>>(
+        '$_base/documents/$documentId',
+        data: {'current_holder_id': currentHolderId, 'remarks': remarks},
+      );
+      final data = res.data;
+      if (data == null) {
+        return const DocuTrackerFailure('The assignment was not recovered');
+      }
+      return DocuTrackerSuccess(DocuTrackerDocument.fromJson(data));
+    } catch (error) {
+      return DocuTrackerFailure(_apiErrorMessage(error));
+    }
+  }
+
+  /// Admin-only read of the reviewers the current step can be reassigned to.
+  Future<DocuTrackerResult<Map<String, dynamic>>> getRecoveryCandidates(
+    String documentId,
+  ) async {
+    try {
+      final res = await ApiClient.instance.get<Map<String, dynamic>>(
+        '$_base/documents/$documentId/recovery-candidates',
+      );
+      return DocuTrackerSuccess(res.data ?? const {});
+    } catch (error) {
+      return DocuTrackerFailure(_apiErrorMessage(error));
+    }
+  }
+
   Future<DocuTrackerResult<DocuTrackerDocument>> getDocument(String id) async {
     try {
       final res = await ApiClient.instance.get<Map<String, dynamic>>(
@@ -602,25 +637,47 @@ class DocuTrackerRepository implements DocuTrackerPermissionsDataSource {
     }
   }
 
-  Future<List<DocumentRoutingRecord>> getDocumentRoutingRecords(
-    String id,
-  ) async {
+  Future<({List<DocumentRoutingRecord> routing, bool? typeRequiresRelease})>
+  getDocumentRoutingView(String id) async {
     try {
       final res = await ApiClient.instance.get<Map<String, dynamic>>(
         '$_base/documents/$id',
       );
       final routing = res.data?['routing'];
-      if (routing is! List) return const [];
-      return routing
-          .map(
-            (e) => DocumentRoutingRecord.fromJson(
-              Map<String, dynamic>.from(e as Map),
-            ),
-          )
-          .toList();
+      final document = res.data?['document'];
+      bool? typeRequiresRelease;
+      if (document is Map && document.containsKey('type_requires_release')) {
+        typeRequiresRelease = document['type_requires_release'] == true;
+      }
+      if (routing is! List) {
+        return (
+          routing: const <DocumentRoutingRecord>[],
+          typeRequiresRelease: typeRequiresRelease,
+        );
+      }
+      return (
+        routing: routing
+            .map(
+              (e) => DocumentRoutingRecord.fromJson(
+                Map<String, dynamic>.from(e as Map),
+              ),
+            )
+            .toList(),
+        typeRequiresRelease: typeRequiresRelease,
+      );
     } catch (_) {
-      return const [];
+      return (
+        routing: const <DocumentRoutingRecord>[],
+        typeRequiresRelease: null,
+      );
     }
+  }
+
+  Future<List<DocumentRoutingRecord>> getDocumentRoutingRecords(
+    String id,
+  ) async {
+    final view = await getDocumentRoutingView(id);
+    return view.routing;
   }
 
   Future<DocuTrackerResult<DocuTrackerDocument>> createDocument(

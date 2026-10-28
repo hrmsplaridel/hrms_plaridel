@@ -27,22 +27,33 @@ String? docuTrackerApprovedWorkflowDetail(DocuTrackerDocument document) {
       'it is distributed to the receiving department.';
 }
 
-/// Final-step approve confirmation when [releaseRequired] still applies.
+/// Final-step approve confirmation. [typeRequiresRelease] is the document
+/// type policy, which is known before approval. The document's own
+/// release flag is set only when final approval succeeds.
 ({String title, String message, String confirmLabel})
-docuTrackerFinalApproveConfirmCopy({required bool releaseRequired}) {
-  if (releaseRequired) {
+docuTrackerFinalApproveConfirmCopy({required bool? typeRequiresRelease}) {
+  if (typeRequiresRelease == true) {
     return (
       title: 'Approve final step?',
       message:
-          'This completes workflow approval. The document must still be '
-          'released before it is distributed to the receiving department.',
+          'This finishes workflow approval. Distribution still requires a '
+          'release before the receiving department can receive it.',
       confirmLabel: 'Approve',
     );
   }
+  if (typeRequiresRelease == false) {
+    return (
+      title: 'Approve and complete?',
+      message:
+          'This finishes workflow approval. This document type does not '
+          'require a release.',
+      confirmLabel: 'Approve and Complete',
+    );
+  }
   return (
-    title: 'Approve and complete?',
-    message: 'This completes the workflow.',
-    confirmLabel: 'Approve and Complete',
+    title: 'Approve final step?',
+    message: 'This finishes workflow approval.',
+    confirmLabel: 'Approve',
   );
 }
 

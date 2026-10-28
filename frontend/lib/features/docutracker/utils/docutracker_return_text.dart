@@ -25,6 +25,27 @@ const String docuTrackerReturnDialogExplanation =
 
 const String docuTrackerReturnReasonLabel = 'Reason for return (optional)';
 
+const String docuTrackerApproveContinueTitle = 'Approve and continue?';
+
+const String docuTrackerApproveContinueMessage =
+    'Approval advances this document to the next workflow step. '
+    'It does not finish the workflow.';
+
+const String docuTrackerApproveContinueLabel = 'Approve and Continue';
+
+const String docuTrackerForwardConfirmTitle = 'Forward without approval?';
+
+const String docuTrackerForwardConfirmMessage =
+    'Forward moves this document to the next workflow step. '
+    'It does not record an approval decision.';
+
+const String docuTrackerForwardConfirmLabel = 'Forward';
+
+const String docuTrackerRejectDialogTitle = 'Reject document';
+
+const String docuTrackerRejectDialogExplanation =
+    'This stops the workflow. A reason is required.';
+
 const String docuTrackerReturnSuccessMessage =
     'Document returned to the previous step.';
 

@@ -6,6 +6,7 @@ import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/providers/auth_provider.dart';
 import 'package:hrms_plaridel/features/docutracker/data/providers/docutracker_provider.dart';
 import 'package:hrms_plaridel/features/docutracker/data/styles/docutracker_styles.dart';
+import 'package:hrms_plaridel/features/docutracker/data/dto/docutracker_api_result.dart';
 import 'package:hrms_plaridel/features/docutracker/data/repositories/docutracker_repository.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document_action.dart';
@@ -31,10 +32,15 @@ import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/d
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_error_banner.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_release_section.dart';
 import 'package:hrms_plaridel/features/docutracker/utils/docutracker_content_lock.dart';
+import 'package:hrms_plaridel/features/docutracker/utils/docutracker_action_feedback.dart';
 import 'package:hrms_plaridel/features/docutracker/utils/docutracker_release_text.dart';
 import 'package:hrms_plaridel/features/docutracker/utils/docutracker_return_text.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_returned_info_card.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_content_lock_banner.dart';
+import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_admin_recovery_card.dart';
+import 'package:hrms_plaridel/features/docutracker/utils/docutracker_admin_recovery.dart';
+import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_workflow_step_strip.dart';
+import 'package:hrms_plaridel/features/docutracker/utils/docutracker_workflow_progress.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_responsive_body.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_status_badge.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_source_signature_card.dart';
@@ -72,6 +78,7 @@ class _DocuTrackerDocumentDetailScreenState
   Timer? _pollTimer;
   List<DocumentRoutingRecord> _routingRecords = const [];
   bool _routingLoading = true;
+  bool? _typeRequiresRelease;
 
   DocuTrackerDocument _resolveDocForView(DocuTrackerProvider provider) {
     final docId = widget.document.id;
@@ -389,7 +396,9 @@ class _DocuTrackerDocumentDetailScreenState
         return;
       }
 
-      _routingRecords = await repo.getDocumentRoutingRecords(docId);
+      final routingView = await repo.getDocumentRoutingView(docId);
+      _routingRecords = routingView.routing;
+      _typeRequiresRelease = routingView.typeRequiresRelease;
       if (mounted) setState(() => _routingLoading = false);
 
       if (!widget.isAdmin &&
@@ -440,7 +449,9 @@ class _DocuTrackerDocumentDetailScreenState
         final docId = widget.document.id!;
 
         await provider.refreshDocument(docId, reloadHistory: true);
-        _routingRecords = await repo.getDocumentRoutingRecords(docId);
+        final routingView = await repo.getDocumentRoutingView(docId);
+        _routingRecords = routingView.routing;
+        _typeRequiresRelease = routingView.typeRequiresRelease;
         if (!mounted) return;
         DocuTrackerDocument? updatedDoc;
         for (final d in provider.documents) {
@@ -476,12 +487,32 @@ class _DocuTrackerDocumentDetailScreenState
     showDocuTrackerProviderError(context, provider, fallback: fallback);
   }
 
-  void _onWorkflowActionSuccess(String message) {
+  Future<void> _onWorkflowActionSuccess(
+    String message, {
+    bool leaveScreen = false,
+  }) async {
     if (!mounted) return;
+    final provider = context.read<DocuTrackerProvider>();
+    final auth = context.read<AuthProvider>();
+    final docId = widget.document.id;
+    if (docId != null && !leaveScreen) {
+      final routingView = await DocuTrackerRepository.instance
+          .getDocumentRoutingView(docId);
+      if (!mounted) return;
+      _routingRecords = routingView.routing;
+      _typeRequiresRelease = routingView.typeRequiresRelease;
+      await _refreshEffectivePermissions(
+        doc: _resolveDocForView(provider),
+        auth: auth,
+        isAdmin: widget.isAdmin,
+      );
+    }
+    if (!mounted) return;
+    setState(() {});
     ScaffoldMessenger.of(
       context,
     ).showSnackBar(SnackBar(content: Text(message)));
-    Navigator.of(context).pop();
+    if (leaveScreen) Navigator.of(context).pop();
   }
 
   DocuTrackerWorkflowPhase _workflowPhaseFor(
@@ -758,6 +789,9 @@ class _DocuTrackerDocumentDetailScreenState
                   final leftColumn = Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
+                      if (_buildAdminRecoveryCard(doc, provider)
+                          case final recoveryCard?)
+                        recoveryCard,
                       _buildWorkflowSection(doc, provider, userId),
                       const SizedBox(height: 24),
                       _buildHistorySection(provider, doc, userId),
@@ -803,6 +837,9 @@ class _DocuTrackerDocumentDetailScreenState
                         actionsCard,
                         const SizedBox(height: 24),
                       ],
+                      if (_buildAdminRecoveryCard(doc, provider)
+                          case final recoveryCard?)
+                        recoveryCard,
                       _buildWorkflowSection(doc, provider, userId),
                       const SizedBox(height: 24),
                       if (doc.releaseRequired) ...[
@@ -845,7 +882,12 @@ class _DocuTrackerDocumentDetailScreenState
         doc.status == DocumentStatus.rejected ||
         doc.status == DocumentStatus.cancelled;
     final currentStepValue = switch (doc.status) {
-      DocumentStatus.approved => 'Completed at Step ${doc.currentStep ?? 1}',
+      DocumentStatus.approved =>
+        doc.isReleased
+            ? 'Released'
+            : doc.isAwaitingRelease
+            ? 'Approved · Awaiting release'
+            : 'Completed at Step ${doc.currentStep ?? 1}',
       DocumentStatus.rejected => 'Stopped at Step ${doc.currentStep ?? 1}',
       DocumentStatus.cancelled => 'Cancelled',
       DocumentStatus.returned => 'Returned to Step ${doc.currentStep ?? 1}',
@@ -929,6 +971,10 @@ class _DocuTrackerDocumentDetailScreenState
         : currentStepValue;
     final stepSub = isDraft
         ? 'Draft stage'
+        : doc.isReleased
+        ? 'Approved'
+        : doc.isAwaitingRelease
+        ? 'Approval complete'
         : isTerminal
         ? doc.status.displayName
         : phase.label;
@@ -940,6 +986,10 @@ class _DocuTrackerDocumentDetailScreenState
         : currentAssigneeValue;
     final assigneeSub = isDraft
         ? 'Document owner'
+        : doc.isReleased
+        ? 'Released'
+        : doc.isAwaitingRelease
+        ? 'Awaiting release'
         : backupNames.isNotEmpty
         ? 'Backup: ${backupNames.join(', ')}'
         : (isTerminal ? 'Workflow finished' : 'Current reviewer');
@@ -1361,6 +1411,7 @@ class _DocuTrackerDocumentDetailScreenState
     final department = released.releasedToDepartmentName;
     _onWorkflowActionSuccess(
       department == null ? 'Document released' : 'Released to $department',
+      leaveScreen: true,
     );
   }
 
@@ -1427,50 +1478,15 @@ class _DocuTrackerDocumentDetailScreenState
     );
   }
 
-  void _showWorkflowMapDialog(List<WorkflowStep> steps, int current) {
+  void _showWorkflowMapDialog(List<DocuTrackerStepProgress> progress) {
     showDialog<void>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Workflow map'),
         content: SizedBox(
-          width: 360,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              for (final s in steps) ...[
-                Row(
-                  children: [
-                    CircleAvatar(
-                      radius: 14,
-                      backgroundColor: s.stepOrder == current
-                          ? DocuTrackerTokens.brand
-                          : s.stepOrder < current
-                          ? DocuTrackerTokens.brandSoftOf(ctx)
-                          : DocuTrackerTokens.borderSubtleOf(ctx),
-                      child: Text(
-                        '${s.stepOrder}',
-                        style: TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w800,
-                          color: s.stepOrder == current
-                              ? Colors.white
-                              : DocuTrackerTokens.textSecondaryOf(ctx),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Text(
-                        s.label ?? 'Step ${s.stepOrder}',
-                        style: const TextStyle(fontWeight: FontWeight.w600),
-                      ),
-                    ),
-                  ],
-                ),
-                if (s != steps.last) const SizedBox(height: 10),
-              ],
-            ],
+          width: 420,
+          child: SingleChildScrollView(
+            child: DocuTrackerWorkflowMapList(progress: progress),
           ),
         ),
         actions: [
@@ -1481,6 +1497,121 @@ class _DocuTrackerDocumentDetailScreenState
         ],
       ),
     );
+  }
+
+  Widget? _buildAdminRecoveryCard(
+    DocuTrackerDocument doc,
+    DocuTrackerProvider provider,
+  ) {
+    if (!docuTrackerShowAdminRecoveryNotice(doc)) return null;
+    final currentStep = doc.currentStep ?? 1;
+    final stepName =
+        (_routingConfigFor(provider, doc)?.steps ?? const <WorkflowStep>[])
+            .where((step) => step.enabled && step.stepOrder == currentStep)
+            .map((step) => step.label?.trim() ?? '')
+            .firstWhere((label) => label.isNotEmpty, orElse: () => '');
+    final reviewer = doc.assigneeName?.trim();
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 24),
+      child: DocuTrackerAdminRecoveryCard(
+        showAction: docuTrackerShowAdminRecoveryAction(
+          doc: doc,
+          isAdmin: widget.isAdmin,
+        ),
+        documentNumber: doc.documentNumber?.trim() ?? '',
+        documentTitle: doc.title,
+        stepLabel: stepName.isEmpty
+            ? 'Step $currentStep'
+            : 'Step $currentStep · $stepName',
+        currentReviewer: reviewer == null || reviewer.isEmpty
+            ? 'Unassigned'
+            : reviewer,
+        reason: docuTrackerAdminRecoveryReason(
+          provider.documentHistory.where((entry) => entry.documentId == doc.id),
+        ),
+        loadOptions: () => _loadRecoveryOptions(doc),
+        onSubmit: (candidate, remarks) =>
+            _submitRecovery(doc, candidate, remarks),
+      ),
+    );
+  }
+
+  Future<DocuTrackerRecoveryOptions> _loadRecoveryOptions(
+    DocuTrackerDocument doc,
+  ) async {
+    final documentId = doc.id?.trim() ?? '';
+    if (documentId.isEmpty) {
+      return const DocuTrackerRecoveryOptions(
+        candidates: [],
+        message: 'This document cannot be recovered.',
+      );
+    }
+    final result = await DocuTrackerRepository.instance.getRecoveryCandidates(
+      documentId,
+    );
+    return switch (result) {
+      DocuTrackerFailure(:final message) => DocuTrackerRecoveryOptions(
+        candidates: const [],
+        message: message.isEmpty
+            ? 'Eligible reviewers could not be loaded.'
+            : message,
+      ),
+      DocuTrackerSuccess(:final value) => docuTrackerRecoveryOptionsFromJson(
+        value,
+      ),
+    };
+  }
+
+  Future<String?> _submitRecovery(
+    DocuTrackerDocument doc,
+    DocuTrackerRecoveryCandidate candidate,
+    String remarks,
+  ) async {
+    final documentId = doc.id?.trim() ?? '';
+    if (documentId.isEmpty) return 'This document cannot be recovered.';
+    final provider = context.read<DocuTrackerProvider>();
+    final error = await provider.recoverDocumentAssignment(
+      documentId: documentId,
+      assigneeId: candidate.userId,
+      remarks: remarks,
+    );
+    if (error != null) {
+      if (!mounted) return error;
+      try {
+        await provider.refreshDocument(documentId, reloadHistory: true);
+        if (!mounted) return error;
+        _routingRecords = await DocuTrackerRepository.instance
+            .getDocumentRoutingRecords(documentId);
+      } catch (_) {
+        // The dialog still shows the recovery error and reloads candidates.
+      }
+      if (mounted) setState(() {});
+      return error;
+    }
+    if (!mounted) return null;
+    final auth = context.read<AuthProvider>();
+    final isAdmin = widget.isAdmin;
+    try {
+      _routingRecords = await DocuTrackerRepository.instance
+          .getDocumentRoutingRecords(documentId);
+      if (!mounted) return null;
+      await _refreshEffectivePermissions(
+        doc: _resolveDocForView(provider),
+        auth: auth,
+        isAdmin: isAdmin,
+      );
+    } catch (refreshError) {
+      if (!mounted) return null;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Assignment recovered, but the workflow view could not refresh: $refreshError',
+          ),
+        ),
+      );
+    }
+    if (mounted) setState(() {});
+    return null;
   }
 
   Widget _buildWorkflowSection(
@@ -1515,17 +1646,21 @@ class _DocuTrackerDocumentDetailScreenState
           snapshotAssigneeIds: currentRouting?.assigneeIds ?? const [],
           singleReviewerStep: singleReviewerStep,
         );
-    final phase = _workflowPhaseFor(doc, provider);
-    final stepSubtitle = phase.detail ?? phase.label;
+    final progress = docuTrackerWorkflowProgress(
+      doc: doc,
+      steps: steps,
+      history: provider.documentHistory,
+      currentReviewerName: doc.assigneeName,
+    );
 
     return DocuTrackerDetailSectionCard(
       icon: Icons.account_tree_outlined,
       title: 'Workflow & Routing',
-      subtitle: stepSubtitle,
+      subtitle: 'Recorded progress for each workflow step',
       trailing: steps.isEmpty
           ? null
           : TextButton(
-              onPressed: () => _showWorkflowMapDialog(steps, current),
+              onPressed: () => _showWorkflowMapDialog(progress),
               style: TextButton.styleFrom(
                 foregroundColor: DocuTrackerTokens.brand,
                 textStyle: const TextStyle(
@@ -1538,12 +1673,8 @@ class _DocuTrackerDocumentDetailScreenState
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          if (steps.isNotEmpty) ...[
-            _WorkflowStepStrip(
-              steps: steps,
-              document: doc,
-              history: provider.documentHistory,
-            ),
+          if (progress.isNotEmpty) ...[
+            DocuTrackerWorkflowStepStrip(progress: progress),
             const SizedBox(height: 20),
           ],
           _CurrentAssignmentCard(
@@ -1603,8 +1734,11 @@ class _DocuTrackerDocumentDetailScreenState
                     );
                     if (!mounted) return;
                     if (ok) {
-                      _onWorkflowActionSuccess(
-                        'Document submitted successfully.',
+                      await _onWorkflowActionSuccess(
+                        docuTrackerWorkflowActionMessage(
+                          action: 'submit',
+                          document: _resolveDocForView(provider),
+                        ),
                       );
                     } else {
                       _showActionError(
@@ -1634,16 +1768,18 @@ class _DocuTrackerDocumentDetailScreenState
                 : () async {
                     final finalCopy = isFinalStep
                         ? docuTrackerFinalApproveConfirmCopy(
-                            releaseRequired: doc.releaseRequired,
+                            typeRequiresRelease: _typeRequiresRelease,
                           )
                         : null;
                     final confirmed = await _confirmWorkflowAction(
-                      title: finalCopy?.title ?? 'Approve and continue?',
+                      title:
+                          finalCopy?.title ?? docuTrackerApproveContinueTitle,
                       message:
                           finalCopy?.message ??
-                          'This sends the document to the next workflow step.',
+                          docuTrackerApproveContinueMessage,
                       confirmLabel:
-                          finalCopy?.confirmLabel ?? 'Approve and Continue',
+                          finalCopy?.confirmLabel ??
+                          docuTrackerApproveContinueLabel,
                     );
                     if (!confirmed || !mounted) return;
                     final ok = await provider.approveDocument(
@@ -1653,7 +1789,12 @@ class _DocuTrackerDocumentDetailScreenState
                     );
                     if (!mounted) return;
                     if (ok) {
-                      _onWorkflowActionSuccess('Document approved.');
+                      await _onWorkflowActionSuccess(
+                        docuTrackerWorkflowActionMessage(
+                          action: 'approve',
+                          document: _resolveDocForView(provider),
+                        ),
+                      );
                     } else {
                       _showActionError(
                         provider,
@@ -1682,6 +1823,12 @@ class _DocuTrackerDocumentDetailScreenState
             onPressed: provider.loading
                 ? null
                 : () async {
+                    final confirmed = await _confirmWorkflowAction(
+                      title: docuTrackerForwardConfirmTitle,
+                      message: docuTrackerForwardConfirmMessage,
+                      confirmLabel: docuTrackerForwardConfirmLabel,
+                    );
+                    if (!confirmed || !mounted) return;
                     final ok = await provider.forwardDocument(
                       doc,
                       actionBy: userId,
@@ -1691,7 +1838,12 @@ class _DocuTrackerDocumentDetailScreenState
                     );
                     if (!mounted) return;
                     if (ok) {
-                      _onWorkflowActionSuccess('Document forwarded.');
+                      await _onWorkflowActionSuccess(
+                        docuTrackerWorkflowActionMessage(
+                          action: 'forward',
+                          document: _resolveDocForView(provider),
+                        ),
+                      );
                     } else {
                       _showActionError(
                         provider,
@@ -1758,8 +1910,11 @@ class _DocuTrackerDocumentDetailScreenState
                                 );
                                 if (!mounted) return;
                                 if (ok) {
-                                  _onWorkflowActionSuccess(
-                                    docuTrackerReturnSuccessMessage,
+                                  await _onWorkflowActionSuccess(
+                                    docuTrackerWorkflowActionMessage(
+                                      action: 'return',
+                                      document: _resolveDocForView(provider),
+                                    ),
                                   );
                                 } else {
                                   _showActionError(
@@ -1795,16 +1950,29 @@ class _DocuTrackerDocumentDetailScreenState
                       await showDialog<void>(
                         context: context,
                         builder: (ctx) => AlertDialog(
-                          title: const Text('Reject document'),
-                          content: TextField(
-                            controller: remarkCtrl,
-                            autofocus: true,
-                            decoration: DocuTrackerStyles.inputDecoration(
-                              context,
-                              'Reason for rejection (required)',
-                              Icons.cancel_rounded,
-                            ),
-                            maxLines: 3,
+                          title: const Text(docuTrackerRejectDialogTitle),
+                          content: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                docuTrackerRejectDialogExplanation,
+                                style: DocuTrackerTokens.subtitleStyle(
+                                  ctx,
+                                ).copyWith(fontSize: 13),
+                              ),
+                              const SizedBox(height: 12),
+                              TextField(
+                                controller: remarkCtrl,
+                                autofocus: true,
+                                decoration: DocuTrackerStyles.inputDecoration(
+                                  context,
+                                  'Reason for rejection (required)',
+                                  Icons.cancel_rounded,
+                                ),
+                                maxLines: 3,
+                              ),
+                            ],
                           ),
                           actions: [
                             OutlinedButton(
@@ -1826,8 +1994,11 @@ class _DocuTrackerDocumentDetailScreenState
                                 );
                                 if (!mounted) return;
                                 if (ok) {
-                                  _onWorkflowActionSuccess(
-                                    'Document rejected.',
+                                  await _onWorkflowActionSuccess(
+                                    docuTrackerWorkflowActionMessage(
+                                      action: 'reject',
+                                      document: _resolveDocForView(provider),
+                                    ),
                                   );
                                 } else {
                                   _showActionError(
@@ -2258,10 +2429,12 @@ class _DocuTrackerDocumentDetailScreenState
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         for (var i = 0; i < steps.length; i++) ...[
-                          _WorkflowStepNode(
-                            order: steps[i].stepOrder,
-                            label: steps[i].label,
-                            indicator: steps[i].indicator,
+                          DocuTrackerWorkflowStepNode(
+                            step: DocuTrackerStepProgress(
+                              order: steps[i].stepOrder,
+                              name: steps[i].label,
+                              indicator: steps[i].indicator,
+                            ),
                           ),
                           if (i < steps.length - 1)
                             Container(
@@ -2345,176 +2518,6 @@ String _getInitials(String name) {
     return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
   }
   return parts[0][0].toUpperCase();
-}
-
-class _WorkflowStepStrip extends StatelessWidget {
-  const _WorkflowStepStrip({
-    required this.steps,
-    required this.document,
-    required this.history,
-  });
-
-  final List<WorkflowStep> steps;
-  final DocuTrackerDocument document;
-  final List<DocumentHistoryEntry> history;
-
-  @override
-  Widget build(BuildContext context) {
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            for (var i = 0; i < steps.length; i++) ...[
-              _WorkflowStepNode(
-                order: steps[i].stepOrder,
-                label: steps[i].label ?? 'Step ${steps[i].stepOrder}',
-                indicator: DocuTrackerWorkflowPhase.indicatorForStep(
-                  doc: document,
-                  stepOrder: steps[i].stepOrder,
-                  history: history,
-                ),
-              ),
-              if (i < steps.length - 1)
-                Container(
-                  margin: const EdgeInsets.only(top: 14, left: 4, right: 4),
-                  width: 40,
-                  height: 2,
-                  color:
-                      DocuTrackerWorkflowPhase.indicatorForStep(
-                        doc: document,
-                        stepOrder: steps[i].stepOrder,
-                        history: history,
-                      ).isCompleted
-                      ? DocuTrackerTokens.brand
-                      : DocuTrackerTokens.borderStrongOf(context),
-                ),
-            ],
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _WorkflowStepNode extends StatelessWidget {
-  const _WorkflowStepNode({
-    required this.order,
-    required this.label,
-    required this.indicator,
-  });
-
-  final int order;
-  final String label;
-  final DocuTrackerStepIndicator indicator;
-
-  @override
-  Widget build(BuildContext context) {
-    final isCurrent = indicator.kind == DocuTrackerStepIndicatorKind.current;
-    final isDone = indicator.isCompleted;
-    final isReturned = indicator.kind == DocuTrackerStepIndicatorKind.returned;
-    final isRejected = indicator.kind == DocuTrackerStepIndicatorKind.rejected;
-    final isOverdue = indicator.kind == DocuTrackerStepIndicatorKind.overdue;
-    final isEscalated =
-        indicator.kind == DocuTrackerStepIndicatorKind.escalated;
-    final isCancelled =
-        indicator.kind == DocuTrackerStepIndicatorKind.cancelled;
-
-    final statusColor = switch (indicator.kind) {
-      DocuTrackerStepIndicatorKind.approved => const Color(0xFF047857),
-      DocuTrackerStepIndicatorKind.forwarded => DocuTrackerTokens.brand,
-      DocuTrackerStepIndicatorKind.returned => const Color(0xFFB45309),
-      DocuTrackerStepIndicatorKind.rejected => const Color(0xFFB91C1C),
-      DocuTrackerStepIndicatorKind.overdue => const Color(0xFFDC2626),
-      DocuTrackerStepIndicatorKind.escalated => const Color(0xFF7C3AED),
-      DocuTrackerStepIndicatorKind.cancelled => DocuTrackerTokens.textMutedOf(
-        context,
-      ),
-      DocuTrackerStepIndicatorKind.current => DocuTrackerTokens.brand,
-      _ => DocuTrackerTokens.textMutedOf(context),
-    };
-    final labelColor = DocuTrackerTokens.toneOf(context, statusColor);
-    final emphasized =
-        isCurrent ||
-        isDone ||
-        isReturned ||
-        isRejected ||
-        isOverdue ||
-        isEscalated ||
-        isCancelled;
-    final nodeColor = emphasized
-        ? statusColor
-        : DocuTrackerTokens.insetOf(context);
-    final borderColor = emphasized
-        ? statusColor
-        : DocuTrackerTokens.borderStrongOf(context);
-
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Container(
-          width: 34,
-          height: 34,
-          decoration: BoxDecoration(
-            color: nodeColor,
-            shape: BoxShape.circle,
-            border: Border.all(color: borderColor, width: 2),
-            boxShadow: isCurrent || isReturned || isOverdue || isEscalated
-                ? [
-                    BoxShadow(
-                      color: DocuTrackerTokens.brand.withValues(alpha: 0.35),
-                      blurRadius: 10,
-                      spreadRadius: 1,
-                    ),
-                  ]
-                : null,
-          ),
-          child: Center(
-            child: isDone
-                ? const Icon(Icons.check_rounded, size: 18, color: Colors.white)
-                : Text(
-                    order.toString(),
-                    style: TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w800,
-                      color: emphasized
-                          ? Colors.white
-                          : DocuTrackerTokens.textMutedOf(context),
-                    ),
-                  ),
-          ),
-        ),
-        const SizedBox(height: 8),
-        SizedBox(
-          width: 88,
-          child: Text(
-            label,
-            textAlign: TextAlign.center,
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(
-              fontSize: 12,
-              fontWeight: emphasized ? FontWeight.w800 : FontWeight.w600,
-              color: DocuTrackerTokens.textPrimaryOf(context),
-              height: 1.2,
-            ),
-          ),
-        ),
-        const SizedBox(height: 2),
-        Text(
-          indicator.label,
-          style: TextStyle(
-            fontSize: 10,
-            fontWeight: FontWeight.w800,
-            letterSpacing: 0.4,
-            color: labelColor,
-          ),
-        ),
-      ],
-    );
-  }
 }
 
 class _CurrentAssignmentCard extends StatelessWidget {

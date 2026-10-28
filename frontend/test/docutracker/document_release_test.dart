@@ -144,22 +144,29 @@ void main() {
       );
     });
 
-    test('final-approve confirm copy keeps release separate', () {
-      final withRelease = docuTrackerFinalApproveConfirmCopy(
-        releaseRequired: true,
-      );
-      expect(withRelease.message, contains('must still be released'));
-      expect(
-        withRelease.message,
-        isNot(contains('This completes the workflow.')),
-      );
+    test(
+      'final-approve confirm copy uses the type policy, not the snapshot',
+      () {
+        final withRelease = docuTrackerFinalApproveConfirmCopy(
+          typeRequiresRelease: true,
+        );
+        expect(withRelease.message, contains('finishes workflow approval'));
+        expect(withRelease.message, contains('requires a release'));
+        expect(withRelease.message, isNot(contains('Released')));
 
-      final without = docuTrackerFinalApproveConfirmCopy(
-        releaseRequired: false,
-      );
-      expect(without.message, 'This completes the workflow.');
-      expect(without.confirmLabel, 'Approve and Complete');
-    });
+        final without = docuTrackerFinalApproveConfirmCopy(
+          typeRequiresRelease: false,
+        );
+        expect(without.message, contains('does not require a release'));
+        expect(without.confirmLabel, 'Approve and Complete');
+
+        final unknown = docuTrackerFinalApproveConfirmCopy(
+          typeRequiresRelease: null,
+        );
+        expect(unknown.message, 'This finishes workflow approval.');
+        expect(unknown.message, isNot(contains('release')));
+      },
+    );
 
     test('released department recipient sees view-only; actors do not', () {
       final released = _memo(

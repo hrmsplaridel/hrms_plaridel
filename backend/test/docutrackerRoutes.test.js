@@ -54,12 +54,14 @@ function workflowServiceMock(overrides = {}) {
     transitionDocument: async () => ({}),
     updateDocumentMetadata: async () => ({}),
     recoverDocumentAssignment: async () => ({}),
+    listRecoveryCandidates: async () => ({ candidates: [] }),
     addDocumentRemark: async () => true,
     getEffectivePermissionExplanation: async () => ({}),
     describeViewerReleaseAccess: async () => ({
       viewer_release_access: false,
       viewer_can_release: false,
     }),
+    typeRequiresRelease: async () => false,
     ...overrides,
   };
 }
@@ -830,6 +832,80 @@ test('PATCH /documents/:id only forwards recovery reassignment fields', async ()
   const rejected = createMockResponse();
   await handler({ ...req, body: { ...req.body, current_step: 2 } }, rejected);
   assert.equal(rejected.statusCode, 400);
+  restoreWorkflow(); restoreDb(); restoreAuth(); restoreRbac();
+  delete require.cache[routePath];
+});
+
+test('GET /documents/:id/recovery-candidates is admin-only and read-only', async () => {
+  let captured = null;
+  const restoreWorkflow = withMockedModule(
+    '../src/services/docutrackerWorkflowService',
+    workflowServiceMock({
+      listRecoveryCandidates: async (_pool, user, id) => {
+        captured = { user, id };
+        return {
+          document_id: id,
+          department_name: 'Engineering',
+          candidates: [{ user_id: 'backup-1', name: 'Ben Cruz', role_label: 'Backup 1' }],
+          message: null,
+        };
+      },
+    })
+  );
+  const restoreDb = withMockedModule('../src/config/db', { pool: {} });
+  const restoreAuth = withMockedModule('../src/middleware/auth', {
+    authMiddleware: (_req, _res, next) => next?.(),
+  });
+  let adminChecked = false;
+  const restoreRbac = withMockedModule('../src/middleware/rbac', {
+    requireAdmin: (req, res, next) => {
+      adminChecked = true;
+      if (req.user?.role !== 'admin') {
+        res.status(403).json({ error: 'Admin access required' });
+        return;
+      }
+      next();
+    },
+  });
+  const routePath = require.resolve('../src/routes/docutracker');
+  delete require.cache[routePath];
+  const router = require('../src/routes/docutracker');
+  const layer = router.stack.find(
+    (entry) => entry?.route?.path === '/documents/:id/recovery-candidates'
+      && entry.route.methods?.get
+  );
+  const handles = layer.route.stack.map((entry) => entry.handle);
+  const guard = handles[handles.length - 2];
+  const handler = handles[handles.length - 1];
+
+  const denied = createMockResponse();
+  let deniedContinued = false;
+  guard(
+    { params: { id: 'doc-4' }, user: { id: 'employee-1', role: 'employee' } },
+    denied,
+    () => { deniedContinued = true; }
+  );
+  assert.equal(adminChecked, true);
+  assert.equal(denied.statusCode, 403);
+  assert.equal(denied.payload.error, 'Admin access required');
+  assert.equal(deniedContinued, false);
+
+  const allowed = createMockResponse();
+  let allowedContinued = false;
+  guard(
+    { params: { id: 'doc-4' }, user: { id: 'admin-1', role: 'admin' } },
+    allowed,
+    () => { allowedContinued = true; }
+  );
+  assert.equal(allowedContinued, true);
+  await handler({
+    params: { id: 'doc-4' },
+    user: { id: 'admin-1', role: 'admin' },
+  }, allowed);
+  assert.equal(allowed.statusCode, 200);
+  assert.equal(captured.id, 'doc-4');
+  assert.equal(allowed.payload.department_name, 'Engineering');
+
   restoreWorkflow(); restoreDb(); restoreAuth(); restoreRbac();
   delete require.cache[routePath];
 });

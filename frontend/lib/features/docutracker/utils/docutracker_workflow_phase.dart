@@ -1,5 +1,4 @@
 import 'package:hrms_plaridel/features/docutracker/models/document.dart';
-import 'package:hrms_plaridel/features/docutracker/models/document_history.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document_status.dart';
 import 'package:hrms_plaridel/features/docutracker/services/docutracker_document_visibility.dart';
 
@@ -14,13 +13,22 @@ enum DocuTrackerStepIndicatorKind {
   overdue,
   escalated,
   cancelled,
+  unrecorded,
 }
 
 class DocuTrackerStepIndicator {
-  const DocuTrackerStepIndicator({required this.kind, required this.label});
+  const DocuTrackerStepIndicator({
+    required this.kind,
+    required this.label,
+    this.detail,
+  });
 
   final DocuTrackerStepIndicatorKind kind;
   final String label;
+
+  /// Second line, such as the current state or an earlier visit. Null when
+  /// the recorded history has nothing further to say.
+  final String? detail;
 
   bool get isCompleted =>
       kind == DocuTrackerStepIndicatorKind.approved ||
@@ -59,6 +67,18 @@ class DocuTrackerWorkflowPhase {
     String? currentStepLabel,
   }) {
     if (doc.status == DocumentStatus.approved) {
+      if (doc.isAwaitingRelease) {
+        return const DocuTrackerWorkflowPhase(
+          label: 'Approved',
+          detail: 'Awaiting release',
+        );
+      }
+      if (doc.isReleased) {
+        return const DocuTrackerWorkflowPhase(
+          label: 'Released',
+          detail: 'Approved and released',
+        );
+      }
       return const DocuTrackerWorkflowPhase(
         label: 'Completed',
         detail: 'Approved — workflow finished',
@@ -138,81 +158,5 @@ class DocuTrackerWorkflowPhase {
       label: 'In progress',
       detail: 'Routing in progress',
     );
-  }
-
-  static DocuTrackerStepIndicator indicatorForStep({
-    required DocuTrackerDocument doc,
-    required int stepOrder,
-    List<DocumentHistoryEntry> history = const <DocumentHistoryEntry>[],
-  }) {
-    final currentStep = doc.currentStep ?? 1;
-
-    if (stepOrder > currentStep) {
-      return const DocuTrackerStepIndicator(
-        kind: DocuTrackerStepIndicatorKind.upcoming,
-        label: 'WAITING',
-      );
-    }
-
-    if (stepOrder == currentStep) {
-      return switch (doc.status) {
-        DocumentStatus.approved => const DocuTrackerStepIndicator(
-          kind: DocuTrackerStepIndicatorKind.approved,
-          label: 'APPROVED',
-        ),
-        DocumentStatus.rejected => const DocuTrackerStepIndicator(
-          kind: DocuTrackerStepIndicatorKind.rejected,
-          label: 'REJECTED',
-        ),
-        DocumentStatus.returned => const DocuTrackerStepIndicator(
-          kind: DocuTrackerStepIndicatorKind.returned,
-          label: 'RETURNED',
-        ),
-        DocumentStatus.overdue => const DocuTrackerStepIndicator(
-          kind: DocuTrackerStepIndicatorKind.overdue,
-          label: 'OVERDUE',
-        ),
-        DocumentStatus.escalated => const DocuTrackerStepIndicator(
-          kind: DocuTrackerStepIndicatorKind.escalated,
-          label: 'ESCALATED',
-        ),
-        DocumentStatus.cancelled => const DocuTrackerStepIndicator(
-          kind: DocuTrackerStepIndicatorKind.cancelled,
-          label: 'CANCELLED',
-        ),
-        _ => const DocuTrackerStepIndicator(
-          kind: DocuTrackerStepIndicatorKind.current,
-          label: 'CURRENT',
-        ),
-      };
-    }
-
-    DocumentHistoryEntry? latest;
-    for (final entry in history) {
-      if (entry.fromStep != stepOrder) continue;
-      final action = entry.action?.trim().toLowerCase();
-      if (action != 'approved' && action != 'forwarded') continue;
-      final latestTime = latest?.createdAt;
-      if (latest == null ||
-          latestTime == null ||
-          (entry.createdAt?.isAfter(latestTime) ?? false)) {
-        latest = entry;
-      }
-    }
-
-    return switch (latest?.action?.trim().toLowerCase()) {
-      'approved' => const DocuTrackerStepIndicator(
-        kind: DocuTrackerStepIndicatorKind.approved,
-        label: 'APPROVED',
-      ),
-      'forwarded' => const DocuTrackerStepIndicator(
-        kind: DocuTrackerStepIndicatorKind.forwarded,
-        label: 'FORWARDED',
-      ),
-      _ => const DocuTrackerStepIndicator(
-        kind: DocuTrackerStepIndicatorKind.completed,
-        label: 'COMPLETED',
-      ),
-    };
   }
 }

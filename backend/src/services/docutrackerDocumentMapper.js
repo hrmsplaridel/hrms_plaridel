@@ -44,6 +44,7 @@ function mapDocumentRow(row) {
       ? row.signature_signer_ids.map(String)
       : [],
     release_required: row.release_required === true,
+    type_requires_release: row.type_requires_release === true,
     released_at: row.released_at ?? null,
     released_to_department_id: row.released_to_department_id ?? null,
     released_to_department_name: row.released_to_department_name ?? null,

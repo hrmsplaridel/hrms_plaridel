@@ -2511,6 +2511,46 @@ async function insertHistory(client, payload) {
   );
 }
 
+function documentNotificationName(title) {
+  const name = String(title || '').trim();
+  return name || 'This document';
+}
+
+/** Wording for the next reviewer. Recipients stay the resolved assignees. */
+function assignmentNotificationCopy(action, title) {
+  const name = documentNotificationName(title);
+  if (action === 'submit') {
+    return {
+      title: 'Document submitted for your review',
+      body: `${name} was submitted and requires your review.`,
+    };
+  }
+  if (action === 'forward') {
+    return {
+      title: 'Document forwarded to you',
+      body: `${name} was forwarded to the next workflow step and requires your review.`,
+    };
+  }
+  if (action === 'approve') {
+    return {
+      title: 'Previous step approved',
+      body: `${name} was approved at the previous step and now requires your review.`,
+    };
+  }
+  return {
+    title: 'Document requires your review',
+    body: `${name} requires your review.`,
+  };
+}
+
+function returnedNotificationCopy(title) {
+  const name = documentNotificationName(title);
+  return {
+    title: 'Document returned for your review',
+    body: `${name} was returned for your review.`,
+  };
+}
+
 async function insertNotification(client, payload) {
   if (!payload.user_id) return;
   await client.query(
@@ -3251,6 +3291,7 @@ async function transitionDocument(pool, user, documentId, action, payload = {}) 
         const allNextAssignees = Array.from(new Set(
           [...nextStepAssignees, nextHolder].filter(Boolean)
         ));
+        const assignedCopy = assignmentNotificationCopy(action, doc.title);
         for (const uid of allNextAssignees) {
           // eslint-disable-next-line no-await-in-loop
           await insertNotificationIfNotRecent(client, {
@@ -3260,12 +3301,14 @@ async function transitionDocument(pool, user, documentId, action, payload = {}) 
             event_key: notificationEventKey,
             step_order: nextStep,
             escalation_level: updated.escalation_level,
-            title: 'Document requires your review',
-            body: `${doc.title} was forwarded and requires your review.`,
+            title: assignedCopy.title,
+            body: assignedCopy.body,
           });
         }
       } else if (notificationType === 'returned') {
-        // Notify the current holder (who sent it back) AND the person it's returned to.
+        // Notify the person the document was returned to. The creator is not
+        // asked to edit or resubmit.
+        const returnedCopy = returnedNotificationCopy(doc.title);
         await insertNotificationIfNotRecent(client, {
           document_id: documentId,
           user_id: nextHolder,
@@ -3273,8 +3316,8 @@ async function transitionDocument(pool, user, documentId, action, payload = {}) 
           event_key: notificationEventKey,
           step_order: nextStep,
           escalation_level: updated.escalation_level,
-          title: 'Document returned to you',
-          body: `${doc.title} was returned and requires your attention.`,
+          title: returnedCopy.title,
+          body: returnedCopy.body,
         });
       } else if (notificationType === 'rejected') {
         await insertNotificationIfNotRecent(client, {
@@ -3374,6 +3417,129 @@ async function updateDocumentMetadata(pool, user, documentId, payload = {}) {
   } finally {
     client.release();
   }
+}
+
+const NO_REPLACEMENT_REVIEWER_MESSAGE =
+  'No eligible replacement reviewer is configured for this step.';
+
+/**
+ * Read-only eligible replacements for the document's current step.
+ * Uses the same assignee resolution as Admin Recovery, then drops the
+ * current holder. The recovery PATCH rechecks eligibility and does not
+ * trust this list.
+ */
+async function listRecoveryCandidates(pool, user, documentId) {
+  if (user?.role !== 'admin') {
+    throw forbiddenError('Only administrators can recover a document assignment');
+  }
+  const client = await pool.connect();
+  try {
+    const docRes = await client.query(
+      'SELECT * FROM docutracker_documents WHERE id = $1',
+      [documentId]
+    );
+    if (!docRes.rowCount) {
+      throw notFoundError('Document not found');
+    }
+    const doc = docRes.rows[0];
+    const status = normalizeStatus(doc.status);
+    if (!RECOVERABLE_WORKFLOW_STATUSES.has(status)) {
+      throw validationError('Only an active workflow document can be reassigned');
+    }
+
+    const config = await getRoutingConfig(
+      client,
+      doc.document_type,
+      doc.workflow_version || null
+    );
+    const steps = ensureValidWorkflowConfig(config, doc.document_type);
+    const currentStep = Number(doc.current_step || 0);
+    const stepConfig = getStepByOrder(steps, currentStep);
+    if (!stepConfig || stepConfig.enabled === false) {
+      throw validationError(`Document step ${currentStep} is not enabled in its workflow`);
+    }
+
+    const source = String(stepConfig.assignee_source || 'specific_users').trim().toLowerCase();
+    const department = await recoveryDepartment(client, doc, stepConfig, source);
+    let eligible = [];
+    let resolutionMessage = null;
+    try {
+      eligible = (await resolveStepAssignees(client, {
+        explicitAssigneeId: null,
+        stepConfig,
+        currentHolderId: doc.current_holder_id || null,
+        documentType: doc.document_type,
+        workflowVersion: doc.workflow_version || config?.version || null,
+        submitterUserId: doc.created_by || null,
+      })).map(String);
+    } catch (error) {
+      if (error?.code !== 'VALIDATION') throw error;
+      resolutionMessage = error.message;
+      eligible = [];
+    }
+
+    const replacements = eligible
+      .map((id, index) => ({ id, index }))
+      .filter((row) => !sameEntityId(row.id, doc.current_holder_id));
+    const names = await recoveryCandidateNames(client, [
+      ...replacements.map((row) => row.id),
+      ...(doc.current_holder_id ? [String(doc.current_holder_id)] : []),
+    ]);
+    const candidates = replacements.map((row) => ({
+      user_id: row.id,
+      name: names.get(row.id) || null,
+      role_label: row.index === 0 ? 'Primary' : `Backup ${row.index}`,
+    }));
+
+    return {
+      document_id: doc.id,
+      current_step: currentStep,
+      step_label: stepConfig.label || null,
+      assignee_source: source,
+      status,
+      current_holder_id: doc.current_holder_id || null,
+      current_holder_name: doc.current_holder_id
+        ? names.get(String(doc.current_holder_id)) || null
+        : null,
+      department_id: department?.departmentId || null,
+      department_name: department?.departmentName || null,
+      candidates,
+      message: candidates.length ? null : (resolutionMessage || NO_REPLACEMENT_REVIEWER_MESSAGE),
+    };
+  } finally {
+    client.release();
+  }
+}
+
+async function recoveryDepartment(client, doc, stepConfig, source) {
+  if (source === 'submitter_department_reviewers') {
+    if (!doc.created_by) return null;
+    return getEmployeeDepartmentForDate(client, doc.created_by, todayInHrmsTimezone());
+  }
+  if (source === 'department_reviewers' && stepConfig.department_id) {
+    return {
+      departmentId: stepConfig.department_id,
+      departmentName: await getDepartmentName(client, stepConfig.department_id),
+    };
+  }
+  return null;
+}
+
+async function recoveryCandidateNames(client, userIds) {
+  const names = new Map();
+  if (!userIds.length) return names;
+  const result = await client.query(
+    `SELECT id::text AS id,
+            COALESCE(NULLIF(btrim(full_name), ''), NULLIF(btrim(email), '')) AS name
+     FROM users
+     WHERE id::text = ANY($1::text[])`,
+    [userIds]
+  );
+  for (const row of result.rows || []) {
+    const name = String(row.name || '').trim();
+    if (row.id && name) names.set(String(row.id), name);
+  }
+  return names;
 }
 
 async function recoverDocumentAssignment(pool, user, documentId, payload = {}) {
@@ -3602,6 +3768,7 @@ module.exports = {
   transitionDocument,
   insertNotificationIfNotRecent,
   updateDocumentMetadata,
+  listRecoveryCandidates,
   recoverDocumentAssignment,
   addDocumentRemark,
   isReleaseTrackedDocument,
