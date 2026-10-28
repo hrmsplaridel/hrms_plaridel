@@ -777,6 +777,7 @@ async function queryLocatorTypes(pool) {
             dtr_print_label,
             requires_attachment,
             coverage_mode,
+            employee_detail_schema,
             is_active,
             sort_order
      FROM locator_request_types
@@ -795,6 +796,7 @@ async function queryLocatorTypes(pool) {
     dtr_print_label: row.dtr_print_label,
     requires_attachment: row.requires_attachment === true,
     coverage_mode: row.coverage_mode,
+    employee_detail_schema: normalizeEmployeeDetailSchema(row.employee_detail_schema),
     is_active: row.is_active !== false,
     sort_order: row.sort_order,
   }));

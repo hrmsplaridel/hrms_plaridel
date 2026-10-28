@@ -817,6 +817,7 @@ function getFormGuidanceForType(typeRecordOrValue) {
 
 function getLeaveFormFieldKey(message) {
   const text = String(message || '').toLowerCase();
+  if (/\b(reason|remarks|rason)\b/.test(text) && /\b(put|write|enter|ibutang|ilagay|ilalagay|isulat|field)\b/.test(text)) return 'reason';
   let best = null;
   let bestLength = 0;
   for (const [key, field] of Object.entries(LEAVE_FORM_FIELDS)) {

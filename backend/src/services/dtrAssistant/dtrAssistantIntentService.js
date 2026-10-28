@@ -1,5 +1,6 @@
 const { normalizeAssistantMessageForRules } = require('./dtrAssistantTextNormalizer');
 const { scoreSemanticIntents } = require('./dtrAssistantSemanticIntent');
+const { explicitQuestionIntent } = require('./dtrAssistantQuestion');
 const {
   isLeaveFormFieldHelpQuestion,
 } = require('./leaveFilingGuidelines');
@@ -99,6 +100,10 @@ function isLeaveTypeExplanationQuestion(text) {
 function normalizeIntent(value) {
   const intent = String(value || '').trim().toLowerCase();
   return [
+    'system_navigation_help',
+    'form_sentence_suggestion',
+    'locator_policy_guidance',
+    'locator_type_compare',
     'today_dtr',
     'missing_logs',
     'dtr_daily_record',
@@ -661,6 +666,8 @@ function scoreEmployeeAssistantIntent(message, explicitIntent) {
     };
   }
 
+  const specific = explicitQuestionIntent(message);
+  if (specific) return { intent: specific, confidence: 1, source: 'specific_question', needsAiPlan: false };
   const fuzzy = scoreFuzzyIntents(message);
   const semantic = scoreSemanticIntents(message);
   if (isLocatorCreditRequirementQuestion(message)) {
@@ -782,6 +789,8 @@ function detectEmployeeAssistantIntentByRules(message, explicitIntent) {
   if (forcedIntent) return forcedIntent;
 
   const text = lower(normalizeAssistantMessageForRules(message));
+  const specific = explicitQuestionIntent(text);
+  if (specific) return specific;
   const hasDtrTopic =
     /\b(dtr|attendance|daily time|log|logs|time[\s-]?in|time[\s-]?out|late|undertime|overtime|absent|absence|incomplete|present|duty|pasok|sched|schedule|shift|missing|kulang|kuwang)\b/.test(
       text

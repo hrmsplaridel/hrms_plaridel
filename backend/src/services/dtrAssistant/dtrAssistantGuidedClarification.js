@@ -1,5 +1,6 @@
 const { detectAssistantLanguage } = require('./dtrAssistantLanguage');
 const { configuredLeaveType } = require('./configuredLeaveType');
+const { configuredLocatorType } = require('./configuredLocatorType');
 const {
   extractMessageEntities,
   extractDayCount,
@@ -7,7 +8,7 @@ const {
   normalizeLocatorTypeHint,
 } = require('./dtrAssistantMessageExtraction');
 const { isLeaveCreditRequirementQuestion } = require('./dtrAssistantIntentService');
-const { parseAssistantDateRange } = require('../../utils/dateRangeParser');
+const { parseAssistantDateRange, todayInHrmsTimezone } = require('../../utils/dateRangeParser');
 
 const GUIDED_FILING_INTENTS = new Set([
   'leave_guided_filing',
@@ -52,7 +53,9 @@ function resolveLeaveType(text, memory, context) {
   return null;
 }
 
-function resolveLocatorType(text, memory) {
+function resolveLocatorType(text, memory, context) {
+  const configured = configuredLocatorType(text, context?.locator_types);
+  if (configured) return configured.code;
   const fromText = normalizeLocatorTypeHint(text);
   if (fromText) return fromText;
   if (memory?.locatorType) return memory.locatorType;
@@ -102,7 +105,7 @@ function missingLeaveFields({ text, memory, context, intent }) {
 
 function missingLocatorFields({ text, memory, context, intent }) {
   const fields = [];
-  const locatorType = resolveLocatorType(text, memory);
+  const locatorType = resolveLocatorType(text, memory, context);
   const storedDestination =
     memory?.topics?.locator?.locatorPrefill?.destination ||
     memory?.locatorPrefill?.destination ||
@@ -197,9 +200,9 @@ function acknowledgedValue(nextField, topic, language, known) {
   if (index <= 0) return null;
   for (let i = index - 1; i >= 0; i -= 1) {
     const field = order[i];
-    if (field === 'leaveType' && known.leaveType) return leaveTypeLabel(known.leaveType);
+    if (field === 'leaveType' && known.leaveType) return known.leaveLabel || leaveTypeLabel(known.leaveType);
     if (field === 'locatorType' && known.locatorType) {
-      return locatorTypeLabel(known.locatorType);
+      return known.locatorLabel || locatorTypeLabel(known.locatorType);
     }
     if (field === 'date' && known.date) return dateLabel(known.date, language);
     if (field === 'days' && known.days != null) return daysLabel(known.days, language);
@@ -364,6 +367,7 @@ function interruptsPendingClarification(text, memory) {
 function evaluateGuidedClarification({ intent, text, context, memory }) {
   if (!GUIDED_FILING_INTENTS.has(intent)) return null;
   if (isLeaveCreditRequirementQuestion(text)) return null;
+  if (intent.startsWith('locator_') && context?.date_range?.endDate < todayInHrmsTimezone()) return null;
 
   const language = detectAssistantLanguage(text);
   let topic = 'leave';
@@ -401,6 +405,8 @@ function evaluateGuidedClarification({ intent, text, context, memory }) {
   const known = {
     leaveType,
     locatorType,
+    leaveLabel: context?.leave_types?.find((type) => type.name === leaveType)?.display_name,
+    locatorLabel: context?.locator_types?.find((type) => type.code === locatorType)?.label,
     date: memory?.dateRange?.label || context?.date_range?.label || null,
     days: memory?.dayCount ?? null,
     destination: memory?.locatorPrefill?.destination || null,

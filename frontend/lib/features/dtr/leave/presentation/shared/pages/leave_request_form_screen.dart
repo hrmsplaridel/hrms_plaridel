@@ -738,13 +738,13 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
       } else {
         _validateSelectedDates();
       }
-      if (_workingDaysLoading) {
+      if (_startDate != null && _endDate != null && _workingDaysLoading) {
         _showMessage('Please wait while working days are computed.');
-      } else if (_currentWorkingDaysApplied == null ||
-          _currentWorkingDaysApplied! <= 0) {
+      } else if (_startDate != null && _endDate != null &&
+          (_currentWorkingDaysApplied == null || _currentWorkingDaysApplied! <= 0)) {
         _showMessage('Enter a valid number of working days greater than zero.');
       }
-      _validateAnnualQuotaLimit();
+      if (_startDate != null && _endDate != null) _validateAnnualQuotaLimit();
       _reviewTarget = _reviewDetailsKey.currentContext;
       _validateRequiredLeaveDetails();
       if (_leaveType == LeaveType.maternityLeave &&
@@ -1840,7 +1840,7 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
                                       final applied =
                                           _currentWorkingDaysApplied;
                                       return _activeAssistantField(
-                                        'reason',
+                                        'working_days',
                                         TextFormField(
                                           controller: _workingDaysController,
                                           readOnly: true,
@@ -1899,7 +1899,7 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
                                             return null;
                                           },
                                         ),
-                                        _reasonController,
+                                        _workingDaysController,
                                       );
                                     },
                                   ),

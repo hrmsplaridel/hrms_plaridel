@@ -1,6 +1,10 @@
 const crypto = require('crypto');
 const { configuredLeaveType } = require('./configuredLeaveType');
 const { assistLeaveField } = require('./leaveFieldAssistant');
+const { explicitQuestionIntent, isWritingRequest, locatorTopic } = require('./dtrAssistantQuestion');
+const { configuredLocatorType } = require('./configuredLocatorType');
+const { draftSentence, extractDraftFacts } = require('./sentenceDraft');
+const { systemNavigationHelp } = require('./systemNavigationHelp');
 const { requestChoices, choiceActions, isRequestFollowUp, formChatContext } = require('./dtrAssistantRequestFocus');
 const { chatCompletion } = require('../llm/llmClient');
 const { getLlmConfig } = require('../llm/llmConfig');
@@ -1364,16 +1368,7 @@ function shouldAskAiForToolPlan({
 }
 
 function simpleLanguageOf(text) {
-  const value = lower(text);
-  if (/\b(tagaloga?|tagalog|filipino)\b/.test(value)) return 'tagalog';
-  if (/\b(bisayaa?|binisayaa?|cebuano)\b/.test(value)) return 'bisaya';
-  if (/\b(unsa|unsaon|unsay|ngano|pila|naa|akong|nako|imong|nimo|ug|karon|pwede|adto|ato|ana|bulana|semanaha|daw|apil|ila|nga)\b/.test(value)) {
-    return 'bisaya';
-  }
-  if (/\b(tagalog|filipino|ano|paano|pano|bakit|ilan|ngayon|kailangan|puwede|pwede|ako|ko|ba|may|wala)\b/.test(value)) {
-    return 'tagalog';
-  }
-  return 'english';
+  return require('./dtrAssistantLanguage').detectAssistantLanguage(text);
 }
 
 function hasDateOrAvailabilityHint(text) {
@@ -1620,6 +1615,12 @@ function rangeCorrectionIntentForDtr(activeIntent, text, memory) {
 }
 
 function resolveIntentFromMemory(text, memory) {
+  const specific = explicitQuestionIntent(text);
+  if (specific) return specific;
+  if (/\bwhat about\b/i.test(text)) {
+    if (/\bleave\b/i.test(text)) return 'latest_leave_request';
+    if (/\blocator\b/i.test(text)) return 'locator_status';
+  }
   if (!memory) return null;
   const value = lower(text);
   if (memory.pendingClarification?.intent) {
@@ -2555,6 +2556,13 @@ async function chatWithDtrAssistant(
       turnGeneration
     );
   const memory = readMemory();
+  const navigationHelp = systemNavigationHelp(text);
+  if (navigationHelp) return buildAssistantResult({
+    content: navigationHelp, actions: [], provider: 'hrms', model: 'system-help',
+    modelProfile: profile.id, mode: scope.mode, context: emptyAssistantContext(),
+    intent: 'system_navigation_help', intentConfidence: 1, intentSource: 'specific_question',
+    text, conversationId: conversationKey,
+  });
   const activeForm = !requestReference && !intent ? formChatContext(formContext, text, memory) : null;
   if (activeForm) {
     const fieldReply = await assistLeaveField(pool, activeForm, signal);
@@ -2571,8 +2579,10 @@ async function chatWithDtrAssistant(
   }
   const followUp = !intent && isRequestFollowUp(text) && parseAssistantDateRange(text).label === 'today';
   const explicitTopic = explicitTopicFromText(text);
-  const rememberedChoices = (memory?.requestChoices || []).filter((item) => !explicitTopic || item.module === explicitTopic);
-  let focusedRequest = requestReference || (followUp &&
+  const wantsRejected = /\b(reject\w*|returned)\b/i.test(text);
+  const rememberedChoices = (memory?.requestChoices || []).filter((item) =>
+    (!explicitTopic || item.module === explicitTopic) && (!wantsRejected || /reject|return/i.test(item.status || '')));
+  let focusedRequest = requestReference || (followUp && !wantsRejected &&
     (!explicitTopic || explicitTopic === memory?.selectedRequest?.module) ? memory?.selectedRequest : null);
   if (!focusedRequest && followUp && rememberedChoices.length === 1) focusedRequest = rememberedChoices[0];
   if (!focusedRequest && followUp && rememberedChoices.length > 1) {
@@ -2677,7 +2687,7 @@ async function chatWithDtrAssistant(
   const asksBothRequestTopics =
     /\bleave\b/.test(normalizedTextForRules) &&
     /\b(locator|pass slip|wfh|official business)\b/.test(normalizedTextForRules);
-  const asksStatusOverview = !forcedIntent && asksRequestStatus && (
+  const asksStatusOverview = !forcedIntent && !explicitQuestionIntent(normalizedTextForRules) && asksRequestStatus && (
     asksBothRequestTopics ||
     (!memoryIntent && !routingMemory?.pendingClarification &&
       !explicitTopicFromText(normalizedTextForRules))
@@ -2724,7 +2734,7 @@ async function chatWithDtrAssistant(
       memory: readMemory(),
     });
   }
-  const clarificationIntent = routingMemory?.pendingClarification
+  const clarificationIntent = routingMemory?.pendingClarification || explicitQuestionIntent(normalizedTextForRules)
     ? null
     : clarificationIntentForMessage(
         normalizedTextForRules,
@@ -2798,14 +2808,14 @@ async function chatWithDtrAssistant(
   }
 
   const scoredIntent =
-    effectiveText === normalizedTextForRules
+    effectiveText === normalizedTextForRules || explicitQuestionIntent(normalizedTextForRules)
       ? rawScoredIntent
       : scoreEmployeeAssistantIntent(effectiveText, intent);
   const fallbackMemoryIntent =
     contextDecision.useMemory
       ? memoryIntent || resolveIntentFromMemory(effectiveText, routingMemory)
       : null;
-  const shouldPreferMemoryIntent = Boolean(fallbackMemoryIntent && !forcedIntent);
+  const shouldPreferMemoryIntent = Boolean(fallbackMemoryIntent && !forcedIntent && !explicitQuestionIntent(normalizedTextForRules));
   let resolvedIntent = shouldPreferMemoryIntent
     ? fallbackMemoryIntent
     : scoredIntent.intent || fallbackMemoryIntent;
@@ -2874,7 +2884,7 @@ async function chatWithDtrAssistant(
     }
   }
 
-  const detectedMultiIntent = detectMultipleIntents(effectiveText, {
+  const detectedMultiIntent = detectMultipleIntents(normalizedTextForRules, {
     explicitIntent: intent,
   });
   const contextIntents = detectedMultiIntent.isMulti
@@ -2899,6 +2909,8 @@ async function chatWithDtrAssistant(
   if (configuredType) {
     mergedExtraction.leaveType = configuredType.name || configuredType.display_name;
   }
+  const locatorType = configuredLocatorType(normalizedTextForRules, context.locator_types);
+  if (locatorType) mergedExtraction.locatorType = locatorType.code;
   const extractionMemory = memoryWithClarificationPatch(routingMemory, {
     leaveType: mergedExtraction.leaveType,
     locatorType: mergedExtraction.locatorType,
@@ -2912,6 +2924,44 @@ async function chatWithDtrAssistant(
   }
   context.assistant_extraction = mergedExtraction;
   context.assistant_memory = extractionMemory;
+
+  // Field explanations and drafts belong in chat, even without an open form.
+  if (resolvedIntent === 'form_sentence_suggestion' ||
+      ['leave_form_field_help', 'locator_form_field_help'].includes(resolvedIntent)) {
+    const module = locatorTopic.test(text) || resolvedIntent === 'locator_form_field_help' ? 'locator' : 'leave';
+    const type = module === 'locator'
+      ? locatorType || (context.locator_types || []).find(row => row.code === mergedExtraction.locatorType)
+      : configuredType || (context.leave_types || []).find(row => row.name === mergedExtraction.leaveType);
+    const facts = extractDraftFacts(text);
+    let fieldReply;
+    if (type) {
+      let schema = type.employee_detail_schema || [];
+      if (typeof schema === 'string') { try { schema = JSON.parse(schema); } catch { schema = []; } }
+      if (!Array.isArray(schema)) schema = schema.fields || [];
+      const custom = schema.find(field => [field.key, field.label].some(label => label && text.toLowerCase().includes(String(label).toLowerCase())));
+      const standardKey = module === 'locator'
+        ? /\b(destination|office|location)\b/i.test(text) ? 'office' : /\b(reason|remarks|rason)\b/i.test(text) ? 'reason' : null
+        : getLeaveFormFieldKey(text);
+      const fieldKey = custom?.key || standardKey || (isWritingRequest(text) ? 'reason' : null);
+      const writableKeys = ['reason', 'office', 'location_details', 'sick_illness_details', 'women_illness_details', 'vawc_case_details', 'solo_parent_id_number', 'study_purpose_details'];
+      if (!fieldKey) {
+        fieldReply = { content: `${type.display_name || type.label || type.name || type.code}: that field is not configured. Available custom fields: ${schema.map(field => field.label || field.key).join(', ') || 'none'}. Tell me which field shown on your form you mean.` };
+      } else if (custom || writableKeys.includes(fieldKey)) fieldReply = await assistLeaveField(pool, { module, fieldKey,
+        leaveType: type.name, locatorType: type.code,
+        task: isWritingRequest(text) ? 'draft' : 'help', facts,
+      }, signal);
+    } else if (isWritingRequest(text)) {
+      const generated = await draftSentence({ facts, module, signal });
+      fieldReply = { content: generated.question || `Suggested wording:\n\n${generated.draft}\n\nReview the facts before using this suggestion.` };
+    }
+    if (fieldReply) {
+      saveMemory(buildNextAssistantMemory(routingMemory, { intent: resolvedIntent, text,
+        leaveType: mergedExtraction.leaveType, locatorType: mergedExtraction.locatorType, modelProfile: profile.id }));
+      return buildAssistantResult({ ...fieldReply, actions: [], provider: 'hrms', model: 'chat-field-assistant',
+        modelProfile: profile.id, mode: scope.mode, context, intent: resolvedIntent,
+        intentConfidence: 1, intentSource: 'specific_question', text, conversationId: conversationKey });
+    }
+  }
 
   if (!resolvedIntent) {
     logExternalDisclosure({
@@ -2991,7 +3041,7 @@ async function chatWithDtrAssistant(
     });
   }
 
-  const guided = evaluateGuidedClarification({
+  const guided = detectedMultiIntent.isMulti ? null : evaluateGuidedClarification({
     intent: resolvedIntent,
     text: plannedText,
     context,
@@ -3034,7 +3084,7 @@ async function chatWithDtrAssistant(
   }
 
   const multi = detectedMultiIntent;
-  if (multi.isMulti && multi.intents.length >= 2 && !routingMemory?.pendingClarification) {
+  if (multi.isMulti && multi.intents.length >= 2) {
     const multiReplies = [];
     for (const item of multi.intents) {
       const segmentText = item.segment || plannedText;

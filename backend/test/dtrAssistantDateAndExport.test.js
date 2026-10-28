@@ -194,7 +194,7 @@ test('DTR exports include no-record workdays and generate owned CSV/XLS files', 
   const statusIndex = rows.header.indexOf('Status');
   assert.equal(rows.rows.length, 3);
   assert.equal(rows.rows[1][statusIndex], 'no_record');
-  assert.equal(rows.rows[2][statusIndex], 'no_schedule');
+  assert.equal(rows.rows[2][statusIndex], 'holiday');
 
   const userId = 'export-owner';
   const csvAttachment = createDtrExportAttachment(context, userId, 'csv');

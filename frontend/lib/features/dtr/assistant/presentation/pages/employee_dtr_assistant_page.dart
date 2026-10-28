@@ -373,7 +373,7 @@ class _EmployeeDtrAssistantPageState extends State<EmployeeDtrAssistantPage> {
       final reply = reviewRequested
           ? DtrAssistantMessage(
               role: 'assistant',
-              content: ActiveApplicationReview.reply(),
+              content: ActiveApplicationReview.reply(text),
               createdAt: DateTime.now(),
             )
           : await _api.sendMessage(

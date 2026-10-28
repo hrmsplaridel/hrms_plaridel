@@ -25,11 +25,11 @@ class ActiveApplicationReview {
 
   static bool matches(String text) =>
       RegExp(
-        r'\b(review|check|validate|ready|missing|kulang|suriin|i-check)\b',
+        r'\b(review|check|validate|ready|missing|kulang|suriin|tan-awa|tanawa|i-check)\b',
         caseSensitive: false,
       ).hasMatch(text) &&
       RegExp(
-        r'\b(application|form|before submitting|before i submit|ready to submit)\b',
+        r'\b(application|aplikasyon|form|before submitting|before i submit|ready to submit)\b',
         caseSensitive: false,
       ).hasMatch(text) &&
       !RegExp(
@@ -37,16 +37,48 @@ class ActiveApplicationReview {
         caseSensitive: false,
       ).hasMatch(text);
 
-  static String reply() {
+  static String reply([String message = '']) {
+    final bisaya = RegExp(
+      r'\b(tan-awa|tanawa|unsa|naa|nako|ug|akong)\b',
+      caseSensitive: false,
+    ).hasMatch(message);
+    final tagalog =
+        RegExp(
+          r'\b(suriin|paki|ko|ng|ano|bago)\b',
+          caseSensitive: false,
+        ).hasMatch(message) &&
+        !bisaya;
     final review = _review;
     if (review == null) {
-      return 'Open your leave or locator application, then ask me to review it. I need the open form to check your current entries.';
+      return bisaya
+          ? 'Ablihi ang imong leave o locator application, unya pangayo ug review aron ma-check nako ang current entries.'
+          : tagalog
+          ? 'Buksan ang leave o locator application mo, pagkatapos hilingin ang review para masuri ang kasalukuyang entries.'
+          : 'Open your leave or locator application, then ask me to review it. I need the open form to check your current entries.';
     }
     final issues = review();
+    final title = bisaya
+        ? 'Review sa imong $_module application'
+        : tagalog
+        ? 'Pagsusuri ng $_module application mo'
+        : 'Review of your $_module application';
     final details = issues.isEmpty
-        ? 'No issues found by the current form checks.'
-        : 'Please address these items:\n${issues.map((issue) => '- ${issue.message}').join('\n')}';
-    return 'Review of your $_module application\n\n$details\n\nNothing has been submitted. Final eligibility, availability, and approval checks still apply when you submit.';
+        ? (bisaya
+              ? 'Walay nakitang issue sa current form checks.'
+              : tagalog
+              ? 'Walang nakitang problema sa kasalukuyang form checks.'
+              : 'No issues found by the current form checks.')
+        : '${bisaya
+              ? 'Palihug ayuha kini'
+              : tagalog
+              ? 'Pakiayos ang mga ito'
+              : 'Please address these items'}:\n${issues.map((issue) => '- ${issue.message}').join('\n')}';
+    final reminder = bisaya
+        ? 'Wala pay na-submit. Ang final eligibility, availability ug approval checks buhaton gihapon sa pag-submit.'
+        : tagalog
+        ? 'Wala pang naisumite. Susuriin pa rin ang final eligibility, availability at approval kapag nagsumite.'
+        : 'Nothing has been submitted. Final eligibility, availability, and approval checks still apply when you submit.';
+    return '$title\n\n$details\n\n$reminder';
   }
 }
 
@@ -65,12 +97,29 @@ List<ApplicationReviewIssue> reviewFormFields(FormState? form) {
   return form
       .validateGranularly()
       .map(
-        (field) => ApplicationReviewIssue(
-          field.errorText ?? 'Check this field.',
-          target: field.context,
-        ),
+        (field) =>
+            ApplicationReviewIssue(_fieldError(field), target: field.context),
       )
       .toList();
+}
+
+String _fieldError(FormFieldState<dynamic> field) {
+  String? label;
+  void inspect(Element element) {
+    final widget = element.widget;
+    if (widget is InputDecorator) {
+      label ??= widget.decoration.labelText ?? widget.decoration.hintText;
+    }
+    element.visitChildren(inspect);
+  }
+
+  field.context.visitChildElements(inspect);
+  final error = field.errorText ?? 'Check this field.';
+  return label == null ||
+          label!.trim().isEmpty ||
+          error.toLowerCase().contains(label!.toLowerCase())
+      ? error
+      : '${label!.trim()}: $error';
 }
 
 Future<void> showApplicationReview(

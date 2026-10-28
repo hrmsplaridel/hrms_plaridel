@@ -1,4 +1,5 @@
 const { detectAssistantLanguage } = require('./dtrAssistantLanguage');
+const { explicitQuestionIntent, isWritingRequest, locatorPolicyKind } = require('./dtrAssistantQuestion');
 const {
   isLocatorCreditRequirementQuestion,
   scoreEmployeeAssistantIntent,
@@ -87,6 +88,10 @@ function uniqueIntents(items) {
 }
 
 function detectMultipleIntents(message, options = {}) {
+  const specific = explicitQuestionIntent(message);
+  if (isWritingRequest(message) || locatorPolicyKind(message) || ['locator_type_compare', 'leave_type_compare', 'leave_form_field_help', 'locator_form_field_help', 'system_navigation_help'].includes(specific)) {
+    return { isMulti: false, intents: specific ? [{ segment: message, intent: specific, confidence: 1, domain: intentDomain(specific) }] : [], segments: [message] };
+  }
   if (isLocatorCreditRequirementQuestion(message)) {
     return {
       isMulti: false,
@@ -127,55 +132,6 @@ function detectMultipleIntents(message, options = {}) {
     };
   }
 
-  // Full-message dual-domain detection: e.g. leave balance + missing logs in one sentence.
-  if (segments.length === 1) {
-    const full = scoreEmployeeAssistantIntent(message, options.explicitIntent || null);
-    const primaryConfidence = full.confidence || 0;
-    if (primaryConfidence >= 0.92) {
-      return {
-        isMulti: false,
-        intents: unique.slice(0, 1),
-        segments,
-      };
-    }
-    const secondaryCandidates = (full.fuzzy?.scores || [])
-      .filter(
-        (item) =>
-          item.intent &&
-          item.intent !== full.intent &&
-          item.confidence >= 0.72 &&
-          primaryConfidence - item.confidence <= 0.18
-      )
-      .slice(0, 2);
-    if (full.intent && secondaryCandidates.length > 0) {
-      const primaryDomain = intentDomain(full.intent);
-      const secondary = secondaryCandidates.find(
-        (item) => intentDomain(item.intent) && intentDomain(item.intent) !== primaryDomain
-      );
-      if (secondary) {
-        return {
-          isMulti: true,
-          intents: uniqueIntents([
-            {
-              segment: message,
-              intent: full.intent,
-              confidence: full.confidence,
-              source: full.source,
-              domain: primaryDomain,
-            },
-            {
-              segment: message,
-              intent: secondary.intent,
-              confidence: secondary.confidence,
-              source: secondary.source,
-              domain: intentDomain(secondary.intent),
-            },
-          ]),
-          segments,
-        };
-      }
-    }
-  }
 
   return {
     isMulti: false,

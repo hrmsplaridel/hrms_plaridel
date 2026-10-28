@@ -1,5 +1,8 @@
 const HRMS_TIMEZONE = process.env.HRMS_TIMEZONE || 'Asia/Manila';
 const { configuredLeaveType } = require('./configuredLeaveType');
+const { effectiveDtrRecords, coveredMissingSlot } = require('./effectiveAttendance');
+const { configuredLocatorType, configuredLocatorTypes } = require('./configuredLocatorType');
+const { locatorPolicyKind } = require('./dtrAssistantQuestion');
 const {
   getDtrPolicySectionsForMessage,
   getLocatorPolicySectionsForMessage,
@@ -1298,6 +1301,14 @@ function localizedLeaveRequirementParts(type, language) {
 
 function localizedLeaveFormChecklist(type, language) {
   const label = labelLeaveType(type.display_name || type.name);
+  if (!getLeaveGuidanceForType(type)) {
+    const fields = customLeaveFieldRequirement(type, language);
+    return language === 'bisaya'
+      ? `Pilia ang ${label}, ibutang ang tinuod nga dates, working days ug reason.${fields ? ` ${fields}` : ''}`
+      : language === 'tagalog'
+        ? `Piliin ang ${label}, ilagay ang totoong dates, working days at reason.${fields ? ` ${fields}` : ''}`
+        : `Select ${label}. Enter the actual dates, working days and reason.${fields ? ` Complete ${fields}.` : ''}`;
+  }
   if (language === 'english') {
     const checklist = getFormGuidanceForType(type).fields.join(' ');
     const customFields = customLeaveFieldRequirement(type, language);
@@ -1482,7 +1493,7 @@ function todayDtrReply(context, localized) {
   }
 
   const parts = [
-    `Status: ${statusLabel(record.status)}`,
+    `Status: ${record.attendance_label || statusLabel(record.status)}`,
     `AM in: ${fmtTime(record.time_in)}`,
     `AM out: ${fmtTime(record.break_out)}`,
     `PM in: ${fmtTime(record.break_in)}`,
@@ -1537,7 +1548,7 @@ function missingLogsReply(context, localized) {
 }
 
 function dtrRecords(context) {
-  return context.dtr_records || [];
+  return effectiveDtrRecords(context);
 }
 
 function isNonWorkingDtrRecord(record) {
@@ -1559,7 +1570,7 @@ function missingDtrSlots(record) {
   if (!record.break_out) missing.push('AM out');
   if (!record.break_in) missing.push('PM in');
   if (!record.time_out) missing.push('PM out');
-  return missing;
+  return missing.filter((slot) => !record.locator_coverage?.[locatorSlotKey(slot)]);
 }
 
 function requestedDtrSlot(message) {
@@ -1772,7 +1783,7 @@ function missingDtrSlotsForContext(context, recordOrDate) {
   }
   if (isNonWorkingDtrRecord(record)) return [];
   const expected = day ? expectedSlotsForCalendarDay(day) : ['AM in', 'AM out', 'PM in', 'PM out'];
-  return expected.filter((slot) => !slotValue(record, slot));
+  return expected.filter((slot) => !slotValue(record, slot) && !coveredMissingSlot(context, date, slot));
 }
 
 function dtrRecordLine(record, context = null) {
@@ -1793,7 +1804,7 @@ function dtrRecordLine(record, context = null) {
   const overtime = isValidDtrMetricRecord(record, 'overtime')
     ? `, overtime ${record.overtime_minutes || 0} min`
     : '';
-  return `${fmtFriendlyDate(record.attendance_date)}: ${statusLabel(record.status)}, AM in ${fmtTime(
+  return `${fmtFriendlyDate(record.attendance_date)}: ${record.attendance_label || statusLabel(record.status)}, AM in ${fmtTime(
     record.time_in
   )}, AM out ${fmtTime(record.break_out)}, PM in ${fmtTime(record.break_in)}, PM out ${fmtTime(
     record.time_out
@@ -1802,7 +1813,8 @@ function dtrRecordLine(record, context = null) {
 
 function dtrDailyRecordReply(context, message) {
   const language = languageOf(message);
-  const record = dtrRecords(context)[0];
+  const rawRecord = (context.dtr_records || [])[0];
+  const record = rawRecord ? dtrRecords(context).find(row => row.attendance_date === rawRecord.attendance_date) || rawRecord : null;
   const label = context.date_range?.label || 'selected date';
   if (!record) {
     const day = calendarDayForDate(context, context.date_range?.startDate);
@@ -1904,7 +1916,7 @@ function dtrDailyRecordReply(context, message) {
   const missing = missingDtrSlotsForContext(context, record);
   const day = calendarDayForDate(context, record.attendance_date);
   const details = [
-    `Status: ${statusLabel(record.status)}`,
+    `Status: ${record.attendance_label || statusLabel(record.status)}`,
     `AM in: ${fmtTime(record.time_in)}`,
     `AM out: ${fmtTime(record.break_out)}`,
     `PM in: ${fmtTime(record.break_in)}`,
@@ -1924,8 +1936,8 @@ function dtrDailyRecordReply(context, message) {
   return structuredReply(language, {
     title: `DTR for ${fmtFriendlyDate(record.attendance_date)}`,
     summary: missing.length > 0
-      ? `Your DTR is ${statusLabel(record.status)} and has missing logs.`
-      : `Your DTR is ${statusLabel(record.status)}.`,
+      ? `Your DTR is ${record.attendance_label || statusLabel(record.status)} and has missing logs.`
+      : `Your DTR is ${record.attendance_label || statusLabel(record.status)}.`,
     details,
     nextStep: missing.length > 0
       ? 'Review the missing logs, then check locator, leave, or HR correction coverage.'
@@ -2024,6 +2036,7 @@ function dtrRangeSummaryReply(context, message) {
         return `${date}: Holiday${record.holiday_name ? ` (${record.holiday_name})` : ''}`;
       }
       if (isAbsentDtrRecord(record)) return `${date}: Absent`;
+      if (record.attendance_label) return `${date}: ${record.attendance_label}${record.locator_fully_covered ? ' (approved coverage)' : ' (partial coverage)'}`;
       if (status === 'present' || status === 'complete') return `${date}: Present`;
       if (isIncompleteDtrRecord(record)) {
         const missing = missingDtrSlotsForContext(context, record);
@@ -2039,7 +2052,7 @@ function dtrRangeSummaryReply(context, message) {
         }
         return `${date}: Incomplete${missing.length > 0 ? ` - missing ${missing.join(', ')}` : ''}`;
       }
-      return `${date}: ${statusLabel(record.status)}`;
+      return `${date}: ${record.attendance_label || statusLabel(record.status)}`;
       }
       const date = fmtFriendlyDate(day.attendance_date);
       if (language === 'bisaya') return `${date}: Walay DTR record (possible absent)`;
@@ -2274,7 +2287,7 @@ function dtrAbsentSummaryReply(context, message) {
     if (language === 'tagalog') return `Wala akong nakitang DTR record na marked absent sa ${displayLabel}.`;
     return `I found no DTR records marked absent for ${displayLabel}.`;
   }
-  const absentLines = absent.map((record) => `${fmtFriendlyDate(record.attendance_date)}: saved as ${statusLabel(record.status)}`);
+  const absentLines = absent.map((record) => `${fmtFriendlyDate(record.attendance_date)}: saved as ${record.attendance_label || statusLabel(record.status)}`);
   const noRecordLines = noRecords.map((day) => `${fmtFriendlyDate(day.attendance_date)}: no DTR record saved for a scheduled workday${day.shift_name ? ` (${day.shift_name})` : ''}`);
   const all = [...absentLines, ...noRecordLines];
   if (language === 'bisaya') {
@@ -2408,7 +2421,8 @@ function dtrStatusExplanationReply(context, message) {
   if (range.startDate && range.endDate && range.startDate !== range.endDate) {
     return dtrRangeSummaryReply(context, message);
   }
-  const record = dtrRecords(context)[0];
+  const rawRecord = (context.dtr_records || [])[0];
+  const record = rawRecord ? dtrRecords(context).find(row => row.attendance_date === rawRecord.attendance_date) || rawRecord : null;
   if (!record) {
     const day = range.startDate ? calendarDayForDate(context, range.startDate) : null;
     const dateText = range.startDate
@@ -2526,7 +2540,7 @@ function dtrStatusExplanationReply(context, message) {
   const coverage = firstMatchingCoverageText(context, record, missing);
   const day = calendarDayForDate(context, record.attendance_date);
   const parts = [
-    `Status: ${statusLabel(record.status)}`,
+    `Status: ${record.attendance_label || statusLabel(record.status)}`,
     day?.shift_name ? `Shift: ${day.shift_name} ${fmtScheduleRange(day)}` : null,
     missing.length > 0 ? `Missing logs: ${missing.join(', ')}` : null,
     record.leave_type ? `Linked leave: ${labelLeaveType(record.leave_type)}` : null,
@@ -2536,10 +2550,10 @@ function dtrStatusExplanationReply(context, message) {
   ];
   const summary =
     language === 'bisaya'
-      ? `Ang DTR status nimo kay ${statusLabel(record.status)}.`
+      ? `Ang DTR status nimo kay ${record.attendance_label || statusLabel(record.status)}.`
       : language === 'tagalog'
-        ? `Ang DTR status mo ay ${statusLabel(record.status)}.`
-        : `Your DTR status is ${statusLabel(record.status)}.`;
+        ? `Ang DTR status mo ay ${record.attendance_label || statusLabel(record.status)}.`
+        : `Your DTR status is ${record.attendance_label || statusLabel(record.status)}.`;
   const nextStep =
     missing.length > 0
       ? language === 'bisaya'
@@ -4361,7 +4375,7 @@ function leaveFormFieldHelpReply(context, message) {
 
 function requestedLocatorTypeRecord(message, context) {
   const requested =
-    requestedSpecificLocatorType(message) || requestedLocatorType(message);
+    requestedSpecificLocatorType(message, context) || requestedLocatorType(message, context);
   if (!requested) return null;
   const types = context.locator_types || [];
   return types.find((type) => locatorTypeMatches(type, requested)) || null;
@@ -4492,8 +4506,8 @@ function locatorFormFieldHelpReply(context, message) {
   const language = languageOf(message);
   const typeRecord = requestedLocatorTypeRecord(message, context);
   const locatorTypeValue =
-    requestedSpecificLocatorType(message) ||
-    requestedLocatorType(message) ||
+    requestedSpecificLocatorType(message, context) ||
+    requestedLocatorType(message, context) ||
     lower(typeRecord?.request_type || typeRecord?.code || '');
   const field = getLocatorFormFieldGuidance(message, locatorTypeValue);
   if (!field) {
@@ -4601,7 +4615,7 @@ function locatorGuidedFilingExampleText(language, typeLabel) {
 function locatorGuidedFilingReply(context, message) {
   const language = languageOf(message);
   const typeRecord = requestedLocatorTypeRecord(message, context);
-  const typeHint = requestedLocatorType(message);
+  const typeHint = requestedLocatorType(message, context);
   const typeLabel = localizedLocatorTypeLabel(typeHint, typeRecord);
   const missing = [];
   if (!typeHint) missing.push('locator type');
@@ -5083,7 +5097,7 @@ function leaveGuidedFilingReply(context, message) {
   const days = requestedDaysOrRangeDays(message, context);
   const missing = [];
   if (!type) missing.push('leave type');
-  if (!hasDateRangeHint(message)) missing.push('date or date range');
+  if (!hasDateRangeHint(message) && (!context.date_range?.startDate || context.date_range.label === 'today')) missing.push('date or date range');
   if (!days) missing.push('number of days');
 
   if (missing.length > 0) {
@@ -5511,25 +5525,29 @@ function locatorStatusText(status) {
   return statusLabel(status);
 }
 
-function requestedLocatorType(message) {
+function requestedLocatorType(message, context) {
+  const configured = configuredLocatorType(message, context?.locator_types);
+  if (configured) return configured.code;
   const text = lower(message);
+  if (/\btravel order\b/.test(text)) return 'travel_order';
   if (/\b(wfh|work from home|home)\b/.test(text)) return 'work_from_home';
   if (/\b(pass slip|pass-slip|passslip)\b/.test(text)) return 'pass_slip';
-  if (/\b(official business|official|business|ob|on field|field|fieldwork|field work|out of office|outside office|travel order|locator)\b/.test(text)) return 'locator';
+  if (/\b(official business|official|business|ob|on field|fieldwork|field work|out of office|outside office|travel order|locator)\b/.test(text)) return 'locator';
   return null;
 }
 
-function requestedSpecificLocatorType(message) {
-  const requestedType = requestedLocatorType(message);
+function requestedSpecificLocatorType(message, context) {
+  const requestedType = requestedLocatorType(message, context);
   if (requestedType !== 'locator') return requestedType;
   const text = lower(message);
-  return /\b(official business|official|business|ob|on field|field|fieldwork|field work|out of office|outside office|travel order)\b/.test(text)
+  return /\b(official business|official|business|ob|on field|fieldwork|field work|out of office|outside office|travel order)\b/.test(text)
     ? 'locator'
     : null;
 }
 
 function locatorTypeMatches(item, requestedType) {
   if (!requestedType) return true;
+  requestedType = lower(requestedType);
   const code = lower(item?.request_type || item?.code);
   const label = lower(item?.request_type_label || item?.label);
   if (requestedType === 'locator') {
@@ -5601,7 +5619,7 @@ function locatorStatusMatches(status, requested) {
 function locatorSlipsForMessage(context, message) {
   const range = context.date_range || {};
   const useRange = hasDateRangeHint(message);
-  const requestedType = requestedSpecificLocatorType(message);
+  const requestedType = requestedSpecificLocatorType(message, context);
   const requestedStatus = requestedLocatorStatus(message);
   return (context.recent_locator_slips || []).filter((slip) => {
     if (useRange && range.startDate && range.endDate) {
@@ -5615,8 +5633,8 @@ function locatorSlipsForMessage(context, message) {
 
 function locatorTypeRulesForMessage(context, message, { genericLocatorMeansAll = true } = {}) {
   const requestedType = genericLocatorMeansAll
-    ? requestedSpecificLocatorType(message)
-    : requestedLocatorType(message);
+    ? requestedSpecificLocatorType(message, context)
+    : requestedLocatorType(message, context);
   const types = context.locator_types || [];
   const matches = types.filter((type) => locatorTypeMatches(type, requestedType));
   return matches.length > 0 ? matches : requestedType ? [] : types;
@@ -5719,7 +5737,7 @@ function locatorRequirementPolicyLines(language) {
 
 function locatorTypesReply(context, message) {
   const language = languageOf(message);
-  const requestedType = requestedSpecificLocatorType(message);
+  const requestedType = requestedSpecificLocatorType(message, context);
   const types = locatorTypeRulesForMessage(context, message);
   if (types.length === 0) {
     if (language === 'bisaya') return 'Wala koy nakitang matching locator type sa system.';
@@ -6078,7 +6096,7 @@ function locatorAvailabilityReply(context, message) {
   const day = date ? calendarDayForDate(context, date) : null;
   const type = locatorTypeRulesForMessage(context, message)[0] || null;
   const requestedSlot = requestedDtrSlot(message);
-  const requestedType = requestedLocatorType(message);
+  const requestedType = requestedLocatorType(message, context);
   const existing = (context.recent_locator_slips || []).filter((slip) => {
     if (date && slip.slip_date !== date) return false;
     return locatorTypeMatches(slip, requestedType);
@@ -6366,12 +6384,60 @@ function locatorApprovalTrackerReply(context, message) {
   });
 }
 
+function locatorPolicyGuidanceReply(context, message) {
+  const language = languageOf(message);
+  const kind = locatorPolicyKind(message);
+  const guidance = {
+    credits: [
+      'An approved locator provides attendance coverage for its saved slots; it does not deduct Vacation or Sick Leave credits. Leave requests have separate credit rules.',
+      'Ang approved locator kay DTR coverage sa gi-save nga slots; dili kini mobawas sa Vacation o Sick Leave credits. Lahi ang credit rules sa leave requests.',
+      'Ang approved locator ay attendance coverage para sa naka-save na slots; hindi ito nagbabawas ng Vacation o Sick Leave credits. Hiwalay ang credit rules ng leave requests.',
+    ],
+    pending: [
+      'No. A pending locator is not final DTR coverage. The required approvals must finish, and coverage applies only to the approved slots. Existing approved coverage is separate from a pending request.',
+      'Dili. Ang pending locator dili pa final DTR coverage. Kinahanglan mahuman ang required approvals ug approved slots ra ang covered. Lahi ang existing approved coverage.',
+      'Hindi. Ang pending locator ay hindi pa final DTR coverage. Kailangang matapos ang required approvals; approved slots lang ang covered. Hiwalay ang existing approved coverage.',
+    ],
+    paper: [
+      'Ask HR/Admin to use approved paper locator recording. Provide the signed paper approval, employee, date, request type, destination/purpose, covered slots and approval/signatory details. This records an already-approved document; employees should not submit it as a new approval request.',
+      'Ipa-record sa HR/Admin ang approved paper locator. Ihatag ang pirmadong approval, employee, petsa, type, destination/purpose, covered slots ug signatory details. Already-approved paper ni; dili bag-ong approval request.',
+      'Ipa-record sa HR/Admin ang approved paper locator. Ibigay ang pirmadong approval, employee, petsa, type, destination/purpose, covered slots at signatory details. Already-approved paper ito; hindi bagong approval request.',
+    ],
+    changes: [
+      'Contact HR/Admin to correct or revoke an approved locator and provide the request reference and reason. Revocation requires HR/Admin access and is audited; it can remove DTR coverage and may require month-end reconciliation. I cannot change or revoke it through chat.',
+      'Kontaka ang HR/Admin para sa correction o revocation sa approved locator. Ihatag ang request reference ug rason. Ma-audit ang revocation ug mahimong mawala ang DTR coverage o kinahanglan ug month-end reconciliation. Dili kini usbon pinaagi sa chat.',
+      'Kontakin ang HR/Admin para itama o i-revoke ang approved locator. Ibigay ang request reference at dahilan. Naka-audit ang revocation at maaaring mawala ang DTR coverage o kailanganin ang month-end reconciliation. Hindi ito binabago sa chat.',
+    ],
+    reconciliation: [
+      'A month-end reconciliation flag means the locator change needs review against already-posted attendance/payroll-period records. Ask HR/Admin to review the request, affected date and DTR posting before the period is finalized. A chat answer does not mark it reconciled.',
+      'Ang month-end reconciliation flag nagpasabot nga ipa-review ang locator change batok sa na-post nga attendance/period records. Kontaka ang HR/Admin ug ihatag ang request ug affected date. Dili kini ma-reconcile pinaagi sa chat.',
+      'Ang month-end reconciliation flag ay kailangang i-review laban sa na-post na attendance/period records. Kontakin ang HR/Admin at ibigay ang request at apektadong petsa. Hindi ito nare-reconcile sa chat.',
+    ],
+    rest_day: [
+      'Employee locator filing requires a valid scheduled workday, not a rest day or whole-day holiday. If you were assigned to work that date, ask HR/Admin to check the schedule or applicable correction before filing.',
+      'Kinahanglan valid scheduled workday ang employee locator, dili rest day o whole-day holiday. Kung gi-assign ka nga mo-duty, ipa-check sa HR/Admin ang schedule o correction.',
+      'Kailangan ng valid scheduled workday para sa employee locator, hindi rest day o whole-day holiday. Kung naatasang pumasok, ipa-check sa HR/Admin ang schedule o correction.',
+    ],
+  };
+  const text = guidance[kind] || guidance.pending;
+  return structuredReply(language, { title: 'Locator policy', summary: text[language === 'bisaya' ? 1 : language === 'tagalog' ? 2 : 0] });
+}
+
 function buildFastEmployeeAssistantReply(message, context, intent) {
   const greetingReply = assistantGreetingReply(message);
   if (greetingReply) return greetingReply;
 
   const text = lower(message);
   const localized = isTagalogOrBisaya(message);
+  if (intent === 'locator_policy_guidance') return locatorPolicyGuidanceReply(context, message);
+  if (intent === 'locator_type_compare') {
+    const types = configuredLocatorTypes(message, context.locator_types);
+    return structuredReply(languageOf(message), {
+      title: 'Locator type comparison',
+      summary: types.length >= 2 ? 'Configured differences for the requested types:' : 'Name both locator types you want to compare.',
+      details: types.map((type) => fmtLocatorTypeRule(type, languageOf(message))), limit: 8,
+    });
+  }
 
   if (intent === 'today_dtr') {
     return dtrDailyRecordReply(context, message);
@@ -6562,7 +6628,12 @@ function buildFastEmployeeAssistantReply(message, context, intent) {
     return dtrHoursSummaryReply(context, message);
   }
   if (intent === 'leave_balance_projection') {
-    return leaveBalanceProjectionReply(context, message);
+    const note = languageOf(message) === 'bisaya'
+      ? 'Projection ra ni; wala pay credit nga gi-deduct. Ang eligibility ug approval checks mag-apply gihapon.'
+      : languageOf(message) === 'tagalog'
+        ? 'Projection lamang ito; walang credit na ibinawas. May eligibility at approval checks pa rin.'
+        : 'This is a projection; no credits have been deducted. Eligibility and approval checks still apply.';
+    return `${leaveBalanceProjectionReply(context, message)}\n\n${note}`;
   }
 
   return null;
@@ -6572,7 +6643,7 @@ function buildFastEmployeeAssistantReply(message, context, intent) {
 // Answers: "How many total hours did I work this month?"
 function dtrHoursSummaryReply(context, message) {
   const language = languageOf(message);
-  const records = context.dtr_records || [];
+  const records = dtrRecords(context);
   const range = context.date_range;
   const period = displayPeriodLabel(range && range.label, language);
 
@@ -6618,6 +6689,15 @@ function dtrHoursSummaryReply(context, message) {
     return sum + (r.undertime_minutes || 0);
   }, 0);
 
+  const coverageDays = records.filter(row => row.locator_only).length;
+  if (coverageDays) {
+    const description = language === 'bisaya'
+      ? `Na-record nga oras gikan sa actual punches: ${totalHours} hours sa ${period}. Approved locator coverage: ${coverageDays} ka adlaw; wala kini gi-convert ngadto sa invented punch hours.`
+      : language === 'tagalog'
+        ? `Naitalang oras mula sa actual punches: ${totalHours} oras sa ${period}. Approved locator coverage: ${coverageDays} araw; hindi ito ginawang imbentong punch hours.`
+        : `Recorded hours from actual punches: ${totalHours} hours for ${period}. Approved locator coverage: ${coverageDays} day(s); coverage is not converted into invented punch hours.`;
+    return `DTR Hours Summary\n\n${description}`;
+  }
   const hoursStr = Number.isInteger(totalHours) ? String(totalHours) : totalHours.toFixed(2);
   const lateNote = lateRecords.length > 0
     ? (language === 'bisaya'
