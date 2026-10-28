@@ -26,7 +26,7 @@ module.exports = function createLocatorControllers({
         await client.query('BEGIN');
         const current = await client.query(
           `SELECT id, status, employee_id, slip_date::text AS slip_date,
-              hr_reviewed_at
+              hr_reviewed_at, paper_approval_record
        FROM locator_slips
        WHERE id = $1::uuid
        FOR UPDATE`,
@@ -38,6 +38,10 @@ module.exports = function createLocatorControllers({
           return res.status(404).json({ error: 'Locator slip not found' });
         }
 
+        if (row.paper_approval_record) {
+          await client.query('ROLLBACK');
+          return res.status(409).json({error:'Paper approvals must be corrected through a documented HR process; they cannot be digitally revoked.'});
+        }
         const policy = evaluateLocatorRevocation({
           status: row.status,
           final_review_route: row.final_review_route || 'hr',

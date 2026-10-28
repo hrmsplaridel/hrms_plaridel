@@ -1410,6 +1410,7 @@ CREATE TABLE IF NOT EXISTS locator_slips (
   final_review_route TEXT NOT NULL DEFAULT 'hr',
   final_reviewer_user_id UUID REFERENCES users(id) ON DELETE SET NULL,
   is_retroactive_correction BOOLEAN NOT NULL DEFAULT false,
+  paper_approval_record JSONB,
   retroactive_correction_reason TEXT,
   retroactive_corrected_by UUID REFERENCES users(id) ON DELETE SET NULL,
   retroactive_corrected_at TIMESTAMPTZ,

@@ -128,6 +128,16 @@
     ]
   },
   {
+    "path": "/admin/paper-signatories",
+    "methods": ["get"],
+    "middleware": ["authMiddleware", "requireAdminOrHr", ""]
+  },
+  {
+    "path": "/admin/approved-paper",
+    "methods": ["post"],
+    "middleware": ["authMiddleware", "requireAdminOrHr", "", "uploadLocatorAttachmentMw"]
+  },
+  {
     "path": "/submit",
     "methods": [
       "post"

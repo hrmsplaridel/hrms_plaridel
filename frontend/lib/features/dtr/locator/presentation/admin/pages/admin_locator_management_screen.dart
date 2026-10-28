@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:hrms_plaridel/features/dtr/locator/presentation/shared/widgets/locator_paper_record_notice.dart';
 import 'package:hrms_plaridel/features/dtr/management/approvals/pages/workflow_approval_inbox_page.dart';
 import 'dart:convert';
 import '../../shared/widgets/locator_custom_fields.dart';
@@ -54,7 +55,7 @@ enum _LocatorAdminQueue {
   final String label;
 }
 
-enum _LocatorHeaderAction { fileForEmployees, recordCorrection, manageTypes }
+enum _LocatorHeaderAction { fileForEmployees, recordApprovedPaper, recordCorrection, manageTypes }
 
 class AdminLocatorManagementScreen extends StatefulWidget {
   const AdminLocatorManagementScreen({super.key});
@@ -210,6 +211,8 @@ class _AdminLocatorManagementScreenState
                 switch (action) {
                   case _LocatorHeaderAction.fileForEmployees:
                     unawaited(_fileForEmployees());
+                  case _LocatorHeaderAction.recordApprovedPaper:
+                    unawaited(_fileForEmployees(paper: true));
                   case _LocatorHeaderAction.recordCorrection:
                     unawaited(_recordLocatorCorrection());
                   case _LocatorHeaderAction.manageTypes:
@@ -234,6 +237,9 @@ class _AdminLocatorManagementScreenState
                     ],
                   ),
                 ),
+                if (_locatorTypes.any((type) => type.isActive))
+                  const PopupMenuItem<_LocatorHeaderAction>(value:_LocatorHeaderAction.recordApprovedPaper,
+                    child:Text('Record approved paper locator')),
                 const PopupMenuItem<_LocatorHeaderAction>(
                   value: _LocatorHeaderAction.manageTypes,
                   child: Row(
@@ -1239,6 +1245,8 @@ class _AdminLocatorManagementScreenState
                                   ),
                                 ),
                             ],
+                            if (item.paperApprovalRecord != null)
+                              LocatorPaperRecordNotice(record:item.paperApprovalRecord!,reconciliationRequired:item.monthEndReconciliationRequired),
                             if (item.isRetroactiveCorrection)
                               Padding(
                                 padding: const EdgeInsets.only(top: 12),
@@ -2279,9 +2287,9 @@ class _AdminLocatorManagementScreenState
     return result;
   }
 
-  Future<void> _fileForEmployees() async {
+  Future<void> _fileForEmployees({bool paper = false}) async {
     final types = _locatorTypes
-        .where((t) => t.isActive && t.adminCanFile)
+        .where((t) => t.isActive && (paper || t.adminCanFile))
         .toList();
     if (types.isEmpty) {
       _showLocatorSnack(
@@ -2295,10 +2303,13 @@ class _AdminLocatorManagementScreenState
       breakpoint: 0,
       minWidth: 620,
       initialWidthFraction: 0.45,
-      builder: (_) => AdminLocatorFilingDialog(requestTypes: types),
+      builder: (_) => AdminLocatorFilingDialog(requestTypes: types, approvedPaper: paper),
     );
     if (created == true && mounted) {
       LocatorSlipDataCache.instance.invalidateRequests();
+      if (paper) {
+        _showLocatorSnack('Approved paper locator recorded successfully.');
+      }
       await _load(forceRefresh: true);
     }
   }
@@ -2526,6 +2537,7 @@ class _LocatorAdminRecord {
     required this.status,
     this.finalReviewRoute = 'hr',
     this.workflowSnapshot,
+    this.paperApprovalRecord,
     this.deptHeadReviewerName,
     this.deptHeadReviewedAt,
     this.deptHeadRemarks,
@@ -2560,6 +2572,7 @@ class _LocatorAdminRecord {
   final String status;
   final String finalReviewRoute;
   final Map<String, dynamic>? workflowSnapshot;
+  final Map<String, dynamic>? paperApprovalRecord;
   bool get hasSharedWorkflow =>
       workflowSnapshot?['steps'] is List &&
       (workflowSnapshot!['steps'] as List).any((step) => step is Map);
@@ -2591,6 +2604,7 @@ class _LocatorAdminRecord {
   }
 
   String? get revokeDisabledReason {
+    if (paperApprovalRecord != null) return 'Paper approvals require a documented HR correction; digital revocation is unavailable.';
     if (status.toLowerCase() != 'approved') {
       return 'Only approved locator requests can be revoked.';
     }
@@ -2606,6 +2620,7 @@ class _LocatorAdminRecord {
   }
 
   String get statusLabel {
+    if (paperApprovalRecord != null && status.toLowerCase() == 'approved') return 'Approved (paper record)';
     final named = pendingWorkflowStepLabel(workflowSnapshot);
     if (status.startsWith('pending') && named != null) return 'Pending $named';
     switch (status.toLowerCase()) {
@@ -2684,6 +2699,7 @@ class _LocatorAdminRecord {
       workflowSnapshot: json['workflow_snapshot'] is Map
           ? Map<String, dynamic>.from(json['workflow_snapshot'] as Map)
           : null,
+      paperApprovalRecord: json['paper_approval_record'] is Map ? Map<String,dynamic>.from(json['paper_approval_record'] as Map) : null,
       deptHeadReviewerName: _trimOrNull(json['dept_head_reviewer_name']),
       deptHeadReviewedAt: _parseDateTime(json['dept_head_reviewed_at']),
       deptHeadRemarks: _trimOrNull(json['dept_head_remarks']),

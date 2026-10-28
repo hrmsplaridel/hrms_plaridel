@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import '../../shared/widgets/locator_custom_fields.dart';
 import 'package:dio/dio.dart';
@@ -10,10 +11,17 @@ import 'package:hrms_plaridel/features/dtr/locator/models/locator_request_type.d
 import 'package:hrms_plaridel/features/dtr/locator/utils/locator_signature_prompt.dart';
 import 'package:hrms_plaridel/shared/widgets/form_settings_section.dart';
 import 'package:hrms_plaridel/shared/widgets/hrms_date_picker.dart';
+import 'locator_paper_approval_fields.dart';
+import 'locator_paper_employee_picker.dart';
 
 class AdminLocatorFilingDialog extends StatefulWidget {
-  const AdminLocatorFilingDialog({super.key, required this.requestTypes});
+  const AdminLocatorFilingDialog({
+    super.key,
+    required this.requestTypes,
+    this.approvedPaper = false,
+  });
   final List<LocatorRequestType> requestTypes;
+  final bool approvedPaper;
   @override
   State<AdminLocatorFilingDialog> createState() =>
       _AdminLocatorFilingDialogState();
@@ -21,6 +29,11 @@ class AdminLocatorFilingDialog extends StatefulWidget {
 
 class _AdminLocatorFilingDialogState extends State<AdminLocatorFilingDialog> {
   final _form = GlobalKey<FormState>();
+  GlobalKey<LocatorPaperApprovalFieldsState> _paperKey =
+      GlobalKey<LocatorPaperApprovalFieldsState>();
+  final _originalDate = TextEditingController();
+  String _paperContext = '';
+  Timer? _searchDebounce;
   final _search = TextEditingController(),
       _office = TextEditingController(),
       _reason = TextEditingController();
@@ -53,14 +66,16 @@ class _AdminLocatorFilingDialogState extends State<AdminLocatorFilingDialog> {
     super.initState();
     _type = widget.requestTypes.first;
     _load();
-    _loadReviewer();
+    if (!widget.approvedPaper) _loadReviewer();
   }
 
   @override
   void dispose() {
+    _searchDebounce?.cancel();
     _search.dispose();
     _office.dispose();
     _reason.dispose();
+    _originalDate.dispose();
     _employeeScroll.dispose();
     _detailsScroll.dispose();
     _reviewScroll.dispose();
@@ -93,7 +108,10 @@ class _AdminLocatorFilingDialogState extends State<AdminLocatorFilingDialog> {
       final r = await ApiClient.instance.get<Map<String, dynamic>>(
         '/api/locator-slips/admin/filing-employees',
         queryParameters: {
-          'slip_date': _dateString,
+          if (widget.approvedPaper)
+            'paper': 'true'
+          else
+            'slip_date': _dateString,
           'search': _search.text.trim(),
           'offset': more ? _employees.length : 0,
         },
@@ -125,7 +143,11 @@ class _AdminLocatorFilingDialogState extends State<AdminLocatorFilingDialog> {
 
   bool _validateSelection() {
     if (_selected.isEmpty) {
-      setState(() => _error = 'Select at least one employee.');
+      setState(
+        () => _error = widget.approvedPaper
+            ? 'Select an employee.'
+            : 'Select at least one employee.',
+      );
       return false;
     }
     if (_validatingEmployees || _availabilityError != null) {
@@ -152,7 +174,9 @@ class _AdminLocatorFilingDialogState extends State<AdminLocatorFilingDialog> {
       setState(() => _error = 'Select the covered time segments.');
       return false;
     }
-    if (_type.requiresAttachment && _attachment?.bytes == null) {
+    if (!widget.approvedPaper &&
+        _type.requiresAttachment &&
+        _attachment?.bytes == null) {
       setState(() => _error = 'Upload the required attachment.');
       return false;
     }
@@ -162,6 +186,15 @@ class _AdminLocatorFilingDialogState extends State<AdminLocatorFilingDialog> {
   void _goToStep(int step) {
     FocusScope.of(context).unfocus();
     setState(() {
+      if (widget.approvedPaper && step == 2) {
+        final contextKey =
+            '${_selected.firstOrNull}/${_type.code}/${_originalDate.text}/$_dateString/${_office.text}/${_reason.text}/${jsonEncode(_slots)}/${jsonEncode(_additionalDetails)}';
+        if (_paperContext != contextKey) {
+          _paperContext = contextKey;
+          _paperKey = GlobalKey<LocatorPaperApprovalFieldsState>();
+          _attachment = null;
+        }
+      }
       _step = step;
       _error = null;
     });
@@ -242,7 +275,9 @@ class _AdminLocatorFilingDialogState extends State<AdminLocatorFilingDialog> {
     final picked = await showHrmsDatePicker(
       context: context,
       initialDate: _date,
-      firstDate: DateTime(now.year, now.month, now.day),
+      firstDate: widget.approvedPaper
+          ? DateTime(1900)
+          : DateTime(now.year, now.month, now.day),
       lastDate: DateTime(now.year + 1, 12, 31),
     );
     if (!mounted || picked == null || DateUtils.isSameDay(picked, _date)) {
@@ -252,13 +287,21 @@ class _AdminLocatorFilingDialogState extends State<AdminLocatorFilingDialog> {
       _date = picked;
       _results = [];
     });
-    await Future.wait([_load(), _revalidateEmployees()]);
+    if (widget.approvedPaper) {
+      await _revalidateEmployees();
+    } else {
+      await Future.wait([_load(), _revalidateEmployees()]);
+    }
   }
 
   Future<void> _submit() async {
     if (_saving || _loading || _validatingEmployees || !_validateDetails()) {
       return;
     }
+    final paperRecord = widget.approvedPaper
+        ? _paperKey.currentState?.buildRecord()
+        : null;
+    if (widget.approvedPaper && paperRecord == null) return;
     setState(() {
       _saving = true;
       _error = null;
@@ -266,12 +309,16 @@ class _AdminLocatorFilingDialogState extends State<AdminLocatorFilingDialog> {
     });
     try {
       Map<String, dynamic>? signature;
-      if (_type.autoApproveAdmin && _canReview) {
+      if (!widget.approvedPaper && _type.autoApproveAdmin && _canReview) {
         signature = await promptLocatorSignature(context, slot: 'hr_approver');
         if (signature == null) return;
       }
       final data = <String, dynamic>{
-        'employee_ids': jsonEncode(_selected.toList()),
+        if (widget.approvedPaper)
+          'employee_id': _selected.single
+        else
+          'employee_ids': jsonEncode(_selected.toList()),
+        if (paperRecord != null) 'paper_approval': jsonEncode(paperRecord),
         'slip_date': _dateString,
         'request_type': _type.code,
         'office': _office.text.trim(),
@@ -287,7 +334,9 @@ class _AdminLocatorFilingDialogState extends State<AdminLocatorFilingDialog> {
           ),
       };
       final r = await ApiClient.instance.dio.post<Map<String, dynamic>>(
-        '/api/locator-slips/admin/file',
+        widget.approvedPaper
+            ? '/api/locator-slips/admin/approved-paper'
+            : '/api/locator-slips/admin/file',
         data: FormData.fromMap(data),
         options: Options(
           contentType: 'multipart/form-data',
@@ -295,10 +344,20 @@ class _AdminLocatorFilingDialogState extends State<AdminLocatorFilingDialog> {
         ),
       );
       if (!mounted) return;
+      if (widget.approvedPaper) {
+        _created = true;
+        Navigator.pop(context, true);
+        return;
+      }
       setState(() {
-        _results = (r.data?['results'] as List? ?? [])
-            .map((e) => Map<String, dynamic>.from(e as Map))
-            .toList();
+        _results =
+            (widget.approvedPaper
+                    ? [
+                        {'employee_id': _selected.single, 'request': r.data},
+                      ]
+                    : r.data?['results'] as List? ?? [])
+                .map((e) => Map<String, dynamic>.from(e as Map))
+                .toList();
         for (final row in _results) {
           if (row['request'] != null) {
             _selected.remove(row['employee_id']);
@@ -344,6 +403,9 @@ class _AdminLocatorFilingDialogState extends State<AdminLocatorFilingDialog> {
   String get _formattedDate =>
       MaterialLocalizations.of(context).formatMediumDate(_date);
   String get _approvalMessage {
+    if (widget.approvedPaper) {
+      return 'The signed paper is already approved. Recording will not send another approval request.';
+    }
     if (_type.approvalWorkflowId != null) {
       return _type.autoApproveAdmin && _canReview
           ? 'Requests follow the configured workflow. Eligible requests may use your approval signature when that workflow permits it.'
@@ -393,9 +455,32 @@ class _AdminLocatorFilingDialogState extends State<AdminLocatorFilingDialog> {
     ],
   );
 
-  Widget _selectedEmployees({bool editable = false}) => _section(
-    'Selected employees (${_selected.length})',
-    [
+  Widget _selectedEmployees({bool editable = false}) {
+    if (widget.approvedPaper) {
+      final id = _selected.firstOrNull;
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          if (id != null)
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: const CircleAvatar(child: Icon(Icons.person_outline)),
+              title: Text(
+                _employeeName(id),
+                style: const TextStyle(
+                  fontSize: 22,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              subtitle: const Text(
+                'Recording an already-approved paper locator',
+              ),
+            ),
+          _availabilityNotice(),
+        ],
+      );
+    }
+    return _section('Selected employees (${_selected.length})', [
       if (_selected.isEmpty) const Text('No employees selected.'),
       Wrap(
         spacing: 8,
@@ -425,15 +510,17 @@ class _AdminLocatorFilingDialogState extends State<AdminLocatorFilingDialog> {
           ),
         ),
       _availabilityNotice(),
-    ],
-  );
+    ]);
+  }
 
   Widget _employeeStep() => ListView(
     controller: _employeeScroll,
     padding: const EdgeInsets.all(20),
     children: [
-      const Text(
-        'Choose the employees to file for. The same request details will apply to everyone selected.',
+      Text(
+        widget.approvedPaper
+            ? 'Choose the employee for this signed paper locator. Record one original document at a time.'
+            : 'Choose the employees to file for. The same request details will apply to everyone selected.',
       ),
       Align(
         alignment: Alignment.centerLeft,
@@ -473,21 +560,22 @@ class _AdminLocatorFilingDialogState extends State<AdminLocatorFilingDialog> {
         Text(
           '${_selected.length} selected · ${_employees.length} of $_total employees',
         ),
-        Align(
-          alignment: Alignment.centerLeft,
-          child: TextButton(
-            onPressed: _busy
-                ? null
-                : () => setState(() {
-                    for (final employee in _employees) {
-                      if (_selected.length >= 100) break;
-                      _selected.add(employee['id'].toString());
-                    }
-                    _error = null;
-                  }),
-            child: const Text('Select loaded employees (up to 100)'),
+        if (!widget.approvedPaper)
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton(
+              onPressed: _busy
+                  ? null
+                  : () => setState(() {
+                      for (final employee in _employees) {
+                        if (_selected.length >= 100) break;
+                        _selected.add(employee['id'].toString());
+                      }
+                      _error = null;
+                    }),
+              child: const Text('Select loaded employees (up to 100)'),
+            ),
           ),
-        ),
         if (_loading) const LinearProgressIndicator(),
         if (_employeeError != null) ...[
           Text(
@@ -515,6 +603,10 @@ class _AdminLocatorFilingDialogState extends State<AdminLocatorFilingDialog> {
                 : (value) => setState(() {
                     final id = employee['id'].toString();
                     if (value == true && _selected.length < 100) {
+                      if (widget.approvedPaper) {
+                        _selected.clear();
+                        _unavailable.clear();
+                      }
                       _selected.add(id);
                     } else if (value != true) {
                       _selected.remove(id);
@@ -543,7 +635,18 @@ class _AdminLocatorFilingDialogState extends State<AdminLocatorFilingDialog> {
         children: [
           _selectedEmployees(),
           const SizedBox(height: 16),
-          _section('Request details', [
+          if (widget.approvedPaper) ...[
+            const Text(
+              'Locator Details',
+              style: TextStyle(fontSize: 24, fontWeight: FontWeight.w700),
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              'Copy the locator type, date, destination and covered time segments from the signed paper.',
+            ),
+            const SizedBox(height: 20),
+          ],
+          _section(widget.approvedPaper ? 'Locator details' : 'Request details', [
             InkWell(
               key: const ValueKey('locator-filing-date'),
               onTap: _saving || _validatingEmployees ? null : _pickDate,
@@ -558,6 +661,49 @@ class _AdminLocatorFilingDialogState extends State<AdminLocatorFilingDialog> {
               ),
             ),
             const SizedBox(height: 12),
+            if (widget.approvedPaper) ...[
+              TextFormField(
+                key: const ValueKey('locator-paper-original-date'),
+                controller: _originalDate,
+                decoration: _decoration('Original filing date').copyWith(
+                  hintText: 'YYYY-MM-DD',
+                  suffixIcon: IconButton(
+                    icon: const Icon(Icons.calendar_today_outlined),
+                    onPressed: () async {
+                      final today = DateUtils.dateOnly(DateTime.now());
+                      final value = await showHrmsDatePicker(
+                        context: context,
+                        initialDate:
+                            DateTime.tryParse(
+                                  _originalDate.text,
+                                )?.isAfter(today) ==
+                                false
+                            ? DateTime.parse(_originalDate.text)
+                            : today,
+                        firstDate: DateTime(1900),
+                        lastDate: today,
+                      );
+                      if (value != null && mounted) {
+                        setState(
+                          () => _originalDate.text = value
+                              .toIso8601String()
+                              .substring(0, 10),
+                        );
+                      }
+                    },
+                  ),
+                ),
+                validator: (value) {
+                  final text = value ?? '', date = DateTime.tryParse(text);
+                  return RegExp(r'^\d{4}-\d{2}-\d{2}$').hasMatch(text) &&
+                          date != null &&
+                          date.toIso8601String().substring(0, 10) == text
+                      ? null
+                      : 'Enter the original filing date (YYYY-MM-DD).';
+                },
+              ),
+              const SizedBox(height: 12),
+            ],
             DropdownButtonFormField<LocatorRequestType>(
               initialValue: _type,
               isExpanded: true,
@@ -629,7 +775,7 @@ class _AdminLocatorFilingDialogState extends State<AdminLocatorFilingDialog> {
                   ),
                 ),
               ),
-            if (_type.requiresAttachment)
+            if (!widget.approvedPaper && _type.requiresAttachment)
               Padding(
                 padding: const EdgeInsets.only(top: 12),
                 child: OutlinedButton.icon(
@@ -681,36 +827,53 @@ class _AdminLocatorFilingDialogState extends State<AdminLocatorFilingDialog> {
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        const Text(
-          'Review the employees and request details before filing. Each employee receives a separate request.',
-        ),
+        if (!widget.approvedPaper)
+          const Text(
+            'Review the employees and request details before filing. Each employee receives a separate request.',
+          ),
         const SizedBox(height: 16),
         _selectedEmployees(),
         const SizedBox(height: 16),
-        _section('Request summary', [
-          _reviewLine('Locator date', _formattedDate),
-          _reviewLine('Request type', _type.label),
-          _reviewLine(
-            'Covered DTR slots',
-            _slots.entries
-                .where((slot) => slot.value)
-                .map((slot) => slot.key.toUpperCase().replaceAll('_', ' '))
-                .join(', '),
-          ),
-          _reviewLine(_type.locationLabel, _office.text.trim()),
-          _reviewLine('Purpose / Reason', _reason.text.trim()),
-          for (final line in locatorAdditionalFieldLines(
-            _type.employeeDetailSchema,
-            _additionalDetails,
-          ))
-            Padding(
-              padding: const EdgeInsets.only(bottom: 8),
-              child: Text(line),
+        if (widget.approvedPaper)
+          AbsorbPointer(
+            absorbing: _saving,
+            child: LocatorPaperApprovalFields(
+              key: _paperKey,
+              employeeId: _selected.firstOrNull ?? '',
+              requestType: _type.code,
+              filingDate: _originalDate.text,
+              onAttachment: (file) => setState(() => _attachment = file),
             ),
-          if (_attachment != null) _reviewLine('Attachment', _attachment!.name),
-        ]),
+          ),
+        _section(
+          widget.approvedPaper ? 'Paper locator summary' : 'Request summary',
+          [
+            _reviewLine('Locator date', _formattedDate),
+            _reviewLine('Request type', _type.label),
+            _reviewLine(
+              'Covered DTR slots',
+              _slots.entries
+                  .where((slot) => slot.value)
+                  .map((slot) => slot.key.toUpperCase().replaceAll('_', ' '))
+                  .join(', '),
+            ),
+            _reviewLine(_type.locationLabel, _office.text.trim()),
+            _reviewLine('Purpose / Reason', _reason.text.trim()),
+            for (final line in locatorAdditionalFieldLines(
+              _type.employeeDetailSchema,
+              _additionalDetails,
+            ))
+              Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Text(line),
+              ),
+            if (_attachment != null)
+              _reviewLine('Attachment', _attachment!.name),
+          ],
+        ),
         const SizedBox(height: 16),
-        _section('Approval', [Text(_approvalMessage)]),
+        if (!widget.approvedPaper)
+          _section('Approval', [Text(_approvalMessage)]),
         if (_results.isNotEmpty) ...[
           const SizedBox(height: 16),
           _section('Filing results', [
@@ -741,9 +904,13 @@ class _AdminLocatorFilingDialogState extends State<AdminLocatorFilingDialog> {
     final nextLabel = _step == 0
         ? 'Continue'
         : _step == 1
-        ? 'Review requests'
+        ? (widget.approvedPaper
+              ? 'Continue to paper approval'
+              : 'Review requests')
         : _finished
         ? 'Done'
+        : widget.approvedPaper
+        ? 'Record approved locator'
         : _results.isNotEmpty
         ? 'Retry failed requests'
         : 'File requests';
@@ -793,7 +960,7 @@ class _AdminLocatorFilingDialogState extends State<AdminLocatorFilingDialog> {
               ],
               Row(
                 children: [
-                  if (_step > 0) ...[
+                  if (_step > 0 && !widget.approvedPaper) ...[
                     TextButton.icon(
                       onPressed: _saving
                           ? null
@@ -824,7 +991,13 @@ class _AdminLocatorFilingDialogState extends State<AdminLocatorFilingDialog> {
                               : Icons.send_outlined,
                           size: 18,
                         ),
-                        label: Text(_saving ? 'Filing…' : nextLabel),
+                        label: Text(
+                          _saving
+                              ? (widget.approvedPaper
+                                    ? 'Recording…'
+                                    : 'Filing…')
+                              : nextLabel,
+                        ),
                       ),
                     ),
                   ),
@@ -837,12 +1010,64 @@ class _AdminLocatorFilingDialogState extends State<AdminLocatorFilingDialog> {
     );
   }
 
-  @override
-  Widget build(BuildContext context) => Scaffold(
+  void _selectPaperEmployee(Map<String, dynamic> employee) {
+    _searchDebounce?.cancel();
+    final id = employee['id'].toString();
+    if (_selected.firstOrNull != id) {
+      _office.clear();
+      _reason.clear();
+      _originalDate.clear();
+      _additionalDetails.clear();
+      _slots.updateAll((_, _) => false);
+      _paperContext = '';
+      _paperKey = GlobalKey<LocatorPaperApprovalFieldsState>();
+      _attachment = null;
+      _results = [];
+      _unavailable.clear();
+      _availabilityError = null;
+    }
+    _selected
+      ..clear()
+      ..add(id);
+    _goToStep(1);
+  }
+
+  Widget _paperStepBody(String label, Widget child) => Column(
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: [
+      Padding(
+        padding: const EdgeInsets.fromLTRB(24, 20, 24, 0),
+        child: Text(
+          label,
+          style: Theme.of(context).textTheme.labelLarge?.copyWith(
+            color: Theme.of(context).colorScheme.primary,
+          ),
+        ),
+      ),
+      Expanded(child: child),
+    ],
+  );
+
+  Widget _paperRecording() => Scaffold(
     backgroundColor: AppTheme.dashPanelOf(context),
     appBar: AppBar(
-      title: const Text('File locator for employees'),
+      title: Text(
+        _step == 2
+            ? 'Original Paper Approval'
+            : 'Record approved paper locator',
+      ),
       automaticallyImplyLeading: false,
+      leading: _step == 0
+          ? null
+          : IconButton(
+              tooltip: _step == 1
+                  ? 'Back to employee selection'
+                  : 'Back to locator details',
+              onPressed: _saving || _validatingEmployees
+                  ? null
+                  : () => _goToStep(_step - 1),
+              icon: const Icon(Icons.arrow_back),
+            ),
       actions: [
         IconButton(
           tooltip: 'Close filing',
@@ -851,51 +1076,104 @@ class _AdminLocatorFilingDialogState extends State<AdminLocatorFilingDialog> {
         ),
       ],
     ),
-    body: Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
+    body: IndexedStack(
+      index: _step,
       children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(20, 16, 20, 12),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Text(
-                'Step ${_step + 1} of 3 • ${['Employees', 'Request details', 'Review and submit'][_step]}',
-                style: TextStyle(
-                  color: Theme.of(context).colorScheme.primary,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-              const SizedBox(height: 12),
-              Row(
-                children: [
-                  for (var index = 0; index < 3; index++) ...[
-                    if (index > 0) const SizedBox(width: 8),
-                    Expanded(
-                      child: Container(
-                        height: 4,
-                        decoration: BoxDecoration(
-                          borderRadius: BorderRadius.circular(4),
-                          color: index <= _step
-                              ? Theme.of(context).colorScheme.primary
-                              : AppTheme.dashHairlineOf(context),
-                        ),
-                      ),
-                    ),
-                  ],
-                ],
+        LocatorPaperEmployeePicker(
+          search: _search,
+          scrollController: _employeeScroll,
+          employees: _employees,
+          total: _total,
+          loading: _loading,
+          error: _employeeError,
+          onSearchChanged: (_) {
+            _searchDebounce?.cancel();
+            _searchDebounce = Timer(
+              const Duration(milliseconds: 300),
+              () => _load(),
+            );
+          },
+          onSearch: () {
+            _searchDebounce?.cancel();
+            _load();
+          },
+          onLoadMore: () => _load(more: true),
+          onSelect: _selectPaperEmployee,
+        ),
+        _paperStepBody('Step 2 of 3 • Locator details', _detailsStep()),
+        _paperStepBody('Step 3 of 3 • Paper approval', _reviewStep()),
+      ],
+    ),
+    bottomNavigationBar: _step == 0 ? null : _footer(),
+  );
+
+  @override
+  Widget build(BuildContext context) => widget.approvedPaper
+      ? _paperRecording()
+      : Scaffold(
+          backgroundColor: AppTheme.dashPanelOf(context),
+          appBar: AppBar(
+            title: Text(
+              widget.approvedPaper
+                  ? 'Record approved paper locator'
+                  : 'File locator for employees',
+            ),
+            automaticallyImplyLeading: false,
+            actions: [
+              IconButton(
+                tooltip: 'Close filing',
+                onPressed: _saving
+                    ? null
+                    : () => Navigator.pop(context, _created),
+                icon: const Icon(Icons.close),
               ),
             ],
           ),
-        ),
-        Expanded(
-          child: IndexedStack(
-            index: _step,
-            children: [_employeeStep(), _detailsStep(), _reviewStep()],
+          body: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 16, 20, 12),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Text(
+                      'Step ${_step + 1} of 3 • ${['Employees', 'Request details', 'Review and submit'][_step]}',
+                      style: TextStyle(
+                        color: Theme.of(context).colorScheme.primary,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    Row(
+                      children: [
+                        for (var index = 0; index < 3; index++) ...[
+                          if (index > 0) const SizedBox(width: 8),
+                          Expanded(
+                            child: Container(
+                              height: 4,
+                              decoration: BoxDecoration(
+                                borderRadius: BorderRadius.circular(4),
+                                color: index <= _step
+                                    ? Theme.of(context).colorScheme.primary
+                                    : AppTheme.dashHairlineOf(context),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              Expanded(
+                child: IndexedStack(
+                  index: _step,
+                  children: [_employeeStep(), _detailsStep(), _reviewStep()],
+                ),
+              ),
+            ],
           ),
-        ),
-      ],
-    ),
-    bottomNavigationBar: _footer(),
-  );
+          bottomNavigationBar: _footer(),
+        );
 }

@@ -67,6 +67,25 @@ const context = {
   signature_revision: 2, status: 'approved', print_signatories: officials, officials,
   dept_head_reviewer_id: head, hr_reviewer_id: final,
 };
+
+test('paper locator printing uses frozen applicant and selected officials without digital approval rows',async()=>{
+  const signature=(user)=>({source:'saved_signature_copy',signature_asset_id:asset,owner_user_id:user,signature_image_base64:'aW5r',mime_type:'image/png',applied_by:backup});
+  const paper={source:'approved_paper',encoded_at:'2026-10-28T01:00:00Z',
+    applicant:{user_id:employee,name:'Original Applicant',position_title:'Clerk',signature:signature(employee)},
+    final_approver:{user_id:final,name:'Original Mayor',position_title:'Municipal Mayor',signature:signature(final)},
+    department_reviewer:{name:'Former Head',position_title:'Department Head'}};
+  const db={async query(sql){
+    if(sql.includes('FROM locator_slips ls'))return {rows:[{...context,paper_approval_record:paper,hr_reviewer_id:null,dept_head_reviewer_id:null}]};
+    throw Error('Paper form must not resolve current reviewers or digital approval signatures');
+  }};
+  const result=await getLocatorSourceSignatures(db,{id:employee,role:'employee'},'dtr','locator_slips',requestId);
+  assert.equal(result.print_signatories.applicant.name,'Original Applicant');
+  assert.equal(result.print_signatories.applicant.signature_image_base64,'aW5r');
+  assert.equal(result.print_signatories.hr_approver.name,'Original Mayor');
+  assert.equal(result.print_signatories.hr_approver.signature_image_base64,'aW5r');
+  assert.equal(result.print_signatories.department_head.signature_image_base64,null);
+  assert.ok(result.signatures.every(s=>s.can_sign===false));
+});
 test('locator print metadata travels with the same request content and signature response',async()=>{
   const layout={version:1,orientation:'portrait',elements:[]};
   const db=mockDb({...context,print_template_version_id:asset,has_print_background:true,print_layout:layout});

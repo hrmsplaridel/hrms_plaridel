@@ -2,6 +2,7 @@ import 'package:hrms_plaridel/features/dtr/management/approvals/pages/workflow_a
 import 'package:hrms_plaridel/features/dtr/assistant/presentation/widgets/application_review.dart';
 import 'package:hrms_plaridel/features/dtr/assistant/presentation/widgets/active_assistant_field.dart';
 import 'dart:async';
+import 'package:hrms_plaridel/features/dtr/locator/presentation/shared/widgets/locator_paper_record_notice.dart';
 import 'dart:convert';
 import '../../../shared/widgets/locator_custom_fields.dart';
 
@@ -829,6 +830,8 @@ class EmployeeLocatorSlipContentState extends State<EmployeeLocatorSlipContent>
                 fields: item.requestType.employeeDetailSchema,
                 values: item.additionalDetails,
               ),
+              if (item.paperApprovalRecord != null)
+                LocatorPaperRecordNotice(record:item.paperApprovalRecord!,reconciliationRequired:item.monthEndReconciliationRequired),
               if (returnBlockedByPastDate) ...[
                 const SizedBox(height: 12),
                 const EmployeeLocatorMobileDetailSection(
@@ -3832,6 +3835,7 @@ class _LocatorSlipDraft {
     this.rawStatus,
     this.finalReviewRoute,
     this.workflowSnapshot,
+    this.paperApprovalRecord,
     this.departmentHeadName,
     this.departmentHeadReviewedAt,
     this.departmentHeadRemarks,
@@ -3865,6 +3869,7 @@ class _LocatorSlipDraft {
   final String? rawStatus;
   final String? finalReviewRoute;
   final Map<String, dynamic>? workflowSnapshot;
+  final Map<String, dynamic>? paperApprovalRecord;
   final String? departmentHeadName;
   final DateTime? departmentHeadReviewedAt;
   final String? departmentHeadRemarks;
@@ -3900,7 +3905,8 @@ class _LocatorSlipDraft {
     return label == null || label.isEmpty ? null : label;
   }
 
-  String get displayStatusLabel => pendingStepLabel != null
+  String get displayStatusLabel => paperApprovalRecord != null && status == _LocatorSlipStatus.approved
+      ? 'Approved (paper record)' : pendingStepLabel != null
       ? 'Pending $pendingStepLabel'
       : status == _LocatorSlipStatus.approved
       ? locatorApprovedStatusLabel(finalReviewRoute)
@@ -3950,6 +3956,7 @@ class _LocatorSlipDraft {
       rawStatus: rawStatus ?? this.rawStatus,
       finalReviewRoute: finalReviewRoute ?? this.finalReviewRoute,
       workflowSnapshot: workflowSnapshot ?? this.workflowSnapshot,
+      paperApprovalRecord: paperApprovalRecord,
       departmentHeadName: departmentHeadName ?? this.departmentHeadName,
       departmentHeadReviewedAt:
           departmentHeadReviewedAt ?? this.departmentHeadReviewedAt,
@@ -4021,6 +4028,7 @@ class _LocatorSlipDraft {
       workflowSnapshot: json['workflow_snapshot'] is Map
           ? Map<String, dynamic>.from(json['workflow_snapshot'] as Map)
           : null,
+      paperApprovalRecord: json['paper_approval_record'] is Map ? Map<String,dynamic>.from(json['paper_approval_record'] as Map) : null,
       departmentHeadName:
           readName([
             'dept_head_reviewer_name',

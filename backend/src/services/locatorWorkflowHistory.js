@@ -1,6 +1,7 @@
 const {completeReviewNotifications} = require('./reviewNotificationCompletion');
 const LOCATOR_HISTORY_ACTION_TITLES = Object.freeze({
   submitted: 'Submitted',
+  paper_approved_recorded: 'Approved Paper Locator Recorded',
   retroactive_correction_recorded: 'Retroactive Correction Recorded',
   cancelled: 'Cancelled',
   resubmitted: 'Corrected and Resubmitted',

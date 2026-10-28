@@ -13,6 +13,7 @@ function createLocatorRouter(dependencies = loadLocatorDependencies()) {
     ...require('./controllers/types.controller')(runtime),
     ...require('./controllers/requests.controller')(runtime),
     ...require('./controllers/staffFiling.controller')(runtime),
+    ...require('./controllers/paperRecording.controller')(runtime),
     ...require('./controllers/submit.controller')(runtime),
     ...require('./controllers/corrections.controller')(runtime),
     ...require('./controllers/requestActions.controller')(runtime),
@@ -74,6 +75,10 @@ function createLocatorRouter(dependencies = loadLocatorDependencies()) {
     uploadLocatorAttachmentMw,
     controllers.fileForEmployees
   );
+  router.get('/admin/paper-signatories', protect, requireAdminOrHr,
+    requireDtrFeatureIfAdmin('locator_allowed'), controllers.paperSignatorySuggestions);
+  router.post('/admin/approved-paper', protect, requireAdminOrHr,
+    requireDtrFeatureIfAdmin('locator_allowed'), uploadLocatorAttachmentMw, controllers.recordApprovedPaper);
   router.post('/submit', protect, controllers.submitRequest);
   router.post(
     '/submit-with-attachment',

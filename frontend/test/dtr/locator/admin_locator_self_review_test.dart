@@ -180,6 +180,10 @@ void main() {
         policy.$3 ? findsOneWidget : findsNothing,
       );
       expect(find.text('Record Correction'), findsOneWidget);
+      expect(
+        find.text('Record approved paper locator'),
+        policy.$2 ? findsOneWidget : findsNothing,
+      );
       expect(find.text('Manage Types'), findsOneWidget);
       await tester.pumpWidget(const SizedBox.shrink());
       auth.dispose();

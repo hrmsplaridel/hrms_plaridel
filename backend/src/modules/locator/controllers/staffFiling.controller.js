@@ -18,7 +18,8 @@ module.exports = function createLocatorControllers({
   return {
     listFilingEmployees: async (req, res) => {
       const date = String(req.query.slip_date || '');
-      if (!parseLocatorDateOnly(date))
+      const paperDirectory = req.query.paper === 'true' && req.query.employee_ids == null;
+      if (!paperDirectory && !parseLocatorDateOnly(date))
         return res.status(400).json({ error: 'Select a valid locator date.' });
       const offset = Math.max(0, Number.parseInt(req.query.offset, 10) || 0);
       const search = String(req.query.search || '')
@@ -35,13 +36,29 @@ module.exports = function createLocatorControllers({
         }
       }
       try {
+        if (paperDirectory) {
+          const result = await pool.query(
+            `SELECT u.id,u.full_name,u.employment_type,d.name AS department_name,count(*) OVER()::int AS total
+             FROM users u
+             LEFT JOIN LATERAL (SELECT a.department_id FROM assignments a
+               WHERE a.employee_id=u.id
+               ORDER BY a.effective_from DESC,a.created_at DESC,a.id DESC LIMIT 1) a ON true
+             LEFT JOIN departments d ON d.id=a.department_id
+             WHERE u.id <> $1::uuid AND u.is_active=true AND u.role <> 'super_admin'
+               AND COALESCE(u.employment_status,'active')='active'
+               AND ($2::text='' OR u.full_name ILIKE '%' || $2 || '%' OR d.name ILIKE '%' || $2 || '%')
+             ORDER BY u.full_name,u.id LIMIT 100 OFFSET $3`,
+            [req.user.id,search,offset]
+          );
+          return res.json({ employees: result.rows, total: result.rows[0]?.total || 0 });
+        }
         const result = await pool.query(
           `SELECT u.id,u.full_name,d.name AS department_name,count(*) OVER()::int AS total
       FROM users u JOIN LATERAL (SELECT a.department_id FROM assignments a
         WHERE a.employee_id=u.id AND a.effective_from <= $1::date AND (a.effective_to IS NULL OR a.effective_to >= $1::date)
         AND a.shift_id IS NOT NULL ORDER BY a.effective_from DESC,a.created_at DESC,a.id DESC LIMIT 1) a ON true
       LEFT JOIN departments d ON d.id=a.department_id
-      WHERE u.id <> $2::uuid AND u.is_active=true AND COALESCE(u.employment_status,'active')='active'
+      WHERE u.id <> $2::uuid AND u.is_active=true AND u.role <> 'super_admin' AND COALESCE(u.employment_status,'active')='active'
         AND (u.date_hired IS NULL OR u.date_hired <= $1::date) AND (u.separation_date IS NULL OR u.separation_date >= $1::date)
         AND ($3::text='' OR u.full_name ILIKE '%' || $3 || '%' OR d.name ILIKE '%' || $3 || '%')
         AND ($5::uuid[] IS NULL OR u.id = ANY($5::uuid[]))
