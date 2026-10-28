@@ -40,7 +40,7 @@ void main() {
     await ClientDeviceHeader.build();
   });
   for (final width in [1500.0, 390.0]) {
-    for (final stage in [0, 1, 2, -1, 3, 4]) {
+    for (final stage in [0, 1, 2, -1, 3, 4, 5, 6]) {
       testWidgets(
         'employee locator shows workflow stage $stage at width $width',
         (tester) async {
@@ -67,13 +67,23 @@ void main() {
             'office': 'Target office',
             'reason': 'Official business',
             'am_in': true,
-            'status': stage == 3
+            'status': stage == 6
+                ? 'revoked'
+                : stage == 3 || stage == 5
                 ? 'approved'
                 : stage == 2
                 ? 'pending_mayor'
                 : 'pending_hr',
             'final_review_route': 'hr',
-            if (stage >= 0)
+            if (stage >= 5)
+              'paper_approval_record': {
+                'source': 'approved_paper',
+                'original_filing_date': '2026-10-17',
+                'approval_date': '2026-10-18',
+                'final_approver': {'name': 'Original Mayor'},
+                'encoded_by_name': 'HR Encoder',
+              },
+            if (stage >= 0 && stage < 5)
               'workflow_snapshot': {
                 'name': 'Department → HR → Mayor',
                 'version': 1,
@@ -159,12 +169,19 @@ void main() {
             ),
           );
           await tester.pumpAndSettle();
-          final expected = stage == -1
+          final expected = stage == 6
+              ? 'Revoked'
+              : stage == 5
+              ? 'Approved'
+              : stage == -1
               ? 'Pending HR Admin'
               : stage == 3
               ? 'Approved by HR'
               : 'Pending ${labels[stage == 4 ? 0 : stage]}';
-          expect(find.text(expected), findsOneWidget);
+          expect(find.text(expected), stage >= 5 ? findsWidgets : findsOneWidget);
+          if (stage >= 5) {
+            expect(find.text('Approved (paper record)'), findsNothing);
+          }
           await tester.tap(find.textContaining('Target office').first);
           await tester.pumpAndSettle();
           expect(find.text(expected), findsWidgets);
@@ -179,7 +196,11 @@ void main() {
             findsOneWidget,
           );
           expect(find.text('History'), findsOneWidget);
-          if (stage == 3) {
+          if (stage >= 5) {
+            expect(find.text('Approved paper locator record'), findsOneWidget);
+            expect(find.text('Approved by: Original Mayor'), findsOneWidget);
+          }
+          if (stage == 3 || stage == 5) {
             expect(find.text('Preview'), findsOneWidget);
             expect(find.text('Print'), findsOneWidget);
           }

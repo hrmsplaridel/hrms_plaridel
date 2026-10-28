@@ -3906,7 +3906,7 @@ class _LocatorSlipDraft {
   }
 
   String get displayStatusLabel => paperApprovalRecord != null && status == _LocatorSlipStatus.approved
-      ? 'Approved (paper record)' : pendingStepLabel != null
+      ? 'Approved' : pendingStepLabel != null
       ? 'Pending $pendingStepLabel'
       : status == _LocatorSlipStatus.approved
       ? locatorApprovedStatusLabel(finalReviewRoute)

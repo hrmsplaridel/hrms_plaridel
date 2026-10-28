@@ -144,6 +144,12 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
+      if (paper) {
+        expect(find.text('Approved (paper record)'), findsNothing);
+        final badge = find.text('Approved');
+        expect(badge, findsOneWidget);
+        expect(tester.widget<Text>(badge).maxLines, 1);
+      }
       await tester.tap(find.text('Workflow Applicant'));
       await tester.pumpAndSettle();
       final button = find.widgetWithText(OutlinedButton, 'Revoke Approval');

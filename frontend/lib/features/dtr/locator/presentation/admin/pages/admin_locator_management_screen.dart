@@ -1974,6 +1974,8 @@ class _AdminLocatorManagementScreenState
       ),
       child: Text(
         item.statusLabel,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
         style: TextStyle(color: fg, fontSize: 11, fontWeight: FontWeight.w700),
       ),
     );
@@ -2629,7 +2631,6 @@ class _LocatorAdminRecord {
   }
 
   String get statusLabel {
-    if (paperApprovalRecord != null && status.toLowerCase() == 'approved') return 'Approved (paper record)';
     final named = pendingWorkflowStepLabel(workflowSnapshot);
     if (status.startsWith('pending') && named != null) return 'Pending $named';
     switch (status.toLowerCase()) {
