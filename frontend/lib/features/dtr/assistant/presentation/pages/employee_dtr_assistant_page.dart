@@ -84,6 +84,18 @@ class _EmployeeDtrAssistantPageState extends State<EmployeeDtrAssistantPage> {
   final _turnGuard = DtrAssistantTurnGuard();
   CancelToken? _cancelToken;
 
+  bool _isLegacyWelcome(DtrAssistantMessage message) =>
+      !message.isUser &&
+      message.content.trim().replaceAll(RegExp(r'\s+'), ' ') ==
+          _legacyWelcomeMessageText;
+
+  @override
+  void reassemble() {
+    super.reassemble();
+    // Hot reload preserves State, including greetings created by older code.
+    _messages.removeWhere(_isLegacyWelcome);
+  }
+
   @override
   void initState() {
     super.initState();
@@ -115,12 +127,7 @@ class _EmployeeDtrAssistantPageState extends State<EmployeeDtrAssistantPage> {
       _conversationId = conversationId;
       _messages
         ..clear()
-        ..addAll(
-          restored.where(
-            (message) =>
-                message.isUser || message.content != _legacyWelcomeMessageText,
-          ),
-        );
+        ..addAll(restored.where((message) => !_isLegacyWelcome(message)));
       _sessionLoaded = true;
     });
     if (_messages.length > 1) {
