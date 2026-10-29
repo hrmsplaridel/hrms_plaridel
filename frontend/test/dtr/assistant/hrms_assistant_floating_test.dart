@@ -32,6 +32,9 @@ class _HistoryAuthProvider extends AuthProvider {
 
 class _FakeAssistantApi extends DtrAssistantApi {
   @override
+  Future<void> resetChat({String? conversationId}) async {}
+
+  @override
   Future<({String defaultModelProfile, List<DtrAssistantModelProfile> models})>
   fetchModels() async {
     return (
@@ -51,6 +54,62 @@ class _FakeAssistantApi extends DtrAssistantApi {
 }
 
 void main() {
+  testWidgets('restoring and clearing history shows no default reply', (
+    tester,
+  ) async {
+    SharedPreferences.setMockInitialValues({});
+    FlutterSecureStorage.setMockInitialValues({});
+    await tester.binding.setSurfaceSize(const Size(1536, 1000));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    await DtrAssistantSessionStorage.saveConversationId(
+      'history-employee',
+      'legacy-welcome',
+    );
+    await DtrAssistantSessionStorage.saveMessages(
+      'history-employee',
+      'legacy-welcome',
+      [
+        DtrAssistantMessage(
+          role: 'assistant',
+          content:
+              'Hi. I am your HRMS Assistant. Ask me about your DTR, leave requests, leave balances, or locator slips.',
+          createdAt: DateTime.now(),
+        ),
+      ],
+    );
+    final auth = _HistoryAuthProvider();
+    await tester.pumpWidget(
+      ChangeNotifierProvider<AuthProvider>.value(
+        value: auth,
+        child: MaterialApp(
+          home: EmployeeDtrAssistantPage(api: _FakeAssistantApi()),
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.byType(DtrAssistantMessageBubble), findsNothing);
+    await tester.tap(find.byTooltip('Clear chat history'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.tap(find.text('Clear history'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    final list = find.byType(ListView).first;
+    expect(tester.widget<ListView>(list).reverse, isFalse);
+    // The introduction should follow the app bar, without a blank viewport.
+    expect(
+      tester
+          .getTopLeft(find.textContaining('Answers use your HRMS records'))
+          .dy,
+      lessThan(220),
+    );
+    expect(find.byType(DtrAssistantMessageBubble), findsNothing);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
+    auth.dispose();
+  });
+
   testWidgets(
     'long saved conversations build only the visible recent messages',
     (tester) async {

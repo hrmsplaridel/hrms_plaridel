@@ -53,7 +53,7 @@ class EmployeeDtrAssistantPage extends StatefulWidget {
 }
 
 class _EmployeeDtrAssistantPageState extends State<EmployeeDtrAssistantPage> {
-  static const _welcomeMessageText =
+  static const _legacyWelcomeMessageText =
       'Hi. I am your HRMS Assistant. Ask me about your DTR, leave requests, leave balances, or locator slips.';
 
   late final DtrAssistantApi _api = widget._api ?? DtrAssistantApi();
@@ -93,22 +93,12 @@ class _EmployeeDtrAssistantPageState extends State<EmployeeDtrAssistantPage> {
     });
   }
 
-  DtrAssistantMessage _welcomeMessage() {
-    return DtrAssistantMessage(
-      role: 'assistant',
-      content: _welcomeMessageText,
-      createdAt: DateTime.now(),
-    );
-  }
-
   Future<void> _restoreSession() async {
     final userId = context.read<AuthProvider>().user?.id;
     if (userId == null || userId.isEmpty) {
       if (!mounted) return;
       setState(() {
-        _messages
-          ..clear()
-          ..add(_welcomeMessage());
+        _messages.clear();
         _sessionLoaded = true;
       });
       return;
@@ -125,7 +115,12 @@ class _EmployeeDtrAssistantPageState extends State<EmployeeDtrAssistantPage> {
       _conversationId = conversationId;
       _messages
         ..clear()
-        ..addAll(restored.isEmpty ? [_welcomeMessage()] : restored);
+        ..addAll(
+          restored.where(
+            (message) =>
+                message.isUser || message.content != _legacyWelcomeMessageText,
+          ),
+        );
       _sessionLoaded = true;
     });
     if (_messages.length > 1) {
@@ -168,9 +163,7 @@ class _EmployeeDtrAssistantPageState extends State<EmployeeDtrAssistantPage> {
     }
     if (!mounted) return;
     setState(() {
-      _messages
-        ..clear()
-        ..add(_welcomeMessage());
+      _messages.clear();
       _feedbackByMessageId.clear();
       _autoExecutedActionKeys.clear();
       _fieldBindings.clear();
@@ -832,6 +825,7 @@ class _EmployeeDtrAssistantPageState extends State<EmployeeDtrAssistantPage> {
   Widget build(BuildContext context) {
     final dark = AppTheme.dashIsDark(context);
     final floating = widget.floating;
+    final emptyChat = !_sending && _messages.isEmpty;
 
     return Scaffold(
       backgroundColor: AppTheme.dashCanvasOf(context),
@@ -881,7 +875,7 @@ class _EmployeeDtrAssistantPageState extends State<EmployeeDtrAssistantPage> {
             Expanded(
               child: ListView.builder(
                 controller: _scrollController,
-                reverse: true,
+                reverse: !emptyChat,
                 itemCount: _messages.length + 2,
                 padding: EdgeInsets.fromLTRB(
                   floating ? 12 : 16,
@@ -890,6 +884,9 @@ class _EmployeeDtrAssistantPageState extends State<EmployeeDtrAssistantPage> {
                   12,
                 ),
                 itemBuilder: (context, index) {
+                  // A fresh chat starts at the top; conversations keep their
+                  // newest messages at the bottom without building all history.
+                  if (emptyChat) index = _messages.length + 1 - index;
                   if (index == 0) {
                     return _sending
                         ? const _TypingIndicator()
