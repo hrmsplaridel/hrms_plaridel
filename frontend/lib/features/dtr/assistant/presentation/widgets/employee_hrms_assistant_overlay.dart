@@ -76,6 +76,7 @@ class _EmployeeHrmsAssistantOverlayState
                   onPressed: () => _openAssistant(context),
                   initialRight: widget.initialRight,
                   initialBottom: widget.initialBottom,
+                  minimumBottom: widget.isDashboard ? 10 : widget.initialBottom,
                 ),
         ),
       ],

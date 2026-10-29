@@ -433,7 +433,7 @@ class _EmployeeDtrAssistantPageState extends State<EmployeeDtrAssistantPage> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!_scrollController.hasClients) return;
       _scrollController.animateTo(
-        _scrollController.position.maxScrollExtent,
+        0,
         duration: const Duration(milliseconds: 220),
         curve: Curves.easeOut,
       );
@@ -879,85 +879,92 @@ class _EmployeeDtrAssistantPageState extends State<EmployeeDtrAssistantPage> {
         child: Column(
           children: [
             Expanded(
-              child: ListView(
+              child: ListView.builder(
                 controller: _scrollController,
+                reverse: true,
+                itemCount: _messages.length + 2,
                 padding: EdgeInsets.fromLTRB(
                   floating ? 12 : 16,
                   floating ? 12 : 16,
                   floating ? 12 : 16,
                   12,
                 ),
-                children: [
-                  if (!floating) ...[
-                    _AssistantHeader(sending: _sending),
-                    const SizedBox(height: 16),
-                  ],
-                  DtrAssistantPromptChips(
-                    enabled: !_sending,
-                    onSelected: (prompt) =>
-                        _send(prompt.text, intent: prompt.intent),
-                  ),
-                  const SizedBox(height: 16),
-                  ..._messages.map(
-                    (message) => Column(
-                      crossAxisAlignment: message.isUser
-                          ? CrossAxisAlignment.end
-                          : CrossAxisAlignment.start,
+                itemBuilder: (context, index) {
+                  if (index == 0) {
+                    return _sending
+                        ? const _TypingIndicator()
+                        : const SizedBox.shrink();
+                  }
+                  if (index == _messages.length + 1) {
+                    return Column(
                       children: [
-                        DtrAssistantMessageBubble(
-                          message: message,
-                          feedback: message.id == null
-                              ? null
-                              : _feedbackByMessageId[message.id],
-                          onFeedback: message.isUser
-                              ? null
-                              : (rating) => _submitFeedback(message, rating),
-                          onDownloadAttachment: _downloadAttachment,
-                          onEdit: message.isUser
-                              ? () {
-                                  _inputController.text = message.content;
-                                  setState(() {
-                                    final index = _messages.indexOf(message);
-                                    if (index != -1) {
-                                      final removed = _messages.sublist(index);
-                                      for (final removedMessage in removed) {
-                                        final removedId = removedMessage.id;
-                                        if (removedId != null) {
-                                          _feedbackByMessageId.remove(
-                                            removedId,
-                                          );
-                                        }
-                                      }
-                                      _messages.removeRange(
-                                        index,
-                                        _messages.length,
-                                      );
-                                    }
-                                  });
-                                }
-                              : null,
+                        if (!floating) ...[
+                          _AssistantHeader(sending: _sending),
+                          const SizedBox(height: 16),
+                        ],
+                        DtrAssistantPromptChips(
+                          enabled: !_sending,
+                          onSelected: (prompt) =>
+                              _send(prompt.text, intent: prompt.intent),
                         ),
-                        if (!message.isUser && message.suggestions.isNotEmpty)
-                          _AssistantSuggestionChips(
-                            enabled: !_sending,
-                            suggestions: message.suggestions,
-                            onSelected: (suggestion) => _send(
-                              suggestion.text,
-                              intent: suggestion.intent,
-                            ),
-                          ),
-                        if (!message.isUser && message.actions.isNotEmpty)
-                          _AssistantActionChips(
-                            enabled: !_sending,
-                            actions: message.actions,
-                            onSelected: (action) =>
-                                _executeAction(message, action),
-                          ),
+                        const SizedBox(height: 16),
                       ],
-                    ),
-                  ),
-                  if (_sending) const _TypingIndicator(),
-                ],
+                    );
+                  }
+                  final message = _messages[_messages.length - index];
+                  return Column(
+                    crossAxisAlignment: message.isUser
+                        ? CrossAxisAlignment.end
+                        : CrossAxisAlignment.start,
+                    children: [
+                      DtrAssistantMessageBubble(
+                        message: message,
+                        feedback: message.id == null
+                            ? null
+                            : _feedbackByMessageId[message.id],
+                        onFeedback: message.isUser
+                            ? null
+                            : (rating) => _submitFeedback(message, rating),
+                        onDownloadAttachment: _downloadAttachment,
+                        onEdit: message.isUser
+                            ? () {
+                                _inputController.text = message.content;
+                                setState(() {
+                                  final index = _messages.indexOf(message);
+                                  if (index != -1) {
+                                    final removed = _messages.sublist(index);
+                                    for (final removedMessage in removed) {
+                                      final removedId = removedMessage.id;
+                                      if (removedId != null) {
+                                        _feedbackByMessageId.remove(removedId);
+                                      }
+                                    }
+                                    _messages.removeRange(
+                                      index,
+                                      _messages.length,
+                                    );
+                                  }
+                                });
+                              }
+                            : null,
+                      ),
+                      if (!message.isUser && message.suggestions.isNotEmpty)
+                        _AssistantSuggestionChips(
+                          enabled: !_sending,
+                          suggestions: message.suggestions,
+                          onSelected: (suggestion) =>
+                              _send(suggestion.text, intent: suggestion.intent),
+                        ),
+                      if (!message.isUser && message.actions.isNotEmpty)
+                        _AssistantActionChips(
+                          enabled: !_sending,
+                          actions: message.actions,
+                          onSelected: (action) =>
+                              _executeAction(message, action),
+                        ),
+                    ],
+                  );
+                },
               ),
             ),
             DtrAssistantInputBar(

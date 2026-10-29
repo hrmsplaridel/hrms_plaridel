@@ -3007,6 +3007,12 @@ function dtrExportGuidanceReply(context, message) {
 
 function dtrPolicyGuidanceReply(context, message) {
   const language = languageOf(message);
+  if (/\b(?:grace period|grace minutes|late cutoff)\b/i.test(message) && /\b(?:missing|incomplete|kulang)\b/i.test(message)) {
+    return dtrPolicyGuidanceReply(context, message.replace(/missing|incomplete|kulang/gi, 'required')) + '\n\n' +
+      (language==='bisaya' ? 'Missing logs: tan-awa lang ang required slots nga overdue na sa assigned shift. Dili pa missing ang umaabot nga punch. I-check ang actual punches ug valid approved leave/locator coverage; kontaka ang HR para sa documented correction kung sayop ang record.'
+        : language==='tagalog' ? 'Missing logs: suriin lang ang required slots na overdue na sa assigned shift. Hindi pa missing ang susunod na punch. Suriin ang actual punches at valid approved leave/locator coverage; kontakin ang HR para sa documented correction kung mali ang record.'
+          : 'Missing logs: check only required slots already due under the assigned shift. Future punches are not missing. Compare actual punches with valid approved leave/locator coverage; ask HR for a documented correction if the record is wrong.');
+  }
   if (/\b(grace period|grace minutes|late cutoff)\b/i.test(message)) {
     const scheduledDay = (context.calendar_days || []).find(
       (day) => day?.shift_name || day?.shift_start

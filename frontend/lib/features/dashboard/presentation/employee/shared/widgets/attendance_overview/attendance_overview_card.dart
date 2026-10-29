@@ -41,6 +41,7 @@ class _EmployeeAttendanceOverviewCardState
   late int _year;
   late int _month;
   StreamSubscription<DtrUpdateEvent>? _dtrUpdateSub;
+  Timer? _clockTimer;
 
   /// True until the first awaited [loadTimeRecordsForUser] for this month
   /// finishes (also true while switching months). Without this, the first
@@ -55,6 +56,9 @@ class _EmployeeAttendanceOverviewCardState
   @override
   void initState() {
     super.initState();
+    _clockTimer = Timer.periodic(const Duration(minutes: 1), (_) {
+      if (mounted && _isViewingCurrentMonth) setState(() {});
+    });
     final n = DateTime.now();
     _year = n.year;
     _month = n.month;
@@ -66,6 +70,7 @@ class _EmployeeAttendanceOverviewCardState
 
   @override
   void dispose() {
+    _clockTimer?.cancel();
     _dtrUpdateSub?.cancel();
     super.dispose();
   }
@@ -212,6 +217,14 @@ class _EmployeeAttendanceOverviewCardState
                 year: _year,
                 month: _month,
                 now: _now,
+                todayShiftEndMinutes: dtr.myShiftEndMinutes == null
+                    ? null
+                    : dtr.myShiftEndMinutes! +
+                          (dtr.myShiftStartMinutes != null &&
+                                  dtr.myShiftEndMinutes! <=
+                                      dtr.myShiftStartMinutes!
+                              ? 1440
+                              : 0),
               );
               final barData = summaryToBarData(summary);
 

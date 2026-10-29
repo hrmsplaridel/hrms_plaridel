@@ -523,7 +523,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboardDesktopPage>
 
   Widget _buildEmployeeLeaveRequestForm() {
     return EmployeeHrmsAssistantOverlay(
-      initialBottom: 36,
+      initialBottom: 176,
       child: LeaveRequestFormScreen(
         onSaveDraft: (LeaveRequest request) async {
           final provider = context.read<LeaveProvider>();

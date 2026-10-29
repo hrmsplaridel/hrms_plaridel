@@ -38,9 +38,12 @@ async function assistLeaveField(pool, form, signal) {
   );
   const leave = result.rows[0];
   if (!leave) throw invalid(`This ${module} type is no longer available for employee filing.`);
+  const purposeField = module==='locator' && form.fieldKey==='office' && /purpose|activity|reason|rason|tuyo/i.test(leave.location_label||'') && !/destination|location|office|place/i.test(leave.location_label||'');
   const locatorFields = {
     reason: ['Remarks / Reasons', 'Explain the actual purpose of your locator request.', 'I am requesting permission to [actual activity or purpose].'],
-    office: [leave.location_label || 'Office / Destination', leave.location_hint || 'Enter the actual office or destination.', '[Actual office or destination]'],
+    office: [leave.location_label || 'Office / Destination', purposeField
+      ? local('Describe the actual activity or reason for the trip, rather than just naming a place. Include the destination if relevant; use a separate destination field when one is shown.', 'Isulat ang tinuod nga activity o tuyo sa biyahe, dili lugar ra. Idugang ang destination kung relevant; gamita ang separate destination field kung naa.', 'Isulat ang totoong activity o layunin ng biyahe, hindi pangalan lang ng lugar. Isama ang destination kung relevant; gamitin ang hiwalay na destination field kung mayroon.')
+      : leave.location_hint || 'Enter the actual office or destination.', purposeField?'To [actual activity] at [actual destination, if relevant].':'[Actual office or destination]'],
   };
   const standard = module === 'leave' ? fields[form.fieldKey] : locatorFields[form.fieldKey];
   const field = standard
@@ -65,7 +68,7 @@ async function assistLeaveField(pool, form, signal) {
   }[field.type];
   const translatedStandard = form.fieldKey==='reason'
     ? local(guidance,'Isulat ang mubo ug tinuod nga rason. Ayaw pag-invent ug diagnosis o approval.','Isulat ang maikli at totoong dahilan. Huwag mag-imbento ng diagnosis o approval.')
-    : form.fieldKey==='office' ? local(guidance,'Ibutang ang tinuod nga destination o purpose sumala sa label sa field.','Ilagay ang totoong destination o purpose ayon sa label ng field.') : guidance;
+    : form.fieldKey==='office' && !purposeField ? local(guidance,'Ibutang ang tinuod nga destination sumala sa label sa field.','Ilagay ang totoong destination ayon sa label ng field.') : guidance;
   const help = `${leave.display_name || leave.name} — ${field.label}\n\n${translatedStandard}\n${local(field.required?'Required field.':'Optional field.',field.required?'Required kini nga field.':'Optional kini nga field.',field.required?'Required ang field na ito.':'Optional ang field na ito.')}${writable ? local(` Maximum ${maximum} characters.`,` Maximum ${maximum} characters.`,` Hanggang ${maximum} characters.`) : ''}\n\n${local('Example template (sample only; use your own facts)','Sample template (pananglitan ra; gamita imong tinuod nga facts)','Halimbawang template (sample lang; gamitin ang totoong detalye mo)')}: ${example || 'Use the configured choices.'}${field.sentence_template ? `\n\nSentence template: ${field.sentence_template}` : ''}${field.type === 'select' ? `\nAllowed choices: ${field.options.join(', ')}` : ''}`;
   if (form.task !== 'draft') return { content: help, actions: [] };
   const facts = typeof form.facts === 'string' ? form.facts.trim() : '';
@@ -75,7 +78,7 @@ async function assistLeaveField(pool, form, signal) {
   const generated = await draftSentence({ module, facts, field: field.label,
     example: field.example,
     sentenceTemplate: field.sentence_template, maxLength: maximum, language,
-    signal, complete: chatCompletion, instruction: [field.instruction || standard?.[1], form.rewriteInstruction].filter(Boolean).join(' ') });
+    signal, previousDraft:form.previousDraft, complete: chatCompletion, instruction: [field.instruction || standard?.[1], form.rewriteInstruction].filter(Boolean).join(' ') });
   if (generated.question) return { content: generated.question, actions: [] };
   const draft = generated.draft;
   const heading = language === 'bisaya' ? 'Gisugyot nga sentence' : language === 'tagalog' ? 'Mungkahing pangungusap' : 'Suggested wording';

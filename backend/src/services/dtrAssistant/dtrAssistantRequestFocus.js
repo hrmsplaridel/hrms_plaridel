@@ -45,7 +45,7 @@ function formChatContext(form, text, memory) {
   const previous=sameField&&restyle?memory?.draftFocus:null;
   const language=/\b(?:tagalog|bisaya|english|filipino|cebuano)\b/i.test(text)?detectAssistantLanguage(text):previous?.language||detectAssistantLanguage(text);
   return { ...form, task: draft ? 'draft' : 'explain', facts: draft ? extractDraftFacts(text, previous?.facts||form.facts) : undefined,
-    language,rewriteInstruction:restyle?text:undefined };
+    language,previousDraft:previous?.draft,rewriteInstruction:restyle?text:undefined };
 }
 
 module.exports = { requestChoices, choiceActions, isRequestFollowUp, formChatContext };

@@ -1438,6 +1438,7 @@ function requestedRestyleLanguage(text) {
 function isLanguageRestyleRequest(text) {
   const value = lower(text);
   if (!requestedRestyleLanguage(value)) return false;
+  if (/\b(?:logs?|attendance|dtr|balance|credits?|requests?|kulang)\b/.test(value)) return false;
   if (explicitTopicFromText(value)) return false;
   const words = value.split(/[^a-z0-9]+/).filter(Boolean);
   if (words.length <= 6) return true;
@@ -2148,7 +2149,7 @@ function enrichMessageWithMemory(text, memory, memoryIntent = null) {
   if (relativeDate) {
     enriched = `${enriched} (${relativeDate})`;
   }
-  const hasDateHint =
+  const hasDateHint = /\b(?:linggo|ngayong|ngayon|kahapon)\b/i.test(enriched) ||
     /\b(today|tomorrow|yesterday|ugma|kagahapon|gahapon|karon|week|semana|semanaha|month|pay\s*period|payroll\s*period|cutoff|cut-off|cut off|ago|from|to|bulan|bulana|buwan|buwana|aning bulana|sunod|miaging|niaging|adtong|adtung|atong|niadtong|niadtung|noong|nung|next day|following day|sunod adlaw|previous day|day before|same day|same date|ana|ato|adto|monday|tuesday|wednesday|thursday|friday|saturday|sunday|lunes|martes|miyerkules|mierkules|huwebes|webes|biyernes|byernes|sabado|domingo|\d{4}-\d{2}-\d{2}|january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|oct|nov|dec)\b/i.test(
       enriched
     );
@@ -2583,9 +2584,9 @@ async function chatWithDtrAssistant(
     let fieldReply, generated;
     const fieldKey=custom?.key || previous?.fieldKey || 'reason';
     if (type) fieldReply = await assistLeaveField(pool,{module,leaveType:type.name,locatorType:type.code,fieldKey,
-      facts,task:'draft',language,rewriteInstruction:isDraftRestyle(text)?text:''},signal);
+      facts,task:'draft',language,previousDraft:previous?.draft,rewriteInstruction:isDraftRestyle(text)?text:''},signal);
     else {
-      generated=await draftSentence({facts,module,language,signal,instruction:isDraftRestyle(text)?text:''});
+      generated=await draftSentence({facts,module,language,signal,previousDraft:previous?.draft,instruction:isDraftRestyle(text)?text:''});
       fieldReply={content:generated.question||draftReply(generated.draft,language),draft:generated.draft};
     }
     throwIfAssistantRequestAborted(signal);
@@ -2615,7 +2616,8 @@ async function chatWithDtrAssistant(
       const part=await loadEmployeeAssistantContext(pool,{userId:scope.userId,message:segment,
         dateRange:parseAssistantDateRange(segment),intents:[item.intent],signal});
       contexts.push(part);
-      replies.push({intent:item.intent,content:buildFastEmployeeAssistantReply(segment,part,item.intent)||`Please clarify this part: ${item.segment}`});
+      const replyText = `${segment} Please answer in ${detectAssistantLanguage(text)}.`;
+      replies.push({intent:item.intent,content:buildFastEmployeeAssistantReply(replyText,part,item.intent)||`Please clarify this part: ${item.segment}`});
     }
     throwIfAssistantRequestAborted(signal);
     const combined=combineMultiIntentReplies(replies,text);
@@ -2974,6 +2976,12 @@ async function chatWithDtrAssistant(
     ? detectedMultiIntent.intents.map((item) => item.intent)
     : [resolvedIntent].filter(Boolean);
 
+  // Explicit current dates constrain both the database lookup and its reply.
+  // A planner or historical filing prefill must not replace a new weekly query.
+  const currentDateRange = parseAssistantDateRange(text);
+  const useCurrentDate = currentDateRange.label !== 'today' || /\b(?:today|ngayon|karon)\b/i.test(text);
+  if (useCurrentDate) plannedDateRange = currentDateRange;
+
   const context = await loadEmployeeAssistantContext(pool, {
     userId: scope.userId,
     message: plannedText,
@@ -2988,6 +2996,7 @@ async function chatWithDtrAssistant(
     extractMessageEntities(plannedText, routingMemory),
     plannerExtraction
   );
+  if (useCurrentDate) mergedExtraction.dateRange = currentDateRange;
   const configuredType = configuredLeaveType(normalizedTextForRules, context.leave_types);
   if (configuredType) {
     mergedExtraction.leaveType = configuredType.name || configuredType.display_name;

@@ -149,6 +149,7 @@ MonthlyAttendanceSummary aggregateMonthlyAttendance({
   required int year,
   required int month,
   DateTime? now,
+  int? todayShiftEndMinutes,
 }) {
   final clock = now ?? DateTime.now();
   final lastDay = DateTime(year, month + 1, 0).day;
@@ -185,6 +186,15 @@ MonthlyAttendanceSummary aggregateMonthlyAttendance({
     }
 
     final bucket = _bucketForDay(rec);
+    // A missing/incomplete current-day record is not a full-day absence
+    // until the assigned shift has ended. Unknown schedules prove no absence.
+    if (dt == today &&
+        bucket == MonthlyAttendanceBucket.absent &&
+        ((todayShiftEndMinutes == null && rec == null) ||
+            (todayShiftEndMinutes != null &&
+                clock.hour * 60 + clock.minute <= todayShiftEndMinutes))) {
+      continue;
+    }
     if (bucket == null) {
       skippedHoliday++;
       continue;

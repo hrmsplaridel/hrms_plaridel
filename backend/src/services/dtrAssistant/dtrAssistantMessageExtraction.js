@@ -358,7 +358,9 @@ function extractMessageEntities(text, memory = null) {
   const current = String(text || '');
   const leavePrefill = extractLeavePrefill(text, memory);
   const locatorPrefill = extractLocatorPrefill(text, memory);
-  const dateRange = parseAssistantDateRange(source);
+  const currentRange = parseAssistantDateRange(current);
+  const currentHasDate = currentRange.label !== 'today' || /\b(?:today|ngayon|karon)\b/i.test(current);
+  const dateRange = currentHasDate ? currentRange : parseAssistantDateRange(source);
   const hasDateHint =
     Boolean(dateRange?.startDate) &&
     !/^(today|karon)$/i.test(String(dateRange.label || ''));

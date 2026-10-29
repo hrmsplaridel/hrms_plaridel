@@ -8,11 +8,33 @@ function choose(text, english, bisaya, tagalog) {
   const language=detectAssistantLanguage(text);
   return language==='bisaya' ? bisaya : language==='tagalog' ? tagalog : english;
 }
+function punchTime(value) {
+  if (!value) return 'not recorded';
+  if (/^\d{1,2}:\d{2}(?::\d{2})?$/.test(String(value))) {
+    const [hour,minute]=String(value).split(':').map(Number);
+    return `${hour%12||12}:${String(minute).padStart(2,'0')} ${hour<12?'AM':'PM'}`;
+  }
+  const date=new Date(value);
+  return Number.isNaN(date.getTime()) ? 'unrecognized time' : new Intl.DateTimeFormat('en-US',{
+    timeZone:process.env.HRMS_TIMEZONE||'Asia/Manila',hour:'numeric',minute:'2-digit',hour12:true,
+  }).format(date);
+}
 function questionReply(text, context, intent) {
+  if (intent==='dtr_status_explanation' && /\b(?:why|ngano|bakit|discrepancy|different)\b/i.test(text) && /\b(?:monthly|summary)\b/i.test(text)) {
+    const date=context.date_range?.startDate;
+    const coverage=coverageForDate(context,date);
+    if (coverage.slips.length) return `${date}: ${coverage.label || 'Approved locator'}\n`+choose(text,
+      `Approved coverage ${coverage.isFullCoverage?'satisfies the full assigned shift':'covers only part of the assigned shift'}. A missing biometric DTR row is different from missing approved coverage: a punch-only summary can show no record while the approved locator covers its saved slots. The current check includes that coverage. If another monthly report still says no DTR record, refresh it and ask HR to reconcile its date, approval state and coverage source; I cannot verify an earlier summary from this single-date check.`,
+      `Ang approved locator ${coverage.isFullCoverage?'kompleto para sa assigned shift':'partial ra sa assigned shift'}. Lahi ang walay biometric row sa walay approved coverage: mahimong no record ang punch-only summary bisan covered ang saved slots. Apil ang coverage sa current check. I-refresh ang monthly report ug ipa-reconcile sa HR ang petsa, approval ug coverage source kung no record gihapon; dili nako ma-verify ang daang summary gikan sa usa ka petsa ra.`,
+      `Ang approved locator ay ${coverage.isFullCoverage?'kumpleto para sa assigned shift':'partial lang sa assigned shift'}. Magkaiba ang walang biometric row at walang approved coverage: maaaring no record ang punch-only summary kahit covered ang saved slots. Kasama ang coverage sa current check. I-refresh ang monthly report at ipa-reconcile sa HR ang petsa, approval at coverage source kung no record pa rin; hindi ko mabe-verify ang lumang summary mula sa isang petsa lamang.`);
+  }
   if(intent==='dtr_date_validation') return choose(text,`${context.date_range.startDate} is a valid calendar date. Whether attendance logs are required depends on your assigned shift and the configured holiday calendar.`,`${context.date_range.startDate} kay valid nga petsa. Ang required logs magdepende sa shift ug holidays.`,`${context.date_range.startDate} ay valid na petsa. Ang required logs ay depende sa shift at holidays.`);
   if(intent==='assistant_action_guidance') {
     const records=/\b(?:punch|pm out|am in|time[ -]?out|time[ -]?in)\b/i.test(text)
-      ? (context.dtr_records||[]).map(r=>`${r.attendance_date}: AM in ${r.time_in||'not recorded'}, AM out ${r.break_out||'not recorded'}, PM in ${r.break_in||'not recorded'}, PM out ${r.time_out||'not recorded'}.`).join('\n') : '';
+      ? (context.dtr_records||[]).map(r=>{
+        const existing=/\bpm out\b/i.test(text)&&r.time_out ? choose(text,`PM out already exists at ${punchTime(r.time_out)}.`, `Naa nay PM out nga ${punchTime(r.time_out)}.`, `May PM out na sa ${punchTime(r.time_out)}.`) : '';
+        return `${r.attendance_date}: AM in ${punchTime(r.time_in)}, AM out ${punchTime(r.break_out)}, PM in ${punchTime(r.break_in)}, PM out ${punchTime(r.time_out)}. ${existing}`;
+      }).join('\n') : '';
     return choose(text,
     'I cannot submit, cancel, approve or change an HR request or attendance punch through chat. Use My Leave or Locator Requests to review the current request and available actions. For approved-request changes or missing/incorrect punches, contact HR/Admin with the date, request reference, actual work details and proof. Attendance must reflect work or valid approved coverage; I cannot mark an unworked day present.',
     'Dili ko maka-submit, cancel, approve o mag-usab sa request/punch pinaagi sa chat. Ablihi ang My Leave o Locator Requests. Para sa approved request o sayop nga punch, kontaka ang HR/Admin uban sa petsa, reference ug tinuod nga work details/proof. Dili nato markahan present ang adlaw nga walay trabaho o valid approved coverage.',
@@ -24,7 +46,10 @@ function questionReply(text, context, intent) {
     'Bago magsumite: sa leave, suriin ang type, eligibility, petsa, working days, balance/quota, advance notice, custom fields at attachments. Sa locator, suriin ang type, workday, destination/purpose, covered slots, reason at required fields/files. Suriin ang overlaps at facts. Sa form magsumite; wala akong isinumite rito at kailangan pa ang approval.');
   if(intent==='request_policy_guidance') {
     const pending=(context.recent_leave_requests||[]).find(r=>/^pending/.test(r.status));
-    const tracker=pending ? ` ${pending.leave_type || 'Leave'} (${pending.start_date}): ${pending.status}; last reviewer: ${pending.dept_head_reviewer_name || pending.last_reviewer_name || pending.hr_reviewer_name || 'not recorded'}.` : '';
+    const owner={pending_hr:'HR final review',pending_department_head:'Department Head review',pending_mayor:'Mayor / authorized final reviewer'}[pending?.status]||'the assigned reviewer shown in the request tracker';
+    const reviewer=pending?.reviewer_name||pending?.latest_history_actor_name||pending?.last_reviewer_name;
+    const personal=/\b(?:my|akong|nako|ko|contact|next|take leave|go on leave)\b/i.test(text);
+    const tracker=pending&&personal ? `\n${pending.leave_type || 'Leave'} (${pending.start_date}): ${pending.status}. `+choose(text,`Current stage/contact: ${owner}.`,`Current stage/kontakon: ${owner}.`,`Kasalukuyang stage/kontakin: ${owner}.`)+(reviewer?` Last recorded reviewer: ${reviewer}.`:'') : '';
     return choose(text,
       'Pending means the request is waiting for its required reviewers; it is not final permission to take leave or DTR coverage. Approved means the required approval stages are complete. Returned means corrections or more information are needed before resubmission. Contact the current reviewer or HR to clarify an urgent pending request; do not assume approval.'+tracker,
       'Pending: naghulat pa sa required reviewers; dili pa final permiso sa leave o DTR coverage. Approved: kompleto na ang approvals. Returned: kinahanglan correction o dugang detalye sa dili pa resubmit. Kontaka ang current reviewer o HR kung urgent; ayaw pag-assume nga approved.'+tracker,
@@ -32,9 +57,9 @@ function questionReply(text, context, intent) {
   }
   if(intent==='leave_type_selection') {
     const types=(context.leave_types||[]).filter(t=>t.employee_can_file!==false&&!t.admin_only);
-    return choose(text,'What is the actual circumstance—your illness, an affected family member, a declared calamity, or another personal obligation? I can help compare the configured types, but cannot assume eligibility. Relevant types available in HRMS: ',
-      'Unsa ang tinuod nga circumstance—imong sakit, family member, declared calamity o personal obligation? Dili ta mo-assume sa eligibility. Available types: ',
-      'Ano ang totoong sitwasyon—sariling sakit, family member, declared calamity o personal na obligasyon? Hindi natin ipagpapalagay ang eligibility. Available types: ')+types.map(t=>t.display_name||t.name).join(', ');
+    return choose(text,'What is the actual circumstance—your illness, an affected family member, a declared calamity, or another personal obligation? I can help compare the configured types, but cannot assume eligibility. Prepare your actual dates, working days, brief factual reason, relationship/circumstances relevant to eligibility, and the selected type’s required custom details and supporting documents; do not invent medical details or obtain unrelated documents. We should check its balance/quota and advance-notice rules before filing. Available configured types: ',
+      'Unsa ang tinuod nga circumstance—imong sakit, family member, declared calamity o personal obligation? Dili ta mo-assume sa eligibility. Andama ang petsa, working days, mubo nga tinuod nga rason, relasyon/circumstances, ug required custom details ug supporting documents sa napiling type. I-check una ang balance/quota ug advance notice; ayaw pag-invent ug medical details. Available types: ',
+      'Ano ang totoong sitwasyon—sariling sakit, family member, declared calamity o personal na obligasyon? Hindi natin ipagpapalagay ang eligibility. Ihanda ang petsa, working days, maikling totoong dahilan, relasyon/circumstances, at required custom details at supporting documents ng napiling type. Suriin muna ang balance/quota at advance notice; huwag mag-imbento ng medical details. Available types: ')+types.map(t=>t.display_name||t.name).join(', ');
   }
   if(intent==='leave_annual_remaining') {
     const type=configuredLeaveType(text,context.leave_types);
@@ -49,7 +74,7 @@ function questionReply(text, context, intent) {
   }
   if(intent==='dtr_undertime_reason') {
     const rows=context.dtr_records||[];
-    return choose(text,'Recorded undertime explanation','Pasabot sa na-record nga undertime','Paliwanag sa naitalang undertime')+'\n'+rows.map(r=>`${r.attendance_date}: ${Number(r.undertime_minutes)||0} minutes. AM out: ${r.break_out||'none'}, PM in: ${r.break_in||'none'}, PM out: ${r.time_out||'none'}.`).join('\n')+'\n'+choose(text,
+    return choose(text,'Recorded undertime explanation','Pasabot sa na-record nga undertime','Paliwanag sa naitalang undertime')+'\n'+rows.map(r=>`${r.attendance_date}: ${Number(r.undertime_minutes)||0} minutes. AM out: ${punchTime(r.break_out)}, PM in: ${punchTime(r.break_in)}, PM out: ${punchTime(r.time_out)}.`).join('\n')+'\n'+choose(text,
       'A late final time-out alone does not prove that every shift segment was complete: break timing and the configured schedule can affect the saved total. The exact calculation trace is not stored in this chat context, so I cannot prove which rule produced these minutes. Ask HR to review the actual punches and assigned shift; I will not invent a missing punch.',
       'Dili igo ang late time-out aron mapamatud-an nga kompleto ang tanang segment. Makaapekto ang break ug shift rules. Wala dinhi ang exact calculation trace; ipa-review sa HR ang actual punches ug shift.',
       'Hindi sapat ang late time-out para patunayang kumpleto ang lahat ng segment. Maaaring makaapekto ang break at shift rules. Wala rito ang exact calculation trace; ipa-review sa HR ang actual punches at shift.');

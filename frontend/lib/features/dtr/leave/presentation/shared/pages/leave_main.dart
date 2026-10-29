@@ -378,7 +378,7 @@ class _LeaveMainState extends State<LeaveMain> {
           },
     );
     if (widget.isAdmin) return form;
-    return EmployeeHrmsAssistantOverlay(initialBottom: 92, child: form);
+    return EmployeeHrmsAssistantOverlay(initialBottom: 176, child: form);
   }
 }
 

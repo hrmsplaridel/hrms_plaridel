@@ -68,6 +68,7 @@ function explicitQuestionIntent(text) {
   if (/\b(?:valid|real)\b.*\b(?:attendance )?date\b/i.test(text)) return 'dtr_date_validation';
   if (leaveTopic.test(text) && /\b(?:change the date|submit anyway)\b/i.test(text)) return 'leave_availability_check';
   const locator = locatorTopic.test(text);
+  if (/\b(?:why|ngano|bakit|discrepancy|different)\b/i.test(text) && /\b(?:monthly|summary)\b/i.test(text) && /\b(?:dtr|attendance|record)\b/i.test(text)) return 'dtr_status_explanation';
   if (locatorPolicyKind(text)) return locatorPolicyKind(text) === 'credits' ? 'locator_requirements' : 'locator_policy_guidance';
   if (locator && /\b(?:difference|compare|versus|kalahi|pagkaiba)\b/i.test(text)) return 'locator_type_compare';
   if (locator && /\b(?:extra|custom|additional)\s+fields?\b/i.test(text)) return 'locator_form_field_help';
@@ -94,6 +95,8 @@ function explicitQuestionIntent(text) {
   if (/\b(?:attendance|dtr)\s+only\b/i.test(text)) return 'dtr_status_explanation';
   if (/\b(?:dtr|attendance)\b/i.test(text) && /\b(?:compare|versus|both|either)\b/i.test(text)) return 'dtr_comparison';
   if (/\b(?:punches|logs)\b/i.test(text) && /\b(?:both|either)\b/i.test(text)) return 'dtr_comparison';
+  if (/^(?:please\s+)?(?:show|check|view)(?:\s+my)?\s+attendance\s+(?:for|in|on|this|last|next|today|tomorrow|yesterday)\b/i.test(text) &&
+      !/\b(?:missing|late|undertime|overtime|hours|correction|export|policy|rules)\b/i.test(text)) return 'dtr_status_explanation';
   if (/^(?:please\s+)?(?:check|show)(?:\s+my)?\s+attendance(?:\s+(?:today|tomorrow|yesterday|ngayon|kahapon))?[.?!]*$/i.test(text.trim())) return 'dtr_status_explanation';
   return null;
 }

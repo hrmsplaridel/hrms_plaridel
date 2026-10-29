@@ -19,16 +19,21 @@ function factualInput(facts) {
     && !/\?$/.test(facts.trim());
 }
 
-function fallbackSentence(facts, module, language) {
+function fallbackSentence(facts, module, language, concise = false) {
   let purpose = facts.replace(/[\r\n]+/g, ' ').replace(/\s+/g, ' ').replace(/[.!?]+$/, '').trim();
   if (language !== 'english' && /^i (?:need|will|would)/i.test(purpose)) {
     let translated = purpose.replace(/^i need (?:time )?to\s+/i,'').replace(/^i will\s+/i,'');
     const phrases = language==='tagalog'
-      ? [["my child's school meeting",'pulong sa paaralan ng aking anak'],['rest and recharge','magpahinga at mag-recharge'],['submit payroll documents','magsumite ng payroll documents'],['attend','dumalo'],['at the','sa']]
-      : [["my child's school meeting",'meeting sa eskwelahan sa akong anak'],['rest and recharge','mopahulay ug mag-recharge'],['submit payroll documents','mosumite ug payroll documents'],['attend','motambong'],['at the','sa']];
+      ? [["my child's school meeting",concise?'school meeting ng aking anak':'pulong sa paaralan ng aking anak'],['rest and recharge','magpahinga at mag-recharge'],['submit payroll documents','magsumite ng payroll documents'],['attend','dumalo sa'],['at the','sa']]
+      : [["my child's school meeting",concise?'school meeting sa akong anak':'meeting sa eskwelahan sa akong anak'],['rest and recharge','mopahulay ug mag-recharge'],['submit payroll documents','mosumite ug payroll documents'],['attend',concise?'moapil sa':'motambong sa'],['at the','sa']];
     for (const [from,to] of phrases) translated=translated.replace(new RegExp(`\\b${from}\\b`,'gi'),to);
     // Preserve uncommon supplied facts verbatim instead of inventing a translation.
-    return `${language==='tagalog'?'Humihiling ako ng pahintulot para':'Mangayo ko ug permiso aron'} ${translated}.`;
+    return concise ? translated.charAt(0).toUpperCase()+translated.slice(1)+'.'
+      : `${language==='tagalog'?'Humihiling ako ng pahintulot para':'Mangayo ko ug permiso aron'} ${translated}.`;
+  }
+  if (concise && language==='english') {
+    purpose=purpose.replace(/^i (?:will|need (?:time )?to)\s+/i,'');
+    return purpose.charAt(0).toUpperCase()+purpose.slice(1)+'.';
   }
   if (module === 'leave' && /^i need (?:time )?to\s+/i.test(purpose)) {
     return `I would like to request leave to ${purpose.replace(/^i need (?:time )?to\s+/i, '')}.`;
@@ -54,7 +59,7 @@ function groundedDraft(draft, facts) {
 }
 
 async function draftSentence({ facts, module = 'leave', field = 'Reason', instruction = '', example, sentenceTemplate,
-  maxLength = 2000, language = detectAssistantLanguage(facts), signal, complete = chatCompletion, timeoutMs }) {
+  maxLength = 2000, language = detectAssistantLanguage(facts), previousDraft, signal, complete = chatCompletion, timeoutMs }) {
   if (signal?.aborted) throw Object.assign(new Error('Assistant request was cancelled.'), {code: 'ASSISTANT_REQUEST_ABORTED', statusCode: 499});
   facts = String(facts || '').trim();
   if (!factualInput(facts)) return { question: language === 'bisaya' ? 'Unsa ang tinuod nga purpose o detalye nga imong ipaapil?' : language === 'tagalog' ? 'Ano ang totoong purpose o detalye na gusto mong isama?' : 'What actual purpose or details would you like included?' };
@@ -88,7 +93,7 @@ async function draftSentence({ facts, module = 'leave', field = 'Reason', instru
     if (typeof parsed.draft === 'string') draft = parsed.draft.trim();
     // The caller already supplied adequate facts; an unfocused model question should
     // not discard them. Invalid output falls back to a factual sentence below.
-    if (!draft || draft.length > limit || /\[[^\]]+\]/.test(draft) || !groundedDraft(draft, facts)) { draft = null; failure = 'AI_DRAFT_UNGROUNDED_OR_INVALID'; }
+    if (!draft || draft.length > limit || (/shorter|mubo/i.test(instruction) && previousDraft && draft.length>=previousDraft.length) || /\[[^\]]+\]/.test(draft) || !groundedDraft(draft, facts)) { draft = null; failure = 'AI_DRAFT_UNGROUNDED_OR_INVALID'; }
   } catch (error) {
     if (signal?.aborted || error.code === 'ASSISTANT_REQUEST_ABORTED') throw error;
     failure = error.code || 'AI_DRAFT_FAILED';
@@ -97,8 +102,7 @@ async function draftSentence({ facts, module = 'leave', field = 'Reason', instru
     signal?.removeEventListener('abort', abort);
   }
   if (!draft) {
-    draft = fallbackSentence(facts, module, language);
-    if (/\b(?:shorter|mubo)\b/i.test(instruction) && language==='english') draft=facts.replace(/[.!?]+$/,'')+'.';
+    draft = fallbackSentence(facts, module, language, /\b(?:shorter|mubo)\b/i.test(instruction));
     // Log only a code, never employee facts or model output.
     if (failure) console.warn('[assistant-draft]', failure);
   }

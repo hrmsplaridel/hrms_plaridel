@@ -140,7 +140,7 @@ test('follow-up audit: full chat retains draft facts, dates per clause and live 
   const user={id:'followup-audit',role:'employee'};
   const ask=async message=>(await chatWithDtrAssistant(pool,{user,message})).message.content;
   assert.match(await ask('Suggest a sentence for wellness leave because I need time to rest and recharge.'),/rest and recharge/);
-  assert.match(await ask('Make that sentence shorter, using the same facts.'),/rest and recharge/);
+  assert.match(await ask('Make that sentence shorter, using the same facts.'),/rest and recharge/i);
   assert.match(await ask('Translate that reason into Tagalog. Keep its meaning.'),/magpahinga/);
   assert.match(await ask('Now write the same reason in Bisaya.'),/mopahulay/);
   assert.match(await ask('For Earl leave, is Purpose required or optional, and how many characters can I enter?'),/Optional.*255/s);
@@ -155,6 +155,16 @@ test('follow-up audit: full chat retains draft facts, dates per clause and live 
   assert.match(await ask('Can you submit the locator for me now?'),/cannot submit/);
   const pending=await ask('Tubaga ko sa Bisaya: show my sick leave balance and explain why pending days reduce it.');
   assert.match(pending,/17\.5/);assert.match(pending,/reserve/);assert.doesNotMatch(pending,/Wala koy nakitang pending/);
+  assert.match(pending,/gi-reserve/);
+  assert.doesNotMatch(pending,/Pending days reserve credits/);
+  assert.match(await ask('If I use five days of sick leave, how many days remain?'),/12\.5/);
+  assert.match(await ask('What are the attendance rules for grace period and missing logs?'),/missing|incomplete/i);
+  const fiveMinutes=await chatWithDtrAssistant(pool,{user,message:'Why does October 2 have five minutes of undertime if I timed out at 5:10 PM?'});
+  assert.equal(fiveMinutes.intent,'dtr_undertime_reason');
+  assert.match(await ask('Show my attendance for October 2026.'),/October|october|2026-10/);
+  const weekly=await chatWithDtrAssistant(pool,{user,message:'Please answer in Tagalog: may kulang ba akong time logs ngayong linggo?'});
+  assert.deepEqual(weekly.sources.dateRange,require('../src/utils/dateRangeParser').parseAssistantDateRange('this week'));
+  assert.deepEqual(loaded.at(-1).dateRange,weekly.sources.dateRange);
   await ask('My leave is still pending. Who should I contact next, and can I go on leave already?');
   assert.match(await ask('Please explain that in one sentence suitable for a new employee.'),/not yet approved/);
   const comparison=await ask('Compare my attendance this week with last week.');
@@ -167,6 +177,39 @@ test('follow-up audit: full chat retains draft facts, dates per clause and live 
   await chatWithDtrAssistant(pool,{user,message:'Suggest a sentence because I need time to rest and recharge.',formContext});
   const activeRewrite=await chatWithDtrAssistant(pool,{user,message:'Translate that reason into Tagalog.',formContext});
   assert.match(activeRewrite.message.content,/magpahinga/);
+});
+
+test('live audit: quantitative facts survive typo correction and local punch evidence is clear',()=>{
+  const normalize=require('../src/services/dtrAssistant/dtrAssistantTextNormalizer').normalizeAssistantMessageForRules;
+  for(const word of ['five','four','nine','twenty-five','half']) assert.equal(normalize(`${word} days`),`${word} days`);
+  assert.match(normalize('loacator'),/locator/);
+  const content=reply('Nawala akong PM out. Can you add 5:10 PM for me?',{
+    dtr_records:[{attendance_date:'2026-10-02',time_out:'2026-10-02T09:10:00.000Z'}],
+  },'assistant_action_guidance');
+  assert.match(content,/5:10 PM/);
+  assert.match(content,/Naa nay PM out|already exists/);
+  assert.doesNotMatch(content,/T09:10|\.000Z/);
+});
+
+test('live audit: translated shorter drafts keep all event facts without courtesy padding',async()=>{
+  const facts="I will attend my child's school meeting.";
+  const result=await draftSentence({facts,language:'bisaya',instruction:'Make it shorter and answer in Bisaya.',
+    previousDraft:facts,complete:async()=>{throw new Error('offline');}});
+  assert.ok(result.draft.length<facts.length, result.draft);
+  assert.match(result.draft,/school meeting/);assert.match(result.draft,/akong anak/);
+});
+
+test('live audit: purpose guidance, HR stage and coverage discrepancy answer the actual question',async()=>{
+  const {assistLeaveField}=require('../src/services/dtrAssistant/leaveFieldAssistant');
+  const help=await assistLeaveField({query:async()=>({rows:[{name:'travel',display_name:'Travel Order',location_label:'Purpose of travel',location_hint:'Enter purpose'}]})},
+    {module:'locator',locatorType:'travel',fieldKey:'office',task:'help'});
+  assert.match(help.content,/actual activity/);assert.doesNotMatch(help.content,/\[Actual office or destination\]/);
+  const pending=reply('My leave is still pending. Who should I contact next?',{recent_leave_requests:[{leave_type:'Sick Leave',status:'pending_hr',start_date:'2026-09-18',reviewer_name:'Recorded Reviewer'}]},'request_policy_guidance');
+  assert.match(pending,/HR final review/);assert.match(pending,/Recorded Reviewer/);assert.doesNotMatch(pending,/not recorded/);
+  const context=attendance();
+  context.recent_locator_slips=[{slip_date:'2026-10-29',status:'approved',dtr_slot_label:'Travel Order',coverage:{am_in:true,am_out:true,pm_in:true,pm_out:true}}];
+  const discrepancy=reply('Why is Travel Order when the monthly summary says no DTR record?',context,'dtr_status_explanation');
+  assert.match(discrepancy,/punch-only summary/);assert.match(discrepancy,/full assigned shift/);
 });
 
 test('follow-up audit: dated coverage lists actual approved slots rather than filing requirements',()=>{
