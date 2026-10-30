@@ -1,5 +1,18 @@
 import 'package:hrms_plaridel/features/docutracker/models/document.dart';
 
+/// Presentation label for an approved document. The stored status stays
+/// `approved`.
+///
+/// - Approved, when release does not apply
+/// - Approved — awaiting release
+/// - Released
+String docuTrackerApprovedStateLabel(DocuTrackerDocument document) {
+  if (document.isAwaitingRelease) {
+    return docuTrackerApprovedWorkflowMessage(document);
+  }
+  return docuTrackerReleaseBadgeLabel(document) ?? 'Approved';
+}
+
 /// Status badge text for the release stage, or null when release does not
 /// apply. The document status itself stays `approved` in both cases.
 String? docuTrackerReleaseBadgeLabel(
