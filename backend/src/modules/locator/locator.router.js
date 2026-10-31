@@ -128,7 +128,7 @@ function createLocatorRouter(dependencies = loadLocatorDependencies()) {
   router.patch(
     '/:id/revoke',
     protect,
-    requireAdminOrHr,
+    requireLocatorFinalRole,
     requireDtrFeatureIfAdmin('locator_allowed'),
     controllers.revokeRequest
   );

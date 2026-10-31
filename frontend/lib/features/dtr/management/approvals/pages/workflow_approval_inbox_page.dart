@@ -23,6 +23,7 @@ import 'package:hrms_plaridel/features/dtr/leave/models/leave_type_definition.da
 import 'package:hrms_plaridel/core/widgets/form_pdf_preview.dart';
 import 'package:hrms_plaridel/features/dtr/locator/utils/locator_slip_print.dart';
 import 'package:hrms_plaridel/features/dtr/locator/utils/locator_form_signatories.dart';
+import 'package:hrms_plaridel/features/dtr/locator/data/repositories/locator_slip_data_cache.dart';
 import 'package:hrms_plaridel/features/dtr/management/approvals/widgets/workflow_request_signatures.dart';
 
 String? pendingWorkflowStepLabel(Map<String, dynamic>? snapshot) {
@@ -407,6 +408,106 @@ class _WorkflowDecisionDialogState extends State<_WorkflowDecisionDialog> {
     }
   }
 
+  bool get _canRevokeWorkflow {
+    final data = _request['request_data'] as Map? ?? const {};
+    final applicant = data['employee_id'] ?? data['user_id'];
+    return data['status'] == 'approved' && data['can_revoke_approval'] == true &&
+        applicant != context.read<AuthProvider>().user?.id;
+  }
+
+  String? get _locatorRevokeDisabledReason {
+    if (widget.revokeDisabledReason != null) return widget.revokeDisabledReason;
+    final data = _request['request_data'] as Map? ?? const {};
+    final paper = data['paper_approval_record'];
+    final timestamp = paper is Map
+        ? paper['encoded_at'] ?? data['created_at'] : data['hr_reviewed_at'];
+    final date = DateTime.tryParse(timestamp?.toString() ?? '');
+    if (date == null) return 'Cannot determine the final approval time for this request.';
+    return DateTime.now().isAfter(date.add(const Duration(days: 3)))
+        ? 'Revoke period expired. Approval can only be revoked within 3 days.' : null;
+  }
+
+  void _runRevokeAction() {
+    if (_saving) return;
+    if (widget.onRevoke != null) {
+      Navigator.pop(context);
+      widget.onRevoke!();
+    } else {
+      unawaited(_revokeWorkflowApproval());
+    }
+  }
+
+  Future<void> _revokeWorkflowApproval() async {
+    if (_saving || !_canRevokeWorkflow) return;
+    setState(() { _saving = true; _error = null; });
+    try {
+      final current = await loadAssignedWorkflowRequest(
+        _request['kind'].toString(), _request['id'].toString(),
+      );
+      if (!mounted) return;
+      if (current == null) throw const FormatException('This approval is no longer available to your account.');
+      setState(() => _request = current);
+      if (!_canRevokeWorkflow) throw const FormatException('This approval can no longer be revoked by your account.');
+      final data = Map<String, dynamic>.from(current['request_data'] as Map);
+      final disabled = current['kind'] == 'leave'
+          ? adminLeaveRevokeDisabledReason(LeaveRequest.fromJson(data))
+          : _locatorRevokeDisabledReason;
+      if (disabled != null) throw FormatException(disabled);
+      final formKey = GlobalKey<FormState>();
+      var reason = '';
+      final minimum = current['kind'] == 'locator' ? 10 : 1;
+      final result = await showDialog<String>(context: context, builder: (dialogContext) => AlertDialog(
+        title: const Text('Revoke Approval'),
+        content: SizedBox(width: 480, child: Form(key: formKey, child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(current['kind'] == 'leave'
+                ? 'This returns the request for correction and removes its leave coverage. Any leave credits deducted will be restored.'
+                : 'This removes the locator coverage from the employee’s DTR. Physical time logs will remain unchanged.'),
+            const SizedBox(height: 16),
+            TextFormField(
+              key: const Key('workflow-revocation-reason'),
+              decoration: const InputDecoration(labelText: 'Reason for revocation'),
+              minLines: 2, maxLines: 4, maxLength: 1000,
+              onChanged: (value) => reason = value,
+              validator: (value) => (value?.trim().length ?? 0) < minimum
+                  ? 'Enter a reason of at least $minimum character${minimum == 1 ? '' : 's'}.' : null,
+            ),
+          ],
+        ))),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(dialogContext), child: const Text('Cancel')),
+          FilledButton(onPressed: () {
+            if (formKey.currentState!.validate()) Navigator.pop(dialogContext, reason.trim());
+          }, child: const Text('Revoke Approval')),
+        ],
+      ));
+      if (result == null || !mounted) return;
+      final kind = current['kind'];
+      final response = await ApiClient.instance.patch<Map<String, dynamic>>(
+        kind == 'leave' ? '/api/leave/${current['id']}/revoke' : '/api/locator-slips/${current['id']}/revoke',
+        data: kind == 'leave' ? {'reason': result} : {'revocation_reason': result},
+      );
+      WorkflowInboxCache.instance.invalidate();
+      if (kind == 'locator') LocatorSlipDataCache.instance.invalidateRequests();
+      if (!mounted) return;
+      final reconcile = response.data?['month_end_reconciliation_required'] == true;
+      Navigator.pop(context, _WorkflowDecisionResult(kind == 'leave'
+          ? 'Approval revoked. The request was returned to the employee.'
+          : 'Approval revoked and DTR coverage removed.${reconcile ? ' Month-end reconciliation is required.' : ''}'));
+    } catch (error) {
+      if (mounted) {
+        final message = error is FormatException ? error.message : userFacingApiError(error);
+        setState(() => _error = message);
+        (_feedbackMessenger.currentState ?? ScaffoldMessenger.of(context))
+            .showSnackBar(SnackBar(content: Text(message)));
+      }
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
   Future<void> _attachment() async {
     setState(() {
       _saving = true;
@@ -768,18 +869,15 @@ class _WorkflowDecisionDialogState extends State<_WorkflowDecisionDialog> {
         onReject: _saving ? null : () => _decide('reject'),
         onReturn: _saving ? null : () => _decide('return'),
         onApprove: _saving || !_signed ? null : () => _decide('approve'),
-        additionalAction: status == 'approved' && widget.onRevoke != null
+        additionalAction: status == 'approved' && (widget.onRevoke != null || _canRevokeWorkflow)
             ? Tooltip(
                 message:
-                    widget.revokeDisabledReason ??
+                    _locatorRevokeDisabledReason ??
                     'Revoke this locator approval',
                 child: OutlinedButton.icon(
-                  onPressed: _saving || widget.revokeDisabledReason != null
+                  onPressed: _saving || _locatorRevokeDisabledReason != null
                       ? null
-                      : () {
-                          Navigator.pop(context);
-                          widget.onRevoke!();
-                        },
+                      : _runRevokeAction,
                   icon: const Icon(Icons.undo_rounded, size: 18),
                   label: const Text('Revoke Approval'),
                 ),
@@ -878,7 +976,7 @@ class _WorkflowDecisionDialogState extends State<_WorkflowDecisionDialog> {
       decisions: request['decisions'] as List?,
     );
     final canRevoke = leave.status == LeaveRequestStatus.approved &&
-        leave.canRevokeApproval == true && widget.onRevoke != null &&
+        leave.canRevokeApproval == true && (widget.onRevoke != null || _canRevokeWorkflow) &&
         context.read<AuthProvider>().user?.id != leave.userId;
     final revokeReason = canRevoke
         ? widget.revokeDisabledReason ?? adminLeaveRevokeDisabledReason(leave)
@@ -905,11 +1003,7 @@ class _WorkflowDecisionDialogState extends State<_WorkflowDecisionDialog> {
           : () => _openForm(widget.onPreview!),
       onPrint: widget.onPrint == null ? null : () => _openForm(widget.onPrint!),
       onRevoke: canRevoke && revokeReason == null && !_refreshing && _refreshError == null
-          ? () {
-              if (_saving) return;
-              Navigator.of(context).pop();
-              widget.onRevoke!();
-            }
+          ? _runRevokeAction
           : null,
       revokeDisabledReason: revokeReason,
       onOpenAttachment: () {

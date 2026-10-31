@@ -15,6 +15,8 @@ async function requestFinalReviewers(db,requestId,fallback){
  return [];
 }
 function requireLeaveFinalRole(req,res,next){
+ if(req.user?.role==='employee' && req.method==='PATCH' && req.route?.path==='/:id/revoke')
+  return require('./leaveRevocationAccess').requireEmployeeWorkflowRevocation('leave',req,res,next);
  if(['admin','hr'].includes(req.user?.role)) return next();
  if(req.user?.role!=='mayor' || !req.params?.id && !['/','/pending','/filter-options','/final-reviewer/me'].includes(req.path))
   return res.status(403).json({error:'Final reviewer access required'});
