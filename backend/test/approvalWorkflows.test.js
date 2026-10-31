@@ -267,3 +267,16 @@ test('completed workflow retains final HR authority for idempotent decisions and
   }},{final:async()=>({reviewers:[{id:'head',role:'hr'},{id:'hr',role:'hr'},{id:'backup',role:'hr'}]})});
   assert.deepEqual(reviewers.map(r=>r.id),['hr','backup']);
 });
+
+test('print bindings can load legacy middle-step ink with revision and asset-owner checks',async()=>{
+  const {decisionSignatures}=require('../src/services/approvalWorkflows');
+  const db={query:async()=>({rows:[{id:'ink',owner_user_id:'hr',signature_image_base64:'aW5r'}]})};
+  const row={status:'approved',signature_revision:2,workflow_snapshot:{steps:['department','hr','mayor'],decisions:[
+    {step:1,action:'approve',actor_id:'hr',signature:{signature_asset_id:'ink',revision:2}},
+  ]}};
+  assert.deepEqual(await decisionSignatures(db,row),[]);
+  assert.equal((await decisionSignatures(db,row,{includeLegacy:true}))[0].slot_key,'workflow_step_2');
+  assert.deepEqual(await decisionSignatures(db,{...row,status:'revoked'},{includeLegacy:true}),[]);
+  assert.deepEqual(await decisionSignatures(db,{...row,signature_revision:3},{includeLegacy:true}),[]);
+  assert.deepEqual(await decisionSignatures({query:async()=>({rows:[{id:'ink',owner_user_id:'other'}]})},row,{includeLegacy:true}),[]);
+});

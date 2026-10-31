@@ -49,6 +49,7 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
     'mayor_employment_types': null,
   };
   Map<String, dynamic>? _pendingRouting;
+  List<dynamic>? _workflowSteps;
   bool _isActive = true;
   bool _employeeCanFile = true;
   bool _adminOnly = false;
@@ -166,6 +167,9 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
       _pendingPrintTypeId = null;
     }
     _printDraftEpoch++;
+    if (_selected?.id != item.id) {
+      _workflowSteps = null;
+    }
     _selected = item;
     _pendingRouting = null;
     _nameController.text = item.name;
@@ -230,6 +234,7 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
     setState(() {
       _selected = null;
       _pendingRouting = null;
+      _workflowSteps = null;
       _creationPrint = const LeavePrintDraft();
       _pendingPrintTypeId = null;
       _printDraftEpoch++;
@@ -1244,7 +1249,9 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
                       key: ValueKey('routing-${selected?.id ?? 'new'}'),
                       leaveTypeId: selected?.id,
                       enabled: !_saving,
+                      onLoaded: (value) => setState(() => _workflowSteps = value['workflow_steps'] as List?),
                       onChanged: (value) {
+                        setState(() => _workflowSteps = value['workflow_steps'] as List?);
                         _creationRouting = value;
                         if (selected?.id != null) _pendingRouting = value;
                       },
@@ -1271,6 +1278,7 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
                                   ids[field.key] ?? _nextCustomFieldUiId++,
                               ];
                             }),
+                      readWorkflowSteps: () => _workflowSteps,
                       readLeaveType: () => LeaveTypeDefinition(
                         name: _nameController.text,
                         displayName: _displayNameController.text,

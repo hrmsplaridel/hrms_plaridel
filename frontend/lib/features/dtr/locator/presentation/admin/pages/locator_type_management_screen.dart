@@ -57,6 +57,7 @@ class _LocatorTypeManagementScreenState
   bool _autoApproveAdmin = false;
   String _approvalRoute = 'hr';
   String? _workflowId;
+  List<dynamic>? _workflowSteps;
   List<String>? _mayorEmploymentTypes;
   List<LeaveCustomFieldDefinition> _customFields = const [];
   bool _isActive = true;
@@ -159,6 +160,7 @@ class _LocatorTypeManagementScreenState
       _autoApproveAdmin = false;
       _approvalRoute = 'hr';
       _workflowId = null;
+      _workflowSteps = null;
       _mayorEmploymentTypes = null;
       _customFields = const [];
       _isActive = true;
@@ -176,6 +178,9 @@ class _LocatorTypeManagementScreenState
     setState(() {
       _printDraft = const LocatorPrintDraft();
       _printEpoch++;
+      if (_selected?.id != item.id) {
+        _workflowSteps = null;
+      }
       _selected = item;
       _codeController.text = item.code;
       _labelController.text = item.label;
@@ -738,7 +743,9 @@ class _LocatorTypeManagementScreenState
                           ),
                           enabled: !_saving,
                           initialWorkflowId: _workflowId,
+                          onLoaded: (routing) => setState(() => _workflowSteps = routing['workflow_steps'] as List?),
                           onChanged: (routing) => setState(() {
+                            _workflowSteps = routing['workflow_steps'] as List?;
                             _workflowId = routing['approval_workflow_id'] as String?;
                             final steps=routing['workflow_steps'] as List? ?? [];
                             _approvalRoute = steps.any((step) => step == 'mayor' || step is Map && step['assignee_source'] == 'active_mayor') ? 'mayor_direct'
@@ -763,6 +770,7 @@ class _LocatorTypeManagementScreenState
                           onCustomFieldsChanged: (fields) => setState(
                             () => _customFields = List.of(fields),
                           ),
+                          readWorkflowSteps: () => _workflowSteps,
                           readRequestType: () => LocatorRequestType.locator.copyWith(
                             code:_codeController.text.trim(),label:_labelController.text.trim().isEmpty?'Locator Slip':_labelController.text.trim(),
                             locationLabel:_locationLabelController.text.trim(),locationHint:_locationHintController.text.trim(),approvalRoute:_approvalRoute,

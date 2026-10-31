@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_type_definition.dart';
@@ -130,6 +131,13 @@ void main() {
       );
     },
   );
+  test('an unapproved workflow block never prints the final reviewer signature', () async {
+    final png=base64Decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGMQUDAAAACkAGE0Zn1yAAAAAElFTkSuQmCC');
+    final bytes=await buildLocatorLayoutPdf(layout:LocatorPrintLayout(elements:const[
+      LocatorPrintElement(id:'future',kind:'signature',source:'workflow_step_2',x:40,y:200,width:240,height:80),
+    ]),form:const{},signatories:LocatorFormSignatories(finalApprover:LocatorPrintedSignatory(name:'Final Official',signatureBytes:png)));
+    expect(RegExp(r'/Subtype\s*/Image').allMatches(latin1.decode(bytes)).length,0);
+  });
   testWidgets(
     'dragging keeps controls and other elements stable until release',
     (t) async {

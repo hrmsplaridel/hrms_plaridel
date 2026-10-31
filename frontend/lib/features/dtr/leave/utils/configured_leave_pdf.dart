@@ -41,11 +41,19 @@ Future<Uint8List> saveConfiguredLeavePdf({
     final manualMayor =
         request.finalReviewRoute == 'mayor' ||
         nativeLayout.baseForm == 'wellness';
+    Map<String, LocatorPrintedSignatory> workflowApprovers = const {};
+    if (nativeLayout.elements.any((item) => item.kind == 'signature' && item.source.startsWith('workflow_step_')) && !request.isPaperRecord) {
+      final signatures = await ApiClient.instance.get<Map<String, dynamic>>(
+        '/api/docutracker/sources/dtr/leave_requests/${request.id}/signatures',
+      );
+      workflowApprovers = workflowPrintedSignatoriesFromJson(signatures.data ?? const {});
+    }
     customBytes = await buildLeaveLayoutPdf(
       layout: nativeLayout,
       balances: balances,
       request: request,
       signatories: LocatorFormSignatories(
+        workflowApprovers: workflowApprovers,
         applicant: LocatorPrintedSignatory(
           name: request.employeeName ?? '',
           positionTitle: request.positionTitle ?? '',

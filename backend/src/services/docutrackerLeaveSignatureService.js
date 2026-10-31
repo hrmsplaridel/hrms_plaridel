@@ -245,7 +245,7 @@ async function getLeaveSourceSignatures(
     source_revision: context.signature_revision,
     workflow_snapshot: context.workflow_snapshot || null,
     signatures: [
-      ...await require('./approvalWorkflows').decisionSignatures(pool,context),
+      ...await require('./approvalWorkflows').decisionSignatures(pool,context,{includeLegacy:true}),
       ...(certification?[certification]:[]),
       mapApplicantSignature(
         context,

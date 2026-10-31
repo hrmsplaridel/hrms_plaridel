@@ -37,7 +37,7 @@ void main() {
       InterceptorsWrapper(
         onRequest: (options, handler) {
           requests.add(options);
-          if(options.path=='/api/approval-workflows'){handler.resolve(Response(requestOptions:options,statusCode:200,data:workflowTestCatalog));return;}
+          if(options.path=='/api/approval-workflows'){handler.resolve(Response(requestOptions:options,statusCode:200,data:[...workflowTestCatalog,{'id':'specific','name':'Specific reviewers','current_version':1,'is_active':true,'steps':[{'step_order':1,'label':'First Step','assignee_source':'specific_users'}]}]));return;}
           if (options.method == 'GET' &&
               options.path ==
                   '/api/locator-slips/types?include_inactive=true') {
@@ -198,6 +198,29 @@ void main() {
     await tester.enterText(textField('DTR display text'), 'Remote');
     await tester.enterText(textField('DTR print text'), 'REMOTE');
   }
+  testWidgets('specific workflow generates and saves only its matching signature blocks', (tester) async {
+    await mount(tester);
+    await enterRequiredFields(tester);
+    final scrollable=find.descendant(of:find.byType(ListView).last,matching:find.byType(Scrollable)).first;
+    await tester.scrollUntilVisible(stringDropdown('Select workflow'),250,scrollable:scrollable);
+    await Scrollable.ensureVisible(tester.element(stringDropdown('Select workflow')),alignment:.5);
+    await tester.pumpAndSettle();
+    await tester.tap(stringDropdown('Select workflow'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Specific reviewers · v1').last);
+    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(find.text('Design layout'),250,scrollable:scrollable);
+    await Scrollable.ensureVisible(tester.element(find.text('Design layout')),alignment:.5);
+    await tester.pumpAndSettle();await tester.tap(find.text('Design layout'));await tester.pumpAndSettle();
+    expect(find.text('Sample signer'),findsNWidgets(2));
+    expect(find.text('First Step'),findsWidgets);
+    await tester.tap(find.text('Use layout'));await tester.pumpAndSettle();
+    await tester.tap(find.text('Create Type'));await tester.pumpAndSettle();
+    final saved=requests.singleWhere((r)=>r.method=='POST' && r.path.startsWith('/api/locator-slips/print/types/'));
+    final layout=jsonDecode((saved.data as FormData).fields.singleWhere((e)=>e.key=='print_layout').value) as Map;
+    expect((layout['elements'] as List).where((e)=>e['kind']=='signature').map((e)=>e['source']),['applicant','hr_approver']);
+  });
+
   testWidgets('locator settings labels remain above input borders on focus', (tester) async {
     await mount(tester);
     final field = textField('Request type name');

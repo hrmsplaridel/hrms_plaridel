@@ -1,3 +1,4 @@
+import 'package:hrms_plaridel/features/dtr/management/approvals/utils/workflow_print_layout.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_type_definition.dart';
 import 'dart:typed_data';
 import 'dart:convert';
@@ -51,6 +52,7 @@ class LocatorPrintSettings extends StatefulWidget {
     this.onSaved,
     this.enabled = true,
     this.readRequestType,
+    this.readWorkflowSteps,
     this.onCustomFieldsChanged,
   });
   final String? typeId;
@@ -59,6 +61,7 @@ class LocatorPrintSettings extends StatefulWidget {
   final VoidCallback? onSaved;
   final bool enabled;
   final LocatorRequestType Function()? readRequestType;
+  final List<dynamic>? Function()? readWorkflowSteps;
   final ValueChanged<List<LeaveCustomFieldDefinition>>? onCustomFieldsChanged;
   @override
   State<LocatorPrintSettings> createState() => _LocatorPrintSettingsState();
@@ -225,12 +228,31 @@ class _LocatorPrintSettingsState extends State<LocatorPrintSettings> {
     }
   }
 
+  List<dynamic>? get _workflowSteps => widget.readWorkflowSteps?.call();
+  LocatorPrintedSignatory _sampleSignatory(String source) {
+    final caption = workflowPrintCaption(_workflowSteps, source);
+    return caption == null ? locatorLayoutSampleSignatory(_requestType, source)
+        : LocatorPrintedSignatory(name: 'Sample signer', positionTitle: caption);
+  }
+  PrintLayoutEditorBindings? _bindings(LocatorRequestType type) {
+    final signatures = workflowPrintSignatures(_workflowSteps);
+    if (signatures.isEmpty) return null;
+    return PrintLayoutEditorBindings(
+      fields: {'employee_name':'Employee name','date':'Date','request_type':'Request type',
+        'office':type.locationLabel,'reason':'Remarks / Reasons','time_segments':'DTR slots'},
+      signatures: signatures, sample: locatorLayoutSample(type),
+      defaultLayout: (orientation) => workflowPrintLayoutDefaults(
+        LocatorPrintLayout.defaults(type, orientation: orientation), _workflowSteps),
+      sampleSignatory: _sampleSignatory,
+    );
+  }
   LocatorRequestType get _requestType=>widget.readRequestType?.call()??LocatorRequestType.locator;
   DioMediaType _fileType(PlatformFile file)=>DioMediaType.parse(file.extension?.toLowerCase()=='pdf'?'application/pdf':file.extension?.toLowerCase()=='png'?'image/png':'image/jpeg');
   Future<void> _previewDraft(LocatorPrintLayout? layout, {List<LeaveCustomFieldDefinition>? customFields})async{
     final type=customFields==null?_requestType:_requestType.copyWith(employeeDetailSchema:customFields);
     final bytes=layout!=null?await buildLocatorLayoutPdf(layout:layout,form:locatorLayoutSample(type),signatories:LocatorFormSignatories(
-      applicant:locatorLayoutSampleSignatory(type,'applicant'),departmentHead:locatorLayoutSampleSignatory(type,'department_head'),finalApprover:locatorLayoutSampleSignatory(type,'hr_approver'),
+      applicant:_sampleSignatory('applicant'),departmentHead:_sampleSignatory('department_head'),finalApprover:_sampleSignatory('hr_approver'),
+      workflowApprovers: {for (final source in workflowPrintSignatures(_workflowSteps).keys) if(source.startsWith('workflow_step_')) source: _sampleSignatory(source)},
     )):await LocatorSlipPrint.buildPdf(id:null,employeeName:'Sample Employee',dateText:'Oct 13, 2026',requestTypeLabel:type.label,locationLabel:type.locationLabel,office:'Municipal Hall',remarks:'Sample purpose',amIn:true,amOut:true,pmIn:true,pmOut:true,
       signatories:LocatorFormSignatories(form:locatorLayoutSample(type)));
     final response=await ApiClient.instance.post<List<int>>('/api/locator-slips/print/preview',data:FormData.fromMap({
@@ -242,6 +264,10 @@ class _LocatorPrintSettingsState extends State<LocatorPrintSettings> {
     if(mounted)await showFormPdfPreview(context:context,bytes:Uint8List.fromList(response.data!),title:'Printed Form Preview',filename:'Locator_Form_Sample.pdf');
   }
   Future<void> _editLayout()async{
+    if (_layout == null && widget.readWorkflowSteps != null && _workflowSteps?.isNotEmpty != true) {
+      setState(() => _error = 'Select a workflow and wait for it to load before designing a new layout.');
+      return;
+    }
     setState((){_busy=true;_error=null;});
     try{
       Uint8List? pdf,image;
@@ -252,7 +278,7 @@ class _LocatorPrintSettingsState extends State<LocatorPrintSettings> {
       }
       if(!mounted)return;
       final result=await showDialog<LocatorPrintLayout>(context:context,builder:(_)=>LocatorPrintLayoutEditor(
-        requestType:_requestType,initialLayout:_layout,backgroundPdf:pdf,backgroundImage:image,onPreview:_previewDraft,
+        requestType:_requestType,bindings:_bindings(_requestType),initialLayout:_layout,backgroundPdf:pdf,backgroundImage:image,onPreview:_previewDraft,
         onPreviewWithFields:(layout,fields)=>_previewDraft(layout,customFields:fields),
         onCustomFieldsChanged:widget.onCustomFieldsChanged==null?null:(fields){
           widget.onCustomFieldsChanged!(fields);
@@ -294,7 +320,7 @@ class _LocatorPrintSettingsState extends State<LocatorPrintSettings> {
           runSpacing: 8,
           children: [
             TextButton.icon(onPressed:_disabled?null:_editLayout,icon:const Icon(Icons.dashboard_customize_outlined),label:Text(_layout==null?'Design layout':'Edit layout')),
-            if(_layout!=null)TextButton(onPressed:_disabled?null:(){setState((){_layout=null;_layoutChanged=true;});_changed();},child:const Text('Use default layout')),
+            if(_layout!=null)TextButton(onPressed:_disabled?null:(){setState((){_layout=_workflowSteps?.isNotEmpty == true ? workflowPrintLayoutDefaults(LocatorPrintLayout.defaults(_requestType),_workflowSteps):null;_layoutChanged=true;});_changed();},child:const Text('Use default layout')),
             TextButton(
               onPressed: _disabled ? null : _pick,
               child: const Text('Upload background'),

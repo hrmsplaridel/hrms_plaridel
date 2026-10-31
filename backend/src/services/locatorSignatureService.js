@@ -239,7 +239,7 @@ async function getLocatorSourceSignatures(db, user, module, table, id) {
         can_sign: !paper && canSign(context, user, slot), can_assign: false, assignment_source: paper?'approved_paper_copy':'automatic',
       };
     });
-    const workflowSignatures=paper?[]:await require('./approvalWorkflows').decisionSignatures(db,context);
+    const workflowSignatures=paper?[]:await require('./approvalWorkflows').decisionSignatures(db,context,{includeLegacy:true});
     return {
       source_module: module, source_table: table, source_record_id: id,
       source_status: context.status, workflow_snapshot:context.workflow_snapshot || null, signatures:[...signatures,...workflowSignatures],

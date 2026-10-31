@@ -69,7 +69,9 @@ String locatorSignatureCaption(
     'applicant' => 'Employee',
     'department_head' => 'Head of Office',
     'certification_officer' => 'Certification officer',
-    _ => 'Final approver',
+    _ => item.source.startsWith('workflow_step_')
+        ? 'Approval step ${item.source.substring(14)}'
+        : 'Final approver',
   };
 }
 
@@ -81,7 +83,8 @@ LocatorPrintedSignatory locatorLayoutSampleSignatory(
   positionTitle: switch (source) {
     'applicant' => 'Sample employee position',
     'department_head' => 'Department Head',
-    _ => type.approvalRoute == 'hr' ? 'HR Officer' : 'Municipal Mayor',
+    _ => source.startsWith('workflow_step_') ? 'Approval step ${source.substring(14)}'
+        : type.approvalRoute == 'hr' ? 'HR Officer' : 'Municipal Mayor',
   },
 );
 
@@ -262,11 +265,7 @@ Future<Uint8List> buildLocatorLayoutPdf({
           : 8.0;
       final person =
           extraSignatories[item.source] ??
-          switch (item.source) {
-            'applicant' => signatories.applicant,
-            'department_head' => signatories.departmentHead,
-            _ => signatories.finalApprover,
-          };
+          signatories.forSource(item.source);
       final name = person.name.isEmpty && item.source == 'applicant'
           ? form['employee_name']?.toString() ?? ''
           : person.name;

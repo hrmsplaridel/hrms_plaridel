@@ -37,12 +37,23 @@ class LocatorFormSignatories {
     this.departmentHead = const LocatorPrintedSignatory(),
     this.finalApprover = const LocatorPrintedSignatory(),
     this.form = const {},
+    this.workflowApprovers = const {},
   });
 
   final LocatorPrintedSignatory applicant;
   final LocatorPrintedSignatory departmentHead;
   final LocatorPrintedSignatory finalApprover;
   final Map<String, dynamic> form;
+  final Map<String, LocatorPrintedSignatory> workflowApprovers;
+
+  LocatorPrintedSignatory forSource(String source) =>
+      workflowApprovers[source] ??
+      switch (source) {
+        'applicant' => applicant,
+        'department_head' => departmentHead,
+        'hr_approver' => finalApprover,
+        _ => const LocatorPrintedSignatory(),
+      };
 
   factory LocatorFormSignatories.fromJson(Map<String, dynamic> json) {
     final roles = json['print_signatories'];
@@ -56,8 +67,77 @@ class LocatorFormSignatories {
       ),
       finalApprover: LocatorPrintedSignatory.fromJson(roles['hr_approver']),
       form: Map<String, dynamic>.from(json['print_form'] as Map? ?? const {}),
+      workflowApprovers: workflowPrintedSignatoriesFromJson(json),
     );
   }
+}
+
+/// Use completed, request-bound decisions only. Never substitute the final
+/// approver's ink into a missing/future middle step.
+Map<String, LocatorPrintedSignatory> workflowPrintedSignatoriesFromJson(
+  Map<String, dynamic> json,
+) {
+  final snapshot = json['workflow_snapshot'];
+  if (snapshot is! Map || snapshot['steps'] is! List) return const {};
+  final steps = snapshot['steps'] as List;
+  final decisions = (snapshot['decisions'] as List? ?? const [])
+      .whereType<Map>();
+  final signatures = (json['signatures'] as List? ?? const []).whereType<Map>();
+  final active = const [
+    'pending',
+    'pending_hr',
+    'pending_department_head',
+    'pending_mayor',
+    'approved',
+  ].contains(json['source_status']);
+  return {
+    for (var i = 0; i < steps.length && i < 20; i++)
+      'workflow_step_${i + 1}': (() {
+        final step = steps[i];
+        final label = step is Map
+            ? step['label']?.toString() ?? ''
+            : const {
+                    'department': 'Department Review',
+                    'hr': 'HR Review',
+                    'mayor': 'Mayor Approval',
+                    'manual_mayor': 'Manual Mayor Signing',
+                  }[step] ??
+                  '';
+        final decision = decisions
+            .where((d) => d['step'] == i && d['action'] == 'approve')
+            .firstOrNull;
+        final reviewer = decision?['reviewer'] is Map
+            ? decision!['reviewer'] as Map
+            : const {};
+        final saved = decision?['signature'] is Map
+            ? decision!['signature'] as Map
+            : const {};
+        final manual =
+            step == 'manual_mayor' ||
+            step is Map && step['assignee_source'] == 'manual_mayor';
+        final confirmed = !active || manual || decision?['actor_id'] == null
+            ? null
+            : signatures
+                  .where(
+                    (s) =>
+                        s['slot_key'] == 'workflow_step_${i + 1}' &&
+                        s['signed_by'] == decision!['actor_id'] &&
+                        s['signature_asset_id'] != null &&
+                        s['signature_asset_id'] ==
+                            saved['signature_asset_id'] &&
+                        (json['source_revision'] == null ||
+                            saved['revision'] == json['source_revision']),
+                  )
+                  .firstOrNull;
+        return LocatorPrintedSignatory.fromJson({
+          'name': decision == null
+              ? ''
+              : reviewer['name'] ?? saved['signer_name_snapshot'] ?? '',
+          'position_title': reviewer['position_title'] ?? label,
+          'signature_image_base64': confirmed?['signature_image_base64'],
+        });
+      })(),
+  };
 }
 
 Future<LocatorFormSignatories> loadLocatorFormSignatories(String? id) async {

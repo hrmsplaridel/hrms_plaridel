@@ -17,3 +17,17 @@ test('layout rejects invalid positions, sources, duplicate IDs and oversized con
     const value=layout();mutate(value);assert.throws(()=>normalizeLocatorPrintLayout(value),{status:400});
   }
 });
+
+test('both form validators preserve explicit workflow step bindings and reject invalid indices',()=>{
+  const {normalizeLeavePrintLayout}=require('../src/services/leavePrintLayout');
+  for(const normalize of [normalizeLocatorPrintLayout,normalizeLeavePrintLayout]) {
+    for(const source of ['workflow_step_2','workflow_step_20']) {
+      const value=layout();value.elements[2].source=source;
+      assert.equal(normalize(value).elements[2].source,source);
+    }
+    for(const source of ['workflow_step_0','workflow_step_21','workflow_step_02','workflow_step_bad']) {
+      const value=layout();value.elements[2].source=source;
+      assert.throws(()=>normalize(value),{status:400});
+    }
+  }
+});

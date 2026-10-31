@@ -1,3 +1,4 @@
+import 'package:hrms_plaridel/features/dtr/management/approvals/utils/workflow_print_layout.dart';
 import '../../../utils/leave_design_capture.dart';
 import 'dart:convert';
 import 'dart:typed_data';
@@ -70,6 +71,7 @@ class LeavePrintSettings extends StatefulWidget {
     this.initialDraft,
     this.enabled = true,
     this.readLeaveType,
+    this.readWorkflowSteps,
     this.onCustomFieldsChanged,
   });
   final String? leaveTypeId;
@@ -78,6 +80,7 @@ class LeavePrintSettings extends StatefulWidget {
   final LeavePrintDraft? initialDraft;
   final bool enabled;
   final LeaveTypeDefinition Function()? readLeaveType;
+  final List<dynamic>? Function()? readWorkflowSteps;
   final ValueChanged<List<LeaveCustomFieldDefinition>>? onCustomFieldsChanged;
   @override
   State<LeavePrintSettings> createState() => _LeavePrintSettingsState();
@@ -229,6 +232,12 @@ class _LeavePrintSettingsState extends State<LeavePrintSettings> {
     }
   }
 
+  List<dynamic>? get _workflowSteps => widget.readWorkflowSteps?.call();
+  LocatorPrintedSignatory _sampleSignatory(String source) {
+    final caption = workflowPrintCaption(_workflowSteps, source);
+    return caption == null ? leaveLayoutSampleSignatory(source)
+        : LocatorPrintedSignatory(name: 'Sample signer', positionTitle: caption);
+  }
   LeaveTypeDefinition get _type =>
       widget.readLeaveType?.call() ??
       const LeaveTypeDefinition(
@@ -256,9 +265,10 @@ class _LeavePrintSettingsState extends State<LeavePrintSettings> {
             layout: custom,
             request: request,
             signatories: LocatorFormSignatories(
-              applicant: leaveLayoutSampleSignatory('applicant'),
-              departmentHead: leaveLayoutSampleSignatory('department_head'),
-              finalApprover: leaveLayoutSampleSignatory('hr_approver'),
+              applicant: _sampleSignatory('applicant'),
+              workflowApprovers: {for (final source in workflowPrintSignatures(_workflowSteps).keys) if(source.startsWith('workflow_step_')) source: _sampleSignatory(source)},
+              departmentHead: _sampleSignatory('department_head'),
+              finalApprover: _sampleSignatory('hr_approver'),
             ),
             certificationOfficer: leaveLayoutSampleSignatory(
               'certification_officer',
@@ -320,6 +330,10 @@ class _LeavePrintSettingsState extends State<LeavePrintSettings> {
   }
 
   Future<void> _editLayout() async {
+    if (_printLayout == null && widget.readWorkflowSteps != null && _workflowSteps?.isNotEmpty != true) {
+      setState(() => _error = 'Select a workflow and wait for it to load before designing a new layout.');
+      return;
+    }
     setState(() {
       _busy = true;
       _error = null;
@@ -438,11 +452,16 @@ class _LeavePrintSettingsState extends State<LeavePrintSettings> {
           backgroundImage: image,
           bindings: PrintLayoutEditorBindings(
             fields: leaveLayoutFields(type),
-            signatures: leaveLayoutSignatures(initial?.baseForm ?? _layout),
+            signatures: {
+              if (initial?.baseForm != null || _workflowSteps?.isNotEmpty != true)
+                ...leaveLayoutSignatures(initial?.baseForm ?? _layout),
+              ...workflowPrintSignatures(_workflowSteps),
+              'certification_officer': 'Certification signature',
+            },
             sample: leaveLayoutForm(leaveLayoutSampleRequest(type)),
             defaultLayout: (orientation) =>
-                leavePrintLayoutDefaults(type, orientation: orientation),
-            sampleSignatory: leaveLayoutSampleSignatory,
+                workflowPrintLayoutDefaults(leavePrintLayoutDefaults(type, orientation: orientation), _workflowSteps),
+            sampleSignatory: _sampleSignatory,
           ),
           onPreview: _previewDraft,
           onPreviewWithFields: (layout, fields) =>
