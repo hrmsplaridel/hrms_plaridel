@@ -120,7 +120,8 @@ for (const role of ['department', 'hr', 'both', 'neither']) {
       const ownsHead = ['department', 'both'].includes(role);
       const ownsHr = ['hr', 'both'].includes(role);
       const hrRoute = ['hr', 'custom'].includes(route);
-      const routeSteps = route === 'custom' ? steps.slice(0, 2).map(step => ({ ...step, assignee_source: 'specific_users' })) : route === 'hr' ? steps.slice(0, 2) : route === 'manual'
+      const routeSteps = route === 'custom' ? steps.slice(0, 2).map((step,index) => ({ ...step, assignee_source: 'specific_users',
+        user_ids:[index===0?(ownsHead?applicant:head):(ownsHr?applicant:hr)] })) : route === 'hr' ? steps.slice(0, 2) : route === 'manual'
         ? [...steps.slice(0, 2), { label: 'Manual Mayor', assignee_source: 'manual_mayor' }] : steps;
       const printedMayor = hrRoute ? profile(id(6), 'New Mayor') : mayorProfile;
       const snapshot = { steps: routeSteps, current_step: status === 'approved' ? routeSteps.length : routeSteps.length - 1, decisions: [

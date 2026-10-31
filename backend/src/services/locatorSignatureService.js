@@ -7,7 +7,7 @@ const { recordLocatorWorkflowEvent } = require('./locatorWorkflowHistory');
 const { resolveActiveMayor } = require('./officialSignatoryService');
 const { canReadLocatorAsMayor } = require('./locatorMayorAccess');
 const { todayInHrmsTimezone } = require('../utils/dateRangeParser');
-const { selfFilingOfficial, requestPrintPolicy } = require('./workflowPrintPolicy');
+const { selfFilingOfficial, requestPrintPolicy, workflowPrimaryApplicant } = require('./workflowPrintPolicy');
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const LABELS = { applicant: 'Applicant', department_head: 'Head of Office', hr_approver: 'Noted' };
@@ -29,16 +29,30 @@ async function substituteApplicantOfficial(db, row, officials, primaryConflicts 
     : null;
   const result = { ...officials };
   for (const slot of slots) {
+    const stepIndex = require('./approvalWorkflows').isShared(row.workflow_snapshot)
+      ? slot === 'department_head' ? 0 : row.workflow_snapshot.steps.length - 1 : null;
     result[slot] = await selfFilingOfficial(db, row, slot === 'department_head' ? 'department' : 'hr', {
       id: mayor?.id || mayor?.employee_id || null, employee_id: mayor?.id || mayor?.employee_id || null,
       name: mayor?.name || '', position_title: mayor?.position_title || 'Municipal Mayor',
-    });
+    }, stepIndex);
   }
   return result;
 }
 
 async function substitutePrimaryApplicantOfficial(db, row, officials) {
   const steps = row.workflow_snapshot?.steps;
+  const engine = require('./approvalWorkflows');
+  if (engine.isShared(row.workflow_snapshot)) {
+    const conflicts = [];
+    const departmentOnly = engine.isDepartmentOnlyWorkflow(row.workflow_snapshot);
+    if ((departmentOnly || steps.length > 1) && await workflowPrimaryApplicant(db, row, steps[0])) {
+      conflicts.push('department_head');
+    }
+    if (!departmentOnly && await workflowPrimaryApplicant(db, row, steps.at(-1))) {
+      conflicts.push('hr_approver');
+    }
+    return substituteApplicantOfficial(db, row, officials, conflicts);
+  }
   if (!require('./approvalWorkflows').isShared(row.workflow_snapshot) && requestPrintPolicy(row) === 'mayor') return officials;
   const conflicts = [];
   const first = steps[0];

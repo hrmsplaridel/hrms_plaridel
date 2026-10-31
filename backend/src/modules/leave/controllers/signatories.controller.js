@@ -1,6 +1,6 @@
 'use strict';
 const {publicPaperRecord,paperSignaturePayload}=require('../services/paperSignatures');
-const { selfFilingOfficial } = require('../../../services/workflowPrintPolicy');
+const { selfFilingOfficial, workflowPrimaryApplicant } = require('../../../services/workflowPrintPolicy');
 module.exports = function createLeaveControllers({
   findAssignmentProfileByUserIdAtDate,
   getDepartmentHeadForEmployee,
@@ -176,21 +176,25 @@ module.exports = function createLeaveControllers({
             ...requestContext,
             employee_id: employeeId,
           });
-          // A backup may act in the workflow, but an applicant who holds the
-          // primary official role still prints the Mayor in that form block.
-          // Reuse the filed Mayor identity after approval, including handovers.
+          const steps = requestContext.workflow_snapshot.steps;
+          const applicantIsWorkflowHead = (steps.length > 1 || workflowEngine.isDepartmentOnlyWorkflow(requestContext.workflow_snapshot)) &&
+            await workflowPrimaryApplicant(pool, requestContext, steps[0], {
+              resolveDepartmentReviewers, resolveFinalLeaveReviewerConfiguration,
+            });
+          // Recommendation follows the saved first step. Credit certification
+          // remains a separate HR official role on CSC forms.
           const lastSource = requestContext.workflow_snapshot.steps.at(-1)?.assignee_source;
           const sharedReplacement = ['active_mayor', 'manual_mayor'].includes(lastSource)
             ? officials.hr_approver
-            : replacement;
+            : replacement || (applicantIsWorkflowHead ? await resolveActiveMayor(pool, todayInHrmsTimezone()) : null);
           return res.json({
             hr_certification_officer: applicantIsHr
               ? mapOfficialSignatoryProfile(await selfFilingOfficial(pool, requestContext, 'hr', sharedReplacement))
               : hrCertifier
                 ? mapOfficialSignatoryProfile({ ...hrCertifier, employee_id: hrCertifier.id })
                 : null,
-            recommendation_officer: applicantIsHead
-              ? mapOfficialSignatoryProfile(await selfFilingOfficial(pool, requestContext, 'department', sharedReplacement))
+            recommendation_officer: applicantIsWorkflowHead
+              ? mapOfficialSignatoryProfile(await selfFilingOfficial(pool, requestContext, 'department', sharedReplacement, 0))
               : mapOfficialSignatoryProfile(officials.department_head),
             approving_authority: mapOfficialSignatoryProfile(officials.hr_approver),
           });
