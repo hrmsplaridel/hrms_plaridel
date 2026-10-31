@@ -168,6 +168,30 @@ void main() {
   }
 
   for (final width in [1500.0, 480.0]) {
+    testWidgets('specific-person queue names the saved step at width $width', (
+      tester,
+    ) async {
+      await mount(
+        tester,
+        () => [
+          {
+            ..._record('specific', 'hr', status: 'pending_hr'),
+            'workflow_snapshot': {
+              'current_step': 0,
+              'steps': [
+                {'label': 'Records verification', 'assignee_source': 'specific_users'},
+              ],
+            },
+          },
+        ],
+        size: Size(width, 1200),
+      );
+      expect(find.text('Pending Records verification'), findsOneWidget);
+      expect(find.text('Pending HR Admin'), findsNothing);
+      expect(find.text('Forwarded to HR'), findsNothing);
+      expect(tester.takeException(), isNull);
+    });
+
     testWidgets('review history uses saved routes on width $width', (
       tester,
     ) async {
@@ -177,14 +201,24 @@ void main() {
           _record('manual', 'mayor'),
           _record('direct', 'mayor_direct'),
           _record('hr', 'hr'),
+          {
+            ..._record('specific', 'hr'),
+            'workflow_snapshot': {
+              'current_step': 1,
+              'steps': [
+                {'label': 'Records verification', 'assignee_source': 'specific_users'},
+              ],
+              'decisions': [{'step': 0, 'actor_id': 'records-reviewer'}],
+            },
+          },
         ],
         size: Size(width, 1200),
       );
       expect(find.text('Approved for manual Mayor signing'), findsOneWidget);
-      expect(find.text('Approved by Mayor'), findsOneWidget);
-      expect(find.text('Approved by HR'), findsOneWidget);
+      expect(find.text('Approved by Mayor'), findsNothing);
+      expect(find.text('Approved by HR'), findsNothing);
       // The shared filter describes all approved routes, rather than attributing them to HR.
-      expect(find.text('Approved'), findsOneWidget);
+      expect(find.text('Approved'), findsNWidgets(4));
       await tester.tap(find.text('Employee manual').first);
       await tester.pumpAndSettle();
       expect(find.text('Approved for manual Mayor signing'), findsWidgets);
@@ -197,17 +231,17 @@ void main() {
       route: 'mayor',
       status: 'approved',
       message:
-          'Department approved. Obtain the Mayor’s signature on the printed form.',
+          'Approved. Obtain the Mayor’s signature on the printed form.',
     ),
     (
       route: 'hr',
       status: 'pending_hr',
-      message: 'Approved and sent to HR for final approval.',
+      message: 'Step approved. Forwarded for further review.',
     ),
     (
       route: 'mayor_direct',
       status: 'pending_mayor',
-      message: 'Department approved. Awaiting Mayor approval.',
+      message: 'Step approved. Awaiting Mayor approval.',
     ),
     (route: '', status: '', message: 'Request updated successfully.'),
   ]) {

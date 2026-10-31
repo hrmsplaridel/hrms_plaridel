@@ -174,11 +174,11 @@ void main() {
               : stage == 5
               ? 'Approved'
               : stage == -1
-              ? 'Pending HR Admin'
+              ? 'Pending review'
               : stage == 3
-              ? 'Approved by HR'
+              ? 'Approved'
               : 'Pending ${labels[stage == 4 ? 0 : stage]}';
-          expect(find.text(expected), stage >= 5 ? findsWidgets : findsOneWidget);
+          expect(find.text(expected), stage == 3 || stage >= 5 ? findsWidgets : findsOneWidget);
           if (stage >= 5) {
             expect(find.text('Approved (paper record)'), findsNothing);
           }

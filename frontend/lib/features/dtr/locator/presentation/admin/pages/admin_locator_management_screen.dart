@@ -43,7 +43,7 @@ typedef _LocatorHistoryStep = ({
 enum _LocatorAdminQueue {
   all('All'),
   pendingDeptHead('Pending Department Review'),
-  pendingHrAdmin('Pending HR Admin'),
+  pendingHrAdmin('Pending further review'),
   pendingMayor('Pending Mayor'),
   returned('Returned for Correction'),
   approved('Approved'),
@@ -1482,7 +1482,7 @@ class _AdminLocatorManagementScreenState
             .toList();
         if (item.status == 'pending_department_head') {
           history.add((
-            title: 'Pending Department Review',
+            title: item.statusLabel,
             actor: item.deptHeadReviewerName,
             date: null,
             remarks: null,
@@ -1492,9 +1492,7 @@ class _AdminLocatorManagementScreenState
             item.status == 'pending' ||
             item.status == 'pending_mayor') {
           history.add((
-            title: item.status == 'pending_mayor'
-                ? 'Pending Mayor'
-                : 'Pending HR Admin',
+            title: item.statusLabel,
             actor: item.hrReviewerName,
             date: null,
             remarks: null,
@@ -1795,7 +1793,7 @@ class _AdminLocatorManagementScreenState
       ),
       if (item.status == 'pending_department_head')
         (
-          title: 'Pending Department Review',
+          title: item.statusLabel,
           actor: item.deptHeadReviewerName,
           date: null,
           remarks: null,
@@ -1824,9 +1822,7 @@ class _AdminLocatorManagementScreenState
         ),
       if (item.canHrReview)
         (
-          title: item.status == 'pending_mayor'
-              ? 'Pending Mayor'
-              : 'Pending HR Admin',
+          title: item.statusLabel,
           actor: item.hrReviewerName,
           date: null,
           remarks: null,
@@ -1834,7 +1830,10 @@ class _AdminLocatorManagementScreenState
         ),
       if (item.status == 'approved' || item.status == 'revoked')
         (
-          title: locatorApprovedStatusLabel(item.finalReviewRoute),
+          title: locatorApprovedStatusLabel(
+            item.finalReviewRoute,
+            workflowSnapshot: item.workflowSnapshot,
+          ),
           actor: item.finalReviewRoute == 'mayor'
               ? item.deptHeadReviewerName
               : item.hrReviewerName,
@@ -1862,9 +1861,7 @@ class _AdminLocatorManagementScreenState
         ),
       if (item.status == 'returned_for_correction' && item.hrReviewedAt != null)
         (
-          title: item.finalReviewRoute == 'mayor_direct'
-              ? 'Returned by Mayor'
-              : 'Returned by HR',
+          title: 'Returned for Correction',
           actor: item.hrReviewerName,
           date: item.hrReviewedAt,
           remarks: item.hrRemarks,
@@ -2631,7 +2628,7 @@ class _LocatorAdminRecord {
   }
 
   String get statusLabel {
-    final named = pendingWorkflowStepLabel(workflowSnapshot);
+    final named = locatorPendingStepLabel(workflowSnapshot);
     if (status.startsWith('pending') && named != null) return 'Pending $named';
     switch (status.toLowerCase()) {
       case 'pending_department_head':
@@ -2640,15 +2637,20 @@ class _LocatorAdminRecord {
         return 'Pending Mayor';
       case 'pending_hr':
       case 'pending':
-        return 'Pending HR Admin';
+        return 'Pending review';
       case 'returned_for_correction':
         return 'Returned for Correction';
       case 'approved':
-        return 'Approved';
+        return paperApprovalRecord != null
+            ? 'Approved'
+            : locatorApprovedStatusLabel(
+                finalReviewRoute,
+                workflowSnapshot: workflowSnapshot,
+              );
       case 'revoked':
         return 'Revoked';
       case 'rejected_by_department_head':
-        return 'Rejected by Dept Head';
+        return 'Rejected';
       case 'rejected_by_hr':
         return locatorFinalRejectionLabel(finalReviewRoute);
       case 'cancelled':

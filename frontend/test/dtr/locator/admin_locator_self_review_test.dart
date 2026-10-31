@@ -25,7 +25,7 @@ class _Signatures extends DocuTrackerProvider {
 void main() {
   setUpAll(() => ApiClient.instance.init());
   testWidgets(
-    'direct Mayor rejection identifies the Mayor in details and legacy history',
+    'neutral rejection badge preserves the Mayor actor in details and history',
     (tester) async {
       tester.view.physicalSize = const Size(1600, 1200);
       tester.view.devicePixelRatio = 1;
@@ -96,7 +96,7 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
-      expect(find.text('Rejected by Mayor'), findsOneWidget);
+      expect(find.text('Rejected'), findsWidgets);
       await tester.tap(find.text('Test Applicant').first);
       await tester.pumpAndSettle();
       expect(find.text('Mayor Reviewer'), findsOneWidget);
@@ -107,7 +107,8 @@ void main() {
       expect(find.text('Signatures'), findsNothing);
       await tester.tap(find.text('History'));
       await tester.pumpAndSettle();
-      expect(find.text('Rejected by Mayor'), findsWidgets);
+      expect(find.text('Rejected'), findsWidgets);
+      expect(find.textContaining('Current Mayor'), findsWidgets);
       expect(find.text('Rejected by HR'), findsNothing);
     },
   );

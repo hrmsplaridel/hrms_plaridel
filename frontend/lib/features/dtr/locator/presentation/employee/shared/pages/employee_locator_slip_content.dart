@@ -52,7 +52,7 @@ const _locatorApprovalFilterOptions = <RequestFilterOption<String>>[
   RequestFilterOption(label: 'All'),
   RequestFilterOption(value: 'pending', label: 'Pending'),
   RequestFilterOption(value: 'returned', label: 'Returned'),
-  RequestFilterOption(value: 'forwarded', label: 'Forwarded to HR'),
+  RequestFilterOption(value: 'forwarded', label: 'Forwarded'),
   RequestFilterOption(value: 'approved', label: 'Approved'),
   RequestFilterOption(value: 'revoked', label: 'Revoked'),
   RequestFilterOption(value: 'rejected', label: 'Rejected'),
@@ -1166,10 +1166,6 @@ class EmployeeLocatorSlipContentState extends State<EmployeeLocatorSlipContent>
                                 : _formatDateTime(step.date!);
                             if (actor != null && actor.isNotEmpty) {
                               subtitle = '$subtitle by $actor';
-                            } else if (step.title.contains('Department Head')) {
-                              subtitle = '$subtitle by Department Head';
-                            } else if (step.title.contains('HR')) {
-                              subtitle = '$subtitle by HR Admin';
                             }
                             return Padding(
                               padding: EdgeInsets.only(bottom: isLast ? 0 : 2),
@@ -2061,14 +2057,7 @@ class EmployeeLocatorSlipContentState extends State<EmployeeLocatorSlipContent>
         inserted = _LocatorSlipDraft.fromApi(data);
         setState(() => _slips.insert(0, inserted!));
       }
-      final msg = inserted != null
-          ? (inserted.status == _LocatorSlipStatus.pendingMayor
-                ? 'Request submitted. Awaiting Mayor approval.'
-                : inserted.status == _LocatorSlipStatus.pendingHr
-                ? 'Request submitted. Awaiting HR approval.'
-                : 'Request submitted. Awaiting department head approval.')
-          : 'Request submitted successfully.';
-      _showLocatorSnack(msg);
+      _showLocatorSnack(locatorSubmissionMessage(data));
     } catch (e) {
       if (!_isCurrentAuthSession(userId, authGeneration)) return;
       final message = _apiErrorMessage(
@@ -3901,7 +3890,7 @@ class _LocatorSlipDraft {
         ].contains(status)) {
       return null;
     }
-    final label = pendingWorkflowStepLabel(workflowSnapshot)?.trim();
+    final label = locatorPendingStepLabel(workflowSnapshot);
     return label == null || label.isEmpty ? null : label;
   }
 
@@ -3909,7 +3898,10 @@ class _LocatorSlipDraft {
       ? 'Approved' : pendingStepLabel != null
       ? 'Pending $pendingStepLabel'
       : status == _LocatorSlipStatus.approved
-      ? locatorApprovedStatusLabel(finalReviewRoute)
+      ? locatorApprovedStatusLabel(
+          finalReviewRoute,
+          workflowSnapshot: workflowSnapshot,
+        )
       : rawStatus == 'rejected_by_hr'
       ? locatorFinalRejectionLabel(finalReviewRoute)
       : status.label;
@@ -4074,7 +4066,7 @@ class _LocatorSlipDraft {
 enum _LocatorSlipStatus {
   draft('Draft'),
   pendingDepartmentHead('Pending Department Review'),
-  pendingHr('Pending HR Admin'),
+  pendingHr('Pending review'),
   pendingMayor('Pending Mayor'),
   returnedForCorrection('Returned for Correction'),
   approved('Approved'),
@@ -4528,13 +4520,13 @@ String _departmentHeadStatusLabel(_LocatorSlipDraft item) {
       return 'Pending';
     case 'pending_hr':
     case 'pending':
-      return 'Forwarded to HR';
+      return 'Forwarded for review';
     case 'pending_mayor':
       return 'Pending Mayor';
     case 'returned_for_correction':
       return 'Returned for Correction';
     case 'approved':
-      return locatorApprovedStatusLabel(item.finalReviewRoute);
+      return item.displayStatusLabel;
     case 'revoked':
       return 'Approval Revoked';
     case 'rejected_by_hr':
