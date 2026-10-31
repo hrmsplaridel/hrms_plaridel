@@ -558,7 +558,7 @@ void main() {
       await tester.ensureVisible(find.text('Submit Request'));
       await tester.tap(find.text('Submit Request'));
       await tester.pumpAndSettle();
-      expect(find.text('Status: Pending HR'), findsOneWidget);
+      expect(find.text('Status: Pending review'), findsOneWidget);
       expect(find.text('Submit Request'), findsNothing);
       expect(tester.takeException(), isNull);
     },
@@ -580,7 +580,7 @@ void main() {
       await tester.ensureVisible(find.text('Save Draft'));
       await tester.tap(find.text('Save Draft'));
       await tester.pumpAndSettle();
-      expect(find.text('Status: Pending HR'), findsOneWidget);
+      expect(find.text('Status: Pending review'), findsOneWidget);
       expect(find.text('Save Draft'), findsNothing);
       expect(tester.takeException(), isNull);
     },
@@ -588,7 +588,7 @@ void main() {
 
   for (final width in [360.0, 1440.0]) {
     testWidgets(
-      'stale draft becomes read-only when server says Pending HR at $width',
+      'stale draft becomes read-only when server says Pending review at $width',
       (tester) async {
         tester.view.physicalSize = Size(width, 1000);
         tester.view.devicePixelRatio = 1;
@@ -599,7 +599,7 @@ void main() {
               draft.copyWith(status: LeaveRequestStatus.pendingHr);
         await _openForm(tester, repository);
         await tester.pumpAndSettle();
-        expect(find.text('Status: Pending HR'), findsOneWidget);
+        expect(find.text('Status: Pending review'), findsOneWidget);
         expect(find.text('Submit Request'), findsNothing);
         expect(find.text('Save Draft'), findsNothing);
         expect(find.text('Close'), findsOneWidget);
@@ -621,7 +621,7 @@ void main() {
         draft.copyWith(status: LeaveRequestStatus.pendingHr);
     await tester.tap(find.text('Retry'));
     await tester.pumpAndSettle();
-    expect(find.text('Status: Pending HR'), findsOneWidget);
+    expect(find.text('Status: Pending review'), findsOneWidget);
     expect(find.text('Submit Request'), findsNothing);
   });
 

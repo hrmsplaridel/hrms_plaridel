@@ -1,5 +1,6 @@
 import 'leave_type.dart';
 import 'leave_type_definition.dart';
+import '../utils/leave_workflow_labels.dart';
 
 /// Workflow status for one leave request.
 enum LeaveRequestStatus {
@@ -45,10 +46,9 @@ extension LeaveRequestStatusExtension on LeaveRequestStatus {
     LeaveRequestStatus.pending => 'Pending',
     LeaveRequestStatus.pendingDepartmentHead => 'Pending Department Head',
     LeaveRequestStatus.pendingMayor => 'Pending Mayor',
-    LeaveRequestStatus.pendingHr => 'Pending HR',
-    LeaveRequestStatus.rejectedByDepartmentHead =>
-      'Rejected by Department Head',
-    LeaveRequestStatus.rejectedByHr => 'Rejected by HR',
+    LeaveRequestStatus.pendingHr => 'Pending review',
+    LeaveRequestStatus.rejectedByDepartmentHead => 'Rejected',
+    LeaveRequestStatus.rejectedByHr => 'Rejected',
     LeaveRequestStatus.returned => 'Returned',
     LeaveRequestStatus.approved => 'Approved',
     LeaveRequestStatus.rejected => 'Rejected',
@@ -262,21 +262,17 @@ class LeaveRequest {
   String get statusLabel {
     if(isPaperRecord && status==LeaveRequestStatus.approved)return 'Approved (paper record)';
     if(isPaperRecord && status==LeaveRequestStatus.cancelled)return 'Revoked (paper record)';
+    if (status == LeaveRequestStatus.approved) {
+      return leaveApprovedStatusLabel(
+        finalReviewRoute,
+        workflowSnapshot: workflowSnapshot,
+      );
+    }
     if (!status.isPending || workflowSnapshot?['outcome'] != null) {
       return status.displayName;
     }
-    final steps = workflowSnapshot?['steps'];
-    final current = workflowSnapshot?['current_step'];
-    if (steps is List &&
-        current is int &&
-        current >= 0 &&
-        current < steps.length) {
-      final step = steps[current];
-      final label = step is Map ? step['label'] : null;
-      if (label is String && label.trim().isNotEmpty) {
-        return 'Pending ${label.trim()}';
-      }
-    }
+    final label = leavePendingStepLabel(workflowSnapshot);
+    if (label != null) return 'Pending $label';
     return status.displayName;
   }
 

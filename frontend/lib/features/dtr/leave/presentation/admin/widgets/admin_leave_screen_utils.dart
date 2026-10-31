@@ -1,4 +1,4 @@
-import 'package:hrms_plaridel/features/dtr/management/approvals/pages/workflow_approval_inbox_page.dart';
+import 'package:hrms_plaridel/features/dtr/leave/utils/leave_workflow_labels.dart';
 import 'package:flutter/material.dart';
 
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
@@ -85,19 +85,21 @@ String adminLeaveStatusLabel(
   if (paperRecorded && status == LeaveRequestStatus.cancelled) {
     return 'Revoked (paper record)';
   }
-  final named = pendingWorkflowStepLabel(workflowSnapshot);
+  final named = leavePendingStepLabel(workflowSnapshot);
   if (status.isPending && named != null) return 'Pending $named';
+  if (status == LeaveRequestStatus.approved) {
+    return leaveApprovedStatusLabel(
+      finalReviewRoute,
+      workflowSnapshot: workflowSnapshot,
+    );
+  }
   if (!isDepartmentHead) return status.displayName;
   return switch (status) {
     LeaveRequestStatus.pendingDepartmentHead => 'Pending',
     LeaveRequestStatus.pendingMayor => 'Forwarded to Mayor',
-    LeaveRequestStatus.pendingHr => 'Forwarded to HR',
-    LeaveRequestStatus.approved =>
-      finalReviewRoute == 'mayor'
-          ? 'Approved by department reviewer'
-          : 'Approved by HR',
+    LeaveRequestStatus.pendingHr => 'Forwarded for review',
     LeaveRequestStatus.rejectedByDepartmentHead => 'Rejected',
-    LeaveRequestStatus.rejectedByHr => 'Rejected by HR',
+    LeaveRequestStatus.rejectedByHr => 'Rejected',
     LeaveRequestStatus.returned => 'Returned',
     LeaveRequestStatus.cancelled => 'Cancelled',
     _ => status.displayName,

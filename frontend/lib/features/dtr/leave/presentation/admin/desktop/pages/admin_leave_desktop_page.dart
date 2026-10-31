@@ -37,6 +37,7 @@ import 'package:hrms_plaridel/features/dtr/leave/presentation/admin/widgets/admi
 import 'package:hrms_plaridel/features/dtr/leave/presentation/admin/widgets/admin_leave_request_queue.dart';
 import 'package:hrms_plaridel/features/dtr/leave/presentation/admin/widgets/admin_leave_review_dialogs.dart';
 import 'package:hrms_plaridel/features/dtr/leave/presentation/admin/widgets/admin_leave_screen_utils.dart';
+import 'package:hrms_plaridel/features/dtr/leave/utils/leave_workflow_labels.dart';
 import 'package:hrms_plaridel/features/dtr/leave/presentation/admin/widgets/admin_leave_shared_widgets.dart';
 import 'package:hrms_plaridel/features/docutracker/data/providers/docutracker_provider.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_source_signature_card.dart';
@@ -1535,9 +1536,11 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
     if (!mounted) return;
     _showMessage(
       ok
-          ? request.workflowSnapshot!=null ? result.status==LeaveRequestStatus.pendingMayor ? 'Department review completed. Awaiting Mayor approval.' : result.status==LeaveRequestStatus.approved ? 'Request approved.' : 'Department review completed. Awaiting HR review.' : request.finalReviewRoute == 'mayor'
-                ? 'Approved. The Mayor signs the printed form manually.'
-                : 'Forwarded to HR for final approval.'
+          ? leaveDepartmentApprovalMessage(
+              status: result.status.value,
+              finalReviewRoute: result.finalReviewRoute,
+              workflowSnapshot: result.workflowSnapshot,
+            )
           : (leaveProvider.error ?? 'Department head approval failed.'),
     );
     if (ok) await _loadRequests();
