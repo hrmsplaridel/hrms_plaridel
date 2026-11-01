@@ -2,6 +2,18 @@ const {printLayoutPageSize}=require('./printLayoutPageSettings');
 const FIELDS=new Set(['employee_name','date','request_type','office','reason','time_segments']);
 const SIGNATURES=new Set(['applicant','department_head','hr_approver']);
 function invalid(message){throw Object.assign(new Error(message),{status:400});}
+function normalizeDecoration(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) invalid('Invalid element decoration');
+  const sides = value.border_sides ?? [];
+  const width = value.border_width ?? 1, color = value.border_color ?? '#000000';
+  const style = value.border_style ?? 'solid', fill = value.fill_color;
+  const colorPattern = /^#[0-9a-fA-F]{6}$/;
+  if (!Array.isArray(sides) || sides.some(s=>!['top','right','bottom','left'].includes(s)) || new Set(sides).size!==sides.length) invalid('Invalid border sides');
+  if (typeof width!=='number' || !Number.isFinite(width) || width<0 || width>20) invalid('Border width must be 0 to 20 points');
+  if (typeof color!=='string' || !colorPattern.test(color) || (fill!=null && (typeof fill!=='string' || !colorPattern.test(fill)))) invalid('Use six-digit border and fill colors');
+  if (!['solid','dashed'].includes(style)) invalid('Invalid border style');
+  return {border_sides:sides,border_width:width,border_color:color,border_style:style,...(fill!=null?{fill_color:fill}:{})};
+}
 function normalizeLocatorPrintLayout(value, {fields=FIELDS, signatures=SIGNATURES}={}) {
   if(value==null || value==='null')return null;
   if(typeof value==='string'){try{value=JSON.parse(value);}catch(_){invalid('Printed layout must be valid JSON');}}
@@ -18,13 +30,16 @@ function normalizeLocatorPrintLayout(value, {fields=FIELDS, signatures=SIGNATURE
     if(!item || typeof item!=='object')invalid('Invalid layout element');
     const id=String(item.id||'');
     if(!/^[a-zA-Z0-9_-]{1,64}$/.test(id)||ids.has(id))invalid('Layout element IDs must be unique');ids.add(id);
-    if(!['field','text','signature','line','table'].includes(item.kind))invalid('Unknown layout element');
+    if(!['field','text','signature','line','table','rectangle'].includes(item.kind))invalid('Unknown layout element');
     for(const key of ['x','y','width','height','font_size'])if(typeof item[key]!=='number'||!Number.isFinite(item[key]))invalid('Layout dimensions must be numbers');
     if(item.x<margins.left||item.y<margins.top||item.width<20||item.height<2||item.x+item.width>pageWidth-margins.right+.1||item.y+item.height>pageHeight-margins.bottom+.1||item.font_size<6||item.font_size>72)invalid('Keep layout elements within the page margins and use fonts from 6 to 72 points');
     const align=item.align??'left';if(!['left','center','right'].includes(align))invalid('Invalid text alignment');
     const label=String(item.label??'').trim();if(label.length>100)invalid('Field labels must not exceed 100 characters');
     if(item.font_family!=null&&!fontFamilies.has(item.font_family))invalid('Unsupported element font family');
     const base={...(item.font_family!=null?{font_family:item.font_family}:{}),id,kind:item.kind,x:item.x,y:item.y,width:item.width,height:item.height,font_size:item.font_size,align,bold:item.bold===true};
+    if(item.decoration!==undefined)base.decoration=normalizeDecoration(item.decoration);
+    if(item.locked!==undefined){if(typeof item.locked!=='boolean')invalid('Element lock must be a boolean');base.locked=item.locked;}
+    if(item.group_id!=null){if(typeof item.group_id!=='string'||!/^[a-zA-Z0-9_-]{1,64}$/.test(item.group_id))invalid('Invalid element group');base.group_id=item.group_id;}
     if(item.kind==='table'){
       if(!Array.isArray(item.cells)||item.cells.length<1||item.cells.length>12||!Array.isArray(item.cells[0])||item.cells[0].length<1||item.cells[0].length>6)invalid('Tables need 1 to 12 rows and 1 to 6 columns');
       const columns=item.cells[0].length;

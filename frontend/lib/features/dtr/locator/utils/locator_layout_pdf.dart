@@ -6,6 +6,7 @@ import '../models/locator_print_layout.dart';
 import '../models/locator_request_type.dart';
 import 'locator_form_signatories.dart';
 import 'print_layout_fonts.dart';
+import 'print_layout_decoration.dart';
 
 Map<String, dynamic> locatorLayoutSample(LocatorRequestType type) => {
   'employee_name': 'Sample Employee',
@@ -247,8 +248,8 @@ Future<Uint8List> buildLocatorLayoutPdf({
         ],
       );
     }
-    if (item.kind == 'line') {
-      return pw.Center(child: pw.Container(height: 1, color: PdfColors.black));
+    if (item.kind == 'line' || item.kind == 'rectangle') {
+      return pw.SizedBox();
     }
     if (item.kind == 'signature') {
       final styled = item.fontFamily != null || layout.fontFamily != null;
@@ -371,7 +372,7 @@ Future<Uint8List> buildLocatorLayoutPdf({
   final measureContext = pw.Context(document: doc.document);
   final widgets = {
     for (final item in layout.elements)
-      item.id: itemWidget(item, measureContext),
+      item.id: decoratePrintLayoutPdf(item, itemWidget(item, measureContext)),
   };
   final positioned = [
     for (final item in layout.elements)

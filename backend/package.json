@@ -8,6 +8,7 @@
     "dev": "node scripts/free-dev-port.js && node --watch src/index.js",
     "preflight": "node scripts/preflight.js",
     "docutracker:schema-check": "node scripts/check-docutracker-schema.js",
+    "test:print-layout": "node --test test/printLayoutDesignTools.test.js test/locatorPrintLayout.test.js test/locatorPrintTemplates.test.js test/leavePrintTemplates.test.js test/leavePrintTemplateRoutes.test.js test/locatorTypeManagementRoutes.test.js",
     "pm2:deploy": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/deploy-pm2.ps1",
     "db:init": "psql -v ON_ERROR_STOP=1 -d $npm_config_db -f scripts/init-schema.sql",
     "admin:bootstrap": "node scripts/create-super-admin.js",
