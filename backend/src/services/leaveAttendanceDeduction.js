@@ -224,7 +224,8 @@ async function ensureLeaveAttendanceDeductionTable(db) {
 
 async function loadEmployees(client, startStr, endStr) {
   const result = await client.query(
-    `SELECT DISTINCT u.id AS user_id, u.full_name
+    `SELECT DISTINCT u.id AS user_id, u.full_name, u.attendance_tracking_start_date::text AS attendance_tracking_start_date,
+       u.date_hired::text AS date_hired
      FROM users u
      JOIN assignments a ON a.employee_id = u.id
      WHERE (
@@ -245,6 +246,8 @@ async function loadEmployees(client, startStr, endStr) {
   return result.rows.map((row) => ({
     userId: String(row.user_id),
     employeeName: row.full_name || 'Unnamed employee',
+    trackingStart:row.attendance_tracking_start_date || null,
+    dateHired:row.date_hired || null,
   }));
 }
 
@@ -577,6 +580,7 @@ async function calculateMonthlyAttendanceDeductions(
     let syntheticAbsenceCount = 0;
 
     for (const dateStr of monthDates) {
+      if((employee.trackingStart && dateStr<employee.trackingStart) || (employee.dateHired && dateStr<employee.dateHired))continue;
       const assignment = dtrRows.get(`${employee.userId}|${dateStr}`)?.shift_snapshot || assignmentForDate(
         assignmentsByEmployee,
         employee.userId,
@@ -675,6 +679,7 @@ async function calculateMonthlyAttendanceDeductions(
       total_deduction_minutes: lateMinutes + undertimeMinutes + absenceMinutes,
       computed_days: round3(computedDaysRaw),
       source_record_count: sourceRecordCount,
+      attendance_tracking_start_date:employee.trackingStart || null,
       synthetic_absence_count: syntheticAbsenceCount,
     });
   }
@@ -810,6 +815,10 @@ async function runMonthlyAttendanceDeductions(pgPool, options = {}) {
 
     const openingCutoffs = await loadOpeningBalanceCutoffs(client,summaries.map(r=>r.user_id));
     for (const summary of summaries) {
+      const trackingStart=summary.attendance_tracking_start_date;
+      if(trackingStart && toDateStr(endOfMonth(targetMonth))<trackingStart) {
+        rowsSkipped++;details.push({...summary,action:'skipped',reason:'before_employee_attendance_tracking',balance_delta:0});continue;
+      }
       if (openingCutoffs.get(String(summary.user_id)) >= serviceMonth) {
         rowsSkipped++;
         details.push({...summary,action:'skipped',reason:'covered_by_opening_balance',balance_delta:0});

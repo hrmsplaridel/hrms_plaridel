@@ -1,5 +1,6 @@
 const express = require('express');
 const { pool } = require('../config/db');
+const { updateEmployeeTrackingStart } = require('../services/employeeAttendanceTracking');
 const { authMiddleware } = require('../middleware/auth');
 const { requireAdmin } = require('../middleware/rbac');
 const { requireDtrManageIfAdmin } = require('../middleware/dtrAccess');
@@ -54,6 +55,7 @@ router.get('/context', protect, async (req, res) => {
     const result = await pool.query(
       `SELECT u.id,
               u.date_hired::text AS date_hired,
+              u.attendance_tracking_start_date::text AS attendance_tracking_start_date,
               u.separation_date::text AS separation_date,
               history.earliest_effective_date
          FROM users u
@@ -84,6 +86,7 @@ router.get('/context', protect, async (req, res) => {
       first_date: context.firstDate,
       last_date: context.lastDate,
       future_horizon_years: context.futureHorizonYears,
+      attendance_tracking_start_date: row.attendance_tracking_start_date || null,
     });
   } catch (err) {
     console.error('[assignments context GET]', err);
@@ -341,6 +344,11 @@ router.post('/', protect, requireAdmin, requireDtrManageIfAdmin, async (req, res
 
     await client.query('BEGIN');
     try {
+      const tracking = await updateEmployeeTrackingStart(client, {
+        employeeId: employee_id,
+        value: req.body.attendance_tracking_start_date,
+        actorId: req.user?.id,
+      });
       const assignmentTransition = await createAssignmentTransition(client, {
         employeeId: employee_id,
         departmentId: department_id,
@@ -411,6 +419,7 @@ router.post('/', protect, requireAdmin, requireDtrManageIfAdmin, async (req, res
       );
       res.status(201).json({
         ...assignment,
+        attendance_tracking_start_date: tracking.date,
         policy_assignment: policyAssignment,
         reconciliation,
       });
@@ -469,8 +478,9 @@ router.put('/:id', protect, requireAdmin, requireDtrManageIfAdmin, async (req, r
       effective_from === undefined &&
       effective_to === undefined &&
       is_active === undefined &&
-      remarks === undefined
-      && !hasPolicyChange
+      remarks === undefined &&
+      !hasPolicyChange &&
+      req.body.attendance_tracking_start_date === undefined
     ) {
       return res.status(400).json({ error: 'No fields to update' });
     }
@@ -502,6 +512,12 @@ router.put('/:id', protect, requireAdmin, requireDtrManageIfAdmin, async (req, r
         throw new AssignmentTransitionError('Assignment not found', 404);
       }
       const before = beforeResult.rows[0];
+      const tracking = await updateEmployeeTrackingStart(client, {
+        employeeId: before.employee_id,
+        value: req.body.attendance_tracking_start_date,
+        actorId: req.user?.id,
+        assignmentId: id,
+      });
       const isDeactivating = is_active === false && before.is_active !== false;
       const deactivationReason = isDeactivating
         ? normalizeChangeReason(change_reason)
@@ -625,6 +641,7 @@ router.put('/:id', protect, requireAdmin, requireDtrManageIfAdmin, async (req, r
       );
       res.json({
         ...assignment,
+        attendance_tracking_start_date: tracking.date,
         policy_assignment: policyAssignment,
         predecessor_restored: restoredPredecessor?.after || null,
         reconciliation,

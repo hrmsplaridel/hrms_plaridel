@@ -36,6 +36,7 @@ $$ LANGUAGE plpgsql;
 -- USERS / EMPLOYEES
 -- =========================================
 CREATE TABLE IF NOT EXISTS users (
+  attendance_tracking_start_date DATE,
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   employee_number INT UNIQUE DEFAULT nextval('users_employee_number_seq'),
 

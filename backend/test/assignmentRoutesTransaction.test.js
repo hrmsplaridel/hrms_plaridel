@@ -36,7 +36,47 @@ function responseRecorder() {
   };
 }
 
-test('failed assignment insert rolls back on the same checked-out client', async () => {
+for (const method of ['post', 'put']) {
+  test(`${method} assignment rejects an invalid tracking date and rolls back`, async () => {
+    const calls = [];
+    const client = {
+      async query(sql) {
+        calls.push(String(sql).trim());
+        if (String(sql).includes('FROM assignments')) {
+          return { rowCount: 1, rows: [{ employee_id: '11111111-1111-4111-8111-111111111111' }] };
+        }
+        return { rows: [] };
+      },
+      release() {},
+    };
+    const restoreDb = withMockedModule('../src/config/db', { pool: { connect: async () => client } });
+    const routePath = require.resolve('../src/routes/assignments');
+    delete require.cache[routePath];
+    try {
+      const router = require('../src/routes/assignments');
+      const layer = router.stack.find((entry) =>
+        entry.route?.path === (method === 'post' ? '/' : '/:id') && entry.route.methods[method]);
+      const handler = layer.route.stack.at(-1).handle;
+      const res = responseRecorder();
+      await handler({ params: { id: 'assignment' }, body: {
+        employee_id: '11111111-1111-4111-8111-111111111111',
+        effective_from: '2025-01-01',
+        attendance_policy_id: '66666666-6666-4666-8666-666666666666',
+        attendance_tracking_start_date: '2026-02-30',
+      } }, res);
+      assert.equal(res.statusCode, 400);
+      assert.match(res.body.error, /tracking start is invalid/);
+      assert.equal(calls[0], 'BEGIN');
+      assert.equal(calls.at(-1), 'ROLLBACK');
+      assert.equal(calls.some((sql) => /^(UPDATE|INSERT)/.test(sql)), false);
+    } finally {
+      delete require.cache[routePath];
+      restoreDb();
+    }
+  });
+}
+
+test('failed assignment insert rolls back the tracking date on the same checked-out client', async () => {
   const clientCalls = [];
   let released = false;
   let poolQueryCount = 0;
@@ -46,6 +86,17 @@ test('failed assignment insert rolls back on the same checked-out client', async
       clientCalls.push(normalized);
       if (normalized === 'BEGIN' || normalized === 'ROLLBACK') {
         return { rowCount: 0, rows: [] };
+      }
+      if (normalized.startsWith('SELECT pg_advisory_xact_lock')) {
+        return { rows: [{}] };
+      }
+      if (normalized.startsWith('SELECT id,date_hired,attendance_tracking_start_date')) {
+        return { rows: [{ date_hired: '2025-01-01', attendance_tracking_start_date: null }] };
+      }
+      if (normalized.includes('FROM leave_attendance_deductions') ||
+          normalized.startsWith('UPDATE users SET attendance_tracking_start_date') ||
+          normalized.startsWith('INSERT INTO audit_logs')) {
+        return { rows: [] };
       }
       if (normalized.includes('FROM position_department_head_periods')) {
         return { rowCount: 0, rows: [] };
@@ -104,6 +155,7 @@ test('failed assignment insert rolls back on the same checked-out client', async
     const handler = layer.route.stack[layer.route.stack.length - 1].handle;
     const req = {
       body: {
+        attendance_tracking_start_date: '2026-11-01',
         employee_id: '11111111-1111-4111-8111-111111111111',
         department_id: '22222222-2222-4222-8222-222222222222',
         position_id: '33333333-3333-4333-8333-333333333333',
@@ -124,6 +176,7 @@ test('failed assignment insert rolls back on the same checked-out client', async
     assert.equal(clientCalls.at(-1), 'ROLLBACK');
     assert.ok(clientCalls.some((sql) => sql.startsWith('INSERT INTO assignments')));
     assert.equal(clientCalls.includes('COMMIT'), false);
+    assert.ok(clientCalls.some((sql) => sql.startsWith('UPDATE users SET attendance_tracking_start_date')));
     assert.equal(released, true);
   } finally {
     console.error = originalConsoleError;

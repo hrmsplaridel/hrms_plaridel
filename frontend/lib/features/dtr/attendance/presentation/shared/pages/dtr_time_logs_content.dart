@@ -563,6 +563,7 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
   /// Fallback attendance remark when backend does not send attendanceRemark (e.g. hardcoded preview).
   /// Backend sends shift-aware attendance_remark; this is a simple fallback.
   static String getAttendanceRemark(TimeRecord r) {
+    if(r.status=='not_tracked') return 'Not tracked';
     if (r.attendanceRemark != null && r.attendanceRemark!.isNotEmpty) {
       return _normalizeAttendanceRemark(r.attendanceRemark!);
     }

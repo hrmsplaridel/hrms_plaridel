@@ -547,6 +547,7 @@ class DtrExport {
   }
 
   static String _getDisplayValue(TimeRecord? r, bool isWeekend) {
+    if(r?.status=='not_tracked') return 'NOT TRACKED';
     if (r == null) return isWeekend ? '' : 'ABSENT';
     // If we have any punch (timeIn or breakIn), show times instead of remarks.
     if (r.timeIn != null || r.breakIn != null) return '';
@@ -590,6 +591,7 @@ class DtrExport {
   /// Row-level remark for print (holiday, leave, suspension, absent, or custom remarks).
   /// Returns empty when we have punches so times are shown instead.
   static String _getRowRemark(TimeRecord? r, DateTime dt, bool isWeekend) {
+    if(r?.status=='not_tracked') return 'NOT TRACKED';
     if (r == null) return isWeekend ? '' : 'ABSENT';
     if (r.timeIn != null || r.breakIn != null) {
       return ''; // Show times, not remark
@@ -649,6 +651,7 @@ class DtrExport {
     bool combineLateAndUndertime,
   ) {
     if (isWeekendOrNonWorking) return (0, 0);
+    if(r?.status=='not_tracked') return (0,0);
     final holidayCoverage = r?.coverage?.trim().toLowerCase();
     final isWholeDayHoliday =
         r != null &&

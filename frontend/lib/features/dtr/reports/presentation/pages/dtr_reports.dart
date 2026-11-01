@@ -976,6 +976,8 @@ class _DtrReportsState extends State<DtrReports> {
   static String _getRemarks(TimeRecord r) {
     if (r.status != null && r.status!.isNotEmpty) {
       switch (r.status!) {
+        case 'not_tracked':
+          return 'Not tracked';
         case 'late':
           return 'Late';
         case 'absent':
@@ -1973,11 +1975,13 @@ class _DtrReportsState extends State<DtrReports> {
     final totalWeekdays = _countScheduledWorkDaysThrough(statsEnd);
     var absentCount = 0;
     var holidaysCount = 0;
+    var untrackedCount = 0;
     for (var d = _rangeStartDay; d <= end.day; d++) {
       final dt = DateTime(_selectedYear, _selectedMonth, d);
       if (!_isScheduledWorkDay(dt)) continue;
       if (dt.isAfter(statsEnd)) continue;
       final rec = rangedRecordsByDate[dt];
+      if(rec?.status=='not_tracked') {untrackedCount++;continue;}
       if (rec?.status == 'holiday' || (rec?.holidayId != null)) {
         holidaysCount++;
       } else if (rec?.status == 'on_leave') {
@@ -1994,7 +1998,7 @@ class _DtrReportsState extends State<DtrReports> {
     final hasRecords =
         rangedRecordsByDate.isNotEmpty ||
         (hasAssignment && !_hasUnverifiedInactiveAttendance);
-    final workingDays = hasRecords ? totalWeekdays - holidaysCount : 0;
+    final workingDays = hasRecords ? totalWeekdays - holidaysCount - untrackedCount : 0;
     final displayAbsentCount = hasRecords ? absentCount : 0;
 
     // Total late and undertime minutes (elapsed days only, same window as counts)
