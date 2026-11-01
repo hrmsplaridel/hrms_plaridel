@@ -4658,6 +4658,8 @@ function locatorGuidedFilingExampleText(language, typeLabel) {
 }
 
 function locatorGuidedFilingReply(context, message) {
+  const day = calendarDayForDate(context, context.date_range?.startDate);
+  if (day?.holiday_coverage === 'whole_day') return locatorAvailabilityReply(context, message);
   const language = languageOf(message);
   const typeRecord = requestedLocatorTypeRecord(message, context);
   const typeHint = requestedLocatorType(message, context);
@@ -6153,9 +6155,9 @@ function locatorAvailabilityReply(context, message) {
           assignment: day,
         })
       : null;
-  const isWorkingDay = workingDayValidation?.ok ?? null;
   const isWholeDayHoliday =
-    day?.holiday_name && day.holiday_coverage === 'whole_day';
+    day?.holiday_coverage === 'whole_day';
+  const isWorkingDay = isWholeDayHoliday ? false : workingDayValidation?.ok ?? null;
   const friendlyDate = date ? fmtFriendlyDate(date) : '';
   const scheduleRange = fmtScheduleRange(day);
   const expectedSlots = day ? expectedSlotsForCalendarDay(day) : [];
@@ -6169,7 +6171,7 @@ function locatorAvailabilityReply(context, message) {
     issues.push(localizedRuleIssue(filingDateWindow.error, language));
   }
   if (isWholeDayHoliday) {
-    issues.push(`Date is marked as whole-day holiday: ${day.holiday_name}`);
+    issues.push(`Date is marked as whole-day holiday: ${day.holiday_name || 'Configured holiday'}. No locator coverage is required.`);
   }
   if (day && !isWorkingDay && !isWholeDayHoliday) {
     issues.push(
@@ -6273,7 +6275,19 @@ function locatorAvailabilityReply(context, message) {
         ? 'Locator filing check'
         : 'Locator filing check';
   const summary =
-    hasBlockingIssue
+    isWholeDayHoliday
+      ? language === 'bisaya'
+        ? `${friendlyDate} kay holiday: ${day.holiday_name || 'configured holiday'}. Dili kinahanglan og locator coverage sa whole-day holiday.`
+        : language === 'tagalog'
+          ? `${friendlyDate} ay holiday: ${day.holiday_name || 'configured holiday'}. Hindi kailangan ng locator coverage sa whole-day holiday.`
+          : `${friendlyDate} is a holiday: ${day.holiday_name || 'configured holiday'}. No locator coverage is required for a whole-day holiday.`
+      : !day
+        ? language === 'bisaya'
+          ? 'Dili pa nako ma-confirm kung pwede: wala ma-load ang schedule ug holiday details sa petsa.'
+          : language === 'tagalog'
+            ? 'Hindi ko pa makumpirma kung puwede: hindi na-load ang schedule at holiday details para sa petsa.'
+            : 'I cannot confirm eligibility because schedule and holiday details are not loaded for this date.'
+      : hasBlockingIssue
       ? language === 'bisaya'
         ? 'Naay issue sa initial locator check. Tan-awa ang detalye sa ubos.'
         : language === 'tagalog'
@@ -6290,7 +6304,15 @@ function locatorAvailabilityReply(context, message) {
     title,
     summary,
     details,
-    nextStep: hasBlockingIssue
+    nextStep: isWholeDayHoliday
+      ? language === 'bisaya'
+        ? 'Pilia ang scheduled working day. Kung naay special holiday duty, ipa-confirm sa HR/Admin ang schedule una.'
+        : language === 'tagalog'
+          ? 'Pumili ng scheduled working day. Kung may special holiday duty, ipakumpirma muna sa HR/Admin ang schedule.'
+          : 'Choose a scheduled working day. For special holiday duty, confirm the schedule with HR/Admin first.'
+      : !day
+        ? 'Check the configured schedule and holiday calendar with HR/Admin before filing.'
+      : hasBlockingIssue
       ? language === 'bisaya' ? 'Sulbara una ang issue; kontaka ang HR/Admin para sa past-date o approved-paper recording.'
         : language === 'tagalog' ? 'Ayusin muna ang issue; kontakin ang HR/Admin para sa past-date o approved-paper recording.'
           : 'Resolve the blocking issue first. Contact HR/Admin for past-date or approved-paper recording.'

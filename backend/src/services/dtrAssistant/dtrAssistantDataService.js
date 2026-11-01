@@ -194,7 +194,7 @@ function assistantContextLoadPlan(intents) {
     if (intent.startsWith('locator_') || LOCATOR_HISTORY_INTENTS.has(intent)) {
       plan.locatorTypes = true;
       if (LOCATOR_HISTORY_INTENTS.has(intent)) plan.locatorSlips = true;
-      if (intent === 'locator_availability_check') {
+      if (intent === 'locator_availability_check' || intent === 'locator_guided_filing') {
         plan.dtrCalendarDays = true;
         plan.locatorSlips = true;
       }

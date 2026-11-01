@@ -368,6 +368,15 @@ function evaluateGuidedClarification({ intent, text, context, memory }) {
   if (!GUIDED_FILING_INTENTS.has(intent)) return null;
   if (isLeaveCreditRequirementQuestion(text)) return null;
   if (intent.startsWith('locator_') && context?.date_range?.endDate < todayInHrmsTimezone()) return null;
+  // Eligibility can be checked from the date without collecting draft fields.
+  // In particular, destination must not hide a holiday or rest-day result.
+  if (intent === 'locator_availability_check' && hasDateHint(text, memory, context)) return null;
+  if (intent === 'locator_guided_filing' && hasDateHint(text, memory, context)) {
+    const day = context?.dtr_calendar_days?.find(
+      (item) => item.attendance_date === context?.date_range?.startDate
+    );
+    if (day?.holiday_coverage === 'whole_day') return null;
+  }
 
   const language = detectAssistantLanguage(text);
   let topic = 'leave';
