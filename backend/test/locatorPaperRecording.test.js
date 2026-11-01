@@ -21,6 +21,16 @@ function harness(){
  return {calls,events,db,deps,get payload(){return JSON.parse(payload);}};
 }
 const input=()=>({actor:{id:id(1),role:'hr'},employeeId:id(2),slipDate:'2026-09-10',requestType:'locator',office:'Hall',reason:'Meeting',slots:{amIn:true,amOut:false,pmIn:false,pmOut:false},attachment:{path:'signed.pdf',name:'signed.pdf',mimeType:'application/pdf'},paperApproval:paper()});
+
+test('paper full-shift recording uses the non-holiday slots returned by coverage', async () => {
+ const h=harness();
+ h.deps.resolveLocatorShiftCoverage=async()=>({can_file:true,single_session:false,allowed_slots:['pm_in','pm_out']});
+ h.deps.validateLocatorWorkingDayForEmployee=async(_db,_id,_date,slots)=>{
+  assert.deepEqual(slots,{amIn:false,amOut:false,pmIn:true,pmOut:true});return {ok:true};
+ };
+ await require('../src/modules/locator/services/paperRecording')(h.deps).recordPaperLocator({...input(),fullShift:true});
+ assert.equal(h.payload.am_in,false);assert.equal(h.payload.pm_out,true);
+});
 test('paper locator records original approval without digital routing and attributes HR only as encoder',async()=>{
  const h=harness(); const service=require('../src/modules/locator/services/paperRecording')(h.deps);
  const row=await service.recordPaperLocator(input());

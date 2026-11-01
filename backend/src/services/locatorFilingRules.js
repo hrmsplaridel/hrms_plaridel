@@ -104,29 +104,46 @@ async function loadLocatorAssignment(
 }
 
 async function resolveLocatorShiftCoverage(client, employeeId, dateInfo) {
+  if (!dateInfo) return {can_file:false, allowed_slots:[], single_session:false, error:'Invalid slip_date'};
   const assignment = await loadLocatorAssignment(client, employeeId, dateInfo);
-  const {getShiftType} = require('./shiftAttendance');
-  const {normalizeShiftInfo} = require('./locatorCoverage');
-  const single = getShiftType(normalizeShiftInfo(assignment)) === 'single_session';
+  const {getShiftType, getExpectedWorkMinutesForCoverage} = require('./shiftAttendance');
+  const {normalizeShiftInfo, expectedLocatorSlotsForShift} = require('./locatorCoverage');
+  const shift = normalizeShiftInfo(assignment);
+  const single = getShiftType(shift) === 'single_session';
   const workingDay = evaluateLocatorWorkingDay({dateInfo, assignment});
-  return {single_session: single, allowed_slots: single ? ['am_in','pm_out'] : ['am_in','am_out','pm_in','pm_out'],
-    can_file: workingDay.ok, error: workingDay.error || null};
+  if (!workingDay.ok) return {single_session:single, allowed_slots:[], can_file:false, error:workingDay.error};
+  const {loadHolidayOverlayMap} = require('./holidayOverlay');
+  const holidays = await loadHolidayOverlayMap(client, dateInfo.dateStr, dateInfo.dateStr);
+  const holiday = holidays.get(dateInfo.dateStr);
+  let allowedSlots = single ? ['am_in','pm_out'] : ['am_in','am_out','pm_in','pm_out'];
+  if (holiday) {
+    if (holiday.coverage === 'whole_day') allowedSlots = [];
+    else if (single) {
+      if (getExpectedWorkMinutesForCoverage(shift, holiday.coverage) <= 0) allowedSlots = [];
+    } else {
+      allowedSlots = expectedLocatorSlotsForShift(shift).filter(slot =>
+        holiday.coverage === 'am_only' ? slot.startsWith('pm_') :
+          holiday.coverage === 'pm_only' ? slot.startsWith('am_') : true);
+    }
+  }
+  return {single_session:single, allowed_slots:allowedSlots, can_file:allowedSlots.length > 0,
+    error:allowedSlots.length ? null : 'This date is a holiday for your scheduled shift. No locator coverage is required.',
+    ...(holiday ? {holiday_coverage:holiday.coverage, holiday_name:holiday.name} : {})};
 }
 
 async function validateLocatorWorkingDayForEmployee(client, employeeId, dateInfo, slots = null) {
   if (!dateInfo) return {ok:false, error:'Invalid slip_date'};
-  const assignment = await loadLocatorAssignment(client, employeeId, dateInfo);
-  const result = evaluateLocatorWorkingDay({
-    dateInfo,
-    assignment,
-  });
-  if (!result.ok || !slots) return result;
-  const {getShiftType} = require('./shiftAttendance');
-  const {normalizeShiftInfo} = require('./locatorCoverage');
-  if (getShiftType(normalizeShiftInfo(assignment)) === 'single_session' && (slots.amOut || slots.pmIn)) {
+  const coverage = await resolveLocatorShiftCoverage(client, employeeId, dateInfo);
+  if (!coverage.can_file) return {ok:false, error:coverage.error};
+  if (!slots) return {ok:true};
+  if (coverage.single_session && (slots.amOut || slots.pmIn)) {
     return {ok:false,error:'Single-session shifts use IN and OUT only. Select the start or end of the shift.'};
   }
-  return result;
+  const fields = {amIn:'am_in', amOut:'am_out', pmIn:'pm_in', pmOut:'pm_out'};
+  if (Object.entries(fields).some(([key, slot]) => slots[key] && !coverage.allowed_slots.includes(slot))) {
+    return {ok:false, error:'The selected segments include holiday time. Select only the working portion of your shift.'};
+  }
+  return {ok:true};
 }
 
 function validateLocatorRequiredFields({

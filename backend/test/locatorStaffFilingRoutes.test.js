@@ -26,7 +26,7 @@ test('paper employee directory precedes date selection while dated availability 
 });
 test('staff route adapts full coverage, records the server actor and reports failures',async()=>{
   const submissions=[];
-  const restoreDb=withMockedModule('../src/config/db',{pool:{connect:async()=>{},query:async sql=>({rows:String(sql).includes('FROM assignments')
+  const restoreDb=withMockedModule('../src/config/db',{pool:{connect:async()=>{},query:async sql=>({rows:String(sql).includes('FROM holidays') ? [] : String(sql).includes('FROM assignments')
     ? [{shift_id:'shift',shift_name:'Single',punch_mode:'single_session',working_days:[1,2,3,4,5]}] : [{id:EMPLOYEE}]})}});
   const restoreService=withMockedModule('../src/services/locatorSubmissionService',{createLocatorSubmissionService:()=>({submit:async input=>{submissions.push(input);return {id:'saved',status:'pending_hr'};}})});
   clearModule('../src/routes/locatorSlips');

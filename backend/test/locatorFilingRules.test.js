@@ -14,6 +14,7 @@ test('locator filing accepts a closed assignment effective on the locator date',
   let executedParams = null;
   const client = {
     async query(sql, params) {
+      if (sql.includes('FROM holidays')) return {rows:[]};
       executedSql = String(sql);
       executedParams = params;
       return {
@@ -43,6 +44,7 @@ test('locator filing accepts a closed assignment effective on the locator date',
 for (const mode of ['single_session','full_day','auto']) {
  test(`locator segment options use the effective shift: ${mode}`,async()=>{
   const db={async query(sql,params){
+   if(sql.includes('FROM holidays'))return {rows:[]};
    assert.deepEqual(params,[EMPLOYEE_ID,'2026-06-19']);
    assert.match(sql,/effective_from <= \$2::date/);
    return {rows:[{shift_id:'shift',shift_name:'Day shift',working_days:[1,2,3,4,5],
@@ -56,7 +58,7 @@ for (const mode of ['single_session','full_day','auto']) {
  });
 }
 test('single-session validation accepts IN/OUT and rejects middle segments',async()=>{
- const db={async query(){return {rows:[{shift_id:'s',shift_name:'Night shift',working_days:[1,2,3,4,5],punch_mode:'auto',start_time:'22:00',end_time:'06:00'}]};}};
+ const db={async query(sql){if(sql.includes('FROM holidays'))return {rows:[]};return {rows:[{shift_id:'s',shift_name:'Night shift',working_days:[1,2,3,4,5],punch_mode:'auto',start_time:'22:00',end_time:'06:00'}]};}};
  const date=parseLocatorDateOnly('2026-06-19');
  assert.equal((await validateLocatorWorkingDayForEmployee(db,EMPLOYEE_ID,date,{amIn:true,amOut:false,pmIn:false,pmOut:true})).ok,true);
  assert.equal((await validateLocatorWorkingDayForEmployee(db,EMPLOYEE_ID,date,{amIn:false,amOut:false,pmIn:true,pmOut:false})).ok,false);

@@ -107,6 +107,8 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
   List<int>? _pendingAttachmentBytes;
   String? _pendingAttachmentName;
   bool _workingDaysLoading = false;
+  static const _noWorkingDaysMessage =
+      'The selected dates contain no working days after excluding holidays and rest days. Choose a date with a scheduled working day.';
   String? _workingDaysHelperText;
   int _workingDaysRequestSerial = 0;
   LeaveAnnualEntitlementPreview? _annualEntitlementPreview;
@@ -742,7 +744,7 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
         _showMessage('Please wait while working days are computed.');
       } else if (_startDate != null && _endDate != null &&
           (_currentWorkingDaysApplied == null || _currentWorkingDaysApplied! <= 0)) {
-        _showMessage('Enter a valid number of working days greater than zero.');
+        _showMessage(_noWorkingDaysMessage);
       }
       if (_startDate != null && _endDate != null) _validateAnnualQuotaLimit();
       _reviewTarget = _reviewDetailsKey.currentContext;
@@ -801,7 +803,7 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
         return;
       }
       if (entered <= 0) {
-        _showMessage('Working days must be greater than 0.');
+        _showMessage(_noWorkingDaysMessage);
         return;
       }
 
@@ -942,7 +944,7 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
       setState(() {
         _workingDaysLoading = false;
         _workingDaysController.text = _formatWorkingDays(days);
-        _workingDaysHelperText = '$helper: ${_formatWorkingDays(days)} day(s)';
+        _workingDaysHelperText = days <= 0 ? _noWorkingDaysMessage : '$helper: ${_formatWorkingDays(days)} day(s)';
         _annualEntitlementPreview = annualPreview;
         final service = data['service_eligibility'];
         _serviceEligibility = service is Map
@@ -1875,6 +1877,8 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
                                                     (applied != null
                                                         ? 'Auto-applied from selected dates: ${_formatWorkingDays(applied)} day(s)'
                                                         : 'Select dates to auto-compute'),
+                                                helperMaxLines: 3,
+                                                errorMaxLines: 3,
                                               ),
                                           validator: (val) {
                                             if (val == null ||
@@ -1888,7 +1892,7 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
                                               return 'Must be a number';
                                             }
                                             if (entered <= 0) {
-                                              return 'Must be greater than 0';
+                                              return _noWorkingDaysMessage;
                                             }
                                             // Warn about max days for leave type
                                             final maxDays = _selectedMaxDays;

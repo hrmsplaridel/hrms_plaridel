@@ -179,6 +179,33 @@ Future<void> _openForm(
 }
 
 void main() {
+  testWidgets('holiday-only dates explain why leave cannot be submitted', (tester) async {
+    ApiClient.instance.init();
+    ApiClient.instance.dio.interceptors.clear();
+    LeaveTypeDefinitionCache.instance.invalidate();
+    ApiClient.instance.dio.interceptors.add(InterceptorsWrapper(onRequest:(o,h)=>h.reject(DioException(requestOptions:o))));
+    final date = _futureWorkingDate();
+    final initial = draft.copyWith(startDate:date,endDate:date,workingDaysApplied:0,
+        sickLeaveNature:SickLeaveNature.outPatient,sickIllnessDetails:'Fever');
+    final repository = _Repository()..read = () async => initial;
+    var submissions = 0;
+    await _openForm(tester,repository,initial:initial,workingDays:0,onSubmit:(_) async { submissions++; return false; });
+    await tester.pumpAndSettle();
+    expect(find.textContaining('The selected dates contain no working days after excluding holidays and rest days.'), findsOneWidget);
+    await tester.ensureVisible(find.text('Submit Request'));
+    await tester.tap(find.text('Submit Request'));
+    await tester.pumpAndSettle();
+    final workingDaysField = find.ancestor(
+        of: find.byWidgetPredicate((w) => w is TextField &&
+            w.decoration?.labelText == 'Number of Working Days Applied For'),
+        matching: find.byType(TextFormField));
+    expect(tester.state<FormFieldState<String>>(workingDaysField).errorText,
+        contains('The selected dates contain no working days after excluding holidays and rest days.'));
+    expect(submissions,0);
+    await tester.pumpWidget(const SizedBox.shrink());
+    ApiClient.instance.dio.interceptors.clear();
+    LeaveTypeDefinitionCache.instance.invalidate();
+  });
   for (final days in [5.0,6.0]) {
     testWidgets('Sick Leave attachment section follows the five-day boundary: $days', (tester) async {
       ApiClient.instance.init();

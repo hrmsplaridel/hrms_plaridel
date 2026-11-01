@@ -49,7 +49,7 @@ module.exports=function createPaperRecording(deps){
    if(fullShift){
     const coverage=await deps.resolveLocatorShiftCoverage(db,employeeId,require('../../../services/locatorFilingRules').parseLocatorDateOnly(slipDate));
     if(!coverage.can_file)fail(400,coverage.error);
-    slots={amIn:true,amOut:!coverage.single_session,pmIn:!coverage.single_session,pmOut:true};
+    slots={amIn:coverage.allowed_slots.includes('am_in'),amOut:coverage.allowed_slots.includes('am_out'),pmIn:coverage.allowed_slots.includes('pm_in'),pmOut:coverage.allowed_slots.includes('pm_out')};
    }
    const fields=require('../../../services/locatorFilingRules').validateLocatorRequiredFields({slipDate,requestType,office,reason,slots});
    if(!fields.valid)fail(400,fields.error);

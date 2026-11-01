@@ -3176,17 +3176,21 @@ class _LocatorSlipFormDialogState extends State<_LocatorSlipFormDialog> {
   bool _hasSavedSegmentsBeforeWfh = false;
   bool _showAttachmentError = false;
   bool _singleSession = false;
+  Set<String> _allowedSlots = {'am_in', 'am_out', 'pm_in', 'pm_out'};
+  String? _holidayCoverageNote;
   bool _loadingShiftCoverage = true;
   String? _shiftCoverageError;
   int _shiftCoverageGeneration = 0;
 
   void _clearHiddenSegments() {
-    if (_singleSession) {
-      _amOut = false;
-      _pmIn = false;
-      _savedAmOutBeforeWfh = false;
-      _savedPmInBeforeWfh = false;
-    }
+    _amIn &= _allowedSlots.contains('am_in');
+    _amOut &= !_singleSession && _allowedSlots.contains('am_out');
+    _pmIn &= !_singleSession && _allowedSlots.contains('pm_in');
+    _pmOut &= _allowedSlots.contains('pm_out');
+    _savedAmInBeforeWfh &= _allowedSlots.contains('am_in');
+    _savedAmOutBeforeWfh &= !_singleSession && _allowedSlots.contains('am_out');
+    _savedPmInBeforeWfh &= !_singleSession && _allowedSlots.contains('pm_in');
+    _savedPmOutBeforeWfh &= _allowedSlots.contains('pm_out');
   }
 
   Future<void> _loadShiftCoverage() async {
@@ -3194,6 +3198,7 @@ class _LocatorSlipFormDialogState extends State<_LocatorSlipFormDialog> {
     setState(() {
       _loadingShiftCoverage = true;
       _shiftCoverageError = null;
+      _holidayCoverageNote = null;
     });
     try {
       final date = _date.toIso8601String().substring(0, 10);
@@ -3205,6 +3210,12 @@ class _LocatorSlipFormDialogState extends State<_LocatorSlipFormDialog> {
       final data = response.data!;
       setState(() {
         _singleSession = data['single_session'] == true;
+        _allowedSlots = data['allowed_slots'] is List
+            ? (data['allowed_slots'] as List).map((slot) => slot.toString()).toSet()
+            : _singleSession ? {'am_in', 'pm_out'} : {'am_in', 'am_out', 'pm_in', 'pm_out'};
+        final holiday = data['holiday_coverage'];
+        _holidayCoverageNote = data['can_file'] == true && (holiday == 'am_only' || holiday == 'pm_only')
+            ? 'Part of this date is a holiday. Select only the remaining working portion of your shift.' : null;
         _shiftCoverageError = data['can_file'] == true
             ? null
             : data['error']?.toString() ??
@@ -3688,6 +3699,10 @@ class _LocatorSlipFormDialogState extends State<_LocatorSlipFormDialog> {
         ),
         const SizedBox(height: 8),
         if (_loadingShiftCoverage) const LinearProgressIndicator(),
+        if (_holidayCoverageNote != null) ...[
+          Text(_holidayCoverageNote!),
+          const SizedBox(height: 8),
+        ],
         if (_shiftCoverageError != null) ...[
           Text(
             _shiftCoverageError!,
@@ -3699,6 +3714,7 @@ class _LocatorSlipFormDialogState extends State<_LocatorSlipFormDialog> {
           ),
         ],
         EmployeeLocatorMobileSegmentSelector(
+          allowedSlots: _allowedSlots,
           singleSession: _singleSession,
           accent: accent,
           locked: locked,
@@ -3751,7 +3767,7 @@ class _LocatorSlipFormDialogState extends State<_LocatorSlipFormDialog> {
     if (_loadingShiftCoverage || _shiftCoverageError != null) {
       issues.add(
         ApplicationReviewIssue(
-          'Check your shift for the selected date before submitting.',
+          _shiftCoverageError ?? 'Check your shift for the selected date before submitting.',
           target: _reviewCoverageKey.currentContext,
         ),
       );

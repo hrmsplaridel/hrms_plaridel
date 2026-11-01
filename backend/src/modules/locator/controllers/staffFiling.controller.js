@@ -144,10 +144,10 @@ module.exports = function createLocatorControllers({
               requestType,
               office: String(req.body.office || '').trim(),
               reason: String(req.body.reason || '').trim(),
-              amIn: full || boolField(req.body.am_in),
-              amOut: full ? !coverage.single_session : boolField(req.body.am_out),
-              pmIn: full ? !coverage.single_session : boolField(req.body.pm_in),
-              pmOut: full || boolField(req.body.pm_out),
+              amIn: full ? coverage.allowed_slots.includes('am_in') : boolField(req.body.am_in),
+              amOut: full ? coverage.allowed_slots.includes('am_out') : boolField(req.body.am_out),
+              pmIn: full ? coverage.allowed_slots.includes('pm_in') : boolField(req.body.pm_in),
+              pmOut: full ? coverage.allowed_slots.includes('pm_out') : boolField(req.body.pm_out),
               attachment,
             });
           } catch (error) {
