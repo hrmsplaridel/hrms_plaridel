@@ -96,7 +96,7 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
     final list = find.byType(ListView).first;
-    expect(tester.widget<ListView>(list).reverse, isFalse);
+    expect(tester.widget<ListView>(list).shrinkWrap, isTrue);
     // The introduction should follow the app bar, without a blank viewport.
     expect(
       tester

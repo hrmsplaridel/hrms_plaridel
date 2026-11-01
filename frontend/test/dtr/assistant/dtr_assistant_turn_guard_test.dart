@@ -72,6 +72,63 @@ void main() {
     SharedPreferences.setMockInitialValues({});
   });
 
+  for (final width in [390.0, 1900.0]) {
+    testWidgets('first prompt keeps the chat at the top at width $width', (
+      tester,
+    ) async {
+      // Leave enough height for the starter chips to wrap on narrow screens.
+      await tester.binding.setSurfaceSize(
+        Size(width, width < 600 ? 1600 : 1000),
+      );
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final api = _TurnAssistantApi();
+      final auth = _TurnAuthProvider();
+      await tester.pumpWidget(
+        ChangeNotifierProvider<AuthProvider>.value(
+          value: auth,
+          child: MaterialApp(home: EmployeeDtrAssistantPage(api: api)),
+        ),
+      );
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
+      final header = find.byKey(const ValueKey('assistant-introduction'));
+      final headerY = tester.getTopLeft(header).dy;
+      expect(headerY, lessThan(220));
+
+      tester
+          .widget<DtrAssistantInputBar>(find.byType(DtrAssistantInputBar))
+          .onSend('is it okay for me to file locator tomorrow?');
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+      expect(api.pending, hasLength(1));
+      // The loading state must not push the introduction down the viewport.
+      expect(tester.getTopLeft(header).dy, closeTo(headerY, 1));
+      api.pending.single.completer.complete(
+        DtrAssistantMessage(
+          role: 'assistant',
+          content: 'What destination or office should I use?',
+          createdAt: DateTime.now(),
+        ),
+      );
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+      expect(tester.getTopLeft(header).dy, closeTo(headerY, 1));
+      expect(
+        find.text('What destination or office should I use?'),
+        findsOneWidget,
+      );
+      expect(
+        tester
+            .getTopLeft(find.text('What destination or office should I use?'))
+            .dy,
+        greaterThan(headerY),
+      );
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox.shrink());
+      auth.dispose();
+    });
+  }
+
   test('turn guard invalidates superseded generations', () {
     final guard = DtrAssistantTurnGuard();
     final first = guard.begin();

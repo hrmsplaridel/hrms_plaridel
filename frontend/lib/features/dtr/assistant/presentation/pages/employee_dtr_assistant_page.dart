@@ -832,7 +832,6 @@ class _EmployeeDtrAssistantPageState extends State<EmployeeDtrAssistantPage> {
   Widget build(BuildContext context) {
     final dark = AppTheme.dashIsDark(context);
     final floating = widget.floating;
-    final emptyChat = !_sending && _messages.isEmpty;
 
     return Scaffold(
       backgroundColor: AppTheme.dashCanvasOf(context),
@@ -880,95 +879,107 @@ class _EmployeeDtrAssistantPageState extends State<EmployeeDtrAssistantPage> {
         child: Column(
           children: [
             Expanded(
-              child: ListView.builder(
-                controller: _scrollController,
-                reverse: !emptyChat,
-                itemCount: _messages.length + 2,
-                padding: EdgeInsets.fromLTRB(
-                  floating ? 12 : 16,
-                  floating ? 12 : 16,
-                  floating ? 12 : 16,
-                  12,
-                ),
-                itemBuilder: (context, index) {
-                  // A fresh chat starts at the top; conversations keep their
-                  // newest messages at the bottom without building all history.
-                  if (emptyChat) index = _messages.length + 1 - index;
-                  if (index == 0) {
-                    return _sending
-                        ? const _TypingIndicator()
-                        : const SizedBox.shrink();
-                  }
-                  if (index == _messages.length + 1) {
-                    return Column(
-                      children: [
-                        if (!floating) ...[
-                          _AssistantHeader(sending: _sending),
-                          const SizedBox(height: 16),
-                        ],
-                        DtrAssistantPromptChips(
-                          enabled: !_sending,
-                          onSelected: (prompt) =>
-                              _send(prompt.text, intent: prompt.intent),
-                        ),
-                        const SizedBox(height: 16),
-                      ],
-                    );
-                  }
-                  final message = _messages[_messages.length - index];
-                  return Column(
-                    crossAxisAlignment: message.isUser
-                        ? CrossAxisAlignment.end
-                        : CrossAxisAlignment.start,
-                    children: [
-                      DtrAssistantMessageBubble(
-                        message: message,
-                        feedback: message.id == null
-                            ? null
-                            : _feedbackByMessageId[message.id],
-                        onFeedback: message.isUser
-                            ? null
-                            : (rating) => _submitFeedback(message, rating),
-                        onDownloadAttachment: _downloadAttachment,
-                        onEdit: message.isUser
-                            ? () {
-                                _inputController.text = message.content;
-                                setState(() {
-                                  final index = _messages.indexOf(message);
-                                  if (index != -1) {
-                                    final removed = _messages.sublist(index);
-                                    for (final removedMessage in removed) {
-                                      final removedId = removedMessage.id;
-                                      if (removedId != null) {
-                                        _feedbackByMessageId.remove(removedId);
+              child: LayoutBuilder(
+                builder: (context, constraints) => Align(
+                  alignment: Alignment.topCenter,
+                  child: ListView.builder(
+                    controller: _scrollController,
+                    reverse: true,
+                    // Each bubble has at least 36 pixels of padding and margin.
+                    // Only shrink-wrap histories small enough to fit this viewport;
+                    // longer histories keep their lazy, full-height viewport.
+                    shrinkWrap: _messages.length * 36 < constraints.maxHeight,
+                    itemCount: _messages.length + 2,
+                    padding: EdgeInsets.fromLTRB(
+                      floating ? 12 : 16,
+                      floating ? 12 : 16,
+                      floating ? 12 : 16,
+                      12,
+                    ),
+                    itemBuilder: (context, index) {
+                      if (index == 0) {
+                        return _sending
+                            ? const _TypingIndicator()
+                            : const SizedBox.shrink();
+                      }
+                      if (index == _messages.length + 1) {
+                        return Column(
+                          children: [
+                            if (!floating) ...[
+                              _AssistantHeader(sending: _sending),
+                              const SizedBox(height: 16),
+                            ],
+                            DtrAssistantPromptChips(
+                              enabled: !_sending,
+                              onSelected: (prompt) =>
+                                  _send(prompt.text, intent: prompt.intent),
+                            ),
+                            const SizedBox(height: 16),
+                          ],
+                        );
+                      }
+                      final message = _messages[_messages.length - index];
+                      return Column(
+                        crossAxisAlignment: message.isUser
+                            ? CrossAxisAlignment.end
+                            : CrossAxisAlignment.start,
+                        children: [
+                          DtrAssistantMessageBubble(
+                            message: message,
+                            feedback: message.id == null
+                                ? null
+                                : _feedbackByMessageId[message.id],
+                            onFeedback: message.isUser
+                                ? null
+                                : (rating) => _submitFeedback(message, rating),
+                            onDownloadAttachment: _downloadAttachment,
+                            onEdit: message.isUser
+                                ? () {
+                                    _inputController.text = message.content;
+                                    setState(() {
+                                      final index = _messages.indexOf(message);
+                                      if (index != -1) {
+                                        final removed = _messages.sublist(
+                                          index,
+                                        );
+                                        for (final removedMessage in removed) {
+                                          final removedId = removedMessage.id;
+                                          if (removedId != null) {
+                                            _feedbackByMessageId.remove(
+                                              removedId,
+                                            );
+                                          }
+                                        }
+                                        _messages.removeRange(
+                                          index,
+                                          _messages.length,
+                                        );
                                       }
-                                    }
-                                    _messages.removeRange(
-                                      index,
-                                      _messages.length,
-                                    );
+                                    });
                                   }
-                                });
-                              }
-                            : null,
-                      ),
-                      if (!message.isUser && message.suggestions.isNotEmpty)
-                        _AssistantSuggestionChips(
-                          enabled: !_sending,
-                          suggestions: message.suggestions,
-                          onSelected: (suggestion) =>
-                              _send(suggestion.text, intent: suggestion.intent),
-                        ),
-                      if (!message.isUser && message.actions.isNotEmpty)
-                        _AssistantActionChips(
-                          enabled: !_sending,
-                          actions: message.actions,
-                          onSelected: (action) =>
-                              _executeAction(message, action),
-                        ),
-                    ],
-                  );
-                },
+                                : null,
+                          ),
+                          if (!message.isUser && message.suggestions.isNotEmpty)
+                            _AssistantSuggestionChips(
+                              enabled: !_sending,
+                              suggestions: message.suggestions,
+                              onSelected: (suggestion) => _send(
+                                suggestion.text,
+                                intent: suggestion.intent,
+                              ),
+                            ),
+                          if (!message.isUser && message.actions.isNotEmpty)
+                            _AssistantActionChips(
+                              enabled: !_sending,
+                              actions: message.actions,
+                              onSelected: (action) =>
+                                  _executeAction(message, action),
+                            ),
+                        ],
+                      );
+                    },
+                  ),
+                ),
               ),
             ),
             DtrAssistantInputBar(
@@ -1146,6 +1157,7 @@ class _AssistantHeader extends StatelessWidget {
     final lottieSize = isNarrow ? 54.0 : 74.0;
 
     return Container(
+      key: const ValueKey('assistant-introduction'),
       padding: EdgeInsets.all(isNarrow ? 12 : 14),
       decoration: BoxDecoration(
         color: AppTheme.dashPanelOf(context),
