@@ -47,7 +47,11 @@ const _rspHubFeatures = <RspHubFeature>[
 
 /// RSP hub: title, subtitle, and feature cards (same layout as DTR).
 class RspAdminHub extends StatelessWidget {
-  const RspAdminHub({super.key, required this.onOpenSection});
+  const RspAdminHub({
+    super.key,
+    required this.onOpenSection,
+    this.featureAccess = const {},
+  });
 
   /// Opens Recruitment Management. Internal tabs keep the original section tools.
   static const int recruitmentManagementSection = 22;
@@ -59,10 +63,44 @@ class RspAdminHub extends StatelessWidget {
     (label: 'Final Requirements', icon: Icons.health_and_safety_rounded),
   ];
 
+  static const _recruitmentFields = [
+    'applications_allowed',
+    'exam_results_allowed',
+    'scheduling_allowed',
+    'final_requirements_allowed',
+  ];
+
+  static const _formFields = [
+    'form_bi_allowed',
+    'form_applicants_profile_allowed',
+    'form_selection_lineup_allowed',
+    'form_computation_of_points_allowed',
+    'form_work_experience_allowed',
+    'form_turn_around_time_allowed',
+    'form_ojt_allowed',
+  ];
+
   final ValueChanged<int> onOpenSection;
+  final Map<String, bool> featureAccess;
+
+  bool _allowed(int sectionIndex) {
+    switch (sectionIndex) {
+      case 1:
+        return featureAccess['vacancies_allowed'] == true;
+      case recruitmentManagementSection:
+        return _recruitmentFields.any((f) => featureAccess[f] == true);
+      case 20:
+        return featureAccess['exams_allowed'] == true;
+      case 21:
+        return _formFields.any((f) => featureAccess[f] == true);
+      default:
+        return false;
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
+    final visible = _rspHubFeatures.where((f) => _allowed(f.sectionIndex));
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -96,17 +134,27 @@ class RspAdminHub extends StatelessWidget {
           ],
         ),
         const SizedBox(height: 24),
-        FeatureCardGrid(
-          children: [
-            for (final f in _rspHubFeatures)
-              FeatureCard(
-                title: f.title,
-                subtitle: f.subtitle,
-                icon: f.icon,
-                onTap: () => onOpenSection(f.sectionIndex),
-              ),
-          ],
-        ),
+        if (visible.isEmpty)
+          Text(
+            'No RSP features are enabled for your account. Ask a super admin to update Manage Access.',
+            style: TextStyle(
+              color: AppTheme.dashTextSecondaryOf(context),
+              fontSize: 14,
+              height: 1.4,
+            ),
+          )
+        else
+          FeatureCardGrid(
+            children: [
+              for (final f in visible)
+                FeatureCard(
+                  title: f.title,
+                  subtitle: f.subtitle,
+                  icon: f.icon,
+                  onTap: () => onOpenSection(f.sectionIndex),
+                ),
+            ],
+          ),
       ],
     );
   }
@@ -125,7 +173,15 @@ class RspRecruitmentManagement extends StatelessWidget {
     required this.examResults,
     required this.scheduling,
     required this.finalRequirements,
+    this.featureAccess = const {},
   });
+
+  static const _tabPermissionFields = [
+    'applications_allowed',
+    'exam_results_allowed',
+    'scheduling_allowed',
+    'final_requirements_allowed',
+  ];
 
   final int tabIndex;
   final ValueChanged<int> onTabChanged;
@@ -133,13 +189,36 @@ class RspRecruitmentManagement extends StatelessWidget {
   final Widget examResults;
   final Widget scheduling;
   final Widget finalRequirements;
+  final Map<String, bool> featureAccess;
+
+  bool _tabAllowed(int index) {
+    if (index < 0 || index >= _tabPermissionFields.length) return false;
+    return featureAccess[_tabPermissionFields[index]] == true;
+  }
 
   @override
   Widget build(BuildContext context) {
-    final selected = tabIndex.clamp(0, RspAdminHub.recruitmentTabs.length - 1);
+    final allowedIndexes = [
+      for (var i = 0; i < RspAdminHub.recruitmentTabs.length; i++)
+        if (_tabAllowed(i)) i,
+    ];
+    if (allowedIndexes.isEmpty) {
+      return Text(
+        'No Recruitment Management tabs are enabled for your account.',
+        style: TextStyle(
+          color: AppTheme.dashTextSecondaryOf(context),
+          fontSize: 14,
+          height: 1.4,
+        ),
+      );
+    }
+    final selected = allowedIndexes.contains(tabIndex)
+        ? tabIndex
+        : allowedIndexes.first;
     final muted = AppTheme.dashMutedSurfaceOf(context);
     final hairline = AppTheme.dashHairlineOf(context);
     final accent = AppTheme.primaryNavy;
+    final pages = [applications, examResults, scheduling, finalRequirements];
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -156,7 +235,7 @@ class RspRecruitmentManagement extends StatelessWidget {
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                for (var i = 0; i < RspAdminHub.recruitmentTabs.length; i++)
+                for (final i in allowedIndexes)
                   _RecruitmentTab(
                     label: RspAdminHub.recruitmentTabs[i].label,
                     icon: RspAdminHub.recruitmentTabs[i].icon,
@@ -169,16 +248,7 @@ class RspRecruitmentManagement extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 16),
-        IndexedStack(
-          index: selected,
-          sizing: StackFit.loose,
-          children: [
-            applications,
-            examResults,
-            scheduling,
-            finalRequirements,
-          ],
-        ),
+        pages[selected],
       ],
     );
   }

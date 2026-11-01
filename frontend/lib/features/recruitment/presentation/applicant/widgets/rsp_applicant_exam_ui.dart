@@ -61,19 +61,22 @@ class RspApplicantStepHeader extends StatelessWidget {
   Widget build(BuildContext context) {
     final primary = AppTheme.dashTextPrimaryOf(context);
     final secondary = AppTheme.dashTextSecondaryOf(context);
+    final narrow = MediaQuery.sizeOf(context).width < 600;
+    final pad = narrow ? 16.0 : 20.0;
+    final iconBox = narrow ? 42.0 : 48.0;
 
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(20),
+      padding: EdgeInsets.all(pad),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(RspApplicantExamUi.radiusLg),
-        gradient: LinearGradient(
+        gradient: const LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
           colors: [
-            const Color(0xFFFFF3E8),
+            Color(0xFFFFF3E8),
             Colors.white,
-            const Color(0xFFF8FAFF),
+            Color(0xFFF8FAFF),
           ],
         ),
         border: Border.all(
@@ -84,15 +87,19 @@ class RspApplicantStepHeader extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Container(
-            width: 48,
-            height: 48,
+            width: iconBox,
+            height: iconBox,
             decoration: BoxDecoration(
               color: RspApplicantExamUi.accent.withValues(alpha: 0.14),
               borderRadius: BorderRadius.circular(14),
             ),
-            child: Icon(icon, color: RspApplicantExamUi.accent, size: 26),
+            child: Icon(
+              icon,
+              color: RspApplicantExamUi.accent,
+              size: narrow ? 22 : 26,
+            ),
           ),
-          const SizedBox(width: 14),
+          SizedBox(width: narrow ? 12 : 14),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -110,7 +117,7 @@ class RspApplicantStepHeader extends StatelessWidget {
                 Text(
                   title,
                   style: TextStyle(
-                    fontSize: 20,
+                    fontSize: narrow ? 18 : 20,
                     fontWeight: FontWeight.w800,
                     color: primary,
                     height: 1.2,
@@ -120,7 +127,7 @@ class RspApplicantStepHeader extends StatelessWidget {
                 Text(
                   subtitle,
                   style: TextStyle(
-                    fontSize: 14,
+                    fontSize: narrow ? 13.5 : 14,
                     height: 1.45,
                     color: secondary,
                   ),
@@ -536,10 +543,12 @@ class RspApplicantMcqQuestionCard extends StatelessWidget {
       _hasOptionImage,
     ).any((v) => v);
     final hasText = questionText.trim().isNotEmpty;
+    final narrow = MediaQuery.sizeOf(context).width < 600;
+    final pad = narrow ? 14.0 : 18.0;
 
     return Container(
-      margin: const EdgeInsets.only(bottom: 16),
-      padding: const EdgeInsets.all(18),
+      margin: EdgeInsets.only(bottom: narrow ? 12 : 16),
+      padding: EdgeInsets.all(pad),
       decoration: BoxDecoration(
         color: AppTheme.dashIsDark(context)
             ? const Color(0xFF242A36)
@@ -558,8 +567,8 @@ class RspApplicantMcqQuestionCard extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Container(
-                width: 32,
-                height: 32,
+                width: narrow ? 30 : 32,
+                height: narrow ? 30 : 32,
                 alignment: Alignment.center,
                 decoration: BoxDecoration(
                   color: AppTheme.primaryNavy.withValues(alpha: 0.1),
@@ -569,23 +578,24 @@ class RspApplicantMcqQuestionCard extends StatelessWidget {
                   '${index + 1}',
                   style: TextStyle(
                     fontWeight: FontWeight.w800,
+                    fontSize: narrow ? 13 : 14,
                     color: AppTheme.primaryNavy,
                   ),
                 ),
               ),
-              const SizedBox(width: 12),
+              SizedBox(width: narrow ? 10 : 12),
               Expanded(
                 child: hasText
                     ? Text(
                         questionText,
                         style: TextStyle(
-                          fontSize: 15,
+                          fontSize: narrow ? 14.5 : 15,
                           fontWeight: FontWeight.w600,
                           height: 1.4,
                           color: AppTheme.dashTextPrimaryOf(context),
                         ),
                       )
-                    : const SizedBox(height: 32),
+                    : SizedBox(height: narrow ? 28 : 32),
               ),
             ],
           ),
@@ -594,9 +604,10 @@ class RspApplicantMcqQuestionCard extends StatelessWidget {
             ExamQuestionFigure(
               path: questionImage!,
               caption: questionImageCaption,
+              maxHeight: narrow ? 240 : 360,
             ),
           ],
-          const SizedBox(height: 14),
+          SizedBox(height: narrow ? 12 : 14),
           if (anyOptionImage)
             _buildImageChoices(context)
           else
@@ -621,7 +632,29 @@ class RspApplicantMcqQuestionCard extends StatelessWidget {
       builder: (context, constraints) {
         const gap = 10.0;
         final w = constraints.maxWidth;
-        final cols = w >= 640 ? 3 : (w >= 300 ? 2 : 1);
+        // Phone: stack for readability; tablet: 2-up; desktop: up to 4.
+        final cols = w >= 900
+            ? 4
+            : (w >= 560 ? 2 : (w >= 360 ? 2 : 1));
+        // Prefer single column on very narrow phones when labels are long.
+        final useStack = cols == 1;
+        if (useStack) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              for (var j = 0; j < options.length; j++) ...[
+                if (j > 0) const SizedBox(height: gap),
+                RspApplicantMcqImageOptionTile(
+                  letter: String.fromCharCode(65 + j),
+                  label: options[j].toString(),
+                  imagePath: _hasOptionImage(j) ? optionImages[j] : null,
+                  selected: selectedIndex == j,
+                  onTap: () => onSelect(j),
+                ),
+              ],
+            ],
+          );
+        }
         final rows = <Widget>[];
         for (var start = 0; start < options.length; start += cols) {
           final cells = <Widget>[];
@@ -767,14 +800,24 @@ class RspApplicantMcqImageOptionTile extends StatelessWidget {
                 ),
                 if (hasImage) ...[
                   const SizedBox(height: 8),
-                  ExamImage(path: imagePath!, boxHeight: 130),
+                  LayoutBuilder(
+                    builder: (context, constraints) {
+                      final w = constraints.maxWidth;
+                      final h = w < 160
+                          ? 100.0
+                          : (w < 280 ? 120.0 : (w < 420 ? 140.0 : 160.0));
+                      return ExamImage(path: imagePath!, boxHeight: h);
+                    },
+                  ),
                 ],
                 if (hasLabel) ...[
                   const SizedBox(height: 8),
                   Text(
                     label,
                     style: TextStyle(
-                      fontSize: 14,
+                      fontSize: MediaQuery.sizeOf(context).width < 600
+                          ? 13.5
+                          : 14,
                       fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
                       color: primary,
                       height: 1.35,
@@ -992,9 +1035,54 @@ class RspApplicantExamSessionHeader extends StatelessWidget {
         ? 'Questions $rangeStart–$questionIndex of $total'
         : 'Question $questionIndex of $total';
     final ratio = total <= 0 ? 0.0 : (questionIndex / total).clamp(0.0, 1.0);
+    final narrow = MediaQuery.sizeOf(context).width < 600;
+    final timerChip = timeLabel == null
+        ? null
+        : Container(
+            padding: EdgeInsets.symmetric(
+              horizontal: narrow ? 8 : 10,
+              vertical: 5,
+            ),
+            decoration: BoxDecoration(
+              color: urgent
+                  ? const Color(0xFFFFEBEE)
+                  : AppTheme.primaryNavy.withValues(alpha: 0.1),
+              borderRadius: BorderRadius.circular(999),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  Icons.timer_outlined,
+                  size: 16,
+                  color: urgent
+                      ? const Color(0xFFC62828)
+                      : AppTheme.primaryNavy,
+                ),
+                const SizedBox(width: 5),
+                Text(
+                  timeLabel!,
+                  style: TextStyle(
+                    fontWeight: FontWeight.w800,
+                    fontSize: 13.5,
+                    fontFeatures: const [FontFeature.tabularFigures()],
+                    color: urgent
+                        ? const Color(0xFFC62828)
+                        : AppTheme.dashTextPrimaryOf(context),
+                  ),
+                ),
+              ],
+            ),
+          );
+
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+      padding: EdgeInsets.fromLTRB(
+        narrow ? 14 : 16,
+        narrow ? 12 : 14,
+        narrow ? 14 : 16,
+        narrow ? 12 : 14,
+      ),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(14),
@@ -1003,63 +1091,47 @@ class RspApplicantExamSessionHeader extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Text(
-            title,
-            style: TextStyle(
-              fontSize: 18,
-              fontWeight: FontWeight.w800,
-              color: AppTheme.dashTextPrimaryOf(context),
+          if (narrow && timerChip != null)
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: Text(
+                    title,
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w800,
+                      height: 1.25,
+                      color: AppTheme.dashTextPrimaryOf(context),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                timerChip,
+              ],
+            )
+          else
+            Text(
+              title,
+              style: TextStyle(
+                fontSize: narrow ? 16 : 18,
+                fontWeight: FontWeight.w800,
+                color: AppTheme.dashTextPrimaryOf(context),
+              ),
             ),
-          ),
           const SizedBox(height: 8),
           Row(
             children: [
               Expanded(
                 child: Text(
                   progressLabel,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontWeight: FontWeight.w700,
-                    fontSize: 13.5,
+                    fontSize: narrow ? 13 : 13.5,
                   ),
                 ),
               ),
-              if (timeLabel != null)
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 10,
-                    vertical: 5,
-                  ),
-                  decoration: BoxDecoration(
-                    color: urgent
-                        ? const Color(0xFFFFEBEE)
-                        : AppTheme.primaryNavy.withValues(alpha: 0.1),
-                    borderRadius: BorderRadius.circular(999),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(
-                        Icons.timer_outlined,
-                        size: 16,
-                        color: urgent
-                            ? const Color(0xFFC62828)
-                            : AppTheme.primaryNavy,
-                      ),
-                      const SizedBox(width: 5),
-                      Text(
-                        timeLabel!,
-                        style: TextStyle(
-                          fontWeight: FontWeight.w800,
-                          fontSize: 13.5,
-                          fontFeatures: const [FontFeature.tabularFigures()],
-                          color: urgent
-                              ? const Color(0xFFC62828)
-                              : AppTheme.dashTextPrimaryOf(context),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
+              if (!narrow && timerChip != null) timerChip,
             ],
           ),
           const SizedBox(height: 8),
@@ -1096,56 +1168,149 @@ class RspApplicantExamPagerNav extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final stack = MediaQuery.sizeOf(context).width < 380;
+    final previous = OutlinedButton(
+      onPressed: canGoBack ? onBack : null,
+      style: OutlinedButton.styleFrom(
+        minimumSize: const Size(0, 48),
+        foregroundColor: AppTheme.primaryNavy,
+      ),
+      child: const Text('Previous'),
+    );
+    final next = FilledButton(
+      onPressed: onForward,
+      style: FilledButton.styleFrom(
+        minimumSize: const Size(0, 48),
+        backgroundColor: AppTheme.primaryNavy,
+      ),
+      child: Text(forwardLabel ?? (isLast ? 'Review answers' : 'Next')),
+    );
+    if (stack) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          next,
+          const SizedBox(height: 10),
+          previous,
+        ],
+      );
+    }
     return Row(
       children: [
-        Expanded(
-          child: OutlinedButton(
-            onPressed: canGoBack ? onBack : null,
-            style: OutlinedButton.styleFrom(
-              minimumSize: const Size(0, 48),
-              foregroundColor: AppTheme.primaryNavy,
-            ),
-            child: const Text('Previous'),
+        Expanded(child: previous),
+        const SizedBox(width: 12),
+        Expanded(child: next),
+      ],
+    );
+  }
+}
+
+class RspExamSubmitDialogResult {
+  const RspExamSubmitDialogResult._({required this.submit, this.jumpToIndex});
+
+  const RspExamSubmitDialogResult.submit() : this._(submit: true);
+
+  const RspExamSubmitDialogResult.closed() : this._(submit: false);
+
+  const RspExamSubmitDialogResult.jump(int index)
+    : this._(submit: false, jumpToIndex: index);
+
+  final bool submit;
+
+  /// Zero-based question index to open when the applicant taps a missing item.
+  final int? jumpToIndex;
+}
+
+class RspApplicantMissingQuestions extends StatelessWidget {
+  const RspApplicantMissingQuestions({
+    super.key,
+    required this.missingIndexes,
+    required this.onJump,
+  });
+
+  final List<int> missingIndexes;
+  final ValueChanged<int> onJump;
+
+  @override
+  Widget build(BuildContext context) {
+    if (missingIndexes.isEmpty) return const SizedBox.shrink();
+    final count = missingIndexes.length;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Text(
+          count == 1
+              ? '1 question still needs an answer. Tap it to go back.'
+              : '$count questions still need an answer. Tap one to go back.',
+          style: const TextStyle(
+            fontSize: 13.5,
+            height: 1.4,
+            color: AppTheme.textSecondary,
           ),
         ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: FilledButton(
-            onPressed: onForward,
-            style: FilledButton.styleFrom(
-              minimumSize: const Size(0, 48),
-              backgroundColor: AppTheme.primaryNavy,
-            ),
-            child: Text(forwardLabel ?? (isLast ? 'Review answers' : 'Next')),
-          ),
+        const SizedBox(height: 8),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            for (final index in missingIndexes)
+              OutlinedButton.icon(
+                onPressed: () => onJump(index),
+                icon: const Icon(Icons.keyboard_return_rounded, size: 16),
+                label: Text('Question ${index + 1}'),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: const Color(0xFFC62828),
+                  side: BorderSide(
+                    color: const Color(0xFFC62828).withValues(alpha: 0.4),
+                  ),
+                  visualDensity: VisualDensity.compact,
+                  minimumSize: const Size(0, 40),
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                ),
+              ),
+          ],
         ),
       ],
     );
   }
 }
 
-Future<bool> showRspApplicantExamSubmitDialog({
+Future<RspExamSubmitDialogResult> showRspApplicantExamSubmitDialog({
   required BuildContext context,
   required String examTitle,
   required int answered,
   required int total,
+  List<int> missingIndexes = const [],
 }) async {
   final unanswered = (total - answered).clamp(0, total);
   final complete = unanswered == 0 && total > 0;
   final ratio = total <= 0 ? 0.0 : (answered / total).clamp(0.0, 1.0);
-  final ok = await showDialog<bool>(
+  final missing = missingIndexes.where((i) => i >= 0 && i < total).toList();
+  final result = await showDialog<RspExamSubmitDialogResult>(
     context: context,
     barrierColor: Colors.black.withValues(alpha: 0.45),
     builder: (ctx) {
+      final narrow = MediaQuery.sizeOf(ctx).width < 600;
       return Dialog(
         backgroundColor: Colors.white,
         surfaceTintColor: Colors.transparent,
-        insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
+        insetPadding: EdgeInsets.symmetric(
+          horizontal: narrow ? 16 : 24,
+          vertical: narrow ? 16 : 24,
+        ),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 440),
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(22, 22, 22, 18),
+          constraints: BoxConstraints(
+            maxWidth: 440,
+            maxHeight: MediaQuery.sizeOf(ctx).height * 0.86,
+          ),
+          child: SingleChildScrollView(
+            padding: EdgeInsets.fromLTRB(
+              narrow ? 16 : 22,
+              narrow ? 16 : 22,
+              narrow ? 16 : 22,
+              18,
+            ),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1184,7 +1349,7 @@ Future<bool> showRspApplicantExamSubmitDialog({
                           Text(
                             complete
                                 ? 'All questions have answers. Submit when you are ready.'
-                                : 'Some questions are still unanswered.',
+                                : 'Some questions are still unanswered. Tap a missing question to go back to it.',
                             style: const TextStyle(
                               fontSize: 13.5,
                               height: 1.4,
@@ -1236,6 +1401,16 @@ Future<bool> showRspApplicantExamSubmitDialog({
                     ),
                   ],
                 ),
+                if (missing.isNotEmpty) ...[
+                  const SizedBox(height: 14),
+                  RspApplicantMissingQuestions(
+                    missingIndexes: missing,
+                    onJump: (index) => Navigator.pop(
+                      ctx,
+                      RspExamSubmitDialogResult.jump(index),
+                    ),
+                  ),
+                ],
                 const SizedBox(height: 14),
                 Container(
                   padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
@@ -1274,7 +1449,10 @@ Future<bool> showRspApplicantExamSubmitDialog({
                   children: [
                     Expanded(
                       child: OutlinedButton(
-                        onPressed: () => Navigator.pop(ctx, false),
+                        onPressed: () => Navigator.pop(
+                          ctx,
+                          const RspExamSubmitDialogResult.closed(),
+                        ),
                         style: OutlinedButton.styleFrom(
                           minimumSize: const Size(0, 46),
                           foregroundColor: AppTheme.textPrimary,
@@ -1286,7 +1464,10 @@ Future<bool> showRspApplicantExamSubmitDialog({
                     const SizedBox(width: 10),
                     Expanded(
                       child: FilledButton(
-                        onPressed: () => Navigator.pop(ctx, true),
+                        onPressed: () => Navigator.pop(
+                          ctx,
+                          const RspExamSubmitDialogResult.submit(),
+                        ),
                         style: FilledButton.styleFrom(
                           minimumSize: const Size(0, 46),
                           backgroundColor: AppTheme.primaryNavy,
@@ -1303,7 +1484,7 @@ Future<bool> showRspApplicantExamSubmitDialog({
       );
     },
   );
-  return ok == true;
+  return result ?? const RspExamSubmitDialogResult.closed();
 }
 
 class _SubmitStatChip extends StatelessWidget {

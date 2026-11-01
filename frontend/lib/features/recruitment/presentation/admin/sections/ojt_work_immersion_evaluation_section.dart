@@ -16,6 +16,7 @@ import 'package:hrms_plaridel/shared/widgets/form_document_preview.dart';
 import 'package:hrms_plaridel/shared/widgets/rsp_ld_form_header.dart';
 import 'package:hrms_plaridel/shared/widgets/rsp_ld_record_actions.dart';
 import 'package:hrms_plaridel/shared/widgets/rsp_ld_saved_records_browser.dart';
+import 'package:hrms_plaridel/shared/widgets/rsp_ld_recycle_bin_dialog.dart';
 
 const _kMonths = [
   'January',
@@ -284,7 +285,7 @@ class _RspOjtWorkImmersionEvaluationSectionState
       if (!mounted) return;
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(const SnackBar(content: Text('Evaluation deleted.')));
+      ).showSnackBar(const SnackBar(content: Text('Moved to the recycle bin.')));
       _load();
     } catch (e) {
       if (!mounted) return;
@@ -335,6 +336,40 @@ class _RspOjtWorkImmersionEvaluationSectionState
     }
   }
 
+  void _openRecycleBin() {
+    showRspLdRecycleBin(
+      context: context,
+      table: OjtWorkImmersionEvaluation.tableName,
+      onChanged: () {
+        if (mounted) _load();
+      },
+      mapRow: (row) {
+        final e = OjtWorkImmersionEvaluation.fromJson(row);
+        final id = e.id;
+        if (id == null || id.isEmpty) return null;
+        final name = (e.ojtImmersion?.trim().isNotEmpty ?? false)
+            ? e.ojtImmersion!
+            : '(No name)';
+        final total = e.totalScore;
+        return RspLdRecycleBinItem(
+          id: id,
+          title: name,
+          subtitle:
+              '${e.school ?? '—'} · ${total == null ? '—/20' : '$total/20'} · Removed ${rspLdRecycleRemovedOn(row)}',
+          previewWidth: 900,
+          previewBuilder: () => OjtWorkImmersionEvaluationEditor(
+            readOnly: true,
+            entry: e,
+            onSave: (_) {},
+            onCancel: () {},
+            onPrint: (_) async {},
+            onDownloadPdf: (_) async {},
+          ),
+        );
+      },
+    );
+  }
+
   void _openSavedRecordsBrowser() {
     showRspLdSavedRecordsBrowser(
       context,
@@ -383,6 +418,9 @@ class _RspOjtWorkImmersionEvaluationSectionState
             backgroundColor: AppTheme.primaryNavy,
             padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
           ),
+        ),
+        RspLdRecycleBinButton(
+          onPressed: _loading ? null : _openRecycleBin,
         ),
         OutlinedButton.icon(
           onPressed: _loading ? null : _load,

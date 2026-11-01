@@ -142,6 +142,40 @@ CREATE TABLE IF NOT EXISTS dtr_admin_access (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+CREATE TABLE IF NOT EXISTS rsp_admin_access (
+  admin_user_id UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  vacancies_allowed BOOLEAN NOT NULL DEFAULT false,
+  recruitment_allowed BOOLEAN NOT NULL DEFAULT false,
+  exams_allowed BOOLEAN NOT NULL DEFAULT false,
+  forms_allowed BOOLEAN NOT NULL DEFAULT false,
+  applications_allowed BOOLEAN NOT NULL DEFAULT false,
+  exam_results_allowed BOOLEAN NOT NULL DEFAULT false,
+  scheduling_allowed BOOLEAN NOT NULL DEFAULT false,
+  final_requirements_allowed BOOLEAN NOT NULL DEFAULT false,
+  form_bi_allowed BOOLEAN NOT NULL DEFAULT false,
+  form_applicants_profile_allowed BOOLEAN NOT NULL DEFAULT false,
+  form_selection_lineup_allowed BOOLEAN NOT NULL DEFAULT false,
+  form_computation_of_points_allowed BOOLEAN NOT NULL DEFAULT false,
+  form_work_experience_allowed BOOLEAN NOT NULL DEFAULT false,
+  form_turn_around_time_allowed BOOLEAN NOT NULL DEFAULT false,
+  form_ojt_allowed BOOLEAN NOT NULL DEFAULT false,
+  updated_by UUID REFERENCES users(id),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS ld_admin_access (
+  admin_user_id UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  forms_allowed BOOLEAN NOT NULL DEFAULT false,
+  daily_reports_allowed BOOLEAN NOT NULL DEFAULT false,
+  requirements_allowed BOOLEAN NOT NULL DEFAULT false,
+  form_tna_allowed BOOLEAN NOT NULL DEFAULT false,
+  form_action_brainstorming_allowed BOOLEAN NOT NULL DEFAULT false,
+  form_idp_allowed BOOLEAN NOT NULL DEFAULT false,
+  form_lap_allowed BOOLEAN NOT NULL DEFAULT false,
+  updated_by UUID REFERENCES users(id),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 -- =========================================
 -- AUTH REFRESH TOKENS (PERSISTENT SESSIONS)
 -- =========================================
@@ -2042,6 +2076,7 @@ CREATE TABLE IF NOT EXISTS training_daily_reports (
   seen_by_admin UUID REFERENCES users(id) ON DELETE SET NULL,
   seen_at TIMESTAMPTZ,
   reviewed_by UUID REFERENCES users(id) ON DELETE SET NULL,
+  deleted_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );

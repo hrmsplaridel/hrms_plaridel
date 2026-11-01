@@ -10,6 +10,7 @@ import 'package:hrms_plaridel/shared/widgets/read_only_saved_entry_dialog.dart';
 import 'package:hrms_plaridel/shared/widgets/form_document_preview.dart';
 import 'package:hrms_plaridel/shared/widgets/rsp_ld_form_header.dart';
 import 'package:hrms_plaridel/shared/widgets/rsp_ld_saved_records_browser.dart';
+import 'package:hrms_plaridel/shared/widgets/rsp_ld_recycle_bin_dialog.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_rsp_signature_section.dart';
 import 'package:hrms_plaridel/features/docutracker/data/providers/docutracker_provider.dart';
 
@@ -84,7 +85,7 @@ class _RspWorkExperienceSheetSectionState
       if (!mounted) return;
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(const SnackBar(content: Text('Deleted.')));
+      ).showSnackBar(const SnackBar(content: Text('Moved to the recycle bin.')));
       _load();
     } catch (e) {
       if (!mounted) return;
@@ -192,6 +193,41 @@ class _RspWorkExperienceSheetSectionState
     }
   }
 
+  void _openRecycleBin() {
+    showRspLdRecycleBin(
+      context: context,
+      table: WorkExperienceSheetEntry.tableName,
+      onChanged: () {
+        if (mounted) _load();
+      },
+      mapRow: (row) {
+        final e = WorkExperienceSheetEntry.fromJson(row);
+        final id = e.id;
+        if (id == null || id.isEmpty) return null;
+        final pos = e.positionAppliedFor?.trim().isNotEmpty == true
+            ? e.positionAppliedFor!
+            : '(No position)';
+        final applicant = e.applicantName?.trim().isNotEmpty == true
+            ? e.applicantName!
+            : '—';
+        return RspLdRecycleBinItem(
+          id: id,
+          title: pos,
+          subtitle: '$applicant · Removed ${rspLdRecycleRemovedOn(row)}',
+          previewWidth: 900,
+          previewBuilder: () => WorkExperienceSheetEditor(
+            readOnly: true,
+            entry: e,
+            onSave: (_) {},
+            onCancel: () {},
+            onPrint: (_) async {},
+            onDownloadPdf: (_) async {},
+          ),
+        );
+      },
+    );
+  }
+
   void _openSavedRecordsBrowser() {
     showRspLdSavedRecordsBrowser(
       context,
@@ -257,6 +293,10 @@ class _RspWorkExperienceSheetSectionState
                     borderRadius: BorderRadius.circular(10),
                   ),
                 ),
+              ),
+              RspLdRecycleBinButton(
+                compact: true,
+                onPressed: _loading ? null : _openRecycleBin,
               ),
               TextButton.icon(
                 onPressed: _loading ? null : _load,
@@ -707,10 +747,6 @@ class _WorkExperienceSheetEditorState extends State<WorkExperienceSheetEditor> {
         spacing: 8,
         runSpacing: 8,
         children: [
-          OutlinedButton(
-            onPressed: widget.readOnly ? null : () => widget.onSave(_buildEntry()),
-            child: const Text('Save draft'),
-          ),
           FilledButton.icon(
             onPressed: widget.readOnly
                 ? null
@@ -836,7 +872,7 @@ class _WorkExperienceSheetEditorState extends State<WorkExperienceSheetEditor> {
                           fontWeight: FontWeight.w800,
                         ),
                       ),
-                      if (!widget.readOnly) ...[
+                      if (!widget.readOnly && !widget.applicantWorkflow) ...[
                         const SizedBox(width: 10),
                         Container(
                           padding: const EdgeInsets.symmetric(

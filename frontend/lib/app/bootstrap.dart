@@ -1,5 +1,3 @@
-import 'dart:async';
-
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:hrms_plaridel/core/api/client.dart';
@@ -21,7 +19,8 @@ class AppBootstrap {
 
 Future<AppBootstrap> bootstrapApp({bool startHidden = false}) async {
   WidgetsFlutterBinding.ensureInitialized();
-  unawaited(FormPdf.warmupPrintAssets());
+  // Await fonts so the global PDF theme is Noto before any screen can print.
+  await FormPdf.warmupPrintAssets();
 
   if (kIsWeb) {
     webview_platform_init.registerWebViewPlatform();

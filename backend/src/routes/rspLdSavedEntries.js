@@ -623,10 +623,22 @@ async function ensureRspLdSavedEntryTables() {
       ADD COLUMN IF NOT EXISTS interviewer_signature TEXT;
   `);
 
+  for (const table of Object.keys(TABLE_COLUMNS)) {
+    await pool.query(
+      `ALTER TABLE ${quoteIdent(table)} ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ`,
+    );
+  }
+
   rspLdSavedEntryTablesReady = true;
 }
 
-router.use(authMiddleware, requireAdmin);
+const { requireRspOrLdFormsIfAdmin } = require('../middleware/rspAccess');
+const { loadLdAccess } = require('../middleware/ldAccess');
+router.use(
+  authMiddleware,
+  requireAdmin,
+  requireRspOrLdFormsIfAdmin(loadLdAccess)
+);
 
 const EDIT_HISTORY_FORMS = Object.freeze({
   [SELECTION_LINEUP_TABLE]: Object.freeze({
@@ -688,6 +700,64 @@ router.get('/:table/:id/edit-history', async (req, res) => {
   }
 });
 
+router.get('/:table/recycle-bin', async (req, res) => {
+  const { table } = req.params;
+  if (!isAllowedTable(table)) {
+    return res.status(400).json({ error: 'Unknown table' });
+  }
+  try {
+    await ensureRspLdSavedEntryTables();
+    const result = await pool.query(
+      `SELECT * FROM ${quoteIdent(table)}
+       WHERE deleted_at IS NOT NULL
+       ORDER BY deleted_at DESC`,
+    );
+    if (table === APPLICANTS_PROFILE_TABLE) {
+      return res.json(await annotateApplicantsProfileSignatureState(pool, result.rows));
+    }
+    return res.json(result.rows);
+  } catch (err) {
+    if (err.code === '42P01' || err.code === '42703') {
+      return res.status(503).json({
+        error: 'Form table not found in database. Run init-schema.sql.',
+      });
+    }
+    console.error('[rspLdSavedEntries GET recycle-bin]', err);
+    return res.status(500).json({ error: 'Failed to list recycle bin' });
+  }
+});
+
+router.post('/:table/:id/restore', async (req, res) => {
+  const { table, id } = req.params;
+  if (!isAllowedTable(table)) {
+    return res.status(400).json({ error: 'Unknown table' });
+  }
+  if (!UUID_RE.test(id)) {
+    return res.status(400).json({ error: 'Invalid id' });
+  }
+  try {
+    await ensureRspLdSavedEntryTables();
+    const result = await pool.query(
+      `UPDATE ${quoteIdent(table)}
+       SET deleted_at = NULL, updated_at = now()
+       WHERE id = $1 AND deleted_at IS NOT NULL
+       RETURNING *`,
+      [id],
+    );
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Not found in the recycle bin' });
+    }
+    if (table === APPLICANTS_PROFILE_TABLE) {
+      const [annotated] = await annotateApplicantsProfileSignatureState(pool, result.rows);
+      return res.json(annotated);
+    }
+    return res.json(result.rows[0]);
+  } catch (err) {
+    console.error('[rspLdSavedEntries POST restore]', err);
+    return res.status(500).json({ error: 'Failed to restore record' });
+  }
+});
+
 router.get('/:table/:id', async (req, res) => {
   const { table, id } = req.params;
   if (!isAllowedTable(table)) {
@@ -726,7 +796,7 @@ router.get('/:table', async (req, res) => {
   }
   try {
     await ensureRspLdSavedEntryTables();
-    const q = `SELECT * FROM ${quoteIdent(table)} ORDER BY created_at DESC`;
+    const q = `SELECT * FROM ${quoteIdent(table)} WHERE deleted_at IS NULL ORDER BY created_at DESC`;
     const result = await pool.query(q);
     if (table === APPLICANTS_PROFILE_TABLE) {
       return res.json(await annotateApplicantsProfileSignatureState(pool, result.rows));
@@ -1040,6 +1110,41 @@ router.delete('/:table/:id', async (req, res) => {
   let client;
   try {
     await ensureRspLdSavedEntryTables();
+    const permanent = ['1', 'true'].includes(String(req.query.permanent || '').toLowerCase());
+    if (!permanent) {
+      if (table === APPLICANTS_PROFILE_TABLE) {
+        client = await pool.connect();
+        await client.query('BEGIN');
+        const lock = await readApplicantsProfileSignatureLock(client, id);
+        if (!lock.found) {
+          await client.query('ROLLBACK');
+          return res.status(404).json({ error: 'Not found' });
+        }
+        if (lock.locked) {
+          await client.query('ROLLBACK');
+          return res.status(409).json({ error: LOCKED_MESSAGE, code: LOCKED_CODE });
+        }
+        const recycled = await client.query(
+          `UPDATE ${quoteIdent(table)}
+           SET deleted_at = now(), updated_at = now()
+           WHERE id = $1 AND deleted_at IS NULL
+           RETURNING id`,
+          [id],
+        );
+        await client.query('COMMIT');
+        if (!recycled.rowCount) return res.status(404).json({ error: 'Not found' });
+        return res.json({ ok: true, recycled: true });
+      }
+      const recycled = await pool.query(
+        `UPDATE ${quoteIdent(table)}
+         SET deleted_at = now(), updated_at = now()
+         WHERE id = $1 AND deleted_at IS NULL
+         RETURNING id`,
+        [id],
+      );
+      if (!recycled.rowCount) return res.status(404).json({ error: 'Not found' });
+      return res.json({ ok: true, recycled: true });
+    }
     if (table === APPLICANTS_PROFILE_TABLE) {
       client = await pool.connect();
       await client.query('BEGIN');

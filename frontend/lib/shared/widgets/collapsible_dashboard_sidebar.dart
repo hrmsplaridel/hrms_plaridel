@@ -296,8 +296,18 @@ class _DashboardSidebarNavTileState extends State<DashboardSidebarNavTile> {
               child: IgnorePointer(
                 ignoring: t > 0.5,
                 child: MouseRegion(
-                  onEnter: (_) => setState(() => _hover = true),
-                  onExit: (_) => setState(() => _hover = false),
+                  onEnter: (_) {
+                    if (_hover) return;
+                    WidgetsBinding.instance.addPostFrameCallback((_) {
+                      if (mounted && !_hover) setState(() => _hover = true);
+                    });
+                  },
+                  onExit: (_) {
+                    if (!_hover) return;
+                    WidgetsBinding.instance.addPostFrameCallback((_) {
+                      if (mounted && _hover) setState(() => _hover = false);
+                    });
+                  },
                   child: Padding(
                     padding: const EdgeInsets.symmetric(
                       horizontal: 12,
@@ -401,8 +411,12 @@ class _CollapsedNavOrb extends StatelessWidget {
     final inactive = AppTheme.dashTextSecondaryOf(context);
 
     return MouseRegion(
-      onEnter: (_) => onHover(true),
-      onExit: (_) => onHover(false),
+      onEnter: (_) {
+        WidgetsBinding.instance.addPostFrameCallback((_) => onHover(true));
+      },
+      onExit: (_) {
+        WidgetsBinding.instance.addPostFrameCallback((_) => onHover(false));
+      },
       child: Material(
         color: Colors.transparent,
         child: InkWell(

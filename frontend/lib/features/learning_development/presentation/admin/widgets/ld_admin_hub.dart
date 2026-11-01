@@ -42,12 +42,38 @@ const _ldHubFeatures = <LdHubFeature>[
 
 /// L&D hub: title, subtitle, and feature cards (same layout as DTR).
 class LdAdminHub extends StatelessWidget {
-  const LdAdminHub({super.key, required this.onOpenSection});
+  const LdAdminHub({
+    super.key,
+    required this.onOpenSection,
+    this.featureAccess = const {},
+  });
 
   final ValueChanged<int> onOpenSection;
+  final Map<String, bool> featureAccess;
+
+  static const _formFields = [
+    'form_tna_allowed',
+    'form_action_brainstorming_allowed',
+    'form_idp_allowed',
+    'form_lap_allowed',
+  ];
+
+  bool _allowed(int sectionIndex) {
+    switch (sectionIndex) {
+      case 1:
+        return _formFields.any((f) => featureAccess[f] == true);
+      case 3:
+        return featureAccess['daily_reports_allowed'] == true;
+      case 5:
+        return featureAccess['requirements_allowed'] == true;
+      default:
+        return false;
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
+    final visible = _ldHubFeatures.where((f) => _allowed(f.sectionIndex));
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -81,17 +107,27 @@ class LdAdminHub extends StatelessWidget {
           ],
         ),
         const SizedBox(height: 24),
-        FeatureCardGrid(
-          children: [
-            for (final f in _ldHubFeatures)
-              FeatureCard(
-                title: f.title,
-                subtitle: f.subtitle,
-                icon: f.icon,
-                onTap: () => onOpenSection(f.sectionIndex),
-              ),
-          ],
-        ),
+        if (visible.isEmpty)
+          Text(
+            'No L&D features are enabled for your account. Ask a super admin to update Manage Access.',
+            style: TextStyle(
+              color: AppTheme.dashTextSecondaryOf(context),
+              fontSize: 14,
+              height: 1.4,
+            ),
+          )
+        else
+          FeatureCardGrid(
+            children: [
+              for (final f in visible)
+                FeatureCard(
+                  title: f.title,
+                  subtitle: f.subtitle,
+                  icon: f.icon,
+                  onTap: () => onOpenSection(f.sectionIndex),
+                ),
+            ],
+          ),
       ],
     );
   }

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
+import 'package:hrms_plaridel/features/dtr/management/employees/pages/manage_employee.dart';
 import 'package:hrms_plaridel/features/recruitment/data/recruitment_hire_prefill.dart';
 import 'package:hrms_plaridel/features/recruitment/models/recruitment_application.dart';
 import 'package:hrms_plaridel/features/recruitment/presentation/admin/widgets/rsp_hire_email_dialog.dart';
@@ -23,14 +24,17 @@ class RspEmployeeAccountSetupPanel extends StatefulWidget {
 
   final RecruitmentApplication app;
   final Future<void> Function() onReload;
+
+  /// Optional legacy sidebar navigation. Final Requirements opens a right panel instead.
   final VoidCallback? onGoToCreateAccount;
+
   final bool busy;
   final ValueChanged<bool>? onBusyChanged;
 
   /// When false, all actions are disabled until orientation is marked attended.
   final bool enabled;
 
-  /// Tighter spacing for Final Requirements 3-column layout.
+  /// Tighter spacing for Final Requirements layout.
   final bool compact;
 
   /// When false, Step 8 is rendered by the parent (full-width footer).
@@ -48,8 +52,6 @@ class _RspEmployeeAccountSetupPanelState
       (widget.app.hiredUserId != null &&
           widget.app.hiredUserId!.trim().isNotEmpty);
 
-  bool get _canNavigate => widget.onGoToCreateAccount != null;
-
   Future<void> _withBusy(Future<void> Function() fn) async {
     widget.onBusyChanged?.call(true);
     try {
@@ -60,7 +62,7 @@ class _RspEmployeeAccountSetupPanelState
     }
   }
 
-  void _goToCreateAccount() {
+  void _armPrefill() {
     final app = widget.app;
     context.read<RecruitmentHirePrefill>().arm(
       applicationId: app.id,
@@ -75,15 +77,65 @@ class _RspEmployeeAccountSetupPanelState
       address: app.address,
       dateOfBirth: app.dateOfBirth,
     );
-    widget.onGoToCreateAccount?.call();
-    if (mounted) {
+  }
+
+  Future<void> _openCreateAccountPanel() async {
+    _armPrefill();
+    if (!mounted) return;
+    final created = await showGeneralDialog<bool>(
+      context: context,
+      useRootNavigator: true,
+      barrierLabel: 'Create Account',
+      barrierDismissible: true,
+      barrierColor: Colors.black.withValues(alpha: 0.35),
+      transitionDuration: const Duration(milliseconds: 220),
+      pageBuilder: (ctx, _, __) {
+        return Align(
+          alignment: Alignment.centerRight,
+          child: Material(
+            color: AppTheme.dashPanelOf(ctx),
+            elevation: 12,
+            child: SizedBox(
+              width: MediaQuery.sizeOf(ctx).width < 720
+                  ? MediaQuery.sizeOf(ctx).width
+                  : 560,
+              height: MediaQuery.sizeOf(ctx).height,
+              child: _RspCreateAccountDrawer(
+                app: widget.app,
+                onCreated: () => Navigator.of(ctx).pop(true),
+              ),
+            ),
+          ),
+        );
+      },
+      transitionBuilder: (ctx, anim, _, child) {
+        return SlideTransition(
+          position: Tween<Offset>(
+            begin: const Offset(1, 0),
+            end: Offset.zero,
+          ).animate(CurvedAnimation(parent: anim, curve: Curves.easeOutCubic)),
+          child: child,
+        );
+      },
+    );
+
+    if (!mounted) return;
+    if (created == true) {
+      await widget.onReload();
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text(
-            'Create Account opened. After you save, you will return here to email credentials.',
+            'Account created and linked. You can email login credentials here.',
           ),
         ),
       );
+      return;
+    }
+
+    final hire = context.read<RecruitmentHirePrefill>();
+    if (hire.applicationId == widget.app.id) {
+      hire.clear();
     }
   }
 
@@ -168,14 +220,14 @@ class _RspEmployeeAccountSetupPanelState
       builder: (context, c) {
         final wide = !compact && c.maxWidth >= 560;
         final openBtn = FilledButton.icon(
-          onPressed: locked || !_canNavigate || busy || accountLinked
+          onPressed: locked || busy || accountLinked
               ? null
-              : _goToCreateAccount,
+              : _openCreateAccountPanel,
           icon: Icon(
-            accountLinked ? Icons.link_rounded : Icons.open_in_new_rounded,
+            accountLinked ? Icons.link_rounded : Icons.person_add_alt_1_rounded,
             size: compact ? 16 : 20,
           ),
-          label: Text(accountLinked ? 'Account linked' : 'Open Create Account'),
+          label: Text(accountLinked ? 'Account linked' : 'Create Account'),
           style: FilledButton.styleFrom(
             backgroundColor: navy,
             disabledBackgroundColor: navy.withValues(alpha: 0.25),
@@ -375,7 +427,7 @@ class _RspEmployeeAccountSetupPanelState
                       child: Text(
                         accountLinked
                             ? 'Account is ready. Email login details to ${app.email.trim().isEmpty ? 'the applicant' : app.email.trim()}.'
-                            : 'Create the employee account first. Email applicant stays gray until the account is linked.',
+                            : 'Opens Create Account in a right panel (same as Applicant details). Email stays gray until linked.',
                         style: TextStyle(
                           fontSize: 12,
                           color: AppTheme.dashTextSecondaryOf(context),
@@ -396,7 +448,7 @@ class _RspEmployeeAccountSetupPanelState
                   Padding(
                     padding: const EdgeInsets.only(bottom: 4),
                     child: Text(
-                      'Create the employee account first. Email applicant stays gray until the account is linked.',
+                      'Opens Create Account in a right panel. Email applicant stays gray until the account is linked.',
                       style: TextStyle(
                         fontSize: 12,
                         color: AppTheme.dashTextSecondaryOf(context),
@@ -407,16 +459,6 @@ class _RspEmployeeAccountSetupPanelState
                 const SizedBox(height: 10),
                 SizedBox(width: double.infinity, child: openBtn),
               ],
-            ],
-            if (!_canNavigate) ...[
-              SizedBox(height: compact ? 6 : 8),
-              Text(
-                'Use the admin sidebar to open Create Account.',
-                style: TextStyle(
-                  fontSize: compact ? 11 : 12,
-                  color: AppTheme.dashTextSecondaryOf(context),
-                ),
-              ),
             ],
             if (widget.showApplicantStatus) ...[
               SizedBox(height: compact ? 12 : 22),
@@ -492,5 +534,115 @@ class _RspEmployeeAccountSetupPanelState
   String _formatCompactStamp(DateTime d, BuildContext context) {
     final local = d.toLocal();
     return '${RspFinalReqUi.formatDateShort(local)} · ${TimeOfDay.fromDateTime(local).format(context)}';
+  }
+}
+
+/// Right-side Create Account drawer — same slide-in pattern as Applicant details.
+class _RspCreateAccountDrawer extends StatelessWidget {
+  const _RspCreateAccountDrawer({
+    required this.app,
+    required this.onCreated,
+  });
+
+  final RecruitmentApplication app;
+  final VoidCallback onCreated;
+
+  @override
+  Widget build(BuildContext context) {
+    final primary = AppTheme.dashTextPrimaryOf(context);
+    final secondary = AppTheme.dashTextSecondaryOf(context);
+    final name = app.fullName.trim().isEmpty
+        ? 'Unnamed applicant'
+        : app.fullName.trim();
+    final position = (app.positionAppliedFor ?? '').trim().isEmpty
+        ? '—'
+        : app.positionAppliedFor!.trim();
+    final applicantId = (app.applicantNumber ?? '').trim().isEmpty
+        ? app.id
+        : app.applicantNumber!.trim();
+
+    return ColoredBox(
+      color: AppTheme.dashCanvasOf(context),
+      child: SafeArea(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Container(
+              height: 4,
+              decoration: const BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [AppTheme.primaryNavy, AppTheme.primaryNavyLight],
+                ),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(8, 6, 8, 0),
+              child: Row(
+                children: [
+                  IconButton(
+                    tooltip: 'Close',
+                    onPressed: () => Navigator.of(context).pop(false),
+                    icon: const Icon(Icons.close_rounded),
+                  ),
+                  Expanded(
+                    child: Text(
+                      'Create Account',
+                      style: TextStyle(
+                        fontWeight: FontWeight.w800,
+                        fontSize: 15,
+                        color: primary,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    name,
+                    style: TextStyle(
+                      fontWeight: FontWeight.w800,
+                      fontSize: 17,
+                      color: primary,
+                      letterSpacing: -0.2,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    '$applicantId · $position',
+                    style: TextStyle(
+                      fontSize: 12.5,
+                      color: secondary,
+                      height: 1.3,
+                    ),
+                  ),
+                  if (app.email.trim().isNotEmpty) ...[
+                    const SizedBox(height: 2),
+                    Text(
+                      app.email.trim(),
+                      style: TextStyle(fontSize: 12.5, color: secondary),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            Divider(height: 1, color: AppTheme.dashHairlineOf(context)),
+            Expanded(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.fromLTRB(12, 12, 12, 24),
+                child: AddEmployeeForm(
+                  key: ValueKey('rsp-hire-drawer-${app.id}'),
+                  onAccountCreated: onCreated,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }

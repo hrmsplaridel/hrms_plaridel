@@ -30,7 +30,7 @@ class _LdTrainingRequirementsEmployeeScreenState
   LdTrainingRequirementRecord? _record;
   List<LdTrainingRequirementRecord> _history = const [];
   bool _loading = true;
-  bool _uploading = false;
+  final Set<LdTrainingRequirementDocKind> _uploadingKinds = {};
   bool _savingTitle = false;
   final _trainingTitleController = TextEditingController();
   final Map<LdTrainingRequirementDocKind, PlatformFile> _picked = {};
@@ -47,8 +47,8 @@ class _LdTrainingRequirementsEmployeeScreenState
     super.dispose();
   }
 
-  Future<void> _load() async {
-    setState(() => _loading = true);
+  Future<void> _load({bool silent = false}) async {
+    if (!silent) setState(() => _loading = true);
     try {
       final mine = await LdTrainingRequirementRepo.instance.loadMine();
       if (!mounted) return;
@@ -124,7 +124,8 @@ class _LdTrainingRequirementsEmployeeScreenState
     final r = _record;
     final f = _picked[kind];
     if (r == null || f == null || f.bytes == null) return;
-    setState(() => _uploading = true);
+    if (_uploadingKinds.contains(kind)) return;
+    setState(() => _uploadingKinds.add(kind));
     try {
       await LdTrainingRequirementRepo.instance.uploadDocument(
         r.id,
@@ -134,7 +135,7 @@ class _LdTrainingRequirementsEmployeeScreenState
       );
       if (!mounted) return;
       setState(() => _picked.remove(kind));
-      await _load();
+      await _load(silent: true);
       if (!mounted) return;
       ScaffoldMessenger.of(
         context,
@@ -145,7 +146,7 @@ class _LdTrainingRequirementsEmployeeScreenState
         context,
       ).showSnackBar(SnackBar(content: Text(userFacingApiError(e))));
     } finally {
-      if (mounted) setState(() => _uploading = false);
+      if (mounted) setState(() => _uploadingKinds.remove(kind));
     }
   }
 
@@ -257,7 +258,7 @@ class _LdTrainingRequirementsEmployeeScreenState
               'Enter the training or seminar you will attend above to start submitting requirements.',
           compact: compact,
           picked: _picked,
-          uploading: _uploading,
+          uploadingKinds: _uploadingKinds,
           onPick: _pick,
           onRemove: _removePicked,
           onUpload: _uploadKind,
@@ -287,7 +288,7 @@ class _LdTrainingRequirementsEmployeeScreenState
               : 'Enter the training or seminar you will attend above to start.',
           compact: compact,
           picked: _picked,
-          uploading: _uploading,
+          uploadingKinds: _uploadingKinds,
           onPick: _pick,
           onRemove: _removePicked,
           onUpload: _uploadKind,
@@ -313,6 +314,9 @@ class _LdTrainingRequirementsEmployeeScreenState
                 justCompleted: !declared && _history.isNotEmpty,
                 compact: compact,
                 onSave: _saveTrainingTitle,
+                historyAction: _history.isEmpty
+                    ? null
+                    : _historyButton(context, fullWidth: compact),
               ),
             ),
             const SizedBox(height: 16),
@@ -330,15 +334,81 @@ class _LdTrainingRequirementsEmployeeScreenState
               const SizedBox(height: 16),
               postCard,
             ],
-            if (_history.isNotEmpty) ...[
-              const SizedBox(height: 20),
-              _CompletedTrainings(
-                records: _history,
-                compact: compact,
-                onPreview: _previewRecordDoc,
-              ),
-            ],
           ],
+        );
+      },
+    );
+  }
+
+  Widget _historyButton(BuildContext context, {required bool fullWidth}) {
+    final button = OutlinedButton.icon(
+      onPressed: _openTrainingHistory,
+      icon: const Icon(Icons.history_rounded, size: 18),
+      label: Text('Training history (${_history.length})'),
+      style: OutlinedButton.styleFrom(
+        foregroundColor: AppTheme.primaryNavy,
+        backgroundColor: AppTheme.dashPanelOf(context),
+        side: BorderSide(
+          color: AppTheme.primaryNavy.withValues(alpha: 0.4),
+        ),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        minimumSize: const Size(0, 44),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        textStyle: const TextStyle(fontWeight: FontWeight.w800, fontSize: 14),
+      ),
+    );
+    if (!fullWidth) return button;
+    return SizedBox(width: double.infinity, child: button);
+  }
+
+  Future<void> _openTrainingHistory() {
+    return showGeneralDialog<void>(
+      context: context,
+      barrierDismissible: true,
+      barrierLabel: 'Close training history',
+      barrierColor: Colors.black.withValues(alpha: 0.28),
+      transitionDuration: const Duration(milliseconds: 240),
+      pageBuilder: (dialogContext, _, __) {
+        final mq = MediaQuery.of(dialogContext);
+        final size = mq.size;
+        final narrow = size.width < 720;
+        final topInset = narrow ? mq.padding.top + 8 : 12.0;
+        final bottomInset = narrow ? mq.padding.bottom + 8 : 12.0;
+        final rightInset = narrow ? 0.0 : 16.0;
+        final panelWidth = narrow ? size.width - 12 : 440.0;
+        return Align(
+          alignment: Alignment.centerRight,
+          child: Padding(
+            padding: EdgeInsets.fromLTRB(0, topInset, rightInset, bottomInset),
+            child: Material(
+              color: AppTheme.dashPanelOf(dialogContext),
+              elevation: 16,
+              shadowColor: Colors.black.withValues(alpha: 0.18),
+              borderRadius: BorderRadius.horizontal(
+                left: const Radius.circular(18),
+                right: narrow ? Radius.zero : const Radius.circular(18),
+              ),
+              clipBehavior: Clip.antiAlias,
+              child: SizedBox(
+                width: panelWidth,
+                height: size.height - topInset - bottomInset,
+                child: _CompletedTrainings(
+                  records: _history,
+                  onClose: () => Navigator.of(dialogContext).pop(),
+                  onPreview: _previewRecordDoc,
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+      transitionBuilder: (ctx, anim, _, child) {
+        return SlideTransition(
+          position: Tween<Offset>(
+            begin: const Offset(1, 0),
+            end: Offset.zero,
+          ).animate(CurvedAnimation(parent: anim, curve: Curves.easeOutCubic)),
+          child: child,
         );
       },
     );
@@ -420,19 +490,22 @@ class _RequirementsHero extends StatelessWidget {
                   children: [
                     Text(
                       'EMPLOYEE TRAINING',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                       style: TextStyle(
                         color: AppTheme.primaryNavy,
                         fontSize: 11,
                         fontWeight: FontWeight.w800,
-                        letterSpacing: 1.1,
+                        letterSpacing: compact ? 0.6 : 1.1,
                       ),
                     ),
                     const SizedBox(height: 3),
                     Text(
                       'Training Requirements',
+                      maxLines: 2,
                       style: TextStyle(
                         color: primary,
-                        fontSize: compact ? 22 : 28,
+                        fontSize: compact ? 20 : 28,
                         fontWeight: FontWeight.w800,
                         height: 1.15,
                         letterSpacing: -0.3,
@@ -537,28 +610,37 @@ class _ProgressSteps extends StatelessWidget {
 
     return Row(
       children: [
-        _StepNode(
-          number: 1,
-          label: compact ? 'Pre' : 'Pre-training',
-          done: preDone,
-          active: preActive,
-          locked: false,
+        Expanded(
+          flex: 3,
+          child: _StepNode(
+            number: 1,
+            label: compact ? 'Pre' : 'Pre-training',
+            done: preDone,
+            active: preActive,
+            locked: false,
+          ),
         ),
         connector(preDone),
-        _StepNode(
-          number: 2,
-          label: compact ? 'Post' : 'Post-training',
-          done: postDone,
-          active: postActive,
-          locked: postLocked,
+        Expanded(
+          flex: 3,
+          child: _StepNode(
+            number: 2,
+            label: compact ? 'Post' : 'Post-training',
+            done: postDone,
+            active: postActive,
+            locked: postLocked,
+          ),
         ),
         connector(postDone),
-        _StepNode(
-          number: 3,
-          label: 'Complete',
-          done: postDone,
-          active: false,
-          locked: false,
+        Expanded(
+          flex: 3,
+          child: _StepNode(
+            number: 3,
+            label: compact ? 'Done' : 'Complete',
+            done: postDone,
+            active: false,
+            locked: false,
+          ),
         ),
       ],
     );
@@ -654,6 +736,7 @@ class _TrainingTitleCard extends StatelessWidget {
     required this.justCompleted,
     required this.compact,
     required this.onSave,
+    this.historyAction,
   });
 
   final TextEditingController controller;
@@ -670,6 +753,7 @@ class _TrainingTitleCard extends StatelessWidget {
   final bool justCompleted;
   final bool compact;
   final VoidCallback onSave;
+  final Widget? historyAction;
 
   static const _accent = Color(0xFFE85D04);
 
@@ -687,7 +771,7 @@ class _TrainingTitleCard extends StatelessWidget {
               ? 'Locked after HR approved your pre-training documents.'
               : 'Identify the training/program associated with these requirements.')
         : (justCompleted
-              ? 'Previous training completed. Declare your next training or seminar to submit new requirements.'
+              ? 'Previous training is complete. Declare the next one before submitting new requirements.'
               : 'Declare the training or seminar you will attend before submitting any requirements.');
 
     final input = TextField(
@@ -757,66 +841,54 @@ class _TrainingTitleCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          if (compact) ...[
-            Row(
-              children: [
-                _programIcon(),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        heading,
-                        style: TextStyle(
-                          fontWeight: FontWeight.w800,
-                          fontSize: 15,
-                          color: primary,
-                        ),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _programIcon(),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      heading,
+                      style: TextStyle(
+                        fontWeight: FontWeight.w800,
+                        fontSize: 15,
+                        color: primary,
                       ),
-                      Text(
-                        subheading,
-                        style: TextStyle(fontSize: 12, color: secondary),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      subheading,
+                      style: TextStyle(
+                        fontSize: 13,
+                        color: secondary,
+                        height: 1.35,
                       ),
-                    ],
-                  ),
+                    ),
+                  ],
                 ),
+              ),
+              if (!compact && historyAction != null) ...[
+                const SizedBox(width: 12),
+                historyAction!,
               ],
-            ),
+            ],
+          ),
+          if (compact && historyAction != null) ...[
             const SizedBox(height: 12),
+            historyAction!,
+          ],
+          const SizedBox(height: 14),
+          if (compact) ...[
             input,
             const SizedBox(height: 10),
             saveBtn,
           ] else
             Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
               children: [
-                _programIcon(),
-                const SizedBox(width: 12),
-                SizedBox(
-                  width: 210,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        heading,
-                        style: TextStyle(
-                          fontWeight: FontWeight.w800,
-                          fontSize: 15,
-                          color: primary,
-                        ),
-                      ),
-                      Text(
-                        subheading,
-                        style: TextStyle(
-                          fontSize: 11.5,
-                          color: secondary,
-                          height: 1.3,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(width: 12),
                 Expanded(child: input),
                 const SizedBox(width: 12),
                 saveBtn,
@@ -864,7 +936,7 @@ class _PhaseCard extends StatelessWidget {
     required this.locked,
     required this.compact,
     required this.picked,
-    required this.uploading,
+    required this.uploadingKinds,
     required this.onPick,
     required this.onRemove,
     required this.onUpload,
@@ -884,7 +956,7 @@ class _PhaseCard extends StatelessWidget {
   final String? lockedMessage;
   final bool compact;
   final Map<LdTrainingRequirementDocKind, PlatformFile> picked;
-  final bool uploading;
+  final Set<LdTrainingRequirementDocKind> uploadingKinds;
   final ValueChanged<LdTrainingRequirementDocKind> onPick;
   final ValueChanged<LdTrainingRequirementDocKind> onRemove;
   final ValueChanged<LdTrainingRequirementDocKind> onUpload;
@@ -896,6 +968,9 @@ class _PhaseCard extends StatelessWidget {
     final p = record.docPath(k);
     return p != null && p.trim().isNotEmpty;
   }).length;
+
+  bool _isUploading(LdTrainingRequirementDocKind kind) =>
+      uploadingKinds.contains(kind);
 
   bool _isDocLocked(LdTrainingRequirementDocKind kind) {
     if (kind.isPreTraining) return record.preRequirementsApproved;
@@ -935,7 +1010,7 @@ class _PhaseCard extends StatelessWidget {
         pickedSingle != null &&
         !locked &&
         !_isDocLocked(kinds.first) &&
-        !uploading;
+        !_isUploading(kinds.first);
 
     return Container(
       decoration: _panelDecoration(context).copyWith(
@@ -986,10 +1061,14 @@ class _PhaseCard extends StatelessWidget {
                         title,
                         style: TextStyle(
                           fontWeight: FontWeight.w800,
-                          fontSize: 16,
+                          fontSize: compact ? 15 : 16,
                           color: primary,
                         ),
                       ),
+                      if (compact) ...[
+                        const SizedBox(height: 6),
+                        _StatusBadge(status: status),
+                      ],
                       const SizedBox(height: 4),
                       Text(
                         description,
@@ -1002,8 +1081,10 @@ class _PhaseCard extends StatelessWidget {
                     ],
                   ),
                 ),
-                const SizedBox(width: 8),
-                _StatusBadge(status: status),
+                if (!compact) ...[
+                  const SizedBox(width: 8),
+                  _StatusBadge(status: status),
+                ],
               ],
             ),
             if (!locked && kinds.length > 1) ...[
@@ -1091,9 +1172,11 @@ class _PhaseCard extends StatelessWidget {
                             kind: kinds[i],
                             record: record,
                             disabled:
-                                locked || _isDocLocked(kinds[i]) || uploading,
+                                locked ||
+                                _isDocLocked(kinds[i]) ||
+                                _isUploading(kinds[i]),
                             picked: picked[kinds[i]],
-                            uploading: uploading,
+                            uploading: _isUploading(kinds[i]),
                             showUploadButton: !singleKind,
                             onPick: () => onPick(kinds[i]),
                             onRemove: () => onRemove(kinds[i]),
@@ -1112,9 +1195,12 @@ class _PhaseCard extends StatelessWidget {
                       _DocTile(
                         kind: kinds[i],
                         record: record,
-                        disabled: locked || _isDocLocked(kinds[i]) || uploading,
+                        disabled:
+                            locked ||
+                            _isDocLocked(kinds[i]) ||
+                            _isUploading(kinds[i]),
                         picked: picked[kinds[i]],
-                        uploading: uploading,
+                        uploading: _isUploading(kinds[i]),
                         showUploadButton: !singleKind,
                         onPick: () => onPick(kinds[i]),
                         onRemove: () => onRemove(kinds[i]),
@@ -1172,7 +1258,7 @@ class _PhaseCard extends StatelessWidget {
                     onPressed: canSubmitSingle
                         ? () => onUpload(kinds.first)
                         : null,
-                    icon: uploading
+                    icon: _isUploading(kinds.first)
                         ? const SizedBox(
                             width: 16,
                             height: 16,
@@ -1183,7 +1269,7 @@ class _PhaseCard extends StatelessWidget {
                           )
                         : const Icon(Icons.send_rounded, size: 16),
                     label: Text(
-                      uploading
+                      _isUploading(kinds.first)
                           ? 'Submitting…'
                           : storedSingle
                           ? 'Submitted'
@@ -1215,12 +1301,12 @@ class _PhaseCard extends StatelessWidget {
 class _CompletedTrainings extends StatefulWidget {
   const _CompletedTrainings({
     required this.records,
-    required this.compact,
+    required this.onClose,
     required this.onPreview,
   });
 
   final List<LdTrainingRequirementRecord> records;
-  final bool compact;
+  final VoidCallback onClose;
   final void Function(
     LdTrainingRequirementRecord record,
     LdTrainingRequirementDocKind kind,
@@ -1232,62 +1318,74 @@ class _CompletedTrainings extends StatefulWidget {
 }
 
 class _CompletedTrainingsState extends State<_CompletedTrainings> {
-  bool _open = false;
   final Set<String> _openRecords = {};
 
   @override
   Widget build(BuildContext context) {
     final primary = AppTheme.dashTextPrimaryOf(context);
     final secondary = AppTheme.dashTextSecondaryOf(context);
-    final pad = widget.compact ? 16.0 : 20.0;
-    return Container(
-      decoration: _panelDecoration(context),
-      clipBehavior: Clip.antiAlias,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          InkWell(
-            onTap: () => setState(() => _open = !_open),
-            child: Padding(
-              padding: EdgeInsets.all(pad),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      'Training history (${widget.records.length})',
+    final count = widget.records.length;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Container(height: 3, color: AppTheme.primaryNavy),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(18, 16, 8, 12),
+          child: Row(
+            children: [
+              Container(
+                width: 36,
+                height: 36,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: AppTheme.primaryNavy.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: const Icon(
+                  Icons.history_rounded,
+                  size: 20,
+                  color: AppTheme.primaryNavy,
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Training history',
                       style: TextStyle(
                         fontWeight: FontWeight.w800,
-                        fontSize: 15,
+                        fontSize: 16,
                         color: primary,
                       ),
                     ),
-                  ),
-                  Text(
-                    _open ? 'Hide' : 'Show',
-                    style: TextStyle(fontSize: 12, color: secondary),
-                  ),
-                  Icon(
-                    _open
-                        ? Icons.keyboard_arrow_up_rounded
-                        : Icons.keyboard_arrow_down_rounded,
-                    color: secondary,
-                  ),
-                ],
+                    const SizedBox(height: 2),
+                    Text(
+                      '$count completed ${count == 1 ? 'training' : 'trainings'}',
+                      style: TextStyle(fontSize: 12.5, color: secondary),
+                    ),
+                  ],
+                ),
               ),
-            ),
+              IconButton(
+                tooltip: 'Close',
+                onPressed: widget.onClose,
+                icon: Icon(Icons.close_rounded, color: secondary),
+              ),
+            ],
           ),
-          if (_open)
-            Padding(
-              padding: EdgeInsets.fromLTRB(pad, 0, pad, pad),
-              child: Column(
-                children: [
-                  for (final r in widget.records)
-                    _recordTile(r, primary, secondary),
-                ],
-              ),
-            ),
-        ],
-      ),
+        ),
+        Divider(height: 1, color: AppTheme.dashHairlineOf(context)),
+        Expanded(
+          child: ListView(
+            padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
+            children: [
+              for (final r in widget.records) _recordTile(r, primary, secondary),
+            ],
+          ),
+        ),
+      ],
     );
   }
 
@@ -1362,15 +1460,16 @@ class _CompletedTrainingsState extends State<_CompletedTrainings> {
                             style: TextStyle(fontSize: 11.5, color: secondary),
                           ),
                         ],
+                        const SizedBox(height: 2),
+                        const Text(
+                          'Approved',
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
+                            color: Color(0xFF2E7D32),
+                          ),
+                        ),
                       ],
-                    ),
-                  ),
-                  Text(
-                    'Approved',
-                    style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w700,
-                      color: secondary,
                     ),
                   ),
                   Icon(
@@ -1462,6 +1561,8 @@ class _CompletedTrainingsState extends State<_CompletedTrainings> {
               Expanded(
                 child: Text(
                   label,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
                   style: TextStyle(
                     fontSize: 13,
                     fontWeight: FontWeight.w800,
@@ -1526,6 +1627,12 @@ class _CompletedTrainingsState extends State<_CompletedTrainings> {
           if (has)
             TextButton(
               onPressed: () => widget.onPreview(r, kind),
+              style: TextButton.styleFrom(
+                visualDensity: VisualDensity.compact,
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                minimumSize: const Size(44, 36),
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+              ),
               child: const Text('View'),
             ),
         ],
@@ -1744,6 +1851,8 @@ class _DocTile extends StatelessWidget {
                   children: [
                     Text(
                       shortLabel(kind),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
                       style: TextStyle(
                         fontWeight: FontWeight.w800,
                         fontSize: 13,
@@ -1752,6 +1861,8 @@ class _DocTile extends StatelessWidget {
                     ),
                     Text(
                       _kindSubtitle(kind),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
                       style: TextStyle(fontSize: 11.5, color: secondary),
                     ),
                   ],
@@ -1839,6 +1950,8 @@ class _DocTile extends StatelessWidget {
                         Text(
                           'Drop your ${shortLabel(kind).toLowerCase()} here',
                           textAlign: TextAlign.center,
+                          maxLines: 3,
+                          overflow: TextOverflow.ellipsis,
                           style: TextStyle(
                             fontSize: 12.5,
                             fontWeight: FontWeight.w600,
@@ -1929,9 +2042,27 @@ class _FileRow extends StatelessWidget {
             ),
           ),
           if (onView != null)
-            TextButton(onPressed: onView, child: const Text('View')),
+            TextButton(
+              onPressed: onView,
+              style: TextButton.styleFrom(
+                visualDensity: VisualDensity.compact,
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                minimumSize: const Size(44, 36),
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+              ),
+              child: const Text('View'),
+            ),
           if (onRemove != null)
-            TextButton(onPressed: onRemove, child: const Text('Remove')),
+            TextButton(
+              onPressed: onRemove,
+              style: TextButton.styleFrom(
+                visualDensity: VisualDensity.compact,
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                minimumSize: const Size(44, 36),
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+              ),
+              child: const Text('Remove'),
+            ),
         ],
       ),
     );

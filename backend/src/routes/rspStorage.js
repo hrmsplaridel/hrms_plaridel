@@ -7,11 +7,12 @@ const fs = require('fs');
 const jwt = require('jsonwebtoken');
 const { authMiddleware } = require('../middleware/auth');
 const { requireAdmin } = require('../middleware/rbac');
+const { requireAnyRspAccessIfAdmin } = require('../middleware/rspAccess');
 const { isAttachmentPathAllowedInDb } = require('../utils/rspAttachmentPolicy');
 const { getRspAttachmentsRoot } = require('../utils/rspLocalAttachment');
 
 const router = express.Router();
-const protect = [authMiddleware, requireAdmin];
+const protect = [authMiddleware, requireAdmin, requireAnyRspAccessIfAdmin];
 
 const UPLOAD_DIR = process.env.UPLOAD_DIR || path.join(__dirname, '../../uploads');
 

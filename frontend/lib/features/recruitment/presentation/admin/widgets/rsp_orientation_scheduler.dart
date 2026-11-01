@@ -1,14 +1,26 @@
-import 'package:flutter/material.dart';
+import 'dart:async';
 
+import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+
+import 'package:hrms_plaridel/core/services/app_realtime_provider.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/features/recruitment/models/recruitment_application.dart';
 import 'package:hrms_plaridel/features/recruitment/presentation/admin/widgets/rsp_scheduling_ui.dart';
 
 /// Admin: schedule orientation for applicants who complied with final requirements.
 class RspOrientationScheduler extends StatefulWidget {
-  const RspOrientationScheduler({super.key, this.embedded = false});
+  const RspOrientationScheduler({
+    super.key,
+    this.embedded = false,
+    this.live = false,
+  });
 
   final bool embedded;
+
+  /// When true, the list reloads as applicant data changes.
+  /// The Refresh button still reloads on demand.
+  final bool live;
 
   @override
   State<RspOrientationScheduler> createState() =>
@@ -25,23 +37,81 @@ class _RspOrientationSchedulerState extends State<RspOrientationScheduler> {
   final Set<String> _savingIds = {};
   final Set<String> _expandedIds = {};
   final Set<String> _collapsedIds = {};
+  Timer? _liveTimer;
+  StreamSubscription<AppRealtimeEvent>? _liveSub;
+  bool _liveHooksReady = false;
+  bool _loadInFlight = false;
+  bool _reloadQueued = false;
+  bool _queuedSilent = true;
 
-  Future<void> _load() async {
-    setState(() => _loading = true);
+  String _snapshot(List<RecruitmentApplication> apps) {
+    final rows = [...apps]..sort((a, b) => a.id.compareTo(b.id));
+    final buf = StringBuffer();
+    for (final app in rows) {
+      buf
+        ..write(app.id)
+        ..write('|')
+        ..write(app.updatedAt?.toIso8601String())
+        ..write('|')
+        ..write(app.fullName)
+        ..write('|')
+        ..write(app.email)
+        ..write('|')
+        ..write(app.positionAppliedFor)
+        ..write('|')
+        ..write(app.status)
+        ..write('|')
+        ..write(app.createdAt?.toIso8601String())
+        ..write('|')
+        ..write(app.finalRequirementsApproved)
+        ..write('|')
+        ..write(app.orientationAt?.toIso8601String())
+        ..write('|')
+        ..write(app.orientationAttended)
+        ..write(';');
+    }
+    return buf.toString();
+  }
+
+  Future<void> _load({bool silent = false}) async {
+    if (_loadInFlight) {
+      _reloadQueued = true;
+      _queuedSilent = _queuedSilent && silent;
+      return;
+    }
+    _loadInFlight = true;
+    _queuedSilent = true;
+    final showSpinner = !silent || _applications.isEmpty;
+    if (showSpinner && mounted) setState(() => _loading = true);
     try {
       final apps = await RecruitmentRepo.instance.listApplications();
       if (!mounted) return;
+      final visible = apps.where((a) => a.finalRequirementsApproved).toList();
+      final unchanged =
+          silent && _snapshot(visible) == _snapshot(_applications);
+      if (unchanged) {
+        if (_loading) setState(() => _loading = false);
+        return;
+      }
       setState(() {
-        _applications = apps.where((a) => a.finalRequirementsApproved).toList()
-          ..sort(_compareBySchedulingActivity);
+        _applications = visible..sort(_compareBySchedulingActivity);
         _loading = false;
       });
     } catch (_) {
       if (!mounted) return;
+      if (silent && _applications.isNotEmpty) return;
       setState(() {
         _applications = [];
         _loading = false;
       });
+    } finally {
+      _loadInFlight = false;
+      if (_reloadQueued && mounted) {
+        final nextSilent = _queuedSilent;
+        _reloadQueued = false;
+        _queuedSilent = true;
+        unawaited(_load(silent: nextSilent));
+      }
     }
   }
 
@@ -49,6 +119,51 @@ class _RspOrientationSchedulerState extends State<RspOrientationScheduler> {
   void initState() {
     super.initState();
     _load();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (!_liveHooksReady) {
+      _liveHooksReady = true;
+      _liveSub = context.read<AppRealtimeProvider>().events.listen((event) {
+        if (!mounted || !widget.live || _savingIds.isNotEmpty) return;
+        if (event.name != 'rsp_applications_changed' &&
+            event.name != 'rsp_exam_results_changed') {
+          return;
+        }
+        unawaited(_load(silent: true));
+      });
+    }
+    _syncLiveTimer();
+  }
+
+  @override
+  void didUpdateWidget(covariant RspOrientationScheduler oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.live && !oldWidget.live) {
+      unawaited(_load(silent: _applications.isNotEmpty));
+    }
+    _syncLiveTimer();
+  }
+
+  void _syncLiveTimer() {
+    if (widget.live && _liveTimer == null) {
+      _liveTimer = Timer.periodic(const Duration(seconds: 10), (_) {
+        if (!mounted || !widget.live || _savingIds.isNotEmpty) return;
+        unawaited(_load(silent: true));
+      });
+    } else if (!widget.live) {
+      _liveTimer?.cancel();
+      _liveTimer = null;
+    }
+  }
+
+  @override
+  void dispose() {
+    _liveTimer?.cancel();
+    _liveSub?.cancel();
+    super.dispose();
   }
 
   /// Newest applications first. The orientation date is shown on the row,

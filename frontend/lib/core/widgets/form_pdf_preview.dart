@@ -1,10 +1,13 @@
+import 'dart:async';
 import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:pdf/pdf.dart';
 import 'package:printing/printing.dart';
 
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
+import 'package:hrms_plaridel/core/utils/form_pdf.dart';
 import 'package:hrms_plaridel/core/utils/responsive_right_side_panel.dart';
 import 'package:hrms_plaridel/features/forms/models/form_print_template.dart';
 
@@ -336,12 +339,30 @@ class _FormPdfPreviewPanelState extends State<_FormPdfPreviewPanel> {
                         'Letter': PdfPageFormat.letter,
                       }
                     : {'Official': format},
-                allowPrinting: true,
+                // On web, package print uses a hidden iframe that hangs Chrome
+                // ("Loading preview...") when a physical printer is the default.
+                allowPrinting: !kIsWeb,
                 allowSharing: true,
                 canChangeOrientation: false,
                 canChangePageFormat: false,
                 dynamicLayout: format == null,
                 canDebug: false,
+                actions: [
+                  if (kIsWeb)
+                    IconButton(
+                      tooltip: 'Print',
+                      onPressed: _busy
+                          ? null
+                          : () => unawaited(
+                              FormPdf.layoutPreparedPdf(
+                                bytes: _bytes,
+                                name: widget.filename,
+                                format: _format,
+                              ),
+                            ),
+                      icon: const Icon(Icons.print),
+                    ),
+                ],
               ),
             ),
           ],

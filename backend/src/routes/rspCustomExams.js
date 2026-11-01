@@ -3,9 +3,10 @@ const express = require('express');
 const { pool } = require('../config/db');
 const { authMiddleware } = require('../middleware/auth');
 const { requireAdminOrSupervisor } = require('../middleware/rbac');
+const { requireRspAccessIfAdmin } = require('../middleware/rspAccess');
 
 const router = express.Router();
-const protect = [authMiddleware];
+const protect = [authMiddleware, requireRspAccessIfAdmin('exams_allowed')];
 
 const RESERVED_TYPES = new Set(['bei', 'general', 'math', 'general_info']);
 const FORMATS = new Set(['open_ended', 'multiple_choice']);

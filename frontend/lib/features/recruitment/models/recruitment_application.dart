@@ -685,13 +685,54 @@ class RecruitmentRepo {
     return t;
   }
 
-  /// Delete an applicant and related exam result rows (PostgreSQL via API).
+  /// Move an applicant to the recycle bin. Exam results and files stay until
+  /// [permanentlyDeleteApplication].
   Future<void> deleteApplication(String applicationId) async {
     try {
       await ApiClient.instance.delete<void>(
         '/api/rsp/applications/$applicationId',
       );
       return;
+    } on DioException catch (e) {
+      final data = e.response?.data;
+      final details =
+          (data is Map && (data['details'] != null || data['error'] != null))
+          ? (data['details'] ?? data['error'])
+          : null;
+      throw Exception(
+        details != null
+            ? 'Delete failed: $details'
+            : 'Delete failed: ${e.message ?? e.toString()}',
+      );
+    }
+  }
+
+  Future<List<RecruitmentApplication>> listRecycledApplications() async {
+    final res = await ApiClient.instance.get<Map<String, dynamic>>(
+      '/api/rsp/applications/recycle-bin',
+    );
+    final rows = res.data?['applications'] as List<dynamic>? ?? [];
+    return rows
+        .map(
+          (e) => RecruitmentApplication.fromJson(
+            Map<String, dynamic>.from(e as Map),
+          ),
+        )
+        .toList();
+  }
+
+  Future<void> restoreApplication(String applicationId) async {
+    await ApiClient.instance.post<void>(
+      '/api/rsp/applications/$applicationId/restore',
+    );
+  }
+
+  Future<void> permanentlyDeleteApplication(String applicationId) async {
+    try {
+      await ApiClient.instance.delete<void>(
+        '/api/rsp/applications/$applicationId',
+        queryParameters: const {'permanent': '1'},
+      );
     } on DioException catch (e) {
       final data = e.response?.data;
       final details =

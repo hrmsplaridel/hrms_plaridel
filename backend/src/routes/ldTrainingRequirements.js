@@ -6,12 +6,17 @@ const jwt = require('jsonwebtoken');
 const { pool } = require('../config/db');
 const { authMiddleware } = require('../middleware/auth');
 const { requireAdmin } = require('../middleware/rbac');
+const { requireLdAccessIfAdmin } = require('../middleware/ldAccess');
 const { isLdTrainingRequirementPathAllowed } = require('../utils/ldTrainingRequirementPolicy');
 
 const router = express.Router();
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const protect = [authMiddleware];
-const adminProtect = [authMiddleware, requireAdmin];
+const adminProtect = [
+  authMiddleware,
+  requireAdmin,
+  requireLdAccessIfAdmin('requirements_allowed'),
+];
 
 const LD_SUBDIR = 'ld-training-requirements';
 const UPLOAD_DIR = process.env.UPLOAD_DIR || path.join(__dirname, '../../uploads');

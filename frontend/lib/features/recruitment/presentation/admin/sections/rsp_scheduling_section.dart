@@ -7,7 +7,10 @@ import 'package:hrms_plaridel/features/recruitment/presentation/admin/widgets/rs
 
 /// RSP Scheduling: deliberation (after exam) and orientation (after final requirements).
 class RspSchedulingSection extends StatefulWidget {
-  const RspSchedulingSection({super.key});
+  const RspSchedulingSection({super.key, this.live = false});
+
+  /// When true, the open scheduling list reloads as applicant data changes.
+  final bool live;
 
   @override
   State<RspSchedulingSection> createState() => _RspSchedulingSectionState();
@@ -89,9 +92,9 @@ class _RspSchedulingSectionState extends State<RspSchedulingSection> {
         ),
         const SizedBox(height: 18),
         if (_tabIndex == 0)
-          const RspFinalInterviewScheduler(embedded: true)
+          RspFinalInterviewScheduler(embedded: true, live: widget.live)
         else
-          const RspOrientationScheduler(embedded: true),
+          RspOrientationScheduler(embedded: true, live: widget.live),
       ],
     );
   }

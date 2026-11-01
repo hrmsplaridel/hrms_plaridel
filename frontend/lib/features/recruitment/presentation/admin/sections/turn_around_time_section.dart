@@ -18,6 +18,7 @@ import 'package:hrms_plaridel/shared/widgets/form_document_preview.dart';
 import 'package:hrms_plaridel/shared/widgets/rsp_ld_form_header.dart';
 import 'package:hrms_plaridel/shared/widgets/rsp_ld_record_actions.dart';
 import 'package:hrms_plaridel/shared/widgets/rsp_ld_saved_records_browser.dart';
+import 'package:hrms_plaridel/shared/widgets/rsp_ld_recycle_bin_dialog.dart';
 import 'package:hrms_plaridel/features/docutracker/data/providers/docutracker_provider.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_rsp_signature_section.dart';
 
@@ -901,7 +902,7 @@ class _RspTurnAroundTimeSectionState extends State<RspTurnAroundTimeSection> {
       if (!mounted) return;
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(const SnackBar(content: Text('Deleted.')));
+      ).showSnackBar(const SnackBar(content: Text('Moved to the recycle bin.')));
       _load();
     } catch (e) {
       if (!mounted) return;
@@ -1008,6 +1009,39 @@ class _RspTurnAroundTimeSectionState extends State<RspTurnAroundTimeSection> {
     }
   }
 
+  void _openRecycleBin() {
+    showRspLdRecycleBin(
+      context: context,
+      table: TurnAroundTimeEntry.tableName,
+      onChanged: () {
+        if (mounted) _load();
+      },
+      mapRow: (row) {
+        final e = TurnAroundTimeEntry.fromJson(row);
+        final id = e.id;
+        if (id == null || id.isEmpty) return null;
+        final pos = e.position?.trim().isNotEmpty == true
+            ? e.position!
+            : '(No position)';
+        return RspLdRecycleBinItem(
+          id: id,
+          title: pos,
+          subtitle:
+              '${e.office ?? "—"} · ${e.applicants.length} applicant(s) · Removed ${rspLdRecycleRemovedOn(row)}',
+          previewWidth: 1100,
+          previewBuilder: () => TurnAroundTimeEditor(
+            readOnly: true,
+            entry: e,
+            onSave: (_) {},
+            onCancel: () {},
+            onPrint: (_) async {},
+            onDownloadPdf: (_) async {},
+          ),
+        );
+      },
+    );
+  }
+
   void _openSavedRecordsBrowser() {
     showRspLdSavedRecordsBrowser(
       context,
@@ -1054,6 +1088,9 @@ class _RspTurnAroundTimeSectionState extends State<RspTurnAroundTimeSection> {
             backgroundColor: AppTheme.primaryNavy,
             padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
           ),
+        ),
+        RspLdRecycleBinButton(
+          onPressed: _loading ? null : _openRecycleBin,
         ),
         OutlinedButton.icon(
           onPressed: _loading ? null : _load,
@@ -1380,12 +1417,18 @@ class _TurnAroundTimeEditorState extends State<TurnAroundTimeEditor> {
   Future<void> _addApplicant() async {
     final load = widget.loadLinkableApplications ??
         RecruitmentRepo.instance.tatApplicantChoices;
+    final alreadyOnForm = <String>{
+      for (final row in _applicants)
+        if ((row['application_id'] ?? '').trim().isNotEmpty)
+          (row['application_id'] ?? '').trim().toLowerCase(),
+    };
     final result = await _showApplicantEditorDialog(
       context,
       initial: _emptyTatValues(),
       isNew: true,
       applicationsFuture: load(),
       selectedPosition: _position.text,
+      excludeApplicationIds: alreadyOnForm,
     );
     if (result == null || !mounted) return;
     if (tatApplicantIdAlreadyTracked(_applicants, result['application_id'])) {
@@ -2483,6 +2526,7 @@ Future<Map<String, String>?> _showApplicantEditorDialog(
   required bool isNew,
   Future<List<Map<String, dynamic>>>? applicationsFuture,
   String? selectedPosition,
+  Set<String> excludeApplicationIds = const {},
 }) {
   return showDialog<Map<String, String>>(
     context: context,
@@ -2492,6 +2536,7 @@ Future<Map<String, String>?> _showApplicantEditorDialog(
       isNew: isNew,
       applicationsFuture: applicationsFuture,
       selectedPosition: selectedPosition,
+      excludeApplicationIds: excludeApplicationIds,
     ),
   );
 }
@@ -2504,12 +2549,16 @@ class _ApplicantEditorDialog extends StatefulWidget {
     required this.isNew,
     this.applicationsFuture,
     this.selectedPosition,
+    this.excludeApplicationIds = const {},
   });
 
   final Map<String, String> initial;
   final bool isNew;
   final Future<List<Map<String, dynamic>>>? applicationsFuture;
   final String? selectedPosition;
+
+  /// Application ids already on Applicant Tracking — hidden from Add choices.
+  final Set<String> excludeApplicationIds;
 
   @override
   State<_ApplicantEditorDialog> createState() => _ApplicantEditorDialogState();
@@ -2606,10 +2655,20 @@ class _ApplicantEditorDialogState extends State<_ApplicantEditorDialog> {
       final rows = await widget.applicationsFuture!;
       if (!mounted) return;
       final position = widget.selectedPosition;
+      final excluded = {
+        for (final id in widget.excludeApplicationIds) id.trim().toLowerCase(),
+      }..removeWhere((id) => id.isEmpty);
       setState(() {
         _choices = _tatLinkableApplications([
           for (final row in rows)
-            if (tatApplicationMatchesSelectedPosition(row, position)) row,
+            if (tatApplicationMatchesSelectedPosition(row, position) &&
+                !excluded.contains(
+                  (row['id'] ?? row['application_id'] ?? '')
+                      .toString()
+                      .trim()
+                      .toLowerCase(),
+                ))
+              row,
         ]);
         _loadingChoices = false;
       });
@@ -2895,12 +2954,17 @@ class _ApplicantEditorDialogState extends State<_ApplicantEditorDialog> {
                           style: TextStyle(color: Colors.red.shade700, fontSize: 13),
                         ),
                       ),
-                    if (widget.isNew && !_loadingChoices && _choiceError == null && _choices.isEmpty)
-                      const Padding(
-                        padding: EdgeInsets.only(bottom: 12),
+                    if (widget.isNew &&
+                        !_loadingChoices &&
+                        _choiceError == null &&
+                        _choices.isEmpty)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 12),
                         child: Text(
-                          'No matching applicants.',
-                          style: TextStyle(fontSize: 13),
+                          widget.excludeApplicationIds.isNotEmpty
+                              ? 'All matching applicants are already on this form.'
+                              : 'No matching applicants.',
+                          style: const TextStyle(fontSize: 13),
                         ),
                       ),
                     if (widget.isNew && _choices.isNotEmpty) ...[

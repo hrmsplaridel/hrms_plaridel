@@ -225,11 +225,17 @@ class _AdminDashboardState extends State<AdminDashboard>
   bool _canViewDtrReports = false;
   bool _canManageDtr = false;
   Map<String, bool> _dtrFeatureAccess = {};
+  Map<String, bool> _rspFeatureAccess = {};
+  Map<String, bool> _ldFeatureAccess = {};
+  int _rspAccessVersion = 0;
+  int _ldAccessVersion = 0;
   bool get _canAccessDtr => hasAdminDtrAccess(
     canViewReports: _canViewDtrReports,
     canManage: _canManageDtr,
     featureAccess: _dtrFeatureAccess,
   );
+  bool get _canAccessRsp => hasAdminModuleAccess(_rspFeatureAccess);
+  bool get _canAccessLd => hasAdminModuleAccess(_ldFeatureAccess);
   bool _sidebarCollapsed = false;
   final GlobalKey<_DtrContentState> _dtrContentKey =
       GlobalKey<_DtrContentState>();
@@ -285,6 +291,8 @@ class _AdminDashboardState extends State<AdminDashboard>
           await Future.wait([
             _loadAccountCreationAccess(),
             _loadDtrAccess(),
+            _loadRspAccess(),
+            _loadLdAccess(),
             context.read<LeaveProvider>().checkIsDepartmentHead(
               forceRefresh: true,
             ),
@@ -387,6 +395,84 @@ class _AdminDashboardState extends State<AdminDashboard>
 
   void _closeUnavailableDtr() {
     if (_selectedMenu != AdminMenu.dtr || _canAccessDtr) return;
+    setState(() => _selectedMenu = AdminMenu.dashboard);
+    DashboardContentNavigator.showHome(_contentNavKey);
+  }
+
+  Future<void> _loadRspAccess() async {
+    final version = ++_rspAccessVersion;
+    try {
+      final data = await fetchAccessCheck(
+        () async => (await ApiClient.instance.get<Map<String, dynamic>>(
+          '/api/rsp-access/me',
+        )).data,
+      );
+      if (!mounted || version != _rspAccessVersion || data == null) return;
+      final features = {
+        for (final field in const [
+          'vacancies_allowed',
+          'recruitment_allowed',
+          'exams_allowed',
+          'forms_allowed',
+          'applications_allowed',
+          'exam_results_allowed',
+          'scheduling_allowed',
+          'final_requirements_allowed',
+          'form_bi_allowed',
+          'form_applicants_profile_allowed',
+          'form_selection_lineup_allowed',
+          'form_computation_of_points_allowed',
+          'form_work_experience_allowed',
+          'form_turn_around_time_allowed',
+          'form_ojt_allowed',
+        ])
+          field: data[field] == true,
+      };
+      if (mapEquals(_rspFeatureAccess, features)) return;
+      setState(() => _rspFeatureAccess = features);
+      _closeUnavailableRsp();
+    } catch (_) {
+      // Preserve the last verified state if applying the refresh fails.
+    }
+  }
+
+  Future<void> _loadLdAccess() async {
+    final version = ++_ldAccessVersion;
+    try {
+      final data = await fetchAccessCheck(
+        () async => (await ApiClient.instance.get<Map<String, dynamic>>(
+          '/api/ld-access/me',
+        )).data,
+      );
+      if (!mounted || version != _ldAccessVersion || data == null) return;
+      final features = {
+        for (final field in const [
+          'forms_allowed',
+          'daily_reports_allowed',
+          'requirements_allowed',
+          'form_tna_allowed',
+          'form_action_brainstorming_allowed',
+          'form_idp_allowed',
+          'form_lap_allowed',
+        ])
+          field: data[field] == true,
+      };
+      if (mapEquals(_ldFeatureAccess, features)) return;
+      setState(() => _ldFeatureAccess = features);
+      _closeUnavailableLd();
+    } catch (_) {
+      // Preserve the last verified state if applying the refresh fails.
+    }
+  }
+
+  void _closeUnavailableRsp() {
+    if (_selectedMenu != AdminMenu.rsp || _canAccessRsp) return;
+    setState(() => _selectedMenu = AdminMenu.dashboard);
+    DashboardContentNavigator.showHome(_contentNavKey);
+  }
+
+  void _closeUnavailableLd() {
+    if (_selectedMenu != AdminMenu.ld || _canAccessLd) return;
     setState(() => _selectedMenu = AdminMenu.dashboard);
     DashboardContentNavigator.showHome(_contentNavKey);
   }
@@ -543,6 +629,22 @@ class _AdminDashboardState extends State<AdminDashboard>
       _closeUnavailableDtr();
       return;
     }
+    if (menu == AdminMenu.rsp && !_canAccessRsp) {
+      _loadRspAccess();
+      _closeUnavailableRsp();
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('RSP access is unavailable.')),
+      );
+      return;
+    }
+    if (menu == AdminMenu.ld && !_canAccessLd) {
+      _loadLdAccess();
+      _closeUnavailableLd();
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('L&D access is unavailable.')),
+      );
+      return;
+    }
     if (menu == AdminMenu.createAccount && _canCreateAccount != true) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -552,6 +654,8 @@ class _AdminDashboardState extends State<AdminDashboard>
       return;
     }
     if (menu == AdminMenu.dtr) _loadDtrAccess();
+    if (menu == AdminMenu.rsp) unawaited(_loadRspAccess());
+    if (menu == AdminMenu.ld) unawaited(_loadLdAccess());
     if (menu != AdminMenu.createAccount) {
       _rspHireReturnApplicationId = null;
     }
@@ -658,10 +762,21 @@ class _AdminDashboardState extends State<AdminDashboard>
     );
   }
 
+  AdminMenu get _effectiveMenu {
+    if (_selectedMenu == AdminMenu.dtr && !_canAccessDtr) {
+      return AdminMenu.dashboard;
+    }
+    if (_selectedMenu == AdminMenu.rsp && !_canAccessRsp) {
+      return AdminMenu.dashboard;
+    }
+    if (_selectedMenu == AdminMenu.ld && !_canAccessLd) {
+      return AdminMenu.dashboard;
+    }
+    return _selectedMenu;
+  }
+
   Widget _buildContent(String displayName) {
-    switch (_selectedMenu == AdminMenu.dtr && !_canAccessDtr
-        ? AdminMenu.dashboard
-        : _selectedMenu) {
+    switch (_effectiveMenu) {
       case AdminMenu.dashboard:
         return _DashboardContent();
       case AdminMenu.myAttendance:
@@ -691,6 +806,7 @@ class _AdminDashboardState extends State<AdminDashboard>
         );
       case AdminMenu.rsp:
         return RspAdminContent(
+          featureAccess: _rspFeatureAccess,
           onOpenCreateAccount: _openCreateAccountFromRspHire,
           initialApplicationId: _pendingRspApplicationId,
           initialFinalRequirementsApplicationId:
@@ -707,7 +823,7 @@ class _AdminDashboardState extends State<AdminDashboard>
           },
         );
       case AdminMenu.ld:
-        return const _LdContent();
+        return _LdContent(featureAccess: _ldFeatureAccess);
       case AdminMenu.docutracker:
         return DocuTrackerMain(
           key: ValueKey('admin-docutracker-$_docuTrackerDeepLinkKey'),
@@ -766,6 +882,8 @@ class _AdminDashboardState extends State<AdminDashboard>
                   selectedMenu: _selectedMenu,
                   canCreateAccount: _canCreateAccount == true,
                   canAccessDtr: _canAccessDtr,
+                  canAccessRsp: _canAccessRsp,
+                  canAccessLd: _canAccessLd,
                   avatarPath: avatarPath,
                   email: email,
                   displayName: displayName,
@@ -792,6 +910,8 @@ class _AdminDashboardState extends State<AdminDashboard>
                     selectedMenu: _selectedMenu,
                     canCreateAccount: _canCreateAccount == true,
                     canAccessDtr: _canAccessDtr,
+                    canAccessRsp: _canAccessRsp,
+                    canAccessLd: _canAccessLd,
                     avatarPath: avatarPath,
                     email: email,
                     displayName: displayName,
@@ -827,6 +947,14 @@ class _AdminDashboardState extends State<AdminDashboard>
                                 _canManageDtr,
                                 _canCreateAccount,
                                 _dtrFeatureAccess,
+                                _canAccessRsp,
+                                _canAccessLd,
+                                Object.hashAll(_rspFeatureAccess.entries.map(
+                                  (e) => Object.hash(e.key, e.value),
+                                )),
+                                Object.hashAll(_ldFeatureAccess.entries.map(
+                                  (e) => Object.hash(e.key, e.value),
+                                )),
                               ),
                               homeBuilder: () => _buildContent(displayName),
                               settingsPanel: _settingsPanel(),
@@ -868,6 +996,14 @@ class _AdminDashboardState extends State<AdminDashboard>
                           _canManageDtr,
                           _canCreateAccount,
                           _dtrFeatureAccess,
+                          _canAccessRsp,
+                          _canAccessLd,
+                          Object.hashAll(_rspFeatureAccess.entries.map(
+                            (e) => Object.hash(e.key, e.value),
+                          )),
+                          Object.hashAll(_ldFeatureAccess.entries.map(
+                            (e) => Object.hash(e.key, e.value),
+                          )),
                         ),
                         homeBuilder: () => _buildContent(displayName),
                         settingsPanel: _settingsPanel(),
@@ -958,6 +1094,9 @@ bool hasAdminDtrAccess({
       'locator_allowed',
     ].any((field) => featureAccess[field] == true);
 
+bool hasAdminModuleAccess(Map<String, bool> featureAccess) =>
+    featureAccess.values.any((allowed) => allowed);
+
 class AdminDtrNavigationTile extends StatelessWidget {
   const AdminDtrNavigationTile({
     super.key,
@@ -985,6 +1124,8 @@ class _Sidebar extends StatelessWidget {
     required this.selectedMenu,
     required this.canCreateAccount,
     required this.canAccessDtr,
+    required this.canAccessRsp,
+    required this.canAccessLd,
     this.avatarPath,
     required this.email,
     required this.displayName,
@@ -999,6 +1140,8 @@ class _Sidebar extends StatelessWidget {
   final AdminMenu selectedMenu;
   final bool canCreateAccount;
   final bool canAccessDtr;
+  final bool canAccessRsp;
+  final bool canAccessLd;
   final String? avatarPath;
   final String email;
   final String displayName;
@@ -1036,18 +1179,20 @@ class _Sidebar extends StatelessWidget {
           ),
         AdminPersonalPortalSection(selectedMenu: selectedMenu, onTap: onTap),
         DashboardSidebarSectionLabel('MANAGEMENT'),
-        DashboardSidebarNavTile(
-          icon: Icons.how_to_reg_outlined,
-          label: 'RSP',
-          selected: selectedMenu == AdminMenu.rsp,
-          onTap: () => onTap(AdminMenu.rsp),
-        ),
-        DashboardSidebarNavTile(
-          icon: Icons.school_outlined,
-          label: 'L&D',
-          selected: selectedMenu == AdminMenu.ld,
-          onTap: () => onTap(AdminMenu.ld),
-        ),
+        if (canAccessRsp)
+          DashboardSidebarNavTile(
+            icon: Icons.how_to_reg_outlined,
+            label: 'RSP',
+            selected: selectedMenu == AdminMenu.rsp,
+            onTap: () => onTap(AdminMenu.rsp),
+          ),
+        if (canAccessLd)
+          DashboardSidebarNavTile(
+            icon: Icons.school_outlined,
+            label: 'L&D',
+            selected: selectedMenu == AdminMenu.ld,
+            onTap: () => onTap(AdminMenu.ld),
+          ),
         AdminDtrNavigationTile(
           canAccessDtr: canAccessDtr,
           selectedMenu: selectedMenu,
@@ -2183,15 +2328,35 @@ const _ldFormPickerItems = <_LdFormPickerItem>[
 
 /// L&D: "Forms" hub — pick Training Need Analysis, Action Brainstorming, IDP, or Learning Application Plan.
 class _LdFormsSection extends StatefulWidget {
-  const _LdFormsSection({required this.onBackToLd});
+  const _LdFormsSection({
+    required this.onBackToLd,
+    this.featureAccess = const {},
+  });
 
   final VoidCallback onBackToLd;
+  final Map<String, bool> featureAccess;
 
   @override
   State<_LdFormsSection> createState() => _LdFormsSectionState();
 }
 
 class _LdFormsSectionState extends State<_LdFormsSection> {
+  static const _formPermissionByKey = {
+    'training_need_analysis': 'form_tna_allowed',
+    'action_brainstorming': 'form_action_brainstorming_allowed',
+    'idp': 'form_idp_allowed',
+    'learning_application_plan': 'form_lap_allowed',
+  };
+
+  bool _formAllowed(_LdFormPickerItem item) {
+    final field = _formPermissionByKey[item.keyName];
+    if (field == null) return false;
+    return widget.featureAccess[field] == true;
+  }
+
+  List<_LdFormPickerItem> get _visibleForms => _ldFormPickerItems
+      .where(_formAllowed)
+      .toList(growable: false);
   _LdFormPickerItem? _selected;
   bool _showPrintBackground = false;
 
@@ -2278,6 +2443,17 @@ class _LdFormsSectionState extends State<_LdFormsSection> {
   }
 
   Widget _formGrid() {
+    final items = _visibleForms;
+    if (items.isEmpty) {
+      return Text(
+        'No L&D forms are enabled for your account.',
+        style: TextStyle(
+          color: AppTheme.dashTextSecondaryOf(context),
+          fontSize: 14,
+          height: 1.4,
+        ),
+      );
+    }
     return LayoutBuilder(
       builder: (context, constraints) {
         final columns = constraints.maxWidth >= 900 ? 2 : 1;
@@ -2288,7 +2464,7 @@ class _LdFormsSectionState extends State<_LdFormsSection> {
         if (columns == 1) {
           return Column(
             children: [
-              for (final item in _ldFormPickerItems)
+              for (final item in items)
                 Padding(
                   padding: const EdgeInsets.only(bottom: 12),
                   child: row(item),
@@ -2300,7 +2476,7 @@ class _LdFormsSectionState extends State<_LdFormsSection> {
           spacing: 12,
           runSpacing: 12,
           children: [
-            for (final item in _ldFormPickerItems)
+            for (final item in items)
               SizedBox(
                 width: (constraints.maxWidth - 12) / 2,
                 child: row(item),
@@ -2313,6 +2489,13 @@ class _LdFormsSectionState extends State<_LdFormsSection> {
 
   @override
   Widget build(BuildContext context) {
+    final selected = _selected;
+    if (selected != null && !_formAllowed(selected)) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        setState(() => _selected = null);
+      });
+    }
     if (_showPrintBackground) {
       return Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -2533,7 +2716,9 @@ class _LdFormPickerRowState extends State<_LdFormPickerRow> {
 
 /// L&D (Learning & Development) module: hub with grouped Forms, daily reports, and requirements.
 class _LdContent extends StatefulWidget {
-  const _LdContent();
+  const _LdContent({this.featureAccess = const {}});
+
+  final Map<String, bool> featureAccess;
 
   @override
   State<_LdContent> createState() => _LdContentState();
@@ -2541,6 +2726,42 @@ class _LdContent extends StatefulWidget {
 
 class _LdContentState extends State<_LdContent> {
   int _ldSectionIndex = 0;
+
+  bool _allowsSection(int index) {
+    switch (index) {
+      case 1:
+        return const [
+          'form_tna_allowed',
+          'form_action_brainstorming_allowed',
+          'form_idp_allowed',
+          'form_lap_allowed',
+        ].any((field) => widget.featureAccess[field] == true);
+      case 3:
+        return widget.featureAccess['daily_reports_allowed'] == true;
+      case 5:
+        return widget.featureAccess['requirements_allowed'] == true;
+      default:
+        return false;
+    }
+  }
+
+  void _openSection(int index) {
+    if (!_allowsSection(index)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('L&D feature access is unavailable.')),
+      );
+      return;
+    }
+    setState(() => _ldSectionIndex = index);
+  }
+
+  @override
+  void didUpdateWidget(covariant _LdContent oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (_ldSectionIndex != 0 && !_allowsSection(_ldSectionIndex)) {
+      setState(() => _ldSectionIndex = 0);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -2570,16 +2791,17 @@ class _LdContentState extends State<_LdContent> {
               ],
               if (_ldSectionIndex == 0)
                 LdAdminHub(
-                  onOpenSection: (index) =>
-                      setState(() => _ldSectionIndex = index),
+                  featureAccess: widget.featureAccess,
+                  onOpenSection: _openSection,
                 )
-              else if (_ldSectionIndex == 1)
+              else if (_ldSectionIndex == 1 && _allowsSection(1))
                 _LdFormsSection(
+                  featureAccess: widget.featureAccess,
                   onBackToLd: () => setState(() => _ldSectionIndex = 0),
                 )
-              else if (_ldSectionIndex == 3)
+              else if (_ldSectionIndex == 3 && _allowsSection(3))
                 const LdTrainingDailyReportsSection()
-              else if (_ldSectionIndex == 5)
+              else if (_ldSectionIndex == 5 && _allowsSection(5))
                 LdTrainingRequirementsAdminSection(
                   onBackToLd: () => setState(() => _ldSectionIndex = 0),
                 )

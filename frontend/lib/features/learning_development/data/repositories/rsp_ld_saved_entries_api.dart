@@ -73,6 +73,26 @@ class RspLdSavedEntriesApi {
     await ApiClient.instance.delete<void>('$_prefix/$table/$id');
   }
 
+  static Future<List<Map<String, dynamic>>> listRecycledRows(String table) async {
+    final res = await ApiClient.instance.get<List<dynamic>>(
+      '$_prefix/$table/recycle-bin',
+    );
+    final data = res.data;
+    if (data == null) return [];
+    return data.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+  }
+
+  static Future<void> restoreRow(String table, String id) async {
+    await ApiClient.instance.post<dynamic>('$_prefix/$table/$id/restore');
+  }
+
+  static Future<void> permanentlyDeleteRow(String table, String id) async {
+    await ApiClient.instance.delete<void>(
+      '$_prefix/$table/$id',
+      queryParameters: const {'permanent': '1'},
+    );
+  }
+
   static Future<List<Map<String, dynamic>>> editHistory(
     String table,
     String id,

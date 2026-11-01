@@ -19,6 +19,7 @@ class TrainingDailyReport {
     this.attachmentType,
     this.attachmentPath,
     this.attachmentToken,
+    this.deletedAt,
   });
 
   final String id;
@@ -33,6 +34,7 @@ class TrainingDailyReport {
   final String? attachmentType;
   final String? attachmentPath;
   final String? attachmentToken;
+  final DateTime? deletedAt;
 
   String? get attachmentUrl => attachmentId == null || attachmentToken == null
       ? null
@@ -54,6 +56,7 @@ class TrainingDailyReport {
       attachmentType: json['attachment_type'] as String?,
       attachmentPath: json['attachment_path'] as String?,
       attachmentToken: json['attachment_token'] as String?,
+      deletedAt: DateTime.tryParse(json['deleted_at'] as String? ?? ''),
     );
   }
 }
@@ -148,8 +151,34 @@ class TrainingDailyReportRepo {
     );
   }
 
-  /// Admin: permanently delete a report (and related attachment metadata).
+  /// Admin: move a report to the recycle bin.
   Future<void> deleteReport(String id) async {
     await ApiClient.instance.delete<void>('/api/training-daily-reports/$id');
+  }
+
+  Future<List<TrainingDailyReport>> listRecycledReports() async {
+    final res = await ApiClient.instance.get(
+      '/api/training-daily-reports/recycle-bin',
+    );
+    final list = res.data as List<dynamic>? ?? [];
+    return list
+        .map(
+          (e) =>
+              TrainingDailyReport.fromJson(Map<String, dynamic>.from(e as Map)),
+        )
+        .toList();
+  }
+
+  Future<void> restoreReport(String id) async {
+    await ApiClient.instance.post<dynamic>(
+      '/api/training-daily-reports/$id/restore',
+    );
+  }
+
+  Future<void> permanentlyDeleteReport(String id) async {
+    await ApiClient.instance.delete<void>(
+      '/api/training-daily-reports/$id',
+      queryParameters: const {'permanent': '1'},
+    );
   }
 }

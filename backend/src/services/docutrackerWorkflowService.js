@@ -2,6 +2,7 @@ const { normalizeStatus, mapDocumentRow } = require('./docutrackerDocumentMapper
 const { sameEntityId } = require('../utils/sameEntityId');
 const { todayInHrmsTimezone } = require('../utils/dateRangeParser');
 const { resolveActiveMayor } = require('./officialSignatoryService');
+const { ensureTrainingDailyReportColumns } = require('../utils/trainingDailyReportSchema');
 const {
   GENERAL_PERMISSION_ACTIONS,
   RELEASE_ACTION,
@@ -287,8 +288,9 @@ async function listSourceBackedDocuments(pool, user, filters = {}) {
 
   const pieces = [];
   if (shouldInclude('ld') && (await canViewModule('ld'))) {
+    await ensureTrainingDailyReportColumns(pool);
     const ldParams = [];
-    const ldWhere = ['1=1'];
+    const ldWhere = ['r.deleted_at IS NULL'];
     if (user.role !== 'admin') {
       ldWhere.push(`r.employee_id = $${ldParams.length + 1}`);
       ldParams.push(user.id);

@@ -2,6 +2,7 @@ const express = require('express');
 const { pool } = require('../config/db');
 const { authMiddleware } = require('../middleware/auth');
 const { requireAdminOrSupervisor } = require('../middleware/rbac');
+const { requireRspAccessIfAdmin } = require('../middleware/rspAccess');
 const {
   parseMaxApplicants,
   parseVacancyAgeRequirements,
@@ -14,7 +15,7 @@ const {
 const { todayInHrmsTimezone } = require('../utils/dateRangeParser');
 
 const router = express.Router();
-const protect = [authMiddleware];
+const protect = [authMiddleware, requireRspAccessIfAdmin('vacancies_allowed')];
 
 // Ensure landing-page table exists (idempotent).
 async function ensureTable() {

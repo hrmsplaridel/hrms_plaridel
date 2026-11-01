@@ -43,8 +43,41 @@ const issuedForm = require('../services/rspIssuedForm');
 const preDeliberation = require('../services/rspPreDeliberation');
 const finalHiring = require('../services/rspFinalHiring');
 const applicantNotices = require('../services/rspApplicantNotices');
+const { broadcastAppEvent } = require('../websockets/appEvents');
 const router = express.Router();
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function broadcastRspRecruitmentChanged(applicationId, action) {
+  try {
+    const payload = {
+      applicationId: applicationId ? String(applicationId) : null,
+      action,
+    };
+    broadcastAppEvent('rsp_applications_changed', payload);
+    broadcastAppEvent('rsp_exam_results_changed', payload);
+  } catch (err) {
+    console.error('[rsp recruitment websocket]', err);
+  }
+}
+
+router.use((req, res, next) => {
+  if (req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS') {
+    return next();
+  }
+  const originalJson = res.json.bind(res);
+  res.json = function broadcastThenJson(body) {
+    if (res.statusCode < 400) {
+      const applicationId =
+        req.params?.applicationId || req.body?.applicationId || null;
+      broadcastRspRecruitmentChanged(
+        applicationId,
+        `${req.method} ${req.path}`,
+      );
+    }
+    return originalJson(body);
+  };
+  next();
+});
 
 async function withRspTransaction(work) {
   const client = await pool.connect();
@@ -124,10 +157,19 @@ async function requireApplicantProof(req, res, next) {
     return res.status(500).json({ error: 'Could not verify applicant access' });
   }
 }
-const protect = [authMiddleware, requireAdmin];
+const {
+  requireAnyRspAccessIfAdmin,
+  requireAnyRspRecruitmentIfAdmin,
+} = require('../middleware/rspAccess');
+const protect = [authMiddleware, requireAdmin, requireAnyRspAccessIfAdmin];
 // Required-form review follows the same Admin or HR operators who use the
 // recruitment screen. It does not open the rest of the admin recruitment API.
-const recruitmentStaff = [authMiddleware, requireAdminOrHr];
+// Admins need any Recruitment Management tab permission from Manage Access.
+const recruitmentStaff = [
+  authMiddleware,
+  requireAdminOrHr,
+  requireAnyRspRecruitmentIfAdmin,
+];
 
 /** BEI needs HR scores for every narrative answer before final pass/fail. */
 function beiGradingComplete(answersJson) {
@@ -433,7 +475,8 @@ async function ensureRspApplicationsTables() {
       ADD COLUMN IF NOT EXISTS age TEXT,
       ADD COLUMN IF NOT EXISTS date_of_birth DATE,
       ADD COLUMN IF NOT EXISTS civil_status TEXT,
-      ADD COLUMN IF NOT EXISTS applicant_number TEXT;
+      ADD COLUMN IF NOT EXISTS applicant_number TEXT,
+      ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ;
   `);
 
   // Backfill missing applicant numbers with unique random codes.
@@ -736,6 +779,7 @@ router.get('/by-email', publicLookupLimiter, async (req, res) => {
       SELECT ${PUBLIC_TRACKING_APPLICATION_SELECT}
       FROM public.recruitment_applications
       WHERE email = $1
+        AND deleted_at IS NULL
       ORDER BY created_at DESC
       LIMIT 1
       `,
@@ -774,6 +818,7 @@ router.get('/by-applicant-number', publicLookupLimiter, async (req, res) => {
       SELECT ${PUBLIC_TRACKING_APPLICATION_SELECT}
       FROM public.recruitment_applications
       WHERE upper(applicant_number) = $1
+        AND deleted_at IS NULL
       LIMIT 1
       `,
       [number],
@@ -807,6 +852,7 @@ router.get('/', protect, async (_req, res) => {
       SELECT ${RSP_APPLICATION_ROW_SELECT}
       FROM public.recruitment_applications
       WHERE ${excludeMayorIntakeStubSql()}
+        AND deleted_at IS NULL
       ORDER BY created_at DESC
       `
     );
@@ -815,6 +861,27 @@ router.get('/', protect, async (_req, res) => {
     console.error('[rspApplications GET /]', err);
     return res.status(500).json({
       error: 'Failed to list applications',
+      details: err?.message ? String(err.message) : String(err),
+    });
+  }
+});
+
+router.get('/recycle-bin', protect, async (_req, res) => {
+  try {
+    await ensureRspApplicationsTables();
+    const result = await pool.query(
+      `
+      SELECT ${RSP_APPLICATION_ROW_SELECT}
+      FROM public.recruitment_applications
+      WHERE deleted_at IS NOT NULL
+      ORDER BY deleted_at DESC
+      `,
+    );
+    return res.json({ ok: true, applications: result.rows });
+  } catch (err) {
+    console.error('[rspApplications GET /recycle-bin]', err);
+    return res.status(500).json({
+      error: 'Failed to list recycled applications',
       details: err?.message ? String(err.message) : String(err),
     });
   }
@@ -839,6 +906,7 @@ router.get('/tat-applicant-choices', protect, async (_req, res) => {
       SELECT id, applicant_number, full_name, position_applied_for, status, final_interview_at
       FROM public.recruitment_applications
       WHERE ${excludeMayorIntakeStubSql()}
+        AND deleted_at IS NULL
         AND status = ANY($1::text[])
       ORDER BY full_name ASC, applicant_number ASC
       `,
@@ -1268,7 +1336,8 @@ router.get('/final-hiring/sources', recruitmentStaff, async (req, res) => {
               e.submitted_at AS exam_submitted_at, e.passed AS exam_passed
        FROM public.recruitment_applications a
        LEFT JOIN public.recruitment_exam_results e ON e.application_id = a.id
-       WHERE a.step5_gate_required = TRUE
+       WHERE a.deleted_at IS NULL
+         AND a.step5_gate_required = TRUE
          AND a.final_interview_passed = TRUE
        ORDER BY a.full_name`,
     );
@@ -2767,17 +2836,62 @@ router.put('/exam-results/:applicationId', protect, async (req, res) => {
 });
 
 // DELETE /api/rsp/applications/:applicationId
-// Deletes the applicant row and its exam result rows.
-//
-// Orphan files under uploads/rsp-attachments may remain until removed manually.
-router.delete('/:applicationId', protect, async (req, res) => {
+// Without ?permanent=1, moves the applicant to the recycle bin.
+// ?permanent=1 deletes the row, exam results, and uploaded files.
+router.post('/:applicationId/restore', protect, async (req, res) => {
   try {
     const { applicationId } = req.params;
     if (!applicationId) {
       return res.status(400).json({ error: 'applicationId is required' });
     }
+    await ensureRspApplicationsTables();
+    const result = await pool.query(
+      `
+      UPDATE public.recruitment_applications
+      SET deleted_at = NULL, updated_at = now()
+      WHERE id = $1 AND deleted_at IS NOT NULL
+      RETURNING id
+      `,
+      [applicationId],
+    );
+    if ((result.rowCount ?? 0) === 0) {
+      return res.status(404).json({ error: 'Application is not in the recycle bin' });
+    }
+    return res.json({ ok: true, restored: true });
+  } catch (err) {
+    console.error('[rspApplications POST restore]', err);
+    return res.status(500).json({
+      error: 'Failed to restore application',
+      details: err?.message ? String(err.message) : String(err),
+    });
+  }
+});
+
+router.delete('/:applicationId', protect, async (req, res) => {
+  try {
+    const { applicationId } = req.params;
+    const permanent = req.query.permanent === '1' || req.query.permanent === 'true';
+    if (!applicationId) {
+      return res.status(400).json({ error: 'applicationId is required' });
+    }
 
     await ensureRspApplicationsTables();
+
+    if (!permanent) {
+      const recycled = await pool.query(
+        `
+        UPDATE public.recruitment_applications
+        SET deleted_at = now(), updated_at = now()
+        WHERE id = $1 AND deleted_at IS NULL
+        RETURNING id
+        `,
+        [applicationId],
+      );
+      if ((recycled.rowCount ?? 0) === 0) {
+        return res.status(404).json({ error: 'Application not found' });
+      }
+      return res.json({ ok: true, recycled: true });
+    }
 
     // Everything the applicant did (exam results, mayor endorsement request,
     // scheduling, final requirements, uploaded document references) is removed

@@ -1,6 +1,10 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 
 import 'package:hrms_plaridel/core/api/user_facing_api_error.dart';
+import 'package:hrms_plaridel/core/services/app_realtime_provider.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/features/recruitment/models/recruitment_application.dart';
 import 'package:hrms_plaridel/features/recruitment/presentation/admin/widgets/rsp_employee_account_setup_panel.dart';
@@ -17,6 +21,7 @@ class RspFinalRequirementsSection extends StatefulWidget {
     this.onGoToCreateAccount,
     this.expandApplicationId,
     this.onExpandApplicationConsumed,
+    this.live = false,
   });
 
   /// Opens the admin **Create Account** screen (sidebar); parent supplies navigation.
@@ -25,6 +30,10 @@ class RspFinalRequirementsSection extends StatefulWidget {
   /// Expands this applicant after returning from Create Account.
   final String? expandApplicationId;
   final VoidCallback? onExpandApplicationConsumed;
+
+  /// When true, the list reloads as applicant data changes.
+  /// Refresh List still reloads on demand.
+  final bool live;
 
   @override
   State<RspFinalRequirementsSection> createState() =>
@@ -43,6 +52,12 @@ class _RspFinalRequirementsSectionState
   String? _selectedPositionFilter;
   DateTime? _selectedAppliedDate;
   _FinalReqStatusFilter _statusFilter = _FinalReqStatusFilter.all;
+  Timer? _liveTimer;
+  StreamSubscription<AppRealtimeEvent>? _liveSub;
+  bool _liveHooksReady = false;
+  bool _loadInFlight = false;
+  bool _reloadQueued = false;
+  bool _queuedSilent = true;
 
   @override
   void initState() {
@@ -57,12 +72,45 @@ class _RspFinalRequirementsSectionState
   }
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (!_liveHooksReady) {
+      _liveHooksReady = true;
+      _liveSub = context.read<AppRealtimeProvider>().events.listen((event) {
+        if (!mounted || !widget.live || _savingIds.isNotEmpty) return;
+        if (event.name != 'rsp_applications_changed' &&
+            event.name != 'rsp_exam_results_changed') {
+          return;
+        }
+        unawaited(_load(silent: true));
+      });
+    }
+    _syncLiveTimer();
+  }
+
+  @override
   void didUpdateWidget(covariant RspFinalRequirementsSection oldWidget) {
     super.didUpdateWidget(oldWidget);
     final next = widget.expandApplicationId?.trim();
     final prev = oldWidget.expandApplicationId?.trim();
     if (next != null && next.isNotEmpty && next != prev) {
       _queueExpandApplication(next);
+    }
+    if (widget.live && !oldWidget.live) {
+      unawaited(_load(silent: _applications.isNotEmpty));
+    }
+    _syncLiveTimer();
+  }
+
+  void _syncLiveTimer() {
+    if (widget.live && _liveTimer == null) {
+      _liveTimer = Timer.periodic(const Duration(seconds: 10), (_) {
+        if (!mounted || !widget.live || _savingIds.isNotEmpty) return;
+        unawaited(_load(silent: true));
+      });
+    } else if (!widget.live) {
+      _liveTimer?.cancel();
+      _liveTimer = null;
     }
   }
 
@@ -80,27 +128,100 @@ class _RspFinalRequirementsSectionState
 
   @override
   void dispose() {
+    _liveTimer?.cancel();
+    _liveSub?.cancel();
     _searchController.dispose();
     super.dispose();
   }
 
-  Future<void> _load() async {
-    setState(() => _loading = true);
+  String _snapshot(List<RecruitmentApplication> apps) {
+    final rows = [...apps]..sort((a, b) => a.id.compareTo(b.id));
+    final buf = StringBuffer();
+    for (final app in rows) {
+      buf
+        ..write(app.id)
+        ..write('|')
+        ..write(app.updatedAt?.toIso8601String())
+        ..write('|')
+        ..write(app.fullName)
+        ..write('|')
+        ..write(app.email)
+        ..write('|')
+        ..write(app.positionAppliedFor)
+        ..write('|')
+        ..write(app.status)
+        ..write('|')
+        ..write(app.createdAt?.toIso8601String())
+        ..write('|')
+        ..write(app.finalRequirementsApproved)
+        ..write('|')
+        ..write(app.hasAllFinalRequirementsUploaded)
+        ..write('|')
+        ..write(app.hasRejectedFinalRequirement)
+        ..write('|')
+        ..write(app.hiredUserId)
+        ..write('|')
+        ..write(app.hrAccountSetupDone)
+        ..write('|')
+        ..write(app.orientationAt?.toIso8601String())
+        ..write('|')
+        ..write(app.orientationAttended)
+        ..write('|')
+        ..write(app.docMedicalCertificatePath)
+        ..write('|')
+        ..write(app.docDrugTestPath)
+        ..write('|')
+        ..write(app.docNbiClearancePath)
+        ..write('|')
+        ..write(app.docMedicalCertificateRejectReason)
+        ..write('|')
+        ..write(app.docDrugTestRejectReason)
+        ..write('|')
+        ..write(app.docNbiClearanceRejectReason)
+        ..write(';');
+    }
+    return buf.toString();
+  }
+
+  Future<void> _load({bool silent = false}) async {
+    if (_loadInFlight) {
+      _reloadQueued = true;
+      _queuedSilent = _queuedSilent && silent;
+      return;
+    }
+    _loadInFlight = true;
+    _queuedSilent = true;
+    final showSpinner = !silent || _applications.isEmpty;
+    if (showSpinner && mounted) setState(() => _loading = true);
     try {
       final apps = await RecruitmentRepo.instance.listApplications();
       if (!mounted) return;
+      final visible = apps.where((a) => a.finalInterviewPassed == true).toList()
+        ..sort(_compareLatestAppliedFirst);
+      final unchanged = silent && _snapshot(visible) == _snapshot(_applications);
+      if (unchanged) {
+        if (_loading) setState(() => _loading = false);
+        return;
+      }
       setState(() {
-        _applications =
-            apps.where((a) => a.finalInterviewPassed == true).toList()
-              ..sort(_compareLatestAppliedFirst);
+        _applications = visible;
         _loading = false;
       });
     } catch (_) {
       if (!mounted) return;
+      if (silent && _applications.isNotEmpty) return;
       setState(() {
         _applications = [];
         _loading = false;
       });
+    } finally {
+      _loadInFlight = false;
+      if (_reloadQueued && mounted) {
+        final nextSilent = _queuedSilent;
+        _reloadQueued = false;
+        _queuedSilent = true;
+        unawaited(_load(silent: nextSilent));
+      }
     }
   }
 
@@ -293,7 +414,7 @@ class _RspFinalRequirementsSectionState
         _buildHeader(ac),
         const SizedBox(height: 16),
         if (!_loading && _applications.isNotEmpty) ...[
-          _buildStatsRow(ac),
+          _buildStatsRow(),
           const SizedBox(height: 14),
         ],
         _buildToolbar(
@@ -394,7 +515,7 @@ class _RspFinalRequirementsSectionState
     );
   }
 
-  Widget _buildStatsRow(Color ac) {
+  Widget _buildStatsRow() {
     return LayoutBuilder(
       builder: (context, c) {
         final wide = c.maxWidth >= 900;
@@ -403,7 +524,6 @@ class _RspFinalRequirementsSectionState
             label: 'Total Applicants',
             count: _applications.length,
             icon: Icons.groups_rounded,
-            color: ac,
             selected: _statusFilter == _FinalReqStatusFilter.all,
             onTap: () =>
                 setState(() => _statusFilter = _FinalReqStatusFilter.all),
@@ -412,7 +532,6 @@ class _RspFinalRequirementsSectionState
             label: 'Incomplete',
             count: _incompleteCount,
             icon: Icons.assignment_late_outlined,
-            color: const Color(0xFFEA580C),
             selected: _statusFilter == _FinalReqStatusFilter.incomplete,
             onTap: () => setState(
               () => _statusFilter = _FinalReqStatusFilter.incomplete,
@@ -422,7 +541,6 @@ class _RspFinalRequirementsSectionState
             label: 'Ready for Review',
             count: _readyCount,
             icon: Icons.hourglass_top_rounded,
-            color: RspFinalReqUi.readyBlue,
             selected: _statusFilter == _FinalReqStatusFilter.readyForReview,
             onTap: () => setState(
               () => _statusFilter = _FinalReqStatusFilter.readyForReview,
@@ -432,7 +550,6 @@ class _RspFinalRequirementsSectionState
             label: 'Approved',
             count: _approvedCount,
             icon: Icons.check_circle_outline_rounded,
-            color: RspFinalReqUi.success,
             selected: _statusFilter == _FinalReqStatusFilter.approved,
             onTap: () =>
                 setState(() => _statusFilter = _FinalReqStatusFilter.approved),
@@ -441,7 +558,6 @@ class _RspFinalRequirementsSectionState
             label: 'Hired',
             count: _hiredCount,
             icon: Icons.badge_outlined,
-            color: RspFinalReqUi.hiredPurple,
             selected: _statusFilter == _FinalReqStatusFilter.hired,
             onTap: () =>
                 setState(() => _statusFilter = _FinalReqStatusFilter.hired),
@@ -479,10 +595,10 @@ class _RspFinalRequirementsSectionState
     required String label,
     required int count,
     required IconData icon,
-    required Color color,
     required bool selected,
     VoidCallback? onTap,
   }) {
+    final accent = RspFinalReqUi.accentOf(context);
     return Material(
       color: Colors.transparent,
       child: InkWell(
@@ -492,10 +608,11 @@ class _RspFinalRequirementsSectionState
           duration: const Duration(milliseconds: 160),
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
           decoration: BoxDecoration(
-            color: color.withValues(alpha: selected ? 0.14 : 0.07),
+            color: RspFinalReqUi.panelOf(context),
             borderRadius: BorderRadius.circular(12),
             border: Border.all(
-              color: color.withValues(alpha: selected ? 0.50 : 0.22),
+              color: selected ? accent : RspFinalReqUi.hairlineOf(context),
+              width: selected ? 1.4 : 1,
             ),
           ),
           child: Row(
@@ -505,10 +622,16 @@ class _RspFinalRequirementsSectionState
                 height: 36,
                 alignment: Alignment.center,
                 decoration: BoxDecoration(
-                  color: color.withValues(alpha: 0.16),
+                  color: AppTheme.dashMutedSurfaceOf(context),
                   borderRadius: BorderRadius.circular(10),
                 ),
-                child: Icon(icon, size: 18, color: color),
+                child: Icon(
+                  icon,
+                  size: 18,
+                  color: selected
+                      ? accent
+                      : RspFinalReqUi.secondaryTextOf(context),
+                ),
               ),
               const SizedBox(width: 10),
               Expanded(
@@ -521,7 +644,7 @@ class _RspFinalRequirementsSectionState
                         fontFamily: 'NotoSans',
                         fontWeight: FontWeight.w800,
                         fontSize: 18,
-                        color: color,
+                        color: RspFinalReqUi.primaryTextOf(context),
                         height: 1.1,
                       ),
                     ),
@@ -533,7 +656,7 @@ class _RspFinalRequirementsSectionState
                       style: TextStyle(
                         fontSize: 11.5,
                         fontWeight: FontWeight.w600,
-                        color: color.withValues(alpha: 0.9),
+                        color: RspFinalReqUi.secondaryTextOf(context),
                       ),
                     ),
                   ],

@@ -44,6 +44,7 @@ void main() {
         ),
       ),
     );
+    await tester.pump();
 
     expect(find.text('Total Applicants'), findsOneWidget);
     expect(find.text('Pending Review'), findsWidgets);
