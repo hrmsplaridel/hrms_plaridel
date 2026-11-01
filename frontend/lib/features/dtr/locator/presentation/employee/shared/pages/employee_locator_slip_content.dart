@@ -100,6 +100,7 @@ class EmployeeLocatorSlipContentState extends State<EmployeeLocatorSlipContent>
   LocatorReviewerAccess _reviewerAccess = const LocatorReviewerAccess.none();
   _LocatorSection _currentSection = _LocatorSection.requests;
   bool _appliedDeptHeadDefaultSection = false;
+  bool _sectionExplicitlySelected = false;
   bool _loadingMy = false;
   bool _loadingApprovals = false;
   bool _myHistoryLoaded = false;
@@ -176,6 +177,17 @@ class EmployeeLocatorSlipContentState extends State<EmployeeLocatorSlipContent>
         ? 'Employee'
         : auth.displayName.trim();
     await _openCreateForm(context, displayName, initialValues: initialValues);
+  }
+
+  void showSection({required bool approvals}) {
+    setState(() {
+      _sectionExplicitlySelected = true;
+      _appliedDeptHeadDefaultSection = true;
+      _currentSection = approvals ? _LocatorSection.approvals : _LocatorSection.requests;
+    });
+    if (approvals && !_approvalHistoryLoaded && !_loadingApprovals && _approvalsError == null) {
+      unawaited(_loadDepartmentHeadRequests());
+    }
   }
 
   @override
@@ -271,6 +283,7 @@ class EmployeeLocatorSlipContentState extends State<EmployeeLocatorSlipContent>
     _assignedRequests = {};
     _currentSection = _LocatorSection.requests;
     _appliedDeptHeadDefaultSection = false;
+    _sectionExplicitlySelected = false;
     _loadingMy = false;
     _loadingApprovals = false;
     _myHistoryLoaded = false;
@@ -477,7 +490,7 @@ class EmployeeLocatorSlipContentState extends State<EmployeeLocatorSlipContent>
         if (isDepartmentHead && !_appliedDeptHeadDefaultSection) {
           _appliedDeptHeadDefaultSection = true;
           WidgetsBinding.instance.addPostFrameCallback((_) {
-            if (!mounted) return;
+            if (!mounted || _sectionExplicitlySelected) return;
             setState(() {
               _currentSection = _LocatorSection.approvals;
             });
@@ -526,13 +539,7 @@ class EmployeeLocatorSlipContentState extends State<EmployeeLocatorSlipContent>
               _LocatorSectionTabs(
                 current: _currentSection,
                 onChanged: (section) {
-                  setState(() => _currentSection = section);
-                  if (section == _LocatorSection.approvals &&
-                      !_approvalHistoryLoaded &&
-                      !_loadingApprovals &&
-                      _approvalsError == null) {
-                    _loadDepartmentHeadRequests();
-                  }
+                  showSection(approvals: section == _LocatorSection.approvals);
                 },
               ),
             ],

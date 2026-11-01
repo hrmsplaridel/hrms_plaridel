@@ -218,6 +218,8 @@ class _AdminDashboardState extends State<AdminDashboard>
   AdminMenu _selectedMenu = AdminMenu.dashboard;
   LeaveSection _myLeaveSection = LeaveSection.requests;
   int _myLeaveEntryVersion = 0;
+  final GlobalKey<EmployeeLocatorSlipScreenState> _myLocatorKey =
+      GlobalKey<EmployeeLocatorSlipScreenState>();
   AdminAccessRefresh? _accessRefresh;
   int _accountAccessVersion = 0;
   int _dtrAccessVersion = 0;
@@ -425,7 +427,7 @@ class _AdminDashboardState extends State<AdminDashboard>
         break;
       case NotificationTapKind.adminDtrLocatorManagement:
         if (_dtrFeatureAccess['locator_allowed'] != true) {
-          _onMenuSelected(AdminMenu.myLocator);
+          _openMyLocatorSection(approvals: true);
           break;
         }
         setState(() => _selectedMenu = AdminMenu.dtr);
@@ -466,8 +468,7 @@ class _AdminDashboardState extends State<AdminDashboard>
         break;
       case NotificationTapKind.employeeLocatorApprovals:
       case NotificationTapKind.employeeLocatorRequests:
-        setState(() => _selectedMenu = AdminMenu.myLocator);
-        DashboardContentNavigator.showHome(_contentNavKey);
+        _openMyLocatorSection(approvals: result.kind == NotificationTapKind.employeeLocatorApprovals);
         break;
       case NotificationTapKind.employeeLeaveApprovals:
       case NotificationTapKind.employeeLeaveRequests:
@@ -485,6 +486,16 @@ class _AdminDashboardState extends State<AdminDashboard>
       case NotificationTapKind.employeeMyAttendance:
         break;
     }
+  }
+
+  void _openMyLocatorSection({required bool approvals}) {
+    setState(() => _selectedMenu = AdminMenu.myLocator);
+    DashboardContentNavigator.showHome(_contentNavKey);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _myLocatorKey.currentState?.showSection(approvals: approvals);
+      });
+    });
   }
 
   void _dismissRspApplicantDetails() {
@@ -678,7 +689,7 @@ class _AdminDashboardState extends State<AdminDashboard>
           ),
         );
       case AdminMenu.myLocator:
-        return const EmployeeLocatorSlipScreen();
+        return EmployeeLocatorSlipScreen(key: _myLocatorKey);
       case AdminMenu.myProfile:
         return _settingsPanel();
       case AdminMenu.dtr:
@@ -820,6 +831,7 @@ class _AdminDashboardState extends State<AdminDashboard>
                               homeCacheKey: _selectedMenu,
                               homeRefreshKey: Object.hash(
                                 _selectedMenu,
+                                _selectedMenu == AdminMenu.myLeave ? _myLeaveEntryVersion : 0,
                                 displayName,
                                 contentPadding,
                                 _rspHomeEpoch,
@@ -861,6 +873,7 @@ class _AdminDashboardState extends State<AdminDashboard>
                         homeCacheKey: _selectedMenu,
                         homeRefreshKey: Object.hash(
                           _selectedMenu,
+                          _selectedMenu == AdminMenu.myLeave ? _myLeaveEntryVersion : 0,
                           displayName,
                           contentPadding,
                           _rspHomeEpoch,

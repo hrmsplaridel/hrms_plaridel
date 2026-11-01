@@ -21,6 +21,9 @@ class EmployeeLocatorSlipScreenState extends State<EmployeeLocatorSlipScreen> {
   final GlobalKey<EmployeeLocatorSlipContentState> _contentKey =
       GlobalKey<EmployeeLocatorSlipContentState>();
 
+  void showSection({required bool approvals}) =>
+      _contentKey.currentState?.showSection(approvals: approvals);
+
   Future<void> openCreateForm({
     LocatorSlipFormInitialValues? initialValues,
   }) async {

@@ -97,8 +97,8 @@ class _EmployeeDashboardState extends State<EmployeeDashboardDesktopPage>
   static const int _profileNavIndex = 7;
   static const _settingsPanelKey = PageStorageKey<String>('employee_settings');
   final GlobalKey<NavigatorState> _contentNavKey = GlobalKey<NavigatorState>();
-  final GlobalKey<State<StatefulWidget>> _locatorSlipKey =
-      GlobalKey<State<StatefulWidget>>();
+  final GlobalKey<EmployeeLocatorSlipScreenState> _locatorSlipKey =
+      GlobalKey<EmployeeLocatorSlipScreenState>();
   final GlobalKey _dashboardWelcomeKey = GlobalKey();
   final GlobalKey _dashboardAttendanceKey = GlobalKey();
   final GlobalKey _dashboardDocumentsKey = GlobalKey();
@@ -416,6 +416,14 @@ class _EmployeeDashboardState extends State<EmployeeDashboardDesktopPage>
       case NotificationTapKind.employeeLocatorRequests:
         setState(() => _selectedNavIndex = 3);
         DashboardContentNavigator.showHome(_contentNavKey);
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (!mounted) return;
+            _locatorSlipKey.currentState?.showSection(
+              approvals: result.kind == NotificationTapKind.employeeLocatorApprovals,
+            );
+          });
+        });
         break;
       case NotificationTapKind.docuTrackerDocuments:
         setState(() {
@@ -687,6 +695,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboardDesktopPage>
         onProfile: _openMyProfile,
         onViewAllNotifications: _handleOpenNotifications,
         onNotificationTap: _applyNotificationTapResult,
+        navigationVersion: _leaveNavKey,
         onFileLeave: _openEmployeeLeaveRequestForm,
         onFileLocator: _openEmployeeLocatorRequestForm,
         onTutorial: _openDashboardTutorial,

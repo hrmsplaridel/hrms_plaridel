@@ -28,6 +28,7 @@ class EmployeeDashboardMobileShell extends StatelessWidget {
     required this.onFileLocator,
     required this.onTutorial,
     required this.showMobileLeaveFab,
+    this.navigationVersion = 0,
   });
 
   final double width;
@@ -49,6 +50,7 @@ class EmployeeDashboardMobileShell extends StatelessWidget {
   final VoidCallback onFileLocator;
   final VoidCallback onTutorial;
   final bool showMobileLeaveFab;
+  final int navigationVersion;
 
   bool get _useMobileLeaveFab =>
       width < 600 && selectedIndex == 2 && showMobileLeaveFab;
@@ -99,6 +101,7 @@ class EmployeeDashboardMobileShell extends StatelessWidget {
                       homeCacheKey: selectedIndex,
                       homeRefreshKey: Object.hash(
                         selectedIndex,
+                        selectedIndex == 2 ? navigationVersion : 0,
                         displayName,
                         width,
                         _ownsMobileLeaveAction,

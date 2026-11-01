@@ -26,6 +26,14 @@ class EmployeeLocatorSlipScreenState extends State<EmployeeLocatorSlipScreen> {
   final GlobalKey<EmployeeLocatorSlipMobilePageState> _mobileKey =
       GlobalKey<EmployeeLocatorSlipMobilePageState>();
 
+  void showSection({required bool approvals}) {
+    if (PlatformLayout.isMobile(context)) {
+      _mobileKey.currentState?.showSection(approvals: approvals);
+    } else {
+      _desktopKey.currentState?.showSection(approvals: approvals);
+    }
+  }
+
   Future<void> openCreateForm({
     LocatorSlipFormInitialValues? initialValues,
   }) async {
