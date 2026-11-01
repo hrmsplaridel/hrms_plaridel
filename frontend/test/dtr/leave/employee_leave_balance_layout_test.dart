@@ -49,7 +49,7 @@ void main() {
     await tester.pump(const Duration(milliseconds: 300));
 
     final credits = find.text('Leave Credits');
-    final entitlements = find.text('Annual Leave Entitlements');
+    final entitlements = find.text('Leave Usage & Limits');
     final requests = find.text('My Requests');
     expect(
       tester.getTopLeft(credits).dy,

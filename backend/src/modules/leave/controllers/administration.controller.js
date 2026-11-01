@@ -52,6 +52,9 @@ module.exports = function createLeaveControllers({
           await client.query('ROLLBACK');
           return res.status(404).json({ error: 'Target employee not found or inactive' });
         }
+        await client.query('SELECT pg_advisory_xact_lock_shared(743022, 0)');
+        await require('../../../services/leaveOpeningBalances').assertAfterOpeningBalanceCutoff(client,userId,`${year}-12-31`);
+        await require('../../../services/leaveOpeningUsage').assertOpeningUsageVerified(client,userId,year);
         const duplicateQ = await client.query(
           `SELECT id, created_at
        FROM leave_balance_ledger

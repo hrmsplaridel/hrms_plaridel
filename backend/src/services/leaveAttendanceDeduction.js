@@ -9,6 +9,7 @@
  */
 
 const { loadHolidayOverlayMap } = require('./holidayOverlay');
+const {loadOpeningBalanceCutoffs} = require('./leaveOpeningBalances');
 const {
   getExpectedWorkMinutes,
   getExpectedAmEndMinutes,
@@ -798,13 +799,22 @@ async function runMonthlyAttendanceDeductions(pgPool, options = {}) {
   const details = [];
 
   try {
-    if (!dryRun) await client.query('BEGIN');
+    if (!dryRun) {
+      await client.query('BEGIN');
+      await client.query('SELECT pg_advisory_xact_lock_shared(743022, 0)');
+    }
 
     const summaries =
       options.summaries ||
       (await calculateMonthlyAttendanceDeductions(client, targetMonth, options));
 
+    const openingCutoffs = await loadOpeningBalanceCutoffs(client,summaries.map(r=>r.user_id));
     for (const summary of summaries) {
+      if (openingCutoffs.get(String(summary.user_id)) >= serviceMonth) {
+        rowsSkipped++;
+        details.push({...summary,action:'skipped',reason:'covered_by_opening_balance',balance_delta:0});
+        continue;
+      }
       let previous;
       let balance;
       let postingCreated = false;

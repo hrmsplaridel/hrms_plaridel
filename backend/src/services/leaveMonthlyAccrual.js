@@ -33,6 +33,7 @@ const {
 // ─── Constants ───────────────────────────────────────────────────────────────
 
 /** Fallback used when leave_types accrual columns are not yet migrated. */
+const {loadOpeningBalanceCutoffs} = require('./leaveOpeningBalances');
 const HARDCODED_ACCRUAL_CONFIGS = [
   { name: 'vacationLeave', monthly_rate: 1.25, accrual_annual_cap: null },
   { name: 'sickLeave',     monthly_rate: 1.25, accrual_annual_cap: null },
@@ -640,8 +641,10 @@ async function reconcileMonthlyAccrualPostings(client, {
   const correctionDetails = [];
   const adjustedKeys = new Set();
   let rowsUpdated = 0;
+  const openingCutoffs = await loadOpeningBalanceCutoffs(client,rows.map(r=>r.user_id));
 
   for (const row of rows) {
+    if (ACCRUAL_LEAVE_TYPES.includes(row.leave_type) && openingCutoffs.get(String(row.user_id)) >= targetMonthStartStr) continue;
     const config = leaveTypeConfigMap.get(row.leave_type);
     const rate = config?.monthly_rate ?? parseFloat(row.accrual_rate || DAYS_PER_MONTH);
     const previousDays = round3(parseFloat(row.credited_days || 0));
@@ -863,6 +866,7 @@ async function runLeaveMonthlyAccrual(pgPool, options = {}) {
   try {
     if (!dryRun) {
       await client.query('BEGIN');
+      await client.query('SELECT pg_advisory_xact_lock_shared(743022, 0)');
     }
 
     // ── Find employees missing balance rows ───────────────────────────────────
@@ -977,6 +981,7 @@ async function runLeaveMonthlyAccrual(pgPool, options = {}) {
       );
     }
 
+    const openingCutoffs = await loadOpeningBalanceCutoffs(client,rows.map(r=>r.user_id));
     // ── Per-row accrual loop ──────────────────────────────────────────────────
     for (const row of rows) {
       // Enhancement 6: use DB-driven rate; fall back to 1.25
@@ -985,7 +990,17 @@ async function runLeaveMonthlyAccrual(pgPool, options = {}) {
       const rate = config.monthly_rate;
 
       const createdBalanceRow = missingBalanceKeys.has(`${row.user_id}|${row.leave_type}`);
-      const lastAccrual = row.last_accrual_date ? new Date(row.last_accrual_date) : null;
+      let lastAccrual = row.last_accrual_date ? new Date(row.last_accrual_date) : null;
+      const openingCutoff = ACCRUAL_LEAVE_TYPES.includes(row.leave_type) ? openingCutoffs.get(String(row.user_id)) : null;
+      if (openingCutoff >= targetMonthStartStr) {
+        rowsSkipped++;
+        details.push({user_id:row.user_id,leave_type:row.leave_type,action:'skipped',reason:'covered_by_opening_balance'});
+        continue;
+      }
+      if (openingCutoff) {
+        const baselineMonth = parseTargetMonth(openingCutoff.slice(0,7));
+        if (!lastAccrual || lastAccrual < baselineMonth) lastAccrual = baselineMonth;
+      }
 
       // Enhancement 2: pass dateHired for hire date backfill
       const months = countMonthsToCredit(lastAccrual, targetMonth, maxCatchUpMonths, row.date_hired);

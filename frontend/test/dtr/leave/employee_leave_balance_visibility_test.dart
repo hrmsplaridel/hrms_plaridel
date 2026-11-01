@@ -93,7 +93,7 @@ void main() {
             history ? findsOneWidget : findsNothing,
           );
           expect(
-            find.text('Annual Leave Entitlements'),
+            find.text('Leave Usage & Limits'),
             annual ? findsOneWidget : findsNothing,
           );
           if (annual) {
@@ -102,7 +102,7 @@ void main() {
             );
             expect(tester.getSize(row).width, greaterThan(1200));
             expect(
-              tester.getTopLeft(find.text('Annual Leave Entitlements')).dx,
+              tester.getTopLeft(find.text('Leave Usage & Limits')).dx,
               tester.getTopLeft(row).dx,
             );
           }

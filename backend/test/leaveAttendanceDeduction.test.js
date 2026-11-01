@@ -66,7 +66,7 @@ test('month-end ignores only current whole-day holidays, not stale stored holida
   );
 });
 
-function createPostingPool() {
+function createPostingPool(openingRows = []) {
   const state = {
     used: 0,
     posting: null,
@@ -82,6 +82,8 @@ function createPostingPool() {
       if (['BEGIN', 'COMMIT', 'ROLLBACK'].includes(text.trim())) {
         return { rows: [], rowCount: 0 };
       }
+      if (text.includes('pg_advisory_xact_lock_shared')) return {rows:[]};
+      if (text.includes('FROM leave_opening_balance_setups')) return {rows:openingRows};
       if (text.includes('INSERT INTO leave_attendance_deductions')) {
         const created = state.posting == null;
         state.posting ??= {
@@ -487,6 +489,19 @@ test('month-end DTR posting is idempotent on rerun', async () => {
   assert.equal(first.dtrReconciliationsCleared, 1);
   assert.equal(state.locatorReconciliationClears, 2);
   assert.equal(state.dtrReconciliationClears, 2);
+});
+
+test('imported opening balance excludes old attendance deductions, including explicit summaries',async()=>{
+ const {pool,state}=createPostingPool([{user_id:USER_ID,cutoff_date:'2026-05-31'}]);
+ const result=await runMonthlyAttendanceDeductions(pool,{targetMonth:'2026-05',now:new Date('2026-06-01T00:00:00Z'),summaries:[summary(2)]});
+ assert.equal(result.rowsUpdated,0);assert.equal(state.used,0);assert.equal(state.ledgerRows,0);
+ assert.equal(state.posting,null);
+});
+
+test('attendance processing continues normally in the month after the opening cutoff',async()=>{
+ const {pool,state}=createPostingPool([{user_id:USER_ID,cutoff_date:'2026-04-30'}]);
+ const result=await runMonthlyAttendanceDeductions(pool,{targetMonth:'2026-05',now:new Date('2026-06-01T00:00:00Z'),summaries:[summary(0.25)]});
+ assert.equal(result.rowsUpdated,1);assert.equal(state.used,0.25);
 });
 
 test('corrected month-end DTR creates a correction ledger movement', async () => {

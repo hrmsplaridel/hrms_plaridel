@@ -7,14 +7,13 @@ import 'package:hrms_plaridel/features/dtr/leave/models/leave_request.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_request_history.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_type.dart';
 
-/// Credit balances and explicitly marked annual-entitlement summaries are shown.
-/// Event, request, and compliance limits are not balance rows.
+/// Credit wallets and explicitly marked usage/compliance summaries are shown.
 List<LeaveBalance> _filterDisplayBalances(List<LeaveBalance> raw) {
   return raw
       .where(
         (balance) =>
             balance.effectiveLeaveTypeName != 'others' &&
-            (balance.isCreditBalance || balance.isAnnualEntitlement),
+            (balance.isCreditBalance || balance.isUsageSummary),
       )
       .toList();
 }

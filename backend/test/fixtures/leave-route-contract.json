@@ -16,6 +16,26 @@
     "regexp": "/^\\/routing\\/?(?=\\/|$)/i"
   },
   {
+    "path": "/admin/opening-balances",
+    "methods": ["get"],
+    "middleware": ["authMiddleware", "requireAdminOrHr", ""]
+  },
+  {
+    "path": "/admin/opening-balances/:userId/usage",
+    "methods": ["post"],
+    "middleware": ["authMiddleware", "requireAdminOrHr", ""]
+  },
+  {
+    "path": "/admin/opening-balances/:userId",
+    "methods": ["get"],
+    "middleware": ["authMiddleware", "requireAdminOrHr", ""]
+  },
+  {
+    "path": "/admin/opening-balances/:userId",
+    "methods": ["post"],
+    "middleware": ["authMiddleware", "requireAdminOrHr", ""]
+  },
+  {
     "path": "/admin/filing-employees",
     "methods": [
       "get"

@@ -57,6 +57,10 @@ module.exports = function createLeaveComponent({
     const leaveTypeRule = r.leave_type_name
       ? await getLeaveTypeDefinition(client, r.leave_type_name)
       : null;
+    if (['vacationLeave','sickLeave','mandatoryForcedLeave'].includes(r.leave_type_name) ||
+        ['vacationLeave','sickLeave'].includes(leaveTypeRule?.balance_ledger_type)) {
+      await require('../../../services/leaveOpeningBalances').assertAfterOpeningBalanceCutoff(client,targetUserId,startStr);
+    }
     await assertLeaveServiceEligibility(client, leaveTypeRule, targetUserId, startStr);
     assertRequiredLeaveAttachment({
       rule: leaveTypeRule,

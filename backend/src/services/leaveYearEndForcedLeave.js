@@ -34,7 +34,7 @@ function manilaYearNow() {
  * @param {import('pg').Pool} pool
  * @param {{ year: number }} options
  */
-async function getYearEndForcedLeaveCompliance(pool, { year }) {
+async function getYearEndForcedLeaveCompliance(pool, { year, userId = null }) {
   const yearStr = String(year);
   const yearClosed = year < manilaYearNow();
 
@@ -47,7 +47,9 @@ async function getYearEndForcedLeaveCompliance(pool, { year }) {
       cur.current_department_name,
 
       /* Approved mandatoryForcedLeave days in the target year */
-      COALESCE(fl.forced_days, 0)::numeric                   AS forced_leave_days_used,
+      COALESCE(fl.qualifying_requests, '[]'::jsonb)          AS qualifying_requests,
+      obs.cutoff_date                                      AS opening_cutoff,
+      obs.qualifying_leave_days                            AS opening_qualifying_days,
 
       /* Current VL available balance */
       GREATEST(
@@ -90,18 +92,22 @@ async function getYearEndForcedLeaveCompliance(pool, { year }) {
     LEFT JOIN (
       SELECT
         COALESCE(lr.user_id, lr.employee_id) AS uid,
-        COALESCE(SUM(COALESCE(lr.number_of_days, lr.total_days, 0)), 0) AS forced_days
+        jsonb_agg(jsonb_build_object('start_date',lr.start_date,'end_date',lr.end_date,
+          'status',lr.status,'number_of_days',COALESCE(lr.number_of_days,lr.total_days))) AS qualifying_requests
       FROM   leave_requests lr
       JOIN   leave_types lt ON lt.id = lr.leave_type_id
       WHERE  lt.name IN ('mandatoryForcedLeave', 'vacationLeave')
         AND  lr.status = 'approved'
-        AND  EXTRACT(YEAR FROM lr.start_date) = $1::int
+        AND  lr.start_date <= make_date($1::int,12,31)
+        AND  lr.end_date >= make_date($1::int,1,1)
+        AND  lr.discarded_at IS NULL
       GROUP BY COALESCE(lr.user_id, lr.employee_id)
     ) fl ON fl.uid = u.id
 
     /* Current VL balance row */
     LEFT JOIN leave_balances vl
       ON vl.user_id = u.id AND vl.leave_type = 'vacationLeave'
+    LEFT JOIN leave_opening_balance_setups obs ON obs.user_id=u.id
 
     /* Existing year-end deduction ledger entry for this year */
     LEFT JOIN LATERAL (
@@ -119,13 +125,18 @@ async function getYearEndForcedLeaveCompliance(pool, { year }) {
     ) ded ON true
 
     WHERE (u.is_active IS NULL OR u.is_active = true)
+      AND ($2::uuid IS NULL OR u.id=$2::uuid)
+      AND NOT EXISTS (SELECT 1 FROM leave_opening_balance_setups obs
+        WHERE obs.user_id=u.id AND obs.cutoff_date >= make_date($1::int,12,31))
     ORDER BY u.full_name ASC
     `,
-    [yearStr],
+    [yearStr,userId],
   );
 
-  const employees = rows.map((r) => {
-    const qualifyingUsed = Math.max(0, parseFloat(r.forced_leave_days_used || 0));
+  const employees = await Promise.all(rows.map(async (r) => {
+    const usage = await require('./leaveOpeningUsage').qualifyingUsage(pool,r.user_id,year,
+      {cutoff_date:r.opening_cutoff,qualifying_leave_days:r.opening_qualifying_days},r.qualifying_requests || []);
+    const qualifyingUsed = usage.used;
     const forcedUsed = Math.min(REQUIRED_FORCED_DAYS, qualifyingUsed);
     const vlAccumulated = parseFloat(r.vl_accumulated || 0);
     const vlAvailable = parseFloat(r.vl_available || 0);
@@ -137,7 +148,7 @@ async function getYearEndForcedLeaveCompliance(pool, { year }) {
     // 25 and must not be included in automatic bulk deductions. Monetization
     // exceptions require HR review because that history is not yet stored.
     const eligible = vlAccumulated >= 10;
-    const actualDeduction = alreadyDeducted || !eligible || !yearClosed
+    const actualDeduction = alreadyDeducted || !eligible || !yearClosed || usage.needsReview
       ? 0
       : parseFloat(Math.min(shortfall, vlAvailable).toFixed(4));
     const unresolvedShortfall = parseFloat(
@@ -146,6 +157,7 @@ async function getYearEndForcedLeaveCompliance(pool, { year }) {
 
     let status;
     if (alreadyDeducted) status = 'deducted';
+    else if (usage.needsReview) status = 'needs_history_review';
     else if (forcedUsed >= REQUIRED_FORCED_DAYS) status = 'compliant';
     else if (!eligible) status = 'optional_below_threshold';
     else if (!yearClosed) status = 'monitoring';
@@ -160,6 +172,7 @@ async function getYearEndForcedLeaveCompliance(pool, { year }) {
       current_department_name: r.current_department_name || null,
       forced_leave_days_used: forcedUsed,
       qualifying_leave_days_used: qualifyingUsed,
+      history_verification_required: usage.needsReview,
       required_days: REQUIRED_FORCED_DAYS,
       suggested_deduction: shortfall,
       actual_deduction: actualDeduction,
@@ -168,17 +181,17 @@ async function getYearEndForcedLeaveCompliance(pool, { year }) {
       vl_accumulated: vlAccumulated,
       eligible,
       eligibility_status: eligible ? 'required' : 'optional_below_threshold',
-      eligibility_reason: eligible
+      eligibility_reason: usage.needsReview ? 'Verify cutoff-year usage in Opening balances before year-end deductions' : eligible
         ? 'At least 10 VL credits at assessment'
         : 'Below 10 VL credits; forced leave is optional and requires HR review',
       already_deducted: alreadyDeducted,
       deducted_days: alreadyDeducted ? parseFloat(r.deducted_days || 0) : null,
       deducted_at: r.deducted_at || null,
       deduction_remarks: r.deduction_remarks || null,
-      can_apply: yearClosed && !alreadyDeducted && eligible && actualDeduction > 0,
+      can_apply: yearClosed && !alreadyDeducted && !usage.needsReview && eligible && actualDeduction > 0,
       status,
     };
-  });
+  }));
 
   const summary = {
     total: employees.length,
@@ -189,6 +202,7 @@ async function getYearEndForcedLeaveCompliance(pool, { year }) {
     optional_review: employees.filter((e) => e.status === 'optional_below_threshold').length,
     insufficient_balance: employees.filter((e) => e.status === 'insufficient_balance').length,
     already_deducted: employees.filter((e) => e.status === 'deducted').length,
+    history_review: employees.filter((e) => e.status === 'needs_history_review').length,
   };
 
   return {
@@ -265,6 +279,9 @@ async function applyYearEndForcedLeaveDeductions(pool, {
       error: null,
       applied_at: null,
     }));
+  const skippedHistory = compliance.employees
+    .filter(e=>e.status==='needs_history_review' && (!filterIds || filterIds.has(e.user_id)))
+    .map(e=>({...e,days_to_deduct:0,apply_status:'needs_history_review',error:null,applied_at:null}));
 
   // --- Dry-run: return preview without writing anything ---
   if (dryRun) {
@@ -292,9 +309,10 @@ async function applyYearEndForcedLeaveDeductions(pool, {
         would_apply: preview.length,
         already_deducted: skippedDeducted.length,
         compliant: skippedCompliant.length,
+        history_review: skippedHistory.length,
         insufficient_balance: preview.filter((r) => !r.vl_sufficient).length,
       },
-      results: [...preview, ...skippedDeducted, ...skippedCompliant],
+      results: [...preview, ...skippedDeducted, ...skippedCompliant, ...skippedHistory],
     };
   }
 
@@ -306,6 +324,17 @@ async function applyYearEndForcedLeaveDeductions(pool, {
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
+      await client.query('SELECT pg_advisory_xact_lock_shared(743022, 0)');
+      await require('./leaveOpeningBalances').assertAfterOpeningBalanceCutoff(client,emp.user_id,`${year}-12-31`);
+      await require('./leaveFilingLock').lockEmployeeLeaveFiling(client,emp.user_id);
+      const fresh = (await getYearEndForcedLeaveCompliance(client,{year,userId:emp.user_id})).employees[0];
+      if (!fresh?.can_apply) {
+        await client.query('ROLLBACK');
+        appliedResults.push({...emp,days_to_deduct:0,apply_status:fresh?.status || 'needs_review',error:null,applied_at:null});
+        continue;
+      }
+      emp.suggested_deduction=fresh.suggested_deduction;
+      emp.forced_leave_days_used=fresh.forced_leave_days_used;
 
       // Race-condition duplicate guard
       const dupQ = await client.query(
@@ -446,8 +475,9 @@ async function applyYearEndForcedLeaveDeductions(pool, {
       insufficient_balance: appliedResults.filter((r) => r.apply_status === 'insufficient_balance').length,
       errors: appliedResults.filter((r) => r.apply_status === 'error').length,
       compliant: skippedCompliant.length,
+      history_review: skippedHistory.length,
     },
-    results: [...appliedResults, ...skippedDeducted, ...skippedCompliant],
+    results: [...appliedResults, ...skippedDeducted, ...skippedCompliant, ...skippedHistory],
   };
 }
 

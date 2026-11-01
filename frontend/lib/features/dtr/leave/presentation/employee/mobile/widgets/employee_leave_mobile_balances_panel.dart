@@ -29,7 +29,7 @@ class EmployeeLeaveMobileBalancesPanel extends StatelessWidget {
         .where((b) => _creditTypes.contains(b.effectiveLeaveTypeName))
         .toList();
     final dayBalances = balances
-        .where((balance) => balance.isAnnualEntitlement)
+        .where((balance) => balance.isUsageSummary)
         .toList();
 
     return Column(
@@ -96,7 +96,7 @@ class EmployeeLeaveMobileBalancesPanel extends StatelessWidget {
         if (dayBalances.isNotEmpty || loading) ...[
           if (showCredits) const SizedBox(height: 24),
           Text(
-            'Annual Leave Entitlements',
+            'Leave Usage & Limits',
             style: TextStyle(
               color: AppTheme.dashTextPrimaryOf(context),
               fontSize: 17,
@@ -106,7 +106,7 @@ class EmployeeLeaveMobileBalancesPanel extends StatelessWidget {
           ),
           const SizedBox(height: 4),
           Text(
-            'Quota-based leave only. Eligibility and approval rules apply.',
+            'Approved days taken toward your yearly limits and requirements.',
             style: TextStyle(
               color: AppTheme.dashTextSecondaryOf(context),
               fontSize: 12,

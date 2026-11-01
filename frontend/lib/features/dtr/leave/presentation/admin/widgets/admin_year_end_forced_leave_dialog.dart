@@ -223,6 +223,7 @@ class _AdminYearEndForcedLeaveDialogState
     return switch (_statusFilter) {
       'pending' => s == 'pending' || s == 'would_apply' || s == 'applied',
       'monitoring' => s == 'monitoring',
+      'needs_history_review' => s == 'needs_history_review',
       'compliant' => s == 'compliant',
       'deducted' => s == 'deducted' || s == 'already_deducted',
       _ => true,
@@ -519,6 +520,7 @@ class _AdminYearEndForcedLeaveDialogState
                 selected: _statusFilter,
                 pendingCount: _compliance!.summary.pendingDeduction,
                 monitoringCount: _compliance!.summary.monitoring,
+                historyReviewCount: _compliance!.employees.where((e)=>e.status=='needs_history_review').length,
                 compliantCount: _compliance!.summary.compliant,
                 deductedCount: _compliance!.summary.alreadyDeducted,
                 onChanged: (v) => _setFilter(status: v),
@@ -718,6 +720,7 @@ class _StatusFilterBar extends StatelessWidget {
     required this.selected,
     required this.pendingCount,
     required this.monitoringCount,
+    required this.historyReviewCount,
     required this.compliantCount,
     required this.deductedCount,
     required this.onChanged,
@@ -726,6 +729,7 @@ class _StatusFilterBar extends StatelessWidget {
   final String selected;
   final int pendingCount;
   final int monitoringCount;
+  final int historyReviewCount;
   final int compliantCount;
   final int deductedCount;
   final ValueChanged<String> onChanged;
@@ -736,6 +740,7 @@ class _StatusFilterBar extends StatelessWidget {
       ('all', 'All'),
       if (pendingCount > 0) ('pending', 'Need deduction ($pendingCount)'),
       if (monitoringCount > 0) ('monitoring', 'Monitoring ($monitoringCount)'),
+      if (historyReviewCount > 0) ('needs_history_review', 'History review ($historyReviewCount)'),
       ('compliant', 'Compliant ($compliantCount)'),
       ('deducted', 'Already deducted ($deductedCount)'),
     ];
@@ -1064,6 +1069,7 @@ class _ComplianceRow extends StatelessWidget {
   (String label, Color color, Color bg) get _statusBadge {
     return switch (_effectiveStatus) {
       'compliant' => ('Compliant', Colors.green.shade700, Colors.green.shade50),
+      'needs_history_review' => ('Needs history review', Colors.orange.shade800, Colors.orange.shade50),
       'deducted' => ('Deducted', Colors.blue.shade700, Colors.blue.shade50),
       'already_deducted' => (
         'Already deducted',

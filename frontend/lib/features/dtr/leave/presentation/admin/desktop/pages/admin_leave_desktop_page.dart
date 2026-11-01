@@ -1,4 +1,5 @@
 import 'package:hrms_plaridel/features/dtr/leave/presentation/admin/widgets/admin_leave_filing_panel.dart';
+import 'package:hrms_plaridel/features/dtr/leave/presentation/admin/widgets/admin_leave_opening_balances_form.dart';
 import 'package:hrms_plaridel/features/dtr/leave/presentation/shared/pages/leave_request_form_screen.dart';
 import 'package:hrms_plaridel/features/dtr/management/approvals/pages/workflow_approval_inbox_page.dart';
 import 'package:hrms_plaridel/features/dtr/leave/utils/configured_leave_pdf.dart';
@@ -1457,9 +1458,11 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
   Future<void> _manualBalanceAdjustment() async {
     final saved = await openResponsiveRightSidePanel<bool>(
       context: context,
+      barrierDismissible: false,
       builder: (_) => const _ManualBalanceAdjustmentDialog(),
     );
     if (!mounted || saved != true) return;
+    context.read<LeaveProvider>().invalidateCachedLeaveData();
     _showMessage('Leave balance saved.');
     await _loadRequests();
   }
@@ -2548,6 +2551,9 @@ class _ManualBalanceAdjustmentDialogState
 
   bool _loadingEmployees = true;
   bool _loadingBalances = false;
+  bool _openingMode = false;
+  bool _openingModeVisited = false;
+  bool _openingSaving = false;
   String? _employeesError;
   List<String> _departments = const [];
   List<Map<String, String>> _employees = const [];
@@ -2767,7 +2773,7 @@ class _ManualBalanceAdjustmentDialogState
 
   @override
   Widget build(BuildContext context) {
-    final saving = context.watch<LeaveProvider>().submitting;
+    final saving = context.watch<LeaveProvider>().submitting || _openingSaving;
     final hasDepartments = _departments.isNotEmpty;
     final hasEmployees = _filteredEmployees.isNotEmpty;
     final hasSelectedEmployee =
@@ -2781,112 +2787,197 @@ class _ManualBalanceAdjustmentDialogState
         hasEmployees &&
         hasSelectedEmployee;
 
-    return Scaffold(
-      backgroundColor: Theme.of(context).canvasColor,
-      body: SafeArea(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 16, 12, 12),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Container(
-                    width: 42,
-                    height: 42,
-                    alignment: Alignment.center,
-                    decoration: BoxDecoration(
-                      color: AppTheme.primaryNavy.withValues(
-                        alpha: AppTheme.dashIsDark(context) ? 0.28 : 0.1,
+    return DefaultTabController(
+      length: 2,
+      child: Scaffold(
+        backgroundColor: Theme.of(context).canvasColor,
+        body: SafeArea(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 16, 12, 12),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Container(
+                      width: 42,
+                      height: 42,
+                      alignment: Alignment.center,
+                      decoration: BoxDecoration(
+                        color: AppTheme.primaryNavy.withValues(
+                          alpha: AppTheme.dashIsDark(context) ? 0.28 : 0.1,
+                        ),
+                        borderRadius: BorderRadius.circular(10),
                       ),
-                      borderRadius: BorderRadius.circular(10),
+                      child: Icon(
+                        Icons.account_balance_wallet_outlined,
+                        color: AppTheme.dashIsDark(context)
+                            ? AppTheme.primaryNavyLight
+                            : AppTheme.primaryNavy,
+                      ),
                     ),
-                    child: Icon(
-                      Icons.account_balance_wallet_outlined,
-                      color: AppTheme.dashIsDark(context)
-                          ? AppTheme.primaryNavyLight
-                          : AppTheme.primaryNavy,
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            'Leave Balance Adjustment',
+                            style: TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            _openingMode
+                                ? 'Enter verified starting credits and the month already accounted for.'
+                                : 'Add or remove credits without replacing calculated balances.',
+                            style: TextStyle(
+                              color: AppTheme.dashTextSecondaryOf(context),
+                              fontSize: 13,
+                              fontWeight: FontWeight.w400,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.close_rounded),
+                      tooltip: 'Close',
+                      onPressed: saving
+                          ? null
+                          : () => Navigator.of(context).pop(),
+                    ),
+                  ],
+                ),
+              ),
+              Divider(height: 1, color: AppTheme.dashHairlineOf(context)),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
+                child: Container(
+                  decoration: BoxDecoration(
+                    color: AppTheme.dashPanelOf(context),
+                    border: Border.all(color: AppTheme.dashHairlineOf(context)),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  clipBehavior: Clip.antiAlias,
+                  child: ExcludeFocus(
+                    excluding: saving,
+                    child: IgnorePointer(
+                      ignoring: saving,
+                      child: TabBar(
+                        key: const ValueKey('leave-balance-tabs'),
+                        onTap: (index) {
+                          if (saving) return;
+                          setState(() {
+                            _openingMode = index == 1;
+                            if (_openingMode) _openingModeVisited = true;
+                          });
+                        },
+                        isScrollable: true,
+                        tabAlignment: TabAlignment.start,
+                        padding: EdgeInsets.zero,
+                        labelPadding: const EdgeInsets.symmetric(horizontal: 16),
+                        indicatorSize: TabBarIndicatorSize.tab,
+                        indicator: const BoxDecoration(color: AppTheme.primaryNavy),
+                        dividerColor: Colors.transparent,
+                        labelColor: Colors.white,
+                        unselectedLabelColor: AppTheme.dashTextSecondaryOf(context),
+                        labelStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
+                        unselectedLabelStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+                        tabs: const [
+                          Tab(
+                            height: 46,
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(Icons.exposure_outlined, size: 18),
+                                SizedBox(width: 8),
+                                Text('Adjust existing balance'),
+                              ],
+                            ),
+                          ),
+                          Tab(
+                            height: 46,
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(Icons.account_balance_wallet_outlined, size: 18),
+                                SizedBox(width: 8),
+                                Text('Opening balances'),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+                ),
+              ),
+              Expanded(
+                child: IndexedStack(
+                  index: _openingMode ? 1 : 0,
+                  children: [
+                    Column(
                       children: [
-                        const Text(
-                          'Leave Balance Adjustment',
-                          style: TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.w700,
+                        Expanded(
+                          child: SingleChildScrollView(
+                            padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
+                            child: Form(
+                              key: _formKey,
+                              autovalidateMode: AutovalidateMode.onUserInteraction,
+                              child: _buildFormContent(
+                                saving: saving,
+                                hasDepartments: hasDepartments,
+                                hasEmployees: hasEmployees,
+                                hasSelectedEmployee: hasSelectedEmployee,
+                              ),
+                            ),
                           ),
                         ),
-                        const SizedBox(height: 4),
-                        Text(
-                          'Add or remove credits without replacing calculated balances.',
-                          style: TextStyle(
-                            color: AppTheme.dashTextSecondaryOf(context),
-                            fontSize: 13,
-                            fontWeight: FontWeight.w400,
+                        Divider(height: 1, color: AppTheme.dashHairlineOf(context)),
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(20, 12, 20, 16),
+                          child: Wrap(
+                            alignment: WrapAlignment.end,
+                            spacing: 8,
+                            runSpacing: 8,
+                            children: [
+                              TextButton(
+                                onPressed: saving
+                                    ? null
+                                    : () => Navigator.of(context).pop(),
+                                child: const Text('Cancel'),
+                              ),
+                              FilledButton.icon(
+                                onPressed: canSave ? _onSave : null,
+                                icon: saving
+                                    ? const SizedBox(
+                                        width: 18,
+                                        height: 18,
+                                        child: CircularProgressIndicator(strokeWidth: 2),
+                                      )
+                                    : const Icon(Icons.check_circle_outline_rounded),
+                                label: Text(saving ? 'Applying...' : 'Apply adjustment'),
+                              ),
+                            ],
                           ),
                         ),
                       ],
                     ),
-                  ),
-                  IconButton(
-                    icon: const Icon(Icons.close_rounded),
-                    tooltip: 'Close',
-                    onPressed: saving
-                        ? null
-                        : () => Navigator.of(context).pop(),
-                  ),
-                ],
-              ),
-            ),
-            Divider(height: 1, color: AppTheme.dashHairlineOf(context)),
-            Expanded(
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
-                child: Form(
-                  key: _formKey,
-                  autovalidateMode: AutovalidateMode.onUserInteraction,
-                  child: _buildFormContent(
-                    saving: saving,
-                    hasDepartments: hasDepartments,
-                    hasEmployees: hasEmployees,
-                    hasSelectedEmployee: hasSelectedEmployee,
-                  ),
+                    if (_openingModeVisited)
+                      AdminLeaveOpeningBalancesForm(
+                        onSavingChanged: (value) => setState(() => _openingSaving = value),
+                      )
+                    else
+                      const SizedBox.shrink(),
+                  ],
                 ),
               ),
-            ),
-            Divider(height: 1, color: AppTheme.dashHairlineOf(context)),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 12, 20, 16),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.end,
-                children: [
-                  TextButton(
-                    onPressed: saving
-                        ? null
-                        : () => Navigator.of(context).pop(),
-                    child: const Text('Cancel'),
-                  ),
-                  const SizedBox(width: 8),
-                  FilledButton.icon(
-                    onPressed: canSave ? _onSave : null,
-                    icon: saving
-                        ? const SizedBox(
-                            width: 18,
-                            height: 18,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : const Icon(Icons.check_circle_outline_rounded),
-                    label: Text(saving ? 'Applying...' : 'Apply adjustment'),
-                  ),
-                ],
-              ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );

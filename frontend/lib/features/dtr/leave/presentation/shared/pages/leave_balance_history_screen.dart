@@ -968,6 +968,8 @@ class _EmployeeLedgerRow extends StatelessWidget {
         return 'Leave Approved';
       case 'admin_adjustment':
         return 'Balance Adjustment';
+      case 'opening_balance':
+        return 'Opening Balance';
       case 'leave_submitted':
         return 'Leave Filed';
       case 'forced_leave_deduction':
@@ -1903,6 +1905,8 @@ class _AdminLedgerTile extends StatelessWidget {
         return 'Leave Approved';
       case 'admin_adjustment':
         return 'Balance Adjustment';
+      case 'opening_balance':
+        return 'Opening Balance';
       case 'leave_submitted':
         return 'Leave Filed';
       case 'forced_leave_deduction':

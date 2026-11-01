@@ -1120,6 +1120,25 @@ CREATE TABLE IF NOT EXISTS leave_balance_ledger (
 );
 CREATE INDEX IF NOT EXISTS idx_leave_balance_ledger_user_created
   ON leave_balance_ledger(user_id, created_at DESC);
+CREATE TABLE IF NOT EXISTS leave_opening_balance_setups (
+  user_id UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  cutoff_date DATE NOT NULL CHECK (EXTRACT(DAY FROM (cutoff_date + 1)) = 1),
+  sick_leave_days NUMERIC(10,3) NOT NULL CHECK (sick_leave_days >= 0),
+  vacation_leave_days NUMERIC(10,3) NOT NULL CHECK (vacation_leave_days >= 0),
+  reason TEXT NOT NULL CHECK (btrim(reason) <> ''),
+  created_by UUID REFERENCES users(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  qualifying_leave_days NUMERIC(10,3),
+  usage_reference TEXT,
+  usage_verified_by UUID REFERENCES users(id) ON DELETE SET NULL,
+  usage_verified_at TIMESTAMPTZ,
+  CONSTRAINT leave_opening_usage_check CHECK (
+    (qualifying_leave_days IS NULL AND usage_reference IS NULL AND usage_verified_at IS NULL)
+    OR (qualifying_leave_days IS NOT NULL AND qualifying_leave_days BETWEEN 0 AND 366
+      AND usage_reference IS NOT NULL AND btrim(usage_reference) <> '' AND usage_verified_at IS NOT NULL)
+  )
+);
+
 CREATE INDEX IF NOT EXISTS idx_leave_balance_ledger_action
   ON leave_balance_ledger(action);
 CREATE INDEX IF NOT EXISTS idx_leave_balance_ledger_leave_request
