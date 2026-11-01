@@ -10,10 +10,14 @@ class EmployeeLocatorSlipScreen extends StatefulWidget {
     super.key,
     this.tutorialHeaderKey,
     this.tutorialRequestsKey,
+    this.tutorialTabsKey,
+    this.tutorialApprovalFiltersKey,
   });
 
   final GlobalKey? tutorialHeaderKey;
   final GlobalKey? tutorialRequestsKey;
+  final GlobalKey? tutorialTabsKey;
+  final GlobalKey? tutorialApprovalFiltersKey;
 
   @override
   State<EmployeeLocatorSlipScreen> createState() =>
@@ -55,11 +59,15 @@ class EmployeeLocatorSlipScreenState extends State<EmployeeLocatorSlipScreen> {
             key: _mobileKey,
             tutorialHeaderKey: widget.tutorialHeaderKey,
             tutorialRequestsKey: widget.tutorialRequestsKey,
+            tutorialTabsKey: widget.tutorialTabsKey,
+            tutorialApprovalFiltersKey: widget.tutorialApprovalFiltersKey,
           )
         : desktop.EmployeeLocatorSlipScreen(
             key: _desktopKey,
             tutorialHeaderKey: widget.tutorialHeaderKey,
             tutorialRequestsKey: widget.tutorialRequestsKey,
+            tutorialTabsKey: widget.tutorialTabsKey,
+            tutorialApprovalFiltersKey: widget.tutorialApprovalFiltersKey,
           );
     return child;
   }

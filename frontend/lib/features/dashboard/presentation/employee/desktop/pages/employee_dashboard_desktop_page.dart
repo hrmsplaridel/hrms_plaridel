@@ -109,6 +109,8 @@ class _EmployeeDashboardState extends State<EmployeeDashboardDesktopPage>
   final GlobalKey _leaveContentKey = GlobalKey();
   final GlobalKey _locatorHeaderKey = GlobalKey();
   final GlobalKey _locatorRequestsKey = GlobalKey();
+  final GlobalKey _locatorTabsKey = GlobalKey();
+  final GlobalKey _locatorApprovalFiltersKey = GlobalKey();
   final GlobalKey _trainingReportsHeaderKey = GlobalKey();
   final GlobalKey _trainingReportsFormKey = GlobalKey();
   final GlobalKey _trainingReportsHistoryKey = GlobalKey();
@@ -258,9 +260,16 @@ class _EmployeeDashboardState extends State<EmployeeDashboardDesktopPage>
 
   List<EmployeeTutorialTarget> get _locatorTutorialTargets =>
       EmployeeLocatorTutorial.targets(
-        isDepartmentHead: _isDepartmentHead ?? false,
+        isDepartmentHead:
+            _isDepartmentHead == true || _locatorTabsKey.currentContext != null,
         headerKey: _locatorHeaderKey,
         requestsKey: _locatorRequestsKey,
+        tabsKey: _locatorTabsKey,
+        approvalFiltersKey: _locatorApprovalFiltersKey,
+        showMyRequests: () =>
+            _locatorSlipKey.currentState?.showSection(approvals: false),
+        showApprovals: () =>
+            _locatorSlipKey.currentState?.showSection(approvals: true),
       );
 
   List<EmployeeTutorialTarget> get _trainingReportsTutorialTargets =>
@@ -420,7 +429,8 @@ class _EmployeeDashboardState extends State<EmployeeDashboardDesktopPage>
           WidgetsBinding.instance.addPostFrameCallback((_) {
             if (!mounted) return;
             _locatorSlipKey.currentState?.showSection(
-              approvals: result.kind == NotificationTapKind.employeeLocatorApprovals,
+              approvals:
+                  result.kind == NotificationTapKind.employeeLocatorApprovals,
             );
           });
         });
@@ -608,6 +618,8 @@ class _EmployeeDashboardState extends State<EmployeeDashboardDesktopPage>
           key: _locatorSlipKey,
           tutorialHeaderKey: _locatorHeaderKey,
           tutorialRequestsKey: _locatorRequestsKey,
+          tutorialTabsKey: _locatorTabsKey,
+          tutorialApprovalFiltersKey: _locatorApprovalFiltersKey,
         );
       case 4:
         return TrainingDailyReportEmployeeScreen(

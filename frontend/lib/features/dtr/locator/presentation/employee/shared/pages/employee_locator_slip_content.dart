@@ -72,10 +72,14 @@ class EmployeeLocatorSlipContent extends StatefulWidget {
     super.key,
     this.tutorialHeaderKey,
     this.tutorialRequestsKey,
+    this.tutorialTabsKey,
+    this.tutorialApprovalFiltersKey,
   });
 
   final GlobalKey? tutorialHeaderKey;
   final GlobalKey? tutorialRequestsKey;
+  final GlobalKey? tutorialTabsKey;
+  final GlobalKey? tutorialApprovalFiltersKey;
 
   @override
   State<EmployeeLocatorSlipContent> createState() =>
@@ -537,6 +541,7 @@ class EmployeeLocatorSlipContentState extends State<EmployeeLocatorSlipContent>
             if (isDepartmentHead) ...[
               const SizedBox(height: 16),
               _LocatorSectionTabs(
+                key: widget.tutorialTabsKey,
                 current: _currentSection,
                 onChanged: (section) {
                   showSection(approvals: section == _LocatorSection.approvals);
@@ -1315,6 +1320,7 @@ class EmployeeLocatorSlipContentState extends State<EmployeeLocatorSlipContent>
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 RequestFiltersBar<String>(
+                  key: widget.tutorialApprovalFiltersKey,
                   options: _locatorApprovalFilterOptions,
                   selectedValue: _selectedApprovalStatusFilter,
                   fromDate: _approvalFromDate,
@@ -4131,7 +4137,7 @@ enum _LocatorSlipStatus {
 enum _LocatorSection { requests, approvals }
 
 class _LocatorSectionTabs extends StatelessWidget {
-  const _LocatorSectionTabs({required this.current, required this.onChanged});
+  const _LocatorSectionTabs({super.key, required this.current, required this.onChanged});
 
   final _LocatorSection current;
   final ValueChanged<_LocatorSection> onChanged;
