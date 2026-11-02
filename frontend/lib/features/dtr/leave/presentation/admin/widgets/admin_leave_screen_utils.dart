@@ -14,6 +14,29 @@ double? parseAdminLeaveDouble(String value) {
   return double.tryParse(trimmed);
 }
 
+String? validateAdminLeaveAdjustment(
+  String? value, {
+  double currentAdjustedDays = 0,
+}) {
+  const maxDays = 9999999.999; // Backend leave_balances NUMERIC(10,3).
+  final text = value?.trim() ?? '';
+  final parsed = parseAdminLeaveDouble(text);
+  if (parsed == null) return 'Enter the number of days to adjust';
+  if (!parsed.isFinite || parsed.abs() > maxDays) {
+    return 'Adjustment must be between -9,999,999.999 and 9,999,999.999 days';
+  }
+  if (parsed == 0) return 'Adjustment must not be zero';
+  if (!RegExp(r'^[+-]?\d+(?:\.\d{1,3})?$').hasMatch(text)) {
+    return 'Use up to 3 decimal places';
+  }
+  final currentUnits = currentAdjustedDays * 1000;
+  if (!currentUnits.isFinite ||
+      (currentUnits.round() + (parsed * 1000).round()).abs() > 9999999999) {
+    return 'The resulting adjusted balance exceeds the supported range';
+  }
+  return null;
+}
+
 String? trimAdminLeaveOrNull(String value) {
   final trimmed = value.trim();
   return trimmed.isEmpty ? null : trimmed;

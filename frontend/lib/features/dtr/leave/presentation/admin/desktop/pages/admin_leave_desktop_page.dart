@@ -3229,16 +3229,10 @@ class _ManualBalanceAdjustmentDialogState
             hintText: 'Example: +2.000 or -1.250',
             helperText: 'Positive adds credits; negative removes credits.',
           ),
-      validator: (value) {
-        final text = value?.trim() ?? '';
-        final parsed = parseAdminLeaveDouble(text);
-        if (parsed == null) return 'Enter the number of days to adjust';
-        if (parsed == 0) return 'Adjustment must not be zero';
-        if (!RegExp(r'^[+-]?\d+(?:\.\d{1,3})?$').hasMatch(text)) {
-          return 'Use up to 3 decimal places';
-        }
-        return null;
-      },
+      validator: (value) => validateAdminLeaveAdjustment(
+        value,
+        currentAdjustedDays: _selectedBalance?.adjustedDays ?? 0,
+      ),
     );
   }
 
