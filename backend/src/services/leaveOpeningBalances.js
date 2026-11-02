@@ -21,6 +21,18 @@ function cutoffDate(value, today) {
   if (parsed.getUTCDate() !== 1 || value >= today.slice(0,7)+'-01') fail('The opening cutoff must be the last day of a completed month.');
   return value;
 }
+function assertQualifyingUsagePeriod(days, cutoffValue, hireValue) {
+  const cutoff = dateOnly(cutoffValue);
+  const yearStart = `${cutoff.slice(0,4)}-01-01`;
+  const hired = dateOnly(hireValue);
+  const start = hired && hired > yearStart ? hired : yearStart;
+  // Opening usage can predate imported assignment/schedule history. Calendar
+  // days provide a hard ceiling without inventing a historical work schedule.
+  const maxDays = Math.max(0, Math.floor((Date.parse(`${cutoff}T00:00:00Z`) -
+    Date.parse(`${start}T00:00:00Z`)) / 86400000) + 1);
+  if (!Number.isFinite(maxDays)) fail('Unable to determine the historical qualifying usage period.');
+  if (days > maxDays) fail(`Historical qualifying leave cannot exceed ${maxDays} calendar days for ${start} through ${cutoff}.`);
+}
 async function loadOpeningBalanceCutoffs(db, ids) {
   if (!ids.length) return new Map();
   const result = await db.query('SELECT user_id, cutoff_date FROM leave_opening_balance_setups WHERE user_id = ANY($1::uuid[])', [[...new Set(ids.map(String))]]);
@@ -37,7 +49,6 @@ async function applyOpeningBalances(db, input, {today = todayInHrmsTimezone()} =
   const cutoff = cutoffDate(input.cutoff_date,today);
   const amounts = {sickLeave:amount(input.sick_leave_days),vacationLeave:amount(input.vacation_leave_days)};
   const qualifyingDays = amount(input.qualifying_leave_days);
-  if (qualifyingDays > 366) fail('Historical qualifying leave cannot exceed 366 days.');
   const reason = String(input.reason || '').trim();
   if (!reason || reason.length > 500) fail('Enter the verified source/reason (up to 500 characters).');
   if (input.confirmed !== true) fail('Confirm both balances include all accruals and deductions through the cutoff.');
@@ -49,6 +60,7 @@ async function applyOpeningBalances(db, input, {today = todayInHrmsTimezone()} =
   if (!employee || employee.role === 'super_admin' || employee.is_active === false ||
       !['active',''].includes(String(employee.employment_status || 'active').toLowerCase()) || !canAdjustLeaveCredits(employee)) fail('Select an active employee eligible for leave credits.');
   if (employee.date_hired && dateOnly(employee.date_hired)>cutoff) fail('The cutoff cannot be earlier than the employee’s hire date.');
+  assertQualifyingUsagePeriod(qualifyingDays,cutoff,employee.date_hired);
   const existing=await db.query('SELECT user_id,cutoff_date FROM leave_opening_balance_setups WHERE user_id=$1::uuid',[input.userId]);
   if (existing.rows.length) fail('Opening balances are already recorded. Use Manual balance adjustment for later corrections.',409);
   await db.query(`INSERT INTO leave_balances (user_id,leave_type,earned_days,used_days,pending_days,adjusted_days,as_of_date)
@@ -92,13 +104,16 @@ async function verifyOpeningUsage(db,input) {
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(input.userId || '')) fail('Select a valid employee.');
   const days=amount(input.qualifying_leave_days);
   const reference=String(input.reference || '').trim();
-  if (days>366 || !reference || reference.length>500 || input.confirmed!==true) fail('Verify the qualifying days and provide the HR source reference (up to 500 characters).');
+  if (!reference || reference.length>500 || input.confirmed!==true) fail('Verify the qualifying days and provide the HR source reference (up to 500 characters).');
   await db.query('SELECT pg_advisory_xact_lock(743022, 0)');
   await lockEmployeeLeaveFiling(db,input.userId);
-  const setup=(await db.query('SELECT cutoff_date,qualifying_leave_days FROM leave_opening_balance_setups WHERE user_id=$1::uuid FOR UPDATE',[input.userId])).rows[0];
+  const setup=(await db.query(`SELECT opening.cutoff_date,opening.qualifying_leave_days,employee.date_hired
+    FROM leave_opening_balance_setups opening JOIN users employee ON employee.id=opening.user_id
+    WHERE opening.user_id=$1::uuid FOR UPDATE OF opening FOR SHARE OF employee`,[input.userId])).rows[0];
   if (!setup) fail('Opening balances have not been recorded.',404);
   if (dateOnly(setup.cutoff_date)!==input.cutoff_date) fail('The cutoff changed. Reload the employee before verifying usage.',409);
   if (setup.qualifying_leave_days!=null) fail('Historical usage is already verified.',409);
+  assertQualifyingUsagePeriod(days,setup.cutoff_date,setup.date_hired);
   const saved=(await db.query(`UPDATE leave_opening_balance_setups SET qualifying_leave_days=$2::numeric,
     usage_reference=$3,usage_verified_by=$4::uuid,usage_verified_at=now() WHERE user_id=$1::uuid RETURNING *`,
     [input.userId,days,reference,input.actor.id])).rows[0];

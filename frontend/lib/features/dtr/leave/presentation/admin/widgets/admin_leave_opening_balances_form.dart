@@ -30,7 +30,7 @@ class _OpeningBalancesState extends State<AdminLeaveOpeningBalancesForm> {
   Map<String, dynamic>? _employee, _existing;
   bool _loading = true, _saving = false, _confirmed = false;
   String? _error, _currentBalances;
-  DateTime? _cutoff, _latestCutoff;
+  DateTime? _cutoff, _latestCutoff, _dateHired;
   int _generation = 0;
 
   @override
@@ -94,6 +94,7 @@ class _OpeningBalancesState extends State<AdminLeaveOpeningBalancesForm> {
       _existing = null;
       _confirmed = false;
       _cutoff = null;
+      _dateHired = null;
       _currentBalances = null;
     });
     _sl.clear();
@@ -121,6 +122,8 @@ class _OpeningBalancesState extends State<AdminLeaveOpeningBalancesForm> {
       setState(() {
         _latestCutoff = latest;
         _cutoff = latest;
+        final hireValue = data.containsKey('date_hired') ? data['date_hired'] : employee['date_hired'];
+        _dateHired = DateTime.tryParse(hireValue?.toString() ?? '');
         _existing = data['setup'] is Map
             ? Map<String, dynamic>.from(data['setup'] as Map)
             : null;
@@ -146,6 +149,23 @@ class _OpeningBalancesState extends State<AdminLeaveOpeningBalancesForm> {
 
   String _date(DateTime value) =>
       '${value.year.toString().padLeft(4, '0')}-${value.month.toString().padLeft(2, '0')}-${value.day.toString().padLeft(2, '0')}';
+
+  DateTime get _usageCutoff => _existing == null
+      ? DateTime.utc(_cutoff!.year, _cutoff!.month, _cutoff!.day)
+      : DateTime.parse('${_existing!['cutoff_date'].toString().substring(0, 10)}T00:00:00Z');
+
+  DateTime get _usageStart {
+    final yearStart = DateTime.utc(_usageCutoff.year);
+    final hired = _dateHired;
+    if (hired == null) return yearStart;
+    final hireDate = DateTime.utc(hired.year, hired.month, hired.day);
+    return hireDate.isAfter(yearStart) ? hireDate : yearStart;
+  }
+
+  int get _maxQualifyingDays {
+    final days = _usageCutoff.difference(_usageStart).inDays + 1;
+    return days < 0 ? 0 : days;
+  }
   Future<void> _chooseMonth() async {
     final picked = await showHrmsDatePicker(
       context: context,
@@ -234,8 +254,11 @@ class _OpeningBalancesState extends State<AdminLeaveOpeningBalancesForm> {
           if (text.isEmpty) return 'Required';
           if (days &&
               (!RegExp(r'^\d+(\.\d{1,3})?$').hasMatch(text) ||
-                  (double.tryParse(text) ?? double.infinity) > (key=='opening-qualifying-days'?366:9999999))) {
+                  (double.tryParse(text) ?? double.infinity) > 9999999)) {
             return 'Enter non-negative days, up to 3 decimal places.';
+          }
+          if (key == 'opening-qualifying-days' && double.parse(text) > _maxQualifyingDays) {
+            return 'Qualifying usage cannot exceed $_maxQualifyingDays calendar days for this period.';
           }
           return null;
         },
@@ -265,7 +288,7 @@ class _OpeningBalancesState extends State<AdminLeaveOpeningBalancesForm> {
       const SizedBox(height:20),
       Text('Vacation / Forced Leave already taken in $year',style:const TextStyle(fontSize:16,fontWeight:FontWeight.w700)),
       const SizedBox(height:8),
-      Text('Enter the verified qualifying days from January 1 through ${legacy?_existing!['cutoff_date'].toString().substring(0,10):_date(_cutoff!)}. Enter 0 if none. These days are counted for year-end compliance without another credit deduction.'),
+      Text('Enter the verified qualifying working days from ${_date(_usageStart)} through ${_date(_usageCutoff)}. Enter 0 if none. Verify the total against the HR leave card. These days count for year-end compliance without another credit deduction.'),
       const SizedBox(height:16),
       _field('Qualifying days already taken',_qualifying,'opening-qualifying-days'),
       if(legacy) ...[
