@@ -1,5 +1,6 @@
 const express = require('express');
 const { pool } = require('../config/db');
+const { parseAssignmentDate: parseDate, assignmentInputError } = require('../utils/assignmentInputValidation');
 const { updateEmployeeTrackingStart } = require('../services/employeeAttendanceTracking');
 const { authMiddleware } = require('../middleware/auth');
 const { requireAdmin } = require('../middleware/rbac');
@@ -93,12 +94,6 @@ router.get('/context', protect, async (req, res) => {
     res.status(500).json({ error: 'Failed to load assignment date context' });
   }
 });
-
-function parseDate(val) {
-  if (!val) return null;
-  const d = new Date(val);
-  return isNaN(d.getTime()) ? null : d.toISOString().slice(0, 10);
-}
 
 function parseTime(val) {
   if (!val) return null;
@@ -313,7 +308,6 @@ router.get('/', protect, async (req, res) => {
 router.post('/', protect, requireAdmin, requireDtrManageIfAdmin, async (req, res) => {
   let client;
   try {
-    client = await pool.connect();
     const {
       employee_id,
       department_id,
@@ -325,6 +319,8 @@ router.post('/', protect, requireAdmin, requireDtrManageIfAdmin, async (req, res
       remarks,
       attendance_policy_id,
     } = req.body;
+    const inputError = assignmentInputError(req.body);
+    if (inputError) return res.status(400).json({ error: inputError });
     const hasPolicyChange = Object.prototype.hasOwnProperty.call(
       req.body || {},
       'attendance_policy_id'
@@ -342,6 +338,7 @@ router.post('/', protect, requireAdmin, requireDtrManageIfAdmin, async (req, res
       return res.status(400).json({ error: 'effective_to must be on or after effective_from' });
     }
 
+    client = await pool.connect();
     await client.query('BEGIN');
     try {
       const tracking = await updateEmployeeTrackingStart(client, {
@@ -356,7 +353,7 @@ router.post('/', protect, requireAdmin, requireDtrManageIfAdmin, async (req, res
         shiftId: shift_id,
         effectiveFrom: ef,
         effectiveTo: et,
-        isActive: is_active === true,
+        isActive: is_active,
         remarks,
         includeTransition: true,
       });
@@ -451,7 +448,6 @@ router.post('/', protect, requireAdmin, requireDtrManageIfAdmin, async (req, res
 router.put('/:id', protect, requireAdmin, requireDtrManageIfAdmin, async (req, res) => {
   let client;
   try {
-    client = await pool.connect();
     const { id } = req.params;
     const {
       department_id,
@@ -464,6 +460,8 @@ router.put('/:id', protect, requireAdmin, requireDtrManageIfAdmin, async (req, r
       change_reason,
       attendance_policy_id,
     } = req.body;
+    const inputError = assignmentInputError(req.body);
+    if (inputError) return res.status(400).json({ error: inputError });
     const hasPolicyChange = Object.prototype.hasOwnProperty.call(
       req.body || {},
       'attendance_policy_id'
@@ -498,6 +496,7 @@ router.put('/:id', protect, requireAdmin, requireDtrManageIfAdmin, async (req, r
       return res.status(400).json({ error: 'Invalid effective_to' });
     }
 
+    client = await pool.connect();
     await client.query('BEGIN');
     try {
       const beforeResult = await client.query(
@@ -530,7 +529,7 @@ router.put('/:id', protect, requireAdmin, requireDtrManageIfAdmin, async (req, r
           shiftId: shift_id,
           effectiveFrom: parsedEffectiveFrom,
           effectiveTo: parsedEffectiveTo,
-          isActive: is_active === undefined ? undefined : is_active === true,
+          isActive: is_active,
           remarks,
         },
         includeTransition: true,
