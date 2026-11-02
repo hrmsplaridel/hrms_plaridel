@@ -1,8 +1,10 @@
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_request.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_request_history.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_type.dart';
 import 'package:hrms_plaridel/features/dtr/leave/presentation/admin/widgets/admin_leave_screen_utils.dart';
+import 'package:hrms_plaridel/features/dtr/leave/presentation/shared/widgets/leave_status_chip.dart';
 import 'package:hrms_plaridel/features/dtr/leave/utils/leave_workflow_labels.dart';
 
 void main() {
@@ -37,11 +39,49 @@ void main() {
       userId: 'employee', leaveType: LeaveType.vacationLeave,
       status: LeaveRequestStatus.approved, finalReviewRoute: 'mayor',
     );
-    expect(request.statusLabel, 'Approved for manual Mayor signing');
+    expect(request.statusLabel, 'Approved · Manual signing');
     expect(adminLeaveStatusLabel(request.status,
       isDepartmentHead: true, finalReviewRoute: 'mayor',
     ), request.statusLabel);
   });
+
+  for (final step in [
+    'manual_mayor',
+    {'label': 'Sign on paper', 'assignee_source': 'manual_mayor'},
+  ]) {
+    test('saved manual signing step uses the compact approved label: $step', () {
+      expect(leaveApprovedStatusLabel('hr', workflowSnapshot: {'steps': ['hr', step]}),
+          'Approved · Manual signing');
+    });
+  }
+
+  testWidgets('manual signing chip keeps the explanation available on long press', (tester) async {
+    const request = LeaveRequest(
+      userId: 'employee', leaveType: LeaveType.vacationLeave,
+      status: LeaveRequestStatus.approved, finalReviewRoute: 'mayor',
+    );
+    const explanation = "The printed form requires the Mayor's handwritten signature.";
+    await tester.pumpWidget(MaterialApp(home: Scaffold(body: Center(
+      child: LeaveStatusChip(status: request.status, label: request.statusLabel),
+    ))));
+    expect(find.text('Approved · Manual signing'), findsOneWidget);
+    expect(find.byTooltip(explanation), findsOneWidget);
+    expect(find.text(explanation), findsNothing);
+    await tester.longPress(find.text('Approved · Manual signing'));
+    await tester.pump(const Duration(milliseconds: 200));
+    expect(find.text(explanation), findsOneWidget);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  for (final label in ['Approved', 'Approved (paper record)']) {
+    testWidgets('$label does not imply a missing manual signature', (tester) async {
+      await tester.pumpWidget(MaterialApp(home: Scaffold(body: Center(
+        child: LeaveStatusChip(status: LeaveRequestStatus.approved, label: label),
+      ))));
+      expect(find.text(label), findsOneWidget);
+      expect(find.byType(Tooltip), findsNothing);
+    });
+  }
 
   for (final action in ['approved', 'rejected', 'returned', 'workflow_step_approved']) {
     test('history $action does not invent HR or Mayor without a saved step', () {

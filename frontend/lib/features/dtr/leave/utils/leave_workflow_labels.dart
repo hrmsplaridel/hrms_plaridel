@@ -1,3 +1,7 @@
+const leaveManualSigningStatusLabel = 'Approved · Manual signing';
+const leaveManualSigningExplanation =
+    "The printed form requires the Mayor's handwritten signature.";
+
 // Compatibility statuses identify API routes, not the reviewer's office.
 String? leavePendingStepLabel(Map<String, dynamic>? snapshot) {
   if (snapshot?['outcome'] != null) return null;
@@ -29,7 +33,7 @@ String leaveApprovedStatusLabel(
   final manual =
       source == 'manual_mayor' ||
       (source == null && finalReviewRoute == 'mayor');
-  return manual ? 'Approved for manual Mayor signing' : 'Approved';
+  return manual ? leaveManualSigningStatusLabel : 'Approved';
 }
 
 String leaveDepartmentApprovalMessage({
@@ -42,7 +46,7 @@ String leaveDepartmentApprovalMessage({
       finalReviewRoute,
       workflowSnapshot: workflowSnapshot,
     );
-    return label == 'Approved for manual Mayor signing'
+    return label == leaveManualSigningStatusLabel
         ? 'Approved. The Mayor signs the printed form manually.'
         : 'Request approved.';
   }
