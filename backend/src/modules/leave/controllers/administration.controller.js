@@ -1,4 +1,43 @@
 'use strict';
+
+// Validate every supplied alias/source before choosing a processing mode.
+// Ignoring an invalid preview flag must never turn it into a live operation.
+function processingInput(req, fields, parse, fallback) {
+  const values = [];
+  for (const source of ['body', 'query']) {
+    const input = req[source] || {};
+    for (const field of fields) {
+      if (Object.hasOwn(input, field)) values.push(parse(input[field], source));
+    }
+  }
+  if (new Set(values).size > 1) {
+    throw new Error(`${fields[0]} has conflicting values in the request`);
+  }
+  return values.length ? values[0] : fallback;
+}
+
+function processingDryRun(req) {
+  return processingInput(req, ['dry_run', 'dryRun'], (value, source) => {
+    if (source === 'body' && typeof value === 'boolean') return value;
+    if (source === 'query') {
+      if (value === 'true' || value === '1') return true;
+      if (value === 'false' || value === '0') return false;
+    }
+    throw new Error('dry_run must be a JSON boolean, or true, false, 1 or 0 in the query');
+  }, false);
+}
+
+function processingCatchUpMonths(req) {
+  return processingInput(req, ['max_catch_up_months'], (value) => {
+    const parsed = typeof value === 'number' ? value :
+      typeof value === 'string' && /^\d+$/.test(value.trim()) ? Number(value.trim()) : NaN;
+    if (!Number.isInteger(parsed) || parsed < 1 || parsed > 120) {
+      throw new Error('max_catch_up_months must be a whole number between 1 and 120');
+    }
+    return parsed;
+  }, undefined);
+}
+
 module.exports = function createLeaveControllers({
   applyYearEndForcedLeaveDeductions,
   broadcastAppEvent,
@@ -149,15 +188,17 @@ module.exports = function createLeaveControllers({
     },
 
     runMonthlyAccrual: async (req, res) => {
+      let dryRun;
+      let maxCatchUpMonths;
+      try {
+        dryRun = processingDryRun(req);
+        maxCatchUpMonths = processingCatchUpMonths(req);
+      } catch (err) {
+        return res.status(400).json({ error: err.message });
+      }
       let notificationMonth = null;
       let notificationDryRun = true;
       try {
-        const dryRun =
-          req.body?.dry_run === true || req.query?.dry_run === '1' || req.query?.dry_run === 'true';
-
-        const rawMax = req.body?.max_catch_up_months ?? req.query?.max_catch_up_months;
-        const maxCatchUpMonths =
-          rawMax != null && rawMax !== '' ? parseInt(String(rawMax), 10) : undefined;
         const targetMonth =
           req.body?.target_month ??
           req.body?.year_month ??
@@ -168,7 +209,7 @@ module.exports = function createLeaveControllers({
         notificationMonth = notificationMonthForTarget(targetMonth);
         const accrualResult = await runLeaveMonthlyAccrual(pool, {
           dryRun,
-          maxCatchUpMonths: Number.isFinite(maxCatchUpMonths) ? maxCatchUpMonths : undefined,
+          maxCatchUpMonths,
           targetMonth: targetMonth ? String(targetMonth).trim() : undefined,
         });
 
@@ -271,6 +312,12 @@ module.exports = function createLeaveControllers({
     },
 
     applyYearEndForcedLeave: async (req, res) => {
+      let dryRun;
+      try {
+        dryRun = processingDryRun(req);
+      } catch (err) {
+        return res.status(400).json({ error: err.message });
+      }
       try {
         const actorUserId = req.user?.id;
         const yearRaw = req.body?.year ?? req.query?.year;
@@ -279,12 +326,6 @@ module.exports = function createLeaveControllers({
         if (!Number.isInteger(year) || year < 1900 || year > maxYear) {
           return res.status(400).json({ error: `year must be between 1900 and ${maxYear}` });
         }
-
-        const dryRun =
-          req.body?.dry_run === true ||
-          req.body?.dryRun === true ||
-          req.query?.dry_run === '1' ||
-          req.query?.dry_run === 'true';
 
         if (!dryRun && year >= yearEndManilaYearNow()) {
           return res.status(409).json({
