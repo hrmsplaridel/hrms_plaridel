@@ -17,6 +17,7 @@ import 'package:hrms_plaridel/features/dtr/leave/presentation/employee/shared/ut
 import 'package:hrms_plaridel/features/dtr/leave/presentation/shared/pages/leave_balance_history_screen.dart';
 import 'package:hrms_plaridel/features/dtr/leave/presentation/shared/widgets/my_leave_loading_skeleton.dart';
 import 'package:hrms_plaridel/features/dtr/leave/presentation/shared/widgets/leave_balance_card.dart';
+import 'package:hrms_plaridel/features/dtr/leave/presentation/shared/widgets/leave_usage_details_panel.dart';
 
 /// Employee-facing leave screen.
 ///
@@ -625,10 +626,20 @@ class _LeaveDaysPanel extends StatelessWidget {
     }
     return _BalanceSection(
       title: 'Leave Usage & Limits',
+      headerTrailing: entitlementBalances.length > leaveUsagePreviewLimit
+          ? TextButton(
+              onPressed: () => showLeaveUsageDetails(
+                context: context,
+                balances: entitlementBalances,
+              ),
+              child: Text('View all (${entitlementBalances.length})'),
+            )
+          : null,
       child: loading && entitlementBalances.isEmpty
           ? const _CenteredState(message: 'Loading leave days...')
           : Column(
               children: entitlementBalances
+                  .take(leaveUsagePreviewLimit)
                   .map(
                     (balance) => _CompactBalanceRow(
                       balance: balance,

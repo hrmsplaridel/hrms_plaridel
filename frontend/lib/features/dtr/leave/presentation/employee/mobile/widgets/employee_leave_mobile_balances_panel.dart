@@ -3,6 +3,7 @@ import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_balance.dart';
 import 'package:hrms_plaridel/features/dtr/leave/presentation/shared/widgets/leave_balance_card.dart';
 import 'package:hrms_plaridel/features/dtr/leave/presentation/shared/widgets/leave_days_card.dart';
+import 'package:hrms_plaridel/features/dtr/leave/presentation/shared/widgets/leave_usage_details_panel.dart';
 
 class EmployeeLeaveMobileBalancesPanel extends StatelessWidget {
   const EmployeeLeaveMobileBalancesPanel({
@@ -31,6 +32,7 @@ class EmployeeLeaveMobileBalancesPanel extends StatelessWidget {
     final dayBalances = balances
         .where((balance) => balance.isUsageSummary)
         .toList();
+    final previewBalances = dayBalances.take(leaveUsagePreviewLimit).toList();
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -85,14 +87,28 @@ class EmployeeLeaveMobileBalancesPanel extends StatelessWidget {
         // ── Leave Remaining Days section ──────────────────────────────────
         if (dayBalances.isNotEmpty || loading) ...[
           if (showCredits) const SizedBox(height: 24),
-          Text(
-            'Leave Usage & Limits',
-            style: TextStyle(
-              color: AppTheme.dashTextPrimaryOf(context),
-              fontSize: 17,
-              fontWeight: FontWeight.w800,
-              height: 1.2,
-            ),
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  'Leave Usage & Limits',
+                  style: TextStyle(
+                    color: AppTheme.dashTextPrimaryOf(context),
+                    fontSize: 17,
+                    fontWeight: FontWeight.w800,
+                    height: 1.2,
+                  ),
+                ),
+              ),
+              if (dayBalances.length > leaveUsagePreviewLimit)
+                TextButton(
+                  onPressed: () => showLeaveUsageDetails(
+                    context: context,
+                    balances: dayBalances,
+                  ),
+                  child: Text('View all (${dayBalances.length})'),
+                ),
+            ],
           ),
           const SizedBox(height: 4),
           Text(
@@ -107,11 +123,11 @@ class EmployeeLeaveMobileBalancesPanel extends StatelessWidget {
             const _MobileCenteredState(message: 'Loading leave days...')
           else
             Column(
-              children: List.generate(dayBalances.length, (index) {
-                final balance = dayBalances[index];
+              children: List.generate(previewBalances.length, (index) {
+                final balance = previewBalances[index];
                 return Padding(
                   padding: EdgeInsets.only(
-                    bottom: index == dayBalances.length - 1 ? 0 : 12,
+                    bottom: index == previewBalances.length - 1 ? 0 : 12,
                   ),
                   child: LeaveDaysCard(balance: balance),
                 );
