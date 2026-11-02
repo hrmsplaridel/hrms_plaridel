@@ -31,6 +31,7 @@ import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/d
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_document_detail_ui.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_error_banner.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_release_section.dart';
+import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_reject_dialog.dart';
 import 'package:hrms_plaridel/features/docutracker/utils/docutracker_content_lock.dart';
 import 'package:hrms_plaridel/features/docutracker/utils/docutracker_action_feedback.dart';
 import 'package:hrms_plaridel/features/docutracker/utils/docutracker_release_text.dart';
@@ -702,22 +703,49 @@ class _DocuTrackerDocumentDetailScreenState
         );
 
     final workflowReady = _workflowConfigIssue == null;
+    final reassignmentRequired = docuTrackerReassignmentRequired(
+      _permissionExplanations,
+    );
     final canSubmit =
         workflowReady && canAct && _canSubmitAction && isCreator && isWip;
 
-    // Review actions only valid if NOT pending and workflow is configured.
+    // Review actions follow permission-explain. When the server reports
+    // reassignment_required, hide actions the backend will reject.
     final canApprove =
-        workflowReady && !isPending && canAct && _canApproveAction;
+        workflowReady &&
+        !isPending &&
+        canAct &&
+        _canApproveAction &&
+        !reassignmentRequired;
     final canForward =
-        workflowReady && !isPending && canAct && _canForwardAction;
-    final canReject = workflowReady && !isPending && canAct && _canRejectAction;
-    final canReturn = workflowReady && !isPending && canAct && _canReturnAction;
+        workflowReady &&
+        !isPending &&
+        canAct &&
+        _canForwardAction &&
+        !reassignmentRequired;
+    final canReject =
+        workflowReady &&
+        !isPending &&
+        canAct &&
+        _canRejectAction &&
+        !reassignmentRequired;
+    final canReturn =
+        workflowReady &&
+        !isPending &&
+        canAct &&
+        _canReturnAction &&
+        !reassignmentRequired;
 
+    // "Your turn" only when the viewer can actually take a workflow action.
     final showYourTurn =
         canAct &&
         !_permissionsLoading &&
         userId.isNotEmpty &&
-        (isAssignedReviewer || canSubmit);
+        (canSubmit ||
+            canApprove ||
+            canForward ||
+            canReject ||
+            canReturn);
 
     final showActions =
         _shouldShowActionsPanel(
@@ -1511,6 +1539,9 @@ class _DocuTrackerDocumentDetailScreenState
             .map((step) => step.label?.trim() ?? '')
             .firstWhere((label) => label.isNotEmpty, orElse: () => '');
     final reviewer = doc.assigneeName?.trim();
+    final workflowBlocked = docuTrackerReassignmentRequired(
+      _permissionExplanations,
+    );
     return Padding(
       padding: const EdgeInsets.only(bottom: 24),
       child: DocuTrackerAdminRecoveryCard(
@@ -1526,6 +1557,7 @@ class _DocuTrackerDocumentDetailScreenState
         currentReviewer: reviewer == null || reviewer.isEmpty
             ? 'Unassigned'
             : reviewer,
+        body: docuTrackerAdminRecoveryBody(workflowBlocked: workflowBlocked),
         reason: docuTrackerAdminRecoveryReason(
           provider.documentHistory.where((entry) => entry.documentId == doc.id),
         ),
@@ -1945,77 +1977,34 @@ class _DocuTrackerDocumentDetailScreenState
             onPressed: provider.loading
                 ? null
                 : () async {
-                    final remarkCtrl = TextEditingController();
-                    try {
-                      await showDialog<void>(
-                        context: context,
-                        builder: (ctx) => AlertDialog(
-                          title: const Text(docuTrackerRejectDialogTitle),
-                          content: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                docuTrackerRejectDialogExplanation,
-                                style: DocuTrackerTokens.subtitleStyle(
-                                  ctx,
-                                ).copyWith(fontSize: 13),
-                              ),
-                              const SizedBox(height: 12),
-                              TextField(
-                                controller: remarkCtrl,
-                                autofocus: true,
-                                decoration: DocuTrackerStyles.inputDecoration(
-                                  context,
-                                  'Reason for rejection (required)',
-                                  Icons.cancel_rounded,
-                                ),
-                                maxLines: 3,
-                              ),
-                            ],
-                          ),
-                          actions: [
-                            OutlinedButton(
-                              onPressed: () => Navigator.of(ctx).pop(),
-                              style: DocuTrackerStyles.outlinedButtonStyle(
-                                context,
-                              ),
-                              child: const Text('Cancel'),
-                            ),
-                            FilledButton(
-                              onPressed: () async {
-                                final remarks = remarkCtrl.text.trim();
-                                if (remarks.isEmpty) return;
-                                Navigator.of(ctx).pop();
-                                final ok = await provider.rejectDocument(
-                                  doc,
-                                  remarks: remarks,
-                                  actionBy: userId,
-                                );
-                                if (!mounted) return;
-                                if (ok) {
-                                  await _onWorkflowActionSuccess(
-                                    docuTrackerWorkflowActionMessage(
-                                      action: 'reject',
-                                      document: _resolveDocForView(provider),
-                                    ),
-                                  );
-                                } else {
-                                  _showActionError(
-                                    provider,
-                                    fallback: 'Failed to reject document.',
-                                  );
-                                }
-                              },
-                              style: DocuTrackerStyles.destructiveButtonStyle(),
-                              child: const Text('Reject'),
-                            ),
-                          ],
-                        ),
-                      );
-                    } finally {
-                      remarkCtrl.dispose();
-                    }
+                    final rejected = await showDialog<bool>(
+                      context: context,
+                      barrierDismissible: false,
+                      builder: (_) => DocuTrackerRejectDialog(
+                        onConfirm: (remarks) async {
+                          final ok = await provider.rejectDocument(
+                            doc,
+                            remarks: remarks,
+                            actionBy: userId,
+                          );
+                          if (!mounted) return false;
+                          if (!ok) {
+                            _showActionError(
+                              provider,
+                              fallback: 'Failed to reject document.',
+                            );
+                          }
+                          return ok;
+                        },
+                      ),
+                    );
+                    if (!mounted || rejected != true) return;
+                    await _onWorkflowActionSuccess(
+                      docuTrackerWorkflowActionMessage(
+                        action: 'reject',
+                        document: _resolveDocForView(provider),
+                      ),
+                    );
                   },
             icon: const Icon(Icons.cancel_rounded, size: 18),
             label: const Text('Reject and Stop'),

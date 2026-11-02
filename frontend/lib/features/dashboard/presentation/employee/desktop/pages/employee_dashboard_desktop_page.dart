@@ -54,6 +54,7 @@ import 'package:hrms_plaridel/shared/screens/profile_page.dart'
     show DashboardProfilePanel;
 import 'package:hrms_plaridel/shared/widgets/dashboard_content_navigator.dart';
 import 'package:hrms_plaridel/shared/widgets/dashboard_header_actions.dart';
+import 'package:hrms_plaridel/shared/widgets/dashboard_mobile_bottom_nav.dart';
 import 'package:hrms_plaridel/shared/utils/time_greeting.dart';
 import 'package:hrms_plaridel/shared/widgets/collapsible_dashboard_sidebar.dart';
 import 'package:hrms_plaridel/shared/widgets/portal_sidebar_brand.dart';
@@ -97,6 +98,9 @@ class _EmployeeDashboardState extends State<EmployeeDashboardDesktopPage>
   static const int _profileNavIndex = 7;
   static const _settingsPanelKey = PageStorageKey<String>('employee_settings');
   final GlobalKey<NavigatorState> _contentNavKey = GlobalKey<NavigatorState>();
+  /// Keeps [DashboardContentNavigator] State (and open document routes) alive
+  /// when the employee chrome swaps between desktop sidebar and mobile shell.
+  final GlobalKey _contentNavigatorHostKey = GlobalKey();
   final GlobalKey<State<StatefulWidget>> _locatorSlipKey =
       GlobalKey<State<StatefulWidget>>();
   final GlobalKey _dashboardWelcomeKey = GlobalKey();
@@ -659,6 +663,48 @@ class _EmployeeDashboardState extends State<EmployeeDashboardDesktopPage>
     final isWide = width > 900;
     final useMobileLeaveFab = width < 600 && _selectedNavIndex == 2;
     final useMobileLocatorFab = !isWide && _selectedNavIndex == 3;
+    final Object? docuTrackerHomeRefreshKey = _selectedNavIndex == 6
+        ? Object.hash(
+            'employee-docutracker',
+            _docuTrackerDeepLinkKey,
+            displayName,
+          )
+        : null;
+    final contentNavigator = DashboardContentNavigator(
+      key: _contentNavigatorHostKey,
+      navigatorKey: _contentNavKey,
+      homeCacheKey: _selectedNavIndex,
+      homeRefreshKey:
+          docuTrackerHomeRefreshKey ??
+          Object.hash(
+            _selectedNavIndex,
+            _leaveNavKey,
+            displayName,
+            useMobileLeaveFab,
+            useMobileLocatorFab,
+          ),
+      homeBuilder: () => _employeeMainChild(
+        displayName: displayName,
+        useMobileLeaveFab: useMobileLeaveFab,
+        useMobileLocatorFab: useMobileLocatorFab,
+      ),
+      settingsPanel: _settingsPanel(),
+      homeScrollPadding: employeeMainScrollPadding(
+        context,
+        mobileNav: !isWide,
+      ),
+      settingsScrollPadding: isWide
+          ? kDashboardSettingsScrollPadding
+          : EdgeInsets.fromLTRB(
+              16,
+              8,
+              16,
+              20 +
+                  DashboardMobileBottomNav.scrollPaddingExtra(
+                    context,
+                  ),
+            ),
+    );
 
     if (!isWide) {
       return EmployeeDashboardMobileShell(
@@ -666,17 +712,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboardDesktopPage>
         avatarPath: avatarPath,
         displayName: displayName,
         selectedIndex: _selectedNavIndex,
-        navigatorKey: _contentNavKey,
-        homeBuilder:
-            ({
-              required bool useMobileLeaveFab,
-              required bool useMobileLocatorFab,
-            }) => _employeeMainChild(
-              displayName: displayName,
-              useMobileLeaveFab: useMobileLeaveFab,
-              useMobileLocatorFab: useMobileLocatorFab,
-            ),
-        settingsPanel: _settingsPanel(),
+        content: contentNavigator,
         onNavSelected: _onNavSelected,
         onProfile: _openMyProfile,
         onViewAllNotifications: _handleOpenNotifications,
@@ -731,28 +767,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboardDesktopPage>
                       Expanded(
                         child: ColoredBox(
                           color: AppTheme.dashCanvasOf(context),
-                          child: DashboardContentNavigator(
-                            navigatorKey: _contentNavKey,
-                            homeCacheKey: _selectedNavIndex,
-                            homeRefreshKey: Object.hash(
-                              _selectedNavIndex,
-                              _leaveNavKey,
-                              displayName,
-                              useMobileLeaveFab,
-                              useMobileLocatorFab,
-                            ),
-                            homeBuilder: () => _employeeMainChild(
-                              displayName: displayName,
-                              useMobileLeaveFab: useMobileLeaveFab,
-                              useMobileLocatorFab: useMobileLocatorFab,
-                            ),
-                            settingsPanel: _settingsPanel(),
-                            homeScrollPadding: employeeMainScrollPadding(
-                              context,
-                            ),
-                            settingsScrollPadding:
-                                kDashboardSettingsScrollPadding,
-                          ),
+                          child: contentNavigator,
                         ),
                       ),
                     ],

@@ -1,3 +1,5 @@
+import 'dart:ui' show PointerDeviceKind;
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document.dart';
@@ -466,6 +468,19 @@ void main() {
     expect(find.text('Ana Reyes'), findsNWidgets(2));
     expect(find.text('Ben Cruz with a long recorded name'), findsNWidgets(2));
     expect(find.text('Final approval'), findsNWidgets(2));
+
+    final strip = find.byKey(const ValueKey('docutracker-workflow-step-strip'));
+    final finalApproval = find.descendant(
+      of: strip,
+      matching: find.text('Final approval'),
+    );
+    expect(tester.getTopLeft(finalApproval).dx, greaterThan(280));
+
+    await tester.drag(strip, const Offset(-300, 0));
+    await tester.pumpAndSettle();
+
+    expect(tester.getTopLeft(finalApproval).dx, lessThan(280));
+    expect(tester.getBottomRight(finalApproval).dx, greaterThan(0));
   });
 
   testWidgets('light layout does not overflow a narrow strip', (tester) async {
@@ -494,5 +509,53 @@ void main() {
     expect(find.text('Current step'), findsOneWidget);
     expect(find.text('Overdue'), findsOneWidget);
     expect(find.text('Receiving office review'), findsOneWidget);
+  });
+
+  testWidgets('eight-step workflow scrolls to its final step at 390px', (
+    tester,
+  ) async {
+    final steps = List<WorkflowStep>.generate(
+      8,
+      (index) => _step(index + 1, 'Approval step ${index + 1}'),
+    );
+    final progress = docuTrackerWorkflowProgress(
+      doc: _doc(
+        status: DocumentStatus.inReview,
+        currentStep: 1,
+        assigneeName: 'Reviewer with a long display name',
+      ),
+      steps: steps,
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: ThemeData.light(),
+        home: Scaffold(
+          body: SizedBox(
+            width: 390,
+            child: DocuTrackerWorkflowStepStrip(progress: progress),
+          ),
+        ),
+      ),
+    );
+
+    final strip = find.byKey(const ValueKey('docutracker-workflow-step-strip'));
+    final finalStep = find.descendant(
+      of: strip,
+      matching: find.text('Approval step 8'),
+    );
+    expect(tester.getTopLeft(finalStep).dx, greaterThan(390));
+
+    final gesture = await tester.startGesture(
+      tester.getCenter(strip),
+      kind: PointerDeviceKind.mouse,
+    );
+    await gesture.moveBy(const Offset(-1400, 0));
+    await gesture.up();
+    await tester.pumpAndSettle();
+
+    expect(tester.getTopLeft(finalStep).dx, lessThan(390));
+    expect(tester.getBottomRight(finalStep).dx, greaterThan(0));
+    expect(tester.takeException(), isNull);
   });
 }

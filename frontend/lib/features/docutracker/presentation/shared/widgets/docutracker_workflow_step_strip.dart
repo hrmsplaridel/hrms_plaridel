@@ -1,37 +1,75 @@
+import 'dart:ui' show PointerDeviceKind;
+
 import 'package:flutter/material.dart';
 import 'package:hrms_plaridel/features/docutracker/theme/docutracker_tokens.dart';
 import 'package:hrms_plaridel/features/docutracker/utils/docutracker_workflow_phase.dart';
 import 'package:hrms_plaridel/features/docutracker/utils/docutracker_workflow_progress.dart';
 
 /// Horizontal workflow progress. Scrolls instead of clipping step names.
-class DocuTrackerWorkflowStepStrip extends StatelessWidget {
+class DocuTrackerWorkflowStepStrip extends StatefulWidget {
   const DocuTrackerWorkflowStepStrip({super.key, required this.progress});
 
   final List<DocuTrackerStepProgress> progress;
 
   @override
+  State<DocuTrackerWorkflowStepStrip> createState() =>
+      _DocuTrackerWorkflowStepStripState();
+}
+
+class _DocuTrackerWorkflowStepStripState
+    extends State<DocuTrackerWorkflowStepStrip> {
+  final ScrollController _scrollController = ScrollController();
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return SingleChildScrollView(
-      key: const ValueKey('docutracker-workflow-step-strip'),
-      scrollDirection: Axis.horizontal,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 2),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            for (var i = 0; i < progress.length; i++) ...[
-              DocuTrackerWorkflowStepNode(step: progress[i]),
-              if (i < progress.length - 1)
-                Container(
-                  margin: const EdgeInsets.only(top: 22, left: 4, right: 4),
-                  width: 28,
-                  height: 2,
-                  color: progress[i].indicator.isCompleted
-                      ? DocuTrackerTokens.brand
-                      : DocuTrackerTokens.borderStrongOf(context),
-                ),
-            ],
-          ],
+    final scrollBehavior = ScrollConfiguration.of(context).copyWith(
+      dragDevices: const {
+        PointerDeviceKind.touch,
+        PointerDeviceKind.mouse,
+        PointerDeviceKind.stylus,
+        PointerDeviceKind.invertedStylus,
+        PointerDeviceKind.trackpad,
+      },
+    );
+    return ScrollConfiguration(
+      behavior: scrollBehavior,
+      child: Scrollbar(
+        controller: _scrollController,
+        thumbVisibility: widget.progress.length > 1,
+        interactive: true,
+        scrollbarOrientation: ScrollbarOrientation.bottom,
+        child: SingleChildScrollView(
+          key: const ValueKey('docutracker-workflow-step-strip'),
+          controller: _scrollController,
+          scrollDirection: Axis.horizontal,
+          primary: false,
+          padding: const EdgeInsets.only(bottom: 10),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 2),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                for (var i = 0; i < widget.progress.length; i++) ...[
+                  DocuTrackerWorkflowStepNode(step: widget.progress[i]),
+                  if (i < widget.progress.length - 1)
+                    Container(
+                      margin: const EdgeInsets.only(top: 22, left: 4, right: 4),
+                      width: 28,
+                      height: 2,
+                      color: widget.progress[i].indicator.isCompleted
+                          ? DocuTrackerTokens.brand
+                          : DocuTrackerTokens.borderStrongOf(context),
+                    ),
+                ],
+              ],
+            ),
+          ),
         ),
       ),
     );

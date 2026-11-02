@@ -6,6 +6,7 @@ import 'package:hrms_plaridel/features/docutracker/models/document_status.dart';
 import 'package:hrms_plaridel/features/docutracker/models/workflow_step.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_admin_recovery_card.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_workflow_step_strip.dart';
+import 'package:hrms_plaridel/features/docutracker/services/docutracker_permission_service.dart';
 import 'package:hrms_plaridel/features/docutracker/utils/docutracker_admin_recovery.dart';
 import 'package:hrms_plaridel/features/docutracker/utils/docutracker_workflow_progress.dart';
 
@@ -158,12 +159,84 @@ void main() {
 
       expect(find.text('Admin attention required'), findsNWidgets(2));
       expect(
+        find.byKey(const ValueKey('docutracker-admin-recovery-body')),
+        findsNWidgets(2),
+      );
+      expect(
+        find.text(docuTrackerAdminRecoveryNoticeBlocking),
+        findsNWidgets(2),
+      );
+      expect(
         find.byKey(const ValueKey('docutracker-admin-recovery-action')),
         findsOneWidget,
       );
       expect(find.text('Admin Recovery is required.'), findsOneWidget);
     },
   );
+
+  test('reassignment_required follows permission-explain, not the flag alone', () {
+    DocuTrackerPermissionExplanation explain({
+      required bool granted,
+      required String reason,
+    }) {
+      return DocuTrackerPermissionExplanation(
+        granted: granted,
+        source: DocuTrackerPermissionSource.defaultDeny,
+        matchedDocumentType: null,
+        matchedRoleId: null,
+        reason: reason,
+      );
+    }
+
+    expect(
+      docuTrackerReassignmentRequired(const {}),
+      isFalse,
+    );
+    expect(
+      docuTrackerReassignmentRequired({
+        'approve': explain(granted: true, reason: 'current_holder'),
+      }),
+      isFalse,
+    );
+    expect(
+      docuTrackerReassignmentRequired({
+        'approve': explain(granted: false, reason: 'reassignment_required'),
+      }),
+      isTrue,
+    );
+    expect(
+      docuTrackerAdminRecoveryBody(workflowBlocked: false),
+      docuTrackerAdminRecoveryNoticeAdvisory,
+    );
+    expect(
+      docuTrackerAdminRecoveryBody(workflowBlocked: true),
+      docuTrackerAdminRecoveryNoticeBlocking,
+    );
+  });
+
+  testWidgets('advisory body is used when the holder can still act', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      _host(
+        child: DocuTrackerAdminRecoveryCard(
+          showAction: false,
+          documentNumber: 'DOC-2026-000099',
+          documentTitle: 'Supply request',
+          stepLabel: 'Step 1',
+          currentReviewer: 'Ana Reyes',
+          body: docuTrackerAdminRecoveryBody(workflowBlocked: false),
+        ),
+      ),
+    );
+
+    expect(find.text(docuTrackerAdminRecoveryNoticeAdvisory), findsOneWidget);
+    expect(find.text(docuTrackerAdminRecoveryNoticeBlocking), findsNothing);
+    expect(
+      find.byKey(const ValueKey('docutracker-admin-recovery-action')),
+      findsNothing,
+    );
+  });
 
   testWidgets('the dialog lists only the eligible replacement', (tester) async {
     await tester.pumpWidget(

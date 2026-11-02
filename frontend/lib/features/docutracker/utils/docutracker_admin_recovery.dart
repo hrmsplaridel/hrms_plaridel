@@ -1,6 +1,7 @@
 import 'package:hrms_plaridel/features/docutracker/models/document.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document_history.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document_status.dart';
+import 'package:hrms_plaridel/features/docutracker/services/docutracker_permission_service.dart';
 
 /// A reviewer the existing recovery check can accept for the current step.
 class DocuTrackerRecoveryCandidate {
@@ -46,9 +47,21 @@ class DocuTrackerRecoveryOptions {
   bool get canSelect => message == null && candidates.isNotEmpty;
 }
 
+/// Shown when permission-explain reports `reassignment_required` (holder ineligible).
+const docuTrackerAdminRecoveryNoticeBlocking =
+    'The assigned reviewer can no longer act on this step. An administrator '
+    'must reassign this document through Admin Recovery before the workflow '
+    'can continue.';
+
+/// Shown when the document is flagged but the server still allows the holder to act.
+const docuTrackerAdminRecoveryNoticeAdvisory =
+    'This document is flagged for administrator attention. The current '
+    'reviewer may still complete their step, or an administrator can reassign '
+    'it through Admin Recovery.';
+
+/// Legacy combined string kept for older tests/call sites.
 const docuTrackerAdminRecoveryNotice =
-    'Admin attention required. This document needs a reviewer reassignment '
-    'before the workflow can continue.';
+    'Admin attention required. $docuTrackerAdminRecoveryNoticeBlocking';
 
 const docuTrackerNoReplacementReviewerMessage =
     'No eligible replacement reviewer is configured for this step.';
@@ -82,6 +95,26 @@ bool docuTrackerShowAdminRecoveryAction({
   return isAdmin &&
       docuTrackerShowAdminRecoveryNotice(doc) &&
       docuTrackerRecoveryStatusOpen(doc.status);
+}
+
+/// True when permission-explain says workflow step actions need Admin Recovery.
+///
+/// Mirrors backend `getDepartmentReviewHolderStatus` / `reassignment_required`:
+/// `needs_admin_intervention` alone does not block an eligible holder.
+bool docuTrackerReassignmentRequired(
+  Map<String, DocuTrackerPermissionExplanation> explanations,
+) {
+  for (final explanation in explanations.values) {
+    if (explanation.reason == 'reassignment_required') return true;
+  }
+  return false;
+}
+
+/// Body copy for the admin attention card, aligned with server decisions.
+String docuTrackerAdminRecoveryBody({required bool workflowBlocked}) {
+  return workflowBlocked
+      ? docuTrackerAdminRecoveryNoticeBlocking
+      : docuTrackerAdminRecoveryNoticeAdvisory;
 }
 
 /// Newest recorded reason, when history actually explains the intervention.

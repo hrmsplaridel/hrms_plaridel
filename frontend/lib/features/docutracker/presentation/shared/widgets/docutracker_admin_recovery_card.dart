@@ -11,6 +11,7 @@ class DocuTrackerAdminRecoveryCard extends StatelessWidget {
     required this.documentTitle,
     required this.stepLabel,
     required this.currentReviewer,
+    this.body = docuTrackerAdminRecoveryNoticeBlocking,
     this.reason,
     this.loadOptions,
     this.onSubmit,
@@ -21,6 +22,9 @@ class DocuTrackerAdminRecoveryCard extends StatelessWidget {
   final String documentTitle;
   final String stepLabel;
   final String currentReviewer;
+
+  /// Server-aligned explanation of whether recovery blocks workflow actions.
+  final String body;
   final String? reason;
   final Future<DocuTrackerRecoveryOptions> Function()? loadOptions;
   final Future<String?> Function(
@@ -65,7 +69,8 @@ class DocuTrackerAdminRecoveryCard extends StatelessWidget {
           ),
           const SizedBox(height: 8),
           Text(
-            'This document needs a reviewer reassignment before the workflow can continue.',
+            body,
+            key: const ValueKey('docutracker-admin-recovery-body'),
             style: TextStyle(
               fontSize: 13,
               height: 1.35,

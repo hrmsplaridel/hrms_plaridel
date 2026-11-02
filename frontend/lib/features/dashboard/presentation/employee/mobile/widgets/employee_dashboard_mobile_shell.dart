@@ -3,11 +3,8 @@ import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/features/dashboard/presentation/employee/mobile/widgets/employee_dashboard_mobile_bottom_bar.dart';
 import 'package:hrms_plaridel/features/dashboard/presentation/employee/mobile/widgets/employee_dashboard_mobile_drawer.dart';
 import 'package:hrms_plaridel/features/dashboard/presentation/employee/mobile/widgets/employee_dashboard_mobile_nav_items.dart';
-import 'package:hrms_plaridel/features/dashboard/presentation/employee/shared/widgets/employee_dashboard_layout_metrics.dart';
 import 'package:hrms_plaridel/features/dashboard/presentation/employee/tutorial/employee_tutorial_controller.dart';
 import 'package:hrms_plaridel/features/notifications/models/notification_tap_result.dart';
-import 'package:hrms_plaridel/shared/widgets/dashboard_content_navigator.dart';
-import 'package:hrms_plaridel/shared/widgets/dashboard_mobile_bottom_nav.dart';
 import 'package:hrms_plaridel/shared/widgets/portal_sidebar_brand.dart';
 
 class EmployeeDashboardMobileShell extends StatelessWidget {
@@ -17,9 +14,7 @@ class EmployeeDashboardMobileShell extends StatelessWidget {
     required this.avatarPath,
     required this.displayName,
     required this.selectedIndex,
-    required this.navigatorKey,
-    required this.homeBuilder,
-    required this.settingsPanel,
+    required this.content,
     required this.onNavSelected,
     required this.onProfile,
     required this.onViewAllNotifications,
@@ -34,13 +29,10 @@ class EmployeeDashboardMobileShell extends StatelessWidget {
   final String? avatarPath;
   final String displayName;
   final int selectedIndex;
-  final GlobalKey<NavigatorState> navigatorKey;
-  final Widget Function({
-    required bool useMobileLeaveFab,
-    required bool useMobileLocatorFab,
-  })
-  homeBuilder;
-  final Widget settingsPanel;
+
+  /// Nested dashboard content navigator owned by the parent page so desktop ↔
+  /// mobile chrome swaps do not remount routes or dispose open documents.
+  final Widget content;
   final ValueChanged<int> onNavSelected;
   final VoidCallback onProfile;
   final VoidCallback onViewAllNotifications;
@@ -52,7 +44,6 @@ class EmployeeDashboardMobileShell extends StatelessWidget {
 
   bool get _useMobileLeaveFab =>
       width < 600 && selectedIndex == 2 && showMobileLeaveFab;
-  bool get _ownsMobileLeaveAction => width < 600 && selectedIndex == 2;
   bool get _useMobileLocatorFab => selectedIndex == 3;
 
   @override
@@ -94,35 +85,7 @@ class EmployeeDashboardMobileShell extends StatelessWidget {
                 Expanded(
                   child: ColoredBox(
                     color: AppTheme.dashCanvasOf(context),
-                    child: DashboardContentNavigator(
-                      navigatorKey: navigatorKey,
-                      homeCacheKey: selectedIndex,
-                      homeRefreshKey: Object.hash(
-                        selectedIndex,
-                        displayName,
-                        width,
-                        _ownsMobileLeaveAction,
-                        _useMobileLocatorFab,
-                      ),
-                      homeBuilder: () => homeBuilder(
-                        useMobileLeaveFab: _ownsMobileLeaveAction,
-                        useMobileLocatorFab: _useMobileLocatorFab,
-                      ),
-                      settingsPanel: settingsPanel,
-                      homeScrollPadding: employeeMainScrollPadding(
-                        context,
-                        mobileNav: true,
-                      ),
-                      settingsScrollPadding: EdgeInsets.fromLTRB(
-                        16,
-                        8,
-                        16,
-                        20 +
-                            DashboardMobileBottomNav.scrollPaddingExtra(
-                              context,
-                            ),
-                      ),
-                    ),
+                    child: content,
                   ),
                 ),
               ],
