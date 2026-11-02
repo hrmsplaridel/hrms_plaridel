@@ -12,7 +12,7 @@ for(const format of ['legacy','shared']) for(const kind of ['leave','locator']) 
       start_date:'2026-10-15',end_date:'2026-10-15',slip_date:today,slip_date_text:today,days:1,number_of_days:1,
       leave_type_name:'Wellness',reserved_credit_days:1,workflow_snapshot:{id:'workflow',name:'Full approval',version:1,
         steps:['department','hr','mayor'],current_step:0,decisions:[]}};
-    if(format==='shared')row.workflow_snapshot.steps=['Initial reviewer','HR review','Mayor approval'].map((label,index)=>({
+    if(format==='shared')row.workflow_snapshot.steps=['Initial reviewer','Budget Authorization','Mayor approval'].map((label,index)=>({
       step_order:index+1,label,assignee_type:'user',assignee_source:index===2?'active_mayor':'specific_users',
       user_ids:index===0?[ids.head]:index===1?[ids.hr]:[],requires_signature:true,allowed_actions:['approve','return','reject']}));
     let deducted=0,coverage=0;
@@ -84,11 +84,36 @@ for(const format of ['legacy','shared']) for(const kind of ['leave','locator']) 
         assert.equal(input.employeeUserId, ids.employee);
         assert.equal(input.leaveRequestId, ids.request);
       }
-      if (format === 'shared') assertLeaveForwardNotice('pending_hr');
+      function assertEmployeeProgress(completedStep, nextStep, count) {
+        if (kind !== 'leave') return;
+        const progress = notifications.map(args => args[1]).filter(n => n.type === 'leave_workflow_step_approved');
+        assert.equal(progress.length, count, 'Notify the applicant once for each intermediate approval');
+        const notice = progress.at(-1);
+        assert.equal(notice.employeeUserId, ids.employee);
+        assert.equal(notice.leaveRequestId, ids.request);
+        assert.equal(notice.title, 'Leave request forwarded for approval');
+        assert.ok(notice.body.includes(`${completedStep} approved`), notice.body);
+        assert.ok(notice.body.includes(`awaiting ${nextStep}`), notice.body);
+        assert.ok(notice.body.includes('Reviewed'), 'Keep the reviewer remarks');
+        assert.equal(notice.metadata.reviewer_remarks, 'Reviewed');
+        assert.notEqual(notice.metadata.workflow_approval, true, 'This is an applicant update, not a reviewer assignment');
+        assert.equal(notifications.some(args => args[1].type === 'leave_approved'), false);
+      }
+      if (format === 'shared') {
+        assertLeaveForwardNotice('pending_hr');
+        assertEmployeeProgress('Initial reviewer', 'Budget Authorization', 1);
+      }
       await act('hr','/:id/approve');
       assert.equal(row.status,'pending_mayor');assert.equal(deducted,0);assert.equal(coverage,0);
       assertLeaveForwardNotice('pending_mayor');
+      assertEmployeeProgress(format === 'shared' ? 'Budget Authorization' : 'HR Review',
+        format === 'shared' ? 'Mayor approval' : 'Mayor Approval', format === 'shared' ? 2 : 1);
       await act('mayor',action==='return' && kind==='locator'?'/:id/return-for-correction':`/:id/${action}`);
+      if (kind === 'leave') {
+        const notices = notifications.map(args => args[1]);
+        assert.equal(notices.filter(n => n.type === 'leave_workflow_step_approved').length, format === 'shared' ? 2 : 1);
+        assert.equal(notices.filter(n => n.type === 'leave_approved').length, action === 'approve' ? 1 : 0);
+      }
       if(action!=='approve'){
         assert.equal(row.status,action==='return'?(kind==='locator'?'returned_for_correction':'returned'):(kind==='locator'?'rejected_by_hr':'rejected'));
         assert.equal(row.workflow_snapshot.outcome,row.status);
