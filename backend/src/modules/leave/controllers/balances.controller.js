@@ -1,4 +1,5 @@
 'use strict';
+const { parseAssignmentDate } = require('../../../utils/assignmentInputValidation');
 module.exports = function createLeaveControllers({
   ENTITLEMENT_BASES,
   annualAllowance,
@@ -455,8 +456,8 @@ module.exports = function createLeaveControllers({
       }
       let asOf = b.as_of_date ?? b.asOfDate;
       if (asOf === '' || asOf === undefined) asOf = null;
-      if (asOf != null && !/^\d{4}-\d{2}-\d{2}$/.test(String(asOf))) {
-        return res.status(400).json({ error: 'as_of_date must use YYYY-MM-DD' });
+      if (asOf != null && !parseAssignmentDate(asOf)) {
+        return res.status(400).json({ error: 'as_of_date must be a real date in YYYY-MM-DD format' });
       }
       const daysChanged = b.adjustment_days ?? b.adjustmentDays;
       const remarks = b.remarks ?? b.reason;
