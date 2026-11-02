@@ -6,6 +6,25 @@ const { requireAdmin } = require('../middleware/rbac');
 const router = express.Router();
 const protect = [authMiddleware];
 
+// Match the strict text/boolean contract used by the department setup routes.
+// Updates validate only supplied fields; creation still defaults to active.
+function officeInputError(body, creating = false) {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    return 'Office details must be an object';
+  }
+  if ((creating || body.name !== undefined) &&
+      (typeof body.name !== 'string' || !body.name.trim())) {
+    return 'Office name must be nonblank text';
+  }
+  if (body.description != null && typeof body.description !== 'string') {
+    return 'Description must be text or null';
+  }
+  if (body.is_active !== undefined && typeof body.is_active !== 'boolean') {
+    return 'is_active must be a boolean';
+  }
+  return null;
+}
+
 // GET /api/offices - list (?status=Active|Inactive|All) — authenticated users (for pickers).
 router.get('/', protect, async (req, res) => {
   try {
@@ -45,10 +64,9 @@ router.get('/', protect, async (req, res) => {
 // POST /api/offices - create (admin only)
 router.post('/', protect, requireAdmin, async (req, res) => {
   try {
+    const inputError = officeInputError(req.body, true);
+    if (inputError) return res.status(400).json({ error: inputError });
     const { name, description, is_active = true } = req.body;
-    if (!name || !String(name).trim()) {
-      return res.status(400).json({ error: 'Name is required' });
-    }
 
     const result = await pool.query(
       `INSERT INTO offices (name, description, is_active, office_number)
@@ -58,7 +76,7 @@ router.post('/', protect, requireAdmin, async (req, res) => {
          1
        )
        RETURNING id, office_number, name, description, is_active`,
-      [String(name).trim(), description?.trim() || null, !!is_active]
+      [name.trim(), description?.trim() || null, is_active]
     );
     res.status(201).json(result.rows[0]);
   } catch (err) {
@@ -78,6 +96,8 @@ router.post('/', protect, requireAdmin, async (req, res) => {
 // PUT /api/offices/:id - update (admin only)
 router.put('/:id', protect, requireAdmin, async (req, res) => {
   try {
+    const inputError = officeInputError(req.body);
+    if (inputError) return res.status(400).json({ error: inputError });
     const { id } = req.params;
     const { name, description, is_active } = req.body;
 
@@ -87,7 +107,7 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
 
     if (name !== undefined) {
       updates.push(`name = $${i++}`);
-      values.push(String(name).trim());
+      values.push(name.trim());
     }
     if (description !== undefined) {
       updates.push(`description = $${i++}`);
@@ -95,7 +115,7 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
     }
     if (is_active !== undefined) {
       updates.push(`is_active = $${i++}`);
-      values.push(!!is_active);
+      values.push(is_active);
     }
 
     if (!updates.length) {
