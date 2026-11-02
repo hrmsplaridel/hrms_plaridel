@@ -85,26 +85,56 @@ function validateEmployeeSeparationDates({
   return null;
 }
 
+class EmployeeProfileValidationError extends Error {
+  constructor(message, statusCode = 400) {
+    super(message);
+    this.name = 'EmployeeProfileValidationError';
+    this.statusCode = statusCode;
+  }
+}
+
+function validateEmployeeProfilePayload(payload, {
+  partial = false, existing = {}, today = manilaTodayDate(),
+} = {}) {
+  if (!partial || payload.email !== undefined) {
+    const email = typeof payload.email === 'string' ? payload.email.trim() : '';
+    if (!email || email.length > 254 || !EMAIL_PATTERN.test(email)) return 'A valid email is required';
+  }
+  for (const [field, label] of [
+    ['first_name', 'First name'], ['last_name', 'Last name'], ['full_name', 'Full name'],
+  ]) {
+    if ((!partial || payload[field] !== undefined) &&
+        (typeof payload[field] !== 'string' || !payload[field].trim())) return `${label} is required`;
+  }
+  for (const field of ['middle_name', 'suffix', 'sex', 'contact_number', 'address', 'civil_status', 'nationality', 'avatar_path']) {
+    if (payload[field] != null && typeof payload[field] !== 'string') return `${field} must be text or null`;
+  }
+  for (const [field, label] of [['date_of_birth', 'Date of birth'], ['date_hired', 'Date hired']]) {
+    if (payload[field] != null && payload[field] !== '' && !isValidIsoDate(payload[field])) {
+      return `${label} must use YYYY-MM-DD`;
+    }
+  }
+  if (!partial || payload.date_of_birth !== undefined || payload.date_hired !== undefined) {
+    const storedDate = value => value instanceof Date ? value.toISOString().slice(0, 10) : value;
+    const birth = payload.date_of_birth === undefined ? storedDate(existing.date_of_birth) : payload.date_of_birth;
+    const hired = payload.date_hired === undefined ? storedDate(existing.date_hired) : payload.date_hired;
+    if (birth && isValidIsoDate(birth)) {
+      if (birth > today) return 'Date of birth cannot be in the future';
+      if (hired && isValidIsoDate(hired) && birth >= hired) return 'Date of birth must be before date hired';
+    }
+  }
+  return null;
+}
+
+function validateUpdateEmployeePayload(payload = {}, existing = {}, options = {}) {
+  return validateEmployeeProfilePayload(payload, { ...options, partial: true, existing });
+}
+
 function validateCreateEmployeePayload(payload = {}) {
   const employmentTypeError = validateEmploymentType(payload.employment_type);
   if (employmentTypeError) return employmentTypeError;
-  const email = typeof payload.email === 'string' ? payload.email.trim() : '';
-  if (!email || email.length > 254 || !EMAIL_PATTERN.test(email)) {
-    return 'A valid email is required';
-  }
-
-  for (const [field, label] of [
-    ['first_name', 'First name'],
-    ['last_name', 'Last name'],
-    ['full_name', 'Full name'],
-  ]) {
-    if (
-      typeof payload[field] !== 'string' ||
-      payload[field].trim().length === 0
-    ) {
-      return `${label} is required`;
-    }
-  }
+  const profileError = validateEmployeeProfilePayload(payload);
+  if (profileError) return profileError;
 
   if (
     typeof payload.password === 'string' &&
@@ -116,14 +146,6 @@ function validateCreateEmployeePayload(payload = {}) {
 
   if (!isValidIsoDate(payload.date_hired)) {
     return 'Date hired is required and must use YYYY-MM-DD';
-  }
-
-  if (
-    payload.date_of_birth != null &&
-    payload.date_of_birth !== '' &&
-    !isValidIsoDate(payload.date_of_birth)
-  ) {
-    return 'Date of birth must use YYYY-MM-DD';
   }
 
   const separationError = validateEmployeeSeparationDates({
@@ -143,5 +165,7 @@ module.exports = {
   isStrongTemporaryPassword,
   validateEmployeeSeparationDates,
   validateCreateEmployeePayload,
+  validateUpdateEmployeePayload,
+  EmployeeProfileValidationError,
   SEPARATION_EMPLOYMENT_STATUSES,
 };

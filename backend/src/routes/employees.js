@@ -16,6 +16,8 @@ const {
 } = require('../utils/employeeStatus');
 const {
   validateCreateEmployeePayload,
+  validateUpdateEmployeePayload,
+  EmployeeProfileValidationError,
   validateEmploymentType,
   validateEmployeeSeparationDates,
   SEPARATION_EMPLOYMENT_STATUSES,
@@ -1026,8 +1028,11 @@ router.put('/:id', protect, requireAdmin, requireDtrFeatureIfAdmin('employees_al
       setup,
     } = req.body;
 
+    const inputError = validateUpdateEmployeePayload(req.body);
+    if (inputError) return res.status(400).json({ error: inputError });
     const existingRes = await pool.query(
-      `SELECT biometric_user_id, employment_type, employment_status, date_hired,
+      `SELECT biometric_user_id, employment_type, employment_status, date_hired::text AS date_hired,
+              date_of_birth::text AS date_of_birth,
               separation_date::text AS separation_date,
               leave_credit_eligible, leave_credit_eligible_until::text
        FROM users WHERE id = $1::uuid AND role <> 'super_admin'`,
@@ -1036,6 +1041,8 @@ router.put('/:id', protect, requireAdmin, requireDtrFeatureIfAdmin('employees_al
     if (existingRes.rowCount === 0) {
       return res.status(404).json({ error: 'Employee not found' });
     }
+    const profileError = validateUpdateEmployeePayload(req.body, existingRes.rows[0]);
+    if (profileError) return res.status(400).json({ error: profileError });
     const employmentTypeError = validateEmploymentType(employment_type, existingRes.rows[0].employment_type);
     if (employmentTypeError) return res.status(400).json({ error: employmentTypeError });
     const currentBioRaw = existingRes.rows[0].biometric_user_id;
@@ -1240,6 +1247,18 @@ router.put('/:id', protect, requireAdmin, requireDtrFeatureIfAdmin('employees_al
         nextIsActive: effectiveIsActive,
         nextEmploymentStatus: effectiveEmploymentStatus,
       });
+      if (date_of_birth !== undefined || date_hired !== undefined) {
+        // The account transition holds the target row lock. Re-read the merged
+        // dates on this client so concurrent profile edits cannot invalidate
+        // chronology between the initial lookup and the UPDATE.
+        const lockedProfile = (await client.query(
+          `SELECT date_of_birth::text AS date_of_birth, date_hired::text AS date_hired
+             FROM users WHERE id = $1::uuid FOR UPDATE`, [id]
+        )).rows[0];
+        if (!lockedProfile) throw new EmployeeProfileValidationError('Employee not found', 404);
+        const lockedError = validateUpdateEmployeePayload(req.body, lockedProfile);
+        if (lockedError) throw new EmployeeProfileValidationError(lockedError);
+      }
       result = await client.query(
         `UPDATE users SET ${updates.join(', ')} WHERE id = $${i}
          RETURNING ${returningColumns.join(', ')}`,
@@ -1288,6 +1307,9 @@ router.put('/:id', protect, requireAdmin, requireDtrFeatureIfAdmin('employees_al
     invalidateAttendancePolicyCache({ employeeId: id });
     res.json({ ...result.rows[0], updated_setup: updatedSetup });
   } catch (err) {
+    if (err instanceof EmployeeProfileValidationError) {
+      return res.status(err.statusCode).json({ error: err.message });
+    }
     if (err instanceof EmployeeAccountSecurityError) {
       return res.status(err.statusCode).json({ error: err.message, code: err.code });
     }
