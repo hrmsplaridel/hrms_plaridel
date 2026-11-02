@@ -3,54 +3,213 @@ import 'package:flutter/material.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_balance.dart';
 
-class LeaveBalanceCard extends StatelessWidget {
-  const LeaveBalanceCard({super.key, required this.balance});
-
-  final LeaveBalance balance;
+/// Shared credit cards for desktop and mobile leave balances.
+class LeaveBalanceCards extends StatelessWidget {
+  const LeaveBalanceCards({super.key, required this.balances});
+  final List<LeaveBalance> balances;
 
   @override
   Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final textScale = MediaQuery.textScalerOf(context).scale(14) / 14;
+        final minimumWidth = 280 * textScale.clamp(1.0, 1.5);
+        final columns =
+            balances.length > 1 && constraints.maxWidth >= minimumWidth * 2 + 16
+            ? 2
+            : 1;
+        final width = (constraints.maxWidth - (columns - 1) * 16) / columns;
+        return Wrap(
+          spacing: 16,
+          runSpacing: 16,
+          children: balances
+              .map(
+                (balance) => SizedBox(
+                  width: width,
+                  child: LeaveBalanceCard(
+                    key: ValueKey(
+                      'leave-credit-card-${balance.effectiveLeaveTypeName}',
+                    ),
+                    balance: balance,
+                  ),
+                ),
+              )
+              .toList(),
+        );
+      },
+    );
+  }
+}
+
+class LeaveBalanceCard extends StatelessWidget {
+  const LeaveBalanceCard({super.key, required this.balance});
+  final LeaveBalance balance;
+
+  String _days(double value) => value == 0
+      ? '0'
+      : value == value.truncateToDouble()
+      ? value.toStringAsFixed(0)
+      : value.toStringAsFixed(1);
+
+  @override
+  Widget build(BuildContext context) {
+    final dark = AppTheme.dashIsDark(context);
+    final accent = dark ? AppTheme.primaryNavyLight : AppTheme.primaryNavyDark;
+    final availableColor = balance.availableDays < 0
+        ? Theme.of(context).colorScheme.error
+        : balance.availableDays == 0
+        ? AppTheme.dashTextSecondaryOf(context)
+        : accent;
     return Container(
-      padding: const EdgeInsets.all(16),
+      width: double.infinity,
+      clipBehavior: Clip.antiAlias,
       decoration: BoxDecoration(
-        color: AppTheme.dashMutedSurfaceOf(context),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppTheme.dashHairlineOf(context)),
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            AppTheme.dashPanelOf(context),
+            Color.alphaBlend(
+              AppTheme.primaryNavy.withValues(alpha: dark ? 0.07 : 0.045),
+              AppTheme.dashPanelOf(context),
+            ),
+          ],
+        ),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(
+          color: AppTheme.primaryNavy.withValues(alpha: dark ? 0.25 : 0.16),
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: dark ? 0.12 : 0.025),
+            blurRadius: 18,
+            offset: const Offset(0, 6),
+          ),
+        ],
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      child: Stack(
         children: [
-          Text(
-            balance.leaveTypeLabel,
-            style: TextStyle(
-              color: AppTheme.dashTextPrimaryOf(context),
-              fontWeight: FontWeight.w700,
-              fontSize: 15,
+          Positioned(
+            right: -44,
+            top: -50,
+            child: IgnorePointer(
+              child: Container(
+                width: 180,
+                height: 180,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  border: Border.all(
+                    color: accent.withValues(alpha: 0.05),
+                    width: 22,
+                  ),
+                ),
+              ),
             ),
           ),
-          const SizedBox(height: 12),
-          Wrap(
-            spacing: 10,
-            runSpacing: 10,
-            children: [
-              _MiniStatChip(
-                label: 'Earned',
-                value: balance.earnedDays.toStringAsFixed(1),
-              ),
-              _MiniStatChip(
-                label: 'Used',
-                value: balance.usedDays.toStringAsFixed(1),
-              ),
-              _MiniStatChip(
-                label: 'Pending',
-                value: balance.pendingDays.toStringAsFixed(1),
-              ),
-              _MiniStatChip(
-                label: 'Available',
-                value: balance.availableDays.toStringAsFixed(1),
-                emphasize: true,
-              ),
-            ],
+          Padding(
+            padding: const EdgeInsets.all(18),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: accent.withValues(alpha: 0.09),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Icon(
+                        balance.effectiveLeaveTypeName == 'sickLeave'
+                            ? Icons.medical_services_outlined
+                            : Icons.beach_access_outlined,
+                        size: 18,
+                        color: accent,
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        balance.leaveTypeLabel,
+                        style: TextStyle(
+                          color: AppTheme.dashTextPrimaryOf(context),
+                          fontSize: 14,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 18),
+                Text(
+                  'Available',
+                  style: TextStyle(
+                    color: AppTheme.dashTextSecondaryOf(context),
+                    fontSize: 12,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.baseline,
+                  textBaseline: TextBaseline.alphabetic,
+                  children: [
+                    Flexible(
+                      child: FittedBox(
+                        fit: BoxFit.scaleDown,
+                        alignment: Alignment.centerLeft,
+                        child: Text(
+                          _days(balance.availableDays),
+                          style: TextStyle(
+                            color: availableColor,
+                            fontSize: 38,
+                            height: 1.1,
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: -1.2,
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      'days',
+                      style: TextStyle(
+                        color: AppTheme.dashTextSecondaryOf(context),
+                        fontSize: 13,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 18),
+                Divider(height: 1, color: AppTheme.dashHairlineOf(context)),
+                const SizedBox(height: 14),
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: _CreditStat(
+                        label: 'Earned',
+                        value: _days(balance.earnedDays),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: _CreditStat(
+                        label: 'Used',
+                        value: _days(balance.usedDays),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: _CreditStat(
+                        label: 'Pending',
+                        value: _days(balance.pendingDays),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
           ),
         ],
       ),
@@ -58,59 +217,37 @@ class LeaveBalanceCard extends StatelessWidget {
   }
 }
 
-class _MiniStatChip extends StatelessWidget {
-  const _MiniStatChip({
-    required this.label,
-    required this.value,
-    this.emphasize = false,
-  });
-
+class _CreditStat extends StatelessWidget {
+  const _CreditStat({required this.label, required this.value});
   final String label;
   final String value;
-  final bool emphasize;
 
   @override
   Widget build(BuildContext context) {
-    final dark = AppTheme.dashIsDark(context);
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-      decoration: BoxDecoration(
-        color: emphasize
-            ? (dark
-                  ? AppTheme.primaryNavy.withValues(alpha: 0.28)
-                  : AppTheme.primaryNavy.withValues(alpha: 0.10))
-            : AppTheme.dashPanelOf(context),
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(
-          color: emphasize
-              ? AppTheme.primaryNavy.withValues(alpha: 0.25)
-              : AppTheme.dashHairlineOf(context),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          label,
+          style: TextStyle(
+            color: AppTheme.dashTextSecondaryOf(context),
+            fontSize: 11,
+          ),
         ),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            label,
+        const SizedBox(height: 4),
+        FittedBox(
+          fit: BoxFit.scaleDown,
+          alignment: Alignment.centerLeft,
+          child: Text(
+            value,
             style: TextStyle(
-              color: AppTheme.dashTextSecondaryOf(context),
-              fontSize: 11,
+              color: AppTheme.dashTextPrimaryOf(context),
+              fontSize: 15,
               fontWeight: FontWeight.w600,
             ),
           ),
-          const SizedBox(height: 4),
-          Text(
-            value,
-            style: TextStyle(
-              color: emphasize
-                  ? (dark ? Colors.white : AppTheme.primaryNavyDark)
-                  : AppTheme.dashTextPrimaryOf(context),
-              fontSize: 14,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 }

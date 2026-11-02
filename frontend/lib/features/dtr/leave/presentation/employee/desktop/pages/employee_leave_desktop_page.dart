@@ -16,6 +16,7 @@ import 'package:hrms_plaridel/features/dtr/leave/presentation/employee/shared/wi
 import 'package:hrms_plaridel/features/dtr/leave/presentation/employee/shared/utils/employee_leave_actions.dart';
 import 'package:hrms_plaridel/features/dtr/leave/presentation/shared/pages/leave_balance_history_screen.dart';
 import 'package:hrms_plaridel/features/dtr/leave/presentation/shared/widgets/my_leave_loading_skeleton.dart';
+import 'package:hrms_plaridel/features/dtr/leave/presentation/shared/widgets/leave_balance_card.dart';
 
 /// Employee-facing leave screen.
 ///
@@ -595,9 +596,7 @@ class _BalancesPanel extends StatelessWidget {
                   _SectionLoadError(message: error!, onRetry: onRetry),
                   const SizedBox(height: 12),
                 ],
-                ...balances.map(
-                  (balance) => _CompactBalanceRow(balance: balance),
-                ),
+                LeaveBalanceCards(balances: balances),
               ],
             ),
     );

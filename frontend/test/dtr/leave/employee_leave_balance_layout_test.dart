@@ -11,7 +11,7 @@ import 'package:hrms_plaridel/providers/auth_provider.dart';
 import 'package:provider/provider.dart';
 
 void main() {
-  testWidgets('desktop balances use side-by-side rows and stack when narrow', (
+  testWidgets('credit cards adapt and keep usage sections unchanged', (
     tester,
   ) async {
     await tester.binding.setSurfaceSize(const Size(1600, 1100));
@@ -59,22 +59,41 @@ void main() {
       tester.getTopLeft(requests).dy,
       greaterThan(tester.getTopLeft(entitlements).dy),
     );
-    expect(find.byType(LeaveBalanceCard), findsNothing);
+    expect(find.byType(LeaveBalanceCard), findsNWidgets(2));
     expect(find.byType(LeaveDaysCard), findsNothing);
-    final sickRow = find.byKey(const ValueKey('leave-balance-row-sickLeave'));
+    final sickCard = find.byWidgetPredicate(
+      (widget) =>
+          widget is LeaveBalanceCard &&
+          widget.balance.effectiveLeaveTypeName == 'sickLeave',
+    );
+    final vacationCard = find.byWidgetPredicate(
+      (widget) =>
+          widget is LeaveBalanceCard &&
+          widget.balance.effectiveLeaveTypeName == 'vacationLeave',
+    );
     final annualRow = find.byKey(
       const ValueKey('leave-balance-row-soloParentLeave'),
     );
-    expect(sickRow, findsOneWidget);
+    expect(sickCard, findsOneWidget);
     expect(annualRow, findsOneWidget);
-    expect(tester.getSize(sickRow).width, lessThanOrEqualTo(560));
+    expect(
+      tester.getTopLeft(sickCard).dy,
+      closeTo(tester.getTopLeft(vacationCard).dy, 1),
+    );
+    expect(
+      tester.getTopLeft(sickCard).dx,
+      lessThan(tester.getTopLeft(vacationCard).dx),
+    );
     expect(tester.getSize(annualRow).width, lessThanOrEqualTo(560));
 
     await tester.binding.setSurfaceSize(const Size(1120, 1100));
     await tester.pump();
     await tester.pump();
     expect(tester.takeException(), isNull);
-    expect(tester.getSize(sickRow).width, lessThanOrEqualTo(560));
+    expect(
+      tester.getTopLeft(vacationCard).dy,
+      greaterThan(tester.getTopLeft(sickCard).dy),
+    );
     expect(tester.getSize(annualRow).width, lessThanOrEqualTo(560));
     expect(
       tester.getTopLeft(credits).dy,
