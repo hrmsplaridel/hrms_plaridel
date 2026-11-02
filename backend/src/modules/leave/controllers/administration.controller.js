@@ -1,4 +1,5 @@
 'use strict';
+const { normalizeYearEndEmployeeIds } = require('../../../services/leaveYearEndForcedLeave');
 
 // Validate every supplied alias/source before choosing a processing mode.
 // Ignoring an invalid preview flag must never turn it into a live operation.
@@ -36,6 +37,23 @@ function processingCatchUpMonths(req) {
     }
     return parsed;
   }, undefined);
+}
+
+function processingEmployeeIds(req) {
+  const fields = ['employee_ids', 'employeeIds'];
+  if (fields.some(field => Object.hasOwn(req.query || {}, field))) {
+    throw new Error('employee_ids must be supplied as an array in the JSON body');
+  }
+  const selections = fields
+    .filter(field => Object.hasOwn(req.body || {}, field))
+    .map(field => normalizeYearEndEmployeeIds(req.body[field]));
+  if (selections.length > 1 &&
+      JSON.stringify([...selections[0]].sort()) !== JSON.stringify([...selections[1]].sort())) {
+    throw new Error('employee_ids has conflicting values in the request');
+  }
+  // The existing Apply All client omits both fields. Explicit empty/null lists
+  // are invalid and must never be converted into this intentional all scope.
+  return selections.length ? selections[0] : null;
 }
 
 module.exports = function createLeaveControllers({
@@ -313,8 +331,10 @@ module.exports = function createLeaveControllers({
 
     applyYearEndForcedLeave: async (req, res) => {
       let dryRun;
+      let employeeIds;
       try {
         dryRun = processingDryRun(req);
+        employeeIds = processingEmployeeIds(req);
       } catch (err) {
         return res.status(400).json({ error: err.message });
       }
@@ -332,12 +352,6 @@ module.exports = function createLeaveControllers({
             error: `Year-end deductions for ${year} cannot be applied until that calendar year has closed. Preview remains available.`,
           });
         }
-
-        const rawIds = req.body?.employee_ids ?? req.body?.employeeIds;
-        const employeeIds =
-          Array.isArray(rawIds) && rawIds.length > 0
-            ? rawIds.map((id) => String(id).trim()).filter(Boolean)
-            : null;
 
         const remarks = (req.body?.remarks || '').toString().trim() || null;
 

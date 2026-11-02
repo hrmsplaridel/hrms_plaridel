@@ -12,6 +12,26 @@ const { insertLeaveBalanceLedger } = require('./leaveBalanceLedger');
 
 const REQUIRED_FORCED_DAYS = 5;
 const CRON_ADVISORY_LOCK_KEY = 918273646; // distinct from monthly accrual (918273645)
+const MAX_YEAR_END_SELECTED_EMPLOYEES = 100;
+
+function normalizeYearEndEmployeeIds(value, { allowAll = false } = {}) {
+  // Internal scheduler calls use null/omission for all employees. A supplied
+  // HTTP selection must be a nonempty list, never an implicit all-employee scope.
+  if (allowAll && value == null) return null;
+  const invalid = () => Object.assign(new Error(
+    `employee_ids must be a nonempty array of valid UUIDs (at most ${MAX_YEAR_END_SELECTED_EMPLOYEES} entries)`,
+  ), { statusCode: 400 });
+  if (!Array.isArray(value) || !value.length || value.length > MAX_YEAR_END_SELECTED_EMPLOYEES) {
+    throw invalid();
+  }
+  const ids = [];
+  const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  for (const raw of value) {
+    if (typeof raw !== 'string' || !uuid.test(raw.trim())) throw invalid();
+    ids.push(raw.trim().toLowerCase());
+  }
+  return [...new Set(ids)];
+}
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -238,11 +258,9 @@ async function applyYearEndForcedLeaveDeductions(pool, {
   employeeIds = null,
   remarks = null,
 }) {
+  const selectedIds = normalizeYearEndEmployeeIds(employeeIds, { allowAll: true });
+  const filterIds = selectedIds === null ? null : new Set(selectedIds);
   const compliance = await getYearEndForcedLeaveCompliance(pool, { year });
-
-  const filterIds = employeeIds && employeeIds.length > 0
-    ? new Set(employeeIds)
-    : null;
 
   const targets = compliance.employees.filter(
     (e) => e.can_apply && (!filterIds || filterIds.has(e.user_id)),
@@ -484,6 +502,7 @@ async function applyYearEndForcedLeaveDeductions(pool, {
 module.exports = {
   getYearEndForcedLeaveCompliance,
   applyYearEndForcedLeaveDeductions,
+  normalizeYearEndEmployeeIds,
   manilaYearNow,
   REQUIRED_FORCED_DAYS,
   CRON_ADVISORY_LOCK_KEY,
