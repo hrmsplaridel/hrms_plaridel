@@ -5,6 +5,8 @@ const {canAdjustLeaveCredits} = require('./leaveCreditAdjustmentEligibility');
 const {lockEmployeeLeaveFiling} = require('./leaveFilingLock');
 const {insertLeaveBalanceLedger} = require('./leaveBalanceLedger');
 const CREDIT_TYPES = ['sickLeave','vacationLeave'];
+// NUMERIC(10,3) supports -9999999.999 through 9999999.999 days.
+const MAX_BALANCE_UNITS = 9999999999;
 function fail(message, statusCode = 400) { throw Object.assign(new Error(message), {statusCode}); }
 function amount(value) {
   if (!['number','string'].includes(typeof value)) fail('Enter numeric credit days.');
@@ -80,14 +82,29 @@ async function applyOpeningBalances(db, input, {today = todayInHrmsTimezone()} =
   const later=await db.query(`SELECT user_id FROM leave_attendance_deductions WHERE user_id=$1::uuid AND service_month>$2::date
     UNION ALL SELECT user_id FROM leave_monthly_accrual_postings WHERE user_id=$1::uuid AND service_month>$2::date LIMIT 1`,[input.userId,cutoff]);
   if (later.rows.length) fail('Month-end processing exists after this cutoff. Choose a later completed accounting period.',409);
+  // Validate both locked balances before either update. Integer thousandths
+  // preserve exact storage boundaries and also keep ledger deltas finite.
+  const planned = rows.map(row => {
+    const label = row.leave_type === 'sickLeave' ? 'Sick Leave' : 'Vacation Leave';
+    const units = ['earned_days','used_days','pending_days','adjusted_days']
+      .map(field => Math.round(Number(row[field]) * 1000));
+    if (units.some(value => !Number.isSafeInteger(value) || Math.abs(value) > MAX_BALANCE_UNITS)) {
+      fail(`The existing ${label} balance contains invalid or out-of-range credits. Review the balance before recording opening credits.`);
+    }
+    const adjustedUnits = Math.round(amounts[row.leave_type] * 1000) - units[0] + units[1] + units[2];
+    if (!Number.isSafeInteger(adjustedUnits) || Math.abs(adjustedUnits) > MAX_BALANCE_UNITS) {
+      fail(`The calculated ${label} opening adjustment is out of range (-9999999.999 to 9999999.999 days). Review the existing balance.`);
+    }
+    return {row, adjusted:adjustedUnits / 1000, oldValue:units[3] / 1000,
+      daysChanged:(adjustedUnits - units[3]) / 1000};
+  });
   const balances=[];
-  for (const row of rows) {
-    const adjusted = Math.round((amounts[row.leave_type]-Number(row.earned_days)+Number(row.used_days)+Number(row.pending_days))*1000)/1000;
+  for (const {row,adjusted,oldValue,daysChanged} of planned) {
     const saved=(await db.query(`UPDATE leave_balances SET adjusted_days=$3::numeric,last_accrual_date=$4::date,
       as_of_date=$5::date,updated_at=now() WHERE user_id=$1::uuid AND leave_type=$2::text RETURNING *`,
       [input.userId,row.leave_type,adjusted,cutoff.slice(0,7)+'-01',cutoff])).rows[0];
     await insertLeaveBalanceLedger(db,{userId:input.userId,leaveType:row.leave_type,action:'opening_balance',affectedBucket:'adjusted',
-      daysChanged:Math.round((adjusted-Number(row.adjusted_days))*1000)/1000,oldValue:Number(row.adjusted_days),newValue:adjusted,
+      daysChanged,oldValue,newValue:adjusted,
       actorUserId:input.actor.id,actorKind:input.actor.role,remarks:reason,
       metadataJson:{cutoff_date:cutoff,verified_available_days:amounts[row.leave_type],before:row,after:saved}});
     balances.push(saved);
