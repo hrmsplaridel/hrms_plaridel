@@ -120,6 +120,39 @@ function sortByLoggedAtAsc(items, getLoggedAt) {
   });
 }
 
+function biometricImportRowError(row) {
+  if (!row || typeof row !== 'object' || Array.isArray(row)) {
+    return { field: 'row', error: 'Expected a log entry object' };
+  }
+  for (const field of ['biometric_user_id', 'raw_line']) {
+    if (typeof row[field] !== 'string' || !row[field].trim() || row[field].includes('\0')) {
+      return { field, error: `${field} must be nonblank text without null characters` };
+    }
+  }
+  for (const field of ['user_id', 'verify_code', 'punch_code', 'work_code']) {
+    if (row[field] != null && (typeof row[field] !== 'string' || row[field].includes('\0'))) {
+      return { field, error: `${field} must be text or null` };
+    }
+  }
+  if (row.user_id?.trim() && !UUID_PATTERN.test(row.user_id.trim())) {
+    return { field: 'user_id', error: 'user_id must be a valid employee UUID' };
+  }
+  // Check the original calendar/time parts before Date.parse can normalize an
+  // impossible date. Preserve the timestamp and its offset for raw storage.
+  const stamp = typeof row.logged_at === 'string' ? row.logged_at.trim() : '';
+  const parts = stamp.match(/^(\d{4}-\d{2}-\d{2})[T ](\d{2}):(\d{2})(?::(\d{2})(?:\.\d{1,6})?)?(?:Z|[+-]\d{2}:?\d{2})?$/i);
+  const offset = stamp.match(/[+-](\d{2}):?(\d{2})$/);
+  if (!parts || parts[1].startsWith('0000-') || !parseExportDate(parts[1]) || Number(parts[2]) > 23 ||
+      Number(parts[3]) > 59 || Number(parts[4] || 0) > 59 || !Number.isFinite(Date.parse(stamp))) {
+    return { field: 'logged_at', error: 'logged_at must be a valid ISO date and time' };
+  }
+  // PostgreSQL rejects displacements of 16 hours or more, even when JS accepts them.
+  if (offset && Number(offset[1]) > 15) {
+    return { field: 'logged_at', error: 'logged_at timezone offset is outside the supported range' };
+  }
+  return null;
+}
+
 function parseExportDate(value) {
   const normalized = String(value || '').trim();
   if (!/^\d{4}-\d{2}-\d{2}$/.test(normalized)) return null;
@@ -537,7 +570,13 @@ router.post('/push', pushAuth, async (req, res) => {
  */
 router.post('/import', protect, requireAdmin, requireDtrManageIfAdmin, async (req, res) => {
   try {
+    if (!req.body || typeof req.body !== 'object' || Array.isArray(req.body)) {
+      return res.status(400).json({ error: 'Import details must be an object' });
+    }
     const { rows = [], source_file_name } = req.body;
+    if (source_file_name != null && (typeof source_file_name !== 'string' || source_file_name.includes('\0'))) {
+      return res.status(400).json({ error: 'source_file_name must be text or null without null characters' });
+    }
     if (!Array.isArray(rows) || rows.length === 0) {
       return res.status(400).json({
         error: 'No rows to import',
@@ -551,16 +590,30 @@ router.post('/import', protect, requireAdmin, requireDtrManageIfAdmin, async (re
         skipped_leave: 0,
         skipped_after_shift_first_punch: 0,
         skipped_invalid_timestamp: 0,
+        skipped_invalid_row: 0,
+        row_errors: [],
         summaries_inserted: 0,
         summaries_updated: 0,
       });
     }
 
-    const uniqueBiometricIds = [...new Set(
-      rows
-        .map((row) => String(row?.biometric_user_id || '').trim())
-        .filter(Boolean)
-    )];
+    // Validate every row before sorting or querying. A malformed entry must not
+    // abort summary processing for valid rows already accepted in this batch.
+    let skippedInvalidRow = 0;
+    let skippedInvalidTimestamp = 0;
+    const rowErrors = [];
+    const validRows = [];
+    for (const [index, row] of rows.entries()) {
+      const error = biometricImportRowError(row);
+      if (error) {
+        if (error.field === 'logged_at') skippedInvalidTimestamp++;
+        else skippedInvalidRow++;
+        if (rowErrors.length < 100) rowErrors.push({ row: index + 1, ...error });
+      } else {
+        validRows.push({ row, index });
+      }
+    }
+    const uniqueBiometricIds = [...new Set(validRows.map(({ row }) => row.biometric_user_id.trim()))];
     const userLookup = uniqueBiometricIds.length > 0
       ? await pool.query(
         `SELECT id, biometric_user_id, is_active, employment_status,
@@ -584,13 +637,12 @@ router.post('/import', protect, requireAdmin, requireDtrManageIfAdmin, async (re
     let skippedHoliday = 0;
     let skippedLeave = 0;
     let skippedAfterShiftFirstPunch = 0;
-    let skippedInvalidTimestamp = 0;
     const processingScopes = new Map();
     const biometricGateCache = new Map();
     const shiftDateCache = new Map();
     const existingDayPunchCache = new Map();
 
-    for (const row of sortByLoggedAtAsc(rows, (item) => item?.logged_at)) {
+    for (const { row, index } of sortByLoggedAtAsc(validRows, (item) => item.row.logged_at)) {
       const suppliedUserId = String(row.user_id || '').trim();
       const biometricUserId = String(row.biometric_user_id || '').trim();
       const loggedAt = row.logged_at;
@@ -614,6 +666,7 @@ router.post('/import', protect, requireAdmin, requireDtrManageIfAdmin, async (re
       const manilaDate = await resolveBiometricPunchDate(userId, loggedAt, shiftDateCache);
       if (!manilaDate) {
         skippedInvalidTimestamp++;
+        if (rowErrors.length < 100) rowErrors.push({ row: index + 1, field: 'logged_at', error: 'Could not resolve the attendance date' });
         continue;
       }
       const employmentStatus = String(user.employment_status || 'active').trim().toLowerCase();
@@ -693,6 +746,8 @@ router.post('/import', protect, requireAdmin, requireDtrManageIfAdmin, async (re
       skipped_leave: skippedLeave,
       skipped_after_shift_first_punch: skippedAfterShiftFirstPunch,
       skipped_invalid_timestamp: skippedInvalidTimestamp,
+      skipped_invalid_row: skippedInvalidRow,
+      row_errors: rowErrors,
       summaries_inserted: summariesInserted,
       summaries_updated: summariesUpdated,
     });

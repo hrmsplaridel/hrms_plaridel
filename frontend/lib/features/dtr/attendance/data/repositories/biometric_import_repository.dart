@@ -1,5 +1,7 @@
 import 'package:hrms_plaridel/core/api/client.dart';
 import 'package:hrms_plaridel/features/dtr/attendance/models/biometric_matched_employee.dart';
+import 'package:hrms_plaridel/features/dtr/attendance/models/biometric_import_result.dart'
+    show BiometricImportRowError;
 
 /// Response from import API.
 class BiometricImportApiResponse {
@@ -14,6 +16,8 @@ class BiometricImportApiResponse {
     required this.skippedLeave,
     required this.skippedAfterShiftFirstPunch,
     required this.skippedInvalidTimestamp,
+    this.skippedInvalidRows = 0,
+    this.rowErrors = const [],
     required this.summariesInserted,
     required this.summariesUpdated,
   });
@@ -28,6 +32,8 @@ class BiometricImportApiResponse {
   final int skippedLeave;
   final int skippedAfterShiftFirstPunch;
   final int skippedInvalidTimestamp;
+  final int skippedInvalidRows;
+  final List<BiometricImportRowError> rowErrors;
   final int summariesInserted;
   final int summariesUpdated;
 
@@ -47,6 +53,14 @@ class BiometricImportApiResponse {
           (json['skipped_after_shift_first_punch'] as num?)?.toInt() ?? 0,
       skippedInvalidTimestamp:
           (json['skipped_invalid_timestamp'] as num?)?.toInt() ?? 0,
+      skippedInvalidRows: (json['skipped_invalid_row'] as num?)?.toInt() ?? 0,
+      rowErrors: (json['row_errors'] as List? ?? [])
+          .map(
+            (entry) => BiometricImportRowError.fromJson(
+              Map<String, dynamic>.from(entry as Map),
+            ),
+          )
+          .toList(),
       summariesInserted: (json['summaries_inserted'] as num?)?.toInt() ?? 0,
       summariesUpdated: (json['summaries_updated'] as num?)?.toInt() ?? 0,
     );
