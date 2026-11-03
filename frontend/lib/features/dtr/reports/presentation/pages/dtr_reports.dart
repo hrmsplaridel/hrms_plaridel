@@ -1272,26 +1272,32 @@ class _DtrReportsState extends State<DtrReports> {
         'DTR_${selectedName.replaceAll(' ', '_')}_${_months[_selectedMonth - 1]}_$_selectedYear.pdf';
 
     try {
-      final bytes = await DtrExport.generatePdf(
-        employeeName: selectedName,
-        year: _selectedYear,
-        month: _selectedMonth,
-        start: start,
-        end: end,
-        recordsByDate: recordsByDate,
-        department: department ?? _reportDepartment,
-        position: position ?? _reportPosition,
-        officialHours: _shiftOfficialHours,
-        scheduledWorkHoursPerDay: _shiftWorkHoursPerDay,
-        punchMode: _shiftPunchMode,
-        workingDays: _shiftWorkingDays,
-        assignmentEffectiveFrom: _assignmentEffectiveFrom,
-        assignmentEffectiveTo: _assignmentEffectiveTo,
-        assignmentSegments: _exportAssignmentSegments,
-        reportableThrough: _reportableThrough,
-        signatories: signatories,
-        pageFormat: pageFormat,
-      );
+      final documents = <PdfPageFormat, Future<Uint8List>>{};
+      Future<Uint8List> buildPdf(PdfPageFormat outputFormat) =>
+          documents.putIfAbsent(
+            outputFormat,
+            () => DtrExport.generatePdf(
+              employeeName: selectedName,
+              year: _selectedYear,
+              month: _selectedMonth,
+              start: start,
+              end: end,
+              recordsByDate: recordsByDate,
+              department: department ?? _reportDepartment,
+              position: position ?? _reportPosition,
+              officialHours: _shiftOfficialHours,
+              scheduledWorkHoursPerDay: _shiftWorkHoursPerDay,
+              punchMode: _shiftPunchMode,
+              workingDays: _shiftWorkingDays,
+              assignmentEffectiveFrom: _assignmentEffectiveFrom,
+              assignmentEffectiveTo: _assignmentEffectiveTo,
+              assignmentSegments: _exportAssignmentSegments,
+              reportableThrough: _reportableThrough,
+              signatories: signatories,
+              pageFormat: outputFormat,
+            ),
+          );
+      await buildPdf(pageFormat);
       if (!context.mounted) return;
       await openResponsiveRightSidePanel<void>(
         context: context,
@@ -1299,7 +1305,11 @@ class _DtrReportsState extends State<DtrReports> {
         breakpoint: 900,
         minWidth: 680,
         initialWidthFraction: 0.62,
-        builder: (_) => _DtrPdfPreviewPanel(bytes: bytes, filename: baseName),
+        builder: (_) => DtrPdfPreviewPanel(
+          buildPdf: buildPdf,
+          pageFormat: pageFormat,
+          filename: baseName,
+        ),
       );
     } catch (error) {
       if (!context.mounted) return;
@@ -1330,7 +1340,7 @@ class _DtrReportsState extends State<DtrReports> {
     ).showSnackBar(const SnackBar(content: Text('Preparing print...')));
     try {
       await Printing.layoutPdf(
-        onLayout: (_) => DtrExport.generatePdf(
+        onLayout: (printFormat) => DtrExport.generatePdf(
           employeeName: selectedName,
           year: _selectedYear,
           month: _selectedMonth,
@@ -1348,7 +1358,7 @@ class _DtrReportsState extends State<DtrReports> {
           assignmentSegments: _exportAssignmentSegments,
           reportableThrough: _reportableThrough,
           signatories: signatories,
-          pageFormat: pageFormat,
+          pageFormat: printFormat,
         ),
         name: baseName,
         format: pageFormat,
@@ -1703,6 +1713,11 @@ class _DtrReportsState extends State<DtrReports> {
   Future<Uint8List> _buildSelectedDtrPdf({
     PdfPageFormat pageFormat = PdfPageFormat.legal,
   }) async {
+    final buildPdf = await _prepareSelectedDtrPdf();
+    return buildPdf(pageFormat);
+  }
+
+  Future<LayoutCallback> _prepareSelectedDtrPdf() async {
     final selected = _selectedEmployeesForBulk();
     if (selected.length < 2) {
       throw StateError('Select at least two employees first.');
@@ -1759,15 +1774,26 @@ class _DtrReportsState extends State<DtrReports> {
         '${remaining > 0 ? '; and $remaining more' : ''}',
       );
     }
-    return DtrExport.generateBulkPdf(
-      items: items,
-      year: _selectedYear,
-      month: _selectedMonth,
-      start: _rangeStartDate(),
-      end: _rangeEndDate(),
-      reportTitle: 'Daily Time Record Report',
-      signatories: _reportSignatories!,
-      pageFormat: pageFormat,
+    // Re-layout prepared data when the printer changes paper; do not re-fetch
+    // employee reports for each native print-dialog callback.
+    final year = _selectedYear;
+    final month = _selectedMonth;
+    final start = _rangeStartDate();
+    final end = _rangeEndDate();
+    final signatories = _reportSignatories!;
+    final documents = <PdfPageFormat, Future<Uint8List>>{};
+    return (pageFormat) => documents.putIfAbsent(
+      pageFormat,
+      () => DtrExport.generateBulkPdf(
+        items: items,
+        year: year,
+        month: month,
+        start: start,
+        end: end,
+        reportTitle: 'Daily Time Record Report',
+        signatories: signatories,
+        pageFormat: pageFormat,
+      ),
     );
   }
 
@@ -1846,10 +1872,11 @@ class _DtrReportsState extends State<DtrReports> {
     Uint8List? bytes;
     try {
       _showReportSnack('Preparing $selectedCount selected DTRs...');
-      bytes = await _buildSelectedDtrPdf(pageFormat: pageFormat);
+      final buildPdf = await _prepareSelectedDtrPdf();
+      bytes = await buildPdf(pageFormat);
       if (!context.mounted) return;
       await Printing.layoutPdf(
-        onLayout: (_) async => bytes!,
+        onLayout: buildPdf,
         name: 'DTR_Selected_${_months[_selectedMonth - 1]}_$_selectedYear',
         format: pageFormat,
       );
@@ -4057,10 +4084,16 @@ class _ExitDtrMultiSelectIntent extends Intent {
   const _ExitDtrMultiSelectIntent();
 }
 
-class _DtrPdfPreviewPanel extends StatelessWidget {
-  const _DtrPdfPreviewPanel({required this.bytes, required this.filename});
+class DtrPdfPreviewPanel extends StatelessWidget {
+  const DtrPdfPreviewPanel({
+    super.key,
+    required this.buildPdf,
+    required this.pageFormat,
+    required this.filename,
+  });
 
-  final Uint8List bytes;
+  final LayoutCallback buildPdf;
+  final PdfPageFormat pageFormat;
   final String filename;
 
   @override
@@ -4101,7 +4134,10 @@ class _DtrPdfPreviewPanel extends StatelessWidget {
             ),
             Expanded(
               child: PdfPreview(
-                build: (_) async => bytes,
+                build: buildPdf,
+                initialPageFormat: pageFormat,
+                pageFormats: {'Selected paper': pageFormat},
+                dynamicLayout: true,
                 pdfFileName: filename,
                 allowPrinting: true,
                 allowSharing: true,

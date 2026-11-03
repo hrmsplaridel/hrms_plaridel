@@ -1105,7 +1105,7 @@ class DtrExport {
     if (center) align = pw.TextAlign.center;
     if (right) align = pw.TextAlign.right;
     return pw.Padding(
-      padding: const pw.EdgeInsets.symmetric(horizontal: 3, vertical: 6.0),
+      padding: const pw.EdgeInsets.symmetric(horizontal: 3, vertical: 4.0),
       child: pw.Text(
         text,
         style: pw.TextStyle(
@@ -1119,13 +1119,13 @@ class DtrExport {
   }
 
   // Fixed column widths (points) shared between header and body table.
-  static const double _wDate = 66;
+  static const double _wDate = 56;
   static const double _wAmIn = 45;
   static const double _wAmOut = 45;
   static const double _wPmIn = 45;
   static const double _wPmOut = 45;
-  static const double _wHours = 21;
-  static const double _wMin = 21;
+  static const double _wHours = 26;
+  static const double _wMin = 26;
   static const double _dtrCopyGap = 8;
   static const double _dtrHorizontalMargins = 28;
   static const double _dtrVerticalMargins = 24;
@@ -1133,7 +1133,7 @@ class DtrExport {
       2 * (_wDate + _wAmIn + _wAmOut + _wPmIn + _wPmOut + _wHours + _wMin) +
       _dtrCopyGap;
 
-  static const double _headerFontSize = 5.0;
+  static const double _headerFontSize = 8.0;
   static const pw.BorderSide _headerBorder = pw.BorderSide(
     width: 0.5,
     color: PdfColors.black,
@@ -1141,8 +1141,8 @@ class DtrExport {
 
   /// Merged-looking header built only with Container/Row/Column and fixed sizes.
   static pw.Widget _buildMergedHeader() {
-    const double topHeight = 11;
-    const double bottomHeight = 9;
+    const double topHeight = 14;
+    const double bottomHeight = 14;
     const double dateHeight = topHeight + bottomHeight + 0.5;
 
     final double amGroupWidth = _wAmIn + _wAmOut;
@@ -1280,7 +1280,7 @@ class DtrExport {
       assignmentSegments: assignmentSegments,
       reportableThrough: reportableThrough,
     );
-    const fs = 5.0;
+    const fs = 8.0;
     final rows = <pw.TableRow>[];
     final shiftWd = workingDays != null && workingDays.isNotEmpty
         ? workingDays.toSet()
