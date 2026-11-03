@@ -4333,7 +4333,7 @@ function localizedLeaveFieldExamples(field, language) {
 function leaveFormFieldHelpReply(context, message) {
   const language = languageOf(message);
   const type = requestedLeaveTypeRecord(message, context);
-  const field = getLeaveFormFieldGuidance(message, type);
+  const field = getLeaveFormFieldGuidance(message, type, language);
   if (!field) {
     return structuredReply(language, {
       title: 'Leave form field help',
@@ -4554,7 +4554,7 @@ function locatorFormFieldHelpReply(context, message) {
     requestedSpecificLocatorType(message, context) ||
     requestedLocatorType(message, context) ||
     lower(typeRecord?.request_type || typeRecord?.code || '');
-  const field = getLocatorFormFieldGuidance(message, locatorTypeValue);
+  const field = getLocatorFormFieldGuidance(message, locatorTypeValue, language);
   if (!field) {
     return structuredReply(language, {
       title: 'Locator form field help',

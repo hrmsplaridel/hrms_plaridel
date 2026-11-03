@@ -16,6 +16,37 @@ function expectedTomorrowDate() {
   return parseAssistantDateRange('tomorrow').startDate;
 }
 
+test('chat answers sick leave reason examples without requiring personal medical facts', async (t) => {
+  const restoreData = withMockedModule('../src/services/dtrAssistant/dtrAssistantDataService', {
+    loadEmployeeAssistantContext: async (_pool, { userId, dateRange }) => assistantContext(dateRange, userId),
+  });
+  const restoreLlm = withMockedModule('../src/services/llm/llmClient', {
+    chatCompletion: async () => { throw new Error('Example help must work without the LLM'); },
+  });
+  clearModule('../src/services/dtrAssistant/dtrAssistantService');
+  clearModule('../src/services/dtrAssistant/leaveFieldAssistant');
+  const { chatWithDtrAssistant } = require('../src/services/dtrAssistant/dtrAssistantService');
+  t.after(() => {
+    clearModule('../src/services/dtrAssistant/dtrAssistantService');
+    clearModule('../src/services/dtrAssistant/leaveFieldAssistant');
+    restoreData(); restoreLlm();
+  });
+  const pool = { query: async () => ({ rows: [{ name: 'sickLeave', display_name: 'Sick Leave' }] }) };
+  for (const [index, message, sample] of [
+    [0, 'sa reason field sa sick leave unsay ibutang? hatagi kog example', /Mangayo ko og sick leave aron makapahulay/],
+    [1, 'Give me an example sentence for the sick leave reason field.', /I would like to request sick leave to rest and recover/],
+    [2, 'Ano ilalagay sa reason field ng sick leave? Bigyan mo ako ng halimbawa.', /Humihiling ako ng sick leave upang makapagpahinga/],
+  ]) {
+    const result = await chatWithDtrAssistant(pool, {
+      user: { id: `reason-example-${index}`, role: 'employee' }, message,
+    });
+    assert.match(result.message.content, sample);
+    assert.doesNotMatch(result.message.content, /\[your actual purpose\]|Tell me the actual details/);
+    assert.equal(result.message.model, 'chat-field-assistant');
+    assert.deepEqual(result.message.actions.filter(action => action.type === 'apply_field_suggestion'), []);
+  }
+});
+
 function assistantContext(dateRange, userId) {
   return {
     scope: 'employee_self',

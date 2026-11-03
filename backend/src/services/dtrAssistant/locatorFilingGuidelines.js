@@ -160,45 +160,18 @@ function isLocatorFormFieldHelpQuestion(message) {
   );
 }
 
-function reasonExamplesForLocatorType(locatorTypeValue) {
-  const examples = {
-    locator: [
-      'Attend coordination meeting at the Municipal Treasurer\'s Office',
-      'Follow up payroll documents at the provincial office',
-    ],
-    work_from_home: [
-      'Work-from-home due to approved office arrangement',
-      'Remote work for assigned project tasks during inclement weather',
-    ],
-    pass_slip: [
-      'Pass slip to attend an urgent personal matter for 2 hours',
-      'Short official errand outside the office during work hours',
-    ],
-  };
-  return examples[locatorTypeValue] || examples.locator;
-}
 
-function destinationExamplesForLocatorType(locatorTypeValue) {
-  const examples = {
-    locator: [
-      'Municipal Engineering Office, Plaridel',
-      'Provincial Capitol, Malolos',
-    ],
-    work_from_home: ['Home work location - Poblacion, Plaridel'],
-    pass_slip: ['Municipal Health Office, Plaridel'],
-  };
-  return examples[locatorTypeValue] || examples.locator;
-}
-
-function getLocatorFormFieldGuidance(message, locatorTypeValue) {
+function getLocatorFormFieldGuidance(message, locatorTypeValue, language = 'english') {
+  const { locatorReasonExamples, locatorDestinationExamples } = require('./formFieldExamples');
+  const typeCode = typeof locatorTypeValue === 'object' ? locatorTypeValue?.code : locatorTypeValue;
   const key = getLocatorFormFieldKey(message);
   if (!key) return null;
   const field = LOCATOR_FORM_FIELDS[key];
   let examples = [...field.examples];
   if (key === 'reason') {
-    examples = reasonExamplesForLocatorType(locatorTypeValue);
+    examples = locatorReasonExamples(typeCode, language);
   } else if (key === 'destination') {
-    examples = destinationExamplesForLocatorType(locatorTypeValue);
+    examples = locatorDestinationExamples(typeCode, language);
   }
   return {
     key,
