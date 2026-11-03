@@ -7,7 +7,7 @@ const { recordLocatorWorkflowEvent } = require('./locatorWorkflowHistory');
 const { resolveActiveMayor } = require('./officialSignatoryService');
 const { canReadLocatorAsMayor } = require('./locatorMayorAccess');
 const { todayInHrmsTimezone } = require('../utils/dateRangeParser');
-const { selfFilingOfficial, requestPrintPolicy } = require('./workflowPrintPolicy');
+const { selfFilingOfficial, requestPrintPolicy, workflowPrimaryApplicant } = require('./workflowPrintPolicy');
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const LABELS = { applicant: 'Applicant', department_head: 'Head of Office', hr_approver: 'Noted' };
@@ -29,16 +29,30 @@ async function substituteApplicantOfficial(db, row, officials, primaryConflicts 
     : null;
   const result = { ...officials };
   for (const slot of slots) {
+    const stepIndex = require('./approvalWorkflows').isShared(row.workflow_snapshot)
+      ? slot === 'department_head' ? 0 : row.workflow_snapshot.steps.length - 1 : null;
     result[slot] = await selfFilingOfficial(db, row, slot === 'department_head' ? 'department' : 'hr', {
       id: mayor?.id || mayor?.employee_id || null, employee_id: mayor?.id || mayor?.employee_id || null,
       name: mayor?.name || '', position_title: mayor?.position_title || 'Municipal Mayor',
-    });
+    }, stepIndex);
   }
   return result;
 }
 
 async function substitutePrimaryApplicantOfficial(db, row, officials) {
   const steps = row.workflow_snapshot?.steps;
+  const engine = require('./approvalWorkflows');
+  if (engine.isShared(row.workflow_snapshot)) {
+    const conflicts = [];
+    const departmentOnly = engine.isDepartmentOnlyWorkflow(row.workflow_snapshot);
+    if ((departmentOnly || steps.length > 1) && await workflowPrimaryApplicant(db, row, steps[0])) {
+      conflicts.push('department_head');
+    }
+    if (!departmentOnly && await workflowPrimaryApplicant(db, row, steps.at(-1))) {
+      conflicts.push('hr_approver');
+    }
+    return substituteApplicantOfficial(db, row, officials, conflicts);
+  }
   if (!require('./approvalWorkflows').isShared(row.workflow_snapshot) && requestPrintPolicy(row) === 'mayor') return officials;
   const conflicts = [];
   const first = steps[0];
@@ -143,6 +157,12 @@ async function loadContext(db, user, id, lock = false) {
   if (!owner && !hr && !reviewer && row.dept_head_reviewer_id !== user.id) {
     fail('NOT_FOUND', 'Locator slip not found');
   }
+  if (row.paper_approval_record) {
+    const paper=row.paper_approval_record;
+    const people={applicant:paper.applicant,department_head:paper.department_reviewer,hr_approver:paper.final_approver};
+    const officials=Object.fromEntries(Object.entries(people).map(([slot,p])=>[slot,{id:p?.user_id||null,name:p?.name||'',position_title:p?.position_title||''}]));
+    return {...row,officials,owner,hr,reviewer:false,canFinalReview:false};
+  }
   // Legacy forms have no historical official snapshot. Resolve primary roles only,
   // never the routing fallback or the person who happened to approve.
   let officials = { ...(row.print_signatories || await resolveOfficials(db, row)) };
@@ -207,7 +227,9 @@ async function getLocatorSourceSignatures(db, user, module, table, id) {
   assertSource(module, table);
   try {
     const context = await loadContext(db, user, id);
-    const result = await db.query(
+    const paper=context.paper_approval_record;
+    const copies=paper&&context.status==='approved'?Object.values(require('../modules/leave/services/paperSignatures').paperSignaturePayload(paper)):[];
+    const result = paper?{rows:copies}:await db.query(
       `SELECT s.*, a.mime_type, encode(a.image_bytes, 'base64') AS signature_image_base64
        FROM docutracker_locator_signatures s
        JOIN docutracker_signature_assets a ON a.id = s.signature_asset_id
@@ -228,10 +250,10 @@ async function getLocatorSourceSignatures(db, user, module, table, id) {
           assigned_signer_id:signature?.assigned_signer_id || context.activeReviewer?.id || null,
           assigned_signer_name:signature?.signer_name_snapshot || context.activeReviewer?.name || '',
         }:{}),
-        can_sign: canSign(context, user, slot), can_assign: false, assignment_source: 'automatic',
+        can_sign: !paper && canSign(context, user, slot), can_assign: false, assignment_source: paper?'approved_paper_copy':'automatic',
       };
     });
-    const workflowSignatures=await require('./approvalWorkflows').decisionSignatures(db,context);
+    const workflowSignatures=paper?[]:await require('./approvalWorkflows').decisionSignatures(db,context,{includeLegacy:true});
     return {
       source_module: module, source_table: table, source_record_id: id,
       source_status: context.status, workflow_snapshot:context.workflow_snapshot || null, signatures:[...signatures,...workflowSignatures],
@@ -246,6 +268,7 @@ async function getLocatorSourceSignatures(db, user, module, table, id) {
         slip_date: context.slip_date_text, office: context.office, reason: context.reason,
         request_type_label: context.print_type_label, location_label: context.print_location_label,
         am_in: context.am_in, am_out: context.am_out, pm_in: context.pm_in, pm_out: context.pm_out,
+        ...(paper?{paper_approval_record:require('../modules/leave/services/paperSignatures').publicPaperRecord(paper)}:{}),
       },
       print_signatories: Object.fromEntries(Object.keys(LABELS).map((slot) => {
         const shared=require('./approvalWorkflows').isShared(context.workflow_snapshot);
@@ -254,7 +277,7 @@ async function getLocatorSourceSignatures(db, user, module, table, id) {
         // backup's ink or an unsigned/manual Mayor slot.
         const confirmed = workflowSignatures.find(s => s.signed_by === context.officials[slot]?.id &&
           ((slot === 'department_head' && s.slot_key === 'workflow_step_1') || context.status === 'approved'));
-        const signature = shared && slot !== 'applicant'
+        const signature = paper ? copies.find(s=>s.slot_key===slot) : shared && slot !== 'applicant'
           ? (manual && context.officials[slot]?.id === context.officials.hr_approver?.id ? null : confirmed)
           : printableSignature(context, slot, result.rows.find((s) => s.slot_key === slot));
         return [slot, {

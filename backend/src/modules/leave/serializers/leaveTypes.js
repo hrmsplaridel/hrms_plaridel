@@ -25,6 +25,7 @@ module.exports = function createLeaveComponent({
           : fallback.employee_can_file !== false,
       admin_only: row.admin_only != null ? row.admin_only === true : fallback.admin_only === true,
       admin_can_file: row.admin_can_file !== false,
+      allow_approved_paper_filing: row.allow_approved_paper_filing === true,
       allows_past_dates:
         row.allows_past_dates != null
           ? row.allows_past_dates === true

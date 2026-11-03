@@ -5,6 +5,7 @@ import 'package:pdf/pdf.dart';
 import 'package:printing/printing.dart';
 
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
+import 'package:hrms_plaridel/core/widgets/form_pdf_preview_viewport.dart';
 import 'package:hrms_plaridel/core/utils/responsive_right_side_panel.dart';
 import 'package:hrms_plaridel/features/forms/models/form_print_template.dart';
 
@@ -325,9 +326,14 @@ class _FormPdfPreviewPanelState extends State<_FormPdfPreviewPanel> {
                 ),
               ),
             Expanded(
-              child: PdfPreview(
+              child: PdfPreview.builder(
                 key: ValueKey(_revision),
                 build: (_) async => _bytes,
+                dpi: 144,
+                pagesBuilder: (_, pages) => FormPdfPreviewViewport(
+                  pages: pages,
+                  rasterDpi: 144,
+                ),
                 pdfFileName: widget.filename,
                 initialPageFormat: format,
                 pageFormats: format == null

@@ -5,6 +5,7 @@ import 'package:dio/dio.dart';
 import 'package:hrms_plaridel/core/api/client.dart';
 
 import 'package:flutter/material.dart';
+import 'package:hrms_plaridel/core/widgets/pdf_preview_preparation.dart';
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
@@ -17,24 +18,10 @@ import 'locator_layout_pdf.dart';
 class LocatorSlipPrint {
   const LocatorSlipPrint._();
 
-  static Future<Uint8List> loadPreview(
+  static Future<Uint8List?> loadPreview(
     BuildContext context,
     Future<Uint8List> Function() load,
-  ) async {
-    final messenger = ScaffoldMessenger.of(context);
-    messenger.clearSnackBars();
-    final loading = messenger.showSnackBar(
-      const SnackBar(
-        content: Text('Loading preview…'),
-        duration: Duration(minutes: 5),
-      ),
-    );
-    try {
-      return await load();
-    } finally {
-      if (messenger.mounted) loading.close();
-    }
-  }
+  ) => preparePdfPreview(context: context, prepare: (_) => load());
 
   static Future<Uint8List> buildPdf({
     required String? id,

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pdf/widgets.dart' as pw;
+import 'package:pdf/pdf.dart';
 import 'package:printing/printing.dart';
 import 'package:hrms_plaridel/core/widgets/form_pdf_preview.dart';
 
@@ -8,7 +9,8 @@ void main() {
   testWidgets('form preview opens an in-app PDF viewer with print and share', (
     tester,
   ) async {
-    final document = pw.Document()..addPage(pw.Page(build: (_) => pw.Text('Form')));
+    final document = pw.Document()
+      ..addPage(pw.Page(build: (_) => pw.Text('Form')));
     final bytes = await document.save();
     await tester.pumpWidget(
       MaterialApp(
@@ -35,5 +37,7 @@ void main() {
     final preview = tester.widget<PdfPreview>(find.byType(PdfPreview));
     expect(preview.allowPrinting, isTrue);
     expect(preview.allowSharing, isTrue);
+    expect(preview.dpi, 144);
+    expect(await preview.build(const PdfPageFormat(300, 400)), bytes);
   });
 }

@@ -55,6 +55,7 @@ function createMockPool({
   balanceRows = [],
   leaveTypeRows = null,
   postingRows = [],
+  openingRows = [],
 } = {}) {
   const calls = [];
 
@@ -73,6 +74,8 @@ function createMockPool({
       if (['BEGIN', 'COMMIT', 'ROLLBACK'].includes(text.trim())) {
         return { rows: [], rowCount: 0 };
       }
+      if (text.includes('pg_advisory_xact_lock_shared')) return {rows:[]};
+      if (text.includes('FROM leave_opening_balance_setups')) return {rows:openingRows};
       if (text.includes('INSERT INTO leave_balances')) {
         return { rows: [], rowCount: missingRows.length };
       }
@@ -933,6 +936,20 @@ test('E5 - separation date in a different month does not affect target month acc
 });
 
 // ─── Enhancement 6: DB-driven accrual rates ──────────────────────────────────
+
+test('opening cutoff protects imported credits against old-month accrual and reconciliation', async()=>{
+ const row=makeBalanceRow({earned_days:'25',last_accrual_date:'2026-04-01'});
+ const {pool,calls}=createMockPool({balanceRows:[row],postingRows:[makePostingRow()],openingRows:[{user_id:row.user_id,cutoff_date:'2026-05-31'}]});
+ const result=await runLeaveMonthlyAccrual(pool,{targetMonth:'2026-05',now:new Date('2026-06-01T00:00:00Z')});
+ assert.equal(result.rowsUpdated,0);
+ assert.equal(calls.some(c=>c.sql.includes('UPDATE leave_balances')),false);
+});
+test('catch-up starts after opening cutoff even when a legacy cursor is missing', async()=>{
+ const row=makeBalanceRow({last_accrual_date:null});
+ const {pool}=createMockPool({balanceRows:[row],openingRows:[{user_id:row.user_id,cutoff_date:'2026-04-30'}]});
+ const result=await runLeaveMonthlyAccrual(pool,{targetMonth:'2026-05',maxCatchUpMonths:3,now:new Date('2026-06-01T00:00:00Z')});
+ assert.equal(result.rowsUpdated,1);assert.equal(result.details[0].days_added,1.25);
+});
 
 test('E6 - uses DB rate when leave_types returns accrual config', async () => {
   // Custom rate of 2.00 days/month from DB

@@ -1,3 +1,4 @@
+import 'package:hrms_plaridel/providers/auth_provider.dart';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
@@ -75,6 +76,11 @@ class AdminLeaveDetailsSideSheet extends StatelessWidget {
           final approved = req.status == LeaveRequestStatus.approved;
           final canRevoke =
               approved &&
+              (!req.isPaperRecord ||
+                  [
+                    'admin',
+                    'hr',
+                  ].contains(context.read<AuthProvider>().user?.role)) &&
               !isOwnRequest &&
               onRevoke != null &&
               (!sharedWorkflow || req.canRevokeApproval == true);
@@ -230,15 +236,19 @@ class AdminLeaveRequestDetailsPanel extends StatelessWidget {
                         ],
                       ),
                     ),
-                    LeaveStatusChip(
-                      status: request!.status,
-                      label:
-                          statusLabel ??
-                          adminLeaveStatusLabel(
-                            request!.status,
-                            finalReviewRoute: request!.finalReviewRoute,
-                            isDepartmentHead: isDepartmentHead,
-                          ),
+                    Flexible(
+                      child: LeaveStatusChip(
+                        status: request!.status,
+                        label:
+                            statusLabel ??
+                            adminLeaveStatusLabel(
+                              request!.status,
+                              paperRecorded: request!.isPaperRecord,
+                              finalReviewRoute: request!.finalReviewRoute,
+                              workflowSnapshot: request!.workflowSnapshot,
+                              isDepartmentHead: isDepartmentHead,
+                            ),
+                      ),
                     ),
                   ],
                 ),
@@ -370,7 +380,7 @@ class AdminLeaveRequestDetailsPanel extends StatelessWidget {
     }
     final reviewer = (request.reviewerName ?? '').trim().isNotEmpty
         ? request.reviewerName!.trim()
-        : 'HR/Admin';
+        : 'Reviewer';
     final departmentHeadReviewer =
         (request.departmentHeadReviewerName ?? '').trim().isNotEmpty
         ? request.departmentHeadReviewerName!.trim()
@@ -380,12 +390,32 @@ class AdminLeaveRequestDetailsPanel extends StatelessWidget {
         (request.departmentHeadRemarks ?? '').trim().isNotEmpty
         ? request.departmentHeadRemarks
         : null;
+    if (request.isPaperRecord) {
+      final paper = request.paperApprovalRecord!;
+      return [
+        LeaveHistoryEvent(
+          label: 'Approved paper leave recorded',
+          dateTime: DateTime.tryParse(paper['encoded_at']?.toString() ?? ''),
+          actor: paper['encoded_by_name']?.toString() ?? 'HR encoder',
+          remarks:
+              'Original paper approval: ${paper['approval_date']} by ${paper['final_approver']?['name'] ?? ''}',
+          completed: true,
+        ),
+        if (paper['revocation'] is Map)
+          LeaveHistoryEvent(
+            label: 'Paper record revoked',
+            dateTime: DateTime.tryParse(
+              paper['revocation']['revoked_at']?.toString() ?? '',
+            ),
+            actor: paper['revocation']['revoked_by_name']?.toString() ?? 'HR',
+            remarks: paper['revocation']['reason']?.toString(),
+            completed: true,
+          ),
+      ];
+    }
     final submittedAt = request.dateFiled ?? request.createdAt;
     final reviewedAt = request.reviewedAt;
     final status = request.status;
-    final finalStage = request.finalReviewRoute == 'mayor'
-        ? 'Department'
-        : 'HR';
     final departmentHeadAction = request.departmentHeadAction;
 
     final deptHeadApprovedStage =
@@ -421,7 +451,7 @@ class AdminLeaveRequestDetailsPanel extends StatelessWidget {
         ),
       if (deptHeadApprovedStage && request.finalReviewRoute != 'mayor')
         LeaveHistoryEvent(
-          label: 'Forwarded to HR',
+          label: 'Forwarded for review',
           dateTime: departmentHeadReviewedAt,
           actor: departmentHeadReviewer,
           completed: true,
@@ -455,15 +485,15 @@ class AdminLeaveRequestDetailsPanel extends StatelessWidget {
       if (status == LeaveRequestStatus.pendingHr ||
           status == LeaveRequestStatus.pendingMayor)
         LeaveHistoryEvent(
-          label: '$finalStage Final Review',
+          label: request.statusLabel,
           dateTime: null,
-          actor: finalStage,
+          actor: 'Assigned reviewer',
           completed: false,
         ),
       if (hrApproved &&
           (!deptHeadApprovedStage || request.finalReviewRoute != 'mayor'))
         LeaveHistoryEvent(
-          label: 'Approved by $finalStage',
+          label: request.statusLabel,
           dateTime: reviewedAt,
           actor: reviewer,
           remarks: request.hrRemarks,
@@ -471,7 +501,7 @@ class AdminLeaveRequestDetailsPanel extends StatelessWidget {
         ),
       if (hrReturned)
         LeaveHistoryEvent(
-          label: 'Returned by $finalStage',
+          label: 'Returned',
           dateTime: reviewedAt,
           actor: reviewer,
           remarks: request.hrRemarks,
@@ -479,7 +509,7 @@ class AdminLeaveRequestDetailsPanel extends StatelessWidget {
         ),
       if (hrRejected)
         LeaveHistoryEvent(
-          label: 'Rejected by $finalStage',
+          label: 'Rejected',
           dateTime: reviewedAt,
           actor: reviewer,
           remarks:

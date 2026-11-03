@@ -218,6 +218,8 @@ class _AdminDashboardState extends State<AdminDashboard>
   AdminMenu _selectedMenu = AdminMenu.dashboard;
   LeaveSection _myLeaveSection = LeaveSection.requests;
   int _myLeaveEntryVersion = 0;
+  final GlobalKey<EmployeeLocatorSlipScreenState> _myLocatorKey =
+      GlobalKey<EmployeeLocatorSlipScreenState>();
   AdminAccessRefresh? _accessRefresh;
   int _accountAccessVersion = 0;
   int _dtrAccessVersion = 0;
@@ -425,7 +427,7 @@ class _AdminDashboardState extends State<AdminDashboard>
         break;
       case NotificationTapKind.adminDtrLocatorManagement:
         if (_dtrFeatureAccess['locator_allowed'] != true) {
-          _onMenuSelected(AdminMenu.myLocator);
+          _openMyLocatorSection(approvals: true);
           break;
         }
         setState(() => _selectedMenu = AdminMenu.dtr);
@@ -466,8 +468,7 @@ class _AdminDashboardState extends State<AdminDashboard>
         break;
       case NotificationTapKind.employeeLocatorApprovals:
       case NotificationTapKind.employeeLocatorRequests:
-        setState(() => _selectedMenu = AdminMenu.myLocator);
-        DashboardContentNavigator.showHome(_contentNavKey);
+        _openMyLocatorSection(approvals: result.kind == NotificationTapKind.employeeLocatorApprovals);
         break;
       case NotificationTapKind.employeeLeaveApprovals:
       case NotificationTapKind.employeeLeaveRequests:
@@ -485,6 +486,16 @@ class _AdminDashboardState extends State<AdminDashboard>
       case NotificationTapKind.employeeMyAttendance:
         break;
     }
+  }
+
+  void _openMyLocatorSection({required bool approvals}) {
+    setState(() => _selectedMenu = AdminMenu.myLocator);
+    DashboardContentNavigator.showHome(_contentNavKey);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _myLocatorKey.currentState?.showSection(approvals: approvals);
+      });
+    });
   }
 
   void _dismissRspApplicantDetails() {
@@ -678,7 +689,7 @@ class _AdminDashboardState extends State<AdminDashboard>
           ),
         );
       case AdminMenu.myLocator:
-        return const EmployeeLocatorSlipScreen();
+        return EmployeeLocatorSlipScreen(key: _myLocatorKey);
       case AdminMenu.myProfile:
         return _settingsPanel();
       case AdminMenu.dtr:
@@ -820,6 +831,7 @@ class _AdminDashboardState extends State<AdminDashboard>
                               homeCacheKey: _selectedMenu,
                               homeRefreshKey: Object.hash(
                                 _selectedMenu,
+                                _selectedMenu == AdminMenu.myLeave ? _myLeaveEntryVersion : 0,
                                 displayName,
                                 contentPadding,
                                 _rspHomeEpoch,
@@ -861,6 +873,7 @@ class _AdminDashboardState extends State<AdminDashboard>
                         homeCacheKey: _selectedMenu,
                         homeRefreshKey: Object.hash(
                           _selectedMenu,
+                          _selectedMenu == AdminMenu.myLeave ? _myLeaveEntryVersion : 0,
                           displayName,
                           contentPadding,
                           _rspHomeEpoch,
@@ -1103,7 +1116,7 @@ class _Sidebar extends StatelessWidget {
           child: DashboardSidebarProfileCard(
             displayName: displayName,
             subtitle: context.select<AuthProvider, String>(
-              (auth) => dashboardAccountRoleLabel(auth.user?.role),
+              (auth) => dashboardAccountPositionLabel(auth.user),
             ),
             avatarPath: avatarPath,
             onProfile: onProfile,
@@ -1734,7 +1747,7 @@ class _DtrContentState extends State<_DtrContent> {
   /// 0 = menu, 1 = Time Logs, 2 = Reports, 3 = Employees, 4 = Assignment,
   /// 5 = Department, 6 = Position, 7 = Shift, 8 = Leave Management,
   /// 9–10 = Holiday / Policy via [_ManageContent], 11 = Biometric Devices,
-  /// 12 = Locator Slip Management, 13 = Weekly Schedule,
+  /// 12 = Locator & Pass Management, 13 = Weekly Schedule,
   /// 14 = Approvals & Signatories
   int _dtrSectionIndex = 0;
   final Map<int, _DtrFeatureCacheEntry> _featureCache = {};
@@ -1742,6 +1755,8 @@ class _DtrContentState extends State<_DtrContent> {
 
   /// When opening **Assignment** from Employees, pre-select this employee once.
   String? _prefillAssignmentEmployeeId;
+  int? _workforceReturnSection;
+  double? _employeeListScrollOffset;
 
   @override
   void didUpdateWidget(covariant _DtrContent oldWidget) {
@@ -1784,14 +1799,17 @@ class _DtrContentState extends State<_DtrContent> {
     _openDtrSection(8);
   }
 
-  /// Opens **Locator Slip Management** (notification deep-link).
+  /// Opens **Locator & Pass Management** (notification deep-link).
   void openLocatorManagement() {
     _openDtrSection(12);
   }
 
   void _goToAssignmentWithEmployee(String employeeId) {
-    if (!mounted) return;
+    if (!mounted || !widget.canManageDtr) return;
     setState(() {
+      _workforceReturnSection = _dtrSectionIndex == 3 ? 3 : null;
+      _employeeListScrollOffset = _workforceReturnSection == 3
+          ? Scrollable.maybeOf(context)?.position.pixels : null;
       _prefillAssignmentEmployeeId = employeeId;
       // Assignment must be rebuilt so the new one-time prefill reaches it.
       _featureCache.remove(4);
@@ -1819,15 +1837,37 @@ class _DtrContentState extends State<_DtrContent> {
     if (index == 0) {
       setState(() {
         _dtrSectionIndex = 0;
+        _workforceReturnSection = null;
+        _employeeListScrollOffset = null;
       });
       return;
     }
     if (_dtrSectionIndex == index) return;
-    setState(() => _dtrSectionIndex = index);
+    final restoreScroll = index == 3 && _canReturnToEmployees
+        ? _employeeListScrollOffset : null;
+    setState(() {
+      _dtrSectionIndex = index;
+      if (!_workforceSetupSections.contains(index)) {
+        _workforceReturnSection = null;
+        _employeeListScrollOffset = null;
+      }
+    });
+    if (restoreScroll != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted || _dtrSectionIndex != 3) return;
+        final position = Scrollable.maybeOf(context)?.position;
+        if (position != null && position.hasContentDimensions) {
+          position.jumpTo(restoreScroll.clamp(position.minScrollExtent, position.maxScrollExtent).toDouble());
+        }
+      });
+    }
   }
 
   bool get _isInWorkforceSetup =>
       _workforceSetupSections.contains(_dtrSectionIndex);
+
+  bool get _canReturnToEmployees => _isInWorkforceSetup &&
+      _workforceReturnSection == 3 && widget.featureAccess['employees_allowed'] == true;
 
   Widget _buildWorkforceSetupNavigation() => WorkforceSetupNavigation(
     selectedIndex: _dtrSectionIndex,
@@ -1875,7 +1915,8 @@ class _DtrContentState extends State<_DtrContent> {
     );
     if (_featureCache.length <= _maxCachedFeatures) return;
     final removable =
-        _featureCache.values.where((entry) => entry.index != index).toList()
+        _featureCache.values.where((entry) => entry.index != index &&
+            !(_canReturnToEmployees && entry.index == 3)).toList()
           ..sort((a, b) => a.lastUsed.compareTo(b.lastUsed));
     while (_featureCache.length > _maxCachedFeatures && removable.isNotEmpty) {
       _featureCache.remove(removable.removeAt(0).index);
@@ -1892,6 +1933,7 @@ class _DtrContentState extends State<_DtrContent> {
       children: [
         for (final entry in entries)
           Offstage(
+            key: ObjectKey(entry),
             offstage: entry.index != _dtrSectionIndex,
             child: TickerMode(
               enabled: entry.index == _dtrSectionIndex,
@@ -1916,9 +1958,9 @@ class _DtrContentState extends State<_DtrContent> {
                 Align(
                   alignment: Alignment.centerLeft,
                   child: TextButton.icon(
-                    onPressed: () => _openDtrSection(0),
+                    onPressed: () => _openDtrSection(_canReturnToEmployees ? 3 : 0),
                     icon: const Icon(Icons.arrow_back_rounded, size: 20),
-                    label: const Text('Back to DTR'),
+                    label: Text(_canReturnToEmployees ? 'Back to Employees' : 'Back to DTR'),
                     style: TextButton.styleFrom(
                       foregroundColor: AppTheme.primaryNavy,
                     ),
@@ -2012,7 +2054,7 @@ class _DtrContentState extends State<_DtrContent> {
                       ),
                     if (widget.featureAccess['locator_allowed'] == true)
                       FeatureCard(
-                        title: 'Locator Slip Management',
+                        title: 'Locator & Pass Management',
                         subtitle:
                             'Review locator slip approvals, department-head endorsements, and HR final decisions.',
                         icon: Icons.pin_drop_rounded,

@@ -50,6 +50,15 @@ void main() {
     expect(find.text('Employee full details'),findsOneWidget);
     expect(find.text('No assignments recorded.'),findsOneWidget);
     expect(tester.takeException(),isNull);
+    await tester.tap(find.widgetWithText(FilledButton, 'Edit employee'));
+    await tester.pumpAndSettle();
+    expect(find.text('Employee full details'), findsNothing);
+    expect(find.text('Edit employee'), findsOneWidget);
+    expect(find.byType(TextFormField), findsWidgets);
+    await tester.tap(find.text('Cancel'));
+    await tester.pumpAndSettle();
+    expect(find.text('View full details'), findsOneWidget);
+    expect(tester.takeException(), isNull);
   });
 
   for (final width in [1020.0, 860.0, 600.0, 360.0]) {

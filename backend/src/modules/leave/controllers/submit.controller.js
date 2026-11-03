@@ -97,7 +97,7 @@ module.exports = function createLeaveControllers({
             await client.query('ROLLBACK');
             return res
               .status(400)
-              .json({ error: 'Number of working days must be greater than 0.' });
+              .json({ error: 'The selected dates contain no working days after excluding holidays and rest days. Choose a date with a scheduled working day.' });
           }
 
           const userSex = await getUserSexForLeaveValidation(client, userId);

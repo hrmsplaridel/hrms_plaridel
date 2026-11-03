@@ -20,7 +20,6 @@ import 'package:hrms_plaridel/features/dtr/dtr_provider.dart';
 import 'package:hrms_plaridel/features/dtr/attendance/data/repositories/biometric_import_repository.dart';
 import 'package:hrms_plaridel/features/dtr/management/employees/data/employee_list_request_guard.dart';
 import 'package:hrms_plaridel/features/dtr/management/employees/data/employee_profile_update_fields.dart';
-import 'package:hrms_plaridel/features/dtr/management/employees/widgets/employee_setup_section.dart';
 import 'package:hrms_plaridel/features/dtr/reports/data/dtr_share.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
 
@@ -2284,13 +2283,21 @@ class _ManageEmployeeState extends State<ManageEmployee> {
           if (hasSelection) ...[
             const SizedBox(height: 12),
             TextButton(
-              onPressed: () => openResponsiveRightSidePanel<void>(
-                context: context,
-                barrierLabel: 'Close employee details',
-                breakpoint: 900,
-                initialWidthFraction: 0.52,
-                builder: (_) => EmployeeDetailsView(employeeId: sel.id),
-              ),
+              onPressed: () async {
+                final editRequested = await openResponsiveRightSidePanel<bool>(
+                  context: context,
+                  barrierLabel: 'Close employee details',
+                  breakpoint: 900,
+                  initialWidthFraction: 0.52,
+                  builder: (panelContext) => EmployeeDetailsView(
+                    employeeId: sel.id,
+                    onEdit: () => Navigator.of(panelContext).pop(true),
+                  ),
+                );
+                if (editRequested == true && mounted) {
+                  await _openEditEmployeePanel(sel);
+                }
+              },
               child: const Text('View full details'),
             ),
           ],

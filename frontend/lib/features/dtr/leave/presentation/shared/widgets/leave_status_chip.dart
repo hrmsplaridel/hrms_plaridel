@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_request.dart';
+import 'package:hrms_plaridel/features/dtr/leave/utils/leave_workflow_labels.dart';
 
 class LeaveStatusChip extends StatelessWidget {
   const LeaveStatusChip({super.key, required this.status, this.label});
@@ -47,7 +48,7 @@ class LeaveStatusChip extends StatelessWidget {
       ),
     };
 
-    return Container(
+    final chip = Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       decoration: BoxDecoration(
         color: bg,
@@ -58,5 +59,10 @@ class LeaveStatusChip extends StatelessWidget {
         style: TextStyle(color: fg, fontSize: 12, fontWeight: FontWeight.w700),
       ),
     );
+    if (status == LeaveRequestStatus.approved &&
+        label == leaveManualSigningStatusLabel) {
+      return Tooltip(message: leaveManualSigningExplanation, child: chip);
+    }
+    return chip;
   }
 }

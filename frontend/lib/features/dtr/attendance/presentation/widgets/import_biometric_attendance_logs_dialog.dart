@@ -307,6 +307,8 @@ class _ImportBiometricAttendanceLogsDialogState
         skippedLeave: apiResponse.skippedLeave,
         skippedAfterShiftFirstPunch: apiResponse.skippedAfterShiftFirstPunch,
         skippedInvalidTimestamp: apiResponse.skippedInvalidTimestamp,
+        skippedInvalidRows: apiResponse.skippedInvalidRows,
+        rowErrors: apiResponse.rowErrors,
         unmatchedRows: unmatchedRowCount,
         invalidRows: preview.invalidRows,
         summariesInserted: apiResponse.summariesInserted,
@@ -337,18 +339,30 @@ class _ImportBiometricAttendanceLogsDialogState
   }
 
   Future<void> _showImportResultDialog(BiometricImportResult result) async {
+    final rejectedRows =
+        result.skippedInvalidRows + result.skippedInvalidTimestamp;
     await showDialog<void>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: Row(
           children: [
             Icon(
-              Icons.check_circle,
-              color: Theme.of(ctx).colorScheme.primary,
+              rejectedRows > 0
+                  ? Icons.warning_amber_rounded
+                  : Icons.check_circle,
+              color: rejectedRows > 0
+                  ? Theme.of(ctx).colorScheme.error
+                  : Theme.of(ctx).colorScheme.primary,
               size: 28,
             ),
             const SizedBox(width: 10),
-            const Text('Import Complete'),
+            Expanded(
+              child: Text(
+                rejectedRows > 0
+                    ? 'Import completed with rejected rows'
+                    : 'Import Complete',
+              ),
+            ),
           ],
         ),
         content: SingleChildScrollView(
@@ -422,6 +436,11 @@ class _ImportBiometricAttendanceLogsDialogState
               ),
               const SizedBox(height: 6),
               _PreviewRow(
+                label: 'Rejected: invalid row data',
+                value: '${result.skippedInvalidRows}',
+              ),
+              const SizedBox(height: 6),
+              _PreviewRow(
                 label: 'Unmatched rows',
                 value: '${result.unmatchedRows}',
               ),
@@ -430,6 +449,24 @@ class _ImportBiometricAttendanceLogsDialogState
                 label: 'Invalid rows',
                 value: '${result.invalidRows}',
               ),
+              if (result.rowErrors.isNotEmpty) ...[
+                const SizedBox(height: 12),
+                const Text(
+                  'Rejected row details',
+                  style: TextStyle(fontWeight: FontWeight.w800),
+                ),
+                const SizedBox(height: 6),
+                const Text('Row numbers refer to entries sent for import.'),
+                if (rejectedRows > result.rowErrors.length)
+                  Text(
+                    'Showing ${result.rowErrors.length} of $rejectedRows rejected entries.',
+                  ),
+                for (final error in result.rowErrors)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 6),
+                    child: Text('Submitted row ${error.row}: ${error.error}'),
+                  ),
+              ],
               const SizedBox(height: 12),
               Text(
                 'DTR Daily Summary',

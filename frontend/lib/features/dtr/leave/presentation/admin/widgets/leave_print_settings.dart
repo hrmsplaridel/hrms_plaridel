@@ -1,3 +1,5 @@
+import 'package:hrms_plaridel/core/widgets/pdf_preview_preparation.dart';
+import 'package:hrms_plaridel/features/dtr/management/approvals/utils/workflow_print_layout.dart';
 import '../../../utils/leave_design_capture.dart';
 import 'dart:convert';
 import 'dart:typed_data';
@@ -70,6 +72,7 @@ class LeavePrintSettings extends StatefulWidget {
     this.initialDraft,
     this.enabled = true,
     this.readLeaveType,
+    this.readWorkflowSteps,
     this.onCustomFieldsChanged,
   });
   final String? leaveTypeId;
@@ -78,6 +81,7 @@ class LeavePrintSettings extends StatefulWidget {
   final LeavePrintDraft? initialDraft;
   final bool enabled;
   final LeaveTypeDefinition Function()? readLeaveType;
+  final List<dynamic>? Function()? readWorkflowSteps;
   final ValueChanged<List<LeaveCustomFieldDefinition>>? onCustomFieldsChanged;
   @override
   State<LeavePrintSettings> createState() => _LeavePrintSettingsState();
@@ -229,6 +233,12 @@ class _LeavePrintSettingsState extends State<LeavePrintSettings> {
     }
   }
 
+  List<dynamic>? get _workflowSteps => widget.readWorkflowSteps?.call();
+  LocatorPrintedSignatory _sampleSignatory(String source) {
+    final caption = workflowPrintCaption(_workflowSteps, source);
+    return caption == null ? leaveLayoutSampleSignatory(source)
+        : LocatorPrintedSignatory(name: 'Sample signer', positionTitle: caption);
+  }
   LeaveTypeDefinition get _type =>
       widget.readLeaveType?.call() ??
       const LeaveTypeDefinition(
@@ -246,58 +256,71 @@ class _LeavePrintSettingsState extends State<LeavePrintSettings> {
     LocatorPrintLayout? custom, {
     List<LeaveCustomFieldDefinition>? customFields,
   }) async {
-    final request = leaveLayoutSampleRequest(
-      customFields == null
-          ? _type
-          : _type.copyWith(employeeDetailSchema: customFields),
+    final prepared = await preparePdfPreview(
+      context: context,
+      prepare: (task) async {
+        final request = leaveLayoutSampleRequest(
+          customFields == null
+              ? _type
+              : _type.copyWith(employeeDetailSchema: customFields),
+        );
+        final bytes = custom != null
+            ? await buildLeaveLayoutPdf(
+                layout: custom,
+                request: request,
+                signatories: LocatorFormSignatories(
+                  applicant: _sampleSignatory('applicant'),
+                  workflowApprovers: {
+                    for (final source in workflowPrintSignatures(
+                      _workflowSteps,
+                    ).keys)
+                      if (source.startsWith('workflow_step_'))
+                        source: _sampleSignatory(source),
+                  },
+                  departmentHead: _sampleSignatory('department_head'),
+                  finalApprover: _sampleSignatory('hr_approver'),
+                ),
+                certificationOfficer: leaveLayoutSampleSignatory(
+                  'certification_officer',
+                ),
+              )
+            : await (_layout == 'wellness'
+                      ? await buildWellnessLeavePdf(
+                          request: request,
+                          department: 'Human Resources',
+                          departmentReviewer: 'Sample Department Head',
+                          mayorName: 'Sample Municipal Mayor',
+                        )
+                      : await LeaveRequestPdf.buildPdf(request: request))
+                  .save();
+        task.checkActive();
+        final response = await ApiClient.instance.post<List<int>>(
+          '/api/leave/print/preview',
+          data: FormData.fromMap({
+            if (widget.leaveTypeId != null) 'type_id': widget.leaveTypeId,
+            'layout': custom != null ? 'custom' : _layout,
+            'print_layout': jsonEncode(custom?.toJson()),
+            'remove_background': _remove.toString(),
+            'file': MultipartFile.fromBytes(bytes, filename: 'preview.pdf'),
+            if (_file != null)
+              'background': MultipartFile.fromBytes(
+                _file!.bytes!,
+                filename: _file!.name,
+                contentType: _fileType(_file!),
+              ),
+          }),
+          options: Options(responseType: ResponseType.bytes),
+        );
+        return Uint8List.fromList(response.data!);
+      },
     );
-    final bytes = custom != null
-        ? await buildLeaveLayoutPdf(
-            layout: custom,
-            request: request,
-            signatories: LocatorFormSignatories(
-              applicant: leaveLayoutSampleSignatory('applicant'),
-              departmentHead: leaveLayoutSampleSignatory('department_head'),
-              finalApprover: leaveLayoutSampleSignatory('hr_approver'),
-            ),
-            certificationOfficer: leaveLayoutSampleSignatory(
-              'certification_officer',
-            ),
-          )
-        : await (_layout == 'wellness'
-                  ? await buildWellnessLeavePdf(
-                      request: request,
-                      department: 'Human Resources',
-                      departmentReviewer: 'Sample Department Head',
-                      mayorName: 'Sample Municipal Mayor',
-                    )
-                  : await LeaveRequestPdf.buildPdf(request: request))
-              .save();
-    final response = await ApiClient.instance.post<List<int>>(
-      '/api/leave/print/preview',
-      data: FormData.fromMap({
-        if (widget.leaveTypeId != null) 'type_id': widget.leaveTypeId,
-        'layout': custom != null ? 'custom' : _layout,
-        'print_layout': jsonEncode(custom?.toJson()),
-        'remove_background': _remove.toString(),
-        'file': MultipartFile.fromBytes(bytes, filename: 'preview.pdf'),
-        if (_file != null)
-          'background': MultipartFile.fromBytes(
-            _file!.bytes!,
-            filename: _file!.name,
-            contentType: _fileType(_file!),
-          ),
-      }),
-      options: Options(responseType: ResponseType.bytes),
+    if (prepared == null || !mounted) return;
+    await showFormPdfPreview(
+      context: context,
+      bytes: prepared,
+      title: 'Leave Form Preview',
+      filename: 'Leave_Form_Sample.pdf',
     );
-    if (mounted) {
-      await showFormPdfPreview(
-        context: context,
-        bytes: Uint8List.fromList(response.data!),
-        title: 'Leave Form Preview',
-        filename: 'Leave_Form_Sample.pdf',
-      );
-    }
   }
 
   Future<void> _preview() async {
@@ -320,6 +343,10 @@ class _LeavePrintSettingsState extends State<LeavePrintSettings> {
   }
 
   Future<void> _editLayout() async {
+    if (_printLayout == null && widget.readWorkflowSteps != null && _workflowSteps?.isNotEmpty != true) {
+      setState(() => _error = 'Select a workflow and wait for it to load before designing a new layout.');
+      return;
+    }
     setState(() {
       _busy = true;
       _error = null;
@@ -438,11 +465,16 @@ class _LeavePrintSettingsState extends State<LeavePrintSettings> {
           backgroundImage: image,
           bindings: PrintLayoutEditorBindings(
             fields: leaveLayoutFields(type),
-            signatures: leaveLayoutSignatures(initial?.baseForm ?? _layout),
+            signatures: {
+              if (initial?.baseForm != null || _workflowSteps?.isNotEmpty != true)
+                ...leaveLayoutSignatures(initial?.baseForm ?? _layout),
+              ...workflowPrintSignatures(_workflowSteps),
+              'certification_officer': 'Certification signature',
+            },
             sample: leaveLayoutForm(leaveLayoutSampleRequest(type)),
             defaultLayout: (orientation) =>
-                leavePrintLayoutDefaults(type, orientation: orientation),
-            sampleSignatory: leaveLayoutSampleSignatory,
+                workflowPrintLayoutDefaults(leavePrintLayoutDefaults(type, orientation: orientation), _workflowSteps),
+            sampleSignatory: _sampleSignatory,
           ),
           onPreview: _previewDraft,
           onPreviewWithFields: (layout, fields) =>

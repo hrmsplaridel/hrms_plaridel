@@ -9,11 +9,13 @@ class DraggableDtrAssistantLauncher extends StatefulWidget {
     required this.onPressed,
     this.initialRight = 16,
     this.initialBottom = 16,
+    this.minimumBottom = 10,
   });
 
   final VoidCallback onPressed;
   final double initialRight;
   final double initialBottom;
+  final double minimumBottom;
 
   @override
   State<DraggableDtrAssistantLauncher> createState() =>
@@ -131,7 +133,7 @@ class _DraggableDtrAssistantLauncherState
       _edgePadding,
       double.infinity,
     );
-    final maxY = (size.height - buttonSize - _edgePadding).clamp(
+    final maxY = (size.height - buttonSize - widget.minimumBottom).clamp(
       _edgePadding,
       double.infinity,
     );

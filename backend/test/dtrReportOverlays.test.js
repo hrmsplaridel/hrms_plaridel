@@ -6,7 +6,7 @@ const EMPLOYEE = '00000000-0000-4000-8000-000000000601';
 const DEPARTMENT = '00000000-0000-4000-8000-000000000602';
 const entry = '../src/routes/dtrDailySummary';
 
-function fixtureDatabase() {
+function fixtureDatabase(trackingStart=null, { partialLocator = false } = {}) {
   const assignment = {
     id: 'assignment', employee_id: EMPLOYEE, department_id: DEPARTMENT,
     effective_from: '2020-01-01', effective_to: null,
@@ -25,6 +25,7 @@ function fixtureDatabase() {
       const text = String(sql);
       let rows;
       if (text === 'SELECT coverage FROM holidays LIMIT 1') rows = [];
+      else if (text.includes('attendance_tracking_start_date') && text.includes('FROM users')) rows = [{id:EMPLOYEE,attendance_tracking_start_date:trackingStart,date_hired:'2020-01-01'}];
       else if (text.includes('d.attendance_date::text AS attendance_date_iso')) rows = [{
         id: 'physical-record', employee_id: EMPLOYEE, employee_name: 'Sample Employee',
         attendance_date_iso: '2020-06-05', status: 'late', source: 'biometric',
@@ -41,7 +42,10 @@ function fixtureDatabase() {
         leave_request_id: 'leave-request', leave_type_name: 'Wellness Leave',
       }));
       else if (text.includes('FROM leave_requests lr')) rows = [];
-      else if (text.includes('FROM locator_slips ls')) rows = ['2020-06-01', '2020-06-02', '2020-06-04', '2020-06-05'].map(locator);
+      else if (text.includes('FROM locator_slips ls')) rows = [
+        ...['2020-06-01', '2020-06-02', '2020-06-04', '2020-06-05'].map(locator),
+        ...(partialLocator ? [{ ...locator('2020-06-03'), am_out: false, pm_in: false, pm_out: false }] : []),
+      ];
       else if (text.includes('FROM assignments a')) rows = [assignment];
       else if (text.includes('FROM employee_schedule_overrides')) rows = [];
       else if (text.includes('FROM attendance_policies')) rows = [{
@@ -57,8 +61,8 @@ function fixtureDatabase() {
   };
 }
 
-async function report(query, run) {
-  const restore = withMockedModule('../src/config/db', { pool: fixtureDatabase() });
+async function report(query, run, trackingStart=null, options={}) {
+  const restore = withMockedModule('../src/config/db', { pool: fixtureDatabase(trackingStart, options) });
   clearModule(entry);
   try {
     const router = require(entry);
@@ -112,4 +116,25 @@ test('DTR paginates after all report overlays and keeps the complete total', asy
     assert.equal(res.headers['X-Offset'], '1');
     assert.deepEqual(res.body.map((r) => r.record_date), ['2020-06-04', '2020-06-03']);
   });
+});
+
+test('tracking boundary hides no historical punches and excludes missing history from penalties',async()=>{
+ await report({},res=>{
+   const missing=res.body.find(r=>r.record_date==='2020-06-03');
+   assert.equal(missing.status,'not_tracked');assert.equal(missing.report_deduction.total_minutes,0);
+   const imported=res.body.find(r=>r.id==='physical-record');
+   assert.equal(imported.status,'late');assert.equal(imported.report_deduction.total_minutes,0);
+   assert.ok(imported.time_in);assert.equal(imported.attendance_tracking_start_date,'2020-07-01');
+ },'2020-07-01');
+});
+
+test('partial locator metadata cannot turn missing pre-tracking history into penalties', async () => {
+  await report({}, (res) => {
+    const missing = res.body.find((row) => row.record_date === '2020-06-03');
+    assert.equal(missing.locator_slip_id, 'locator-2020-06-03');
+    assert.equal(missing.status, 'not_tracked');
+    assert.equal(missing.attendance_remark, 'Not tracked');
+    assert.equal(missing.undertime_minutes, 0);
+    assert.equal(missing.report_deduction.total_minutes, 0);
+  }, '2020-07-01', { partialLocator: true });
 });

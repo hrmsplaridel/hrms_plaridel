@@ -357,7 +357,12 @@ function weekdayDate(today, targetWeekday, mode = 'next') {
 }
 
 function parseAssistantDateRangeUnchecked(message, options = {}) {
-  const text = String(message || '').toLowerCase();
+  // Tagalog existential "may" is not the month. Retain explicit dates/years,
+  // month qualifiers and bare "May", including genuine English month queries.
+  const text = String(message || '').toLowerCase().replace(
+    /\bmay\b(?!\s+(?:\d|of\s+20\d{2}|month\b))(?=\s+(?:kulang|meeting|family|event|pasok|duty|trabaho|work|sakit|kailangan|leave\s+(?:ako|ba)|available|request|natitira)\b)/g,
+    'meron'
+  );
   const today = options.today || todayInHrmsTimezone(options.now);
   const monthNames = Object.keys(MONTHS).join('|');
   const weekdayNames = Object.keys(WEEKDAYS).join('|');
@@ -716,7 +721,7 @@ function parseAssistantDateRangeUnchecked(message, options = {}) {
     return { label: 'next month', startDate, endDate: endOfMonth(nextMonth) };
   }
 
-  if (/\b(this week|current week|karong semanaha|karon nga semana|karong semana|this semana|week|semana|semanaha)\b/.test(text)) {
+  if (/\b(this week|current week|ngayong linggo|linggong ito|karong semanaha|karon nga semana|karong semana|this semana|week|semana|semanaha)\b/.test(text)) {
     const startDate = startOfWeekMonday(today);
     return { label: 'this week', startDate, endDate: addDays(startDate, 6) };
   }

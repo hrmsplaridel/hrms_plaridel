@@ -1,5 +1,6 @@
 import 'leave_type.dart';
 import 'leave_type_definition.dart';
+import '../utils/leave_workflow_labels.dart';
 
 /// Workflow status for one leave request.
 enum LeaveRequestStatus {
@@ -45,10 +46,9 @@ extension LeaveRequestStatusExtension on LeaveRequestStatus {
     LeaveRequestStatus.pending => 'Pending',
     LeaveRequestStatus.pendingDepartmentHead => 'Pending Department Head',
     LeaveRequestStatus.pendingMayor => 'Pending Mayor',
-    LeaveRequestStatus.pendingHr => 'Pending HR',
-    LeaveRequestStatus.rejectedByDepartmentHead =>
-      'Rejected by Department Head',
-    LeaveRequestStatus.rejectedByHr => 'Rejected by HR',
+    LeaveRequestStatus.pendingHr => 'Pending review',
+    LeaveRequestStatus.rejectedByDepartmentHead => 'Rejected',
+    LeaveRequestStatus.rejectedByHr => 'Rejected',
     LeaveRequestStatus.returned => 'Returned',
     LeaveRequestStatus.approved => 'Approved',
     LeaveRequestStatus.rejected => 'Rejected',
@@ -162,6 +162,7 @@ class LeaveRequest {
     this.reviewerRole,
     this.finalReviewRoute = 'hr',
     this.workflowSnapshot,
+    this.paperApprovalRecord,
     this.reviewerTitle,
     this.reviewedAt,
     this.approvedAt,
@@ -237,6 +238,8 @@ class LeaveRequest {
   final String? reviewerRole;
   final String finalReviewRoute;
   final Map<String,dynamic>? workflowSnapshot;
+  final Map<String,dynamic>? paperApprovalRecord;
+  bool get isPaperRecord => paperApprovalRecord?['source'] == 'approved_paper';
   final String? reviewerTitle;
   final DateTime? reviewedAt;
   final DateTime? approvedAt;
@@ -257,21 +260,19 @@ class LeaveRequest {
 
   /// Shared workflows use compatibility statuses; display their actual stage.
   String get statusLabel {
+    if(isPaperRecord && status==LeaveRequestStatus.approved)return 'Approved (paper record)';
+    if(isPaperRecord && status==LeaveRequestStatus.cancelled)return 'Revoked (paper record)';
+    if (status == LeaveRequestStatus.approved) {
+      return leaveApprovedStatusLabel(
+        finalReviewRoute,
+        workflowSnapshot: workflowSnapshot,
+      );
+    }
     if (!status.isPending || workflowSnapshot?['outcome'] != null) {
       return status.displayName;
     }
-    final steps = workflowSnapshot?['steps'];
-    final current = workflowSnapshot?['current_step'];
-    if (steps is List &&
-        current is int &&
-        current >= 0 &&
-        current < steps.length) {
-      final step = steps[current];
-      final label = step is Map ? step['label'] : null;
-      if (label is String && label.trim().isNotEmpty) {
-        return 'Pending ${label.trim()}';
-      }
-    }
+    final label = leavePendingStepLabel(workflowSnapshot);
+    if (label != null) return 'Pending $label';
     return status.displayName;
   }
 
@@ -389,6 +390,7 @@ class LeaveRequest {
       reviewerName: json['reviewer_name']?.toString(),
       reviewerRole: json['reviewer_role']?.toString(),
       finalReviewRoute: json['final_review_route']?.toString() ?? 'hr',
+      paperApprovalRecord: json['paper_approval_record'] is Map ? Map<String,dynamic>.from(json['paper_approval_record']) : null,
       workflowSnapshot: json['workflow_snapshot'] is Map ? Map<String,dynamic>.from(json['workflow_snapshot']) : null,
       reviewerTitle: json['reviewer_title']?.toString(),
       reviewedAt: _parseDateTime(json['reviewed_at']),
@@ -462,6 +464,7 @@ class LeaveRequest {
       'reviewer_role': _trimOrNull(reviewerRole),
       'final_review_route': finalReviewRoute,
       'workflow_snapshot': workflowSnapshot,
+      'paper_approval_record': paperApprovalRecord,
       'reviewer_title': _trimOrNull(reviewerTitle),
       'reviewed_at': reviewedAt?.toIso8601String(),
       'approved_at': approvedAt?.toIso8601String(),
@@ -531,6 +534,7 @@ class LeaveRequest {
     String? reviewerRole,
     String? finalReviewRoute,
     Map<String,dynamic>? workflowSnapshot,
+    Map<String,dynamic>? paperApprovalRecord,
     String? reviewerTitle,
     DateTime? reviewedAt,
     DateTime? approvedAt,
@@ -606,6 +610,7 @@ class LeaveRequest {
       reviewerRole: reviewerRole ?? this.reviewerRole,
       finalReviewRoute: finalReviewRoute ?? this.finalReviewRoute,
       workflowSnapshot:workflowSnapshot ?? this.workflowSnapshot,
+      paperApprovalRecord:paperApprovalRecord ?? this.paperApprovalRecord,
       reviewerTitle: reviewerTitle ?? this.reviewerTitle,
       reviewedAt: reviewedAt ?? this.reviewedAt,
       approvedAt: approvedAt ?? this.approvedAt,

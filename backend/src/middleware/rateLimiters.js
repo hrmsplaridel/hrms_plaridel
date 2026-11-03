@@ -163,16 +163,32 @@ function createEmployeeAssistantLimiter({
   });
 }
 
-const authLoginLimiter = createJsonLimiter({
-  scope: 'auth_login',
-  windowMs: parsePositiveInt(
+function createAuthLoginLimiters({
+  windowMs = parsePositiveInt(
     process.env.AUTH_LOGIN_RATE_LIMIT_WINDOW_MS,
     FIFTEEN_MINUTES_MS,
   ),
-  limit: parsePositiveInt(process.env.AUTH_LOGIN_RATE_LIMIT_MAX, 5),
-  message: 'Too many login attempts. Please wait and try again.',
-  skipSuccessfulRequests: true,
-});
+  accountMax = parsePositiveInt(process.env.AUTH_LOGIN_RATE_LIMIT_MAX, 5),
+  ipMax = parsePositiveInt(process.env.AUTH_LOGIN_IP_RATE_LIMIT_MAX, 1000),
+} = {}) {
+  return [
+    createJsonLimiter({
+      scope: 'network_login', windowMs, limit: ipMax,
+      message: 'Too many login requests from this network. Please wait and try again.',
+    }),
+    createJsonLimiter({
+      scope: 'auth_login', windowMs, limit: accountMax,
+      keyGenerator: req => {
+        const email = typeof req.body?.email === 'string' ? req.body.email.trim().toLowerCase() : '';
+        return email ? `account:${email}` : `ip:${ipKeyGenerator(req.ip)}`;
+      },
+      message: 'Too many login attempts for this account. Please wait and try again.',
+      skipSuccessfulRequests: true,
+    }),
+  ];
+}
+
+const authLoginLimiter = createAuthLoginLimiters();
 
 const authRegisterLimiter = createJsonLimiter({
   scope: 'auth_register',
@@ -330,6 +346,7 @@ const dtrAssistantExportLimiter = createEmployeeAssistantLimiter({
 });
 
 module.exports = {
+  createAuthLoginLimiters,
   createApiRateLimits,
   createEmployeeAssistantLimiter,
   createPublicIpLimiter,

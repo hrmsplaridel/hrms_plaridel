@@ -1,3 +1,4 @@
+import 'package:hrms_plaridel/shared/widgets/profile_modern_ui.dart' show ProfileLabeledField;
 import 'dart:async';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_type_definition.dart';
 import '../../shared/widgets/locator_custom_fields.dart';
@@ -56,6 +57,7 @@ class _LocatorTypeManagementScreenState
   bool _autoApproveAdmin = false;
   String _approvalRoute = 'hr';
   String? _workflowId;
+  List<dynamic>? _workflowSteps;
   List<String>? _mayorEmploymentTypes;
   List<LeaveCustomFieldDefinition> _customFields = const [];
   bool _isActive = true;
@@ -158,6 +160,7 @@ class _LocatorTypeManagementScreenState
       _autoApproveAdmin = false;
       _approvalRoute = 'hr';
       _workflowId = null;
+      _workflowSteps = null;
       _mayorEmploymentTypes = null;
       _customFields = const [];
       _isActive = true;
@@ -175,6 +178,9 @@ class _LocatorTypeManagementScreenState
     setState(() {
       _printDraft = const LocatorPrintDraft();
       _printEpoch++;
+      if (_selected?.id != item.id) {
+        _workflowSteps = null;
+      }
       _selected = item;
       _codeController.text = item.code;
       _labelController.text = item.label;
@@ -737,7 +743,9 @@ class _LocatorTypeManagementScreenState
                           ),
                           enabled: !_saving,
                           initialWorkflowId: _workflowId,
+                          onLoaded: (routing) => setState(() => _workflowSteps = routing['workflow_steps'] as List?),
                           onChanged: (routing) => setState(() {
+                            _workflowSteps = routing['workflow_steps'] as List?;
                             _workflowId = routing['approval_workflow_id'] as String?;
                             final steps=routing['workflow_steps'] as List? ?? [];
                             _approvalRoute = steps.any((step) => step == 'mayor' || step is Map && step['assignee_source'] == 'active_mayor') ? 'mayor_direct'
@@ -762,6 +770,7 @@ class _LocatorTypeManagementScreenState
                           onCustomFieldsChanged: (fields) => setState(
                             () => _customFields = List.of(fields),
                           ),
+                          readWorkflowSteps: () => _workflowSteps,
                           readRequestType: () => LocatorRequestType.locator.copyWith(
                             code:_codeController.text.trim(),label:_labelController.text.trim().isEmpty?'Locator Slip':_labelController.text.trim(),
                             locationLabel:_locationLabelController.text.trim(),locationHint:_locationHintController.text.trim(),approvalRoute:_approvalRoute,
@@ -878,25 +887,27 @@ class _LocatorTypeManagementScreenState
       children: [
         SizedBox(
           width: 360,
-          child: DropdownButtonFormField<String>(
-            initialValue: _filingAccess,
-            isExpanded: true,
-            decoration: AppTheme.dashInputDecoration(
-              context,
-              labelText: 'Who can file',
-            ),
-            items: const [
-              DropdownMenuItem(
-                value: 'both',
-                child: Text('Employee and HR/admin'),
+          child: ProfileLabeledField(
+            label: 'Who can file',
+            child: DropdownButtonFormField<String>(
+              initialValue: _filingAccess,
+              isExpanded: true,
+              decoration: AppTheme.dashInputDecoration(
+                context,
               ),
-              DropdownMenuItem(value: 'employee', child: Text('Employee only')),
-              DropdownMenuItem(value: 'admin', child: Text('HR/admin only')),
-            ],
-            onChanged: (value) => setState(() {
-              _filingAccess = value!;
-              if (value == 'employee') _autoApproveAdmin = false;
-            }),
+              items: const [
+                DropdownMenuItem(
+                  value: 'both',
+                  child: Text('Employee and HR/admin'),
+                ),
+                DropdownMenuItem(value: 'employee', child: Text('Employee only')),
+                DropdownMenuItem(value: 'admin', child: Text('HR/admin only')),
+              ],
+              onChanged: (value) => setState(() {
+                _filingAccess = value!;
+                if (value == 'employee') _autoApproveAdmin = false;
+              }),
+            ),
           ),
         ),
         _settingTile(
@@ -925,20 +936,22 @@ class _LocatorTypeManagementScreenState
         ),
         SizedBox(
           width: 360,
-          child: DropdownButtonFormField<String>(
-            initialValue: _coverageMode,
-            decoration: AppTheme.dashInputDecoration(
-              context,
-              labelText: 'Time coverage behavior',
-              prefixIcon: const Icon(Icons.timelapse_rounded),
+          child: ProfileLabeledField(
+            label: 'Time coverage behavior',
+            child: DropdownButtonFormField<String>(
+              initialValue: _coverageMode,
+              decoration: AppTheme.dashInputDecoration(
+                context,
+                prefixIcon: const Icon(Icons.timelapse_rounded),
+              ),
+              items: const [
+                DropdownMenuItem(value: 'manual', child: Text('Manual segments')),
+                DropdownMenuItem(value: 'wfh', child: Text('WFH coverage')),
+              ],
+              onChanged: (value) {
+                if (value != null) setState(() => _coverageMode = value);
+              },
             ),
-            items: const [
-              DropdownMenuItem(value: 'manual', child: Text('Manual segments')),
-              DropdownMenuItem(value: 'wfh', child: Text('WFH coverage')),
-            ],
-            onChanged: (value) {
-              if (value != null) setState(() => _coverageMode = value);
-            },
           ),
         ),
       ],
@@ -1042,18 +1055,21 @@ class _LocatorTypeManagementScreenState
   }) {
     return SizedBox(
       width: 300,
-      child: TextFormField(
-        controller: controller,
-        enabled: enabled,
-        keyboardType: number ? TextInputType.number : TextInputType.text,
-        maxLength: maxLength,
-        maxLengthEnforcement: maxLength == null
-            ? null
-            : MaxLengthEnforcement.none,
-        decoration: AppTheme.dashInputDecoration(context, labelText: label),
-        validator:
-            validator ??
-            (value) => _validateRequiredText(value, label, maxLength),
+      child: ProfileLabeledField(
+        label: label,
+        child: TextFormField(
+          controller: controller,
+          enabled: enabled,
+          keyboardType: number ? TextInputType.number : TextInputType.text,
+          maxLength: maxLength,
+          maxLengthEnforcement: maxLength == null
+              ? null
+              : MaxLengthEnforcement.none,
+          decoration: AppTheme.dashInputDecoration(context),
+          validator:
+              validator ??
+              (value) => _validateRequiredText(value, label, maxLength),
+        ),
       ),
     );
   }

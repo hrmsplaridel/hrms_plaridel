@@ -562,6 +562,24 @@ void main() {
     );
   });
 
+  for (final optionalText in <String?>[null, '', '   ']) {
+    test(
+      'turn-around time PDF accepts blank optional header lines: "$optionalText"',
+      () async {
+        await _expectPdf(
+          FormPdf.buildTurnAroundTimePdf(
+            TurnAroundTimeEntry(
+              position: 'Administrative Officer',
+              office: optionalText,
+              qs: optionalText,
+              applicants: const [],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   test(
     'turn-around time prints five applicant rows on landscape letter',
     () async {

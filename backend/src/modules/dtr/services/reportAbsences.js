@@ -1,4 +1,5 @@
 'use strict';
+const {isBeforeEmployeeTracking}=require('../../../services/employeeAttendanceTracking');
 module.exports = function createDtrComponent({
   evaluateLocatorCoverage,
   getExpectedWorkMinutes,
@@ -10,6 +11,7 @@ module.exports = function createDtrComponent({
   resolvedWorkingDay,
 }) {
   async function addAbsenceReportRows({
+    trackingStarts=new Map(),
     assignmentsByEmployee,
     attendancePolicyContext,
     employeeIds,
@@ -41,6 +43,8 @@ module.exports = function createDtrComponent({
         if (leaveKeys.has(key)) continue;
         const shiftInfo = getShiftInfoForDateFromAssignments(assignmentsByEmployee, empId, dateStr);
         if (!shiftInfo) continue; // no assignment/shift => can't determine working day
+        const hired=trackingStarts.get(String(empId))?.hired;
+        if(hired && dateStr<hired)continue;
         if (
           scopedDepartmentId &&
           String(shiftInfo.departmentId || '') !== String(scopedDepartmentId)
@@ -82,7 +86,8 @@ module.exports = function createDtrComponent({
           dateStr,
           shiftInfo
         );
-        const absentUndertime = policyForDay.absentEqualsFullDayDeduction
+        const untracked=isBeforeEmployeeTracking(empId,dateStr,trackingStarts);
+        const absentUndertime = !untracked && policyForDay.absentEqualsFullDayDeduction
           ? getExpectedWorkMinutes(shiftInfo)
           : 0;
 
@@ -98,11 +103,11 @@ module.exports = function createDtrComponent({
           total_hours: null,
           late_minutes: 0,
           undertime_minutes: absentUndertime,
-          status: 'absent',
+          status: untracked?'not_tracked':'absent',
           pm_status: null,
           remarks: null,
           source: null,
-          attendance_remark: 'Absent',
+          attendance_remark: untracked?'Not tracked':'Absent',
           holiday_id: null,
           leave_request_id: null,
           holiday_name: null,

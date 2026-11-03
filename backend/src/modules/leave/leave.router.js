@@ -36,6 +36,22 @@ function createLeaveRouter(dependencies = loadLeaveDependencies()) {
     ...require('./controllers/attachments.controller')(runtime),
   };
 
+  const staffControllers = require('./controllers/staffFiling.controller')(runtime, controllers);
+  const staffAccess = [protect, requireAdminOrHr, requireDtrFeatureIfAdmin('leave_allowed')];
+  const openingControllers = require('./controllers/openingBalances.controller')(runtime);
+  router.get('/admin/opening-balances', ...staffAccess, openingControllers.listOpeningBalances);
+  router.post('/admin/opening-balances/:userId/usage', ...staffAccess, openingControllers.verifyOpeningUsage);
+  router.get('/admin/opening-balances/:userId', ...staffAccess, openingControllers.getOpeningBalances);
+  router.post('/admin/opening-balances/:userId', ...staffAccess, openingControllers.saveOpeningBalances);
+  router.get('/admin/filing-employees', ...staffAccess, staffControllers.listFilingEmployees);
+  router.get('/admin/paper-signatories', ...staffAccess, staffControllers.paperSignatorySuggestions);
+  router.get('/admin/submission-availability', ...staffAccess, staffControllers.staffSubmissionAvailability);
+  router.get('/admin/working-days', ...staffAccess, (req,res) => {
+    if (typeof req.query.employee_id !== 'string') return res.status(400).json({error:'Select a valid employee.'});
+    return controllers.previewWorkingDays(req,res,req.query.employee_id);
+  });
+  router.post('/admin/file', ...staffAccess, uploadLeaveAttachmentMemoryMw, staffControllers.fileForEmployees);
+
   // Registration order is part of the existing API contract. Keep /:id after fixed paths.
   router.get(
     '/final-reviewer/me',

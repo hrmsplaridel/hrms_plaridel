@@ -291,6 +291,8 @@ const FUZZY_WORDS = [
 ];
 
 const SKIP_FUZZY = new Set([
+  // Valid quantities are facts, never spelling candidates (five -> file).
+  ...'zero one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen twenty thirty forty fifty sixty seventy eighty ninety hundred thousand half quarter usa isa duha dalawa tulo tatlo upat apat lima unom anim pito walo siyam napulo'.split(' '),
   'ngayon',
   'karon',
   'ngano',
@@ -376,6 +378,7 @@ function normalizeAssistantMessageForRules(message) {
 
   return text.replace(/\b[a-zA-Z][a-zA-Z-]*\b/g, (token) => {
     const lower = token.toLowerCase();
+    if (lower.split('-').every(part => SKIP_FUZZY.has(part))) return token;
     const replacement = TOKEN_REPLACEMENTS[lower] || fuzzyReplacement(token);
     return replacement ? preserveCase(token, replacement) : token;
   });

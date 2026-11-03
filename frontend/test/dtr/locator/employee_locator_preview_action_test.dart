@@ -36,14 +36,15 @@ void main() {
         await tester.tap(find.text('Preview'));
         await tester.pump();
         await tester.pump(const Duration(milliseconds: 300));
-        expect(find.text('Loading preview…'), findsOneWidget);
+        expect(find.text('Preparing preview…'), findsOneWidget);
+        expect(find.text('Cancel'), findsOneWidget);
         if (fail) {
           pending.completeError(StateError('Failed to load'));
         } else {
           pending.complete(Uint8List(1));
         }
         await tester.pumpAndSettle();
-        expect(find.text('Loading preview…'), findsNothing);
+        expect(find.text('Preparing preview…'), findsNothing);
         expect(error, fail ? isA<StateError>() : isNull);
       },
     );

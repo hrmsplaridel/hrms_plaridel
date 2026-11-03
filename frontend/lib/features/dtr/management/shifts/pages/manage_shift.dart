@@ -96,6 +96,7 @@ class _ManageShiftState extends State<ManageShift> {
   final _searchController = TextEditingController();
   final _nameController = TextEditingController();
   final _graceController = TextEditingController();
+  final _graceFieldKey = GlobalKey<FormFieldState<String>>();
 
   String _statusFilter = 'Active';
   int _page = 0;
@@ -447,6 +448,12 @@ class _ManageShiftState extends State<ManageShift> {
     });
   }
 
+  int? _validatedGracePeriodMinutes() {
+    if (_graceFieldKey.currentState?.validate() != true) return null;
+    final text = _graceController.text.trim();
+    return text.isEmpty ? 0 : int.parse(text);
+  }
+
   Future<bool> _addShift() async {
     final name = _nameController.text.trim();
     if (name.isEmpty) {
@@ -469,6 +476,8 @@ class _ManageShiftState extends State<ManageShift> {
       );
       return false;
     }
+    final gracePeriodMinutes = _validatedGracePeriodMinutes();
+    if (gracePeriodMinutes == null) return false;
     try {
       final body = <String, dynamic>{
         'name': name,
@@ -481,7 +490,7 @@ class _ManageShiftState extends State<ManageShift> {
         if (_breakEndTime != null && _formUsesPmStart)
           'break_end': _timeStr(_breakEndTime!),
         'is_active': true,
-        'grace_period_minutes': int.tryParse(_graceController.text.trim()) ?? 0,
+        'grace_period_minutes': gracePeriodMinutes,
         'working_days': _workingDays.toList()..sort(),
       };
       await ApiClient.instance.post('/api/shifts', data: body);
@@ -534,6 +543,8 @@ class _ManageShiftState extends State<ManageShift> {
       );
       return false;
     }
+    final gracePeriodMinutes = _validatedGracePeriodMinutes();
+    if (gracePeriodMinutes == null) return false;
     try {
       final body = <String, dynamic>{
         'name': name,
@@ -546,7 +557,7 @@ class _ManageShiftState extends State<ManageShift> {
         'break_end': _breakEndTime != null && _formUsesPmStart
             ? _timeStr(_breakEndTime!)
             : null,
-        'grace_period_minutes': int.tryParse(_graceController.text.trim()) ?? 0,
+        'grace_period_minutes': gracePeriodMinutes,
         'working_days': _workingDays.toList()..sort(),
       };
       await ApiClient.instance.put('/api/shifts/${s.id}', data: body);
@@ -1556,9 +1567,22 @@ class _ManageShiftState extends State<ManageShift> {
         ),
         const SizedBox(height: 6),
         TextFormField(
+          key: _graceFieldKey,
           controller: _graceController,
           enabled: !scheduleLocked,
           keyboardType: TextInputType.number,
+          autovalidateMode: AutovalidateMode.onUserInteraction,
+          validator: (value) {
+            final text = value?.trim() ?? '';
+            if (text.isEmpty) return null;
+            final minutes = RegExp(r'^[0-9]+$').hasMatch(text)
+                ? int.tryParse(text)
+                : null;
+            if (minutes == null || minutes > 240) {
+              return 'Enter a whole number from 0 to 240.';
+            }
+            return null;
+          },
           style: AppTheme.dashFieldTextStyle(context),
           decoration: _inputDecoration('0'),
         ),

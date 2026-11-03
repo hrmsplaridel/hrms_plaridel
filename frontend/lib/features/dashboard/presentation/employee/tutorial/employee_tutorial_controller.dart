@@ -25,7 +25,7 @@ class EmployeeTutorialController {
     String? userId,
     EmployeeTutorialSection section,
   ) =>
-      'employee_tutorial_v$_tutorialVersion:${userId ?? 'device'}:${section.name}';
+      'employee_tutorial_v${section == EmployeeTutorialSection.locator ? 3 : _tutorialVersion}:${userId ?? 'device'}:${section.name}';
 
   static Future<void> showIfNeeded(
     BuildContext context, {
@@ -129,11 +129,13 @@ class EmployeeTutorialTarget {
     required this.key,
     required this.title,
     required this.body,
+    this.onFocus,
   });
 
   final GlobalKey key;
   final String title;
   final String body;
+  final VoidCallback? onFocus;
 }
 
 class _EmployeeDashboardCoach extends StatefulWidget {
@@ -159,6 +161,11 @@ class _EmployeeDashboardCoachState extends State<_EmployeeDashboardCoach> {
   }
 
   Future<void> _focusTarget([int attempt = 0]) async {
+    if (attempt == 0 && _target.onFocus != null) {
+      _target.onFocus!();
+      await WidgetsBinding.instance.endOfFrame;
+      if (!mounted) return;
+    }
     final targetContext = _target.key.currentContext;
     if (targetContext == null) {
       if (attempt < 10) {
@@ -169,6 +176,7 @@ class _EmployeeDashboardCoachState extends State<_EmployeeDashboardCoach> {
       _advance();
       return;
     }
+    if (!targetContext.mounted) return;
     await Scrollable.ensureVisible(
       targetContext,
       duration: const Duration(milliseconds: 420),

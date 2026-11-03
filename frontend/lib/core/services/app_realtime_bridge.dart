@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/widgets.dart';
 import 'package:provider/provider.dart';
+import 'package:hrms_plaridel/core/api/workflow_inbox_cache.dart';
 
 import 'package:hrms_plaridel/features/docutracker/data/providers/docutracker_provider.dart';
 import 'package:hrms_plaridel/features/dtr/leave/data/providers/leave_provider.dart';
@@ -36,6 +37,13 @@ class _AppRealtimeBridgeState extends State<AppRealtimeBridge> {
 
   void _handleEvent(AppRealtimeEvent event) {
     if (!mounted) return;
+    if (const [
+      'leave_updated',
+      'locator_updated',
+      'connected',
+    ].contains(event.name)) {
+      WorkflowInboxCache.instance.invalidate();
+    }
     if (event.name == 'leave_updated') {
       try {
         context.read<LeaveProvider>().invalidateCachedLeaveData();

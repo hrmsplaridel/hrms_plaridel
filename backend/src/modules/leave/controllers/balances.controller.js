@@ -1,4 +1,5 @@
 'use strict';
+const { parseAssignmentDate } = require('../../../utils/assignmentInputValidation');
 module.exports = function createLeaveControllers({
   ENTITLEMENT_BASES,
   annualAllowance,
@@ -279,9 +280,8 @@ module.exports = function createLeaveControllers({
           updated_at: r.updated_at,
         }));
 
-        // Annual entitlements are not credit wallets. They are returned as clearly
-        // marked, read-only summary rows so the employee UI can show yearly usage
-        // separately from VL/SL credits.
+        // Yearly limits and forced-leave compliance are read-only summaries,
+        // separate from VL/SL credit wallets.
         const officialDate = todayInHrmsTimezone();
         const currentYear = Number(officialDate.slice(0, 4));
         const startOfYear = `${currentYear}-01-01`;
@@ -293,21 +293,25 @@ module.exports = function createLeaveControllers({
               max_days,
               minimum_service_months,
               first_year_allowance,
+              entitlement_basis,
               sex_eligibility,
               eligible_employment_types
        FROM leave_types
        WHERE is_active = true
-         AND entitlement_basis = $1
-         AND COALESCE(balance_ledger_type, 'none') = 'none'
+         AND (
+           (entitlement_basis = $1 AND COALESCE(balance_ledger_type, 'none') = 'none')
+           OR (name = 'mandatoryForcedLeave' AND entitlement_basis = $2)
+         )
          AND max_days IS NOT NULL
          AND max_days > 0
        ORDER BY display_name, name`,
-          [ENTITLEMENT_BASES.ANNUAL],
+          [ENTITLEMENT_BASES.ANNUAL, ENTITLEMENT_BASES.COMPLIANCE],
         );
         const annualQuotaTypes = annualTypesQ.rows.map((row) => ({
           name: row.name,
           display: row.display_name || systemLeaveTypeDisplayName(row.name),
           quota: parseFloat(row.max_days),
+          compliance: row.name === 'mandatoryForcedLeave' && row.entitlement_basis === ENTITLEMENT_BASES.COMPLIANCE,
           minimum_service_months: row.minimum_service_months || 0,
           first_year_allowance: row.first_year_allowance || 'full',
           sex: normalizeSexEligibility(row.sex_eligibility, row.name),
@@ -342,11 +346,13 @@ module.exports = function createLeaveControllers({
 
         if (synthTypes.length > 0) {
           const synthTypeNames = synthTypes.map((t) => t.name);
+          if (synthTypes.some(t => t.compliance)) synthTypeNames.push('vacationLeave');
           const usageQuery = await pool.query(
-            `SELECT lr.start_date, lr.end_date, lr.status, lt.name AS leave_type
+              `SELECT lr.start_date, lr.end_date, lr.status, lr.number_of_days, lr.total_days, lt.name AS leave_type
          FROM leave_requests lr
          JOIN leave_types lt ON lt.id = lr.leave_type_id
          WHERE (lr.user_id = $1::uuid OR lr.employee_id = $1::uuid)
+             AND lr.discarded_at IS NULL
            AND lr.start_date <= $3::date
            AND lr.end_date   >= $2::date
            AND lt.name = ANY($4::text[])
@@ -361,8 +367,18 @@ module.exports = function createLeaveControllers({
           }
 
           const client = await pool.connect();
+            let historyVerificationRequired = false;
           try {
+              if (usageMap.mandatoryForcedLeave) {
+                const openingUsage = require('../../../services/leaveOpeningUsage');
+                const historical = await openingUsage.loadOpeningUsage(client,targetId);
+                const qualifying = await openingUsage.qualifyingUsage(client,targetId,currentYear,historical,
+                  usageQuery.rows.filter(r=>['mandatoryForcedLeave','vacationLeave'].includes(r.leave_type)),workingDaysWithinYear);
+                usageMap.mandatoryForcedLeave.used=qualifying.used;
+                historyVerificationRequired=qualifying.needsReview;
+              }
             for (const row of usageQuery.rows) {
+                if (usageMap.mandatoryForcedLeave && row.status==='approved' && ['mandatoryForcedLeave','vacationLeave'].includes(row.leave_type)) continue;
               const startStr = toIsoDateStr(row.start_date);
               const endStr = toIsoDateStr(row.end_date);
               const days = await workingDaysWithinYear(
@@ -372,7 +388,8 @@ module.exports = function createLeaveControllers({
                 endStr,
                 currentYear,
               );
-              const usageKey = row.leave_type;
+              const usageKey = row.leave_type === 'vacationLeave' && usageMap.mandatoryForcedLeave
+                ? 'mandatoryForcedLeave' : row.leave_type;
               if (days > 0 && usageMap[usageKey]) {
                 if (row.status === 'approved') {
                   usageMap[usageKey].used += days;
@@ -400,9 +417,10 @@ module.exports = function createLeaveControllers({
               leave_type: t.name,
               leave_type_display_name: t.display,
               employee_name: employeeName,
-              record_kind: 'annual_entitlement',
-              entitlement_basis: ENTITLEMENT_BASES.ANNUAL,
+              record_kind: t.compliance ? 'compliance_progress' : 'annual_entitlement',
+              entitlement_basis: t.compliance ? ENTITLEMENT_BASES.COMPLIANCE : ENTITLEMENT_BASES.ANNUAL,
               entitlement_year: currentYear,
+                history_verification_required: t.compliance && historyVerificationRequired,
               earned_days: allowance.limit_days,
               full_limit_days: allowance.full_limit_days,
               calculated_days: allowance.calculated_days,
@@ -438,8 +456,8 @@ module.exports = function createLeaveControllers({
       }
       let asOf = b.as_of_date ?? b.asOfDate;
       if (asOf === '' || asOf === undefined) asOf = null;
-      if (asOf != null && !/^\d{4}-\d{2}-\d{2}$/.test(String(asOf))) {
-        return res.status(400).json({ error: 'as_of_date must use YYYY-MM-DD' });
+      if (asOf != null && !parseAssignmentDate(asOf)) {
+        return res.status(400).json({ error: 'as_of_date must be a real date in YYYY-MM-DD format' });
       }
       const daysChanged = b.adjustment_days ?? b.adjustmentDays;
       const remarks = b.remarks ?? b.reason;

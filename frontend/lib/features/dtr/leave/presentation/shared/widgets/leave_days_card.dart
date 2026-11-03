@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_balance.dart';
 
-/// A compact card that shows remaining days for a genuine annual entitlement.
+/// A compact card showing approved usage against a yearly limit or requirement.
 /// Distinct from [LeaveBalanceCard] which is for accrual-based credits.
 class LeaveDaysCard extends StatelessWidget {
   const LeaveDaysCard({super.key, required this.balance});
@@ -16,13 +16,15 @@ class LeaveDaysCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final dark = AppTheme.dashIsDark(context);
-    final remaining = balance.availableDays;
+    final remaining = balance.usageRemainingDays;
     final total = balance.earnedDays;
     final displayedRemaining = remaining.clamp(0, total).toDouble();
 
     // Color the remaining chip: green when plenty left, amber when low, red when zero
     Color accentColor;
-    if (displayedRemaining <= 0) {
+    if (balance.isComplianceProgress) {
+      accentColor = !balance.historyVerificationRequired && displayedRemaining <= 0 ? const Color(0xFF2E7D32) : const Color(0xFFF57C00);
+    } else if (displayedRemaining <= 0) {
       accentColor = const Color(0xFFD32F2F);
     } else if (total > 0 && displayedRemaining / total <= 0.33) {
       accentColor = const Color(0xFFF57C00);
@@ -31,6 +33,7 @@ class LeaveDaysCard extends StatelessWidget {
     }
 
     return Container(
+      key: ValueKey('leave-balance-row-${balance.effectiveLeaveTypeName}'),
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
       decoration: BoxDecoration(
         color: AppTheme.dashMutedSurfaceOf(context),
@@ -75,7 +78,7 @@ class LeaveDaysCard extends StatelessWidget {
                   runSpacing: 4,
                   children: [
                     _Pip(
-                      label: 'Entitlement',
+                      label: balance.isComplianceProgress ? 'Required' : 'Limit',
                       value: _fmt(balance.annualEntitlementDays),
                       context: context,
                     ),
@@ -85,16 +88,9 @@ class LeaveDaysCard extends StatelessWidget {
                         value: _fmt(total),
                         context: context,
                       ),
-                    if (balance.usedDays > 0)
-                      _Pip(
-                        label: 'Used',
+                    _Pip(
+                        label: 'Taken',
                         value: _fmt(balance.usedDays),
-                        context: context,
-                      ),
-                    if (balance.pendingDays > 0)
-                      _Pip(
-                        label: 'Pending',
-                        value: _fmt(balance.pendingDays),
                         context: context,
                       ),
                   ],
@@ -109,6 +105,11 @@ class LeaveDaysCard extends StatelessWidget {
                     ),
                   ),
                 ],
+                if (balance.isComplianceProgress)
+                  Text('Includes approved Forced and Vacation Leave. Charged to VL credits.',
+                    style: TextStyle(color: AppTheme.dashTextSecondaryOf(context),fontSize:10)),
+                if (balance.usageStatusLabel != null)
+                  Text(balance.usageStatusLabel!,style:TextStyle(color:accentColor,fontSize:11,fontWeight:FontWeight.w600)),
               ],
             ),
           ),
@@ -125,7 +126,7 @@ class LeaveDaysCard extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.center,
               children: [
                 Text(
-                  _fmt(displayedRemaining),
+                  balance.historyVerificationRequired ? '—' : _fmt(displayedRemaining),
                   style: TextStyle(
                     color: accentColor,
                     fontSize: 22,
@@ -135,7 +136,7 @@ class LeaveDaysCard extends StatelessWidget {
                 ),
                 const SizedBox(height: 3),
                 Text(
-                  displayedRemaining == 1 ? 'day available' : 'days available',
+                  balance.historyVerificationRequired ? 'Unverified' : balance.isComplianceProgress ? 'Still required' : 'Remaining',
                   style: TextStyle(
                     color: accentColor,
                     fontSize: 10,

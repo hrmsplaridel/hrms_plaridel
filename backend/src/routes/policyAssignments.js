@@ -1,5 +1,6 @@
 const express = require('express');
 const { pool } = require('../config/db');
+const { parseAssignmentDate: parseDate, assignmentInputError } = require('../utils/assignmentInputValidation');
 const { authMiddleware } = require('../middleware/auth');
 const { requireAdmin } = require('../middleware/rbac');
 const { requireDtrManageIfAdmin } = require('../middleware/dtrAccess');
@@ -29,12 +30,6 @@ const {
 
 const router = express.Router();
 const protect = [authMiddleware];
-
-function parseDate(val) {
-  if (!val) return null;
-  const d = new Date(val);
-  return isNaN(d.getTime()) ? null : d.toISOString().slice(0, 10);
-}
 
 // GET /api/policy-assignments?employee_id=uuid&status=Current|Upcoming|Expired|Archived|All
 router.get('/', protect, async (req, res) => {
@@ -110,9 +105,8 @@ router.post('/employee-upsert', protect, requireAdmin, requireDtrManageIfAdmin, 
     if (!employee_id || !effective_from) {
       return res.status(400).json({ error: 'employee_id and effective_from are required' });
     }
-    if (typeof is_active !== 'boolean') {
-      return res.status(400).json({ error: 'is_active must be a boolean.' });
-    }
+    const inputError = assignmentInputError(req.body || {});
+    if (inputError) return res.status(400).json({ error: inputError });
     const ef = parseDate(effective_from);
     if (!ef) return res.status(400).json({ error: 'Invalid effective_from' });
     const et = effective_to != null && effective_to !== '' ? parseDate(effective_to) : null;

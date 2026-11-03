@@ -4,6 +4,9 @@ Reviewed `663a40b6` against `00fa6d61` (140 changed files). The merge brings
 Mayor Office endorsement isolation, RSP/L&D changes, account-role changes and
 shared UI/branding updates. Existing Leave, Locator and DTR fixes are retained.
 
+Subsequent local application is recorded in [LOCAL_20261023_APPLIED.md](LOCAL_20261023_APPLIED.md).
+The pending-state statements below describe the earlier review, before that application.
+
 ## Upgrade inventory
 
 Paths in this table are relative to `backend/scripts/migrations/`.

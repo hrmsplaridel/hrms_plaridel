@@ -1,4 +1,61 @@
 'use strict';
+const { normalizeYearEndEmployeeIds } = require('../../../services/leaveYearEndForcedLeave');
+
+// Validate every supplied alias/source before choosing a processing mode.
+// Ignoring an invalid preview flag must never turn it into a live operation.
+function processingInput(req, fields, parse, fallback) {
+  const values = [];
+  for (const source of ['body', 'query']) {
+    const input = req[source] || {};
+    for (const field of fields) {
+      if (Object.hasOwn(input, field)) values.push(parse(input[field], source));
+    }
+  }
+  if (new Set(values).size > 1) {
+    throw new Error(`${fields[0]} has conflicting values in the request`);
+  }
+  return values.length ? values[0] : fallback;
+}
+
+function processingDryRun(req) {
+  return processingInput(req, ['dry_run', 'dryRun'], (value, source) => {
+    if (source === 'body' && typeof value === 'boolean') return value;
+    if (source === 'query') {
+      if (value === 'true' || value === '1') return true;
+      if (value === 'false' || value === '0') return false;
+    }
+    throw new Error('dry_run must be a JSON boolean, or true, false, 1 or 0 in the query');
+  }, false);
+}
+
+function processingCatchUpMonths(req) {
+  return processingInput(req, ['max_catch_up_months'], (value) => {
+    const parsed = typeof value === 'number' ? value :
+      typeof value === 'string' && /^\d+$/.test(value.trim()) ? Number(value.trim()) : NaN;
+    if (!Number.isInteger(parsed) || parsed < 1 || parsed > 120) {
+      throw new Error('max_catch_up_months must be a whole number between 1 and 120');
+    }
+    return parsed;
+  }, undefined);
+}
+
+function processingEmployeeIds(req) {
+  const fields = ['employee_ids', 'employeeIds'];
+  if (fields.some(field => Object.hasOwn(req.query || {}, field))) {
+    throw new Error('employee_ids must be supplied as an array in the JSON body');
+  }
+  const selections = fields
+    .filter(field => Object.hasOwn(req.body || {}, field))
+    .map(field => normalizeYearEndEmployeeIds(req.body[field]));
+  if (selections.length > 1 &&
+      JSON.stringify([...selections[0]].sort()) !== JSON.stringify([...selections[1]].sort())) {
+    throw new Error('employee_ids has conflicting values in the request');
+  }
+  // The existing Apply All client omits both fields. Explicit empty/null lists
+  // are invalid and must never be converted into this intentional all scope.
+  return selections.length ? selections[0] : null;
+}
+
 module.exports = function createLeaveControllers({
   applyYearEndForcedLeaveDeductions,
   broadcastAppEvent,
@@ -52,6 +109,9 @@ module.exports = function createLeaveControllers({
           await client.query('ROLLBACK');
           return res.status(404).json({ error: 'Target employee not found or inactive' });
         }
+        await client.query('SELECT pg_advisory_xact_lock_shared(743022, 0)');
+        await require('../../../services/leaveOpeningBalances').assertAfterOpeningBalanceCutoff(client,userId,`${year}-12-31`);
+        await require('../../../services/leaveOpeningUsage').assertOpeningUsageVerified(client,userId,year);
         const duplicateQ = await client.query(
           `SELECT id, created_at
        FROM leave_balance_ledger
@@ -146,15 +206,17 @@ module.exports = function createLeaveControllers({
     },
 
     runMonthlyAccrual: async (req, res) => {
+      let dryRun;
+      let maxCatchUpMonths;
+      try {
+        dryRun = processingDryRun(req);
+        maxCatchUpMonths = processingCatchUpMonths(req);
+      } catch (err) {
+        return res.status(400).json({ error: err.message });
+      }
       let notificationMonth = null;
       let notificationDryRun = true;
       try {
-        const dryRun =
-          req.body?.dry_run === true || req.query?.dry_run === '1' || req.query?.dry_run === 'true';
-
-        const rawMax = req.body?.max_catch_up_months ?? req.query?.max_catch_up_months;
-        const maxCatchUpMonths =
-          rawMax != null && rawMax !== '' ? parseInt(String(rawMax), 10) : undefined;
         const targetMonth =
           req.body?.target_month ??
           req.body?.year_month ??
@@ -165,7 +227,7 @@ module.exports = function createLeaveControllers({
         notificationMonth = notificationMonthForTarget(targetMonth);
         const accrualResult = await runLeaveMonthlyAccrual(pool, {
           dryRun,
-          maxCatchUpMonths: Number.isFinite(maxCatchUpMonths) ? maxCatchUpMonths : undefined,
+          maxCatchUpMonths,
           targetMonth: targetMonth ? String(targetMonth).trim() : undefined,
         });
 
@@ -268,6 +330,14 @@ module.exports = function createLeaveControllers({
     },
 
     applyYearEndForcedLeave: async (req, res) => {
+      let dryRun;
+      let employeeIds;
+      try {
+        dryRun = processingDryRun(req);
+        employeeIds = processingEmployeeIds(req);
+      } catch (err) {
+        return res.status(400).json({ error: err.message });
+      }
       try {
         const actorUserId = req.user?.id;
         const yearRaw = req.body?.year ?? req.query?.year;
@@ -277,23 +347,11 @@ module.exports = function createLeaveControllers({
           return res.status(400).json({ error: `year must be between 1900 and ${maxYear}` });
         }
 
-        const dryRun =
-          req.body?.dry_run === true ||
-          req.body?.dryRun === true ||
-          req.query?.dry_run === '1' ||
-          req.query?.dry_run === 'true';
-
         if (!dryRun && year >= yearEndManilaYearNow()) {
           return res.status(409).json({
             error: `Year-end deductions for ${year} cannot be applied until that calendar year has closed. Preview remains available.`,
           });
         }
-
-        const rawIds = req.body?.employee_ids ?? req.body?.employeeIds;
-        const employeeIds =
-          Array.isArray(rawIds) && rawIds.length > 0
-            ? rawIds.map((id) => String(id).trim()).filter(Boolean)
-            : null;
 
         const remarks = (req.body?.remarks || '').toString().trim() || null;
 

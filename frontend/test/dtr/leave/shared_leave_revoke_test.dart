@@ -16,6 +16,7 @@ import 'package:hrms_plaridel/features/dtr/leave/presentation/admin/widgets/admi
 
 class _Repository extends MockLeaveRepository {
   bool authorized = true;
+  bool paper = false;
   bool revoked = false;
   bool expired = false;
   bool missingDate = false;
@@ -27,11 +28,12 @@ class _Repository extends MockLeaveRepository {
     'id': 'request', 'user_id': 'applicant', 'employee_name': 'Applicant', 'leave_type': leaveTypeName,
     'approved_days_with_pay': paidDays,
     'start_date': '2026-10-19', 'end_date': '2026-10-19', 'working_days_applied': 1,
-    'status': revoked ? 'returned' : 'approved', 'can_revoke_approval': authorized && !revoked,
+    'status': revoked ? (paper ? 'cancelled' : 'returned') : 'approved', 'can_revoke_approval': authorized && !revoked,
     if (!missingDate) 'approved_at': DateTime.now().subtract(Duration(days: expired ? 4 : 1)).toIso8601String(),
     // An older HR timestamp must not replace the final Mayor approval date.
     if (!missingDate) 'reviewed_at': DateTime.now().subtract(const Duration(days: 7)).toIso8601String(),
-    'workflow_snapshot': {
+    if (paper) 'paper_approval_record': {'source':'approved_paper', 'approval_date':'2020-01-01', 'encoded_at':DateTime.now().subtract(Duration(days: expired ? 4 : 0)).toIso8601String(), 'final_approver':{'name':'Paper Mayor'}, if(revoked) 'revocation':{'reason':'Duplicate paper entry.', 'revoked_by_name':'HR', 'revoked_at':DateTime.now().toIso8601String(), 'restored_credit_days':0}},
+    'workflow_snapshot': paper ? null : {
       'name': 'Complete Workflow', 'version': 2, 'current_step': 3,
       'steps': [
         {'label': 'Dept', 'assignee_source': 'submitter_department_reviewers'},
@@ -86,6 +88,42 @@ void main() {
       expect(tester.takeException(), isNull);
     });
   }
+  testWidgets(
+    'paper leave uses recording time, requires a reason and preserves original approval evidence',
+    (tester) async {
+      final repository = _Repository()
+        ..paper = true
+        ..creditPolicy = 'none'
+        ..leaveTypeName = 'wellnessLeave';
+      await _mount(tester, repository);
+      await tester.tap(find.text('Applicant').first);
+      await tester.pumpAndSettle();
+      final revoke = find.widgetWithText(OutlinedButton, 'Revoke Approval');
+      expect(revoke, findsOneWidget);
+      await tester.ensureVisible(revoke);
+      await tester.tap(revoke);
+      await tester.pumpAndSettle();
+      expect(find.textContaining('original signed paper'), findsOneWidget);
+      await tester.tap(find.text('Revoke Approval').last);
+      await tester.pumpAndSettle();
+      expect(repository.writes, 0);
+      final reason = find
+          .descendant(
+            of: find.byType(AlertDialog),
+            matching: find.byType(TextFormField),
+          )
+          .first;
+      await tester.enterText(reason, 'Duplicate paper entry.');
+      await tester.tap(find.text('Revoke Approval').last);
+      await tester.pumpAndSettle();
+      expect(repository.writes, 1);
+      expect(
+        find.text('Paper record revoked. DTR coverage removed.'),
+        findsOneWidget,
+      );
+      expect(tester.takeException(), isNull);
+    },
+  );
   test('revoke deadline uses final approval time and preserves it through model copies', () {
     final finalApproval = DateTime.utc(2026, 10, 18, 2);
     final request = LeaveRequest.fromJson({
@@ -169,7 +207,7 @@ Future<void> _mount(WidgetTester tester, _Repository repository) async {
     }
     h.resolve(Response(requestOptions: o, statusCode: 200, data: data));
   }));
-  final auth = AuthProvider()..replaceUser(const AppUser(id: 'mayor', email: 'mayor@test.local', role: 'mayor'));
+  final auth = AuthProvider()..replaceUser(AppUser(id: 'mayor', email: 'mayor@test.local', role: repository.paper ? 'hr' : 'mayor'));
   final leave = LeaveProvider(repository: repository);
   final realtime = AppRealtimeProvider();
   addTearDown(() async {

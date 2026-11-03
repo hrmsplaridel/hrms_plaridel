@@ -36,6 +36,7 @@ $$ LANGUAGE plpgsql;
 -- USERS / EMPLOYEES
 -- =========================================
 CREATE TABLE IF NOT EXISTS users (
+  attendance_tracking_start_date DATE,
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   employee_number INT UNIQUE DEFAULT nextval('users_employee_number_seq'),
 
@@ -704,6 +705,7 @@ CREATE TABLE IF NOT EXISTS leave_types (
   is_active BOOLEAN NOT NULL DEFAULT true,
   employee_can_file BOOLEAN NOT NULL DEFAULT true,
   admin_can_file BOOLEAN NOT NULL DEFAULT true,
+  allow_approved_paper_filing BOOLEAN NOT NULL DEFAULT false,
   admin_only BOOLEAN NOT NULL DEFAULT false,
   allows_past_dates BOOLEAN NOT NULL DEFAULT true,
   requires_attachment BOOLEAN NOT NULL DEFAULT false,
@@ -766,22 +768,22 @@ CREATE TABLE IF NOT EXISTS leave_types (
 );
 
 -- Seed leave types (names must match Flutter LeaveType enum .value for API lookup).
-INSERT INTO leave_types (name, description, is_active)
+INSERT INTO leave_types (name, description, is_active, allow_approved_paper_filing)
 VALUES
-  ('vacationLeave', 'Vacation Leave', true),
-  ('mandatoryForcedLeave', 'Mandatory/Forced Leave', true),
-  ('sickLeave', 'Sick Leave', true),
-  ('maternityLeave', 'Maternity Leave', true),
-  ('paternityLeave', 'Paternity Leave', true),
-  ('specialPrivilegeLeave', 'Special Privilege Leave', true),
-  ('soloParentLeave', 'Solo Parent Leave', true),
-  ('studyLeave', 'Study Leave', true),
-  ('tenDayVawcLeave', '10-Day VAWC Leave', true),
-  ('rehabilitationPrivilege', 'Rehabilitation Privilege', true),
-  ('specialLeaveBenefitsForWomen', 'Special Leave Benefits for Women', true),
-  ('specialEmergencyCalamityLeave', 'Special Emergency (Calamity) Leave', true),
-  ('adoptionLeave', 'Adoption Leave', true),
-  ('others', 'Others', true)
+  ('vacationLeave', 'Vacation Leave', true, true),
+  ('mandatoryForcedLeave', 'Mandatory/Forced Leave', true, true),
+  ('sickLeave', 'Sick Leave', true, true),
+  ('maternityLeave', 'Maternity Leave', true, true),
+  ('paternityLeave', 'Paternity Leave', true, true),
+  ('specialPrivilegeLeave', 'Special Privilege Leave', true, true),
+  ('soloParentLeave', 'Solo Parent Leave', true, true),
+  ('studyLeave', 'Study Leave', true, true),
+  ('tenDayVawcLeave', '10-Day VAWC Leave', true, true),
+  ('rehabilitationPrivilege', 'Rehabilitation Privilege', true, true),
+  ('specialLeaveBenefitsForWomen', 'Special Leave Benefits for Women', true, true),
+  ('specialEmergencyCalamityLeave', 'Special Emergency (Calamity) Leave', true, true),
+  ('adoptionLeave', 'Adoption Leave', true, true),
+  ('others', 'Others', true, true)
 ON CONFLICT (name) DO NOTHING;
 
 UPDATE leave_types
@@ -903,6 +905,7 @@ CREATE TABLE IF NOT EXISTS leave_requests (
   employee_official_snapshot JSONB NOT NULL DEFAULT '{}'::jsonb,
   -- Field labels/types frozen with the request for reliable historical display.
   employee_detail_schema_snapshot JSONB NOT NULL DEFAULT '[]'::jsonb,
+  paper_approval_record JSONB,
   workflow_snapshot JSONB,
   signature_revision INTEGER NOT NULL DEFAULT 1 CHECK (signature_revision > 0),
   status TEXT NOT NULL DEFAULT 'pending'
@@ -1118,6 +1121,25 @@ CREATE TABLE IF NOT EXISTS leave_balance_ledger (
 );
 CREATE INDEX IF NOT EXISTS idx_leave_balance_ledger_user_created
   ON leave_balance_ledger(user_id, created_at DESC);
+CREATE TABLE IF NOT EXISTS leave_opening_balance_setups (
+  user_id UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  cutoff_date DATE NOT NULL CHECK (EXTRACT(DAY FROM (cutoff_date + 1)) = 1),
+  sick_leave_days NUMERIC(10,3) NOT NULL CHECK (sick_leave_days >= 0),
+  vacation_leave_days NUMERIC(10,3) NOT NULL CHECK (vacation_leave_days >= 0),
+  reason TEXT NOT NULL CHECK (btrim(reason) <> ''),
+  created_by UUID REFERENCES users(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  qualifying_leave_days NUMERIC(10,3),
+  usage_reference TEXT,
+  usage_verified_by UUID REFERENCES users(id) ON DELETE SET NULL,
+  usage_verified_at TIMESTAMPTZ,
+  CONSTRAINT leave_opening_usage_check CHECK (
+    (qualifying_leave_days IS NULL AND usage_reference IS NULL AND usage_verified_at IS NULL)
+    OR (qualifying_leave_days IS NOT NULL AND qualifying_leave_days BETWEEN 0 AND 366
+      AND usage_reference IS NOT NULL AND btrim(usage_reference) <> '' AND usage_verified_at IS NOT NULL)
+  )
+);
+
 CREATE INDEX IF NOT EXISTS idx_leave_balance_ledger_action
   ON leave_balance_ledger(action);
 CREATE INDEX IF NOT EXISTS idx_leave_balance_ledger_leave_request
@@ -1408,6 +1430,7 @@ CREATE TABLE IF NOT EXISTS locator_slips (
   final_review_route TEXT NOT NULL DEFAULT 'hr',
   final_reviewer_user_id UUID REFERENCES users(id) ON DELETE SET NULL,
   is_retroactive_correction BOOLEAN NOT NULL DEFAULT false,
+  paper_approval_record JSONB,
   retroactive_correction_reason TEXT,
   retroactive_corrected_by UUID REFERENCES users(id) ON DELETE SET NULL,
   retroactive_corrected_at TIMESTAMPTZ,

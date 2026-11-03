@@ -53,7 +53,7 @@ class EmployeeDtrAssistantPage extends StatefulWidget {
 }
 
 class _EmployeeDtrAssistantPageState extends State<EmployeeDtrAssistantPage> {
-  static const _welcomeMessageText =
+  static const _legacyWelcomeMessageText =
       'Hi. I am your HRMS Assistant. Ask me about your DTR, leave requests, leave balances, or locator slips.';
 
   late final DtrAssistantApi _api = widget._api ?? DtrAssistantApi();
@@ -84,6 +84,18 @@ class _EmployeeDtrAssistantPageState extends State<EmployeeDtrAssistantPage> {
   final _turnGuard = DtrAssistantTurnGuard();
   CancelToken? _cancelToken;
 
+  bool _isLegacyWelcome(DtrAssistantMessage message) =>
+      !message.isUser &&
+      message.content.trim().replaceAll(RegExp(r'\s+'), ' ') ==
+          _legacyWelcomeMessageText;
+
+  @override
+  void reassemble() {
+    super.reassemble();
+    // Hot reload preserves State, including greetings created by older code.
+    _messages.removeWhere(_isLegacyWelcome);
+  }
+
   @override
   void initState() {
     super.initState();
@@ -93,22 +105,12 @@ class _EmployeeDtrAssistantPageState extends State<EmployeeDtrAssistantPage> {
     });
   }
 
-  DtrAssistantMessage _welcomeMessage() {
-    return DtrAssistantMessage(
-      role: 'assistant',
-      content: _welcomeMessageText,
-      createdAt: DateTime.now(),
-    );
-  }
-
   Future<void> _restoreSession() async {
     final userId = context.read<AuthProvider>().user?.id;
     if (userId == null || userId.isEmpty) {
       if (!mounted) return;
       setState(() {
-        _messages
-          ..clear()
-          ..add(_welcomeMessage());
+        _messages.clear();
         _sessionLoaded = true;
       });
       return;
@@ -125,7 +127,7 @@ class _EmployeeDtrAssistantPageState extends State<EmployeeDtrAssistantPage> {
       _conversationId = conversationId;
       _messages
         ..clear()
-        ..addAll(restored.isEmpty ? [_welcomeMessage()] : restored);
+        ..addAll(restored.where((message) => !_isLegacyWelcome(message)));
       _sessionLoaded = true;
     });
     if (_messages.length > 1) {
@@ -168,9 +170,7 @@ class _EmployeeDtrAssistantPageState extends State<EmployeeDtrAssistantPage> {
     }
     if (!mounted) return;
     setState(() {
-      _messages
-        ..clear()
-        ..add(_welcomeMessage());
+      _messages.clear();
       _feedbackByMessageId.clear();
       _autoExecutedActionKeys.clear();
       _fieldBindings.clear();
@@ -373,7 +373,7 @@ class _EmployeeDtrAssistantPageState extends State<EmployeeDtrAssistantPage> {
       final reply = reviewRequested
           ? DtrAssistantMessage(
               role: 'assistant',
-              content: ActiveApplicationReview.reply(),
+              content: ActiveApplicationReview.reply(text),
               createdAt: DateTime.now(),
             )
           : await _api.sendMessage(
@@ -433,7 +433,7 @@ class _EmployeeDtrAssistantPageState extends State<EmployeeDtrAssistantPage> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!_scrollController.hasClients) return;
       _scrollController.animateTo(
-        _scrollController.position.maxScrollExtent,
+        0,
         duration: const Duration(milliseconds: 220),
         curve: Curves.easeOut,
       );
@@ -879,85 +879,107 @@ class _EmployeeDtrAssistantPageState extends State<EmployeeDtrAssistantPage> {
         child: Column(
           children: [
             Expanded(
-              child: ListView(
-                controller: _scrollController,
-                padding: EdgeInsets.fromLTRB(
-                  floating ? 12 : 16,
-                  floating ? 12 : 16,
-                  floating ? 12 : 16,
-                  12,
-                ),
-                children: [
-                  if (!floating) ...[
-                    _AssistantHeader(sending: _sending),
-                    const SizedBox(height: 16),
-                  ],
-                  DtrAssistantPromptChips(
-                    enabled: !_sending,
-                    onSelected: (prompt) =>
-                        _send(prompt.text, intent: prompt.intent),
-                  ),
-                  const SizedBox(height: 16),
-                  ..._messages.map(
-                    (message) => Column(
-                      crossAxisAlignment: message.isUser
-                          ? CrossAxisAlignment.end
-                          : CrossAxisAlignment.start,
-                      children: [
-                        DtrAssistantMessageBubble(
-                          message: message,
-                          feedback: message.id == null
-                              ? null
-                              : _feedbackByMessageId[message.id],
-                          onFeedback: message.isUser
-                              ? null
-                              : (rating) => _submitFeedback(message, rating),
-                          onDownloadAttachment: _downloadAttachment,
-                          onEdit: message.isUser
-                              ? () {
-                                  _inputController.text = message.content;
-                                  setState(() {
-                                    final index = _messages.indexOf(message);
-                                    if (index != -1) {
-                                      final removed = _messages.sublist(index);
-                                      for (final removedMessage in removed) {
-                                        final removedId = removedMessage.id;
-                                        if (removedId != null) {
-                                          _feedbackByMessageId.remove(
-                                            removedId,
-                                          );
-                                        }
-                                      }
-                                      _messages.removeRange(
-                                        index,
-                                        _messages.length,
-                                      );
-                                    }
-                                  });
-                                }
-                              : null,
-                        ),
-                        if (!message.isUser && message.suggestions.isNotEmpty)
-                          _AssistantSuggestionChips(
-                            enabled: !_sending,
-                            suggestions: message.suggestions,
-                            onSelected: (suggestion) => _send(
-                              suggestion.text,
-                              intent: suggestion.intent,
-                            ),
-                          ),
-                        if (!message.isUser && message.actions.isNotEmpty)
-                          _AssistantActionChips(
-                            enabled: !_sending,
-                            actions: message.actions,
-                            onSelected: (action) =>
-                                _executeAction(message, action),
-                          ),
-                      ],
+              child: LayoutBuilder(
+                builder: (context, constraints) => Align(
+                  alignment: Alignment.topCenter,
+                  child: ListView.builder(
+                    controller: _scrollController,
+                    reverse: true,
+                    // Each bubble has at least 36 pixels of padding and margin.
+                    // Only shrink-wrap histories small enough to fit this viewport;
+                    // longer histories keep their lazy, full-height viewport.
+                    shrinkWrap: _messages.length * 36 < constraints.maxHeight,
+                    itemCount: _messages.length + 2,
+                    padding: EdgeInsets.fromLTRB(
+                      floating ? 12 : 16,
+                      floating ? 12 : 16,
+                      floating ? 12 : 16,
+                      12,
                     ),
+                    itemBuilder: (context, index) {
+                      if (index == 0) {
+                        return _sending
+                            ? const _TypingIndicator()
+                            : const SizedBox.shrink();
+                      }
+                      if (index == _messages.length + 1) {
+                        return Column(
+                          children: [
+                            if (!floating) ...[
+                              _AssistantHeader(sending: _sending),
+                              const SizedBox(height: 16),
+                            ],
+                            DtrAssistantPromptChips(
+                              enabled: !_sending,
+                              onSelected: (prompt) =>
+                                  _send(prompt.text, intent: prompt.intent),
+                            ),
+                            const SizedBox(height: 16),
+                          ],
+                        );
+                      }
+                      final message = _messages[_messages.length - index];
+                      return Column(
+                        crossAxisAlignment: message.isUser
+                            ? CrossAxisAlignment.end
+                            : CrossAxisAlignment.start,
+                        children: [
+                          DtrAssistantMessageBubble(
+                            message: message,
+                            feedback: message.id == null
+                                ? null
+                                : _feedbackByMessageId[message.id],
+                            onFeedback: message.isUser
+                                ? null
+                                : (rating) => _submitFeedback(message, rating),
+                            onDownloadAttachment: _downloadAttachment,
+                            onEdit: message.isUser
+                                ? () {
+                                    _inputController.text = message.content;
+                                    setState(() {
+                                      final index = _messages.indexOf(message);
+                                      if (index != -1) {
+                                        final removed = _messages.sublist(
+                                          index,
+                                        );
+                                        for (final removedMessage in removed) {
+                                          final removedId = removedMessage.id;
+                                          if (removedId != null) {
+                                            _feedbackByMessageId.remove(
+                                              removedId,
+                                            );
+                                          }
+                                        }
+                                        _messages.removeRange(
+                                          index,
+                                          _messages.length,
+                                        );
+                                      }
+                                    });
+                                  }
+                                : null,
+                          ),
+                          if (!message.isUser && message.suggestions.isNotEmpty)
+                            _AssistantSuggestionChips(
+                              enabled: !_sending,
+                              suggestions: message.suggestions,
+                              onSelected: (suggestion) => _send(
+                                suggestion.text,
+                                intent: suggestion.intent,
+                              ),
+                            ),
+                          if (!message.isUser && message.actions.isNotEmpty)
+                            _AssistantActionChips(
+                              enabled: !_sending,
+                              actions: message.actions,
+                              onSelected: (action) =>
+                                  _executeAction(message, action),
+                            ),
+                        ],
+                      );
+                    },
                   ),
-                  if (_sending) const _TypingIndicator(),
-                ],
+                ),
               ),
             ),
             DtrAssistantInputBar(
@@ -1135,6 +1157,7 @@ class _AssistantHeader extends StatelessWidget {
     final lottieSize = isNarrow ? 54.0 : 74.0;
 
     return Container(
+      key: const ValueKey('assistant-introduction'),
       padding: EdgeInsets.all(isNarrow ? 12 : 14),
       decoration: BoxDecoration(
         color: AppTheme.dashPanelOf(context),

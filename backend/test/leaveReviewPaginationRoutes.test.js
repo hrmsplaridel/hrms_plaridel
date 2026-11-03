@@ -82,6 +82,8 @@ test('HR and department-head queues page past 200 and expose complete filter cho
       assert.equal(first.items.length, 200);
       assert.equal(first.total, 251);
       assert.equal(first.has_more, true);
+      assert.match(seen.at(-1).statement, /ORDER BY lr\.created_at DESC, lr\.id DESC/);
+      assert.doesNotMatch(seen.at(-1).statement, /ORDER BY lr\.updated_at/);
       if (!departmentHead) {
         const reviewQuery = seen.at(-1).statement;
         assert.match(reviewQuery, /lr\.status IN \('pending', 'pending_hr'\)/);
@@ -94,6 +96,7 @@ test('HR and department-head queues page past 200 and expose complete filter cho
       assert.equal(second.items.length, 51);
       assert.equal(second.items.at(-1).id, 'request-250');
       assert.equal(second.has_more, false);
+      assert.match(seen.at(-1).statement, /ORDER BY lr\.created_at DESC, lr\.id DESC/);
 
       const filtered = await run({
         paginated: 'true', limit: '200', offset: '0',
@@ -121,6 +124,19 @@ test('HR and department-head queues page past 200 and expose complete filter cho
     clearModule('../src/routes/leaveRoutes');
     restoreDb();
   }
+});
+
+test('pending Leave approvals use filing time and a stable ID tie-breaker', async () => {
+  let statement;
+  const controller = require('../src/modules/leave/controllers/reviewQueries.controller')({
+    pool: { query: async (sql) => { statement = sql; return { rows: [] }; } },
+    SQL_LEAVE_ASSIGNMENT_DEPT_JOIN: '', finalReviewScope: () => 'true',
+    finalQueueVisibilitySql: () => 'true', mapLeaveRowToApi: row => row,
+  });
+  const res = responseRecorder();
+  await controller.listPendingRequests({ user: { id: 'reviewer' } }, res);
+  assert.equal(res.statusCode, 200);
+  assert.match(statement, /ORDER BY lr\.created_at DESC, lr\.id DESC/);
 });
 
 test('former head receives history visibility without pending review authority', async () => {

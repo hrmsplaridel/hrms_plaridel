@@ -197,6 +197,11 @@ module.exports = function createLeaveComponent({
       ),
       adminOnly: boolField('admin_only', existing?.admin_only ?? base.admin_only === true),
       adminCanFile: boolField('admin_can_file', existing?.admin_can_file ?? true),
+      allowApprovedPaperFiling: boolField(
+        'allow_approved_paper_filing',
+        existing?.allow_approved_paper_filing ??
+          (SYSTEM_LEAVE_TYPE_NAMES.includes(name) && boolField('admin_can_file', existing?.admin_can_file ?? true)),
+      ),
       allowsPastDates: boolField(
         'allows_past_dates',
         existing?.allows_past_dates ?? base.allows_past_dates !== false,
@@ -279,6 +284,7 @@ module.exports = function createLeaveComponent({
         { statusCode: 400 },
       );
     }
+    if (payload.allowApprovedPaperFiling && !payload.adminCanFile) throw Object.assign(new Error('Enable staff filing before enabling approved paper recording.'), {statusCode:400});
     return payload;
   }
   return {

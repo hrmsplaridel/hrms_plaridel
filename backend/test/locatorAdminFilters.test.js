@@ -90,3 +90,31 @@ test('locator history filters reject invalid query values', () => {
     false
   );
 });
+
+test('department approval pages order by filing time with a stable ID tie-breaker', async () => {
+  const create = require('../src/modules/locator/controllers/departmentQueue.controller');
+  for (const page of [1, 2]) {
+    let released = false;
+    const client = {
+      async query(sql, params) {
+        if (sql.includes('COUNT(*)')) return { rows: [{ total: 4 }] };
+        assert.match(sql, /ORDER BY ls\.created_at DESC, ls\.id DESC\s+LIMIT/);
+        assert.doesNotMatch(sql, /ORDER BY ls\.updated_at/);
+        assert.deepEqual(params.slice(-2), [2, (page - 1) * 2]);
+        return { rows: [{ id: `page-${page}` }] };
+      },
+      release() { released = true; },
+    };
+    const controller = create({
+      pool: { connect: async () => client },
+      isDepartmentHead: async () => ({ departmentId: 'department' }),
+      parseLocatorHistoryFilters, mapLocatorRow: row => row,
+    });
+    const response = { status(code) { this.code = code; return this; }, json(body) { this.body = body; } };
+    await controller.listDepartmentRequests({ user: { id: 'reviewer' }, query: { page: String(page), page_size: '2' } }, response);
+    assert.equal(response.code, undefined);
+    assert.equal(response.body.pagination.page, page);
+    assert.equal(response.body.pagination.total, 4);
+    assert.equal(released, true);
+  }
+});

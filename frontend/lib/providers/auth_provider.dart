@@ -9,6 +9,7 @@ import 'package:hrms_plaridel/core/api/app_user.dart';
 import 'package:hrms_plaridel/core/api/client.dart';
 import 'package:hrms_plaridel/core/api/config.dart';
 import 'package:hrms_plaridel/core/api/token_storage.dart';
+import 'package:hrms_plaridel/core/api/workflow_inbox_cache.dart';
 import 'package:hrms_plaridel/core/services/push_notification_service.dart';
 import 'package:hrms_plaridel/features/dtr/assistant/data/dtr_assistant_session_storage.dart';
 import 'package:hrms_plaridel/features/dtr/locator/data/repositories/locator_slip_data_cache.dart';
@@ -74,6 +75,7 @@ class AuthProvider extends ChangeNotifier {
       ActiveAssistantForm.current = null;
       ActiveApplicationReview.clear();
       LocatorSlipDataCache.instance.invalidateAll();
+      WorkflowInboxCache.instance.clearSession();
       LeaveTypeDefinitionCache.instance.invalidate();
     }
   }
@@ -158,6 +160,7 @@ class AuthProvider extends ChangeNotifier {
 
       final refresh = data['refreshToken'] as String?;
       await TokenStorage.instance.setTokens(access: token, refresh: refresh);
+      WorkflowInboxCache.instance.clearSession();
       LocatorSlipDataCache.instance.invalidateAll();
       LeaveTypeDefinitionCache.instance.invalidate();
 
@@ -247,6 +250,7 @@ class AuthProvider extends ChangeNotifier {
     if (_isSigningOut) return;
     final signedOutUserId = (_user?.id ?? '').trim();
     _isSigningOut = true;
+    WorkflowInboxCache.instance.clearSession();
     notifyListeners();
     LocatorSlipDataCache.instance.invalidateAll();
     LeaveTypeDefinitionCache.instance.invalidate();

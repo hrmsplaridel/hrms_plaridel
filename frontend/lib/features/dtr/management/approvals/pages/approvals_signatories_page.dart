@@ -88,7 +88,7 @@ class _ApprovalsSignatoriesPageState extends State<ApprovalsSignatoriesPage> {
             child: IndexedStack(
               index: _tab,
               children: [
-                const ApprovalWorkflowsPanel(),
+                const ApprovalWorkflowsPanel(useSidePanel: true),
                 const DocuTrackerOfficialSignatoriesScreen(dtrOnly: true),
               ],
             ),

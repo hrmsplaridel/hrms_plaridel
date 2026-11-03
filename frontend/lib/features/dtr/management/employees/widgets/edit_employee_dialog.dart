@@ -11,7 +11,6 @@ class _EditEmployeeDialog extends StatefulWidget {
 class _EditEmployeeDialogState extends State<_EditEmployeeDialog> {
   late final _EmployeeProfile _profile;
   final _formKey = GlobalKey<FormState>();
-  final _setupSectionKey = GlobalKey<EmployeeSetupSectionState>();
   final _firstNameController = TextEditingController();
   final _middleNameController = TextEditingController();
   final _lastNameController = TextEditingController();
@@ -43,20 +42,22 @@ class _EditEmployeeDialogState extends State<_EditEmployeeDialog> {
   void initState() {
     super.initState();
     _profile = widget.profile;
-    _parseFullName(
-      _profile.fullName,
-      _firstNameController,
-      _middleNameController,
-      _lastNameController,
-    );
-    if ((_profile.firstName ?? '').trim().isNotEmpty) {
-      _firstNameController.text = _profile.firstName!.trim();
-    }
-    if (_profile.middleName != null && _profile.middleName!.isNotEmpty) {
-      _middleNameController.text = _profile.middleName!;
-    }
-    if ((_profile.lastName ?? '').trim().isNotEmpty) {
-      _lastNameController.text = _profile.lastName!.trim();
+    final hasStructuredName =
+        _profile.firstName != null ||
+        _profile.middleName != null ||
+        _profile.lastName != null;
+    if (hasStructuredName) {
+      // A blank saved field must stay blank, not inherit a guessed name part.
+      _firstNameController.text = (_profile.firstName ?? '').trim();
+      _middleNameController.text = (_profile.middleName ?? '').trim();
+      _lastNameController.text = (_profile.lastName ?? '').trim();
+    } else {
+      _parseFullName(
+        _profile.fullName,
+        _firstNameController,
+        _middleNameController,
+        _lastNameController,
+      );
     }
     _contactController.text = _profile.contactNumber ?? '';
     _salaryGradeController.text = _profile.salaryGrade ?? '';
@@ -199,10 +200,6 @@ class _EditEmployeeDialogState extends State<_EditEmployeeDialog> {
 
   Future<void> _saveEmployee() async {
     if (!(_formKey.currentState?.validate() ?? false)) return;
-    if (!(_setupSectionKey.currentState?.validateAssignmentSelection() ??
-        true)) {
-      return;
-    }
 
     final firstName = _firstNameController.text.trim();
     final middleName = _middleNameController.text.trim();
@@ -251,14 +248,6 @@ class _EditEmployeeDialogState extends State<_EditEmployeeDialog> {
             _biometricIdController.text.trim().isNotEmpty)
           'biometric_user_id': _biometricIdController.text.trim(),
       };
-      if (!_requiresSeparationDate(_employmentStatus)) {
-        final setupChanges = _setupSectionKey.currentState
-            ?.buildAtomicSetupPayload(
-              effectiveFrom: DateTime.now(),
-              changedOnly: true,
-            );
-        if (setupChanges != null) body['setup'] = setupChanges;
-      }
 
       await ApiClient.instance.put('/api/employees/${_profile.id}', data: body);
 
@@ -542,6 +531,7 @@ class _EditEmployeeDialogState extends State<_EditEmployeeDialog> {
           ),
           const SizedBox(height: 16),
           DropdownButtonFormField<String>(
+            isExpanded: true,
             initialValue: _privilege,
             dropdownColor: AppTheme.dashPanelOf(context),
             style: AppTheme.dashFieldTextStyle(context),
@@ -642,19 +632,6 @@ class _EditEmployeeDialogState extends State<_EditEmployeeDialog> {
                 ),
               ],
             ),
-          const SizedBox(height: 16),
-          if (!_requiresSeparationDate(_employmentStatus))
-            EmployeeSetupSection(
-              key: _setupSectionKey,
-              title: 'Current assignment',
-              subtitle:
-                  'Change these only if this employee needs a new current department, position, shift, or policy. Assignment changes start today and keep old history.',
-              validationMessage:
-                  'For assignment, select Department, Position, and Shift; or leave all three blank.',
-              employeeId: _profile.id,
-              loadCurrentSetup: true,
-              boxed: true,
-            ),
         ],
       ),
     );
@@ -697,6 +674,7 @@ class _EditEmployeeDialogState extends State<_EditEmployeeDialog> {
           ),
           const SizedBox(height: 16),
           DropdownButtonFormField<String>(
+            isExpanded: true,
             initialValue: _suffix ?? 'None',
             decoration: _inputDecoration('Suffix (e.g. Jr., Sr., or None)'),
             hint: const Text(
@@ -716,6 +694,7 @@ class _EditEmployeeDialogState extends State<_EditEmployeeDialog> {
           ),
           const SizedBox(height: 16),
           DropdownButtonFormField<String>(
+            isExpanded: true,
             initialValue: _sex,
             decoration: _inputDecoration('Sex (Male / Female)'),
             hint: const Text(

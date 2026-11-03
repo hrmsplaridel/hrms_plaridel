@@ -6,6 +6,7 @@ const {
   locatorHistoryTitle,
   normalizeLocatorRejectionReason,
   recordLocatorWorkflowEvent,
+  mapLocatorWorkflowEvent,
 } = require('../src/services/locatorWorkflowHistory');
 
 const SLIP_ID = '00000000-0000-0000-0000-000000000101';
@@ -68,7 +69,8 @@ test('recordLocatorWorkflowEvent writes a complete append-only event payload', a
 test('history listing preserves database order and exposes readable titles', async () => {
   const client = {
     async query(sql, params) {
-      assert.match(sql, /ORDER BY created_at ASC, id ASC/);
+      assert.match(sql, /JOIN locator_slips slip/);
+      assert.match(sql, /ORDER BY history.created_at ASC, history.id ASC/);
       assert.deepEqual(params, [SLIP_ID]);
       return {
         rows: [
@@ -100,4 +102,56 @@ test('history listing preserves database order and exposes readable titles', asy
   assert.equal(events[1].title, 'Returned by Department Head');
   assert.equal(locatorHistoryTitle('custom_action'), 'Custom Action');
   assert.equal(locatorHistoryTitle('mayor_reassigned'), 'Reassigned to Current Mayor');
+});
+
+for (const [action, decision, outcome] of [
+  ['hr_approved', 'approve', 'Approved'],
+  ['hr_rejected', 'reject', 'Rejected'],
+  ['hr_returned', 'return', 'Returned'],
+]) {
+  test(`specific-person history uses the saved step and actual actor: ${action}`, () => {
+    const event = mapLocatorWorkflowEvent({
+      id: 'specific-event', action, actor_id: ACTOR_ID,
+      actor_name_snapshot: 'Records Reviewer', actor_role: 'employee',
+      workflow_snapshot: {
+        steps: [{label: 'Records verification', assignee_source: 'specific_users'}],
+        decisions: [{step: 0, action: decision, actor_id: ACTOR_ID}],
+      },
+    });
+    assert.equal(event.title, `Records verification · ${outcome}`);
+    assert.equal(event.actor_name, 'Records Reviewer');
+    assert.equal(event.action, action, 'The stored audit action remains unchanged');
+  });
+}
+
+test('ambiguous old-cycle history stays neutral rather than inventing an HR step', () => {
+  const event = mapLocatorWorkflowEvent({
+    action: 'hr_approved', actor_id: ACTOR_ID, actor_role: 'employee',
+    workflow_snapshot: {
+      steps: [{label: 'Current step', assignee_source: 'specific_users'}],
+      decisions: [{step: 0, action: 'approve', actor_id: ACTOR_ID}],
+      cycles: [{
+        steps: [{label: 'Previous step', assignee_source: 'specific_users'}],
+        decisions: [{step: 0, action: 'approve', actor_id: ACTOR_ID}],
+      }],
+    },
+  });
+  assert.equal(event.title, 'Approved');
+});
+
+test('history without a matching decision never attributes a custom step to HR', () => {
+  const event = mapLocatorWorkflowEvent({
+    action: 'hr_approved', actor_id: ACTOR_ID, actor_role: 'admin',
+    workflow_snapshot: {
+      steps: [{label: 'Records verification', assignee_source: 'specific_users'}],
+      decisions: [],
+    },
+  });
+  assert.equal(event.title, 'Approved');
+});
+
+test('legacy history does not describe an employee actor as HR', () => {
+  assert.equal(mapLocatorWorkflowEvent({
+    action: 'hr_approved', actor_role: 'employee',
+  }).title, 'Approved');
 });

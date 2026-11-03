@@ -67,7 +67,12 @@ class NotificationTapResult {
     final cat = n.category.toLowerCase();
     final t = n.type.toLowerCase();
     final isPrivileged = role == 'admin' || role == 'hr';
-    if ((cat == 'leave' || cat == 'locator') && n.metadata?['workflow_approval'] == true) {
+    final reviewAlert = {
+      '${cat}_pending_hr', '${cat}_pending_mayor', '${cat}_pending_department_head',
+      '${cat}_forwarded_to_hr', '${cat}_forwarded_to_mayor',
+      '${cat}_cancelled_hr', '${cat}_cancelled_department_head',
+    }.contains(t);
+    if ((cat == 'leave' || cat == 'locator') && reviewAlert && n.metadata?['workflow_approval'] == true) {
       return NotificationTapResult(
         cat == 'leave'
           ? (isPrivileged || role == 'mayor' ? NotificationTapKind.adminDtrLeaveManagement : NotificationTapKind.employeeLeaveApprovals)

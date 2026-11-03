@@ -11,6 +11,7 @@ function createLocatorRuntime(dependencies) {
   Object.assign(runtime, require('./repositories/requests')(runtime));
   require('./infrastructure/initialize')(runtime);
   Object.assign(runtime, require('./services/submission')(runtime));
+  Object.assign(runtime, require('./services/paperRecording')(runtime));
   return runtime;
 }
 module.exports = { createLocatorRuntime };

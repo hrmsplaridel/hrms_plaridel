@@ -68,6 +68,7 @@ module.exports = function createLocatorComponent({
       status: row.status,
       final_review_route: row.final_review_route || 'hr',
       workflow_snapshot: row.workflow_snapshot || null,
+      paper_approval_record: require('../../leave/services/paperSignatures').publicPaperRecord(row.paper_approval_record),
       dept_head_reviewer_id: row.dept_head_reviewer_id || null,
       dept_head_reviewer_name: row.dept_head_reviewer_name || null,
       dept_head_reviewed_at: row.dept_head_reviewed_at || null,

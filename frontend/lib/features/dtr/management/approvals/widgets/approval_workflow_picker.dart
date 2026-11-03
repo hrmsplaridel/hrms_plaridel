@@ -24,12 +24,14 @@ class ApprovalWorkflowPicker extends StatefulWidget {
     this.enabled = true,
     required this.onChanged,
     this.onSaved,
+    this.onLoaded,
   });
   final String? initialWorkflowId;
   final String? leaveTypeId;
   final bool enabled;
   final ValueChanged<Map<String, dynamic>> onChanged;
   final VoidCallback? onSaved;
+  final ValueChanged<Map<String, dynamic>>? onLoaded;
   @override
   State<ApprovalWorkflowPicker> createState() => _ApprovalWorkflowPickerState();
 }
@@ -108,6 +110,7 @@ class _ApprovalWorkflowPickerState extends State<ApprovalWorkflowPicker> {
         _selected = selected;
         _loading = false;
       });
+      widget.onLoaded?.call(_payload);
       if (defaultWorkflow != null) widget.onChanged(_payload);
     } catch (_) {
       if (mounted && generation == _generation) {

@@ -118,6 +118,7 @@ module.exports = function initializeLocatorCompatibility({ DEFAULT_LOCATOR_TYPES
 
       ALTER TABLE locator_slips
         ADD COLUMN IF NOT EXISTS request_type TEXT NOT NULL DEFAULT 'locator';
+      ALTER TABLE locator_slips ADD COLUMN IF NOT EXISTS paper_approval_record JSONB;
       ALTER TABLE locator_slips
         ADD COLUMN IF NOT EXISTS request_type_label_snapshot TEXT;
       ALTER TABLE locator_slips

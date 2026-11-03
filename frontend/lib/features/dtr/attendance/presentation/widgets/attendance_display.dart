@@ -8,6 +8,7 @@ import 'package:hrms_plaridel/core/theme/app_theme.dart';
 /// Single attendance remark. Prefer record.attendanceRemark (backend); fallback for hardcoded/preview.
 /// For holidays, uses holiday name when available.
 String getAttendanceRemark(TimeRecord r) {
+  if(r.status=='not_tracked') return 'Not tracked';
   if (r.attendanceRemark != null && r.attendanceRemark!.isNotEmpty) {
     return normalizeAttendanceRemark(r.attendanceRemark!);
   }
@@ -68,6 +69,7 @@ String compactLocatorRemark(String remark) {
 /// Whether a record represents a completed workday attendance. Late and/or
 /// undertime employees were still present; incomplete and invalid logs were not.
 bool isCompletedAttendanceRecord(TimeRecord record) {
+  if (record.status == 'not_tracked') return false;
   if (record.status == 'on_field' || record.locatorSlipId != null) {
     // Approved locator coverage replaces punches. Uncovered absence and
     // incomplete/invalid sessions still do not count as a completed workday.
@@ -100,6 +102,7 @@ String formatWorkedHours(TimeRecord record) {
 
 /// Display late minutes: "X min", "0 min", or "—" for holiday/leave.
 String formatLateMinutes(TimeRecord r) {
+  if(r.status=='not_tracked') return '—';
   if (r.status == 'holiday' ||
       r.holidayId != null ||
       r.status == 'on_leave' ||
@@ -126,6 +129,7 @@ Color colorForRemarkText(
 
 /// Display undertime minutes: "X min", "0 min", or "—" for holiday/leave.
 String formatUndertimeMinutes(TimeRecord r) {
+  if(r.status=='not_tracked') return '—';
   if (r.status == 'holiday' ||
       r.holidayId != null ||
       r.status == 'on_leave' ||

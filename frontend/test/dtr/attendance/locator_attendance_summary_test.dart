@@ -4,6 +4,25 @@ import 'package:hrms_plaridel/features/dtr/attendance/presentation/widgets/atten
 import 'package:hrms_plaridel/features/dashboard/presentation/employee/shared/widgets/attendance_overview/attendance_overview_data.dart';
 
 void main() {
+  test('current absence is counted only after the assigned shift ends', () {
+    for (final hour in [7, 12, 18]) {
+      final summary = aggregateMonthlyAttendance(
+        records: [],
+        year: 2026,
+        month: 10,
+        now: DateTime(2026, 10, 1, hour),
+        todayShiftEndMinutes: 17 * 60,
+      );
+      expect(summary.absent, hour > 17 ? 1 : 0);
+    }
+    final unknown = aggregateMonthlyAttendance(
+      records: [],
+      year: 2026,
+      month: 10,
+      now: DateTime(2026, 10, 1, 7),
+    );
+    expect(unknown.absent, 0);
+  });
   final date = DateTime(2026, 10, 1);
   TimeRecord field({int late = 0, int undertime = 0}) => TimeRecord(
     userId: 'employee',

@@ -183,6 +183,19 @@ extension _ManageAssignmentForms on _ManageAssignmentState {
           },
         ),
         const SizedBox(height: 16),
+        Wrap(spacing:12,runSpacing:8,crossAxisAlignment:WrapCrossAlignment.end,children:[
+          KeyedSubtree(key:const ValueKey('employee-tracking-start'),child:_buildDatePicker(
+            'Attendance tracking starts',_trackingStart,
+            (date)=>_updateAssignmentFormState(()=>_trackingStart=date),
+          )),
+          if(_trackingStart!=null) TextButton(
+            onPressed:()=>_updateAssignmentFormState(()=>_trackingStart=null),child:const Text('Use assignment schedule'),
+          ),
+        ]),
+        const SizedBox(height:8),
+        Text('Missing scheduled logs before this date are not tracked and do not generate attendance deductions. The date belongs to the employee and stays the same across transfers. Leave blank to use the existing assignment schedule.',
+          style:TextStyle(fontSize:12,color:_mutedColor(context))),
+        const SizedBox(height:16),
         Text(
           'Remarks (optional)',
           style: TextStyle(

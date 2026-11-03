@@ -148,10 +148,12 @@ class EmployeeLocatorMobileSegmentSelector extends StatelessWidget {
     required this.onPmOut,
     this.accent = const Color(0xFFF57C00),
     this.singleSession = false,
+    this.allowedSlots = const {'am_in', 'am_out', 'pm_in', 'pm_out'},
   });
 
   final bool amIn;
   final bool singleSession;
+  final Set<String> allowedSlots;
   final bool amOut;
   final bool pmIn;
   final bool pmOut;
@@ -178,7 +180,7 @@ class EmployeeLocatorMobileSegmentSelector extends StatelessWidget {
           _SegmentCell(
             label: singleSession ? 'IN' : 'AM IN',
             selected: amIn,
-            onTap: locked ? null : onAmIn,
+            onTap: locked || !allowedSlots.contains('am_in') ? null : onAmIn,
             accent: accent,
           ),
           if (!singleSession) ...[
@@ -186,14 +188,14 @@ class EmployeeLocatorMobileSegmentSelector extends StatelessWidget {
             _SegmentCell(
               label: 'AM OUT',
               selected: amOut,
-              onTap: locked ? null : onAmOut,
+              onTap: locked || !allowedSlots.contains('am_out') ? null : onAmOut,
               accent: accent,
             ),
             _SegmentDivider(divider),
             _SegmentCell(
               label: 'PM IN',
               selected: pmIn,
-              onTap: locked ? null : onPmIn,
+              onTap: locked || !allowedSlots.contains('pm_in') ? null : onPmIn,
               accent: accent,
             ),
           ],
@@ -201,7 +203,7 @@ class EmployeeLocatorMobileSegmentSelector extends StatelessWidget {
           _SegmentCell(
             label: singleSession ? 'OUT' : 'PM OUT',
             selected: pmOut,
-            onTap: locked ? null : onPmOut,
+            onTap: locked || !allowedSlots.contains('pm_out') ? null : onPmOut,
             accent: accent,
           ),
         ],
@@ -246,7 +248,7 @@ class _SegmentCell extends StatelessWidget {
           child: Text(
             label,
             style: TextStyle(
-              color: selected ? Colors.white : const Color(0xFF2F2F2F),
+              color: onTap == null && !selected ? Colors.grey : selected ? Colors.white : const Color(0xFF2F2F2F),
               fontWeight: FontWeight.w600,
               fontSize: 14,
             ),
