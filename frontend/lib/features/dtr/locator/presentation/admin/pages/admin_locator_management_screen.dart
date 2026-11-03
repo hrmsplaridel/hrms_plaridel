@@ -1402,7 +1402,9 @@ class _AdminLocatorManagementScreenState
                                         pmOut: item.pmOut,
                                       ),
                                     );
-                                if (!dialogContext.mounted) return;
+                                if (bytes == null || !dialogContext.mounted) {
+                                  return;
+                                }
                                 await showFormPdfPreview(
                                   context: dialogContext,
                                   bytes: bytes,

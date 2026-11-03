@@ -1,3 +1,4 @@
+import 'package:hrms_plaridel/core/widgets/pdf_preview_preparation.dart';
 import 'dart:convert';
 
 import 'package:dio/dio.dart';
@@ -1297,8 +1298,11 @@ class _DtrReportsState extends State<DtrReports> {
               pageFormat: outputFormat,
             ),
           );
-      await buildPdf(pageFormat);
-      if (!context.mounted) return;
+      final prepared = await preparePdfPreview(
+        context: context,
+        prepare: (_) => buildPdf(pageFormat),
+      );
+      if (prepared == null || !context.mounted) return;
       await openResponsiveRightSidePanel<void>(
         context: context,
         barrierLabel: 'Close DTR preview',

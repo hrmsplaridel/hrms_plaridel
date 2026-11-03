@@ -753,7 +753,7 @@ class EmployeeLocatorSlipContentState extends State<EmployeeLocatorSlipContent>
             pmOut: item.pmOut,
           ),
         );
-        if (!dialogContext.mounted) return;
+        if (bytes == null || !dialogContext.mounted) return;
         await showFormPdfPreview(
           context: dialogContext,
           bytes: bytes,

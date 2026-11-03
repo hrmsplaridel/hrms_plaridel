@@ -1,3 +1,4 @@
+import 'package:hrms_plaridel/core/widgets/pdf_preview_preparation.dart';
 import 'package:hrms_plaridel/features/dtr/leave/utils/configured_leave_pdf.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
@@ -88,63 +89,72 @@ class EmployeeLeaveActions {
     final provider = context.read<LeaveProvider>();
     if (!context.mounted || !isMounted()) return;
 
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(const SnackBar(content: Text('Loading preview...')));
-
     try {
-      final (:target, :balances, :formSignatories) = await _loadLeaveFormData(
-        provider,
-        request,
-      );
-      if (!context.mounted || !isMounted()) return;
+      final prepared = await preparePdfPreview(
+        context: context,
+        prepare: (task) async {
+          final (:target, :balances, :formSignatories) =
+              await _loadLeaveFormData(provider, request, task: task);
+          task.checkActive();
 
-      final filename = 'Leave_Application_${target.id ?? target.userId}.pdf';
-      final doc = await LeaveRequestPdf.buildPdf(
-        request: target,
-        balances: balances,
-        certificationOfficerSignatureBytes:
-            formSignatories.certificationOfficerSignature?.signatureImageBytes,
-        certificationOfficerName: formSignatories.certificationOfficer?.name,
-        certificationOfficerTitle: formSignatories.certificationOfficer?.title,
-        recommendationOfficerName: formSignatories.recommendationOfficer?.name,
-        recommendationOfficerTitle:
-            formSignatories.recommendationOfficer?.title,
-        approvingAuthorityName: formSignatories.approvingAuthority?.name,
-        approvingAuthorityTitle: formSignatories.approvingAuthority?.title,
-        applicantSignatureBytes:
-            formSignatories.applicantSignature?.signatureImageBytes,
-        departmentHeadSignatureBytes:
-            formSignatories.departmentHeadSignature?.signatureImageBytes,
-        hrApproverSignatureBytes:
-            formSignatories.hrApproverSignature?.signatureImageBytes,
+          final filename =
+              'Leave_Application_${target.id ?? target.userId}.pdf';
+          final doc = await LeaveRequestPdf.buildPdf(
+            request: target,
+            balances: balances,
+            certificationOfficerSignatureBytes: formSignatories
+                .certificationOfficerSignature
+                ?.signatureImageBytes,
+            certificationOfficerName:
+                formSignatories.certificationOfficer?.name,
+            certificationOfficerTitle:
+                formSignatories.certificationOfficer?.title,
+            recommendationOfficerName:
+                formSignatories.recommendationOfficer?.name,
+            recommendationOfficerTitle:
+                formSignatories.recommendationOfficer?.title,
+            approvingAuthorityName: formSignatories.approvingAuthority?.name,
+            approvingAuthorityTitle: formSignatories.approvingAuthority?.title,
+            applicantSignatureBytes:
+                formSignatories.applicantSignature?.signatureImageBytes,
+            departmentHeadSignatureBytes:
+                formSignatories.departmentHeadSignature?.signatureImageBytes,
+            hrApproverSignatureBytes:
+                formSignatories.hrApproverSignature?.signatureImageBytes,
+          );
+          task.checkActive();
+          final bytes = await saveConfiguredLeavePdf(
+            request: target,
+            document: doc,
+            balances: balances,
+            departmentReviewer: formSignatories.recommendationOfficer?.name,
+            departmentReviewerTitle:
+                formSignatories.recommendationOfficer?.title,
+            approvingAuthorityName: formSignatories.approvingAuthority?.name,
+            approvingAuthorityTitle: formSignatories.approvingAuthority?.title,
+            certificationOfficerName:
+                formSignatories.certificationOfficer?.name,
+            certificationOfficerTitle:
+                formSignatories.certificationOfficer?.title,
+            certificationSignature: formSignatories
+                .certificationOfficerSignature
+                ?.signatureImageBytes,
+            applicantSignature:
+                formSignatories.applicantSignature?.signatureImageBytes,
+            departmentSignature:
+                formSignatories.departmentHeadSignature?.signatureImageBytes,
+            finalSignature:
+                formSignatories.hrApproverSignature?.signatureImageBytes,
+          );
+          return (bytes: bytes, filename: filename);
+        },
       );
-      final bytes = await saveConfiguredLeavePdf(
-        request: target,
-        document: doc,
-        balances: balances,
-        departmentReviewer: formSignatories.recommendationOfficer?.name,
-        departmentReviewerTitle: formSignatories.recommendationOfficer?.title,
-        approvingAuthorityName: formSignatories.approvingAuthority?.name,
-        approvingAuthorityTitle: formSignatories.approvingAuthority?.title,
-        certificationOfficerName: formSignatories.certificationOfficer?.name,
-        certificationOfficerTitle: formSignatories.certificationOfficer?.title,
-        certificationSignature: formSignatories.certificationOfficerSignature?.signatureImageBytes,
-        applicantSignature:
-            formSignatories.applicantSignature?.signatureImageBytes,
-        departmentSignature:
-            formSignatories.departmentHeadSignature?.signatureImageBytes,
-        finalSignature:
-            formSignatories.hrApproverSignature?.signatureImageBytes,
-      );
-      if (!context.mounted || !isMounted()) return;
-
-      ScaffoldMessenger.of(context).clearSnackBars();
+      if (prepared == null || !context.mounted || !isMounted()) return;
       await showFormPdfPreview(
         context: context,
-        bytes: bytes,
+        bytes: prepared.bytes,
         title: 'Leave Form Preview',
-        filename: filename,
+        filename: prepared.filename,
       );
     } catch (e) {
       if (!context.mounted || !isMounted()) return;
@@ -226,7 +236,11 @@ class EmployeeLeaveActions {
       LeaveFormSignatories formSignatories,
     })
   >
-  _loadLeaveFormData(LeaveProvider provider, LeaveRequest request) async {
+  _loadLeaveFormData(
+    LeaveProvider provider,
+    LeaveRequest request, {
+    PdfPreviewPreparation? task,
+  }) async {
     LeaveRequest target = request;
     final id = request.id;
     if (id != null && id.isNotEmpty) {
@@ -239,6 +253,7 @@ class EmployeeLeaveActions {
       }
       target = fresh;
     }
+    task?.checkActive();
 
     // Run the two independent lookups concurrently — they both depend on
     // `target` but not on each other, so there is no reason to wait for

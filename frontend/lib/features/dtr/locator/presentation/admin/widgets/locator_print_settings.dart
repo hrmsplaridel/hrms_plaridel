@@ -1,3 +1,4 @@
+import 'package:hrms_plaridel/core/widgets/pdf_preview_preparation.dart';
 import 'package:hrms_plaridel/features/dtr/management/approvals/utils/workflow_print_layout.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_type_definition.dart';
 import 'dart:typed_data';
@@ -193,34 +194,40 @@ class _LocatorPrintSettingsState extends State<LocatorPrintSettings> {
         await _previewDraft(_layout);
         return;
       }
-      final bytes = await LocatorSlipPrint.buildPdf(
-        id: null,
-        employeeName: 'Sample Employee',
-        dateText: 'Oct 10, 2026',
-        requestTypeLabel: 'Locator / Official Business',
-        locationLabel: 'Office / Destination',
-        office: 'Municipal Hall',
-        remarks: 'Official transaction',
-        amIn: true,
-        amOut: true,
-        pmIn: true,
-        pmOut: true,
+      final prepared = await preparePdfPreview(
+        context: context,
+        prepare: (task) async {
+          final bytes = await LocatorSlipPrint.buildPdf(
+            id: null,
+            employeeName: 'Sample Employee',
+            dateText: 'Oct 10, 2026',
+            requestTypeLabel: 'Locator / Official Business',
+            locationLabel: 'Office / Destination',
+            office: 'Municipal Hall',
+            remarks: 'Official transaction',
+            amIn: true,
+            amOut: true,
+            pmIn: true,
+            pmOut: true,
+          );
+          task.checkActive();
+          final r = await ApiClient.instance.post<List<int>>(
+            '/api/locator-slips/print/types/${widget.typeId}/preview',
+            data: FormData.fromMap({
+              'file': MultipartFile.fromBytes(bytes, filename: 'preview.pdf'),
+            }),
+            options: Options(responseType: ResponseType.bytes),
+          );
+          return Uint8List.fromList(r.data!);
+        },
       );
-      final r = await ApiClient.instance.post<List<int>>(
-        '/api/locator-slips/print/types/${widget.typeId}/preview',
-        data: FormData.fromMap({
-          'file': MultipartFile.fromBytes(bytes, filename: 'preview.pdf'),
-        }),
-        options: Options(responseType: ResponseType.bytes),
+      if (prepared == null || !mounted) return;
+      await showFormPdfPreview(
+        context: context,
+        bytes: prepared,
+        title: 'Locator Form Preview',
+        filename: 'Locator_Form_Sample.pdf',
       );
-      if (mounted) {
-        await showFormPdfPreview(
-          context: context,
-          bytes: Uint8List.fromList(r.data!),
-          title: 'Locator Form Preview',
-          filename: 'Locator_Form_Sample.pdf',
-        );
-      }
     } catch (_) {
       if (mounted) setState(() => _error = 'Could not preview the saved form.');
     } finally {
@@ -246,26 +253,96 @@ class _LocatorPrintSettingsState extends State<LocatorPrintSettings> {
       sampleSignatory: _sampleSignatory,
     );
   }
-  LocatorRequestType get _requestType=>widget.readRequestType?.call()??LocatorRequestType.locator;
-  DioMediaType _fileType(PlatformFile file)=>DioMediaType.parse(file.extension?.toLowerCase()=='pdf'?'application/pdf':file.extension?.toLowerCase()=='png'?'image/png':'image/jpeg');
-  Future<void> _previewDraft(LocatorPrintLayout? layout, {List<LeaveCustomFieldDefinition>? customFields})async{
-    final type=customFields==null?_requestType:_requestType.copyWith(employeeDetailSchema:customFields);
-    final bytes=layout!=null?await buildLocatorLayoutPdf(layout:layout,form:locatorLayoutSample(type),signatories:LocatorFormSignatories(
-      applicant:_sampleSignatory('applicant'),departmentHead:_sampleSignatory('department_head'),finalApprover:_sampleSignatory('hr_approver'),
-      workflowApprovers: {for (final source in workflowPrintSignatures(_workflowSteps).keys) if(source.startsWith('workflow_step_')) source: _sampleSignatory(source)},
-    )):await LocatorSlipPrint.buildPdf(id:null,employeeName:'Sample Employee',dateText:'Oct 13, 2026',requestTypeLabel:type.label,locationLabel:type.locationLabel,office:'Municipal Hall',remarks:'Sample purpose',amIn:true,amOut:true,pmIn:true,pmOut:true,
-      signatories:LocatorFormSignatories(form:locatorLayoutSample(type)));
-    final response=await ApiClient.instance.post<List<int>>('/api/locator-slips/print/preview',data:FormData.fromMap({
-      if(widget.typeId!=null)'type_id':widget.typeId,
-      'print_layout':jsonEncode(layout?.toJson()),'remove_background':_remove.toString(),
-      'file':MultipartFile.fromBytes(bytes,filename:'preview.pdf'),
-      if(_file!=null)'background':MultipartFile.fromBytes(_file!.bytes!,filename:_file!.name,contentType:_fileType(_file!)),
-    }),options:Options(responseType:ResponseType.bytes));
-    if(mounted)await showFormPdfPreview(context:context,bytes:Uint8List.fromList(response.data!),title:'Printed Form Preview',filename:'Locator_Form_Sample.pdf');
+
+  LocatorRequestType get _requestType =>
+      widget.readRequestType?.call() ?? LocatorRequestType.locator;
+  DioMediaType _fileType(PlatformFile file) => DioMediaType.parse(
+    file.extension?.toLowerCase() == 'pdf'
+        ? 'application/pdf'
+        : file.extension?.toLowerCase() == 'png'
+        ? 'image/png'
+        : 'image/jpeg',
+  );
+  Future<void> _previewDraft(
+    LocatorPrintLayout? layout, {
+    List<LeaveCustomFieldDefinition>? customFields,
+  }) async {
+    final prepared = await preparePdfPreview(
+      context: context,
+      prepare: (task) async {
+        final type = customFields == null
+            ? _requestType
+            : _requestType.copyWith(employeeDetailSchema: customFields);
+        final bytes = layout != null
+            ? await buildLocatorLayoutPdf(
+                layout: layout,
+                form: locatorLayoutSample(type),
+                signatories: LocatorFormSignatories(
+                  applicant: _sampleSignatory('applicant'),
+                  departmentHead: _sampleSignatory('department_head'),
+                  finalApprover: _sampleSignatory('hr_approver'),
+                  workflowApprovers: {
+                    for (final source in workflowPrintSignatures(
+                      _workflowSteps,
+                    ).keys)
+                      if (source.startsWith('workflow_step_'))
+                        source: _sampleSignatory(source),
+                  },
+                ),
+              )
+            : await LocatorSlipPrint.buildPdf(
+                id: null,
+                employeeName: 'Sample Employee',
+                dateText: 'Oct 13, 2026',
+                requestTypeLabel: type.label,
+                locationLabel: type.locationLabel,
+                office: 'Municipal Hall',
+                remarks: 'Sample purpose',
+                amIn: true,
+                amOut: true,
+                pmIn: true,
+                pmOut: true,
+                signatories: LocatorFormSignatories(
+                  form: locatorLayoutSample(type),
+                ),
+              );
+        task.checkActive();
+        final response = await ApiClient.instance.post<List<int>>(
+          '/api/locator-slips/print/preview',
+          data: FormData.fromMap({
+            if (widget.typeId != null) 'type_id': widget.typeId,
+            'print_layout': jsonEncode(layout?.toJson()),
+            'remove_background': _remove.toString(),
+            'file': MultipartFile.fromBytes(bytes, filename: 'preview.pdf'),
+            if (_file != null)
+              'background': MultipartFile.fromBytes(
+                _file!.bytes!,
+                filename: _file!.name,
+                contentType: _fileType(_file!),
+              ),
+          }),
+          options: Options(responseType: ResponseType.bytes),
+        );
+        return Uint8List.fromList(response.data!);
+      },
+    );
+    if (prepared == null || !mounted) return;
+    await showFormPdfPreview(
+      context: context,
+      bytes: prepared,
+      title: 'Printed Form Preview',
+      filename: 'Locator_Form_Sample.pdf',
+    );
   }
-  Future<void> _editLayout()async{
-    if (_layout == null && widget.readWorkflowSteps != null && _workflowSteps?.isNotEmpty != true) {
-      setState(() => _error = 'Select a workflow and wait for it to load before designing a new layout.');
+
+  Future<void> _editLayout() async {
+    if (_layout == null &&
+        widget.readWorkflowSteps != null &&
+        _workflowSteps?.isNotEmpty != true) {
+      setState(
+        () => _error =
+            'Select a workflow and wait for it to load before designing a new layout.',
+      );
       return;
     }
     setState((){_busy=true;_error=null;});

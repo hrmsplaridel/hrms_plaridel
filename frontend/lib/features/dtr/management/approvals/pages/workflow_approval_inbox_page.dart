@@ -937,7 +937,7 @@ class _WorkflowDecisionDialogState extends State<_WorkflowDecisionDialog> {
             pmOut: data['pm_out'] == true,
           ),
         );
-        if (!mounted) return;
+        if (bytes == null || !mounted) return;
         await showFormPdfPreview(
           context: context,
           bytes: bytes,
