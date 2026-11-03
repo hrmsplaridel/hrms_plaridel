@@ -456,7 +456,7 @@ class LocatorPrintLayout {
   }
 
   String? validate() {
-    if (baseForm != null && !['csc', 'wellness'].contains(baseForm)) {
+    if (baseForm != null && !['csc', 'wellness', 'locator'].contains(baseForm)) {
       return 'Unknown original form.';
     }
     if (baseFormBox != null) {
