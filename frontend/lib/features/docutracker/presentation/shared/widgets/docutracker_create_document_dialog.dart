@@ -247,9 +247,9 @@ class _DocuTrackerCreateDocumentFlowState
     final onDetails = _type != null;
     return Material(
       color: DocuTrackerTokens.surfaceOf(context),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
           _buildHeader(context, onDetails),
           Divider(height: 1, color: DocuTrackerTokens.borderSubtleOf(context)),
           Expanded(
@@ -278,21 +278,21 @@ class _DocuTrackerCreateDocumentFlowState
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
                 if (stepLabel != null)
-                  Text(
+                            Text(
                     stepLabel.toUpperCase(),
                     style: const TextStyle(
                       fontSize: 11,
                       letterSpacing: 0.8,
-                      fontWeight: FontWeight.w800,
+                                fontWeight: FontWeight.w800,
                       color: DocuTrackerTokens.brand,
-                    ),
-                  ),
+                              ),
+                            ),
                 const SizedBox(height: 4),
-                Text(
+                            Text(
                   onDetails ? 'Draft details' : 'What are you creating?',
                   style: DocuTrackerTokens.titleStyle(context),
                 ),
@@ -304,10 +304,10 @@ class _DocuTrackerCreateDocumentFlowState
                       : 'Pick a document type. Each one follows its own '
                             'approval route.',
                   style: DocuTrackerTokens.metaStyle(context),
-                ),
-              ],
-            ),
-          ),
+                            ),
+                          ],
+                        ),
+                      ),
           IconButton(
             tooltip: 'Close',
             onPressed: _creating ? null : () => Navigator.of(context).pop(),
@@ -354,33 +354,33 @@ class _DocuTrackerCreateDocumentFlowState
     final route = _routeFor(type);
     return ListView(
       padding: const EdgeInsets.fromLTRB(24, 20, 24, 24),
-      children: [
+                          children: [
         if (_error != null) ...[
-          Container(
-            padding: const EdgeInsets.all(12),
+                              Container(
+                                padding: const EdgeInsets.all(12),
             decoration: DocuTrackerTokens.errorBannerDecoration(context),
-            child: Row(
-              children: [
-                Icon(
-                  Icons.error_outline,
-                  size: 20,
+                                child: Row(
+                                  children: [
+                                    Icon(
+                                      Icons.error_outline,
+                                      size: 20,
                   color: DocuTrackerTokens.errorBannerIcon(context),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
+                                    ),
+                                    const SizedBox(width: 8),
+                                    Expanded(
+                                      child: Text(
                     _error!,
-                    style: TextStyle(
-                      fontSize: 13,
+                                        style: TextStyle(
+                                          fontSize: 13,
                       color: DocuTrackerTokens.errorBannerForeground(context),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 16),
-        ],
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              const SizedBox(height: 16),
+                            ],
         _SelectedTypeBanner(
           type: type,
           onChange: _singleType || _creating
@@ -389,32 +389,32 @@ class _DocuTrackerCreateDocumentFlowState
                   _type = null;
                   _error = null;
                 }),
-        ),
-        const SizedBox(height: 20),
-        TextField(
+                            ),
+                            const SizedBox(height: 20),
+                            TextField(
           key: const Key('docutracker-create-title'),
           controller: _titleController,
           autofocus: true,
           textInputAction: TextInputAction.next,
-          decoration: DocuTrackerStyles.inputDecoration(
-            context,
-            'Document title',
-            Icons.title_rounded,
-          ),
+                              decoration: DocuTrackerStyles.inputDecoration(
+                                context,
+                                'Document title',
+                                Icons.title_rounded,
+                              ),
           onChanged: (_) {
             if (_error != null) setState(() => _error = null);
           },
         ),
         const SizedBox(height: 16),
-        TextField(
+                            TextField(
           key: const Key('docutracker-create-purpose'),
           controller: _purposeController,
           maxLines: 4,
           decoration:
               DocuTrackerStyles.inputDecoration(
-                context,
+                                context,
                 'Purpose (optional)',
-                Icons.notes_rounded,
+                                Icons.notes_rounded,
               ).copyWith(
                 helperText:
                     'Used as the opening text in the editor. You can change '
@@ -431,8 +431,8 @@ class _DocuTrackerCreateDocumentFlowState
             _pickedFileName = null;
             _pickedFileBytes = null;
           }),
-        ),
-        const SizedBox(height: 20),
+                            ),
+                            const SizedBox(height: 20),
         _NextStepsPanel(route: route),
       ],
     );
@@ -473,7 +473,7 @@ class _DocuTrackerCreateDocumentFlowState
       child: widget.isMobile
           ? Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
+                              children: [
                 if (onDetails) primary,
                 if (onDetails) const SizedBox(height: 12),
                 secondary,
@@ -481,7 +481,7 @@ class _DocuTrackerCreateDocumentFlowState
             )
           : Row(
               mainAxisAlignment: MainAxisAlignment.end,
-              children: [
+                                  children: [
                 secondary,
                 if (onDetails) ...[const SizedBox(width: 16), primary],
               ],

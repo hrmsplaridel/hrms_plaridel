@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hrms_plaridel/features/docutracker/data/dto/docutracker_api_result.dart';
@@ -423,26 +425,74 @@ void main() {
     });
   });
 
+  group('release department filter', () {
+    test('filters case-insensitively and returns all when query empty', () {
+      const departments = [
+        DocuTrackerReleaseDepartment(id: '1', name: 'Engineering'),
+        DocuTrackerReleaseDepartment(id: '2', name: 'Finance'),
+        DocuTrackerReleaseDepartment(
+          id: '3',
+          name: 'Municipal Planning and Development Office',
+        ),
+      ];
+      expect(docuTrackerFilterReleaseDepartments(departments, ''), departments);
+      expect(docuTrackerFilterReleaseDepartments(departments, '  '), departments);
+      expect(
+        docuTrackerFilterReleaseDepartments(departments, 'eng').map((d) => d.id),
+        ['1'],
+      );
+      expect(
+        docuTrackerFilterReleaseDepartments(departments, 'FINANCE').map(
+          (d) => d.id,
+        ),
+        ['2'],
+      );
+      expect(
+        docuTrackerFilterReleaseDepartments(departments, 'planning').map(
+          (d) => d.id,
+        ),
+        ['3'],
+      );
+      expect(
+        docuTrackerFilterReleaseDepartments(departments, 'zzz'),
+        isEmpty,
+      );
+    });
+  });
+
   group('release dialog', () {
     Future<DocuTrackerDocument?> openDialog(
       WidgetTester tester, {
       required DocuTrackerReleaseOptions options,
       required DocuTrackerReleaseSubmitter submit,
+      ThemeData? theme,
+      Size surfaceSize = const Size(800, 900),
+      DocuTrackerDocument? document,
+      Future<DocuTrackerReleaseOptions> Function(String)? loadOptions,
     }) async {
+      final view = tester.view;
+      view.physicalSize = surfaceSize;
+      view.devicePixelRatio = 1.0;
+      addTearDown(view.resetPhysicalSize);
+      addTearDown(view.resetDevicePixelRatio);
       DocuTrackerDocument? popped;
       await tester.pumpWidget(
         MaterialApp(
-          home: Builder(
-            builder: (context) => TextButton(
-              onPressed: () async {
-                popped = await showDocuTrackerReleaseDialog(
-                  context,
-                  document: _memo(viewerCanRelease: true),
-                  loadOptions: (_) async => options,
-                  submit: submit,
-                );
-              },
-              child: const Text('open'),
+          theme: theme ?? ThemeData.light(),
+          home: MediaQuery(
+            data: MediaQueryData(size: surfaceSize),
+            child: Builder(
+              builder: (context) => TextButton(
+                onPressed: () async {
+                  popped = await showDocuTrackerReleaseDialog(
+                    context,
+                    document: document ?? _memo(viewerCanRelease: true),
+                    loadOptions: loadOptions ?? (_) async => options,
+                    submit: submit,
+                  );
+                },
+                child: const Text('open'),
+              ),
             ),
           ),
         ),
@@ -455,6 +505,16 @@ void main() {
     FilledButton confirmButton(WidgetTester tester) => tester.widget(
       find.byKey(const ValueKey('docutracker-release-confirm')),
     );
+
+    Future<void> selectDepartment(
+      WidgetTester tester,
+      String departmentId,
+    ) async {
+      await tester.tap(
+        find.byKey(ValueKey('docutracker-release-department-$departmentId')),
+      );
+      await tester.pumpAndSettle();
+    }
 
     testWidgets('confirm is disabled until a department is chosen, then '
         'submits once with remarks and pops the released document', (
@@ -488,19 +548,22 @@ void main() {
             },
       );
 
+      expect(find.text('Release Document'), findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('docutracker-release-info')),
+        findsOneWidget,
+      );
+      expect(find.text(docuTrackerReleaseInfoViewOnly), findsOneWidget);
+      expect(find.text(docuTrackerReleaseInfoIrreversible), findsOneWidget);
       expect(confirmButton(tester).onPressed, isNull);
 
-      await tester.tap(
-        find.byKey(const ValueKey('docutracker-release-department')),
-      );
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('Engineering').last);
-      await tester.pumpAndSettle();
+      await selectDepartment(tester, 'dept-eng');
       await tester.enterText(
         find.byKey(const ValueKey('docutracker-release-remarks')),
         'For implementation',
       );
       expect(confirmButton(tester).onPressed, isNotNull);
+      expect(find.textContaining('Will release to Engineering'), findsOneWidget);
 
       await tester.tap(
         find.byKey(const ValueKey('docutracker-release-confirm')),
@@ -513,6 +576,95 @@ void main() {
       expect(calls.single['remarks'], 'For implementation');
       expect(calls.single['idempotencyKey'], isNotEmpty);
       expect(find.byType(DocuTrackerReleaseDialog), findsNothing);
+    });
+
+    testWidgets('search filters departments and shows empty state', (
+      tester,
+    ) async {
+      await openDialog(
+        tester,
+        options: const DocuTrackerReleaseOptions(
+          releaseRequired: true,
+          released: false,
+          canRelease: true,
+          departments: _departments,
+        ),
+        submit:
+            ({
+              required documentId,
+              required departmentId,
+              remarks,
+              idempotencyKey,
+            }) async => throw StateError('must not submit'),
+      );
+
+      expect(find.text('Engineering'), findsOneWidget);
+      expect(find.text('Finance'), findsOneWidget);
+
+      await tester.enterText(
+        find.byKey(const ValueKey('docutracker-release-department-search')),
+        'fin',
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('Finance'), findsOneWidget);
+      expect(find.text('Engineering'), findsNothing);
+
+      await tester.enterText(
+        find.byKey(const ValueKey('docutracker-release-department-search')),
+        'zzz-no-match',
+      );
+      await tester.pumpAndSettle();
+      expect(
+        find.byKey(const ValueKey('docutracker-release-department-empty')),
+        findsOneWidget,
+      );
+      expect(find.text(docuTrackerReleaseNoDepartmentsFound), findsOneWidget);
+      expect(confirmButton(tester).onPressed, isNull);
+    });
+
+    testWidgets('long department names remain selectable without overflow', (
+      tester,
+    ) async {
+      const longName =
+          'Office of the Municipal Planning and Development Coordinator '
+          'for Infrastructure and Special Projects';
+      await openDialog(
+        tester,
+        surfaceSize: const Size(360, 780),
+        options: const DocuTrackerReleaseOptions(
+          releaseRequired: true,
+          released: false,
+          canRelease: true,
+          departments: [
+            DocuTrackerReleaseDepartment(id: 'dept-long', name: longName),
+            ..._departments,
+          ],
+        ),
+        submit:
+            ({
+              required documentId,
+              required departmentId,
+              remarks,
+              idempotencyKey,
+            }) async => DocuTrackerSuccess(
+              _memo(releasedAt: '2026-10-09T15:42:00Z'),
+            ),
+      );
+
+      final title = tester.widget<Text>(
+        find.descendant(
+          of: find.byKey(
+            const ValueKey('docutracker-release-department-dept-long'),
+          ),
+          matching: find.byType(Text),
+        ),
+      );
+      expect(title.maxLines, 2);
+      expect(title.overflow, TextOverflow.ellipsis);
+
+      await selectDepartment(tester, 'dept-long');
+      expect(confirmButton(tester).onPressed, isNotNull);
+      expect(tester.takeException(), isNull);
     });
 
     testWidgets('backend failure keeps the dialog open with the error', (
@@ -551,6 +703,76 @@ void main() {
         find.byKey(const ValueKey('docutracker-release-error')),
         findsOneWidget,
       );
+      expect(confirmButton(tester).onPressed, isNotNull);
+    });
+
+    testWidgets('duplicate confirm taps submit only once', (tester) async {
+      var calls = 0;
+      final gate = Completer<void>();
+      await openDialog(
+        tester,
+        options: const DocuTrackerReleaseOptions(
+          releaseRequired: true,
+          released: false,
+          canRelease: true,
+          suggestedDepartmentId: 'dept-eng',
+          departments: _departments,
+        ),
+        submit:
+            ({
+              required documentId,
+              required departmentId,
+              remarks,
+              idempotencyKey,
+            }) async {
+              calls++;
+              await gate.future;
+              return DocuTrackerSuccess(
+                _memo(releasedAt: '2026-10-09T15:42:00Z'),
+              );
+            },
+      );
+
+      final confirm = find.byKey(const ValueKey('docutracker-release-confirm'));
+      await tester.tap(confirm);
+      await tester.pump();
+      await tester.tap(confirm);
+      await tester.pump();
+      expect(calls, 1);
+      expect(confirmButton(tester).onPressed, isNull);
+
+      gate.complete();
+      await tester.pumpAndSettle();
+      expect(find.byType(DocuTrackerReleaseDialog), findsNothing);
+    });
+
+    testWidgets('load failure shows error and keeps confirm disabled', (
+      tester,
+    ) async {
+      await openDialog(
+        tester,
+        options: const DocuTrackerReleaseOptions(
+          releaseRequired: true,
+          released: false,
+          canRelease: true,
+          departments: _departments,
+        ),
+        loadOptions: (_) async => throw Exception('Network unavailable'),
+        submit:
+            ({
+              required documentId,
+              required departmentId,
+              remarks,
+              idempotencyKey,
+            }) async => throw StateError('must not submit'),
+      );
+
+      expect(
+        find.byKey(const ValueKey('docutracker-release-error')),
+        findsOneWidget,
+      );
+      expect(find.textContaining('Network unavailable'), findsOneWidget);
+      expect(confirmButton(tester).onPressed, isNull);
     });
 
     testWidgets('unauthorized viewer cannot confirm', (tester) async {
@@ -574,6 +796,128 @@ void main() {
         findsOneWidget,
       );
       expect(confirmButton(tester).onPressed, isNull);
+    });
+
+    testWidgets('uses bottom sheet on narrow screens', (tester) async {
+      await openDialog(
+        tester,
+        surfaceSize: const Size(390, 844),
+        options: const DocuTrackerReleaseOptions(
+          releaseRequired: true,
+          released: false,
+          canRelease: true,
+          departments: _departments,
+        ),
+        submit:
+            ({
+              required documentId,
+              required departmentId,
+              remarks,
+              idempotencyKey,
+            }) async => throw StateError('must not submit'),
+      );
+
+      expect(
+        find.byKey(const ValueKey('docutracker-release-sheet-handle')),
+        findsOneWidget,
+      );
+      expect(find.byType(Dialog), findsNothing);
+      expect(find.text('Release Document'), findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('docutracker-release-department-search')),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('desktop dialog remains usable', (tester) async {
+      await openDialog(
+        tester,
+        surfaceSize: const Size(1280, 900),
+        options: const DocuTrackerReleaseOptions(
+          releaseRequired: true,
+          released: false,
+          canRelease: true,
+          departments: _departments,
+        ),
+        submit:
+            ({
+              required documentId,
+              required departmentId,
+              remarks,
+              idempotencyKey,
+            }) async => throw StateError('must not submit'),
+      );
+
+      expect(find.byType(Dialog), findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('docutracker-release-sheet-handle')),
+        findsNothing,
+      );
+    });
+
+    testWidgets('renders in dark theme without exceptions', (tester) async {
+      await openDialog(
+        tester,
+        theme: ThemeData.dark(),
+        options: const DocuTrackerReleaseOptions(
+          releaseRequired: true,
+          released: false,
+          canRelease: true,
+          departments: _departments,
+        ),
+        submit:
+            ({
+              required documentId,
+              required departmentId,
+              remarks,
+              idempotencyKey,
+            }) async => throw StateError('must not submit'),
+      );
+
+      expect(find.text('Release Document'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+      final dialog = tester.widget<Material>(
+        find.byKey(const ValueKey('docutracker-release-dialog')),
+      );
+      expect(
+        dialog.color,
+        DocuTrackerTokens.surfaceOf(
+          tester.element(
+            find.byKey(const ValueKey('docutracker-release-dialog')),
+          ),
+        ),
+      );
+    });
+
+    testWidgets('remarks stay optional with character counter limit', (
+      tester,
+    ) async {
+      await openDialog(
+        tester,
+        options: const DocuTrackerReleaseOptions(
+          releaseRequired: true,
+          released: false,
+          canRelease: true,
+          suggestedDepartmentId: 'dept-eng',
+          departments: _departments,
+        ),
+        submit:
+            ({
+              required documentId,
+              required departmentId,
+              remarks,
+              idempotencyKey,
+            }) async => DocuTrackerSuccess(
+              _memo(releasedAt: '2026-10-09T15:42:00Z'),
+            ),
+      );
+
+      final field = tester.widget<TextField>(
+        find.byKey(const ValueKey('docutracker-release-remarks')),
+      );
+      expect(field.maxLength, docuTrackerReleaseRemarksMaxLength);
+      expect(field.enabled, isTrue);
+      expect(confirmButton(tester).onPressed, isNotNull);
     });
   });
 
