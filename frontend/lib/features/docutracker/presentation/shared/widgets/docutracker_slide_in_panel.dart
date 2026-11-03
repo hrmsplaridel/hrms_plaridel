@@ -13,12 +13,18 @@ Future<T?> showDocuTrackerSlideInPanel<T>({
   const breakpoint = 600.0;
 
   if (viewportWidth < breakpoint) {
-    return Navigator.of(context).push<T>(
+    return Navigator.of(context, rootNavigator: true).push<T>(
       MaterialPageRoute(
-        builder: (ctx) => _DocuTrackerSlideInPanelScaffold(
-          title: title,
-          headerTrailing: headerTrailing,
-          child: child,
+        fullscreenDialog: true,
+        builder: (ctx) => Scaffold(
+          backgroundColor: DocuTrackerTokens.surfaceOf(ctx),
+          body: SafeArea(
+            child: _DocuTrackerSlideInPanelScaffold(
+              title: title,
+              headerTrailing: headerTrailing,
+              child: child,
+            ),
+          ),
         ),
       ),
     );
@@ -28,6 +34,7 @@ Future<T?> showDocuTrackerSlideInPanel<T>({
 
   return showGeneralDialog<T>(
     context: context,
+    useRootNavigator: true,
     barrierDismissible: true,
     barrierLabel: 'Close $title',
     barrierColor: Colors.black54,
@@ -37,8 +44,9 @@ Future<T?> showDocuTrackerSlideInPanel<T>({
         child: Align(
           alignment: Alignment.centerRight,
           child: Material(
-            color: DocuTrackerTokens.surfaceOf(context),
+            color: DocuTrackerTokens.surfaceOf(ctx),
             elevation: 12,
+            clipBehavior: Clip.antiAlias,
             child: SizedBox(
               width: panelWidth,
               height: double.infinity,
@@ -52,7 +60,7 @@ Future<T?> showDocuTrackerSlideInPanel<T>({
         ),
       );
     },
-    transitionBuilder: (ctx, animation, _, child) {
+    transitionBuilder: (ctx, animation, _, panelChild) {
       final curved = CurvedAnimation(
         parent: animation,
         curve: Curves.easeOutCubic,
@@ -62,7 +70,7 @@ Future<T?> showDocuTrackerSlideInPanel<T>({
           begin: const Offset(1, 0),
           end: Offset.zero,
         ).animate(curved),
-        child: child,
+        child: panelChild,
       );
     },
   );
@@ -112,9 +120,10 @@ class _DocuTrackerSlideInPanelScaffold extends StatelessWidget {
               ],
               IconButton(
                 tooltip: 'Close',
-                onPressed: () => Navigator.of(context).pop(),
+                onPressed: () => Navigator.of(context).maybePop(),
                 icon: const Icon(Icons.close_rounded),
                 color: DocuTrackerTokens.textMutedOf(context),
+                constraints: const BoxConstraints(minWidth: 44, minHeight: 44),
               ),
             ],
           ),

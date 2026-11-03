@@ -41,6 +41,8 @@ async function locatorFinalReviewers(db,requestId,fallback) {
  return fallback();
 }
 function requireLocatorFinalRole(req,res,next) {
+ if(req.user?.role==='employee' && req.method==='PATCH' && req.route?.path==='/:id/revoke')
+  return require('./leaveRevocationAccess').requireEmployeeWorkflowRevocation('locator',req,res,next);
  return ['admin','hr','mayor'].includes(req.user?.role)?next():res.status(403).json({error:'Final reviewer access required'});
 }
 module.exports={normalizeLocatorRouting,chooseLocatorRoute,resolveLocatorRouting,locatorFinalReviewers,requireLocatorFinalRole};

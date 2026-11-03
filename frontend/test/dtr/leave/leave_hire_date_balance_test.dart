@@ -59,14 +59,14 @@ void main() {
         .widgetList<RichText>(find.byType(RichText))
         .map((w) => w.text.toPlainText())
         .toList();
-    expect(text, contains('Entitlement: 5'));
+    expect(text, contains('Limit: 5'));
     expect(text, contains('Prorated: 1'));
     expect(find.text('1'), findsOneWidget);
-    expect(find.text('day available'), findsOneWidget);
+    expect(find.text('Remaining'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('desktop shows Entitled 5, Prorated 1 and Available 1', (
+  testWidgets('desktop shows Limit 5, Prorated 1 and Remaining 1', (
     tester,
   ) async {
     await tester.binding.setSurfaceSize(const Size(1600, 1100));
@@ -103,7 +103,7 @@ void main() {
     await tester.pump(const Duration(milliseconds: 300));
     final row = find.byKey(const ValueKey('leave-balance-row-wellnessLeave'));
     expect(
-      find.descendant(of: row, matching: find.text('Entitled')),
+      find.descendant(of: row, matching: find.text('Limit')),
       findsOneWidget,
     );
     expect(find.descendant(of: row, matching: find.text('5')), findsOneWidget);

@@ -1,4 +1,5 @@
 'use strict';
+const {loadTrackingStarts}=require('../../../services/employeeAttendanceTracking');
 module.exports = function createDtrComponent({
   addAbsenceReportRows,
   addHolidayReportRows,
@@ -102,6 +103,7 @@ module.exports = function createDtrComponent({
       endStr
     );
     const scheduleOverrides = await loadScheduleOverrides(pool, employeeIds, startStr, endStr);
+    const trackingStarts=await loadTrackingStarts(pool,employeeIds);
     reportScheduleOverrides = scheduleOverrides;
     reportEmployeeIds = employeeIds;
     reportAssignmentsByEmployee = assignmentsByEmployee;
@@ -153,6 +155,7 @@ module.exports = function createDtrComponent({
     const startD = new Date(`${startStr}T12:00:00`); // noon avoids UTC date shift
     const endD = new Date(`${endStr}T12:00:00`);
     await addAbsenceReportRows({
+      trackingStarts,
       assignmentsByEmployee,
       attendancePolicyContext,
       employeeIds,
@@ -194,6 +197,7 @@ module.exports = function createDtrComponent({
     // month-end processing. Attach both the resolved policy and the official
     // per-day contribution after locator/leave/holiday overlays are final.
     await attachReportPolicies({
+      trackingStarts,
       assignmentsByEmployee,
       attendancePolicyContext,
       rows,

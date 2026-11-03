@@ -1,9 +1,6 @@
 import 'package:flutter/widgets.dart';
-import 'package:hrms_plaridel/core/utils/platform_layout.dart';
 import 'package:hrms_plaridel/features/dashboard/presentation/employee/desktop/pages/employee_dashboard_desktop_page.dart'
     as desktop;
-import 'package:hrms_plaridel/features/dashboard/presentation/employee/mobile/pages/employee_dashboard_mobile_page.dart';
-import 'package:hrms_plaridel/features/dashboard/presentation/employee/web/pages/employee_dashboard_web_page.dart';
 
 export 'package:hrms_plaridel/features/dashboard/presentation/employee/desktop/pages/employee_dashboard_desktop_page.dart'
     show EmployeeAttendanceDetailsSection, EmployeeAttendanceOverviewSection;
@@ -11,12 +8,14 @@ export 'package:hrms_plaridel/features/dashboard/presentation/employee/desktop/p
 class EmployeeDashboard extends StatelessWidget {
   const EmployeeDashboard({super.key});
 
+  /// Survives former PlatformLayoutBuilder mobile/web/desktop wrapper swaps so
+  /// nested DocuTracker routes and editor state are not disposed on resize.
+  static final GlobalKey _hostKey = GlobalKey();
+
   @override
   Widget build(BuildContext context) {
-    return PlatformLayoutBuilder(
-      mobile: (_) => const EmployeeDashboardMobilePage(),
-      web: (_) => const EmployeeDashboardWebPage(),
-      desktop: (_) => const desktop.EmployeeDashboardDesktopPage(),
-    );
+    // Mobile/desktop chrome is handled inside the page from MediaQuery width.
+    // Do not swap MobilePage / WebPage wrappers here — that remounted State.
+    return desktop.EmployeeDashboardDesktopPage(key: _hostKey);
   }
 }

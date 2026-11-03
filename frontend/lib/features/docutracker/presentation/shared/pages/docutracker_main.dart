@@ -3,6 +3,7 @@ import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/features/docutracker/data/routes/docutracker_routes.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/admin/pages/docutracker_admin_screen.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/pages/docutracker_documents_screen.dart';
+import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_notification_bell.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_responsive_body.dart';
 
 /// Main DocuTracker module entry.
@@ -73,27 +74,36 @@ class _DocuTrackerMainState extends State<DocuTrackerMain> {
     );
   }
 
-  Widget _buildHeader() => Column(
+  Widget _buildHeader() => Row(
     crossAxisAlignment: CrossAxisAlignment.start,
     children: [
-      Text(
-        'DocuTracker',
-        style: TextStyle(
-          color: AppTheme.dashTextPrimaryOf(context),
-          fontSize: 24,
-          fontWeight: FontWeight.w800,
-          letterSpacing: -0.3,
+      Expanded(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'DocuTracker',
+              style: TextStyle(
+                color: AppTheme.dashTextPrimaryOf(context),
+                fontSize: 24,
+                fontWeight: FontWeight.w800,
+                letterSpacing: -0.3,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Create, route, and track official documents.',
+              style: TextStyle(
+                color: AppTheme.dashTextSecondaryOf(context),
+                fontSize: 14,
+                height: 1.4,
+              ),
+            ),
+          ],
         ),
       ),
-      const SizedBox(height: 8),
-      Text(
-        'Create, route, and track official documents.',
-        style: TextStyle(
-          color: AppTheme.dashTextSecondaryOf(context),
-          fontSize: 14,
-          height: 1.4,
-        ),
-      ),
+      const SizedBox(width: 12),
+      DocuTrackerNotificationBellButton(isAdmin: widget.isAdmin),
     ],
   );
 

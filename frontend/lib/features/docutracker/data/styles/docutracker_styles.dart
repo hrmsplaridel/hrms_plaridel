@@ -68,11 +68,12 @@ class DocuTrackerStyles {
   );
 
   /// Orange brand primary (module chrome, create, open, links).
-  static ButtonStyle primaryBrandButtonStyle() =>
-      DocuTrackerTokens.brandFilledStyle();
+  static ButtonStyle primaryBrandButtonStyle([BuildContext? context]) =>
+      DocuTrackerTokens.brandFilledStyle(context);
 
   /// @deprecated Use [primaryBrandButtonStyle].
-  static ButtonStyle primaryButtonStyleNavy() => primaryBrandButtonStyle();
+  static ButtonStyle primaryButtonStyleNavy([BuildContext? context]) =>
+      primaryBrandButtonStyle(context);
 
   static ButtonStyle outlinedButtonStyle([BuildContext? context]) =>
       OutlinedButton.styleFrom(
@@ -167,7 +168,9 @@ class DocuTrackerStyles {
     required IconData icon,
     required Color color,
     required String message,
+    String? detail,
   }) {
+    final textColor = color.withValues(alpha: 0.95);
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
@@ -176,17 +179,35 @@ class DocuTrackerStyles {
         border: Border.all(color: color.withValues(alpha: 0.25)),
       ),
       child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Icon(icon, color: color, size: 18),
           const SizedBox(width: 8),
           Expanded(
-            child: Text(
-              message,
-              style: TextStyle(
-                color: color.withValues(alpha: 0.95),
-                fontSize: 12.5,
-                fontWeight: FontWeight.w600,
-              ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  message,
+                  style: TextStyle(
+                    color: textColor,
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                if (detail != null && detail.trim().isNotEmpty) ...[
+                  const SizedBox(height: 4),
+                  Text(
+                    detail,
+                    style: TextStyle(
+                      color: textColor.withValues(alpha: 0.9),
+                      fontSize: 12,
+                      fontWeight: FontWeight.w500,
+                      height: 1.35,
+                    ),
+                  ),
+                ],
+              ],
             ),
           ),
         ],

@@ -1,5 +1,6 @@
 'use strict';
-const { selfFilingOfficial } = require('../../../services/workflowPrintPolicy');
+const {publicPaperRecord,paperSignaturePayload}=require('../services/paperSignatures');
+const { selfFilingOfficial, workflowPrimaryApplicant } = require('../../../services/workflowPrintPolicy');
 module.exports = function createLeaveControllers({
   findAssignmentProfileByUserIdAtDate,
   getDepartmentHeadForEmployee,
@@ -44,7 +45,7 @@ module.exports = function createLeaveControllers({
                 )::date::text AS submitted_on,
                 lr.review_department_id,
                 lr.approved_at::date::text AS approved_on,
-                lr.approving_authority_snapshot,lr.final_review_route,lr.final_reviewer_user_id,lr.workflow_snapshot,
+                lr.paper_approval_record,lr.approving_authority_snapshot,lr.final_review_route,lr.final_reviewer_user_id,lr.workflow_snapshot,
                 lr.assigned_department_head_id,
                 d.name AS review_department_name,
                 EXISTS (
@@ -116,6 +117,13 @@ module.exports = function createLeaveControllers({
           }
         }
 
+        if (requestContext?.paper_approval_record) {
+          const source=requestContext.paper_approval_record;
+          const paper=publicPaperRecord(source);
+          return res.json({hr_certification_officer:paper.certification_officer || null,
+            recommendation_officer:paper.department_reviewer || null,approving_authority:paper.final_approver,
+            paper_signatures:requestContext.status==='approved'?paperSignaturePayload(source):{}});
+        }
         const signatoryDate =
           requestContext?.approved_on || requestContext?.submitted_on || todayInHrmsTimezone();
         const { primary: hrCertifier } = await resolveFinalLeaveReviewerConfiguration(
@@ -168,21 +176,25 @@ module.exports = function createLeaveControllers({
             ...requestContext,
             employee_id: employeeId,
           });
-          // A backup may act in the workflow, but an applicant who holds the
-          // primary official role still prints the Mayor in that form block.
-          // Reuse the filed Mayor identity after approval, including handovers.
+          const steps = requestContext.workflow_snapshot.steps;
+          const applicantIsWorkflowHead = (steps.length > 1 || workflowEngine.isDepartmentOnlyWorkflow(requestContext.workflow_snapshot)) &&
+            await workflowPrimaryApplicant(pool, requestContext, steps[0], {
+              resolveDepartmentReviewers, resolveFinalLeaveReviewerConfiguration,
+            });
+          // Recommendation follows the saved first step. Credit certification
+          // remains a separate HR official role on CSC forms.
           const lastSource = requestContext.workflow_snapshot.steps.at(-1)?.assignee_source;
           const sharedReplacement = ['active_mayor', 'manual_mayor'].includes(lastSource)
             ? officials.hr_approver
-            : replacement;
+            : replacement || (applicantIsWorkflowHead ? await resolveActiveMayor(pool, todayInHrmsTimezone()) : null);
           return res.json({
             hr_certification_officer: applicantIsHr
               ? mapOfficialSignatoryProfile(await selfFilingOfficial(pool, requestContext, 'hr', sharedReplacement))
               : hrCertifier
                 ? mapOfficialSignatoryProfile({ ...hrCertifier, employee_id: hrCertifier.id })
                 : null,
-            recommendation_officer: applicantIsHead
-              ? mapOfficialSignatoryProfile(await selfFilingOfficial(pool, requestContext, 'department', sharedReplacement))
+            recommendation_officer: applicantIsWorkflowHead
+              ? mapOfficialSignatoryProfile(await selfFilingOfficial(pool, requestContext, 'department', sharedReplacement, 0))
               : mapOfficialSignatoryProfile(officials.department_head),
             approving_authority: mapOfficialSignatoryProfile(officials.hr_approver),
           });

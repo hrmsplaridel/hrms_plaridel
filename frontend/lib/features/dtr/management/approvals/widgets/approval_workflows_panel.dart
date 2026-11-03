@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:hrms_plaridel/core/api/client.dart';
 import 'package:hrms_plaridel/core/api/user_facing_api_error.dart';
+import 'package:hrms_plaridel/core/utils/responsive_right_side_panel.dart';
 import 'approval_workflow_picker.dart';
 import 'package:hrms_plaridel/features/docutracker/models/workflow_step.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/admin/widgets/workflow_step_editor_panel.dart';
@@ -23,9 +24,13 @@ class ApprovalWorkflowsPanel extends StatefulWidget {
     super.key,
     this.allowDocumentBinding = false,
     this.initialWorkflowId,
+    this.useSidePanel = false,
   });
   final bool allowDocumentBinding;
   final String? initialWorkflowId;
+
+  /// Enabled by DTR settings; DocuTracker retains its existing dialog editor.
+  final bool useSidePanel;
   @override
   State<ApprovalWorkflowsPanel> createState() => _ApprovalWorkflowsPanelState();
 }
@@ -77,11 +82,20 @@ class _ApprovalWorkflowsPanelState extends State<ApprovalWorkflowsPanel> {
   }
 
   Future<void> _edit([Map<String, dynamic>? workflow]) async {
-    final saved = await showDialog<bool>(
-      context: context,
-      barrierDismissible: false,
-      builder: (_) => _WorkflowEditor(workflow: workflow),
-    );
+    final saved = widget.useSidePanel
+        ? await openResponsiveRightSidePanel<bool>(
+            context: context,
+            breakpoint: 900,
+            minWidth: 600,
+            barrierLabel: 'Workflow editor',
+            barrierDismissible: false,
+            builder: (_) => _WorkflowEditor(workflow: workflow, sidePanel: true),
+          )
+        : await showDialog<bool>(
+            context: context,
+            barrierDismissible: false,
+            builder: (_) => _WorkflowEditor(workflow: workflow),
+          );
     if (saved == true && mounted) await _load();
   }
 
@@ -390,8 +404,9 @@ class _WorkflowBadge extends StatelessWidget {
 }
 
 class _WorkflowEditor extends StatefulWidget {
-  const _WorkflowEditor({this.workflow});
+  const _WorkflowEditor({this.workflow, this.sidePanel = false});
   final Map<String, dynamic>? workflow;
+  final bool sidePanel;
   @override
   State<_WorkflowEditor> createState() => _WorkflowEditorState();
 }
@@ -540,163 +555,225 @@ class _WorkflowEditorState extends State<_WorkflowEditor> {
   }
 
   @override
-  Widget build(BuildContext context) => PopScope(
-    canPop: !_saving,
-    child: AlertDialog(
-      title: Text(
-        widget.workflow == null
-            ? 'Create approval workflow'
-            : 'Edit approval workflow',
-      ),
-      content: SizedBox(
-        width: 720,
-        child: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              TextFormField(
-                controller: _name,
-                enabled: !_saving,
-                maxLength: 100,
-                decoration: const InputDecoration(labelText: 'Workflow name'),
-              ),
-              const SizedBox(height: 12),
-              const Text(
-                'Approval steps',
-                style: TextStyle(fontWeight: FontWeight.bold),
-              ),
-              const Text(
-                'Add steps in approval order and choose each step’s primary and backup reviewers. The last system step is the final approval.',
-              ),
-              for (var i = 0; i < _steps.length; i++)
-                ListTile(
-                  contentPadding: EdgeInsets.zero,
-                  leading: CircleAvatar(child: Text('${i + 1}')),
-                  title: Text(_stepJson(_steps[i], i)['label'] as String),
-                  subtitle: Text(_assigneeDescription(_steps[i], i)),
-                  onTap: _saving ? null : () => _editStep(i),
-                  trailing: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      if ([
-                        'submitter_department_reviewers',
-                        'department_reviewers',
-                        'final_hr_reviewers',
-                      ].contains(_stepJson(_steps[i], i)['assignee_source']))
-                        IconButton(
-                          tooltip:
-                              'Configure ${_stepJson(_steps[i], i)['label']} reviewers',
-                          onPressed: _saving
-                              ? null
-                              : () => _configureReviewers(i),
-                          icon: const Icon(Icons.manage_accounts_outlined),
-                        ),
-                      PopupMenuButton<String>(
-                        tooltip: 'Step ${i + 1} actions',
-                        enabled: !_saving,
-                        onSelected: (action) {
-                          if (action == 'edit') {
-                            _editStep(i);
-                          } else {
-                            setState(() {
-                              final step = _steps.removeAt(i);
-                              if (action != 'remove') {
-                                _steps.insert(
-                                  action == 'up' ? i - 1 : i + 1,
-                                  step,
-                                );
-                              }
-                            });
+  Widget build(BuildContext context) {
+    final title = Text(
+      widget.workflow == null
+          ? 'Create approval workflow'
+          : 'Edit approval workflow',
+    );
+    final content = SingleChildScrollView(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          TextFormField(
+            controller: _name,
+            enabled: !_saving,
+            maxLength: 100,
+            decoration: const InputDecoration(labelText: 'Workflow name'),
+          ),
+          const SizedBox(height: 12),
+          const Text(
+            'Approval steps',
+            style: TextStyle(fontWeight: FontWeight.bold),
+          ),
+          const Text(
+            'Add steps in approval order and choose each step’s primary and backup reviewers. The last system step is the final approval.',
+          ),
+          for (var i = 0; i < _steps.length; i++)
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: CircleAvatar(child: Text('${i + 1}')),
+              title: Text(_stepJson(_steps[i], i)['label'] as String),
+              subtitle: Text(_assigneeDescription(_steps[i], i)),
+              onTap: _saving ? null : () => _editStep(i),
+              trailing: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if ([
+                    'submitter_department_reviewers',
+                    'department_reviewers',
+                    'final_hr_reviewers',
+                  ].contains(_stepJson(_steps[i], i)['assignee_source']))
+                    IconButton(
+                      tooltip:
+                          'Configure ${_stepJson(_steps[i], i)['label']} reviewers',
+                      onPressed: _saving ? null : () => _configureReviewers(i),
+                      icon: const Icon(Icons.manage_accounts_outlined),
+                    ),
+                  PopupMenuButton<String>(
+                    tooltip: 'Step ${i + 1} actions',
+                    enabled: !_saving,
+                    onSelected: (action) {
+                      if (action == 'edit') {
+                        _editStep(i);
+                      } else {
+                        setState(() {
+                          final step = _steps.removeAt(i);
+                          if (action != 'remove') {
+                            _steps.insert(action == 'up' ? i - 1 : i + 1, step);
                           }
-                        },
-                        itemBuilder: (_) => [
-                          const PopupMenuItem(
-                            value: 'edit',
-                            child: Text('Edit approvers'),
-                          ),
-                          if (i > 0)
-                            const PopupMenuItem(
-                              value: 'up',
-                              child: Text('Move up'),
-                            ),
-                          if (i < _steps.length - 1)
-                            const PopupMenuItem(
-                              value: 'down',
-                              child: Text('Move down'),
-                            ),
-                          const PopupMenuItem(
-                            value: 'remove',
-                            child: Text('Remove step'),
-                          ),
-                        ],
+                        });
+                      }
+                    },
+                    itemBuilder: (_) => [
+                      const PopupMenuItem(
+                        value: 'edit',
+                        child: Text('Edit approvers'),
+                      ),
+                      if (i > 0)
+                        const PopupMenuItem(
+                          value: 'up',
+                          child: Text('Move up'),
+                        ),
+                      if (i < _steps.length - 1)
+                        const PopupMenuItem(
+                          value: 'down',
+                          child: Text('Move down'),
+                        ),
+                      const PopupMenuItem(
+                        value: 'remove',
+                        child: Text('Remove step'),
                       ),
                     ],
                   ),
-                ),
-              if (_steps.length < 20)
-                TextButton.icon(
-                  onPressed: _saving ? null : () => _editStep(),
-                  icon: const Icon(Icons.add),
-                  label: const Text('Add approval step'),
-                ),
-              const SizedBox(height: 16),
-              const Text(
-                'When a primary reviewer files their own request',
-                style: TextStyle(fontWeight: FontWeight.bold),
-              ),
-              const SizedBox(height: 12),
-              DropdownButtonFormField<String>(
-                key: const ValueKey('self-filing-signatory-policy'),
-                initialValue: _printPolicy,
-                isExpanded: true,
-                decoration: const InputDecoration(labelText: 'Printed signatories'),
-                items: [
-                  for (final entry in _printPolicyLabels.entries)
-                    DropdownMenuItem(value: entry.key, child: Text(entry.value)),
                 ],
-                onChanged: _saving ? null : (value) {
-                  if (value != null) setState(() => _printPolicy = value);
-                },
               ),
-              const SizedBox(height: 8),
-              Text(_printPolicyDescriptions[_printPolicy]!),
-              const SizedBox(height: 8),
-              const Text('Applies to Leave and Locator printed forms. Approval steps and reviewer permissions stay the same.'),
-              SwitchListTile(
-                contentPadding: EdgeInsets.zero,
-                title: const Text('Active workflow'),
-                value: _active,
-                onChanged: _saving ? null : (v) => setState(() => _active = v),
-              ),
-              Text(
-                widget.workflow == null
-                    ? 'Publishing creates a new version for future filings. Existing requests retain their saved version.'
-                    : 'Updating creates a new version for future filings. Existing requests retain their saved version.',
-              ),
-              if (_error != null)
-                Text(
-                  _error!,
-                  style: TextStyle(color: Theme.of(context).colorScheme.error),
-                ),
+            ),
+          if (_steps.length < 20)
+            TextButton.icon(
+              onPressed: _saving ? null : () => _editStep(),
+              icon: const Icon(Icons.add),
+              label: const Text('Add approval step'),
+            ),
+          const SizedBox(height: 16),
+          const Text(
+            'When a primary reviewer files their own request',
+            style: TextStyle(fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 12),
+          DropdownButtonFormField<String>(
+            key: const ValueKey('self-filing-signatory-policy'),
+            initialValue: _printPolicy,
+            isExpanded: true,
+            decoration: const InputDecoration(labelText: 'Printed signatories'),
+            items: [
+              for (final entry in _printPolicyLabels.entries)
+                DropdownMenuItem(value: entry.key, child: Text(entry.value)),
             ],
+            onChanged: _saving
+                ? null
+                : (value) {
+                    if (value != null) setState(() => _printPolicy = value);
+                  },
+          ),
+          const SizedBox(height: 8),
+          Text(_printPolicyDescriptions[_printPolicy]!),
+          const SizedBox(height: 8),
+          const Text(
+            'Applies to Leave and Locator printed forms. Approval steps and reviewer permissions stay the same.',
+          ),
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            title: const Text('Active workflow'),
+            value: _active,
+            onChanged: _saving ? null : (v) => setState(() => _active = v),
+          ),
+          Text(
+            widget.workflow == null
+                ? 'Publishing creates a new version for future filings. Existing requests retain their saved version.'
+                : 'Updating creates a new version for future filings. Existing requests retain their saved version.',
+          ),
+          if (_error != null)
+            Text(
+              _error!,
+              style: TextStyle(color: Theme.of(context).colorScheme.error),
+            ),
+        ],
+      ),
+    );
+    final actions = <Widget>[
+      TextButton(
+        onPressed: _saving ? null : () => Navigator.pop(context, false),
+        child: const Text('Cancel'),
+      ),
+      FilledButton(
+        onPressed: _saving ? null : _publish,
+        child: Text(
+          widget.workflow == null
+              ? (_saving ? 'Publishing…' : 'Publish workflow')
+              : (_saving ? 'Updating…' : 'Update workflow'),
+        ),
+      ),
+    ];
+    return PopScope(
+      canPop: !_saving,
+      child: widget.sidePanel
+          ? _buildSidePanel(context, title, content, actions)
+          : AlertDialog(
+              title: title,
+              content: SizedBox(width: 720, child: content),
+              actions: actions,
+            ),
+    );
+  }
+
+  Widget _buildSidePanel(
+    BuildContext context,
+    Widget title,
+    Widget content,
+    List<Widget> actions,
+  ) {
+    final colors = Theme.of(context).colorScheme;
+    return Scaffold(
+      key: const ValueKey('approval-workflow-side-panel'),
+      backgroundColor: colors.surface,
+      appBar: AppBar(
+        automaticallyImplyLeading: false,
+        backgroundColor: colors.surface,
+        scrolledUnderElevation: 0,
+        title: title,
+        titleTextStyle: Theme.of(context).textTheme.titleLarge?.copyWith(
+          fontSize: 20,
+          fontWeight: FontWeight.w600,
+        ),
+        actions: [
+          IconButton(
+            tooltip: 'Close workflow editor',
+            onPressed: _saving ? null : () => Navigator.pop(context, false),
+            icon: const Icon(Icons.close_rounded),
+          ),
+          const SizedBox(width: 8),
+        ],
+        bottom: PreferredSize(
+          preferredSize: const Size.fromHeight(1),
+          child: Divider(height: 1, color: colors.outlineVariant),
+        ),
+      ),
+      body: Padding(padding: const EdgeInsets.all(24), child: content),
+      bottomNavigationBar: Padding(
+        padding: EdgeInsets.only(
+          bottom: MediaQuery.viewInsetsOf(context).bottom,
+        ),
+        child: SafeArea(
+          top: false,
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              color: colors.surface,
+              border: Border(top: BorderSide(color: colors.outlineVariant)),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+              child: Wrap(
+                alignment: WrapAlignment.end,
+                spacing: 12,
+                runSpacing: 8,
+                children: actions,
+              ),
+            ),
           ),
         ),
       ),
-      actions: [
-        TextButton(
-          onPressed: _saving ? null : () => Navigator.pop(context, false),
-          child: const Text('Cancel'),
-        ),
-        FilledButton(
-          onPressed: _saving ? null : _publish,
-          child: Text(
-            widget.workflow == null
-                ? (_saving ? 'Publishing…' : 'Publish workflow')
-                : (_saving ? 'Updating…' : 'Update workflow'),
-          ),
-        ),
-      ],
-    ),
-  );
+    );
+  }
 }

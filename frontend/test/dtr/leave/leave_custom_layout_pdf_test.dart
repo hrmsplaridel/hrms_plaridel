@@ -10,6 +10,7 @@ import 'package:hrms_plaridel/features/dtr/leave/models/leave_type_definition.da
 import 'package:hrms_plaridel/features/dtr/leave/utils/configured_leave_pdf.dart';
 import 'package:hrms_plaridel/features/dtr/leave/utils/leave_layout_pdf.dart';
 import 'package:hrms_plaridel/features/dtr/leave/presentation/admin/widgets/leave_print_settings.dart';
+import 'package:hrms_plaridel/features/dtr/locator/models/locator_print_layout.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -239,6 +240,39 @@ void main() {
       );
     },
   );
+  test('saved custom Leave PDF binds a middle step to its confirmed request signature', () async {
+    final layout=LocatorPrintLayout(elements:const [LocatorPrintElement(
+      id:'middle',kind:'signature',source:'workflow_step_2',x:40,y:200,width:240,height:80,
+    )]);
+    Future<Uint8List> render(String status) async {
+      ApiClient.instance.dio.interceptors.clear();
+      var signaturesRead=false;
+      ApiClient.instance.dio.interceptors.add(InterceptorsWrapper(onRequest:(o,h)async{
+        if(o.path.endsWith('/signatures')) {
+          signaturesRead=true;
+          h.resolve(Response(requestOptions:o,statusCode:200,data:{
+            'source_status':status,'source_revision':2,
+            'workflow_snapshot':{'steps':[{'label':'First'},{'label':'Middle'},{'label':'Final'}],
+              'decisions':[{'step':1,'actor_id':'middle','action':'approve','reviewer':{'name':'Middle Approver','position_title':'Officer'},
+                'signature':{'signature_asset_id':'ink','revision':2}}]},
+            'signatures':[{'slot_key':'workflow_step_2','signed_by':'middle','signature_asset_id':'ink',
+              'signature_image_base64':'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGMQUDAAAACkAGE0Zn1yAAAAAElFTkSuQmCC'}],
+          }));
+        } else if(o.method=='GET') {
+          h.resolve(Response(requestOptions:o,statusCode:200,data:{'id':'template','layout':'custom','print_layout':layout.toJson(),'has_background':false}));
+        } else {
+          final bytes=<int>[];await for(final chunk in (o.data as FormData).files.single.value.finalize()){bytes.addAll(chunk);}
+          h.resolve(Response(requestOptions:o,statusCode:200,data:bytes));
+        }
+      }));
+      final bytes=await saveConfiguredLeavePdf(request:request,document:pw.Document());
+      expect(signaturesRead,true);return bytes;
+    }
+    final signed=await render('approved'),revoked=await render('cancelled');
+    final images=RegExp(r'/Subtype\s*/Image');
+    expect(images.allMatches(latin1.decode(signed)).length,greaterThan(0));
+    expect(images.allMatches(latin1.decode(revoked)).length,0);
+  });
   test(
     'custom leave PDF keeps long and unplaced answers on a continuation',
     () async {

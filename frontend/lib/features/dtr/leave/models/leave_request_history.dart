@@ -41,18 +41,16 @@ class LeaveRequestHistoryEntry {
     return switch (action) {
       'saved_draft' => 'Draft saved',
       'submitted' => 'Submitted',
+      'paper_approved_recorded' => 'Approved paper leave recorded',
       'updated' => 'Request updated',
       'resubmitted' => 'Resubmitted',
       'department_head_approved' => 'Approved by Department Reviewer',
       'department_head_rejected' => 'Rejected by Department Reviewer',
       'department_head_returned' => 'Returned by Department Reviewer',
-      'approved' =>
-        fromStatus == 'pending_mayor' ? 'Approved by Mayor' : 'Approved by HR',
-      'workflow_step_approved' => 'HR review approved; forwarded to Mayor',
-      'rejected' =>
-        fromStatus == 'pending_mayor' ? 'Rejected by Mayor' : 'Rejected by HR',
-      'returned' =>
-        fromStatus == 'pending_mayor' ? 'Returned by Mayor' : 'Returned by HR',
+      'approved' => 'Approved',
+      'workflow_step_approved' => 'Step approved',
+      'rejected' => 'Rejected',
+      'returned' => 'Returned',
       'cancelled' => 'Cancelled',
       _ => _humanize(action),
     };

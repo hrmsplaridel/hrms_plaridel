@@ -919,6 +919,34 @@ class DocuTrackerProvider extends ChangeNotifier {
     return _isCurrentAuthGeneration(authGeneration);
   }
 
+  /// Reassigns the current step through the existing admin recovery route,
+  /// then reloads the document and its full history. Returns the backend
+  /// error message when the reassignment is rejected.
+  Future<String?> recoverDocumentAssignment({
+    required String documentId,
+    required String assigneeId,
+    required String remarks,
+  }) async {
+    final authGeneration = _authGeneration;
+    final result = await _repo.recoverDocumentAssignment(
+      documentId: documentId,
+      currentHolderId: assigneeId,
+      remarks: remarks,
+    );
+    if (!_isCurrentAuthGeneration(authGeneration)) {
+      return 'The session changed before recovery finished.';
+    }
+    switch (result) {
+      case DocuTrackerFailure<DocuTrackerDocument>(:final message):
+        return message.isEmpty
+            ? 'The assignment could not be recovered.'
+            : message;
+      case DocuTrackerSuccess<DocuTrackerDocument>():
+        await refreshDocument(documentId, reloadHistory: true);
+        return null;
+    }
+  }
+
   /// Refresh a single document from backend and update local state.
   /// Useful when server-side workflows (escalation worker) update status/holder.
   Future<void> refreshDocument(
@@ -972,6 +1000,40 @@ class DocuTrackerProvider extends ChangeNotifier {
     final lookup = EmployeeDirectoryLookup();
     await lookup.load();
     return lookup.isLoaded ? lookup.entries : const <EmployeeDirectoryEntry>[];
+  }
+
+  /// Removes an unsubmitted draft from the list.
+  Future<bool> deleteDraft(DocuTrackerDocument doc) async {
+    final id = doc.id;
+    if (id == null || id.isEmpty) return false;
+    final authGeneration = _authGeneration;
+    _loading = true;
+    _error = null;
+    notifyListeners();
+    try {
+      final result = await _repo.deleteDocument(id);
+      if (!_isCurrentAuthGeneration(authGeneration)) return false;
+      if (result is DocuTrackerFailure<bool>) {
+        _error = result.message.isNotEmpty
+            ? result.message
+            : 'Could not delete the draft.';
+        return false;
+      }
+      _documents = _documents.where((item) => item.id != id).toList();
+      _departmentQueue = _departmentQueue
+          .where((item) => item.id != id)
+          .toList();
+      return true;
+    } catch (e) {
+      if (!_isCurrentAuthGeneration(authGeneration)) return false;
+      _error = e.toString();
+      return false;
+    } finally {
+      if (_isCurrentAuthGeneration(authGeneration)) {
+        _loading = false;
+        notifyListeners();
+      }
+    }
   }
 
   /// Create document and start workflow.

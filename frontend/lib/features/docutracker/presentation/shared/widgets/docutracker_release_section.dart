@@ -1,25 +1,21 @@
-import 'dart:math';
-
 import 'package:flutter/material.dart';
-import 'package:hrms_plaridel/features/docutracker/data/dto/docutracker_api_result.dart';
-import 'package:hrms_plaridel/features/docutracker/data/repositories/docutracker_repository.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document.dart';
-import 'package:hrms_plaridel/features/docutracker/models/document_release.dart';
-import 'package:hrms_plaridel/features/docutracker/models/document_type.dart';
+import 'package:hrms_plaridel/features/docutracker/data/styles/docutracker_styles.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_document_detail_ui.dart';
 import 'package:hrms_plaridel/features/docutracker/theme/docutracker_tokens.dart';
 import 'package:hrms_plaridel/features/docutracker/utils/docutracker_release_text.dart';
 
-typedef DocuTrackerReleaseOptionsLoader =
-    Future<DocuTrackerReleaseOptions> Function(String documentId);
-
-typedef DocuTrackerReleaseSubmitter =
-    Future<DocuTrackerResult<DocuTrackerDocument>> Function({
-      required String documentId,
-      required String departmentId,
-      String? remarks,
-      String? idempotencyKey,
-    });
+export 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_release_dialog.dart'
+    show
+        DocuTrackerReleaseDialog,
+        DocuTrackerReleaseOptionsLoader,
+        DocuTrackerReleaseSubmitter,
+        docuTrackerFilterReleaseDepartments,
+        docuTrackerReleaseInfoIrreversible,
+        docuTrackerReleaseInfoViewOnly,
+        docuTrackerReleaseNoDepartmentsFound,
+        docuTrackerReleaseRemarksMaxLength,
+        showDocuTrackerReleaseDialog;
 
 /// Release stage of an approved document, shown apart from the workflow.
 class DocuTrackerReleaseSection extends StatelessWidget {
@@ -92,243 +88,12 @@ class DocuTrackerReleaseSection extends StatelessWidget {
                 onPressed: onRelease,
                 icon: const Icon(Icons.outbox_rounded),
                 label: const Text('Release Document'),
+                style: DocuTrackerStyles.primaryBrandButtonStyle(context),
               ),
             ],
           ],
         ],
       ),
-    );
-  }
-}
-
-/// Opens the release dialog. Returns the released document, or null when the
-/// dialog was dismissed.
-Future<DocuTrackerDocument?> showDocuTrackerReleaseDialog(
-  BuildContext context, {
-  required DocuTrackerDocument document,
-  DocuTrackerReleaseOptionsLoader? loadOptions,
-  DocuTrackerReleaseSubmitter? submit,
-}) {
-  final repository = DocuTrackerRepository.instance;
-  return showDialog<DocuTrackerDocument>(
-    context: context,
-    barrierDismissible: false,
-    builder: (_) => DocuTrackerReleaseDialog(
-      document: document,
-      loadOptions: loadOptions ?? repository.getReleaseOptions,
-      submit: submit ?? repository.releaseDocument,
-    ),
-  );
-}
-
-class DocuTrackerReleaseDialog extends StatefulWidget {
-  const DocuTrackerReleaseDialog({
-    super.key,
-    required this.document,
-    required this.loadOptions,
-    required this.submit,
-  });
-
-  final DocuTrackerDocument document;
-  final DocuTrackerReleaseOptionsLoader loadOptions;
-  final DocuTrackerReleaseSubmitter submit;
-
-  @override
-  State<DocuTrackerReleaseDialog> createState() =>
-      _DocuTrackerReleaseDialogState();
-}
-
-class _DocuTrackerReleaseDialogState extends State<DocuTrackerReleaseDialog> {
-  final _remarksController = TextEditingController();
-
-  /// One key per dialog, so a retried confirm cannot release twice.
-  late final String _idempotencyKey =
-      'release-${widget.document.id}-${DateTime.now().microsecondsSinceEpoch}'
-      '-${Random().nextInt(1 << 32)}';
-
-  DocuTrackerReleaseOptions? _options;
-  String? _departmentId;
-  String? _error;
-  bool _loading = true;
-  bool _submitting = false;
-
-  @override
-  void initState() {
-    super.initState();
-    _load();
-  }
-
-  @override
-  void dispose() {
-    _remarksController.dispose();
-    super.dispose();
-  }
-
-  Future<void> _load() async {
-    try {
-      final options = await widget.loadOptions(widget.document.id!);
-      if (!mounted) return;
-      final suggested = options.suggestedDepartmentId;
-      setState(() {
-        _options = options;
-        _departmentId =
-            suggested != null &&
-                options.departments.any((d) => d.id == suggested)
-            ? suggested
-            : null;
-        _loading = false;
-      });
-    } catch (error) {
-      if (!mounted) return;
-      setState(() {
-        _error = error.toString().replaceFirst('Exception: ', '');
-        _loading = false;
-      });
-    }
-  }
-
-  String? get _departmentName => _options?.departments
-      .where((d) => d.id == _departmentId)
-      .firstOrNull
-      ?.name;
-
-  Future<void> _confirm() async {
-    final departmentId = _departmentId;
-    if (departmentId == null || _submitting) return;
-    setState(() {
-      _submitting = true;
-      _error = null;
-    });
-    final result = await widget.submit(
-      documentId: widget.document.id!,
-      departmentId: departmentId,
-      remarks: _remarksController.text,
-      idempotencyKey: _idempotencyKey,
-    );
-    if (!mounted) return;
-    switch (result) {
-      case DocuTrackerSuccess(:final value):
-        Navigator.of(context).pop(value);
-      case DocuTrackerFailure(:final message):
-        setState(() {
-          _error = message;
-          _submitting = false;
-        });
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final options = _options;
-    final canRelease = options?.canRelease == true;
-    final typeName = documentTypeFromString(
-      widget.document.documentType,
-    ).displayName;
-    final muted = DocuTrackerTokens.textMutedOf(context);
-    final departmentName = _departmentName;
-
-    return AlertDialog(
-      title: const Text('Release Document'),
-      content: SizedBox(
-        width: 440,
-        child: _loading
-            ? const Padding(
-                padding: EdgeInsets.all(24),
-                child: Center(child: CircularProgressIndicator()),
-              )
-            : Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Text(
-                    widget.document.title,
-                    style: const TextStyle(fontWeight: FontWeight.w700),
-                  ),
-                  const SizedBox(height: 12),
-                  if (options != null && !canRelease)
-                    Text(
-                      options.released
-                          ? 'This document has already been released.'
-                          : 'You are not authorized to release this document.',
-                      style: TextStyle(color: muted),
-                    )
-                  else if (options != null) ...[
-                    DropdownButtonFormField<String>(
-                      key: const ValueKey('docutracker-release-department'),
-                      initialValue: _departmentId,
-                      isExpanded: true,
-                      decoration: const InputDecoration(
-                        labelText: 'Release to Department',
-                        border: OutlineInputBorder(),
-                      ),
-                      items: [
-                        for (final department in options.departments)
-                          DropdownMenuItem(
-                            value: department.id,
-                            child: Text(
-                              department.name,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                      ],
-                      onChanged: _submitting
-                          ? null
-                          : (value) => setState(() => _departmentId = value),
-                    ),
-                    const SizedBox(height: 12),
-                    TextField(
-                      key: const ValueKey('docutracker-release-remarks'),
-                      controller: _remarksController,
-                      enabled: !_submitting,
-                      maxLines: 3,
-                      maxLength: 2000,
-                      decoration: const InputDecoration(
-                        labelText: 'Remarks (optional)',
-                        border: OutlineInputBorder(),
-                      ),
-                    ),
-                    Text(
-                      departmentName == null
-                          ? 'Choose the department that should receive this '
-                                '$typeName.'
-                          : 'Members of $departmentName will be able to '
-                                'open it (view only). A release cannot be '
-                                'changed afterwards.',
-                      style: TextStyle(fontSize: 12, color: muted),
-                    ),
-                  ],
-                  if (_error != null) ...[
-                    const SizedBox(height: 12),
-                    Text(
-                      _error!,
-                      key: const ValueKey('docutracker-release-error'),
-                      style: TextStyle(
-                        color: Theme.of(context).colorScheme.error,
-                      ),
-                    ),
-                  ],
-                ],
-              ),
-      ),
-      actions: [
-        TextButton(
-          onPressed: _submitting ? null : () => Navigator.of(context).pop(),
-          child: const Text('Cancel'),
-        ),
-        FilledButton(
-          key: const ValueKey('docutracker-release-confirm'),
-          onPressed: canRelease && _departmentId != null && !_submitting
-              ? _confirm
-              : null,
-          child: _submitting
-              ? const SizedBox(
-                  width: 18,
-                  height: 18,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                )
-              : const Text('Confirm Release'),
-        ),
-      ],
     );
   }
 }

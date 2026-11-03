@@ -390,7 +390,7 @@ test('DTR assistant service uses employee-self data for real HRMS scenarios', as
   });
   assert.equal(combined.intent, 'leave_balance');
   assert.deepEqual(
-    new Set(loaded.at(-1).intents),
+    new Set(loaded.slice(-2).flatMap(call => call.intents)),
     new Set(['leave_balance', 'dtr_missing_logs'])
   );
 
@@ -644,7 +644,18 @@ test('DTR assistant locator prompts yield to new locator and DTR questions', asy
       loadEmployeeAssistantContext: async (
         _pool,
         { userId, dateRange }
-      ) => assistantContext(dateRange, userId),
+      ) => {
+        const context = assistantContext(dateRange, userId);
+        if (userId.includes('-holiday-')) {
+          context.dtr_calendar_days = [{
+            attendance_date: dateRange.startDate,
+            shift_id: 'holiday-shift', start_time: '08:00:00', end_time: '17:00:00',
+            working_days: [1, 2, 3, 4, 5, 6, 7],
+            holiday_name: "All Souls' Day", holiday_coverage: 'whole_day',
+          }];
+        }
+        return context;
+      },
     }
   );
   const restoreLlm = withMockedModule('../src/services/llm/llmClient', {
@@ -670,6 +681,21 @@ test('DTR assistant locator prompts yield to new locator and DTR questions', asy
     id: '88888888-8888-4888-8888-888888888888',
     role: 'employee',
   };
+
+  for (const [index, message] of [
+    'is it okay for me to file locator tomorrow?',
+    'pwede ko mag-file ug locator ugma?',
+    'puwede ba ako mag-file ng locator bukas?',
+    'help me file a locator tomorrow',
+  ].entries()) {
+    const result = await chatWithDtrAssistant(pool, {
+      user: { ...baseUser, id: `${baseUser.id}-holiday-${index}` },
+      message,
+    });
+    assert.match(result.message.content, /All Souls' Day/);
+    assert.doesNotMatch(result.message.content, /What destination|Asa ang imong destination/);
+    assert.notEqual(result.message.model, 'hrms-guided-clarification');
+  }
 
   const creditUser = { ...baseUser, id: `${baseUser.id}-credit` };
   const creditQuestion = await chatWithDtrAssistant(pool, {
@@ -721,18 +747,26 @@ test('DTR assistant locator prompts yield to new locator and DTR questions', asy
   assert.doesNotMatch(dtrQuestion.message.content, /locator type|Which workday/i);
 
   const destinationUser = { ...baseUser, id: `${baseUser.id}-destination` };
+  const availabilityAnswer = await chatWithDtrAssistant(pool, {
+    user: { ...baseUser, id: `${baseUser.id}-date-eligibility` },
+    message: 'is it okay for me to file locator tomorrow?',
+  });
+  assert.equal(availabilityAnswer.intent, 'locator_availability_check');
+  assert.doesNotMatch(availabilityAnswer.message.content, /What destination or office should I use/);
+  assert.match(availabilityAnswer.message.content, /Locator filing check/);
+
   const destinationPrompt = await chatWithDtrAssistant(pool, {
     user: destinationUser,
-    message: 'can I file official business tomorrow?',
+    message: 'help me file official business tomorrow',
   });
-  assert.equal(destinationPrompt.intent, 'locator_availability_check');
+  assert.equal(destinationPrompt.intent, 'locator_guided_filing');
   assert.match(destinationPrompt.message.content, /destination|office/i);
 
   const destinationAnswer = await chatWithDtrAssistant(pool, {
     user: destinationUser,
     message: 'Cebu City Hall',
   });
-  assert.equal(destinationAnswer.intent, 'locator_availability_check');
+  assert.equal(destinationAnswer.intent, 'locator_guided_filing');
   assert.doesNotMatch(destinationAnswer.message.content, /What destination|Asa ang imong destination/i);
   const locatorAction = destinationAnswer.message.actions.find(
     (action) => action.type === 'open_locator_form'
@@ -743,9 +777,9 @@ test('DTR assistant locator prompts yield to new locator and DTR questions', asy
   const statusUser = { ...baseUser, id: `${baseUser.id}-status` };
   const statusPrompt = await chatWithDtrAssistant(pool, {
     user: statusUser,
-    message: 'can I file official business tomorrow?',
+    message: 'help me file official business tomorrow',
   });
-  assert.equal(statusPrompt.intent, 'locator_availability_check');
+  assert.equal(statusPrompt.intent, 'locator_guided_filing');
   assert.match(statusPrompt.message.content, /destination|office/i);
   const {
     getAssistantMemory,

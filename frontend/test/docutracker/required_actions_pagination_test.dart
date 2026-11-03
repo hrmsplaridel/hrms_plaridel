@@ -306,7 +306,9 @@ void main() {
       ),
     );
     expect(_labelText(tester), 'Showing 1–10 of 12');
-    expect(find.text('Needs your signature'), findsOneWidget);
+    // Native DTR/memo review tasks lead; setup fills the rest of page 1.
+    expect(find.text('Needs your review'), findsOneWidget);
+    expect(find.text('Needs your signature'), findsNothing);
     // Section heading plus one chip per setup card on this page.
     expect(find.text('Needs setup'), findsNWidgets(1 + 3));
     // Module headings, plus the module filter chip for each. DocuTracker
@@ -319,6 +321,7 @@ void main() {
 
     await _tap(tester, _next);
     expect(_labelText(tester), 'Showing 11–12 of 12');
+    expect(find.text('Needs your review'), findsNothing);
     expect(find.text('Needs your signature'), findsNothing);
     expect(find.text('Needs setup'), findsNWidgets(1 + 2));
     expect(find.text('DTR'), findsOneWidget, reason: 'filter chip only');
@@ -330,6 +333,31 @@ void main() {
     expect(find.text('RSP'), findsNWidgets(2));
     expect(find.text('setup TAT 04'), findsOneWidget);
     expect(find.text('setup TAT 05'), findsOneWidget);
+  });
+
+  testWidgets('native review and signature requests use separate headings', (
+    tester,
+  ) async {
+    await _pumpPanel(
+      tester,
+      _panel(
+        documents: [
+          DocuTrackerDocument.fromJson({
+            'id': 'memo-review',
+            'document_type': 'memo',
+            'title': 'Review me',
+            'status': 'in_review',
+            'current_holder_id': 'me',
+          }),
+        ],
+        requests: [_request(1, _Slot.mine)],
+      ),
+    );
+    expect(find.text('Needs your review'), findsOneWidget);
+    expect(find.text('Needs your signature'), findsOneWidget);
+    expect(find.text('Review me'), findsOneWidget);
+    expect(find.text('mine TAT 01'), findsOneWidget);
+    expect(find.text('2'), findsOneWidget, reason: 'actionable badge count');
   });
 
   testWidgets('the selected page survives leaving and returning to the panel', (

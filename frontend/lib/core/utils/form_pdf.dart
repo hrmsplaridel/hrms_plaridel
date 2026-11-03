@@ -117,6 +117,15 @@ class FormPdf {
   static pw.MemoryImage? _lockedPrintBg;
   static PdfPageFormat? _activeCustomFormat;
   static String? _customTemplateError;
+
+  /// Test seam. When set, background lookup does not touch [ApiClient].
+  /// Production printing leaves this null and uses [FormPrintTemplateRepo].
+  @visibleForTesting
+  static Future<FormPrintTemplate?> Function({
+    required String module,
+    required String formKey,
+  })?
+  debugLoadPrintTemplateMeta;
   static pw.Font? _idpPdfFont;
   static pw.Font? _idpPdfFontBold;
   static Uint8List? _idpBuildingBytes;
@@ -662,10 +671,13 @@ class FormPdf {
       return;
     }
     try {
-      final meta = await FormPrintTemplateRepo.instance.getMeta(
-        module: module,
-        formKey: formKey,
-      );
+      final metaLoader = debugLoadPrintTemplateMeta;
+      final meta = metaLoader != null
+          ? await metaLoader(module: module, formKey: formKey)
+          : await FormPrintTemplateRepo.instance.getMeta(
+              module: module,
+              formKey: formKey,
+            );
       if (meta == null) {
         _customTemplateCache[cacheKey] = const _CustomPrintBind();
         return;
@@ -762,7 +774,9 @@ class FormPdf {
     );
   }
 
-  /// Noto Sans theme — never fall back to Helvetica (no Unicode; console spam).
+  /// Noto Sans Regular and Bold. No italic file is bundled, so italic runs
+  /// use these upright faces and keep Unicode characters such as ñ and ₱.
+  /// Never fall back to Helvetica (no Unicode; console spam).
   static pw.ThemeData get _idpPdfTheme {
     final base = _idpPdfFont;
     final bold = _idpPdfFontBold;
@@ -1576,6 +1590,7 @@ class FormPdf {
 
   static Future<pw.Document> buildBiFormPdf(BiFormEntry e) async {
     await ensureLogoLoaded();
+    await _ensureIdpPdfFonts();
     await _bindCustomTemplate('rsp', 'bi');
     final doc = await _formPdfDocument();
     const formTitle = 'BACKGROUND INVESTIGATION (BI FORM)';
@@ -4491,15 +4506,19 @@ class FormPdf {
                   ),
                 ),
                 padding: const pw.EdgeInsets.only(left: 3, bottom: 1),
-                child: pw.FittedBox(
-                  fit: pw.BoxFit.scaleDown,
-                  alignment: pw.Alignment.bottomLeft,
-                  child: pw.Text(
-                    text.isEmpty ? ' ' : text,
-                    maxLines: 1,
-                    style: const pw.TextStyle(fontSize: 8),
-                  ),
-                ),
+                // A whitespace-only string lays out at width 0, and FittedBox
+                // rejects that. A blank value keeps the underline and no text.
+                child: text.isEmpty
+                    ? pw.SizedBox(height: 8)
+                    : pw.FittedBox(
+                        fit: pw.BoxFit.scaleDown,
+                        alignment: pw.Alignment.bottomLeft,
+                        child: pw.Text(
+                          text,
+                          maxLines: 1,
+                          style: const pw.TextStyle(fontSize: 8),
+                        ),
+                      ),
               ),
             ),
           ],

@@ -42,7 +42,7 @@ void main() {
     expect(find.text('Official HRMS Portal'), findsOneWidget);
     expect(find.text('Sign In to HRMS'), findsOneWidget);
     expect(find.text('Municipality of Plaridel'), findsWidgets);
-    expect(find.text('Remember me'), findsNothing);
+    expect(find.text('Remember me'), findsOneWidget);
     expect(find.text('Forgot password?'), findsOneWidget);
     expect(find.text('Or quick access'), findsNothing);
     expect(tester.takeException(), isNull);
@@ -191,7 +191,7 @@ void main() {
     'mobile reset and legal controls retain their actions',
     (tester) async {
       await pumpAt(tester, const Size(375, 812));
-      expect(find.text('Remember me'), findsNothing);
+      expect(find.text('Remember me'), findsOneWidget);
 
       await tester.ensureVisible(find.byType(TextField).first);
       await tester.enterText(

@@ -49,6 +49,7 @@ void main() {
   for (final (name, size, dark, settings) in [
     ('desktop', const Size(1440, 900), false, false),
     ('table', const Size(1440, 900), false, false),
+    ('boxes', const Size(1440, 900), false, false),
     ('page_settings', const Size(1440, 900), false, false),
     ('dark', const Size(1440, 900), true, false),
     ('mobile', const Size(390, 844), false, false),
@@ -115,6 +116,17 @@ void main() {
                         ),
                       ],
                     )
+                  : name == 'boxes'
+                  ? const LocatorPrintLayout(elements:[
+                      LocatorPrintElement(id:'frame',kind:'rectangle',x:40,y:120,width:515,height:250,
+                        decoration:PrintElementDecoration(borderSides:['top','right','bottom','left'],borderColor:'#334155')),
+                      LocatorPrintElement(id:'section',kind:'text',text:'EMPLOYEE INFORMATION',x:40,y:120,width:515,height:32,bold:true,fontSize:14,
+                        decoration:PrintElementDecoration(fillColor:'#E8EDF5',borderSides:['bottom'],borderColor:'#334155')),
+                      LocatorPrintElement(id:'employee',kind:'field',source:'employee_name',label:'Employee name',x:55,y:175,width:240,height:40),
+                      LocatorPrintElement(id:'office',kind:'field',source:'office',label:'Office / Department',x:310,y:175,width:230,height:40),
+                      LocatorPrintElement(id:'note',kind:'text',text:'Supporting details',x:55,y:240,width:485,height:100,
+                        decoration:PrintElementDecoration(borderSides:['top','right','bottom','left'],borderStyle:'dashed',borderColor:'#64748B')),
+                    ])
                   : name == 'table'
                   ? const LocatorPrintLayout(
                       elements: [
@@ -162,6 +174,10 @@ void main() {
       await tester.pumpAndSettle();
       if (settings) {
         await tester.tap(find.byTooltip('Page and element settings'));
+        await tester.pumpAndSettle();
+      }
+      if (name == 'boxes') {
+        await tester.ensureVisible(find.byKey(const ValueKey('layout-appearance')));
         await tester.pumpAndSettle();
       }
       await expectLater(

@@ -58,6 +58,10 @@ test.describe('turn-around time create route', () => {
           return {
             query: async (sql, params) => {
               log.calls.push({ sql: String(sql), params });
+              if (/^\s*SELECT \* FROM "turn_around_time_entries"/.test(String(sql))) {
+                return {rows:[{id:params[0],position:null,office:null,applicants:[]}],rowCount:1};
+              }
+              if (/^\s*SELECT/.test(String(sql))) return {rows:[],rowCount:0};
               if (String(sql).includes('INSERT')) {
                 return {
                   rows: [{ id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', ...(params ? {} : {}) }],
@@ -183,7 +187,7 @@ test.describe('turn-around time create route', () => {
     assert.equal(res.statusCode, 200);
     assert.equal(res.payload && res.payload.code, undefined);
     assert.equal(log.calls.some((call) => call.sql.includes('UPDATE')), true);
-    const update = log.calls.find((call) => call.sql.includes('UPDATE'));
+    const update = log.calls.find((call) => /^UPDATE "turn_around_time_entries" SET/.test(call.sql));
     assert.equal(update.params[0], null);
     assert.equal(update.params[1], null);
   });

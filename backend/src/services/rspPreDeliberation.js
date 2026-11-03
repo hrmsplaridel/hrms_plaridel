@@ -11,7 +11,7 @@ const { revisionIsNew } = require('./rspApplicantNotices');
 const { initializeCreatorSourceSignatures } = require('./docutrackerRspSignatureService');
 const { resolveLineupCreatorId } = require('./selectionLineupEditAudit');
 
-const MIGRATION = 'backend/scripts/migrations/20261007_rsp_pre_deliberation_gate.sql';
+const MIGRATION = 'backend/scripts/migrations/rsp/20261007_rsp_pre_deliberation_gate.sql';
 let schemaReady = false;
 
 class PreDeliberationError extends Error {

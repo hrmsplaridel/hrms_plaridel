@@ -24,10 +24,6 @@ function scorePatterns(text, patterns) {
  */
 function detectAssistantLanguage(message) {
   const raw = String(message || '').toLowerCase();
-  if (/\bkumusta\b/.test(raw)) return 'bisaya';
-  if (/\bkamusta\b/.test(raw)) return 'tagalog';
-  if (/\b(unsaka|kinsa ka)\b/.test(raw)) return 'bisaya';
-  if (/\b(sino ka|ano ka ba|ano ka)\b/.test(raw)) return 'tagalog';
 
   const text = normalizeAssistantMessageForRules(message).toLowerCase();
   if (!text.trim()) return 'english';
@@ -45,6 +41,15 @@ function detectAssistantLanguage(message) {
     return 'tagalog';
   }
   if (/\b(english|ingles)\b/.test(text)) return 'english';
+  // Strong sentence-level cues take priority over shared words such as akong,
+  // wala, kumusta, ba and ko. Evaluate explicit language requests first.
+  const bisaya = /\b(unsa\w*|ngan[ou]\w*|pila|naa|nako|imong|nimo|ug|karon|ugma|gahapon|kinsa|asa|tabangi|himoig?|motambong|tan[- ]awa|adlaw|semanaha)\b/g;
+  const tagalog = /\b(ano|anong|bakit|ilang?|ngayon\w*|bukas|kahapon|paano|pano|suriin|gawan|pangungusap|ilalagay|sino|kanino|saan|nasaan|araw|buwan|linggo|dahil)\b/g;
+  const strongBisaya = [...raw.matchAll(bisaya)].length;
+  const strongTagalog = [...raw.matchAll(tagalog)].length;
+  if (strongTagalog !== strongBisaya) return strongTagalog > strongBisaya ? 'tagalog' : 'bisaya';
+  if (!strongTagalog && !strongBisaya && /^\s*(?:can|could|what|which|how|where|when|why|am i|do i|does|please|check|show|suggest|give|is my|i want|i need)\b/.test(raw)) return 'english';
+  if (/\bkumusta\s+(?:ang|ko)\b/.test(raw) || /\bkamusta\b/.test(raw)) return 'tagalog';
   if (
     /\b(?:pwede|puwede|maaari)\s+ba\s+akong\b/.test(text) ||
     /\b(?:pwede|puwede|maaari)\s+ba\s+ako\b/.test(text)

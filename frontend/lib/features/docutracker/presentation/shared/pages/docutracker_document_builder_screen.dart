@@ -13,8 +13,12 @@ import 'package:provider/provider.dart';
 import 'package:hrms_plaridel/features/docutracker/data/providers/docutracker_provider.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document_builder.dart';
+import 'package:hrms_plaridel/features/docutracker/models/document_type.dart';
 import 'package:hrms_plaridel/features/docutracker/models/docutracker_memo_template.dart';
+import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_builder_chrome.dart';
+import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_content_lock_banner.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_error_banner.dart';
+import 'package:hrms_plaridel/features/docutracker/utils/docutracker_content_lock.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_memo_sheet.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_printable_page_frame.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_signature_field_visual.dart';
@@ -24,6 +28,7 @@ import 'package:hrms_plaridel/features/docutracker/services/employee_directory_l
 import 'package:hrms_plaridel/features/docutracker/theme/docutracker_tokens.dart';
 import 'package:hrms_plaridel/features/docutracker/utils/docutracker_memo_layout.dart';
 import 'package:hrms_plaridel/features/docutracker/utils/docutracker_memo_pdf.dart';
+import 'package:hrms_plaridel/features/docutracker/utils/docutracker_designed_print.dart';
 import 'package:hrms_plaridel/features/docutracker/utils/docutracker_pdf_export.dart';
 import 'package:hrms_plaridel/features/docutracker/utils/docutracker_printable_template.dart';
 import 'package:hrms_plaridel/features/docutracker/utils/docutracker_signature_geometry.dart';
@@ -64,6 +69,7 @@ class _DocuTrackerDocumentBuilderScreenState
   int _revision = 0;
   int _formatVersion = 1;
   String _currentUserId = '';
+  DocuTrackerMemoSignatories? _memoSignatories;
   int _activePage = 0;
   int _localFieldCounter = 0;
   String? _selectedFieldId;
@@ -73,6 +79,11 @@ class _DocuTrackerDocumentBuilderScreenState
   bool _loadingDirectory = false;
   bool _exporting = false;
   bool _canEditLayout = false;
+  String? _staleLockMessage;
+
+  String? get _contentLockMessage =>
+      _staleLockMessage ?? docuTrackerNativeContentLockMessage(widget.document);
+
   bool _canAddOwnSignature = false;
 
   bool get _canInsertOwnSignature => _canEditLayout || _canAddOwnSignature;
@@ -167,30 +178,22 @@ class _DocuTrackerDocumentBuilderScreenState
   DocuTrackerMemoSignatory _memoSignatory(DocuTrackerMemoSlot slot) =>
       DocuTrackerMemoSignatory.resolve(slot, _signatureFields);
 
-  /// Memo: the creator may only fill an unassigned Prepared by slot, and a
-  /// reviewer keeps the existing add-own-signature flow.
-  bool get _canInsertOwnOnDocument => !_isMemo
-      ? _canInsertOwnSignature
-      : _canAddOwnSignature ||
-            (_canEditLayout &&
-                !_memoSignatory(DocuTrackerMemoSlot.preparedBy).isAssigned);
-
-  /// The Memo slot the current user's own signature fills, if any: the
-  /// creator fills an unassigned Prepared by; the Mayor an unassigned
-  /// Approved by. Other reviewers sign outside the fixed slots.
-  Future<DocuTrackerMemoSlot?> _memoOwnSlot() async {
-    if (_canEditLayout) {
-      return _memoSignatory(DocuTrackerMemoSlot.preparedBy).isAssigned
-          ? null
-          : DocuTrackerMemoSlot.preparedBy;
+  /// The memo line assigned to the current user, if they have not signed it.
+  DocuTrackerMemoSlot? get _ownMemoSlot {
+    for (final slot in DocuTrackerMemoSlot.values) {
+      final signatory = _memoSignatory(slot);
+      if (!signatory.isSigned &&
+          signatory.field?.assignedSignerId == _currentUserId) {
+        return slot;
+      }
     }
-    if (_memoSignatory(DocuTrackerMemoSlot.approvedBy).isAssigned) return null;
-    final entries = await _provider.loadEmployeeDirectoryEntries();
-    final me = entries.where((item) => item.id == _currentUserId).firstOrNull;
-    return me?.roleId?.trim().toLowerCase() == 'mayor'
-        ? DocuTrackerMemoSlot.approvedBy
-        : null;
+    return null;
   }
+
+  /// Memo lines are signed on the page. Insert My Signature stays for a
+  /// reviewer who is not already on one of those lines.
+  bool get _canInsertOwnOnDocument =>
+      !_isMemo ? _canInsertOwnSignature : _canAddOwnSignature;
 
   /// Signing a Memo slot: a not-yet-saved draft is saved first so the slot
   /// exists on the server, then the normal signature dialog opens.
@@ -216,22 +219,12 @@ class _DocuTrackerDocumentBuilderScreenState
     await _signField(target);
   }
 
-  /// Prepared by = the drafting user; Approved by = the active Mayor when the
-  /// directory identifies exactly one. Names and positions are the signers'
-  /// own; the creator cannot retype or move them.
+  /// Prepared by = the HR head. Noted by = the Mayor's Office. Approved by =
+  /// the Municipal Mayor. The employee who typed the draft does not take a
+  /// line unless they are that official.
   Future<void> _addDefaultMemoSignatureFields() async {
-    final entries = await _provider.loadEmployeeDirectoryEntries();
     if (!mounted || !_canEditLayout) return;
-    EmployeeDirectoryEntry? entry(String id) {
-      for (final item in entries) {
-        if (item.id == id) return item;
-      }
-      return null;
-    }
-
-    final mayors = entries
-        .where((item) => item.roleId?.trim().toLowerCase() == 'mayor')
-        .toList(growable: false);
+    final signatories = _memoSignatories;
     bool hasLabel(String label) =>
         _signatureFields.any((field) => field.label == label);
     // Until the first save returns the server's values, show the same
@@ -264,30 +257,46 @@ class _DocuTrackerDocumentBuilderScreenState
       );
     }
 
+    var added = false;
     setState(() {
-      if (_currentUserId.isNotEmpty &&
-          !hasLabel(DocuTrackerMemoLayout.preparedFieldLabel)) {
+      void addLine(
+        DocuTrackerMemoDepartmentHead? person,
+        Rect rect,
+        String label,
+      ) {
+        if (person == null || hasLabel(label)) return;
         _signatureFields.add(
           field(
-            DocuTrackerMemoLayout.preparedField,
-            _currentUserId,
-            entry(_currentUserId),
-            DocuTrackerMemoLayout.preparedFieldLabel,
+            rect,
+            person.id,
+            EmployeeDirectoryEntry(
+              id: person.id,
+              fullName: person.fullName,
+              positionName: person.position,
+              roleId: person.roleId,
+            ),
+            label,
           ),
         );
+        added = true;
       }
-      if (mayors.length == 1 &&
-          !hasLabel(DocuTrackerMemoLayout.approvedFieldLabel)) {
-        _signatureFields.add(
-          field(
-            DocuTrackerMemoLayout.approvedField,
-            mayors.single.id,
-            mayors.single,
-            DocuTrackerMemoLayout.approvedFieldLabel,
-          ),
-        );
-      }
-      _dirty = true;
+
+      addLine(
+        signatories?.preparedBy,
+        DocuTrackerMemoLayout.preparedField,
+        DocuTrackerMemoLayout.preparedFieldLabel,
+      );
+      addLine(
+        signatories?.notedBy,
+        DocuTrackerMemoLayout.notedField,
+        DocuTrackerMemoLayout.notedFieldLabel,
+      );
+      addLine(
+        signatories?.approvedBy,
+        DocuTrackerMemoLayout.approvedField,
+        DocuTrackerMemoLayout.approvedFieldLabel,
+      );
+      if (added) _dirty = true;
     });
   }
 
@@ -310,8 +319,14 @@ class _DocuTrackerDocumentBuilderScreenState
       });
       return;
     }
+    final type = DocumentType.fromValue(widget.document.documentType);
+    final officialTemplate =
+        type == DocumentType.memo || type == DocumentType.purchaseRequest;
+    // The create flow asks for a starter. Memo and purchase request also
+    // restore that starter when Open Document loads a page that was never saved.
     final starter =
-        widget.prefillNewDraft && DocuTrackerDraftText.canPrefill(data)
+        DocuTrackerDraftText.canPrefill(data) &&
+            (widget.prefillNewDraft || officialTemplate)
         ? DocuTrackerDraftText.composePage(widget.document)
         : null;
     final memo = data.pages.isNotEmpty && data.pages.first.memo != null;
@@ -344,8 +359,13 @@ class _DocuTrackerDocumentBuilderScreenState
       );
       setState(() => _dirty = true);
       if (memoStarter != null) await _addDefaultMemoSignatureFields();
+      if (!mounted || !_canEditLayout) return;
+      await _save(announce: false);
     } else if (_isMemo) {
       await _refreshMemoRelease();
+      if (!mounted || !_canEditLayout) return;
+      await _addDefaultMemoSignatureFields();
+      if (_dirty) await _save(announce: false);
     }
   }
 
@@ -385,6 +405,7 @@ class _DocuTrackerDocumentBuilderScreenState
       _revision = data.revision;
       _formatVersion = data.formatVersion;
       _currentUserId = data.currentUserId;
+      _memoSignatories = data.memoSignatories;
       _canEditLayout = data.canEditLayout;
       _canAddOwnSignature = data.canAddOwnSignature;
       _activePage = _activePage.clamp(0, _pages.length - 1);
@@ -412,7 +433,7 @@ class _DocuTrackerDocumentBuilderScreenState
       )
       .toList(growable: false);
 
-  Future<bool> _save() async {
+  Future<bool> _save({bool announce = true}) async {
     final documentId = widget.document.id;
     if (!_canEditLayout || documentId == null || _busy) return false;
     setState(() {
@@ -427,18 +448,60 @@ class _DocuTrackerDocumentBuilderScreenState
     );
     if (!mounted) return false;
     if (saved == null) {
+      final message =
+          _provider.builderError ?? 'Could not save the document layout.';
+      final locked = message.toLowerCase().contains('read-only');
       setState(() {
         _saving = false;
-        _error =
-            _provider.builderError ?? 'Could not save the document layout.';
+        _error = message;
+        if (locked) {
+          _canEditLayout = false;
+          _staleLockMessage = message;
+        }
       });
       return false;
     }
     _replaceFromServer(saved);
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(const SnackBar(content: Text('Document layout saved.')));
+    if (announce) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            _isMemo ? 'Memo draft saved.' : 'Document layout saved.',
+          ),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
     return true;
+  }
+
+  Future<void> _handleBack() async {
+    if (_exporting) return;
+    if (_dirty && _canEditLayout) {
+      final leave = await showDialog<bool>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('Unsaved changes'),
+          content: Text(
+            _isMemo
+                ? 'You have unsaved Memo changes. Leave without saving the draft?'
+                : 'You have unsaved changes. Leave without saving?',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: const Text('Stay'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, true),
+              child: const Text('Leave'),
+            ),
+          ],
+        ),
+      );
+      if (leave != true || !mounted) return;
+    }
+    if (mounted) Navigator.of(context).pop();
   }
 
   void _addPage() {
@@ -609,7 +672,7 @@ class _DocuTrackerDocumentBuilderScreenState
 
   Future<void> _insertOwnSignature() async {
     if (!_canInsertOwnOnDocument || _currentUserId.isEmpty || _busy) return;
-    final memoSlot = _isMemo ? await _memoOwnSlot() : null;
+    final memoSlot = _isMemo ? _ownMemoSlot : null;
     if (!mounted || (_isMemo && memoSlot == null && _canEditLayout)) return;
     final choice = await showDocuTrackerSignatureDialog(
       context,
@@ -618,6 +681,7 @@ class _DocuTrackerDocumentBuilderScreenState
     if (choice == null || !mounted) return;
     final slotRect = switch (memoSlot) {
       DocuTrackerMemoSlot.preparedBy => DocuTrackerMemoLayout.preparedField,
+      DocuTrackerMemoSlot.notedBy => DocuTrackerMemoLayout.notedField,
       DocuTrackerMemoSlot.approvedBy => DocuTrackerMemoLayout.approvedField,
       null => null,
     };
@@ -1170,10 +1234,35 @@ class _DocuTrackerDocumentBuilderScreenState
     }
   }
 
+  /// Prefer the admin-designed printed form when the document type has one.
+  Future<Uint8List> _bytesForPrintOrExport() async {
+    final document = _latestDocument ?? widget.document;
+    if (document.id != null) {
+      setState(() {
+        _exporting = true;
+        _selectedFieldId = null;
+      });
+      FocusManager.instance.primaryFocus?.unfocus();
+      try {
+        final designed = await buildDocuTrackerDesignedPrintPdf(
+          document: document,
+          signatureFields: _signatureFields,
+          memo: _isMemo ? _currentMemo() : null,
+        );
+        if (designed != null && designed.isNotEmpty) return designed;
+      } catch (_) {
+        // A saved layout that cannot be rendered still prints the built-in PDF.
+      } finally {
+        if (mounted) setState(() => _exporting = false);
+      }
+    }
+    return _isMemo ? await _buildMemoPdf() : await _buildPdf();
+  }
+
   Future<void> _printDocument() async {
     if (_busy) return;
     try {
-      final bytes = _isMemo ? await _buildMemoPdf() : await _buildPdf();
+      final bytes = await _bytesForPrintOrExport();
       await Printing.layoutPdf(
         onLayout: (_) async => bytes,
         format: PdfPageFormat.a4,
@@ -1191,7 +1280,7 @@ class _DocuTrackerDocumentBuilderScreenState
   Future<void> _exportPdf() async {
     if (_busy) return;
     try {
-      final bytes = _isMemo ? await _buildMemoPdf() : await _buildPdf();
+      final bytes = await _bytesForPrintOrExport();
       final safeName = widget.document.title
           .replaceAll(RegExp(r'[^A-Za-z0-9._-]+'), '_')
           .replaceAll(RegExp(r'_+'), '_');
@@ -1228,13 +1317,24 @@ class _DocuTrackerDocumentBuilderScreenState
         : _dirty
         ? 'Unsaved changes'
         : 'Saved';
+    final statusTone = !_canEditLayout
+        ? DocuTrackerBuilderStatusTone.readOnly
+        : _saving
+        ? DocuTrackerBuilderStatusTone.saving
+        : _dirty
+        ? DocuTrackerBuilderStatusTone.dirty
+        : DocuTrackerBuilderStatusTone.saved;
     return Localizations.override(
       context: context,
       delegates: const <LocalizationsDelegate<dynamic>>[
         quill.FlutterQuillLocalizations.delegate,
       ],
       child: PopScope(
-        canPop: !_exporting,
+        canPop: !_exporting && !(_dirty && _canEditLayout),
+        onPopInvokedWithResult: (didPop, _) async {
+          if (didPop || _exporting) return;
+          await _handleBack();
+        },
         child: Stack(
           children: [
             AbsorbPointer(
@@ -1242,70 +1342,135 @@ class _DocuTrackerDocumentBuilderScreenState
               child: Scaffold(
                 backgroundColor: DocuTrackerTokens.canvasOf(context),
                 appBar: AppBar(
+                  toolbarHeight: compact ? kToolbarHeight : 64,
+                  backgroundColor: DocuTrackerTokens.surfaceOf(context),
+                  foregroundColor: DocuTrackerTokens.textPrimaryOf(context),
+                  surfaceTintColor: Colors.transparent,
                   leading: BackButton(
                     onPressed: _exporting
                         ? null
-                        : () => Navigator.maybePop(context),
+                        : () => unawaited(_handleBack()),
                   ),
                   titleSpacing: 0,
-                  title: Tooltip(
-                    message: widget.document.title,
-                    child: Text(
-                      widget.document.title,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                  actions: [
-                    if (_canEditLayout) ...[
-                      if (!compact)
-                        Text(
-                          status,
-                          style: Theme.of(context).textTheme.labelSmall,
-                        ),
-                      SizedBox(
-                        width: compact ? 56 : 48,
-                        child: Tooltip(
-                          message: 'Save — $status',
-                          child: InkWell(
-                            onTap: _busy || !_dirty ? null : _save,
-                            child: Semantics(
-                              button: true,
-                              enabled: !_busy && _dirty,
-                              child: Column(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  if (_saving)
-                                    const SizedBox.square(
-                                      dimension: 18,
-                                      child: CircularProgressIndicator(
-                                        strokeWidth: 2,
-                                      ),
-                                    )
-                                  else
-                                    Icon(
-                                      _dirty
-                                          ? Icons.save_outlined
-                                          : Icons.check_circle_outline,
-                                    ),
-                                  if (compact)
-                                    Text(
-                                      _saving
-                                          ? 'Saving'
-                                          : _dirty
-                                          ? 'Unsaved'
-                                          : 'Saved',
-                                      style: Theme.of(
-                                        context,
-                                      ).textTheme.labelSmall,
-                                    ),
-                                ],
-                              ),
-                            ),
+                  title: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Tooltip(
+                        message: widget.document.title,
+                        child: Text(
+                          widget.document.title,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontWeight: FontWeight.w700,
+                            fontSize: compact ? 15 : 16,
+                            color: DocuTrackerTokens.textPrimaryOf(context),
                           ),
                         ),
                       ),
+                      if (!compact)
+                        Text(
+                          _isMemo
+                              ? (_canEditLayout
+                                    ? 'Memo draft editor'
+                                    : 'Memo · view only')
+                              : (_canEditLayout
+                                    ? 'Document editor'
+                                    : 'Document · view only'),
+                          style: DocuTrackerTokens.metaStyle(context).copyWith(
+                            fontSize: 11,
+                          ),
+                        ),
                     ],
+                  ),
+                  actions: [
+                    if (_canEditLayout) ...[
+                      if (!compact) ...[
+                        DocuTrackerBuilderStatusChip(
+                          label: status,
+                          tone: statusTone,
+                        ),
+                        const SizedBox(width: 8),
+                      ],
+                      Padding(
+                        padding: EdgeInsets.only(right: compact ? 0 : 4),
+                        child: Tooltip(
+                          message: 'Save — $status',
+                          child: compact
+                              ? IconButton(
+                                  key: const ValueKey(
+                                    'docutracker-builder-save-draft',
+                                  ),
+                                  onPressed: _busy || !_dirty
+                                      ? null
+                                      : () => unawaited(_save()),
+                                  icon: _saving
+                                      ? const SizedBox.square(
+                                          dimension: 18,
+                                          child: CircularProgressIndicator(
+                                            strokeWidth: 2,
+                                          ),
+                                        )
+                                      : Icon(
+                                          _dirty
+                                              ? Icons.save_outlined
+                                              : Icons.check_circle_outline,
+                                        ),
+                                )
+                              : FilledButton.tonalIcon(
+                                  key: const ValueKey(
+                                    'docutracker-builder-save-draft',
+                                  ),
+                                  style: FilledButton.styleFrom(
+                                    visualDensity: VisualDensity.compact,
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 12,
+                                      vertical: 8,
+                                    ),
+                                  ),
+                                  onPressed: _busy || !_dirty
+                                      ? null
+                                      : () => unawaited(_save()),
+                                  icon: _saving
+                                      ? const SizedBox.square(
+                                          dimension: 16,
+                                          child: CircularProgressIndicator(
+                                            strokeWidth: 2,
+                                          ),
+                                        )
+                                      : Icon(
+                                          _dirty
+                                              ? Icons.save_outlined
+                                              : Icons.check_circle_outline,
+                                          size: 18,
+                                        ),
+                                  label: Text(
+                                    _saving ? 'Saving…' : 'Save Draft',
+                                  ),
+                                ),
+                        ),
+                      ),
+                      if (compact)
+                        Padding(
+                          padding: const EdgeInsets.only(right: 4),
+                          child: DocuTrackerBuilderStatusChip(
+                            label: _saving
+                                ? 'Saving'
+                                : _dirty
+                                ? 'Unsaved'
+                                : 'Saved',
+                            tone: statusTone,
+                          ),
+                        ),
+                    ] else if (!compact)
+                      Padding(
+                        padding: const EdgeInsets.only(right: 8),
+                        child: DocuTrackerBuilderStatusChip(
+                          label: 'Read-only',
+                          tone: DocuTrackerBuilderStatusTone.readOnly,
+                        ),
+                      ),
                     IconButton(
                       tooltip: 'Signatures',
                       onPressed: _busy ? null : _toggleSignatures,
@@ -1349,6 +1514,17 @@ class _DocuTrackerDocumentBuilderScreenState
                       Padding(
                         padding: const EdgeInsets.all(8),
                         child: DocuTrackerErrorBanner(message: _error!),
+                      ),
+                    if (_contentLockMessage case final lockMessage?)
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
+                        child: DocuTrackerContentLockBanner(
+                          message: lockMessage,
+                        ),
+                      ),
+                    if (_isMemo)
+                      DocuTrackerMemoEditorHintBanner(
+                        editable: _canEditLayout && !_busy,
                       ),
                     Expanded(child: _buildWorkspace()),
                     _buildCanvasControls(),
@@ -1582,87 +1758,76 @@ class _DocuTrackerDocumentBuilderScreenState
   Widget _buildDocumentCanvas() {
     final index = _capturePage ?? _activePage;
     final page = _pages[index];
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final widthFit = math.max(
-          0.01,
-          (constraints.maxWidth - 24) / _paperWidth,
-        );
-        final heightFit = math.max(
-          0.01,
-          (constraints.maxHeight - 24) / _paperHeight,
-        );
-        final scale =
-            (_fitWidth ? widthFit : math.min(widthFit, heightFit)) * _zoom;
-        _renderScale = scale;
-        return SingleChildScrollView(
-          key: ValueKey('canvas-$index'),
-          controller: page.canvasScroll,
-          child: SingleChildScrollView(
-            controller: page.horizontalScroll,
-            scrollDirection: Axis.horizontal,
-            child: ConstrainedBox(
-              constraints: BoxConstraints(
-                minWidth: constraints.maxWidth,
-                minHeight: constraints.maxHeight,
-              ),
-              child: Center(
-                child: Padding(
-                  padding: const EdgeInsets.all(12),
-                  child: _buildPage(index, scale),
+    return ColoredBox(
+      color: DocuTrackerTokens.canvasOf(context),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final pad = MediaQuery.sizeOf(context).width < 600 ? 10.0 : 20.0;
+          final widthFit = math.max(
+            0.01,
+            (constraints.maxWidth - pad * 2) / _paperWidth,
+          );
+          final heightFit = math.max(
+            0.01,
+            (constraints.maxHeight - pad * 2) / _paperHeight,
+          );
+          final scale =
+              (_fitWidth ? widthFit : math.min(widthFit, heightFit)) * _zoom;
+          _renderScale = scale;
+          return SingleChildScrollView(
+            key: ValueKey('canvas-$index'),
+            controller: page.canvasScroll,
+            child: SingleChildScrollView(
+              controller: page.horizontalScroll,
+              scrollDirection: Axis.horizontal,
+              child: ConstrainedBox(
+                constraints: BoxConstraints(
+                  minWidth: constraints.maxWidth,
+                  minHeight: constraints.maxHeight,
+                ),
+                child: Center(
+                  child: Padding(
+                    padding: EdgeInsets.all(pad),
+                    child: _buildPage(index, scale),
+                  ),
                 ),
               ),
             ),
-          ),
-        );
-      },
+          );
+        },
+      ),
     );
   }
 
   Widget _buildCanvasControls() {
-    return SafeArea(
-      top: false,
-      child: Material(
-        color: DocuTrackerTokens.surfaceOf(context),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            IconButton(
-              tooltip: 'Previous page',
-              onPressed: !_busy && _activePage > 0
-                  ? () => _goToPage(_activePage - 1)
-                  : null,
-              icon: const Icon(Icons.chevron_left),
-            ),
-            PopupMenuButton<int>(
-              tooltip: 'Choose page',
-              enabled: !_busy,
-              onSelected: (index) => unawaited(_goToPage(index)),
-              itemBuilder: (_) => List.generate(
-                _pages.length,
-                (index) => PopupMenuItem(
-                  value: index,
-                  child: Text('Page ${index + 1}'),
-                ),
-              ),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 16,
-                  vertical: 14,
-                ),
-                child: Text('Page ${_activePage + 1} of ${_pages.length}'),
-              ),
-            ),
-            IconButton(
-              tooltip: 'Next page',
-              onPressed: !_busy && _activePage < _pages.length - 1
-                  ? () => _goToPage(_activePage + 1)
-                  : null,
-              icon: const Icon(Icons.chevron_right),
-            ),
-          ],
-        ),
-      ),
+    return DocuTrackerBuilderCanvasBar(
+      pageLabel: 'Page ${_activePage + 1} of ${_pages.length}',
+      zoomLabel: '${(_zoom * 100).round()}%',
+      pageCount: _pages.length,
+      enabled: !_busy,
+      canGoPrevious: !_busy && _activePage > 0,
+      canGoNext: !_busy && _activePage < _pages.length - 1,
+      onPrevious: () => unawaited(_goToPage(_activePage - 1)),
+      onNext: () => unawaited(_goToPage(_activePage + 1)),
+      onPickPage: (index) => unawaited(_goToPage(index)),
+      canZoomOut: !_busy && _zoom > 0.5,
+      canZoomIn: !_busy && _zoom < 3,
+      onZoomOut: () => setState(() {
+        _fitWidth = false;
+        _zoom = (_zoom - 0.1).clamp(0.5, 3.0);
+      }),
+      onZoomIn: () => setState(() {
+        _fitWidth = false;
+        _zoom = (_zoom + 0.1).clamp(0.5, 3.0);
+      }),
+      onFitPage: () => setState(() {
+        _fitWidth = false;
+        _zoom = 1;
+      }),
+      onFitWidth: () => setState(() {
+        _fitWidth = true;
+        _zoom = 1;
+      }),
     );
   }
 
@@ -1786,14 +1951,23 @@ class _DocuTrackerDocumentBuilderScreenState
               width: _paperWidth,
               height: _paperHeight,
               child: DecoratedBox(
-                decoration: const BoxDecoration(
-                  boxShadow: <BoxShadow>[
-                    BoxShadow(
-                      color: Color(0x26000000),
-                      blurRadius: 18,
-                      offset: Offset(0, 7),
-                    ),
-                  ],
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(_exporting ? 0 : 2),
+                  boxShadow: _exporting
+                      ? null
+                      : const <BoxShadow>[
+                          BoxShadow(
+                            color: Color(0x33000000),
+                            blurRadius: 28,
+                            spreadRadius: 1,
+                            offset: Offset(0, 10),
+                          ),
+                          BoxShadow(
+                            color: Color(0x14000000),
+                            blurRadius: 6,
+                            offset: Offset(0, 2),
+                          ),
+                        ],
                 ),
                 child: RepaintBoundary(
                   key: _pageKeys[index],
@@ -1804,7 +1978,10 @@ class _DocuTrackerDocumentBuilderScreenState
                       color: Colors.white,
                       border: _exporting
                           ? null
-                          : Border.all(color: const Color(0xFFD7DCE3)),
+                          : Border.all(
+                              color: const Color(0xFFCBD5E1),
+                              width: 1.1,
+                            ),
                     ),
                     child: Stack(
                       clipBehavior: Clip.none,
@@ -1820,6 +1997,9 @@ class _DocuTrackerDocumentBuilderScreenState
                                   editable: _canEditLayout && !_busy,
                                   preparedBy: _memoSignatory(
                                     DocuTrackerMemoSlot.preparedBy,
+                                  ),
+                                  notedBy: _memoSignatory(
+                                    DocuTrackerMemoSlot.notedBy,
                                   ),
                                   approvedBy: _memoSignatory(
                                     DocuTrackerMemoSlot.approvedBy,

@@ -77,6 +77,44 @@ class LocatorPrintTableCell {
       );
 }
 
+class PrintElementDecoration {
+  const PrintElementDecoration({
+    this.borderSides = const [],
+    this.borderWidth = 1,
+    this.borderColor = '#000000',
+    this.borderStyle = 'solid',
+    this.fillColor,
+  });
+  final List<String> borderSides;
+  final double borderWidth;
+  final String borderColor, borderStyle;
+  final String? fillColor;
+  bool get isDefault => borderSides.isEmpty && borderWidth == 1 &&
+      borderColor == '#000000' && borderStyle == 'solid' && fillColor == null;
+  PrintElementDecoration copyWith({List<String>? borderSides, double? borderWidth,
+    String? borderColor, String? borderStyle, String? fillColor, bool clearFill = false}) =>
+      PrintElementDecoration(borderSides: borderSides ?? this.borderSides,
+        borderWidth: borderWidth ?? this.borderWidth, borderColor: borderColor ?? this.borderColor,
+        borderStyle: borderStyle ?? this.borderStyle, fillColor: clearFill ? null : fillColor ?? this.fillColor);
+  String? validate() {
+    final color = RegExp(r'^#[0-9a-fA-F]{6}$');
+    if (!borderWidth.isFinite || borderWidth < 0 || borderWidth > 20) return 'Border width must be 0 to 20 points.';
+    if (!color.hasMatch(borderColor) || (fillColor != null && !color.hasMatch(fillColor!))) return 'Use a six-digit color such as #000000.';
+    if (!['solid','dashed'].contains(borderStyle) || borderSides.toSet().length != borderSides.length ||
+        borderSides.any((side) => !['top','right','bottom','left'].contains(side))) {
+      return 'Choose valid border sides and style.';
+    }
+    return null;
+  }
+  Map<String,dynamic> toJson() => {'border_sides':borderSides,'border_width':borderWidth,
+    'border_color':borderColor,'border_style':borderStyle,if(fillColor != null)'fill_color':fillColor};
+  factory PrintElementDecoration.fromJson(Map<String,dynamic> json) => PrintElementDecoration(
+    borderSides: List<String>.from(json['border_sides'] as List? ?? const []),
+    borderWidth: (json['border_width'] as num? ?? 1).toDouble(),
+    borderColor: json['border_color'] as String? ?? '#000000',
+    borderStyle: json['border_style'] as String? ?? 'solid', fillColor: json['fill_color'] as String?);
+}
+
 class LocatorPrintElement {
   const LocatorPrintElement({
     required this.id,
@@ -98,6 +136,9 @@ class LocatorPrintElement {
     this.headerRow = true,
     this.borders = true,
     this.signatureStyle = 'standard',
+    this.decoration = const PrintElementDecoration(),
+    this.groupId,
+    this.locked = false,
   });
   final String id, kind, source, text, label, align, signatureStyle;
   final double x, y, width, height, fontSize;
@@ -106,6 +147,9 @@ class LocatorPrintElement {
   final List<List<LocatorPrintTableCell>> cells;
   final List<double> columnWidths;
   final bool headerRow, borders;
+  final PrintElementDecoration decoration;
+  final String? groupId;
+  final bool locked;
   LocatorPrintElement copyWith({
     String? id,
     String? text,
@@ -125,6 +169,10 @@ class LocatorPrintElement {
     bool? headerRow,
     bool? borders,
     String? signatureStyle,
+    PrintElementDecoration? decoration,
+    String? groupId,
+    bool clearGroup = false,
+    bool? locked,
   }) => LocatorPrintElement(
     id: id ?? this.id,
     kind: kind,
@@ -145,6 +193,9 @@ class LocatorPrintElement {
     headerRow: headerRow ?? this.headerRow,
     borders: borders ?? this.borders,
     signatureStyle: signatureStyle ?? this.signatureStyle,
+    decoration: decoration ?? this.decoration,
+    groupId: clearGroup ? null : groupId ?? this.groupId,
+    locked: locked ?? this.locked,
   );
   Map<String, dynamic> toJson() => {
     'id': id,
@@ -162,6 +213,9 @@ class LocatorPrintElement {
     'bold': bold,
     'show_label': showLabel,
     if (signatureStyle != 'standard') 'signature_style': signatureStyle,
+    if (!decoration.isDefault) 'decoration': decoration.toJson(),
+    if (groupId != null) 'group_id': groupId,
+    if (locked) 'locked': true,
     if (kind == 'table') ...{
       'cells': cells
           .map((row) => row.map((cell) => cell.toJson()).toList())
@@ -185,6 +239,11 @@ class LocatorPrintElement {
         fontSize: (json['font_size'] as num).toDouble(),
         fontFamily: json['font_family'] as String?,
         signatureStyle: json['signature_style'] as String? ?? 'standard',
+        decoration: json['decoration'] is Map
+            ? PrintElementDecoration.fromJson(Map<String,dynamic>.from(json['decoration'] as Map))
+            : const PrintElementDecoration(),
+        groupId: json['group_id'] as String?,
+        locked: json['locked'] == true,
         align: json['align'] as String? ?? 'left',
         bold: json['bold'] == true,
         showLabel: json['show_label'] != false,
@@ -327,6 +386,10 @@ class LocatorPrintLayout {
       margins: margins,
     );
     if (next.pageSettingsError() != null) return next;
+    if (next.pageWidth == pageWidth && next.pageHeight == pageHeight &&
+        next.margins.toJson().toString() == this.margins.toJson().toString()) {
+      return next;
+    }
     return next.copyWith(
       baseFormBox: baseFormBox == null
           ? null
@@ -423,6 +486,10 @@ class LocatorPrintLayout {
       return 'Each element needs a unique ID.';
     }
     for (final e in elements) {
+      if (!['text','field','signature','line','table','rectangle'].contains(e.kind)) return 'Unknown layout element.';
+      final appearanceError = e.decoration.validate();
+      if (appearanceError != null) return appearanceError;
+      if (e.groupId != null && !RegExp(r'^[a-zA-Z0-9_-]{1,64}$').hasMatch(e.groupId!)) return 'Invalid element group.';
       if ([e.x, e.y, e.width, e.height, e.fontSize].any((n) => !n.isFinite) ||
           e.x < margins.left ||
           e.y < margins.top ||

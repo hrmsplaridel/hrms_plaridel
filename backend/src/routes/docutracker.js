@@ -10,14 +10,19 @@ const {
   transitionDocument,
   addDocumentRemark,
   createDocument: createDocumentEngine,
+  deleteOwnDraft,
   getEffectivePermissionExplanation,
   listDocuments,
   listReviewedDepartments,
   canUserPerformDocumentAction,
   isDraftOrWipDocument,
+  nativeDocumentContentIsLocked,
+  nativeDocumentContentLockMessage,
   updateDocumentMetadata,
+  listRecoveryCandidates,
   recoverDocumentAssignment,
   describeViewerReleaseAccess,
+  typeRequiresRelease,
 } = require('../services/docutrackerWorkflowService');
 const {
   getReleaseOptions,
@@ -154,9 +159,31 @@ async function loadDocumentRowForAccess(documentId) {
 
 async function canModifyDocumentAttachment(client, docRow, user) {
   if (!docRow || !user?.id) return false;
+  if (nativeDocumentContentIsLocked(docRow)) return false;
   if (user.role === 'admin') return true;
   if (isDraftOrWipDocument(docRow) && sameEntityId(docRow.created_by, user.id)) return true;
   return canUserPerformDocumentAction(client, { user, document: docRow, action: 'edit' });
+}
+
+function codedRouteError(code, message) {
+  const error = new Error(message);
+  error.code = code;
+  return error;
+}
+
+async function lockDocumentForAttachmentChange(client, documentId, user) {
+  const result = await client.query(
+    'SELECT * FROM docutracker_documents WHERE id = $1 FOR UPDATE',
+    [documentId]
+  );
+  if (!result.rowCount) throw codedRouteError('NOT_FOUND', 'Document not found');
+  const document = result.rows[0];
+  const lockMessage = nativeDocumentContentLockMessage(document);
+  if (lockMessage) throw codedRouteError('FORBIDDEN', lockMessage);
+  if (!(await canModifyDocumentAttachment(client, document, user))) {
+    throw codedRouteError('FORBIDDEN', 'You do not have permission to change this file.');
+  }
+  return document;
 }
 
 async function canDownloadDocumentFile(client, docRow, user) {
@@ -1401,8 +1428,25 @@ router.put(
   }
 );
 
+const historySelectSql = `SELECT h.*,
+              COALESCE(NULLIF(h.actor_name, ''), u.full_name) AS actor_name
+       FROM docutracker_document_history h
+       LEFT JOIN users u ON u.id = h.actor_id`;
+
+function parseBoundedInteger(value, { min, max }) {
+  const text = String(value ?? '').trim();
+  if (!/^\d+$/.test(text)) return null;
+  const number = Number(text);
+  if (!Number.isSafeInteger(number) || number < min || number > max) return null;
+  return number;
+}
+
 /**
  * GET /api/docutracker/documents/:id/history
+ *
+ * Without `limit`, returns the full history array (existing clients).
+ * With `limit` and optional `offset` / `action`, returns
+ * `{ items, total, limit, offset }`. Access checks are unchanged.
  */
 router.get('/documents/:id/history', protect, async (req, res) => {
   const { id } = req.params;
@@ -1410,16 +1454,59 @@ router.get('/documents/:id/history', protect, async (req, res) => {
     if (!(await assertDocumentReadable(req, id))) {
       return res.status(403).json({ error: 'Forbidden' });
     }
-    const result = await pool.query(
-      `SELECT h.*,
-              COALESCE(NULLIF(h.actor_name, ''), u.full_name) AS actor_name
-       FROM docutracker_document_history h
-       LEFT JOIN users u ON u.id = h.actor_id
+    const paginate = req.query.limit !== undefined;
+    if (!paginate) {
+      const result = await pool.query(
+        `${historySelectSql}
        WHERE document_id = $1
        ORDER BY h.created_at DESC`,
-      [id]
+        [id]
+      );
+      return res.json(result.rows);
+    }
+
+    const limit = parseBoundedInteger(req.query.limit, { min: 1, max: 100 });
+    const offset = parseBoundedInteger(req.query.offset ?? '0', {
+      min: 0,
+      max: 1000000,
+    });
+    if (limit == null) {
+      return res.status(400).json({ error: 'limit must be an integer from 1 to 100' });
+    }
+    if (offset == null) {
+      return res.status(400).json({ error: 'offset must be a non-negative integer' });
+    }
+    const action = String(req.query.action || '').trim();
+    if (action && !/^[a-z0-9_]{1,64}$/.test(action)) {
+      return res.status(400).json({ error: 'action filter is not valid' });
+    }
+
+    const where = ['h.document_id = $1'];
+    const params = [id];
+    if (action) {
+      params.push(action);
+      where.push(`h.action = $${params.length}`);
+    }
+    const whereSql = where.join(' AND ');
+    const count = await pool.query(
+      `SELECT COUNT(*)::int AS total
+       FROM docutracker_document_history h
+       WHERE ${whereSql}`,
+      params
     );
-    res.json(result.rows);
+    const rows = await pool.query(
+      `${historySelectSql}
+       WHERE ${whereSql}
+       ORDER BY h.created_at DESC, h.id DESC
+       LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
+      [...params, limit, offset]
+    );
+    return res.json({
+      items: rows.rows,
+      total: count.rows[0]?.total ?? 0,
+      limit,
+      offset,
+    });
   } catch (err) {
     console.error('[docutracker GET /documents/:id/history]', err);
     res.status(500).json({ error: 'Failed to fetch history' });
@@ -1517,9 +1604,16 @@ router.get('/documents/:id', protect, async (req, res) => {
       user: req.user,
       document: docRow,
     });
+    const typeRequiresReleaseFlag = docRow.source_module
+      ? false
+      : await typeRequiresRelease(pool, docRow.document_type);
 
     res.json({
-      document: mapDocumentRow({ ...docRow, ...releaseFlags }),
+      document: mapDocumentRow({
+        ...docRow,
+        ...releaseFlags,
+        type_requires_release: typeRequiresReleaseFlag,
+      }),
       routing: routingResult.rows,
       history: historyResult.rows,
     });
@@ -1568,6 +1662,21 @@ router.get('/permission-explain', protect, async (req, res) => {
   } catch (err) {
     console.error('[docutracker GET /permission-explain]', err);
     return res.status(500).json({ error: 'Failed to explain permission' });
+  }
+});
+
+/**
+ * GET /api/docutracker/documents/:id/recovery-candidates
+ * Admin-only read of the reviewers the current step can be reassigned to.
+ */
+router.get('/documents/:id/recovery-candidates', protect, requireAdmin, async (req, res) => {
+  try {
+    const candidates = await listRecoveryCandidates(pool, req.user, req.params.id);
+    return res.json(candidates);
+  } catch (err) {
+    console.error('[docutracker GET /documents/:id/recovery-candidates]', err);
+    const mapped = mapWorkflowServiceError(err);
+    return res.status(mapped.status).json({ error: mapped.error });
   }
 });
 
@@ -2586,8 +2695,12 @@ router.post('/documents/:id/attachment', protect, uploadDocutrackerAttachmentMw,
     if (!(await assertDocumentReadable(req, id))) {
       return res.status(403).json({ error: 'Forbidden' });
     }
-    if (!(await canModifyDocumentAttachment(pool, docRow, req.user))) {
-      return res.status(403).json({ error: 'You do not have permission to attach a file.' });
+    const lockMessage = nativeDocumentContentLockMessage(docRow);
+    if (lockMessage || !(await canModifyDocumentAttachment(pool, docRow, req.user))) {
+      if (req.file?.path && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+      return res.status(403).json({
+        error: lockMessage || 'You do not have permission to attach a file.',
+      });
     }
 
     const relPath = `${DOCUTRACKER_ATTACHMENT_SUBDIR}/${req.file.filename}`;
@@ -2596,6 +2709,7 @@ router.post('/documents/:id/attachment', protect, uploadDocutrackerAttachmentMw,
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
+      await lockDocumentForAttachmentChange(client, id, req.user);
       const updated = await client.query(
         `UPDATE docutracker_documents
          SET file_path = $1, file_name = $2, updated_at = NOW()
@@ -2625,8 +2739,53 @@ router.post('/documents/:id/attachment', protect, uploadDocutrackerAttachmentMw,
       const filePath = path.join(UPLOAD_DIR, uploadedRelPath);
       if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
     }
+    const mapped = mapWorkflowServiceError(err);
+    if (err?.code === 'FORBIDDEN' || err?.code === 'NOT_FOUND' || err?.code === 'VALIDATION') {
+      return res.status(mapped.status).json({ error: mapped.error });
+    }
     console.error('[docutracker POST /documents/:id/attachment]', err);
     res.status(500).json({ error: 'Failed to upload attachment' });
+  }
+});
+
+function unlinkUploadedDocuTrackerFile(relativePath) {
+  const rel = String(relativePath || '').replace(/\\/g, '/').replace(/^\/+/, '');
+  if (!rel || rel.includes('..')) return;
+  const root = path.resolve(UPLOAD_DIR);
+  const target = path.resolve(root, rel);
+  if (target !== root && !target.startsWith(`${root}${path.sep}`)) return;
+  if (fs.existsSync(target)) fs.unlinkSync(target);
+}
+
+/**
+ * DELETE /api/docutracker/documents/:id
+ * Removes an unsubmitted draft so it leaves the document list.
+ */
+router.delete('/documents/:id', protect, async (req, res) => {
+  const { id } = req.params;
+  try {
+    if (isSourceOnlyDocumentId(id)) return sourceOnlyDocumentResponse(res);
+    if (!isUuid(id)) return res.status(404).json({ error: 'Document not found' });
+    const filePaths = await deleteOwnDraft(pool, req.user, id);
+    for (const filePath of filePaths) {
+      try {
+        unlinkUploadedDocuTrackerFile(filePath);
+      } catch (error) {
+        console.error('[docutracker DELETE /documents/:id] file cleanup', error);
+      }
+    }
+    return res.json({ deleted: true });
+  } catch (err) {
+    const mapped = mapWorkflowServiceError(err);
+    if (
+      err?.code === 'FORBIDDEN' ||
+      err?.code === 'NOT_FOUND' ||
+      err?.code === 'VALIDATION'
+    ) {
+      return res.status(mapped.status).json({ error: mapped.error });
+    }
+    console.error('[docutracker DELETE /documents/:id]', err);
+    return res.status(500).json({ error: 'Failed to delete draft' });
   }
 });
 
@@ -2642,12 +2801,16 @@ router.delete('/documents/:id/attachment', protect, async (req, res) => {
     if (!(await assertDocumentReadable(req, id))) {
       return res.status(403).json({ error: 'Forbidden' });
     }
-    if (!(await canModifyDocumentAttachment(pool, docRow, req.user))) {
-      return res.status(403).json({ error: 'You do not have permission to remove the file.' });
+    const lockMessage = nativeDocumentContentLockMessage(docRow);
+    if (lockMessage || !(await canModifyDocumentAttachment(pool, docRow, req.user))) {
+      return res.status(403).json({
+        error: lockMessage || 'You do not have permission to remove the file.',
+      });
     }
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
+      await lockDocumentForAttachmentChange(client, id, req.user);
       await clearCurrentDocumentFiles(client, id);
       const updated = await client.query(
         `UPDATE docutracker_documents
@@ -2665,6 +2828,10 @@ router.delete('/documents/:id/attachment', protect, async (req, res) => {
       client.release();
     }
   } catch (err) {
+    const mapped = mapWorkflowServiceError(err);
+    if (err?.code === 'FORBIDDEN' || err?.code === 'NOT_FOUND' || err?.code === 'VALIDATION') {
+      return res.status(mapped.status).json({ error: mapped.error });
+    }
     console.error('[docutracker DELETE /documents/:id/attachment]', err);
     res.status(500).json({ error: 'Failed to remove attachment' });
   }
@@ -2712,5 +2879,8 @@ router.get('/documents/:id/attachment', protect, async (req, res) => {
     res.status(500).json({ error: 'Failed to fetch attachment' });
   }
 });
+
+// Printed form templates (background + designed layout) for document types.
+router.use('/print', protect, require('./docutrackerPrintTemplates'));
 
 module.exports = router;

@@ -1,3 +1,4 @@
+import 'package:hrms_plaridel/core/api/app_user.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
@@ -35,12 +36,20 @@ class LeaveRequestFormScreen extends StatefulWidget {
   const LeaveRequestFormScreen({
     super.key,
     this.initialRequest,
+    this.filingEmployee,
+    this.paperOriginalFilingDate,
+    this.onReviewPaperApproval,
+    this.onBackToEmployeeSelection,
     this.onSaveDraft,
     this.onSubmitRequest,
     this.onSubmitRequestWithAttachment,
   });
 
   final LeaveRequest? initialRequest;
+  final AppUser? filingEmployee;
+  final DateTime? paperOriginalFilingDate;
+  final LeaveRequestAction? onReviewPaperApproval;
+  final VoidCallback? onBackToEmployeeSelection;
   final LeaveRequestAction? onSaveDraft;
   final LeaveRequestAction? onSubmitRequest;
   final LeaveRequestAttachmentAction? onSubmitRequestWithAttachment;
@@ -50,6 +59,16 @@ class LeaveRequestFormScreen extends StatefulWidget {
 }
 
 class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
+  bool get _isStaffFiling => widget.filingEmployee != null;
+  bool get _hasPaperReview => _isStaffFiling && widget.onReviewPaperApproval != null;
+  final _paperFilingDateController = TextEditingController();
+  DateTime? get _originalPaperDate {
+    final text = _paperFilingDateController.text.trim();
+    final parsed = DateTime.tryParse(text);
+    return parsed != null && _dateOnly(parsed) == text ? parsed : null;
+  }
+  AppUser? get _subjectUser => widget.filingEmployee ?? context.read<AuthProvider>().user;
+
   final _formKey = GlobalKey<FormState>();
   final _messengerKey = GlobalKey<ScaffoldMessengerState>();
   static const int _maxAttachmentBytes = 10 * 1024 * 1024;
@@ -88,6 +107,8 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
   List<int>? _pendingAttachmentBytes;
   String? _pendingAttachmentName;
   bool _workingDaysLoading = false;
+  static const _noWorkingDaysMessage =
+      'The selected dates contain no working days after excluding holidays and rest days. Choose a date with a scheduled working day.';
   String? _workingDaysHelperText;
   int _workingDaysRequestSerial = 0;
   LeaveAnnualEntitlementPreview? _annualEntitlementPreview;
@@ -110,6 +131,9 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
   void initState() {
     super.initState();
     ActiveApplicationReview.register(this, 'leave', _reviewApplication);
+    if (widget.paperOriginalFilingDate != null) {
+      _paperFilingDateController.text = _dateOnly(widget.paperOriginalFilingDate!);
+    }
     final initial = widget.initialRequest;
     _savedRequest = initial;
     _checkingStatus = (initial?.id ?? '').isNotEmpty;
@@ -288,6 +312,7 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
     ActiveApplicationReview.clear(this);
     _customLeaveTypeController.dispose();
     _reasonController.dispose();
+    _paperFilingDateController.dispose();
     _locationDetailsController.dispose();
     _sickIllnessController.dispose();
     _vawcCaseDetailsController.dispose();
@@ -448,7 +473,7 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
   }
 
   String? _normalizedAccountSex() {
-    final sex = context.read<AuthProvider>().user?.sex?.trim().toLowerCase();
+    final sex = _subjectUser?.sex?.trim().toLowerCase();
     if (sex == null || sex.isEmpty) return null;
     if (sex == 'f' || sex == 'female') return 'female';
     if (sex == 'm' || sex == 'male') return 'male';
@@ -504,7 +529,7 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
     LeaveTypeDefinition definition,
   ) {
     if (!definition.isEmploymentTypeEligible(
-      context.read<AuthProvider>().user?.employmentType,
+      _subjectUser?.employmentType,
     )) {
       return '${definition.displayName} is not available for your employment type.';
     }
@@ -544,14 +569,16 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
       _leaveTypesError = null;
     });
     try {
-      final items = await LeaveTypeDefinitionCache.instance
-          .listActiveEmployeeTypes(forceRefresh: true);
+      final items = _isStaffFiling
+          ? (await LeaveTypeDefinitionCache.instance.listAll(includeInactive:false,forceRefresh:true)).where((item) => item.adminCanFile && item.allowApprovedPaperFiling).toList()
+          : await LeaveTypeDefinitionCache.instance.listActiveEmployeeTypes(forceRefresh:true);
       if (!mounted) return;
       setState(() {
         final allowedItems = items
             .where(_isLeaveTypeDefinitionAllowedForAccount)
             .toList();
         _leaveTypeDefinitions = allowedItems;
+        if (_isStaffFiling && allowedItems.isEmpty) _leaveTypesError = 'No eligible leave type allows paper recording. Ask HR to enable it in Leave Type Rules.';
         _loadingLeaveTypes = false;
         _leaveTypesLoaded = true;
         final selectedExists = allowedItems.any(
@@ -579,7 +606,7 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
   }
 
   Future<void> _loadCreditContext() async {
-    final userId = context.read<AuthProvider>().user?.id;
+    final userId = _subjectUser?.id;
     if (userId == null || userId.isEmpty) return;
     final provider = context.read<LeaveProvider>();
     await provider.loadOfficialDate();
@@ -628,8 +655,7 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
           (item) =>
               item.isActive &&
               _isLeaveTypeDefinitionAllowedForAccount(item) &&
-              item.employeeCanFile &&
-              !item.adminOnly,
+              (_isStaffFiling ? item.adminCanFile && item.allowApprovedPaperFiling : item.employeeCanFile && !item.adminOnly),
         )
         .map(
           (item) => DropdownMenuItem<String>(
@@ -714,13 +740,13 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
       } else {
         _validateSelectedDates();
       }
-      if (_workingDaysLoading) {
+      if (_startDate != null && _endDate != null && _workingDaysLoading) {
         _showMessage('Please wait while working days are computed.');
-      } else if (_currentWorkingDaysApplied == null ||
-          _currentWorkingDaysApplied! <= 0) {
-        _showMessage('Enter a valid number of working days greater than zero.');
+      } else if (_startDate != null && _endDate != null &&
+          (_currentWorkingDaysApplied == null || _currentWorkingDaysApplied! <= 0)) {
+        _showMessage(_noWorkingDaysMessage);
       }
-      _validateAnnualQuotaLimit();
+      if (_startDate != null && _endDate != null) _validateAnnualQuotaLimit();
       _reviewTarget = _reviewDetailsKey.currentContext;
       _validateRequiredLeaveDetails();
       if (_leaveType == LeaveType.maternityLeave &&
@@ -777,7 +803,7 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
         return;
       }
       if (entered <= 0) {
-        _showMessage('Working days must be greater than 0.');
+        _showMessage(_noWorkingDaysMessage);
         return;
       }
 
@@ -796,8 +822,8 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
         return;
       }
 
-      if (!await _checkSubmissionAvailability()) return;
-      if (!await _ensureApplicantSignature()) return;
+      if (!_isStaffFiling && !await _checkSubmissionAvailability()) return;
+      if (!_isStaffFiling && !await _ensureApplicantSignature()) return;
       await _submit(isDraft: false);
     } finally {
       if (mounted) setState(() => _submitFlowInFlight = false);
@@ -877,8 +903,9 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
 
     try {
       final res = await ApiClient.instance.get<Map<String, dynamic>>(
-        '/api/leave/working-days',
+        _isStaffFiling ? '/api/leave/admin/working-days' : '/api/leave/working-days',
         queryParameters: {
+          if (_isStaffFiling) 'employee_id':_subjectUser!.id,
           'start_date': _dateOnly(start),
           'end_date': _dateOnly(end),
           'leave_type': _leaveTypeName,
@@ -917,7 +944,7 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
       setState(() {
         _workingDaysLoading = false;
         _workingDaysController.text = _formatWorkingDays(days);
-        _workingDaysHelperText = '$helper: ${_formatWorkingDays(days)} day(s)';
+        _workingDaysHelperText = days <= 0 ? _noWorkingDaysMessage : '$helper: ${_formatWorkingDays(days)} day(s)';
         _annualEntitlementPreview = annualPreview;
         final service = data['service_eligibility'];
         _serviceEligibility = service is Map
@@ -959,11 +986,14 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
         status == LeaveRequestStatus.returned;
   }
 
-  /// Visible only when an attachment is mandatory: sick leave ≥5 working days,
+  /// Visible only when an attachment is mandatory: sick leave >5 working days,
   /// or any non–sick type with [LeaveType.requiresAttachment].
   bool _shouldShowAttachmentSection() {
+    if (_hasPaperReview) return false;
+    if (_isStaffFiling) return true;
     if (_leaveType == LeaveType.sickLeave) {
-      return (_currentWorkingDaysApplied ?? 0) >= 5;
+      final days = _currentWorkingDaysApplied ?? 0;
+      return _selectedLeaveTypeDefinition?.requiresAttachmentForDays(days) ?? days > 5;
     }
     return _selectedRequiresAttachment;
   }
@@ -1067,6 +1097,10 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
       DateTime(value.year, value.month, value.day);
 
   DateTime? _officialDateForValidation() {
+    if (_isStaffFiling) {
+      if (_originalPaperDate == null) _showMessage('Enter the original filing date from the signed paper.');
+      return _originalPaperDate;
+    }
     final date = context.read<LeaveProvider>().officialDate;
     if (date == null) {
       _showMessage(
@@ -1283,7 +1317,7 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
         'The official HRMS date is unavailable. Retry before continuing.',
       );
     }
-    final authName = auth.user?.fullName?.trim();
+    final authName = _subjectUser?.fullName?.trim();
     final display = auth.displayName.trim();
     var employeeName = (authName != null && authName.isNotEmpty)
         ? authName
@@ -1330,7 +1364,7 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
     }
 
     final initial = widget.initialRequest;
-    final existingFiled = _savedRequest?.dateFiled ?? initial?.dateFiled;
+    final existingFiled = (_isStaffFiling ? _originalPaperDate : null) ?? _savedRequest?.dateFiled ?? initial?.dateFiled;
     final dateFiled = existingFiled != null
         ? DateTime(existingFiled.year, existingFiled.month, existingFiled.day)
         : officialDate == null
@@ -1352,7 +1386,7 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
       if (!await _refreshSavedStatus() || !mounted) return;
       final initial = widget.initialRequest;
       final auth = context.read<AuthProvider>();
-      final userId = auth.user!.id;
+      final userId = _subjectUser!.id;
 
       // FIX #4: prefer the ID from _savedRequest (set on first save) so that
       // subsequent "Save Draft" clicks do a PUT (update) rather than another POST.
@@ -1487,6 +1521,9 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
                 : 'Could not save the draft. Please try again.',
           );
         }
+      } else if (_hasPaperReview) {
+        final success = await widget.onReviewPaperApproval!(req);
+        if (mounted && success) _completeSubmission();
       } else {
         final pendingBytes = _pendingAttachmentBytes;
         final pendingName = _pendingAttachmentName?.trim();
@@ -1595,7 +1632,12 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
       child: Scaffold(
         backgroundColor: AppTheme.dashCanvasOf(context),
         appBar: AppBar(
-          title: const Text('File Leave Request'),
+          title: Text(_isStaffFiling ? 'Record Approved Paper Leave' : 'File Leave Request'),
+          leading: widget.onBackToEmployeeSelection == null ? null : IconButton(
+            tooltip: 'Back to employee selection',
+            icon: const Icon(Icons.arrow_back),
+            onPressed: _busy || _submitFlowInFlight ? null : widget.onBackToEmployeeSelection,
+          ),
           centerTitle: true,
         ),
         body: SafeArea(
@@ -1613,6 +1655,16 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
+                            if (_isStaffFiling) ...[
+                              if (_hasPaperReview) ...[
+                                Text('Step 2 of 3 • Leave details', style: Theme.of(context).textTheme.labelLarge?.copyWith(color: Theme.of(context).colorScheme.primary)),
+                                const SizedBox(height: 12),
+                              ],
+                              Text(_subjectUser?.fullName ?? 'Employee',style:Theme.of(context).textTheme.titleLarge),
+                              const SizedBox(height:8),
+                              Text(_hasPaperReview ? 'Choose the leave type and copy the leave details from the paper. Next, record its approval and upload the signed original.' : 'Encode the details from the approved paper form. The original filing date is used for date rules. Upload the fully signed form and required supporting documents as one PDF or image. Digital signatures are not copied.'),
+                              const SizedBox(height:24),
+                            ],
                             Text(
                               'Leave Details',
                               style: TextStyle(
@@ -1750,6 +1802,10 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
                                     ),
                                   ),
                                   const SizedBox(height: 16),
+                                  if (_isStaffFiling) ...[
+                                    _buildPaperFilingDate(),
+                                    const SizedBox(height: 20),
+                                  ],
                                   Row(
                                     children: [
                                       Expanded(
@@ -1786,7 +1842,7 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
                                       final applied =
                                           _currentWorkingDaysApplied;
                                       return _activeAssistantField(
-                                        'reason',
+                                        'working_days',
                                         TextFormField(
                                           controller: _workingDaysController,
                                           readOnly: true,
@@ -1821,6 +1877,8 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
                                                     (applied != null
                                                         ? 'Auto-applied from selected dates: ${_formatWorkingDays(applied)} day(s)'
                                                         : 'Select dates to auto-compute'),
+                                                helperMaxLines: 3,
+                                                errorMaxLines: 3,
                                               ),
                                           validator: (val) {
                                             if (val == null ||
@@ -1834,7 +1892,7 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
                                               return 'Must be a number';
                                             }
                                             if (entered <= 0) {
-                                              return 'Must be greater than 0';
+                                              return _noWorkingDaysMessage;
                                             }
                                             // Warn about max days for leave type
                                             final maxDays = _selectedMaxDays;
@@ -1845,7 +1903,7 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
                                             return null;
                                           },
                                         ),
-                                        _reasonController,
+                                        _workingDaysController,
                                       );
                                     },
                                   ),
@@ -1911,7 +1969,7 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
                             ),
                             const SizedBox(height: 16),
 
-                            _buildApplicantSignatureSection(),
+                            if (!_isStaffFiling) _buildApplicantSignatureSection(),
                             const SizedBox(height: 32),
 
                             // Actions
@@ -1936,7 +1994,7 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
                                     ),
                                     child: const Text('Save Draft'),
                                   ),
-                                if (widget.onSubmitRequest != null)
+                                if (widget.onSubmitRequest != null || _hasPaperReview)
                                   FilledButton(
                                     onPressed:
                                         _busy ||
@@ -1964,7 +2022,7 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
                                               strokeWidth: 2,
                                             ),
                                           )
-                                        : const Text('Submit Request'),
+                                        : Text(_hasPaperReview ? 'Continue to paper approval' : _isStaffFiling ? 'Record Approved Leave' : 'Submit Request'),
                                   ),
                               ],
                             ),
@@ -2249,6 +2307,48 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
       ),
     );
   }
+
+  Widget _buildPaperFilingDate() => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      const Text('Original filing date', style: TextStyle(fontWeight: FontWeight.w500)),
+      const SizedBox(height: 8),
+      TextFormField(
+        key: const ValueKey('paper_original_filing_date'),
+        controller: _paperFilingDateController,
+        keyboardType: TextInputType.datetime,
+        decoration: _inputDecoration('').copyWith(
+          labelText: null,
+          hintText: 'YYYY-MM-DD',
+          helperText: 'Date the employee originally filed the paper. Used for filing-date rules.',
+          helperMaxLines: 2,
+          suffixIcon: IconButton(
+            tooltip: 'Choose original filing date',
+            icon: const Icon(Icons.calendar_today_outlined),
+            onPressed: () async {
+              final today = context.read<LeaveProvider>().officialDate;
+              if (today == null) return;
+              final current = _originalPaperDate;
+              final selected = await showDatePicker(
+                context: context,
+                initialDate: current != null && !current.isAfter(today) ? current : today,
+                firstDate: DateTime(1900), lastDate: today,
+              );
+              if (selected != null && mounted) setState(() => _paperFilingDateController.text = _dateOnly(selected));
+            },
+          ),
+        ),
+        validator: (_) {
+          final date = _originalPaperDate;
+          if (date == null) return 'Enter a valid original filing date: YYYY-MM-DD';
+          final today = context.read<LeaveProvider>().officialDate;
+          if (today == null) return 'The official HRMS date is unavailable. Retry before continuing.';
+          if (date.isAfter(_onlyDate(today))) return 'Original filing date cannot be in the future.';
+          return null;
+        },
+      ),
+    ],
+  );
 
   Widget _buildDatePicker({
     required String label,
@@ -2818,11 +2918,13 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
       children: [
         Row(
           children: [
-            Text(
-              'Attachments',
-              style: TextStyle(
-                fontWeight: FontWeight.w500,
-                color: AppTheme.dashTextPrimaryOf(context),
+            Flexible(
+              child: Text(
+                _isStaffFiling ? 'Signed paper form' : 'Attachments',
+                style: TextStyle(
+                  fontWeight: FontWeight.w500,
+                  color: AppTheme.dashTextPrimaryOf(context),
+                ),
               ),
             ),
             const SizedBox(width: 8),
@@ -2846,7 +2948,7 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
         ),
         const SizedBox(height: 4),
         Text(
-          _leaveType == LeaveType.sickLeave
+          _isStaffFiling ? 'Required: the fully approved signed form, including all required supporting documents in one PDF or image (max 10MB).' : _leaveType == LeaveType.sickLeave
               ? 'Medical certificate is required for sick leave exceeding 5 days. '
                     'PDF, JPG, PNG (max 10MB).'
               : 'A supporting document is required for $_selectedLeaveTypeLabel '

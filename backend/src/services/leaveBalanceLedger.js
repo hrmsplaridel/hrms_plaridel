@@ -4,6 +4,8 @@
  */
 
 let _ensurePromise = null;
+// leave_balances stores every bucket as NUMERIC(10,3).
+const MAX_BALANCE_DAYS = 9999999.999;
 
 async function ensureLeaveBalanceLedgerTable(db) {
   await db.query(`CREATE EXTENSION IF NOT EXISTS "uuid-ossp";`);
@@ -56,11 +58,16 @@ function leaveBalanceAdjustmentError(message) {
 }
 
 function normalizeLeaveBalanceAdjustment(value) {
-  const parsed = Number(value);
+  const parsed = typeof value === 'number' ? value :
+    typeof value === 'string' && /^[+-]?\d+(?:\.\d+)?$/.test(value.trim())
+      ? Number(value.trim()) : NaN;
   if (!Number.isFinite(parsed)) {
-    throw leaveBalanceAdjustmentError('adjustment_days must be a number');
+    throw leaveBalanceAdjustmentError('adjustment_days must be a number in decimal format');
   }
   const rounded = Math.round((parsed + Number.EPSILON) * 1000) / 1000;
+  if (!Number.isFinite(rounded) || Math.abs(rounded) > MAX_BALANCE_DAYS) {
+    throw leaveBalanceAdjustmentError('adjustment_days must be between -9999999.999 and 9999999.999');
+  }
   if (rounded === 0) {
     throw leaveBalanceAdjustmentError('adjustment_days must not be zero');
   }
@@ -251,6 +258,12 @@ async function applyAdminLeaveBalanceAdjustment(client, input) {
     throw new Error('Failed to lock leave balance for adjustment');
   }
   const before = balanceSnapshot(locked.rows[0]);
+  // Check the resulting stored bucket under the row lock, using integer
+  // thousandths so floating-point addition cannot blur the storage boundary.
+  const adjustedUnits = Math.round(before.adjusted_days * 1000) + Math.round(daysChanged * 1000);
+  if (!Number.isSafeInteger(adjustedUnits) || Math.abs(adjustedUnits) > Math.round(MAX_BALANCE_DAYS * 1000)) {
+    throw leaveBalanceAdjustmentError('The resulting adjusted balance is out of range (-9999999.999 to 9999999.999 days)');
+  }
 
   const updated = await client.query(
     `UPDATE leave_balances

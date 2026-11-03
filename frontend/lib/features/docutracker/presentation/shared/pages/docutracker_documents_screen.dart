@@ -11,15 +11,19 @@ import 'package:hrms_plaridel/features/docutracker/models/document_type.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document_builder.dart';
 import 'package:hrms_plaridel/features/docutracker/services/docutracker_document_visibility.dart';
 import 'package:hrms_plaridel/features/docutracker/theme/docutracker_tokens.dart';
+import 'package:hrms_plaridel/features/docutracker/data/styles/docutracker_styles.dart';
 import 'package:hrms_plaridel/features/docutracker/data/navigation/docutracker_document_navigation.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_create_document_dialog.dart';
+import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_delete_draft_button.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_signature_library_dialog.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_rsp_signature_request_dialog.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_error_banner.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_module_header.dart';
+import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_notification_bell.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_status_badge.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_status_theme.dart';
 import 'package:hrms_plaridel/features/docutracker/utils/docutracker_release_text.dart';
+import 'package:hrms_plaridel/features/docutracker/utils/docutracker_required_action_bucket.dart';
 import 'package:hrms_plaridel/features/docutracker/utils/docutracker_source_status_text.dart';
 import 'package:hrms_plaridel/features/docutracker/utils/docutracker_workflow_phase.dart';
 
@@ -57,6 +61,26 @@ String _assigneeLabel(DocuTrackerDocument document) {
     return 'Not submitted';
   }
   return 'Unassigned';
+}
+
+/// Client-side document list search. Matches title, number, sender, assignee,
+/// and type label. Filters (type/status) stay server-side via the provider.
+@visibleForTesting
+bool docuTrackerDocumentMatchesSearch(
+  DocuTrackerDocument document,
+  String query,
+) {
+  final q = query.trim().toLowerCase();
+  if (q.isEmpty) return true;
+  final typeLabel = documentTypeFromString(
+    document.documentType,
+  ).displayName.toLowerCase();
+  return document.title.toLowerCase().contains(q) ||
+      (document.documentNumber?.toLowerCase().contains(q) ?? false) ||
+      (document.creatorName?.toLowerCase().contains(q) ?? false) ||
+      (document.createdBy?.toLowerCase().contains(q) ?? false) ||
+      (document.assigneeName?.toLowerCase().contains(q) ?? false) ||
+      typeLabel.contains(q);
 }
 
 /// Document list screen. Step 2: Role-Based Visibility - shows only
@@ -252,6 +276,9 @@ class _DocuTrackerDocumentsScreenState
             subtitle: widget.isAdmin
                 ? 'All routed documents in the organization.'
                 : 'Documents you created, hold, or are assigned to review.',
+            trailing: DocuTrackerNotificationBellButton(
+              isAdmin: widget.isAdmin,
+            ),
           ),
           const SizedBox(height: 16),
         ],
@@ -262,6 +289,7 @@ class _DocuTrackerDocumentsScreenState
           DocuTrackerRequiredActionsPanel(
             documents: requiredDocuments,
             sourceRequests: pendingSourceRequests,
+            currentUserId: userId,
             loading: provider.sourceSignatureRequestsLoading,
             hasPartialError: provider.sourceSignatureRequestsError != null,
             onRefreshSignatures: () =>
@@ -285,7 +313,7 @@ class _DocuTrackerDocumentsScreenState
           ),
         ],
         const SizedBox(height: 20),
-        if (provider.loading)
+        if (provider.loading && visibleDocuments.isEmpty)
           const Center(
             child: Padding(
               padding: EdgeInsets.all(32),
@@ -297,18 +325,67 @@ class _DocuTrackerDocumentsScreenState
             onCreateTap: _canCreateDocuments == true
                 ? () => _openCreateDialog(auth, provider)
                 : null,
+            hasActiveFilters: _hasActiveListControls,
+            onClearFilters: _clearListControls,
           )
         else
-          _DocumentList(
-            documents: visibleDocuments,
-            isAdmin: widget.isAdmin,
-            userId: userId,
-            onRefresh: _refresh,
-            searchQuery: _searchQuery,
-            sortByDeadline: _sortByDeadline,
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              if (provider.loading)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 10),
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(999),
+                    child: LinearProgressIndicator(
+                      minHeight: 3,
+                      color: DocuTrackerTokens.brand,
+                      backgroundColor: DocuTrackerTokens.brandSoftOf(context),
+                    ),
+                  ),
+                ),
+              _DocumentList(
+                documents: visibleDocuments,
+                isAdmin: widget.isAdmin,
+                userId: userId,
+                onRefresh: _refresh,
+                searchQuery: _searchQuery,
+                sortByDeadline: _sortByDeadline,
+                hasActiveFilters: _hasActiveListControls,
+                onClearFilters: _clearListControls,
+              ),
+            ],
           ),
       ],
     );
+  }
+
+  bool get _hasActiveListControls =>
+      _filterType != null ||
+      _filterStatus != null ||
+      _sortByDeadline ||
+      _searchQuery.trim().isNotEmpty;
+
+  void _clearSearch() {
+    if (_documentSearchController.text.isEmpty && _searchQuery.isEmpty) {
+      return;
+    }
+    setState(() {
+      _documentSearchController.clear();
+      _searchQuery = '';
+    });
+  }
+
+  void _clearListControls() {
+    final needsReload = _filterType != null || _filterStatus != null;
+    setState(() {
+      _filterType = null;
+      _filterStatus = null;
+      _sortByDeadline = false;
+      _documentSearchController.clear();
+      _searchQuery = '';
+    });
+    if (needsReload) _load();
   }
 
   Future<void> _openCreateDialog(
@@ -364,9 +441,14 @@ class _DocuTrackerDocumentsScreenState
         _filterType != null && filterTypeValues.contains(_filterType)
         ? _filterType
         : null;
+    final hasServerFilters = _filterType != null || _filterStatus != null;
+    final hasClientControls =
+        _sortByDeadline || _searchQuery.trim().isNotEmpty;
+    final hasActiveControls = hasServerFilters || hasClientControls;
     final filterControls = <Widget>[
       _warmDropdown(
         context,
+        key: const ValueKey('docutracker-filter-type'),
         DropdownButton<String?>(
           value: selectedFilterType,
           hint: const Text('Type'),
@@ -378,11 +460,12 @@ class _DocuTrackerDocumentsScreenState
             ...filterTypes.map(
               (type) => DropdownMenuItem(
                 value: type.value,
-                child: Text(type.displayName),
+                child: Text(type.displayName, overflow: TextOverflow.ellipsis),
               ),
             ),
           ],
           onChanged: (value) {
+            if (value == _filterType) return;
             setState(() => _filterType = value);
             _load();
           },
@@ -390,6 +473,7 @@ class _DocuTrackerDocumentsScreenState
       ),
       _warmDropdown(
         context,
+        key: const ValueKey('docutracker-filter-status'),
         DropdownButton<DocumentStatus?>(
           value: _filterStatus,
           hint: const Text('Status'),
@@ -406,6 +490,7 @@ class _DocuTrackerDocumentsScreenState
             ),
           ],
           onChanged: (value) {
+            if (value == _filterStatus) return;
             setState(() => _filterStatus = value);
             _load();
           },
@@ -413,6 +498,7 @@ class _DocuTrackerDocumentsScreenState
       ),
       _warmDropdown(
         context,
+        key: const ValueKey('docutracker-sort'),
         DropdownButton<bool>(
           value: _sortByDeadline,
           underline: const SizedBox.shrink(),
@@ -423,7 +509,8 @@ class _DocuTrackerDocumentsScreenState
             DropdownMenuItem(value: true, child: Text('Deadline first')),
           ],
           onChanged: (value) {
-            if (value != null) setState(() => _sortByDeadline = value);
+            if (value == null || value == _sortByDeadline) return;
+            setState(() => _sortByDeadline = value);
           },
         ),
       ),
@@ -435,8 +522,9 @@ class _DocuTrackerDocumentsScreenState
             onPressed: provider.loading
                 ? null
                 : () => _openCreateDialog(auth, provider),
-            icon: const Icon(Icons.add_rounded, size: 18),
+            icon: const Icon(Icons.note_add_rounded, size: 19),
             label: const Text('Create Draft'),
+            style: DocuTrackerStyles.primaryBrandButtonStyle(context),
           )
         : null;
 
@@ -457,6 +545,57 @@ class _DocuTrackerDocumentsScreenState
       label: const Text('My Signatures'),
     );
 
+    final activeFilterBar = hasActiveControls
+        ? Padding(
+            padding: const EdgeInsets.only(top: 10),
+            child: Wrap(
+              key: const ValueKey('docutracker-active-filters'),
+              spacing: 8,
+              runSpacing: 6,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: [
+                if (_searchQuery.trim().isNotEmpty)
+                  InputChip(
+                    label: Text('Search: ${_documentSearchController.text}'),
+                    onDeleted: _clearSearch,
+                    deleteIcon: const Icon(Icons.close_rounded, size: 16),
+                  ),
+                if (_filterType != null)
+                  InputChip(
+                    label: Text(
+                      'Type: ${documentTypeFromString(_filterType).displayName}',
+                    ),
+                    onDeleted: () {
+                      setState(() => _filterType = null);
+                      _load();
+                    },
+                    deleteIcon: const Icon(Icons.close_rounded, size: 16),
+                  ),
+                if (_filterStatus != null)
+                  InputChip(
+                    label: Text('Status: ${_filterStatus!.displayName}'),
+                    onDeleted: () {
+                      setState(() => _filterStatus = null);
+                      _load();
+                    },
+                    deleteIcon: const Icon(Icons.close_rounded, size: 16),
+                  ),
+                if (_sortByDeadline)
+                  InputChip(
+                    label: const Text('Deadline first'),
+                    onDeleted: () => setState(() => _sortByDeadline = false),
+                    deleteIcon: const Icon(Icons.close_rounded, size: 16),
+                  ),
+                TextButton(
+                  key: const ValueKey('docutracker-clear-filters'),
+                  onPressed: _clearListControls,
+                  child: const Text('Clear all'),
+                ),
+              ],
+            ),
+          )
+        : const SizedBox.shrink();
+
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(14),
@@ -466,21 +605,29 @@ class _DocuTrackerDocumentsScreenState
           final search = TextField(
             key: const ValueKey('docutracker-document-search'),
             controller: _documentSearchController,
+            textInputAction: TextInputAction.search,
             onChanged: (value) =>
                 setState(() => _searchQuery = value.toLowerCase()),
             decoration: AppTheme.dashInputDecoration(
               context,
-              hintText: 'Search title, number, or sender',
+              hintText: 'Search title, number, sender, or assignee',
               prefixIcon: const Icon(Icons.search_rounded),
               contentPadding: const EdgeInsets.symmetric(
                 horizontal: 14,
                 vertical: 12,
               ),
+            ).copyWith(
+              suffixIcon: _documentSearchController.text.isEmpty
+                  ? null
+                  : IconButton(
+                      key: const ValueKey('docutracker-clear-search'),
+                      tooltip: 'Clear search',
+                      onPressed: _clearSearch,
+                      icon: const Icon(Icons.close_rounded, size: 18),
+                    ),
             ),
           );
           if (constraints.maxWidth < 820) {
-            final hasFilters =
-                _filterType != null || _filterStatus != null || _sortByDeadline;
             return Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
@@ -496,12 +643,24 @@ class _DocuTrackerDocumentsScreenState
                       onPressed: () => setState(
                         () => _showMobileFilters = !_showMobileFilters,
                       ),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: hasActiveControls
+                            ? DocuTrackerTokens.brand
+                            : null,
+                        side: BorderSide(
+                          color: hasActiveControls
+                              ? DocuTrackerTokens.brand
+                              : DocuTrackerTokens.borderSubtleOf(context),
+                        ),
+                      ),
                       icon: Icon(
                         _showMobileFilters
                             ? Icons.expand_less_rounded
                             : Icons.tune_rounded,
                       ),
-                      label: Text(hasFilters ? 'Filters active' : 'Filters'),
+                      label: Text(
+                        hasActiveControls ? 'Filters active' : 'Filters',
+                      ),
                     ),
                     refreshButton,
                     signaturesButton,
@@ -512,54 +671,31 @@ class _DocuTrackerDocumentsScreenState
                   const SizedBox(height: 10),
                   Wrap(spacing: 8, runSpacing: 8, children: filterControls),
                 ],
-                if (hasFilters) ...[
-                  const SizedBox(height: 8),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 6,
-                    crossAxisAlignment: WrapCrossAlignment.center,
-                    children: [
-                      if (_filterType != null)
-                        Chip(
-                          label: Text(
-                            documentTypeFromString(_filterType).displayName,
-                          ),
-                        ),
-                      if (_filterStatus != null)
-                        Chip(label: Text(_filterStatus!.displayName)),
-                      if (_sortByDeadline)
-                        const Chip(label: Text('Deadline first')),
-                      TextButton(
-                        onPressed: () {
-                          setState(() {
-                            _filterType = null;
-                            _filterStatus = null;
-                            _sortByDeadline = false;
-                          });
-                          _load();
-                        },
-                        child: const Text('Clear filters'),
-                      ),
-                    ],
-                  ),
-                ],
+                activeFilterBar,
               ],
             );
           }
-          return Row(
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Expanded(child: search),
-              const SizedBox(width: 10),
-              ...filterControls.expand(
-                (control) => [control, const SizedBox(width: 8)],
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(child: search),
+                  const SizedBox(width: 10),
+                  ...filterControls.expand(
+                    (control) => [control, const SizedBox(width: 8)],
+                  ),
+                  refreshButton,
+                  const SizedBox(width: 8),
+                  signaturesButton,
+                  if (createButton != null) ...[
+                    const SizedBox(width: 14),
+                    createButton,
+                  ],
+                ],
               ),
-              refreshButton,
-              const SizedBox(width: 8),
-              signaturesButton,
-              if (createButton != null) ...[
-                const SizedBox(width: 8),
-                createButton,
-              ],
+              activeFilterBar,
             ],
           );
         },
@@ -567,9 +703,15 @@ class _DocuTrackerDocumentsScreenState
     );
   }
 
-  Widget _warmDropdown(BuildContext context, Widget child) {
+  Widget _warmDropdown(
+    BuildContext context,
+    Widget child, {
+    Key? key,
+    double width = 138,
+  }) {
     return SizedBox(
-      width: 132,
+      key: key,
+      width: width,
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
         decoration: BoxDecoration(
@@ -593,10 +735,12 @@ class DocuTrackerRequiredActionsPanel extends StatefulWidget {
     required this.hasPartialError,
     required this.onRefreshSignatures,
     required this.onDocumentTap,
+    this.currentUserId = '',
   });
 
   final List<DocuTrackerDocument> documents;
   final List<DocuTrackerRspSignatureRequest> sourceRequests;
+  final String currentUserId;
   final bool loading;
   final bool hasPartialError;
   final Future<void> Function() onRefreshSignatures;
@@ -675,25 +819,12 @@ class _RequiredActionsPanelState
     return title.isEmpty ? raw.trim() : title;
   }
 
-  _ActionPriority _priorityFor(_RequiredActionEntry entry) {
-    final request = entry.sourceRequest;
-    final document = entry.document;
-    if (request != null) {
-      return switch (request.signatureState) {
-        DocuTrackerSourceSignatureState.needsSetup =>
-          _ActionPriority.needsSetup,
-        DocuTrackerSourceSignatureState.needsYourSignature =>
-          _ActionPriority.needsSignature,
-        DocuTrackerSourceSignatureState.waitingOnOthers =>
-          _ActionPriority.waiting,
-        DocuTrackerSourceSignatureState.fullySigned =>
-          _ActionPriority.completed,
-      };
-    }
-    // Native / leave documents in this panel are already action-only.
-    final action = (document?.sourceAction ?? '').trim();
-    if (action.isNotEmpty) return _ActionPriority.needsSignature;
-    return _ActionPriority.needsSignature;
+  DocuTrackerRequiredActionBucket _priorityFor(_RequiredActionEntry entry) {
+    return docuTrackerRequiredActionBucket(
+      document: entry.document,
+      sourceRequest: entry.sourceRequest,
+      userId: widget.currentUserId,
+    );
   }
 
   String _moduleKey(_RequiredActionEntry entry) {
@@ -932,27 +1063,32 @@ class _RequiredActionsPanelState
       ...widget.documents.map(_RequiredActionEntry.document),
     ];
     final entries = allEntries.where(_matchesFilters).toList(growable: false);
+    final needsReview = <_RequiredActionEntry>[];
     final needsSignature = <_RequiredActionEntry>[];
     final needsSetup = <_RequiredActionEntry>[];
     final waiting = <_RequiredActionEntry>[];
     final completed = <_RequiredActionEntry>[];
     for (final entry in entries) {
       switch (_priorityFor(entry)) {
-        case _ActionPriority.needsSignature:
+        case DocuTrackerRequiredActionBucket.needsReview:
+          needsReview.add(entry);
+        case DocuTrackerRequiredActionBucket.needsSignature:
           needsSignature.add(entry);
-        case _ActionPriority.needsSetup:
+        case DocuTrackerRequiredActionBucket.needsSetup:
           needsSetup.add(entry);
-        case _ActionPriority.waiting:
+        case DocuTrackerRequiredActionBucket.waiting:
           waiting.add(entry);
-        case _ActionPriority.completed:
+        case DocuTrackerRequiredActionBucket.completed:
           completed.add(entry);
       }
     }
+    final reviewEntries = _displayOrder(needsReview);
     final signatureEntries = _displayOrder(needsSignature);
     final setupEntries = _displayOrder(needsSetup);
     final waitingEntries = _displayOrder(waiting);
     final completedEntries = _displayOrder(completed);
-    final primary = [...signatureEntries, ...setupEntries];
+    // Primary order: review → signature → setup (then secondary waiting/signed).
+    final primary = [...reviewEntries, ...signatureEntries, ...setupEntries];
     final secondary = [...waitingEntries, ...completedEntries];
     final secondaryVisible = _showSecondary || primary.isEmpty;
     // One page window over every visible card, in render order.
@@ -974,8 +1110,12 @@ class _RequiredActionsPanelState
       return section.sublist(from, to);
     }
 
-    final pageSignature = onPage(signatureEntries, 0);
-    final pageSetup = onPage(setupEntries, signatureEntries.length);
+    final pageReview = onPage(reviewEntries, 0);
+    final pageSignature = onPage(signatureEntries, reviewEntries.length);
+    final pageSetup = onPage(
+      setupEntries,
+      reviewEntries.length + signatureEntries.length,
+    );
     final pageWaiting = secondaryVisible
         ? onPage(waitingEntries, primary.length)
         : const <_RequiredActionEntry>[];
@@ -989,8 +1129,10 @@ class _RequiredActionsPanelState
     final actionableCount = allEntries
         .where(
           (e) =>
-              _priorityFor(e) == _ActionPriority.needsSignature ||
-              _priorityFor(e) == _ActionPriority.needsSetup,
+              _priorityFor(e) == DocuTrackerRequiredActionBucket.needsReview ||
+              _priorityFor(e) ==
+                  DocuTrackerRequiredActionBucket.needsSignature ||
+              _priorityFor(e) == DocuTrackerRequiredActionBucket.needsSetup,
         )
         .length;
     final filtering =
@@ -1098,6 +1240,12 @@ class _RequiredActionsPanelState
                   'Nothing needs your attention right now.',
                   style: TextStyle(color: muted),
                 ),
+              ),
+            if (pageReview.isNotEmpty)
+              _buildSection(
+                context,
+                title: 'Needs your review',
+                entries: pageReview,
               ),
             if (pageSignature.isNotEmpty)
               _buildSection(
@@ -1486,8 +1634,6 @@ class _RequiredActionEntry {
   final DocuTrackerRspSignatureRequest? sourceRequest;
 }
 
-enum _ActionPriority { needsSignature, needsSetup, waiting, completed }
-
 class _RequiredActionsPager extends StatelessWidget {
   const _RequiredActionsPager({
     required this.page,
@@ -1622,15 +1768,23 @@ class _RequiredActionsPagePill extends StatelessWidget {
 }
 
 class _EmptyState extends StatelessWidget {
-  const _EmptyState({this.onCreateTap});
+  const _EmptyState({
+    this.onCreateTap,
+    this.hasActiveFilters = false,
+    this.onClearFilters,
+  });
 
   final VoidCallback? onCreateTap;
+  final bool hasActiveFilters;
+  final VoidCallback? onClearFilters;
 
   @override
   Widget build(BuildContext context) {
     final canCreate = onCreateTap != null;
+    final filteredEmpty = hasActiveFilters;
 
     return Container(
+      key: const ValueKey('docutracker-documents-empty'),
       width: double.infinity,
       padding: const EdgeInsets.symmetric(vertical: 72, horizontal: 32),
       decoration: DocuTrackerTokens.cardDecoration(context: context),
@@ -1645,7 +1799,7 @@ class _EmptyState extends StatelessWidget {
                 width: 88,
                 height: 88,
                 decoration: BoxDecoration(
-                  color: canCreate
+                  color: canCreate || filteredEmpty
                       ? DocuTrackerTokens.insetOf(context)
                       : DocuTrackerTokens.borderSubtleOf(
                           context,
@@ -1653,9 +1807,13 @@ class _EmptyState extends StatelessWidget {
                   shape: BoxShape.circle,
                 ),
                 child: Icon(
-                  canCreate ? Icons.description_outlined : Icons.inbox_outlined,
+                  filteredEmpty
+                      ? Icons.filter_alt_off_rounded
+                      : canCreate
+                      ? Icons.description_outlined
+                      : Icons.inbox_outlined,
                   size: 40,
-                  color: canCreate
+                  color: canCreate || filteredEmpty
                       ? DocuTrackerTokens.terracotta
                       : DocuTrackerTokens.textMutedOf(context),
                 ),
@@ -1664,7 +1822,11 @@ class _EmptyState extends StatelessWidget {
 
               // Title
               Text(
-                canCreate ? 'No documents yet' : 'No documents assigned to you',
+                filteredEmpty
+                    ? 'No documents match these filters'
+                    : canCreate
+                    ? 'No documents yet'
+                    : 'No documents assigned to you',
                 style: TextStyle(
                   fontSize: 18,
                   fontWeight: FontWeight.w700,
@@ -1677,12 +1839,23 @@ class _EmptyState extends StatelessWidget {
 
               // Subtext
               Text(
-                canCreate
+                filteredEmpty
+                    ? 'Try clearing filters or search to see more documents in your list.'
+                    : canCreate
                     ? 'Create your first document to begin a workflow. It will be routed to the assigned reviewers automatically.'
                     : 'Documents assigned to you for review will appear here. You will also receive a notification when action is required.',
                 style: DocuTrackerTokens.subtitleStyle(context),
                 textAlign: TextAlign.center,
               ),
+              if (filteredEmpty && onClearFilters != null) ...[
+                const SizedBox(height: 20),
+                OutlinedButton.icon(
+                  key: const ValueKey('docutracker-empty-clear-filters'),
+                  onPressed: onClearFilters,
+                  icon: const Icon(Icons.filter_alt_off_rounded, size: 18),
+                  label: const Text('Clear filters'),
+                ),
+              ],
 
               // Extra info for read-only users
               if (!canCreate) ...[
@@ -1724,19 +1897,9 @@ class _EmptyState extends StatelessWidget {
                 const SizedBox(height: 28),
                 FilledButton.icon(
                   onPressed: onCreateTap,
-                  icon: const Icon(Icons.add_rounded, size: 18),
+                  icon: const Icon(Icons.note_add_rounded, size: 19),
                   label: const Text('Create Draft'),
-                  style: DocuTrackerTokens.terracottaFilledStyle().copyWith(
-                    padding: WidgetStateProperty.all(
-                      const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
-                    ),
-                    textStyle: WidgetStateProperty.all(
-                      const TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ),
+                  style: DocuTrackerStyles.primaryBrandButtonStyle(context),
                 ),
               ],
             ],
@@ -1755,6 +1918,8 @@ class _DocumentList extends StatefulWidget {
     required this.onRefresh,
     required this.searchQuery,
     required this.sortByDeadline,
+    this.hasActiveFilters = false,
+    this.onClearFilters,
   });
 
   final List<DocuTrackerDocument> documents;
@@ -1763,6 +1928,8 @@ class _DocumentList extends StatefulWidget {
   final VoidCallback onRefresh;
   final String searchQuery;
   final bool sortByDeadline;
+  final bool hasActiveFilters;
+  final VoidCallback? onClearFilters;
 
   @override
   State<_DocumentList> createState() => _DocumentListState();
@@ -1776,7 +1943,8 @@ class _DocumentListState extends State<_DocumentList> {
   void didUpdateWidget(covariant _DocumentList oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.searchQuery != widget.searchQuery ||
-        oldWidget.sortByDeadline != widget.sortByDeadline) {
+        oldWidget.sortByDeadline != widget.sortByDeadline ||
+        !identical(oldWidget.documents, widget.documents)) {
       _page = 0;
     }
   }
@@ -1788,14 +1956,9 @@ class _DocumentListState extends State<_DocumentList> {
     final isAdmin = widget.isAdmin;
     final userId = widget.userId;
     final onRefresh = widget.onRefresh;
-    var filtered = documents.where((doc) {
-      if (searchQuery.isEmpty) return true;
-      final q = searchQuery.toLowerCase();
-      return doc.title.toLowerCase().contains(q) ||
-          (doc.documentNumber?.toLowerCase().contains(q) ?? false) ||
-          (doc.creatorName?.toLowerCase().contains(q) ?? false) ||
-          (doc.createdBy?.toLowerCase().contains(q) ?? false);
-    }).toList();
+    var filtered = documents
+        .where((doc) => docuTrackerDocumentMatchesSearch(doc, searchQuery))
+        .toList();
 
     if (widget.sortByDeadline) {
       filtered.sort((a, b) {
@@ -1808,6 +1971,7 @@ class _DocumentListState extends State<_DocumentList> {
 
     if (filtered.isEmpty) {
       return Container(
+        key: const ValueKey('docutracker-documents-no-results'),
         width: double.infinity,
         padding: const EdgeInsets.symmetric(vertical: 48, horizontal: 32),
         decoration: DocuTrackerTokens.cardDecoration(context: context),
@@ -1838,21 +2002,54 @@ class _DocumentListState extends State<_DocumentList> {
               style: DocuTrackerTokens.subtitleStyle(context),
               textAlign: TextAlign.center,
             ),
+            if (widget.onClearFilters != null) ...[
+              const SizedBox(height: 18),
+              OutlinedButton.icon(
+                key: const ValueKey('docutracker-no-results-clear'),
+                onPressed: widget.onClearFilters,
+                icon: const Icon(Icons.filter_alt_off_rounded, size: 18),
+                label: const Text('Clear search & filters'),
+              ),
+            ],
           ],
         ),
       );
     }
 
-    final pageCount = (filtered.length / _pageSize).ceil();
+    final pageCount = (filtered.length / _pageSize).ceil().clamp(1, 999999);
     final page = _page.clamp(0, pageCount - 1);
+    final start = page * _pageSize;
     final pageDocuments = filtered
-        .skip(page * _pageSize)
+        .skip(start)
         .take(_pageSize)
         .toList(growable: false);
+    final end = start + pageDocuments.length;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
+        Padding(
+          padding: const EdgeInsets.only(bottom: 10),
+          child: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  filtered.length == documents.length
+                      ? 'Showing $end of ${filtered.length} document${filtered.length == 1 ? '' : 's'}'
+                      : 'Showing $end of ${filtered.length} match${filtered.length == 1 ? '' : 'es'}'
+                            ' (${documents.length} total)',
+                  key: const ValueKey('docutracker-document-count'),
+                  style: DocuTrackerTokens.metaStyle(context),
+                ),
+              ),
+              if (widget.hasActiveFilters && widget.onClearFilters != null)
+                TextButton(
+                  onPressed: widget.onClearFilters,
+                  child: const Text('Reset'),
+                ),
+            ],
+          ),
+        ),
         LayoutBuilder(
           builder: (context, constraints) {
             if (constraints.maxWidth >= 860) {
@@ -1883,6 +2080,8 @@ class _DocumentListState extends State<_DocumentList> {
         _DocumentPager(
           page: page,
           pageCount: pageCount,
+          totalCount: filtered.length,
+          pageSize: _pageSize,
           onPageChanged: (value) => setState(() => _page = value),
         ),
       ],
@@ -1894,18 +2093,25 @@ class _DocumentPager extends StatelessWidget {
   const _DocumentPager({
     required this.page,
     required this.pageCount,
+    required this.totalCount,
+    required this.pageSize,
     required this.onPageChanged,
   });
 
   final int page;
   final int pageCount;
+  final int totalCount;
+  final int pageSize;
   final ValueChanged<int> onPageChanged;
 
   @override
   Widget build(BuildContext context) {
+    if (pageCount <= 1) return const SizedBox.shrink();
     final canGoBack = page > 0;
     final canGoForward = page < pageCount - 1;
     final muted = DocuTrackerTokens.textMutedOf(context);
+    final start = page * pageSize + 1;
+    final end = ((page + 1) * pageSize).clamp(0, totalCount);
     Widget arrow({
       required IconData icon,
       required String tooltip,
@@ -1922,8 +2128,13 @@ class _DocumentPager extends StatelessWidget {
 
     return Row(
       key: const ValueKey('docutracker-document-pager'),
-      mainAxisAlignment: MainAxisAlignment.end,
       children: [
+        Expanded(
+          child: Text(
+            '$start–$end of $totalCount',
+            style: TextStyle(fontSize: 12, color: muted),
+          ),
+        ),
         arrow(
           icon: Icons.keyboard_double_arrow_left_rounded,
           tooltip: 'First page',
@@ -1940,27 +2151,38 @@ class _DocumentPager extends StatelessWidget {
           alignment: Alignment.center,
           padding: const EdgeInsets.symmetric(horizontal: 8),
           decoration: BoxDecoration(
-            color: DocuTrackerTokens.surfaceOf(context),
+            color: DocuTrackerTokens.tintOf(
+              context,
+              light: const Color(0xFFEFF6FF),
+              accent: const Color(0xFF3B82F6),
+            ),
             borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: const Color(0xFF3B82F6)),
+            border: Border.all(
+              color: DocuTrackerTokens.toneOf(
+                context,
+                const Color(0xFF3B82F6),
+              ),
+            ),
           ),
           child: Text(
             '${page + 1}',
-            style: const TextStyle(
+            style: TextStyle(
               fontSize: 13,
               fontWeight: FontWeight.w700,
-              color: Color(0xFF1D4ED8),
+              color: DocuTrackerTokens.toneOf(
+                context,
+                const Color(0xFF1D4ED8),
+              ),
             ),
           ),
         ),
-        if (pageCount > 1)
-          Padding(
-            padding: const EdgeInsets.only(left: 6),
-            child: Text(
-              'of $pageCount',
-              style: TextStyle(fontSize: 12, color: muted),
-            ),
+        Padding(
+          padding: const EdgeInsets.only(left: 6),
+          child: Text(
+            'of $pageCount',
+            style: TextStyle(fontSize: 12, color: muted),
           ),
+        ),
         arrow(
           icon: Icons.chevron_right_rounded,
           tooltip: 'Next page',
@@ -1996,19 +2218,27 @@ class _DocumentTable extends StatelessWidget {
     final headerStyle = TextStyle(
       fontSize: 12,
       fontWeight: FontWeight.w600,
+      letterSpacing: 0.2,
       color: DocuTrackerTokens.textMutedOf(context),
     );
     return Column(
       key: const ValueKey('docutracker-document-table'),
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(20, 0, 20, 10),
+        Container(
+          padding: const EdgeInsets.fromLTRB(20, 12, 20, 12),
+          decoration: BoxDecoration(
+            color: DocuTrackerTokens.insetOf(context),
+            borderRadius: BorderRadius.circular(DocuTrackerTokens.radiusMd),
+            border: Border.all(
+              color: DocuTrackerTokens.borderSubtleOf(context),
+            ),
+          ),
           child: Row(
             children: [
               Expanded(
                 flex: _documentTableFlex.title,
-                child: Text('Document Title', style: headerStyle),
+                child: Text('Document', style: headerStyle),
               ),
               Expanded(
                 flex: _documentTableFlex.type,
@@ -2022,13 +2252,21 @@ class _DocumentTable extends StatelessWidget {
                 flex: _documentTableFlex.deadline,
                 child: Text('Deadline', style: headerStyle),
               ),
-              SizedBox(width: 150, child: Text('Assignee', style: headerStyle)),
+              SizedBox(
+                width: 168,
+                child: Text('Assignee', style: headerStyle),
+              ),
+              const SizedBox(width: 64),
             ],
           ),
         ),
+        const SizedBox(height: 8),
         for (final doc in documents)
           _DocumentTableRow(
             doc: doc,
+            userId: userId,
+            isAdmin: isAdmin,
+            onDeleted: onRefresh,
             onTap: () => openDocuTrackerDocumentDetail(
               context,
               document: doc,
@@ -2043,10 +2281,19 @@ class _DocumentTable extends StatelessWidget {
 }
 
 class _DocumentTableRow extends StatefulWidget {
-  const _DocumentTableRow({required this.doc, required this.onTap});
+  const _DocumentTableRow({
+    required this.doc,
+    required this.userId,
+    required this.isAdmin,
+    required this.onTap,
+    required this.onDeleted,
+  });
 
   final DocuTrackerDocument doc;
+  final String userId;
+  final bool isAdmin;
   final Future<void> Function() onTap;
+  final VoidCallback onDeleted;
 
   @override
   State<_DocumentTableRow> createState() => _DocumentTableRowState();
@@ -2178,144 +2425,194 @@ class _DocumentTableRowState extends State<_DocumentTableRow> {
                     : DocuTrackerTokens.borderSubtleOf(context),
               ),
             ),
-            child: Row(
-              children: [
-                Expanded(
-                  flex: _documentTableFlex.title,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        doc.title,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w700,
-                          color: isOverdue ? overdueText : textPrimary,
+            child: Semantics(
+              button: true,
+              label: 'Open document ${doc.title}',
+              child: Row(
+                children: [
+                  Expanded(
+                    flex: _documentTableFlex.title,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Tooltip(
+                          message: doc.title,
+                          waitDuration: const Duration(milliseconds: 450),
+                          child: Text(
+                            doc.title,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w700,
+                              height: 1.25,
+                              color: isOverdue ? overdueText : textPrimary,
+                            ),
+                          ),
                         ),
-                      ),
-                      if (dateRange.isNotEmpty) ...[
-                        const SizedBox(height: 3),
-                        Text(
-                          dateRange,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(fontSize: 12, color: textMuted),
+                        Builder(
+                          builder: (context) {
+                            final meta = [
+                              if (doc.documentNumber != null &&
+                                  doc.documentNumber!.trim().isNotEmpty)
+                                doc.documentNumber!.trim(),
+                              if (dateRange.isNotEmpty) dateRange,
+                            ].join(' · ');
+                            if (meta.isEmpty) return const SizedBox.shrink();
+                            return Padding(
+                              padding: const EdgeInsets.only(top: 4),
+                              child: Text(
+                                meta,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: textMuted,
+                                ),
+                              ),
+                            );
+                          },
                         ),
                       ],
-                    ],
-                  ),
-                ),
-                Expanded(
-                  flex: _documentTableFlex.type,
-                  child: Align(
-                    alignment: Alignment.centerLeft,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 9,
-                        vertical: 4,
-                      ),
-                      decoration: BoxDecoration(
-                        color: DocuTrackerTokens.tintOf(
-                          context,
-                          light: chipBg,
-                          accent: chipFg,
-                          darkAlpha: 0.28,
-                        ),
-                        borderRadius: BorderRadius.circular(6),
-                      ),
-                      child: Text(
-                        typeName.toUpperCase(),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          fontSize: 11,
-                          fontWeight: FontWeight.w700,
-                          letterSpacing: 0.4,
-                          color: DocuTrackerTokens.toneOf(context, chipFg),
-                        ),
-                      ),
                     ),
                   ),
-                ),
-                Expanded(
-                  flex: _documentTableFlex.status,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      DocuTrackerStatusBadge(
-                        status: statusForUi,
-                        compact: true,
-                        label: _statusLabel(doc, statusForUi),
-                      ),
-                      const SizedBox(height: 6),
-                      ClipRRect(
-                        borderRadius: BorderRadius.circular(2),
-                        child: SizedBox(
-                          width: 46,
-                          height: 3,
-                          child: LinearProgressIndicator(
-                            value: _progressFor(doc, statusForUi),
-                            backgroundColor: DocuTrackerTokens.raisedOf(
-                              context,
-                              light: const Color(0xFFE5E7EB),
-                            ),
-                            color: _progressColor(statusForUi),
+                  Expanded(
+                    flex: _documentTableFlex.type,
+                    child: Align(
+                      alignment: Alignment.centerLeft,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 9,
+                          vertical: 4,
+                        ),
+                        decoration: BoxDecoration(
+                          color: DocuTrackerTokens.tintOf(
+                            context,
+                            light: chipBg,
+                            accent: chipFg,
+                            darkAlpha: 0.28,
+                          ),
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: Text(
+                          typeName.toUpperCase(),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
+                            letterSpacing: 0.4,
+                            color: DocuTrackerTokens.toneOf(context, chipFg),
                           ),
                         ),
                       ),
-                    ],
-                  ),
-                ),
-                Expanded(
-                  flex: _documentTableFlex.deadline,
-                  child: Text(
-                    deadline == null
-                        ? 'No deadline'
-                        : MaterialLocalizations.of(
-                            context,
-                          ).formatShortDate(deadline.toLocal()),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontSize: 13,
-                      fontWeight: deadline == null
-                          ? FontWeight.w400
-                          : FontWeight.w700,
-                      color: isOverdue
-                          ? DocuTrackerTokens.accentTextOf(
-                              context,
-                              light: const Color(0xFFB91C1C),
-                              dark: const Color(0xFFFCA5A5),
-                            )
-                          : (deadline == null ? textMuted : textPrimary),
                     ),
                   ),
-                ),
-                SizedBox(
-                  width: 150,
-                  child: Row(
-                    children: [
-                      Icon(
-                        Icons.person_outline_rounded,
-                        size: 15,
-                        color: textMuted,
-                      ),
-                      const SizedBox(width: 5),
-                      Expanded(
-                        child: Text(
-                          _assigneeLabel(doc),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(fontSize: 13, color: textPrimary),
+                  Expanded(
+                    flex: _documentTableFlex.status,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        DocuTrackerStatusBadge(
+                          status: statusForUi,
+                          compact: true,
+                          label: _statusLabel(doc, statusForUi),
                         ),
-                      ),
-                    ],
+                        const SizedBox(height: 6),
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(2),
+                          child: SizedBox(
+                            width: 46,
+                            height: 3,
+                            child: LinearProgressIndicator(
+                              value: _progressFor(doc, statusForUi),
+                              backgroundColor: DocuTrackerTokens.raisedOf(
+                                context,
+                                light: const Color(0xFFE5E7EB),
+                              ),
+                              color: _progressColor(statusForUi),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
-                ),
-              ],
+                  Expanded(
+                    flex: _documentTableFlex.deadline,
+                    child: Text(
+                      deadline == null
+                          ? 'No deadline'
+                          : MaterialLocalizations.of(
+                              context,
+                            ).formatShortDate(deadline.toLocal()),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: deadline == null
+                            ? FontWeight.w400
+                            : FontWeight.w700,
+                        color: isOverdue
+                            ? DocuTrackerTokens.accentTextOf(
+                                context,
+                                light: const Color(0xFFB91C1C),
+                                dark: const Color(0xFFFCA5A5),
+                              )
+                            : (deadline == null ? textMuted : textPrimary),
+                      ),
+                    ),
+                  ),
+                  SizedBox(
+                    width: 168,
+                    child: Row(
+                      children: [
+                        Icon(
+                          Icons.person_outline_rounded,
+                          size: 15,
+                          color: textMuted,
+                        ),
+                        const SizedBox(width: 5),
+                        Expanded(
+                          child: Tooltip(
+                            message: _assigneeLabel(doc),
+                            waitDuration: const Duration(milliseconds: 450),
+                            child: Text(
+                              _assigneeLabel(doc),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                fontSize: 13,
+                                color: textPrimary,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  SizedBox(
+                    width: 64,
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.end,
+                      children: [
+                        DocuTrackerDeleteDraftButton(
+                          doc: doc,
+                          userId: widget.userId,
+                          isAdmin: widget.isAdmin,
+                          onDeleted: widget.onDeleted,
+                        ),
+                        Icon(
+                          Icons.chevron_right_rounded,
+                          color: _hovered
+                              ? DocuTrackerTokens.textSecondaryOf(context)
+                              : textMuted,
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
         ),
@@ -2508,22 +2805,33 @@ class _DocumentRowCardState extends State<_DocumentRowCard> {
                             ),
                             const SizedBox(width: 10),
                             Expanded(
-                              child: Text(
-                                doc.title,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: TextStyle(
-                                  fontSize: 14.5,
-                                  fontWeight: FontWeight.w700,
-                                  color: isOverdue
-                                      ? overdueText
-                                      : DocuTrackerTokens.textPrimaryOf(
-                                          context,
-                                        ),
+                              child: Tooltip(
+                                message: doc.title,
+                                waitDuration: const Duration(milliseconds: 450),
+                                child: Text(
+                                  doc.title,
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                    fontSize: 14.5,
+                                    fontWeight: FontWeight.w700,
+                                    height: 1.25,
+                                    color: isOverdue
+                                        ? overdueText
+                                        : DocuTrackerTokens.textPrimaryOf(
+                                            context,
+                                          ),
+                                  ),
                                 ),
                               ),
                             ),
                             const SizedBox(width: 8),
+                            DocuTrackerDeleteDraftButton(
+                              doc: doc,
+                              userId: widget.userId,
+                              isAdmin: widget.isAdmin,
+                              onDeleted: widget.onRefresh,
+                            ),
                             DocuTrackerStatusBadge(
                               status: widget.statusForUi,
                               compact: true,
@@ -2569,13 +2877,17 @@ class _DocumentRowCardState extends State<_DocumentRowCard> {
                           ],
                         ),
                         const SizedBox(height: 8),
-                        Text(
-                          'Current assignee: ${_assigneeLabel(doc)}',
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            fontSize: 12.5,
-                            color: DocuTrackerTokens.textSecondaryOf(context),
+                        Tooltip(
+                          message: _assigneeLabel(doc),
+                          waitDuration: const Duration(milliseconds: 450),
+                          child: Text(
+                            'Current assignee: ${_assigneeLabel(doc)}',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontSize: 12.5,
+                              color: DocuTrackerTokens.textSecondaryOf(context),
+                            ),
                           ),
                         ),
                       ],
@@ -2639,17 +2951,24 @@ class _DocumentRowCardState extends State<_DocumentRowCard> {
                               ],
                             ),
                             const SizedBox(height: 4),
-                            Text(
-                              doc.title,
-                              style: TextStyle(
-                                fontSize: 15,
-                                fontWeight: FontWeight.w600,
-                                color: isOverdue
-                                    ? overdueText
-                                    : DocuTrackerTokens.textPrimaryOf(context),
+                            Tooltip(
+                              message: doc.title,
+                              waitDuration: const Duration(milliseconds: 450),
+                              child: Text(
+                                doc.title,
+                                style: TextStyle(
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.w600,
+                                  height: 1.25,
+                                  color: isOverdue
+                                      ? overdueText
+                                      : DocuTrackerTokens.textPrimaryOf(
+                                          context,
+                                        ),
+                                ),
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
                               ),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
                             ),
                           ],
                         ),
@@ -2768,10 +3087,16 @@ class _DocumentRowCardState extends State<_DocumentRowCard> {
 
                       // 5. Status Badge & Chevron (Right)
                       SizedBox(
-                        width: 130,
+                        width: 176,
                         child: Row(
                           mainAxisAlignment: MainAxisAlignment.end,
                           children: [
+                            DocuTrackerDeleteDraftButton(
+                              doc: doc,
+                              userId: widget.userId,
+                              isAdmin: widget.isAdmin,
+                              onDeleted: widget.onRefresh,
+                            ),
                             DocuTrackerStatusBadge(
                               status: widget.statusForUi,
                               compact: true,

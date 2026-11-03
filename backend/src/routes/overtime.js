@@ -3,9 +3,52 @@ const { pool } = require('../config/db');
 const { authMiddleware } = require('../middleware/auth');
 const { requireAdmin, requireAdminOrSupervisor } = require('../middleware/rbac');
 const overtimeNotifications = require('../services/overtimeNotifications');
+const { parseAssignmentDate } = require('../utils/assignmentInputValidation');
 
 const router = express.Router();
 const protect = [authMiddleware];
+
+function overtimeTimeSeconds(value) {
+  if (typeof value !== 'string') return null;
+  const parts = value.trim().match(/^(\d{1,2}):(\d{2})(?::(\d{2})(\.\d{1,6})?)?$/);
+  if (!parts || Number(parts[1]) > 23 || Number(parts[2]) > 59 || Number(parts[3] || 0) > 59) return null;
+  return Number(parts[1]) * 3600 + Number(parts[2]) * 60 + Number(parts[3] || 0) + Number(parts[4] || 0);
+}
+
+function validateOvertimeSubmission(body, employeeId) {
+  if (typeof employeeId !== 'string' || !/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(employeeId.trim())) {
+    return { error: 'A valid employee ID is required' };
+  }
+  if (!parseAssignmentDate(body.ot_date)) return { error: 'ot_date must be a real date in YYYY-MM-DD format' };
+  const start = overtimeTimeSeconds(body.time_start);
+  const end = overtimeTimeSeconds(body.time_end);
+  if (start === null) return { error: 'time_start must be a valid HH:MM or HH:MM:SS time' };
+  if (end === null) return { error: 'time_end must be a valid HH:MM or HH:MM:SS time' };
+  if (start === end) return { error: 'Time start and time end must differ; overtime must be shorter than 24 hours' };
+
+  const rawHours = body.total_hours;
+  const decimal = typeof rawHours === 'string' ? rawHours.trim() : '';
+  if (typeof rawHours !== 'number' &&
+      !(decimal && /^\+?(?:\d+(?:\.\d*)?|\.\d+)$/.test(decimal))) {
+    return { error: 'total_hours must be a finite positive decimal number' };
+  }
+  const claimedHours = Number(rawHours);
+  if (!Number.isFinite(claimedHours) || claimedHours <= 0 || claimedHours > 24) {
+    return { error: 'total_hours must be greater than zero and at most 24' };
+  }
+  // An earlier end is next-day overtime. Compare at NUMERIC(5,2) precision
+  // and store the server-calculated duration, rather than an arbitrary claim.
+  const seconds = end > start ? end - start : 86400 - start + end;
+  const totalHours = Math.round(seconds / 36) / 100;
+  const roundedClaim = Math.round((claimedHours + Number.EPSILON) * 100) / 100;
+  if (totalHours <= 0 || roundedClaim !== totalHours) {
+    return { error: 'total_hours must match the start/end interval rounded to two decimal places' };
+  }
+  if (body.reason != null && (typeof body.reason !== 'string' || body.reason.includes('\0'))) {
+    return { error: 'reason must be text or null without null characters' };
+  }
+  return { totalHours };
+}
 
 // GET /api/overtime - list (?status=pending|approved|rejected|All, ?employee_id=uuid)
 router.get('/', protect, async (req, res) => {
@@ -54,36 +97,36 @@ router.get('/', protect, async (req, res) => {
 // POST /api/overtime - submit (employee or admin on behalf of employee)
 router.post('/', protect, async (req, res) => {
   try {
-    const { employee_id, ot_date, time_start, time_end, total_hours, reason } = req.body;
+    if (!req.body || typeof req.body !== 'object' || Array.isArray(req.body)) {
+      return res.status(400).json({ error: 'Overtime details must be an object' });
+    }
+    const { employee_id, ot_date, time_start, time_end, reason } = req.body;
     const userId = req.user?.id;
     const isAdmin = req.user?.role === 'admin' || req.user?.role === 'hr' || req.user?.role === 'supervisor';
     const targetEmployeeId = isAdmin && employee_id ? employee_id : userId;
 
-    if (!targetEmployeeId || !ot_date) {
-      return res.status(400).json({ error: 'Employee and OT date are required' });
-    }
-    if (!time_start || !time_end || total_hours == null) {
-      return res.status(400).json({ error: 'Time start, time end, and total hours are required' });
-    }
     if (!isAdmin && targetEmployeeId !== userId) {
       return res.status(403).json({ error: 'You can only submit overtime for yourself' });
     }
+    const validated = validateOvertimeSubmission(req.body, targetEmployeeId);
+    if (validated.error) return res.status(400).json({ error: validated.error });
+    const normalizedEmployeeId = targetEmployeeId.trim();
 
     const result = await pool.query(
       `INSERT INTO overtime_requests (employee_id, ot_date, time_start, time_end, total_hours, reason, status)
        VALUES ($1, $2::date, $3::time, $4::time, $5::numeric, $6, 'pending')
        RETURNING id, employee_id, ot_date, time_start, time_end, total_hours, reason, status, created_at`,
-      [targetEmployeeId, ot_date, time_start, time_end, parseFloat(total_hours) || 0, reason?.trim() || null]
+      [normalizedEmployeeId, ot_date, time_start.trim(), time_end.trim(), validated.totalHours, reason?.trim() || null]
     );
     const row = result.rows[0];
     try {
       const nameRes = await pool.query(
         `SELECT full_name FROM users WHERE id = $1`,
-        [targetEmployeeId]
+        [normalizedEmployeeId]
       );
       await overtimeNotifications.notifyOvertimeSubmitted(pool, {
         requestId: row.id,
-        employeeUserId: targetEmployeeId,
+        employeeUserId: normalizedEmployeeId,
         employeeName: nameRes.rows[0]?.full_name,
         otDate: row.ot_date,
       });

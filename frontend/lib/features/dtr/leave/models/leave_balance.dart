@@ -1,7 +1,7 @@
 import 'leave_type.dart';
 import 'leave_entitlement_basis.dart';
 
-/// A credit balance or a read-only annual-entitlement summary.
+/// A credit balance or a read-only leave usage/compliance summary.
 ///
 /// This supports:
 /// - employee balance display
@@ -32,6 +32,7 @@ class LeaveBalance {
     this.lastAccrualDate,
     this.createdAt,
     this.updatedAt,
+    this.historyVerificationRequired = false,
   });
 
   final String? id;
@@ -76,6 +77,7 @@ class LeaveBalance {
 
   final DateTime? createdAt;
   final DateTime? updatedAt;
+  final bool historyVerificationRequired;
 
   static const String tableName = 'leave_balances';
 
@@ -100,6 +102,18 @@ class LeaveBalance {
   bool get isAnnualEntitlement =>
       recordKind == 'annual_entitlement' &&
       entitlementBasis == LeaveEntitlementBasis.annual;
+
+  bool get isComplianceProgress => recordKind == 'compliance_progress' &&
+      entitlementBasis == LeaveEntitlementBasis.compliance;
+
+  bool get isUsageSummary => isAnnualEntitlement || isComplianceProgress;
+
+  /// Display approved usage independently of pending filing reservations.
+  double get usageRemainingDays => eligible
+      ? remainingDays.clamp(0, double.infinity).toDouble() : 0;
+
+  String? get usageStatusLabel => historyVerificationRequired ? 'History verification required' : eligible && earnedDays > 0 && usageRemainingDays == 0
+      ? (isComplianceProgress ? 'Requirement met' : 'Limit reached') : null;
 
   String get effectiveLeaveTypeName {
     final raw = leaveTypeName.trim();
@@ -151,6 +165,7 @@ class LeaveBalance {
       lastAccrualDate: _parseDate(json['last_accrual_date']),
       createdAt: _parseDateTime(json['created_at']),
       updatedAt: _parseDateTime(json['updated_at']),
+      historyVerificationRequired: json['history_verification_required'] == true,
     );
   }
 
@@ -164,6 +179,7 @@ class LeaveBalance {
       'entitlement_basis': entitlementBasis,
       if (entitlementYear != null) 'entitlement_year': entitlementYear,
       'eligible': eligible,
+      'history_verification_required': historyVerificationRequired,
       'eligibility_message': eligibilityMessage,
       'eligible_from': eligibleFrom,
       'prorated': prorated,
@@ -204,6 +220,7 @@ class LeaveBalance {
     DateTime? lastAccrualDate,
     DateTime? createdAt,
     DateTime? updatedAt,
+    bool? historyVerificationRequired,
   }) {
     return LeaveBalance(
       id: id ?? this.id,
@@ -229,6 +246,7 @@ class LeaveBalance {
       lastAccrualDate: lastAccrualDate ?? this.lastAccrualDate,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
+      historyVerificationRequired: historyVerificationRequired ?? this.historyVerificationRequired,
     );
   }
 

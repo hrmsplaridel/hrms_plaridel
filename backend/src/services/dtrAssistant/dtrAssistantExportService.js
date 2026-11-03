@@ -2,6 +2,7 @@ const crypto = require('crypto');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const { effectiveDtrRecords, effectiveExportStatus } = require('./effectiveAttendance');
 
 const DEFAULT_EXPORT_TTL_MS = 15 * 60 * 1000;
 const DEFAULT_MAX_EXPORTS = 500;
@@ -47,7 +48,7 @@ function assertCompleteDtrExportContext(context) {
 function dtrExportRows(context) {
   assertCompleteDtrExportContext(context);
   const recordsByDate = new Map(
-    (context.dtr_records || []).map((record) => [
+    effectiveDtrRecords(context).map((record) => [
       String(record.attendance_date).slice(0, 10),
       record,
     ])
@@ -92,11 +93,11 @@ function dtrExportRows(context) {
       day.holiday_name
         ? `${day.holiday_name} (${day.holiday_coverage || 'whole_day'})`
         : record.holiday_name || '',
-      record.status || (day.shift_id ? 'no_record' : 'no_schedule'),
-      record.time_in || '',
-      record.break_out || '',
-      record.break_in || '',
-      record.time_out || '',
+      effectiveExportStatus(context, day, record),
+      record.time_in || (record.locator_coverage?.am_in ? record.attendance_label : ''),
+      record.break_out || (record.locator_coverage?.am_out ? record.attendance_label : ''),
+      record.break_in || (record.locator_coverage?.pm_in ? record.attendance_label : ''),
+      record.time_out || (record.locator_coverage?.pm_out ? record.attendance_label : ''),
       record.total_hours ?? '',
       record.late_minutes ?? '',
       record.undertime_minutes ?? '',

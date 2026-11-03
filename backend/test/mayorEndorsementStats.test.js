@@ -51,6 +51,14 @@ test('parseReportPeriod daily/weekly/monthly presets', () => {
   assert.equal(withTest.includeTest, true);
 });
 
+test('custom report periods reject impossible and reversed calendar dates',()=>{
+  for(const [from_date,to_date] of [
+    ['2026-02-30','2026-03-02'],['2026-10-01','2026-13-01'],
+    ['2026-10-21','2026-10-20'],['2026-10-00','2026-10-20'],
+  ]) assert.ok(parseReportPeriod({period:'custom',from_date,to_date}).error,`${from_date} to ${to_date}`);
+  assert.equal(parseReportPeriod({period:'custom',from_date:'2028-02-29',to_date:'2028-02-29'}).toDateExclusive,'2028-03-01');
+});
+
 test('Manila timezone constant', () => {
   assert.equal(MANILA_TZ, 'Asia/Manila');
 });

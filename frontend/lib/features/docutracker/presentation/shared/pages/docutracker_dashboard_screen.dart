@@ -14,12 +14,15 @@ import 'package:hrms_plaridel/features/docutracker/models/document_type.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_create_document_dialog.dart';
 import 'package:hrms_plaridel/features/docutracker/theme/docutracker_tokens.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_module_header.dart';
+import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_notification_bell.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_section_header.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_status_theme.dart';
 import 'package:hrms_plaridel/features/docutracker/data/navigation/docutracker_document_navigation.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_error_banner.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_summary_card.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_press_scale.dart';
+import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_dashboard_status_chip.dart';
+import 'package:hrms_plaridel/features/docutracker/utils/docutracker_dashboard_sections.dart';
 import 'package:hrms_plaridel/features/docutracker/utils/docutracker_source_status_text.dart';
 import 'package:hrms_plaridel/features/docutracker/utils/docutracker_workflow_phase.dart';
 
@@ -138,6 +141,9 @@ class _DocuTrackerDashboardScreenState
             subtitle: widget.isAdmin
                 ? 'Organization-wide routing, SLA risk, and escalations.'
                 : 'Items assigned to you, deadlines, and completed work.',
+            trailing: DocuTrackerNotificationBellButton(
+              isAdmin: widget.isAdmin,
+            ),
           ),
           const SizedBox(height: 20),
         ],
@@ -225,15 +231,12 @@ class _DocuTrackerDashboardScreenState
     // backend (viewerIsRoutingAssignee covers any-step assignees + history
     // actors; signatureSignerIds covers e-sign placeholders).
     final completed = provider.completedDocuments
-        .where(
-          (d) =>
-              d.createdBy == userId ||
-              d.currentHolderId == userId ||
-              d.viewerIsRoutingAssignee ||
-              d.viewerParticipatedInSource ||
-              d.signatureSignerIds.any((id) => id == userId),
-        )
+        .where((d) => docuTrackerEmployeeParticipated(d, userId))
         .toList();
+    final releasedToViewer = docuTrackerReleasedViewDocuments(
+      documents: myDocs,
+      userId: userId,
+    );
     final inReview = myDocs
         .where((d) => d.status == DocumentStatus.inReview)
         .toList();
@@ -252,6 +255,7 @@ class _DocuTrackerDashboardScreenState
         incoming.isNotEmpty ||
         returned.isNotEmpty ||
         completed.isNotEmpty ||
+        releasedToViewer.isNotEmpty ||
         provider.departmentQueue.isNotEmpty;
     final reviewedDepartmentNames = provider.reviewedDepartmentNames;
 
@@ -325,6 +329,13 @@ class _DocuTrackerDashboardScreenState
               completed,
               userId: userId,
               sectionKey: 'employee_completed',
+            ),
+          if (releasedToViewer.isNotEmpty)
+            _buildDocSection(
+              'Released to you',
+              releasedToViewer,
+              userId: userId,
+              sectionKey: 'employee_released_to_viewer',
             ),
         ] else
           _buildEmptyState(),
@@ -431,7 +442,7 @@ class _DocuTrackerDashboardScreenState
             ),
             const SizedBox(height: 12),
             Text(
-              'No documents yet',
+              docuTrackerEmployeeDashboardEmptyTitle,
               style: TextStyle(
                 color: dark ? Colors.white : AppTheme.textPrimary,
                 fontSize: 15,
@@ -440,7 +451,7 @@ class _DocuTrackerDashboardScreenState
             ),
             const SizedBox(height: 6),
             Text(
-              'When documents are routed to you, they will appear here.',
+              docuTrackerEmployeeDashboardEmptyMessage,
               textAlign: TextAlign.center,
               style: DocuTrackerTokens.subtitleStyle(context),
             ),
@@ -896,6 +907,10 @@ class _DocuTrackerDashboardScreenState
       'My drafts' => (Icons.edit_note_rounded, const Color(0xFFD97706)),
       'Returned' => (Icons.reply_rounded, const Color(0xFFFF9800)),
       'Completed' => (Icons.check_circle_rounded, DocuTrackerTokens.brand),
+      'Released to you' => (
+        Icons.outbox_rounded,
+        DocuTrackerTokens.brand,
+      ),
       _ when sectionKey == 'employee_department_queue' => (
         Icons.apartment_rounded,
         DocuTrackerTokens.brand,
@@ -1016,8 +1031,10 @@ class _DocumentTileState extends State<_DocumentTile> {
       builder: (context, constraints) {
         final compact = constraints.maxWidth < 520;
         final statusForUi = docuTrackerStatusForDisplay(widget.document);
-
-        final statusLabel = statusForUi.displayName.toUpperCase();
+        final statusChip = DocuTrackerDashboardStatusChip(
+          document: widget.document,
+          compact: compact,
+        );
 
         final leading = Container(
           width: compact ? 34 : 40,
@@ -1070,25 +1087,6 @@ class _DocumentTileState extends State<_DocumentTile> {
           ],
         );
 
-        final statusChip = Container(
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-          decoration: BoxDecoration(
-            color: DocuTrackerStatusTheme.chipBackground(statusForUi),
-            borderRadius: BorderRadius.circular(6),
-          ),
-          child: Text(
-            statusLabel,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(
-              fontSize: 10,
-              fontWeight: FontWeight.w800,
-              color: DocuTrackerStatusTheme.foreground(statusForUi),
-              letterSpacing: 0.3,
-            ),
-          ),
-        );
-
         Widget child;
         if (compact) {
           child = InkWell(
@@ -1106,10 +1104,7 @@ class _DocumentTileState extends State<_DocumentTile> {
                   Column(
                     crossAxisAlignment: CrossAxisAlignment.end,
                     children: [
-                      ConstrainedBox(
-                        constraints: const BoxConstraints(maxWidth: 100),
-                        child: statusChip,
-                      ),
+                      statusChip,
                       const SizedBox(height: 8),
                       Icon(
                         Icons.chevron_right_rounded,

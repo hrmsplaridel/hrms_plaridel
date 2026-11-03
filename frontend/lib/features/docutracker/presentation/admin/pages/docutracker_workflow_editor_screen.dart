@@ -19,12 +19,14 @@ import 'package:hrms_plaridel/features/docutracker/models/document_type.dart';
 import 'package:hrms_plaridel/features/docutracker/models/workflow_step.dart';
 import 'package:hrms_plaridel/features/docutracker/services/docutracker_workflow_config_validator.dart';
 import 'package:hrms_plaridel/features/docutracker/theme/docutracker_tokens.dart';
+import 'package:hrms_plaridel/features/docutracker/utils/docutracker_return_text.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_error_banner.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_responsive_body.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_section_header.dart';
 import 'docutracker_escalation_config_screen.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/admin/widgets/workflow_step_editor_panel.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/admin/widgets/docutracker_release_policy_tile.dart';
+import 'package:hrms_plaridel/features/docutracker/presentation/admin/widgets/docutracker_print_settings.dart';
 
 class DocuTrackerWorkflowEditorScreen extends StatefulWidget {
   const DocuTrackerWorkflowEditorScreen({
@@ -875,6 +877,35 @@ class _DocuTrackerWorkflowEditorScreenState
       );
     }
 
+    void openPrintedFormSettings() {
+      final type = widget.initialConfig.documentType;
+      Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (_) => Scaffold(
+            backgroundColor: DocuTrackerTokens.canvasOf(context),
+            appBar: AppBar(
+              title: Text('${type.displayName} · Printed form'),
+              backgroundColor: DocuTrackerTokens.surfaceOf(context),
+              foregroundColor: DocuTrackerTokens.textPrimaryOf(context),
+              surfaceTintColor: Colors.transparent,
+            ),
+            body: DocuTrackerResponsiveBody(
+              maxWidth: DocuTrackerTokens.maxContentWidth,
+              padding: const EdgeInsets.all(20),
+              child: ListView(
+                children: [
+                  DocuTrackerPrintSettings(
+                    documentType: type.value,
+                    displayName: type.displayName,
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
     Widget workflowHeaderBlock() {
       return Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -975,8 +1006,13 @@ class _DocuTrackerWorkflowEditorScreenState
               tooltip: 'More workflow settings',
               onSelected: (value) {
                 if (value == 'escalation') openEscalationRules();
+                if (value == 'printed_form') openPrintedFormSettings();
               },
               itemBuilder: (_) => const [
+                PopupMenuItem(
+                  value: 'printed_form',
+                  child: Text('Printed form'),
+                ),
                 PopupMenuItem(
                   value: 'escalation',
                   child: Text('Escalation rules'),
@@ -2589,7 +2625,7 @@ String _workflowActionLabel(String raw) {
   return switch (raw.trim().toLowerCase()) {
     'approve' => 'Approve and continue',
     'forward' => 'Forward without approval',
-    'return' => 'Return for changes',
+    'return' => docuTrackerReturnActionLabel,
     'reject' => 'Reject and stop',
     final value when value.isNotEmpty =>
       '${value[0].toUpperCase()}${value.substring(1)}',

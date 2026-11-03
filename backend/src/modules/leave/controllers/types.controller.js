@@ -56,7 +56,7 @@ module.exports = function createLeaveControllers({
           requires_attachment, requires_attachment_when_over_days,
           max_days, minimum_advance_days, affects_dtr_normally, balance_ledger_type,
           entitlement_basis, sex_eligibility, employee_detail_schema, eligible_employment_types, approval_route, mayor_employment_types,
-          admin_can_file, approval_workflow_id, minimum_service_months, first_year_allowance, created_at, updated_at
+          admin_can_file, approval_workflow_id, minimum_service_months, first_year_allowance, allow_approved_paper_filing, created_at, updated_at
         )
         VALUES (
           $1, $2, $3, $4, false,
@@ -64,7 +64,7 @@ module.exports = function createLeaveControllers({
           $8, $9,
           $10, $11, $12, $13,
           $14, $15, $16::jsonb, $17::text[], $18, $19::text[],
-          $20, $21::uuid, $22, $23, now(), now()
+          $20, $21::uuid, $22, $23, $24, now(), now()
         )
         RETURNING *`,
           [
@@ -91,6 +91,7 @@ module.exports = function createLeaveControllers({
             workflowId,
             payload.minimumServiceMonths,
             payload.firstYearAllowance,
+            payload.allowApprovedPaperFiling,
           ],
         );
         res.status(201).json(leaveTypeRowToApi(q.rows[0]));
@@ -115,14 +116,14 @@ module.exports = function createLeaveControllers({
           const body = req.body || {};
           if (
             Object.keys(body).some(
-              (key) => !['eligible_employment_types', 'minimum_service_months'].includes(key),
+              (key) => !['eligible_employment_types', 'minimum_service_months', 'allow_approved_paper_filing'].includes(key),
             )
           ) {
             return res
               .status(400)
               .json({
                 error:
-                  'Built-in leave rules are protected. Only employment-type and minimum-service eligibility can be configured.',
+                  'Built-in leave rules are protected. Only employment-type, minimum-service eligibility and approved paper recording can be configured.',
               });
           }
           if (!Object.keys(body).length) {
@@ -131,9 +132,9 @@ module.exports = function createLeaveControllers({
           const payload = leaveTypePayloadFromBody(body, existing);
           const eligibility = payload.eligibleEmploymentTypes;
           const updated = await pool.query(
-            `UPDATE leave_types SET eligible_employment_types = $1::text[], minimum_service_months = $3, updated_at = now()
+            `UPDATE leave_types SET eligible_employment_types = $1::text[], minimum_service_months = $3, allow_approved_paper_filing = $4, updated_at = now()
          WHERE id = $2::uuid RETURNING *`,
-            [eligibility, req.params.id, payload.minimumServiceMonths],
+            [eligibility, req.params.id, payload.minimumServiceMonths, payload.allowApprovedPaperFiling],
           );
           return res.json(leaveTypeRowToApi(updated.rows[0]));
         }
@@ -178,6 +179,7 @@ module.exports = function createLeaveControllers({
            admin_can_file = $20,
            minimum_service_months = $21,
            first_year_allowance = $22,
+           allow_approved_paper_filing = $23,
            updated_at = now()
        WHERE id = $18::uuid
        RETURNING *`,
@@ -208,6 +210,7 @@ module.exports = function createLeaveControllers({
             payload.adminCanFile,
             payload.minimumServiceMonths,
             payload.firstYearAllowance,
+            payload.allowApprovedPaperFiling,
           ],
         );
         res.json(leaveTypeRowToApi(q.rows[0]));

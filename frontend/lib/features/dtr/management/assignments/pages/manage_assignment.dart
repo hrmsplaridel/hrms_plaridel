@@ -112,6 +112,8 @@ class _ManageAssignmentState extends State<ManageAssignment> {
   String? _selectedPolicyId;
   DateTime? _effectiveFrom;
   DateTime? _effectiveTo;
+  DateTime? _trackingStart;
+  DateTime? _savedTrackingStart;
   final _remarksController = TextEditingController();
   _AssignmentRecord? _selectedAssignment;
   StateSetter? _drawerSetState;
@@ -637,6 +639,8 @@ class _ManageAssignmentState extends State<ManageAssignment> {
         _officialHrmsDate = officialDate;
         _assignmentPickerFirstDate = pickerFirstDate;
         _assignmentPickerLastDate = pickerLastDate;
+        _savedTrackingStart=_assignmentDateFromApi(assignmentContext['attendance_tracking_start_date']);
+        _trackingStart=_savedTrackingStart;
       });
     } catch (e) {
       debugPrint('Load assignments failed: $e');
@@ -864,6 +868,8 @@ class _ManageAssignmentState extends State<ManageAssignment> {
     _designationRequestGuard.invalidate();
     _updateAssignmentFormState(() {
       _selectedEmployeeId = employee.id;
+      _trackingStart=null;
+      _savedTrackingStart=null;
       _selectedEmployeeName = employee.fullName;
       _selectedEmployeeCanAddAssignments = employee.canAddAssignments;
       _officialHrmsDate = null;
@@ -931,6 +937,7 @@ class _ManageAssignmentState extends State<ManageAssignment> {
   void _selectAssignment(_AssignmentRecord a) {
     _updateAssignmentFormState(() {
       _selectedAssignment = a;
+      _trackingStart=_savedTrackingStart;
       _selectedDeptId = a.departmentId;
       _selectedPositionId =
           _positionBelongsToDepartment(a.positionId, a.departmentId)
@@ -946,6 +953,7 @@ class _ManageAssignmentState extends State<ManageAssignment> {
 
   void _clearForm() {
     _updateAssignmentFormState(() {
+      _trackingStart=_savedTrackingStart;
       _selectedAssignment = null;
       _selectedDeptId = null;
       _selectedPositionId = null;
@@ -1041,6 +1049,8 @@ class _ManageAssignmentState extends State<ManageAssignment> {
       final data = <String, dynamic>{
         'employee_id': _selectedEmployeeId,
         'department_id': _selectedDeptId,
+        if(!DateUtils.isSameDay(_trackingStart,_savedTrackingStart))
+          'attendance_tracking_start_date':_trackingStart==null?null:_dateStr(_trackingStart!),
         'position_id': _selectedPositionId,
         'shift_id': _selectedShiftId,
         'effective_from': _effectiveFrom!.toIso8601String().split('T')[0],
@@ -1119,6 +1129,8 @@ class _ManageAssignmentState extends State<ManageAssignment> {
     try {
       final data = <String, dynamic>{
         'department_id': _selectedDeptId,
+        if(!DateUtils.isSameDay(_trackingStart,_savedTrackingStart))
+          'attendance_tracking_start_date':_trackingStart==null?null:_dateStr(_trackingStart!),
         'position_id': _selectedPositionId,
         'shift_id': _selectedShiftId,
         'effective_from': _effectiveFrom!.toIso8601String().split('T')[0],

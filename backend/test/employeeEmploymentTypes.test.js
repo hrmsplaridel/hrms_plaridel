@@ -22,6 +22,7 @@ for(const method of ['post','put']) {
     let stored;
     const query=async(sql,params=[])=>{
       if(sql.includes('SELECT biometric_user_id')) return {rowCount:1,rows:[{employment_type:'regular',employment_status:'active',date_hired:'2026-10-09',leave_credit_eligible:true}]};
+      if(sql.includes('SELECT date_of_birth::text')) return {rowCount:1,rows:[{date_of_birth:null,date_hired:'2026-10-09'}]};
       if(sql.includes('nextval')) return {rows:[{n:99}]};
       if(sql.startsWith('SELECT 1 FROM users')) return {rowCount:0,rows:[]};
       if(sql.includes('INSERT INTO users')) {

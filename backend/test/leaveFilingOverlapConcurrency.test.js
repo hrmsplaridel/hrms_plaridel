@@ -6,7 +6,10 @@ for (const { secondPath, overlaps } of [
   ...['/submit', '/submit-with-attachment', '/:id'].map(secondPath => ({ secondPath, overlaps: true })),
   { secondPath: '/submit', overlaps: false },
 ]) {
-  test(`concurrent JSON filing and ${secondPath} ${overlaps ? "reject overlapping request" : "accept disjoint requests"}`, async () => {
+  test(`concurrent JSON filing and ${secondPath} ${overlaps ? "reject overlapping request" : "accept disjoint requests"}`, async (t) => {
+    // Keep the filing dates in the future; this test covers locking, not the
+    // real-world date on which the test suite happens to run.
+    t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-10-01T00:00:00Z') });
     const rows = new Map([['draft-2', { id: 'draft-2', status: 'draft', user_id: 'employee', employee_id: 'employee' }]]);
     let owner = null;
     const waiters = [];
@@ -80,7 +83,7 @@ for (const { secondPath, overlaps } of [
       const secondRequest = req();
       if (!overlaps) { secondRequest.body.start_date = '2026-11-04'; secondRequest.body.end_date = '2026-11-05'; }
       await Promise.all([handler('/submit')(req(), first), handler(secondPath)(secondRequest, second)]);
-      assert.equal(first.code, 201);
+      assert.equal(first.code, 201, JSON.stringify(first.body));
       assert.equal(second.code, overlaps ? 400 : 201);
       if (overlaps) assert.match(second.body.error, /Overlapping leave request/);
       assert.equal(inserts, overlaps ? 1 : 2);

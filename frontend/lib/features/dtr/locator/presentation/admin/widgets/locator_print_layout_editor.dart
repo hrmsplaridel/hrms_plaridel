@@ -11,10 +11,14 @@ import '../../../models/locator_print_layout.dart';
 import '../../../models/locator_request_type.dart';
 import '../../../utils/locator_layout_pdf.dart';
 import '../../../utils/locator_form_signatories.dart';
+import '../../../utils/print_layout_editing.dart';
+import '../../../utils/print_layout_decoration.dart';
 import 'print_layout_table_properties.dart';
 import 'print_layout_page_properties.dart';
 import 'print_layout_field_dialog.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_type_definition.dart';
+
+part 'print_layout_design_controls.dart';
 
 /// Domain-specific fields and sample values for the shared printed page editor.
 class PrintLayoutEditorBindings {
@@ -64,10 +68,16 @@ class _LocatorPrintLayoutEditorState extends State<LocatorPrintLayoutEditor> {
   late List<LeaveCustomFieldDefinition> _customFields;
   bool _customFieldsChanged = false;
   String? _selectedId, _error;
+  Set<String> _selectedIds = {};
+  final _dragPreview = ValueNotifier<(String?, Offset)>((null, Offset.zero));
+  final _selectionBox = ValueNotifier<Rect?>(null);
+  Offset? _selectionOrigin;
+  Set<String> _selectionBase = {};
   Uint8List? _background;
   bool _busy = false, _loadingBackground = false;
   String? _backgroundOrientation, _backgroundPaper;
   final _pagePropertiesKey = GlobalKey<PrintLayoutPagePropertiesState>();
+  final _appearanceKey = GlobalKey<_PrintLayoutAppearancePropertiesState>();
   final _zoom = ValueNotifier<double?>(null);
   bool _showGrid = false, _showSettings = false;
   final _workspaceVertical = ScrollController();
@@ -108,11 +118,15 @@ class _LocatorPrintLayoutEditorState extends State<LocatorPrintLayoutEditor> {
     _editorFocus.dispose();
     _fitZoom.dispose();
     _zoom.dispose();
+    _dragPreview.dispose();
+    _cancelBoxSelection();
+    _selectionBox.dispose();
     super.dispose();
   }
 
   LocatorPrintElement? get _selected =>
       _layout.elements.where((e) => e.id == _selectedId).firstOrNull;
+  void _updateDesignState(VoidCallback update) => setState(update);
   Future<void> _loadBackground() async {
     if (widget.backgroundPdf == null && widget.backgroundImage == null) return;
     setState(() => _loadingBackground = true);
@@ -159,9 +173,19 @@ class _LocatorPrintLayoutEditorState extends State<LocatorPrintLayoutEditor> {
     }
   }
 
-  void _select(String? id) {
+  void _select(String? id, {bool toggle = false, bool preserve = false}) {
     _historyGroup = null;
-    _selectedId = id;
+    final expanded = id == null ? <String>{} : PrintLayoutEditing.selection(_layout, {id});
+    if (toggle) {
+      if (_selectedIds.contains(id)) {
+        _selectedIds.removeAll(expanded);
+      } else {
+        _selectedIds.addAll(expanded);
+      }
+    } else if (!preserve || !_selectedIds.contains(id)) {
+      _selectedIds = expanded;
+    }
+    _selectedId = _selectedIds.contains(id) ? id : _selectedIds.firstOrNull;
     final item = _selected;
     if (item == null) return;
     for (final entry in {
@@ -181,6 +205,7 @@ class _LocatorPrintLayoutEditorState extends State<LocatorPrintLayoutEditor> {
     fields: List.of(_customFields),
     fieldsChanged: _customFieldsChanged,
     selectedId: _selectedId,
+    selectedIds: Set.of(_selectedIds),
     customCaptions: Set.of(_customSignatureCaptions),
   );
 
@@ -201,6 +226,7 @@ class _LocatorPrintLayoutEditorState extends State<LocatorPrintLayoutEditor> {
       ..clear()
       ..addAll(snapshot.customCaptions);
     _select(snapshot.selectedId);
+    _selectedIds = Set.of(snapshot.selectedIds);
     _error = null;
   }
 
@@ -221,13 +247,13 @@ class _LocatorPrintLayoutEditorState extends State<LocatorPrintLayoutEditor> {
   }
 
   void _deleteSelected() {
-    if (_busy || _gestureActive || _selected == null) return;
+    if (_busy || _gestureActive || !_canEditSelection) return;
     _remember();
     setState(() {
       _layout = _layout.copyWith(
         elements: [
           for (final e in _layout.elements)
-            if (e.id != _selectedId) e,
+            if (!_selectedIds.contains(e.id)) e,
         ],
       );
       _select(_layout.elements.firstOrNull?.id);
@@ -237,6 +263,10 @@ class _LocatorPrintLayoutEditorState extends State<LocatorPrintLayoutEditor> {
   }
 
   KeyEventResult _onEditorKey(FocusNode node, KeyEvent event) {
+    if (event is KeyDownEvent && event.logicalKey == LogicalKeyboardKey.escape && _selectionOrigin != null) {
+      _cancelBoxSelection();
+      return KeyEventResult.handled;
+    }
     if (event is! KeyDownEvent || _busy || _gestureActive) {
       return KeyEventResult.ignored;
     }
@@ -287,8 +317,9 @@ class _LocatorPrintLayoutEditorState extends State<LocatorPrintLayoutEditor> {
   }
 
   bool _commitProperties() {
+    if (!(_appearanceKey.currentState?.commit() ?? true)) return false;
     final item = _selected;
-    if (item == null) {
+    if (item == null || item.locked || _selectedIds.length > 1) {
       return _pagePropertiesKey.currentState?.commit(base: _layout) ?? true;
     }
     if (item.kind == 'signature' &&
@@ -474,6 +505,8 @@ class _LocatorPrintLayoutEditorState extends State<LocatorPrintLayoutEditor> {
               ? math.max(80.0, _layout.defaultFontSize * 3.5 + 12)
               : kind == 'line'
               ? 2.0
+              : kind == 'rectangle'
+              ? 100.0
               : math.max(40.0, _layout.defaultFontSize * 1.5 + 12),
         );
     final item = LocatorPrintElement(
@@ -495,6 +528,9 @@ class _LocatorPrintLayoutEditorState extends State<LocatorPrintLayoutEditor> {
       bold: kind == 'text',
       fontSize: _layout.defaultFontSize,
       fontFamily: _layout.fontFamily ?? 'sans',
+      decoration: kind == 'rectangle'
+          ? const PrintElementDecoration(borderSides: ['top','right','bottom','left'])
+          : const PrintElementDecoration(),
       columnWidths: kind == 'table' ? const [1, 1] : const [],
       cells: kind == 'table'
           ? const [
@@ -583,6 +619,8 @@ class _LocatorPrintLayoutEditorState extends State<LocatorPrintLayoutEditor> {
           const SizedBox(height: 12),
           _section('Element properties', Icons.tune, _elementProperties()),
           const SizedBox(height: 12),
+          _section('Layers', Icons.layers_outlined, _layers()),
+          const SizedBox(height: 12),
           Container(
             decoration: BoxDecoration(
               color: AppTheme.dashPanelOf(context),
@@ -621,7 +659,7 @@ class _LocatorPrintLayoutEditorState extends State<LocatorPrintLayoutEditor> {
     onChanged: (next) => setState(() {
       _remember();
       _layout = next;
-      _select(_selectedId);
+      _select(_selectedId, preserve:true);
     }),
   );
 
@@ -631,6 +669,7 @@ class _LocatorPrintLayoutEditorState extends State<LocatorPrintLayoutEditor> {
     children: [
       _paletteButton('Text / title', 'text'),
       _paletteButton('Line', 'line'),
+      _paletteButton('Rectangle', 'rectangle'),
       _paletteButton('Table', 'table'),
       for (final entry in _fields.entries)
         _paletteButton(entry.value, 'field|${entry.key}'),
@@ -650,6 +689,16 @@ class _LocatorPrintLayoutEditorState extends State<LocatorPrintLayoutEditor> {
         ),
       );
     }
+    if (selected.locked || _selectedIds.length > 1) {
+      return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        Text('${_selectedIds.length} element${_selectedIds.length == 1 ? '' : 's'} selected'),
+        const SizedBox(height: 8),
+        Text(selected.locked ? 'Locked. Unlock to edit or move this selection.' : 'Use Arrange to align, space, group or lock this selection.'),
+        const SizedBox(height: 8),
+        if (!_canEditSelection) OutlinedButton.icon(onPressed: _busy ? null : () => _arrange('unlock'),
+          icon: const Icon(Icons.lock_open_outlined), label: const Text('Unlock selection')),
+      ]);
+    }
     final automaticCaption =
         selected.kind == 'signature' &&
         selected.label.isEmpty &&
@@ -665,6 +714,7 @@ class _LocatorPrintLayoutEditorState extends State<LocatorPrintLayoutEditor> {
                   'text' => 'Text / title',
                   'line' => 'Line',
                   'table' => 'Table',
+                  'rectangle' => 'Rectangle',
                   'signature' => 'Signature',
                   _ => selected.label.isEmpty ? 'Field' : selected.label,
                 },
@@ -747,7 +797,7 @@ class _LocatorPrintLayoutEditorState extends State<LocatorPrintLayoutEditor> {
             ),
           const SizedBox(height: 8),
         ],
-        if (selected.kind != 'line' &&
+        if (selected.kind != 'rectangle' && selected.kind != 'line' &&
             selected.kind != 'table' &&
             !automaticCaption)
           TextField(
@@ -773,7 +823,7 @@ class _LocatorPrintLayoutEditorState extends State<LocatorPrintLayoutEditor> {
             },
           ),
         const SizedBox(height: 16),
-        if (selected.kind != 'line')
+        if (selected.kind != 'line' && selected.kind != 'rectangle')
           DropdownButtonFormField<String>(
             key: ValueKey('element-font-${selected.id}-${selected.fontFamily}'),
             initialValue: selected.fontFamily ?? 'inherit',
@@ -822,6 +872,7 @@ class _LocatorPrintLayoutEditorState extends State<LocatorPrintLayoutEditor> {
               'height': 'Height',
               'font_size': 'Font size',
             }.entries)
+              if (entry.key != 'font_size' || !['line','rectangle'].contains(selected.kind))
               SizedBox(
                 width: 124,
                 child: TextField(
@@ -844,6 +895,7 @@ class _LocatorPrintLayoutEditorState extends State<LocatorPrintLayoutEditor> {
           ],
         ),
         const SizedBox(height: 8),
+        if (!['line','rectangle'].contains(selected.kind)) ...[
         DropdownButtonFormField<String>(
           key: ValueKey('${selected.id}-${selected.align}'),
           initialValue: selected.align,
@@ -875,6 +927,7 @@ class _LocatorPrintLayoutEditorState extends State<LocatorPrintLayoutEditor> {
             const Text('Bold'),
           ],
         ),
+        ],
         if (selected.kind == 'table')
           PrintLayoutTableProperties(
             key: ValueKey('table-properties-${selected.id}'),
@@ -894,6 +947,8 @@ class _LocatorPrintLayoutEditorState extends State<LocatorPrintLayoutEditor> {
               const Text('Show label'),
             ],
           ),
+        const SizedBox(height: 16),
+        _appearance(selected),
       ],
     );
   }
@@ -1037,7 +1092,16 @@ class _LocatorPrintLayoutEditorState extends State<LocatorPrintLayoutEditor> {
             final point = box.globalToLocal(details.offset);
             _add(details.data, point: point / scale);
           },
-          builder: (context, candidates, rejected) => Material(
+          builder: (context, candidates, rejected) => GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            supportedDevices: const {PointerDeviceKind.mouse},
+            dragStartBehavior: DragStartBehavior.down,
+            onPanStart: _beginBoxSelection,
+            onPanUpdate: _updateBoxSelection,
+            onPanEnd: (_) => _finishBoxSelection(),
+            onPanCancel: _cancelBoxSelection,
+            onTap: _clearCanvasSelection,
+            child: Material(
             key: _canvasKey,
             color: Colors.white,
             elevation: 2,
@@ -1086,21 +1150,33 @@ class _LocatorPrintLayoutEditorState extends State<LocatorPrintLayoutEditor> {
                     pageSize: Size(_layout.pageWidth, _layout.pageHeight),
                     margins: _layout.margins,
                     enabled: !_busy,
-                    selected: item.id == _selectedId,
+                    selected: _selectedIds.contains(item.id),
+                    canMove: _canMoveItem(item),
+                    canResize: _selectedIds.length <= 1 && item.groupId == null,
+                    movementBounds: _movementBounds(item),
+                    dragPreview: _dragPreview,
+                    followsDrag: _selectedIds.contains(item.id),
+                    onMovePreview: (offset) => _dragPreview.value = (item.id, offset),
                     zoomChanges: _zoomChanges,
                     displayZoom: () => _zoom.value ?? _fitZoom.value,
                     fontFamily: _layout.fontFamily,
-                    onGestureChanged: (active) => _gestureActive = active,
+                    onGestureChanged: (active) {
+                      _gestureActive = active;
+                      if (!active) _dragPreview.value = (null, Offset.zero);
+                    },
                     onSelect: () {
-                      setState(() => _select(item.id));
+                      final keys = HardwareKeyboard.instance;
+                      setState(() => _select(item.id,
+                        toggle: keys.isControlPressed || keys.isMetaPressed || keys.isShiftPressed,
+                        preserve: true));
                       _editorFocus.requestFocus();
                     },
-                    onMoved: (next) => _replace(next, sync: true),
-                    child: Container(
+                    onMoved: _moveSelection,
+                    child: PrintLayoutDecorationView(item: item, scale: scale, child: Container(
                       padding: EdgeInsets.all(item.kind == 'line' ? 0 : scale),
                       decoration: BoxDecoration(
                         border: Border.all(
-                          color: item.id == _selectedId
+                          color: _selectedIds.contains(item.id)
                               ? const Color(0xFFF56600)
                               : Colors.transparent,
                         ),
@@ -1108,7 +1184,9 @@ class _LocatorPrintLayoutEditorState extends State<LocatorPrintLayoutEditor> {
                       child: item.kind == 'table'
                           ? _tablePreview(item, scale, sample)
                           : item.kind == 'line'
-                          ? const Divider(color: Colors.black, height: 1)
+                          ? const SizedBox.expand()
+                          : item.kind == 'rectangle'
+                          ? const SizedBox.expand()
                           : item.kind == 'signature'
                           ? _signaturePreview(item, scale)
                           : Column(
@@ -1158,9 +1236,21 @@ class _LocatorPrintLayoutEditorState extends State<LocatorPrintLayoutEditor> {
                                 ),
                               ],
                             ),
-                    ),
+                    )),
                   ),
+                Positioned.fill(child:IgnorePointer(child:RepaintBoundary(
+                  child:ValueListenableBuilder<Rect?>(valueListenable:_selectionBox,
+                    builder:(_,rect,_)=>Stack(children:[if(rect!=null)Positioned.fromRect(
+                      rect:Rect.fromLTWH(rect.left*scale,rect.top*scale,rect.width*scale,rect.height*scale),
+                      child:Container(key:const ValueKey('layout-selection-box'),decoration:BoxDecoration(
+                        color:const Color(0xFF2563EB).withValues(alpha:.10),
+                        border:Border.all(color:const Color(0xFF2563EB)),
+                      )),
+                    )]),
+                  ),
+                ))),
               ],
+            ),
             ),
           ),
         ),
@@ -1308,7 +1398,7 @@ class _LocatorPrintLayoutEditorState extends State<LocatorPrintLayoutEditor> {
           IconButton(
             tooltip: 'Delete selected element (Delete)',
             constraints: const BoxConstraints.tightFor(width: 36, height: 36),
-            onPressed: _busy || _selected == null ? null : _deleteSelected,
+            onPressed: _busy || !_canEditSelection ? null : _deleteSelected,
             icon: const Icon(Icons.delete_outline, size: 20),
           ),
           OutlinedButton.icon(
@@ -1365,6 +1455,20 @@ class _LocatorPrintLayoutEditorState extends State<LocatorPrintLayoutEditor> {
               ),
             ),
           ),
+          OutlinedButton.icon(
+            key: const ValueKey('layout-add-rectangle'),
+            onPressed: _busy ? null : () => _add('rectangle'),
+            icon: const Icon(Icons.crop_square, size: 18),
+            label: const Text('Rectangle'),
+            style: OutlinedButton.styleFrom(
+              minimumSize: const Size(0, 36),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              textStyle: const TextStyle(fontSize:13,fontFamily:AppTheme.fontFamily,fontWeight:FontWeight.w500),
+              shape: RoundedRectangleBorder(borderRadius:BorderRadius.circular(8)),
+            ),
+          ),
+          _arrangeMenu(),
           PopupMenuButton<String>(
             tooltip: 'Insert field',
             enabled: !_busy,
@@ -1770,12 +1874,14 @@ class _LayoutEditorSnapshot {
     required this.fields,
     required this.fieldsChanged,
     required this.selectedId,
+    required this.selectedIds,
     required this.customCaptions,
   });
   final LocatorPrintLayout layout;
   final List<LeaveCustomFieldDefinition> fields;
   final bool fieldsChanged;
   final String? selectedId;
+  final Set<String> selectedIds;
   final Set<String> customCaptions;
 }
 
@@ -1867,6 +1973,12 @@ class _DraggableLayoutElement extends StatefulWidget {
     required this.margins,
     required this.enabled,
     required this.selected,
+    required this.canMove,
+    required this.canResize,
+    required this.movementBounds,
+    required this.dragPreview,
+    required this.followsDrag,
+    required this.onMovePreview,
     required this.zoomChanges,
     required this.displayZoom,
     required this.onSelect,
@@ -1880,6 +1992,10 @@ class _DraggableLayoutElement extends StatefulWidget {
   final Size pageSize;
   final PrintLayoutMargins margins;
   final bool enabled, selected;
+  final bool canMove, canResize, followsDrag;
+  final Rect movementBounds;
+  final ValueNotifier<(String?,Offset)> dragPreview;
+  final ValueChanged<Offset> onMovePreview;
   final Listenable zoomChanges;
   final double Function() displayZoom;
   final String? fontFamily;
@@ -1955,18 +2071,20 @@ class _DraggableLayoutElementState extends State<_DraggableLayoutElement> {
   void _move(DragUpdateDetails details) {
     final rect = _geometry.value;
     final next = rect.topLeft + details.delta / widget.scale;
+    final group = widget.movementBounds;
     _geometry.value = Rect.fromLTWH(
       next.dx.clamp(
-        widget.margins.left,
-        widget.pageSize.width - widget.margins.right - rect.width,
+        widget.item.x + widget.margins.left - group.left,
+        widget.item.x + widget.pageSize.width - widget.margins.right - group.right,
       ),
       next.dy.clamp(
-        widget.margins.top,
-        widget.pageSize.height - widget.margins.bottom - rect.height,
+        widget.item.y + widget.margins.top - group.top,
+        widget.item.y + widget.pageSize.height - widget.margins.bottom - group.bottom,
       ),
       rect.width,
       rect.height,
     );
+    widget.onMovePreview(_geometry.value.topLeft - _modelRect.topLeft);
   }
 
   void _resize(DragUpdateDetails details) {
@@ -2090,22 +2208,22 @@ class _DraggableLayoutElementState extends State<_DraggableLayoutElement> {
   Widget build(BuildContext context) => ValueListenableBuilder<Rect>(
     valueListenable: _geometry,
     child: MouseRegion(
-      cursor: SystemMouseCursors.move,
+      cursor: widget.canMove ? SystemMouseCursors.move : SystemMouseCursors.click,
       child: GestureDetector(
         key: ValueKey('layout-element-${widget.item.id}'),
         behavior: HitTestBehavior.opaque,
         dragStartBehavior: DragStartBehavior.down,
         onTap: widget.enabled ? widget.onSelect : null,
-        onPanStart: widget.enabled
+        onPanStart: widget.enabled && widget.canMove
             ? (_) {
                 _dragging = true;
                 widget.onGestureChanged(true);
                 widget.onSelect();
               }
             : null,
-        onPanUpdate: widget.enabled ? _move : null,
-        onPanEnd: widget.enabled ? (_) => _finishGesture() : null,
-        onPanCancel: widget.enabled ? _finishGesture : null,
+        onPanUpdate: widget.enabled && widget.canMove ? _move : null,
+        onPanEnd: widget.enabled && widget.canMove ? (_) => _finishGesture() : null,
+        onPanCancel: widget.enabled && widget.canMove ? _finishGesture : null,
         child: RepaintBoundary(child: widget.child),
       ),
     ),
@@ -2117,8 +2235,10 @@ class _DraggableLayoutElementState extends State<_DraggableLayoutElement> {
       child: Stack(
         fit: StackFit.expand,
         children: [
-          child!,
-          if (widget.selected)
+          ValueListenableBuilder<(String?,Offset)>(valueListenable:widget.dragPreview,child:child,
+            builder:(_,preview,content)=>Transform.translate(
+              offset:widget.followsDrag && preview.$1!=widget.item.id ? preview.$2*widget.scale : Offset.zero,child:content)),
+          if (widget.selected && widget.canMove && widget.canResize)
             Positioned.fill(
               child: ListenableBuilder(
                 listenable: widget.zoomChanges,

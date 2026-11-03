@@ -16,6 +16,76 @@
     "regexp": "/^\\/routing\\/?(?=\\/|$)/i"
   },
   {
+    "path": "/admin/opening-balances",
+    "methods": ["get"],
+    "middleware": ["authMiddleware", "requireAdminOrHr", ""]
+  },
+  {
+    "path": "/admin/opening-balances/:userId/usage",
+    "methods": ["post"],
+    "middleware": ["authMiddleware", "requireAdminOrHr", ""]
+  },
+  {
+    "path": "/admin/opening-balances/:userId",
+    "methods": ["get"],
+    "middleware": ["authMiddleware", "requireAdminOrHr", ""]
+  },
+  {
+    "path": "/admin/opening-balances/:userId",
+    "methods": ["post"],
+    "middleware": ["authMiddleware", "requireAdminOrHr", ""]
+  },
+  {
+    "path": "/admin/filing-employees",
+    "methods": [
+      "get"
+    ],
+    "middleware": [
+      "authMiddleware",
+      "requireAdminOrHr",
+      ""
+    ]
+  },
+  {
+    "path": "/admin/paper-signatories",
+    "methods": ["get"],
+    "middleware": ["authMiddleware", "requireAdminOrHr", ""]
+  },
+  {
+    "path": "/admin/submission-availability",
+    "methods": [
+      "get"
+    ],
+    "middleware": [
+      "authMiddleware",
+      "requireAdminOrHr",
+      ""
+    ]
+  },
+  {
+    "path": "/admin/working-days",
+    "methods": [
+      "get"
+    ],
+    "middleware": [
+      "authMiddleware",
+      "requireAdminOrHr",
+      ""
+    ]
+  },
+  {
+    "path": "/admin/file",
+    "methods": [
+      "post"
+    ],
+    "middleware": [
+      "authMiddleware",
+      "requireAdminOrHr",
+      "",
+      "uploadLeaveAttachmentMemoryMw"
+    ]
+  },
+  {
     "path": "/final-reviewer/me",
     "methods": [
       "get"

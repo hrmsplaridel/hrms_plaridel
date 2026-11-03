@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:provider/provider.dart';
@@ -18,11 +19,13 @@ import 'package:hrms_plaridel/features/dtr/leave/data/repositories/mock_leave_re
 class _TestPrintLeaveProvider extends LeaveProvider {
   _TestPrintLeaveProvider({required super.repository});
 
+  Completer<LeaveRequest?>? refreshGate;
   bool failRequestRefresh = false;
   bool failBalanceFetch = false;
 
   @override
   Future<LeaveRequest?> refreshRequestById(String id) async {
+    if (refreshGate != null) return refreshGate!.future;
     if (failRequestRefresh) return null;
     return LeaveRequest(
       id: id,
@@ -43,6 +46,65 @@ class _TestPrintLeaveProvider extends LeaveProvider {
 }
 
 void main() {
+  testWidgets(
+    'Cancel leave preview returns before refresh and discards its failure',
+    (tester) async {
+      final gate = Completer<LeaveRequest?>();
+      final provider = _TestPrintLeaveProvider(
+        repository: MockLeaveRepository(),
+      )..refreshGate = gate;
+      addTearDown(provider.dispose);
+      var returned = false;
+      await tester.pumpWidget(
+        ChangeNotifierProvider<LeaveProvider>.value(
+          value: provider,
+          child: MaterialApp(
+            home: Scaffold(
+              body: Builder(
+                builder: (context) {
+                  return SizedBox.expand(
+                    child: Column(
+                      children: [
+                        TextButton(
+                          onPressed: () async {
+                            await EmployeeLeaveActions(
+                              context: context,
+                              isMounted: () => true,
+                            ).previewLeaveForm(
+                              LeaveRequest(
+                                id: 'req-1',
+                                userId: 'employee-a',
+                                leaveType: LeaveType.sickLeave,
+                                status: LeaveRequestStatus.approved,
+                              ),
+                            );
+                            returned = true;
+                          },
+                          child: const Text('Preview'),
+                        ),
+                      ],
+                    ),
+                  );
+                },
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.text('Preview'));
+      await tester.pump();
+      expect(find.text('Preparing preview…'), findsOneWidget);
+      await tester.tap(find.text('Cancel'));
+      await tester.pumpAndSettle();
+      expect(returned, isTrue);
+      gate.completeError(StateError('late refresh failure'));
+      await tester.pumpAndSettle();
+      expect(find.text('Leave Form Preview'), findsNothing);
+      expect(find.textContaining('Preview failed'), findsNothing);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
   for (final slot in ['department_head', 'applicant']) {
     testWidgets('employee CSC preview embeds the recorded $slot signature', (
       tester,

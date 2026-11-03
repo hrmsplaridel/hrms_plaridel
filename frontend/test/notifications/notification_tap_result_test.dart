@@ -3,6 +3,30 @@ import 'package:hrms_plaridel/features/notifications/models/app_notification.dar
 import 'package:hrms_plaridel/features/notifications/models/notification_tap_result.dart';
 
 void main() {
+  for (final role in ['employee', 'admin', 'hr']) {
+    for (final category in ['leave', 'locator']) {
+      for (final action in ['approved', 'approved_hr', 'approved_mayor', 'approved_department_head', 'returned_hr', 'rejected_hr', 'approval_revoked', 'workflow_step_approved']) {
+        test('$role personal $category $action ignores a stale approval metadata flag', () {
+          final result = NotificationTapResult.fromNotification(AppNotification(
+            id:'notice',category:category,type:'${category}_$action',
+            title:'Your request status',referenceId:'request',
+            metadata:{'workflow_approval':true},createdAt:DateTime(2026,11,1),
+          ),role:role);
+          expect(result.kind,category=='leave'
+              ?NotificationTapKind.employeeLeaveRequests:NotificationTapKind.employeeLocatorRequests);
+        });
+      }
+      test('$role $category assignment still opens the review queue', () {
+        final result=NotificationTapResult.fromNotification(AppNotification(
+          id:'notice',category:category,type:'${category}_pending_hr',title:'Needs your approval',
+          referenceId:'request',metadata:{'workflow_approval':true},createdAt:DateTime(2026,11,1),
+        ),role:role);
+        expect(result.kind,category=='leave'
+            ?role=='employee'?NotificationTapKind.employeeLeaveApprovals:NotificationTapKind.adminDtrLeaveManagement
+            :role=='employee'?NotificationTapKind.employeeLocatorApprovals:NotificationTapKind.adminDtrLocatorManagement);
+      });
+    }
+  }
   test('Mayor locator alert opens locator approval management', () {
     final result = NotificationTapResult.fromNotification(
       AppNotification(

@@ -28,7 +28,6 @@ module.exports = function createDtrControllers({
           break_out,
           break_in,
           time_out,
-          total_hours,
           reason,
         } = req.body;
         const userId = req.user?.id;
@@ -108,10 +107,13 @@ module.exports = function createDtrControllers({
           pmStatus = await computePmLateStatus(targetId, date, breakIn);
         }
         const holidayId = holiday ? holiday.id : null;
-        const total =
-          total_hours != null
-            ? parseFloat(total_hours)
-            : computeTotalHours(timeIn, breakOut, breakIn, timeOut, shiftInfo);
+        // Hours are derived from validated punches, never a client override.
+        const total = computeTotalHours(timeIn, breakOut, breakIn, timeOut, shiftInfo);
+        if (!Number.isFinite(total) || total < 0 || total > 24) {
+          return res.status(400).json({
+            error: 'Total hours calculated from punches must be between 0 and 24 hours.',
+          });
+        }
         let lateMinutes = 0;
         let undertimeMinutes = 0;
         if (

@@ -133,12 +133,14 @@ module.exports = function createDtrControllers({
           break_in !== undefined ||
           time_out !== undefined;
         const computedTotal = computeTotalHours(ti, bo, bi, to, shiftInfo);
-        if (total_hours !== undefined) {
-          updates.push(`total_hours = $${i++}::numeric`);
-          const parsedTotal =
-            total_hours === null || total_hours === '' ? null : parseFloat(total_hours);
-          values.push(Number.isFinite(parsedTotal) ? parsedTotal : computedTotal);
-        } else if (anyTimeChanged) {
+        if (total_hours !== undefined || anyTimeChanged) {
+          // Keep legacy payloads compatible, but treat their total as a request
+          // to recompute from the merged punches under this row's lock.
+          if (!Number.isFinite(computedTotal) || computedTotal < 0 || computedTotal > 24) {
+            return rejectEdit(400, {
+              error: 'Total hours calculated from punches must be between 0 and 24 hours.',
+            });
+          }
           updates.push(`total_hours = $${i++}::numeric`);
           values.push(computedTotal);
         }

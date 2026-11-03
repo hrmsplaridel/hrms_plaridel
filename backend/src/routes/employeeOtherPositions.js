@@ -1,5 +1,6 @@
 const express = require('express');
 const { pool } = require('../config/db');
+const { assignmentInputError } = require('../utils/assignmentInputValidation');
 const { authMiddleware } = require('../middleware/auth');
 const { requireAdmin } = require('../middleware/rbac');
 const {
@@ -143,6 +144,8 @@ router.post('/', protect, requireAdmin, async (req, res) => {
       is_active = true,
       remarks,
     } = req.body;
+    const inputError = assignmentInputError(req.body);
+    if (inputError) return res.status(400).json({ error: inputError });
 
     client = await pool.connect();
     await client.query('BEGIN');
@@ -153,7 +156,7 @@ router.post('/', protect, requireAdmin, async (req, res) => {
       positionId: position_id,
       effectiveFrom: effective_from,
       effectiveTo: effective_to,
-      isActive: is_active === true,
+      isActive: is_active,
       remarks,
       createdBy: req.user?.id,
     });
@@ -202,6 +205,8 @@ router.put('/:id', protect, requireAdmin, async (req, res) => {
       remarks,
       change_reason,
     } = req.body;
+    const inputError = assignmentInputError(req.body);
+    if (inputError) return res.status(400).json({ error: inputError });
 
     if (
       department_id === undefined &&

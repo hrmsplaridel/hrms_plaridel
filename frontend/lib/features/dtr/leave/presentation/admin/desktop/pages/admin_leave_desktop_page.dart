@@ -1,3 +1,8 @@
+import 'package:hrms_plaridel/core/widgets/pdf_preview_preparation.dart';
+import 'dart:typed_data';
+import 'package:hrms_plaridel/features/dtr/leave/presentation/admin/widgets/admin_leave_filing_panel.dart';
+import 'package:hrms_plaridel/features/dtr/leave/presentation/admin/widgets/admin_leave_opening_balances_form.dart';
+import 'package:hrms_plaridel/features/dtr/leave/presentation/shared/pages/leave_request_form_screen.dart';
 import 'package:hrms_plaridel/features/dtr/management/approvals/pages/workflow_approval_inbox_page.dart';
 import 'package:hrms_plaridel/features/dtr/leave/utils/configured_leave_pdf.dart';
 import 'dart:async';
@@ -35,6 +40,7 @@ import 'package:hrms_plaridel/features/dtr/leave/presentation/admin/widgets/admi
 import 'package:hrms_plaridel/features/dtr/leave/presentation/admin/widgets/admin_leave_request_queue.dart';
 import 'package:hrms_plaridel/features/dtr/leave/presentation/admin/widgets/admin_leave_review_dialogs.dart';
 import 'package:hrms_plaridel/features/dtr/leave/presentation/admin/widgets/admin_leave_screen_utils.dart';
+import 'package:hrms_plaridel/features/dtr/leave/utils/leave_workflow_labels.dart';
 import 'package:hrms_plaridel/features/dtr/leave/presentation/admin/widgets/admin_leave_shared_widgets.dart';
 import 'package:hrms_plaridel/features/docutracker/data/providers/docutracker_provider.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_source_signature_card.dart';
@@ -484,20 +490,16 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
   @override
   Widget build(BuildContext context) {
     final provider = context.watch<LeaveProvider>();
-    final mergedRequests = <String?, LeaveRequest>{
+    final requests = <String?, LeaveRequest>{
       for (final request in (widget.isDepartmentHead ? provider.departmentHeadRequests : _canReviewFinal ? provider.requests : <LeaveRequest>[])) request.id: request,
       for (final entry in _assignedRequests.values) entry['id'].toString(): LeaveRequest.fromJson(Map<String,dynamic>.from(entry['request_data'] as Map)),
-    }.values.toList();
-    final actionableIds = _assignedRequests.entries
-        .where((entry) => entry.value['can_review'] != false)
-        .map((entry) => entry.key)
-        .toSet();
-    final requests = [
-      for (final request in mergedRequests)
-        if (actionableIds.contains(request.id)) request,
-      for (final request in mergedRequests)
-        if (!actionableIds.contains(request.id)) request,
-    ];
+    }.values.toList()..sort((a, b) {
+      final unknownDate = DateTime.fromMillisecondsSinceEpoch(0, isUtc: true);
+      final aFiled = a.createdAt ?? a.dateFiled ?? unknownDate;
+      final bFiled = b.createdAt ?? b.dateFiled ?? unknownDate;
+      final byFiled = bFiled.compareTo(aFiled);
+      return byFiled != 0 ? byFiled : (b.id ?? '').compareTo(a.id ?? '');
+    });
     final filterOptions = [..._reviewFilterOptions, ...requests.map(
             (request) => LeaveReviewFilterOption(
               userId: request.userId,
@@ -609,10 +611,11 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         _AdminHeaderCard(
-          totalRequests: totalCount,
+          totalRequests: hasMoreAssignedWorkflowRequests('leave') ? filteredRequests.length : totalCount,
+          partialAssignments: hasMoreAssignedWorkflowRequests('leave'),
           hasMore: provider.reviewHasMore(
             departmentHead: widget.isDepartmentHead,
-          ),
+          ) || hasMoreAssignedWorkflowRequests('leave'),
           pendingCount: filteredRequests
               .where(
                 (r) => _assignedRequests[r.id] != null
@@ -629,6 +632,7 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
               _loadRequests(forceRefresh: true),
             ]);
           },
+          onFileForEmployee: !widget.isDepartmentHead && !widget.isMayor && ['admin','hr'].contains(context.read<AuthProvider>().user?.role) ? _fileForEmployee : null,
           onManageSignatures: _openSignatureLibrary,
           onForcedLeaveDeduction: widget.isDepartmentHead || widget.isMayor
               ? null
@@ -780,6 +784,10 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
               _openRequestDetailsPanel(request);
             },
           ),
+        WorkflowInboxMoreButton(
+          kind: 'leave',
+          onLoaded: (rows) => setState(() => _assignedRequests = rows),
+        ),
       ],
     );
   }
@@ -816,7 +824,10 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
       if (!mounted) return;
     }
     try {
-      final assigned = await loadAssignedWorkflowRequests('leave');
+      final assigned = await loadAssignedWorkflowRequests(
+        'leave',
+        forceRefresh: forceRefresh,
+      );
       if (!mounted) return;
       setState(() { _assignedRequests = assigned; _assignedRequestsError = null; _assignedRequestsLoaded = true; });
     } catch (_) {
@@ -860,15 +871,31 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
 
   Future<void> _openCurrentAssignedRequest(LeaveRequest request) async {
     // Another primary/backup may have completed this step since the queue loaded.
-    await _loadRequests(forceRefresh: true);
+    final id = request.id;
+    if (id == null) return;
+    Map<String, dynamic>? assigned;
+    try {
+      assigned = await loadAssignedWorkflowRequest('leave', id);
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not verify this request. Refresh before reviewing.')),
+        );
+      }
+      return;
+    }
     if (!mounted) return;
-    final assigned = _assignedRequests[request.id];
+    setState(() {
+      if (assigned == null) {
+        _assignedRequests.remove(id);
+      } else {
+        _assignedRequests[id] = assigned;
+      }
+    });
     if (assigned != null) {
       await _reviewAssigned(assigned);
       return;
     }
-    final id = request.id;
-    if (id == null) return;
     final fresh = await context.read<LeaveProvider>().refreshRequestById(id);
     if (!mounted) return;
     if (fresh == null) {
@@ -944,120 +971,143 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
     final auth = context.read<AuthProvider>();
     if (!mounted) return;
 
-    // Show a loading indicator immediately so the user gets instant feedback
-    // before any of the network calls begin.
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(preview ? 'Loading preview...' : 'Loading form data...'),
-      ),
-    );
+    if (!preview) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Loading form data...')));
+    }
 
     try {
-      // Refresh the request so we print the latest snapshot (e.g. after HR
-      // changes). If the refresh fails, block the print — printing a stale
-      // snapshot with potentially outdated status or balance figures risks
-      // producing an invalid formal document.
-      LeaveRequest target = request;
-      final id = request.id;
-      if (id != null && id.isNotEmpty) {
-        final fresh = await provider.refreshRequestById(id);
-        if (fresh == null) {
-          throw Exception(
-            'Could not load the latest request data. '
-            'Please check your connection and try again.',
+      Future<({Uint8List bytes, String filename})> prepare(
+        PdfPreviewPreparation? task,
+      ) async {
+        // Refresh the request so we print the latest snapshot (e.g. after HR
+        // changes). If the refresh fails, block the print — printing a stale
+        // snapshot with potentially outdated status or balance figures risks
+        // producing an invalid formal document.
+        LeaveRequest target = request;
+        final id = request.id;
+        if (id != null && id.isNotEmpty) {
+          final fresh = await provider.refreshRequestById(id);
+          if (fresh == null) {
+            throw Exception(
+              'Could not load the latest request data. '
+              'Please check your connection and try again.',
+            );
+          }
+          task?.checkActive();
+          target = fresh;
+          if (mounted && _selectedRequest?.id == id) {
+            setState(() => _selectedRequest = fresh);
+          }
+        }
+
+        // Run the three independent lookups concurrently — they all depend on
+        // `target` but not on each other, so there is no reason to wait for
+        // one before starting the next.
+        if (id == null || id.isEmpty) {
+          throw StateError(
+            'A saved leave request is required to print the form',
           );
         }
-        target = fresh;
-        if (mounted && _selectedRequest?.id == id) {
-          setState(() => _selectedRequest = fresh);
+        final results = await Future.wait([
+          _loadSignatureInfoByUserId(
+            userId: target.reviewerId ?? auth.user?.id,
+            fallbackName: (target.reviewerName?.trim().isNotEmpty == true)
+                ? target.reviewerName!.trim()
+                : (auth.displayName.trim().isNotEmpty
+                      ? auth.displayName.trim()
+                      : 'Authorized Officer'),
+            fallbackTitle: (target.reviewerTitle?.trim().isNotEmpty == true)
+                ? target.reviewerTitle!.trim()
+                : _reviewerTitleFromRole(
+                    target.reviewerRole ?? auth.user?.role,
+                  ),
+          ),
+          loadLeaveFormSignatories(request: target),
+          provider.fetchFormCreditsForRequestStrict(id),
+        ]);
+
+        task?.checkActive();
+        final signerInfo = results[0] as ({String name, String? title});
+        final formSignatories = results[1] as LeaveFormSignatories;
+        final balances = results[2] as List<LeaveBalance>;
+
+        target = target.copyWith(
+          reviewerName: signerInfo.name,
+          reviewerTitle: signerInfo.title,
+        );
+
+        if (!preview && mounted) {
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(const SnackBar(content: Text('Preparing print...')));
         }
+
+        final document = await LeaveRequestPdf.buildPdf(
+          request: target,
+          balances: balances,
+          certificationOfficerSignatureBytes: formSignatories
+              .certificationOfficerSignature
+              ?.signatureImageBytes,
+          certificationOfficerName: formSignatories.certificationOfficer?.name,
+          certificationOfficerTitle:
+              formSignatories.certificationOfficer?.title,
+          recommendationOfficerName:
+              formSignatories.recommendationOfficer?.name,
+          recommendationOfficerTitle:
+              formSignatories.recommendationOfficer?.title,
+          approvingAuthorityName: formSignatories.approvingAuthority?.name,
+          approvingAuthorityTitle: formSignatories.approvingAuthority?.title,
+          applicantSignatureBytes:
+              formSignatories.applicantSignature?.signatureImageBytes,
+          departmentHeadSignatureBytes:
+              formSignatories.departmentHeadSignature?.signatureImageBytes,
+          hrApproverSignatureBytes:
+              formSignatories.hrApproverSignature?.signatureImageBytes,
+        );
+        task?.checkActive();
+        final bytes = await saveConfiguredLeavePdf(
+          request: target,
+          document: document,
+          balances: balances,
+          departmentReviewer: formSignatories.recommendationOfficer?.name,
+          departmentReviewerTitle: formSignatories.recommendationOfficer?.title,
+          approvingAuthorityName: formSignatories.approvingAuthority?.name,
+          approvingAuthorityTitle: formSignatories.approvingAuthority?.title,
+          certificationOfficerName: formSignatories.certificationOfficer?.name,
+          certificationOfficerTitle:
+              formSignatories.certificationOfficer?.title,
+          certificationSignature: formSignatories
+              .certificationOfficerSignature
+              ?.signatureImageBytes,
+          applicantSignature:
+              formSignatories.applicantSignature?.signatureImageBytes,
+          departmentSignature:
+              formSignatories.departmentHeadSignature?.signatureImageBytes,
+          finalSignature:
+              formSignatories.hrApproverSignature?.signatureImageBytes,
+        );
+        final filename = 'Leave_Application_${target.id ?? target.userId}.pdf';
+        return (bytes: bytes, filename: filename);
       }
 
-      // Run the three independent lookups concurrently — they all depend on
-      // `target` but not on each other, so there is no reason to wait for
-      // one before starting the next.
-      if (id == null || id.isEmpty) {
-        throw StateError('A saved leave request is required to print the form');
-      }
-      final results = await Future.wait([
-        _loadSignatureInfoByUserId(
-          userId: target.reviewerId ?? auth.user?.id,
-          fallbackName: (target.reviewerName?.trim().isNotEmpty == true)
-              ? target.reviewerName!.trim()
-              : (auth.displayName.trim().isNotEmpty
-                    ? auth.displayName.trim()
-                    : 'Authorized Officer'),
-          fallbackTitle: (target.reviewerTitle?.trim().isNotEmpty == true)
-              ? target.reviewerTitle!.trim()
-              : _reviewerTitleFromRole(target.reviewerRole ?? auth.user?.role),
-        ),
-        loadLeaveFormSignatories(request: target),
-        provider.fetchFormCreditsForRequestStrict(id),
-      ]);
-
-      final signerInfo = results[0] as ({String name, String? title});
-      final formSignatories = results[1] as LeaveFormSignatories;
-      final balances = results[2] as List<LeaveBalance>;
-
-      target = target.copyWith(
-        reviewerName: signerInfo.name,
-        reviewerTitle: signerInfo.title,
-      );
-
-      if (!preview && mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text('Preparing print...')));
-      }
-
-      final document = await LeaveRequestPdf.buildPdf(
-        request: target,
-        balances: balances,
-        certificationOfficerSignatureBytes:
-            formSignatories.certificationOfficerSignature?.signatureImageBytes,
-        certificationOfficerName: formSignatories.certificationOfficer?.name,
-        certificationOfficerTitle: formSignatories.certificationOfficer?.title,
-        recommendationOfficerName: formSignatories.recommendationOfficer?.name,
-        recommendationOfficerTitle:
-            formSignatories.recommendationOfficer?.title,
-        approvingAuthorityName: formSignatories.approvingAuthority?.name,
-        approvingAuthorityTitle: formSignatories.approvingAuthority?.title,
-        applicantSignatureBytes:
-            formSignatories.applicantSignature?.signatureImageBytes,
-        departmentHeadSignatureBytes:
-            formSignatories.departmentHeadSignature?.signatureImageBytes,
-        hrApproverSignatureBytes:
-            formSignatories.hrApproverSignature?.signatureImageBytes,
-      );
-      final bytes = await saveConfiguredLeavePdf(
-        request: target,
-        document: document,
-      balances: balances,
-        departmentReviewer: formSignatories.recommendationOfficer?.name,
-        departmentReviewerTitle: formSignatories.recommendationOfficer?.title,
-        approvingAuthorityName: formSignatories.approvingAuthority?.name,
-        approvingAuthorityTitle: formSignatories.approvingAuthority?.title,
-        certificationOfficerName: formSignatories.certificationOfficer?.name,
-        certificationOfficerTitle: formSignatories.certificationOfficer?.title,
-        certificationSignature: formSignatories.certificationOfficerSignature?.signatureImageBytes,
-        applicantSignature:
-            formSignatories.applicantSignature?.signatureImageBytes,
-        departmentSignature:
-            formSignatories.departmentHeadSignature?.signatureImageBytes,
-        finalSignature:
-            formSignatories.hrApproverSignature?.signatureImageBytes,
-      );
-      final filename = 'Leave_Application_${target.id ?? target.userId}.pdf';
+      final prepared = preview
+          ? await preparePdfPreview(context: context, prepare: prepare)
+          : await prepare(null);
+      if (prepared == null || !mounted) return;
       if (preview) {
-        if (!mounted) return;
         await showFormPdfPreview(
           context: context,
-          bytes: bytes,
+          bytes: prepared.bytes,
           title: 'Leave Form Preview',
-          filename: filename,
+          filename: prepared.filename,
         );
       } else {
-        await Printing.layoutPdf(onLayout: (_) async => bytes, name: filename);
+        await Printing.layoutPdf(
+          onLayout: (_) async => prepared.bytes,
+          name: prepared.filename,
+        );
       }
     } catch (e) {
       if (!mounted) return;
@@ -1276,12 +1326,18 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
     final request = await leaveProvider.refreshRequestById(id);
     if (!mounted) return;
     if (request == null) {
-      _showMessage(leaveProvider.error ?? 'Could not refresh this request. Try again.');
+      _showMessage(
+        leaveProvider.error ?? 'Could not refresh this request. Try again.',
+      );
       return;
     }
-    final shared = (request.workflowSnapshot?['steps'] as List? ?? []).any((step) => step is Map);
-    if (request.status != LeaveRequestStatus.approved || request.userId == auth.user?.id ||
-        (shared && request.canRevokeApproval != true)) {
+    final shared = (request.workflowSnapshot?['steps'] as List? ?? []).any(
+      (step) => step is Map,
+    );
+    if (request.status != LeaveRequestStatus.approved ||
+        request.userId == auth.user?.id ||
+        (shared && request.canRevokeApproval != true) ||
+        (request.isPaperRecord && !['admin', 'hr'].contains(auth.user?.role))) {
       _showMessage('This approval can no longer be revoked by your account.');
       return;
     }
@@ -1290,18 +1346,22 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
       _showMessage(revokeDisabledReason);
       return;
     }
-    final restoresCredits = _creditPolicyForRequest(request) != 'none' &&
+    final restoresCredits =
+        _creditPolicyForRequest(request) != 'none' &&
         (request.approvedDaysWithPay ?? request.workingDaysApplied ?? 0) > 0;
     final input = await showDialog<LeaveReviewDecisionInput>(
       context: context,
       builder: (_) => AdminLeaveDecisionDialog(
         title: 'Revoke Approval',
-        subtitle:
-            'This will revoke the approval and remove its DTR leave entries. '
-            '${restoresCredits ? 'Leave credits will be restored. ' : ''}'
-            'The request returns to the employee for correction.',
+        subtitle: request.isPaperRecord
+            ? 'This reverses the system record and removes its DTR coverage. The original signed paper and audit history will be preserved. Only credits actually deducted will be restored. Record a corrected paper entry if needed.'
+            : 'This will revoke the approval and remove its DTR leave entries. '
+                  '${restoresCredits ? 'Leave credits will be restored. ' : ''}'
+                  'The request returns to the employee for correction.',
         confirmLabel: 'Revoke Approval',
-        requireReason: false,
+        requireReason: request.isPaperRecord,
+        minReasonLength: request.isPaperRecord ? 10 : 1,
+        maxReasonLength: request.isPaperRecord ? 1000 : null,
         request: request,
       ),
     );
@@ -1330,13 +1390,25 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
     final result = await leaveProvider.revokeApproval(finalInput);
     final ok = result != null;
     if (!mounted) return;
-    _showMessage(
-      ok
-          ? (restoresCredits
-              ? 'Approval revoked. Leave credits restored.'
-              : 'Approval revoked. The request was returned to the employee.')
-          : (leaveProvider.error ?? 'Revoke failed.'),
-    );
+    if (ok && request.isPaperRecord) {
+      final metadata = result.paperApprovalRecord?['revocation'];
+      final restored = metadata is Map
+          ? (metadata['restored_credit_days'] as num? ?? 0)
+          : 0;
+      final reconcile =
+          metadata is Map && metadata['reconciliation_required'] == true;
+      _showMessage(
+        'Paper record revoked. DTR coverage removed.${restored > 0 ? ' Leave credits restored: $restored day(s).' : ''}${reconcile ? ' Month-end reconciliation is required.' : ''}',
+      );
+    } else {
+      _showMessage(
+        ok
+            ? (restoresCredits
+                  ? 'Approval revoked. Leave credits restored.'
+                  : 'Approval revoked. The request was returned to the employee.')
+            : (leaveProvider.error ?? 'Revoke failed.'),
+      );
+    }
     if (ok) await _loadRequests();
   }
 
@@ -1411,9 +1483,11 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
   Future<void> _manualBalanceAdjustment() async {
     final saved = await openResponsiveRightSidePanel<bool>(
       context: context,
+      barrierDismissible: false,
       builder: (_) => const _ManualBalanceAdjustmentDialog(),
     );
     if (!mounted || saved != true) return;
+    context.read<LeaveProvider>().invalidateCachedLeaveData();
     _showMessage('Leave balance saved.');
     await _loadRequests();
   }
@@ -1490,9 +1564,11 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
     if (!mounted) return;
     _showMessage(
       ok
-          ? request.workflowSnapshot!=null ? result.status==LeaveRequestStatus.pendingMayor ? 'Department review completed. Awaiting Mayor approval.' : result.status==LeaveRequestStatus.approved ? 'Request approved.' : 'Department review completed. Awaiting HR review.' : request.finalReviewRoute == 'mayor'
-                ? 'Approved. The Mayor signs the printed form manually.'
-                : 'Forwarded to HR for final approval.'
+          ? leaveDepartmentApprovalMessage(
+              status: result.status.value,
+              finalReviewRoute: result.finalReviewRoute,
+              workflowSnapshot: result.workflowSnapshot,
+            )
           : (leaveProvider.error ?? 'Department head approval failed.'),
     );
     if (ok) await _loadRequests();
@@ -1568,6 +1644,14 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
     if (ok) await _loadRequests();
   }
 
+  Future<void> _fileForEmployee() async {
+    final result=await openResponsiveRightSidePanel<String>(context:context,
+      barrierDismissible:false,builder:(_)=>const AdminLeaveFilingPanel());
+    if(!mounted || result!=kLeaveFormResultSubmitted)return;
+    await _loadRequests(forceRefresh:true);
+    if(mounted)ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content:Text('Approved paper leave recorded.')));
+  }
+
   Future<void> _openLeaveTypeRules() async {
     await openResponsiveRightSidePanel<void>(
       context: context,
@@ -1596,6 +1680,7 @@ class _AdminHeaderCard extends StatelessWidget {
   const _AdminHeaderCard({
     required this.totalRequests,
     required this.hasMore,
+    this.partialAssignments = false,
     required this.pendingCount,
     required this.reviewing,
     required this.onRefresh,
@@ -1607,10 +1692,12 @@ class _AdminHeaderCard extends StatelessWidget {
     this.onEmployeeLeaveCard,
     this.onLeaveLedger,
     this.onLeaveTypeRules,
+    this.onFileForEmployee,
   });
 
   final int totalRequests;
   final bool hasMore;
+  final bool partialAssignments;
   final int pendingCount;
   final bool reviewing;
   final Future<void> Function() onRefresh;
@@ -1622,10 +1709,12 @@ class _AdminHeaderCard extends StatelessWidget {
   final Future<void> Function()? onEmployeeLeaveCard;
   final VoidCallback? onLeaveLedger;
   final Future<void> Function()? onLeaveTypeRules;
+  final Future<void> Function()? onFileForEmployee;
 
   @override
   Widget build(BuildContext context) {
     final menuActions = <_HeaderMenuAction>[
+      if(onFileForEmployee!=null) _HeaderMenuAction(label:'Record approved paper leave',icon:Icons.person_add_alt_1_outlined,onSelected:onFileForEmployee!),
       _HeaderMenuAction(
         label: 'My Signatures',
         icon: Icons.draw_outlined,
@@ -1785,7 +1874,7 @@ class _AdminHeaderCard extends StatelessWidget {
                         runSpacing: 10,
                         children: [
                           AdminLeaveHeaderChip(
-                            label: 'Total Matching',
+                            label: partialAssignments ? 'Loaded Requests' : 'Total Matching',
                             value: '$totalRequests',
                           ),
                           AdminLeaveHeaderChip(
@@ -2487,6 +2576,9 @@ class _ManualBalanceAdjustmentDialogState
 
   bool _loadingEmployees = true;
   bool _loadingBalances = false;
+  bool _openingMode = false;
+  bool _openingModeVisited = false;
+  bool _openingSaving = false;
   String? _employeesError;
   List<String> _departments = const [];
   List<Map<String, String>> _employees = const [];
@@ -2706,7 +2798,7 @@ class _ManualBalanceAdjustmentDialogState
 
   @override
   Widget build(BuildContext context) {
-    final saving = context.watch<LeaveProvider>().submitting;
+    final saving = context.watch<LeaveProvider>().submitting || _openingSaving;
     final hasDepartments = _departments.isNotEmpty;
     final hasEmployees = _filteredEmployees.isNotEmpty;
     final hasSelectedEmployee =
@@ -2720,112 +2812,197 @@ class _ManualBalanceAdjustmentDialogState
         hasEmployees &&
         hasSelectedEmployee;
 
-    return Scaffold(
-      backgroundColor: Theme.of(context).canvasColor,
-      body: SafeArea(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 16, 12, 12),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Container(
-                    width: 42,
-                    height: 42,
-                    alignment: Alignment.center,
-                    decoration: BoxDecoration(
-                      color: AppTheme.primaryNavy.withValues(
-                        alpha: AppTheme.dashIsDark(context) ? 0.28 : 0.1,
+    return DefaultTabController(
+      length: 2,
+      child: Scaffold(
+        backgroundColor: Theme.of(context).canvasColor,
+        body: SafeArea(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 16, 12, 12),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Container(
+                      width: 42,
+                      height: 42,
+                      alignment: Alignment.center,
+                      decoration: BoxDecoration(
+                        color: AppTheme.primaryNavy.withValues(
+                          alpha: AppTheme.dashIsDark(context) ? 0.28 : 0.1,
+                        ),
+                        borderRadius: BorderRadius.circular(10),
                       ),
-                      borderRadius: BorderRadius.circular(10),
+                      child: Icon(
+                        Icons.account_balance_wallet_outlined,
+                        color: AppTheme.dashIsDark(context)
+                            ? AppTheme.primaryNavyLight
+                            : AppTheme.primaryNavy,
+                      ),
                     ),
-                    child: Icon(
-                      Icons.account_balance_wallet_outlined,
-                      color: AppTheme.dashIsDark(context)
-                          ? AppTheme.primaryNavyLight
-                          : AppTheme.primaryNavy,
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            'Leave Balance Adjustment',
+                            style: TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            _openingMode
+                                ? 'Enter verified starting credits and the month already accounted for.'
+                                : 'Add or remove credits without replacing calculated balances.',
+                            style: TextStyle(
+                              color: AppTheme.dashTextSecondaryOf(context),
+                              fontSize: 13,
+                              fontWeight: FontWeight.w400,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.close_rounded),
+                      tooltip: 'Close',
+                      onPressed: saving
+                          ? null
+                          : () => Navigator.of(context).pop(),
+                    ),
+                  ],
+                ),
+              ),
+              Divider(height: 1, color: AppTheme.dashHairlineOf(context)),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
+                child: Container(
+                  decoration: BoxDecoration(
+                    color: AppTheme.dashPanelOf(context),
+                    border: Border.all(color: AppTheme.dashHairlineOf(context)),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  clipBehavior: Clip.antiAlias,
+                  child: ExcludeFocus(
+                    excluding: saving,
+                    child: IgnorePointer(
+                      ignoring: saving,
+                      child: TabBar(
+                        key: const ValueKey('leave-balance-tabs'),
+                        onTap: (index) {
+                          if (saving) return;
+                          setState(() {
+                            _openingMode = index == 1;
+                            if (_openingMode) _openingModeVisited = true;
+                          });
+                        },
+                        isScrollable: true,
+                        tabAlignment: TabAlignment.start,
+                        padding: EdgeInsets.zero,
+                        labelPadding: const EdgeInsets.symmetric(horizontal: 16),
+                        indicatorSize: TabBarIndicatorSize.tab,
+                        indicator: const BoxDecoration(color: AppTheme.primaryNavy),
+                        dividerColor: Colors.transparent,
+                        labelColor: Colors.white,
+                        unselectedLabelColor: AppTheme.dashTextSecondaryOf(context),
+                        labelStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
+                        unselectedLabelStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+                        tabs: const [
+                          Tab(
+                            height: 46,
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(Icons.exposure_outlined, size: 18),
+                                SizedBox(width: 8),
+                                Text('Adjust existing balance'),
+                              ],
+                            ),
+                          ),
+                          Tab(
+                            height: 46,
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(Icons.account_balance_wallet_outlined, size: 18),
+                                SizedBox(width: 8),
+                                Text('Opening balances'),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+                ),
+              ),
+              Expanded(
+                child: IndexedStack(
+                  index: _openingMode ? 1 : 0,
+                  children: [
+                    Column(
                       children: [
-                        const Text(
-                          'Leave Balance Adjustment',
-                          style: TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.w700,
+                        Expanded(
+                          child: SingleChildScrollView(
+                            padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
+                            child: Form(
+                              key: _formKey,
+                              autovalidateMode: AutovalidateMode.onUserInteraction,
+                              child: _buildFormContent(
+                                saving: saving,
+                                hasDepartments: hasDepartments,
+                                hasEmployees: hasEmployees,
+                                hasSelectedEmployee: hasSelectedEmployee,
+                              ),
+                            ),
                           ),
                         ),
-                        const SizedBox(height: 4),
-                        Text(
-                          'Add or remove credits without replacing calculated balances.',
-                          style: TextStyle(
-                            color: AppTheme.dashTextSecondaryOf(context),
-                            fontSize: 13,
-                            fontWeight: FontWeight.w400,
+                        Divider(height: 1, color: AppTheme.dashHairlineOf(context)),
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(20, 12, 20, 16),
+                          child: Wrap(
+                            alignment: WrapAlignment.end,
+                            spacing: 8,
+                            runSpacing: 8,
+                            children: [
+                              TextButton(
+                                onPressed: saving
+                                    ? null
+                                    : () => Navigator.of(context).pop(),
+                                child: const Text('Cancel'),
+                              ),
+                              FilledButton.icon(
+                                onPressed: canSave ? _onSave : null,
+                                icon: saving
+                                    ? const SizedBox(
+                                        width: 18,
+                                        height: 18,
+                                        child: CircularProgressIndicator(strokeWidth: 2),
+                                      )
+                                    : const Icon(Icons.check_circle_outline_rounded),
+                                label: Text(saving ? 'Applying...' : 'Apply adjustment'),
+                              ),
+                            ],
                           ),
                         ),
                       ],
                     ),
-                  ),
-                  IconButton(
-                    icon: const Icon(Icons.close_rounded),
-                    tooltip: 'Close',
-                    onPressed: saving
-                        ? null
-                        : () => Navigator.of(context).pop(),
-                  ),
-                ],
-              ),
-            ),
-            Divider(height: 1, color: AppTheme.dashHairlineOf(context)),
-            Expanded(
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
-                child: Form(
-                  key: _formKey,
-                  autovalidateMode: AutovalidateMode.onUserInteraction,
-                  child: _buildFormContent(
-                    saving: saving,
-                    hasDepartments: hasDepartments,
-                    hasEmployees: hasEmployees,
-                    hasSelectedEmployee: hasSelectedEmployee,
-                  ),
+                    if (_openingModeVisited)
+                      AdminLeaveOpeningBalancesForm(
+                        onSavingChanged: (value) => setState(() => _openingSaving = value),
+                      )
+                    else
+                      const SizedBox.shrink(),
+                  ],
                 ),
               ),
-            ),
-            Divider(height: 1, color: AppTheme.dashHairlineOf(context)),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 12, 20, 16),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.end,
-                children: [
-                  TextButton(
-                    onPressed: saving
-                        ? null
-                        : () => Navigator.of(context).pop(),
-                    child: const Text('Cancel'),
-                  ),
-                  const SizedBox(width: 8),
-                  FilledButton.icon(
-                    onPressed: canSave ? _onSave : null,
-                    icon: saving
-                        ? const SizedBox(
-                            width: 18,
-                            height: 18,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : const Icon(Icons.check_circle_outline_rounded),
-                    label: Text(saving ? 'Applying...' : 'Apply adjustment'),
-                  ),
-                ],
-              ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
@@ -3077,16 +3254,10 @@ class _ManualBalanceAdjustmentDialogState
             hintText: 'Example: +2.000 or -1.250',
             helperText: 'Positive adds credits; negative removes credits.',
           ),
-      validator: (value) {
-        final text = value?.trim() ?? '';
-        final parsed = parseAdminLeaveDouble(text);
-        if (parsed == null) return 'Enter the number of days to adjust';
-        if (parsed == 0) return 'Adjustment must not be zero';
-        if (!RegExp(r'^[+-]?\d+(?:\.\d{1,3})?$').hasMatch(text)) {
-          return 'Use up to 3 decimal places';
-        }
-        return null;
-      },
+      validator: (value) => validateAdminLeaveAdjustment(
+        value,
+        currentAdjustedDays: _selectedBalance?.adjustedDays ?? 0,
+      ),
     );
   }
 

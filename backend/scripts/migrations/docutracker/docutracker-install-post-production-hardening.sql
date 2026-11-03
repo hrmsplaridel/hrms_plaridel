@@ -1,5 +1,5 @@
 -- =============================================================================
--- HRMS Plaridel - DocuTracker: INSTALL PHASE 3 (post production hardening, 10-33)
+-- HRMS Plaridel - DocuTracker: INSTALL PHASE 3 (post production hardening, 10-34)
 -- =============================================================================
 -- PREREQUISITE: phase 1 complete AND docutracker-install-production-hardening-apply-once.sql applied.
 -- Section 10 drops/replaces *_prod_v1 status constraints created in production hardening.
@@ -22,6 +22,7 @@
 -- Section 31 limits memo create/submit to admin-authorized preparers (Mayor issues).
 -- Section 32 adds the per-type release stage (approved -> released to a department).
 -- Section 33 freezes the signer's printed position and role on signed builder fields.
+-- Section 34 adds printed-form template versions (background PDF + designed layout) per document type.
 --
 -- TABLE OF CONTENTS
 --   10 - STATUS SEMANTICS V2 (drop forwarded as document status)
@@ -48,6 +49,7 @@
 --   31 - MEMO AUTHORIZED PREPARERS ONLY
 --   32 - DOCUMENT RELEASE / DISTRIBUTION
 --   33 - SIGNER IDENTITY SNAPSHOT (position + role at signing)
+--   34 - PRINTED FORM TEMPLATES (background + designed layout)
 --
 -- =============================================================================
 
@@ -1524,3 +1526,45 @@ ALTER TABLE docutracker_signature_fields
   VALIDATE CONSTRAINT docutracker_signature_fields_identity_snapshot_check_v1;
 
 COMMIT;
+
+
+-- #############################################################################
+-- 34 - PRINTED FORM TEMPLATES (background + designed layout)
+-- Source file: migrate-docutracker-print-templates-v1.sql
+-- #############################################################################
+
+-- DocuTracker printed-form templates (background + designed layout), per document type.
+-- Official Memo / Purchase Request keep built-in templates unless a custom layout is saved.
+
+CREATE TABLE IF NOT EXISTS docutracker_print_template_versions (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  document_type TEXT NOT NULL
+    REFERENCES docutracker_document_types(document_type) ON DELETE CASCADE,
+  background_pdf BYTEA,
+  background_name TEXT,
+  print_layout JSONB,
+  created_by UUID REFERENCES users(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT docutracker_print_template_versions_layout_object_check
+    CHECK (print_layout IS NULL OR jsonb_typeof(print_layout) = 'object')
+);
+
+CREATE INDEX IF NOT EXISTS idx_docutracker_print_template_versions_type
+  ON docutracker_print_template_versions (document_type, created_at DESC);
+
+ALTER TABLE docutracker_document_types
+  ADD COLUMN IF NOT EXISTS print_template_version_id UUID;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conname = 'docutracker_document_types_print_template_version_fkey'
+  ) THEN
+    ALTER TABLE docutracker_document_types
+      ADD CONSTRAINT docutracker_document_types_print_template_version_fkey
+      FOREIGN KEY (print_template_version_id)
+      REFERENCES docutracker_print_template_versions(id)
+      ON DELETE SET NULL;
+  END IF;
+END $$;

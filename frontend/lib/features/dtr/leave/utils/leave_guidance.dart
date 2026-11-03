@@ -71,7 +71,7 @@ class LeaveGuidance {
       description:
           'Granted when an employee is unable to report due to personal illness, injury, or medical appointment.',
       requirements:
-          'Medical certificate required if the absence is 5 or more consecutive days, '
+          'Medical certificate required if the absence is more than 5 days, '
           'or at the discretion of the head of office.',
       advanceFiling:
           'Apply immediately upon return or during absence if possible.',
@@ -257,6 +257,9 @@ class LeaveGuidance {
     LeaveTypeDefinition definition,
     LeaveTypeGuidance? base,
   ) {
+    if (definition.name == 'sickLeave') {
+      return base?.requirements ?? 'Medical certificate required for more than 5 days. HR may also require one for shorter periods.';
+    }
     final threshold = definition.requiresAttachmentWhenOverDays;
     if (threshold != null) {
       return 'Supporting document required when the request reaches ${_formatDays(threshold)} working day(s).';
@@ -325,7 +328,7 @@ class LeaveGuidance {
       icon: 'schedule',
       items: [
         'Vacation Leave — at least 5 days in advance whenever possible.',
-        'Sick Leave — immediately upon return; attach a medical certificate if filed in advance or for 5 days or more.',
+        'Sick Leave — immediately upon return; attach a medical certificate if filed in advance or for more than 5 days.',
         'Maternity Leave — notify HR at least 30 days before the expected delivery.',
         'Paternity Leave — within 60 days of delivery.',
         'Special Privilege Leave — at least 1 week before availment, except emergency cases.',
@@ -341,7 +344,7 @@ class LeaveGuidance {
       title: 'Supporting Documents',
       icon: 'description',
       items: [
-        'Sick Leave (≥5 days): Medical certificate from a licensed physician.',
+        'Sick Leave (>5 days): Medical certificate from a licensed physician.',
         'Maternity Leave: Birth certificate, marriage certificate, medical documents.',
         'Paternity Leave: Marriage certificate, birth/delivery records.',
         'Solo Parent Leave: Solo Parent ID or DSWD certificate.',

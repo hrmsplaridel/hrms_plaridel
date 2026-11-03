@@ -9,9 +9,10 @@ module.exports = function createLeaveControllers({
   toIsoDateStr,
 }) {
   return {
-    previewWorkingDays: async (req, res) => {
-      const userId = req.user?.id;
+    previewWorkingDays: async (req, res, staffEmployeeId) => {
+      const userId = typeof staffEmployeeId === 'string' ? staffEmployeeId : req.user?.id;
       if (!userId) return res.status(401).json({ error: 'Not authenticated' });
+      if (typeof staffEmployeeId === 'string' && !/^[0-9a-f-]{36}$/i.test(userId)) return res.status(400).json({error:'Select a valid employee.'});
       const dateError = requiredLeaveDateRangeError(
         req.query.start_date || req.query.startDate,
         req.query.end_date || req.query.endDate,

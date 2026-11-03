@@ -3,6 +3,7 @@ import 'package:hrms_plaridel/features/docutracker/models/document.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document_history.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document_status.dart';
 import 'package:hrms_plaridel/features/docutracker/utils/docutracker_workflow_phase.dart';
+import 'package:hrms_plaridel/features/docutracker/utils/docutracker_workflow_progress.dart';
 
 DocuTrackerDocument _document({
   required DocumentStatus status,
@@ -21,7 +22,7 @@ DocuTrackerDocument _document({
 
 void main() {
   test(
-    'returned document phase says changes are required at its current step',
+    'returned document phase says it is awaiting review at the previous step',
     () {
       final phase = DocuTrackerWorkflowPhase.forDocument(
         doc: _document(status: DocumentStatus.returned, currentStep: 1),
@@ -29,26 +30,27 @@ void main() {
         currentStepLabel: 'Department Review',
       );
 
-      expect(phase.label, 'Returned for changes');
+      expect(phase.label, 'Returned to previous step');
       expect(phase.detail, contains('Step 1 of 3'));
-      expect(phase.detail, contains('Changes are required'));
+      expect(phase.detail, contains('Awaiting review at this step'));
+      expect(phase.detail, isNot(contains('Changes')));
     },
   );
 
   test('final approved step is approved instead of current', () {
-    final indicator = DocuTrackerWorkflowPhase.indicatorForStep(
+    final indicator = docuTrackerIndicatorForStep(
       doc: _document(status: DocumentStatus.approved),
       stepOrder: 2,
     );
 
     expect(indicator.kind, DocuTrackerStepIndicatorKind.approved);
-    expect(indicator.label, 'APPROVED');
+    expect(indicator.label, 'Approved');
     expect(indicator.isCompleted, isTrue);
   });
 
   test('completed step distinguishes forwarding from approval', () {
     final doc = _document(status: DocumentStatus.inReview, currentStep: 2);
-    final forwarded = DocuTrackerWorkflowPhase.indicatorForStep(
+    final forwarded = docuTrackerIndicatorForStep(
       doc: doc,
       stepOrder: 1,
       history: <DocumentHistoryEntry>[
@@ -61,7 +63,7 @@ void main() {
         ),
       ],
     );
-    final approved = DocuTrackerWorkflowPhase.indicatorForStep(
+    final approved = docuTrackerIndicatorForStep(
       doc: doc,
       stepOrder: 1,
       history: <DocumentHistoryEntry>[
@@ -75,21 +77,48 @@ void main() {
       ],
     );
 
-    expect(forwarded.label, 'FORWARDED');
-    expect(approved.label, 'APPROVED');
+    expect(forwarded.label, 'Forwarded');
+    expect(approved.label, 'Approved');
   });
 
   test('returned current step and future step use different indicators', () {
     final doc = _document(status: DocumentStatus.returned, currentStep: 1);
+    final current = docuTrackerIndicatorForStep(doc: doc, stepOrder: 1);
+    final upcoming = docuTrackerIndicatorForStep(doc: doc, stepOrder: 2);
 
-    expect(
-      DocuTrackerWorkflowPhase.indicatorForStep(doc: doc, stepOrder: 1).label,
-      'RETURNED',
+    expect(current.label, 'Current step');
+    expect(current.detail, 'Returned');
+    expect(current.kind, isNot(DocuTrackerStepIndicatorKind.approved));
+    expect(upcoming.label, 'Pending');
+  });
+
+  test('approved phase names release separately from workflow approval', () {
+    final awaiting = DocuTrackerWorkflowPhase.forDocument(
+      doc: DocuTrackerDocument(
+        id: 'document-1',
+        documentType: 'memo',
+        title: 'Test document',
+        status: DocumentStatus.approved,
+        currentStep: 2,
+        releaseRequired: true,
+      ),
     );
-    expect(
-      DocuTrackerWorkflowPhase.indicatorForStep(doc: doc, stepOrder: 2).label,
-      'WAITING',
+    expect(awaiting.label, 'Approved');
+    expect(awaiting.detail, 'Awaiting release');
+
+    final released = DocuTrackerWorkflowPhase.forDocument(
+      doc: DocuTrackerDocument(
+        id: 'document-1',
+        documentType: 'memo',
+        title: 'Test document',
+        status: DocumentStatus.approved,
+        currentStep: 2,
+        releaseRequired: true,
+        releasedAt: DateTime.utc(2026, 10, 9),
+      ),
     );
+    expect(released.label, 'Released');
+    expect(released.detail, 'Approved and released');
   });
 
   test('expired deadline never replaces a terminal status', () {

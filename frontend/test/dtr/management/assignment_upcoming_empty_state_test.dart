@@ -52,6 +52,7 @@ void main() {
               'official_date': '2026-10-17',
               'first_date': '2020-01-01',
               'last_date': '2030-12-31',
+              'attendance_tracking_start_date': '2026-11-01',
             };
           } else if (options.path == '/api/assignments') {
             if (options.queryParameters['employee_id'] == 'second') {
@@ -113,6 +114,16 @@ void main() {
     expect(find.text('Test department'), findsNothing);
     expect(find.text('No primary assignment yet'), findsNothing);
     expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('assignment form carries the employee tracking start into later assignments',(tester)async{
+    await openPage(tester);
+    await tester.tap(find.text('Add Primary'));await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Attendance tracking starts'));
+    expect(find.text('Attendance tracking starts'),findsOneWidget);
+    expect(find.byKey(const ValueKey('employee-tracking-start')),findsOneWidget);
+    expect(find.text('2026-11-01'),findsOneWidget);
+    expect(tester.takeException(),isNull);
   });
 
   testWidgets(

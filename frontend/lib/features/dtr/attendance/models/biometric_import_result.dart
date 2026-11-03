@@ -1,3 +1,18 @@
+/// A rejected entry's position in the submitted batch, rather than the source file.
+class BiometricImportRowError {
+  const BiometricImportRowError({required this.row, required this.error});
+
+  final int row;
+  final String error;
+
+  factory BiometricImportRowError.fromJson(Map<String, dynamic> json) {
+    return BiometricImportRowError(
+      row: (json['row'] as num?)?.toInt() ?? 0,
+      error: json['error'] as String? ?? 'Invalid log entry',
+    );
+  }
+}
+
 /// Result of a biometric logs import operation.
 class BiometricImportResult {
   const BiometricImportResult({
@@ -13,6 +28,8 @@ class BiometricImportResult {
     required this.skippedLeave,
     required this.skippedAfterShiftFirstPunch,
     required this.skippedInvalidTimestamp,
+    this.skippedInvalidRows = 0,
+    this.rowErrors = const [],
     required this.unmatchedRows,
     required this.invalidRows,
     required this.summariesInserted,
@@ -31,6 +48,8 @@ class BiometricImportResult {
   final int skippedLeave;
   final int skippedAfterShiftFirstPunch;
   final int skippedInvalidTimestamp;
+  final int skippedInvalidRows;
+  final List<BiometricImportRowError> rowErrors;
   final int unmatchedRows;
   final int invalidRows;
   final int summariesInserted;
@@ -55,6 +74,14 @@ class BiometricImportResult {
           (json['skipped_after_shift_first_punch'] as num?)?.toInt() ?? 0,
       skippedInvalidTimestamp:
           (json['skipped_invalid_timestamp'] as num?)?.toInt() ?? 0,
+      skippedInvalidRows: (json['skipped_invalid_row'] as num?)?.toInt() ?? 0,
+      rowErrors: (json['row_errors'] as List? ?? [])
+          .map(
+            (entry) => BiometricImportRowError.fromJson(
+              Map<String, dynamic>.from(entry as Map),
+            ),
+          )
+          .toList(),
       unmatchedRows: (json['unmatched_rows'] as num?)?.toInt() ?? 0,
       invalidRows: (json['invalid_rows'] as num?)?.toInt() ?? 0,
       summariesInserted: (json['summaries_inserted'] as num?)?.toInt() ?? 0,

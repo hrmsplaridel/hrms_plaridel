@@ -6,6 +6,7 @@ import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/providers/auth_provider.dart';
 import 'package:hrms_plaridel/features/docutracker/data/providers/docutracker_provider.dart';
 import 'package:hrms_plaridel/features/docutracker/data/styles/docutracker_styles.dart';
+import 'package:hrms_plaridel/features/docutracker/data/dto/docutracker_api_result.dart';
 import 'package:hrms_plaridel/features/docutracker/data/repositories/docutracker_repository.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document_action.dart';
@@ -24,15 +25,28 @@ import 'package:hrms_plaridel/features/docutracker/utils/docutracker_open_attach
 import 'package:hrms_plaridel/features/docutracker/utils/docutracker_permission_reason_label.dart';
 import 'package:hrms_plaridel/features/docutracker/utils/docutracker_source_status_text.dart';
 import 'package:hrms_plaridel/features/docutracker/utils/docutracker_workflow_phase.dart';
+import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_activity_timeline.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_document_attachment_panel.dart';
+import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_slide_in_panel.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_document_detail_ui.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_error_banner.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_release_section.dart';
+import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_reject_dialog.dart';
+import 'package:hrms_plaridel/features/docutracker/utils/docutracker_content_lock.dart';
+import 'package:hrms_plaridel/features/docutracker/utils/docutracker_action_feedback.dart';
 import 'package:hrms_plaridel/features/docutracker/utils/docutracker_release_text.dart';
+import 'package:hrms_plaridel/features/docutracker/utils/docutracker_return_text.dart';
+import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_returned_info_card.dart';
+import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_content_lock_banner.dart';
+import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_admin_recovery_card.dart';
+import 'package:hrms_plaridel/features/docutracker/utils/docutracker_admin_recovery.dart';
+import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_workflow_step_strip.dart';
+import 'package:hrms_plaridel/features/docutracker/utils/docutracker_workflow_progress.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_responsive_body.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_status_badge.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_source_signature_card.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/pages/docutracker_document_builder_screen.dart';
+import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_delete_draft_button.dart';
 import 'package:hrms_plaridel/core/utils/responsive_right_side_panel.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/pages/docutracker_linked_source_document_screen.dart';
 import 'package:hrms_plaridel/features/dtr/leave/data/providers/leave_provider.dart';
@@ -66,6 +80,7 @@ class _DocuTrackerDocumentDetailScreenState
   Timer? _pollTimer;
   List<DocumentRoutingRecord> _routingRecords = const [];
   bool _routingLoading = true;
+  bool? _typeRequiresRelease;
 
   DocuTrackerDocument _resolveDocForView(DocuTrackerProvider provider) {
     final docId = widget.document.id;
@@ -346,10 +361,11 @@ class _DocuTrackerDocumentDetailScreenState
           granted(DocumentAction.download.value) ||
           granted(DocumentAction.view.value);
       _canModifyAttachment =
-          isAdmin ||
-          (DocuTrackerDocumentVisibility.isWorkInProgressDraft(doc) &&
-              doc.createdBy == userId) ||
-          granted(DocumentAction.edit.value);
+          !docuTrackerNativeContentIsLocked(doc) &&
+          (isAdmin ||
+              (DocuTrackerDocumentVisibility.isWorkInProgressDraft(doc) &&
+                  doc.createdBy == userId) ||
+              granted(DocumentAction.edit.value));
       _permissionsLoading = false;
     });
   }
@@ -382,7 +398,9 @@ class _DocuTrackerDocumentDetailScreenState
         return;
       }
 
-      _routingRecords = await repo.getDocumentRoutingRecords(docId);
+      final routingView = await repo.getDocumentRoutingView(docId);
+      _routingRecords = routingView.routing;
+      _typeRequiresRelease = routingView.typeRequiresRelease;
       if (mounted) setState(() => _routingLoading = false);
 
       if (!widget.isAdmin &&
@@ -433,7 +451,9 @@ class _DocuTrackerDocumentDetailScreenState
         final docId = widget.document.id!;
 
         await provider.refreshDocument(docId, reloadHistory: true);
-        _routingRecords = await repo.getDocumentRoutingRecords(docId);
+        final routingView = await repo.getDocumentRoutingView(docId);
+        _routingRecords = routingView.routing;
+        _typeRequiresRelease = routingView.typeRequiresRelease;
         if (!mounted) return;
         DocuTrackerDocument? updatedDoc;
         for (final d in provider.documents) {
@@ -469,12 +489,32 @@ class _DocuTrackerDocumentDetailScreenState
     showDocuTrackerProviderError(context, provider, fallback: fallback);
   }
 
-  void _onWorkflowActionSuccess(String message) {
+  Future<void> _onWorkflowActionSuccess(
+    String message, {
+    bool leaveScreen = false,
+  }) async {
     if (!mounted) return;
+    final provider = context.read<DocuTrackerProvider>();
+    final auth = context.read<AuthProvider>();
+    final docId = widget.document.id;
+    if (docId != null && !leaveScreen) {
+      final routingView = await DocuTrackerRepository.instance
+          .getDocumentRoutingView(docId);
+      if (!mounted) return;
+      _routingRecords = routingView.routing;
+      _typeRequiresRelease = routingView.typeRequiresRelease;
+      await _refreshEffectivePermissions(
+        doc: _resolveDocForView(provider),
+        auth: auth,
+        isAdmin: widget.isAdmin,
+      );
+    }
+    if (!mounted) return;
+    setState(() {});
     ScaffoldMessenger.of(
       context,
     ).showSnackBar(SnackBar(content: Text(message)));
-    Navigator.of(context).pop();
+    if (leaveScreen) Navigator.of(context).pop();
   }
 
   DocuTrackerWorkflowPhase _workflowPhaseFor(
@@ -664,22 +704,49 @@ class _DocuTrackerDocumentDetailScreenState
         );
 
     final workflowReady = _workflowConfigIssue == null;
+    final reassignmentRequired = docuTrackerReassignmentRequired(
+      _permissionExplanations,
+    );
     final canSubmit =
         workflowReady && canAct && _canSubmitAction && isCreator && isWip;
 
-    // Review actions only valid if NOT pending and workflow is configured.
+    // Review actions follow permission-explain. When the server reports
+    // reassignment_required, hide actions the backend will reject.
     final canApprove =
-        workflowReady && !isPending && canAct && _canApproveAction;
+        workflowReady &&
+        !isPending &&
+        canAct &&
+        _canApproveAction &&
+        !reassignmentRequired;
     final canForward =
-        workflowReady && !isPending && canAct && _canForwardAction;
-    final canReject = workflowReady && !isPending && canAct && _canRejectAction;
-    final canReturn = workflowReady && !isPending && canAct && _canReturnAction;
+        workflowReady &&
+        !isPending &&
+        canAct &&
+        _canForwardAction &&
+        !reassignmentRequired;
+    final canReject =
+        workflowReady &&
+        !isPending &&
+        canAct &&
+        _canRejectAction &&
+        !reassignmentRequired;
+    final canReturn =
+        workflowReady &&
+        !isPending &&
+        canAct &&
+        _canReturnAction &&
+        !reassignmentRequired;
 
+    // "Your turn" only when the viewer can actually take a workflow action.
     final showYourTurn =
         canAct &&
         !_permissionsLoading &&
         userId.isNotEmpty &&
-        (isAssignedReviewer || canSubmit);
+        (canSubmit ||
+            canApprove ||
+            canForward ||
+            canReject ||
+            canReturn);
 
     final showActions =
         _shouldShowActionsPanel(
@@ -705,6 +772,14 @@ class _DocuTrackerDocumentDetailScreenState
                 showYourTurn,
                 userId: userId,
                 isAssignedReviewer: isAssignedReviewer,
+                hasActiveAction:
+                    showYourTurn ||
+                    canSubmit ||
+                    canApprove ||
+                    canForward ||
+                    canReject ||
+                    canReturn ||
+                    (doc.isAwaitingRelease && doc.viewerCanRelease),
                 assigneeNames: _currentReviewerNames(
                   doc,
                   currentRouting,
@@ -743,6 +818,9 @@ class _DocuTrackerDocumentDetailScreenState
                   final leftColumn = Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
+                      if (_buildAdminRecoveryCard(doc, provider)
+                          case final recoveryCard?)
+                        recoveryCard,
                       _buildWorkflowSection(doc, provider, userId),
                       const SizedBox(height: 24),
                       _buildHistorySection(provider, doc, userId),
@@ -788,6 +866,9 @@ class _DocuTrackerDocumentDetailScreenState
                         actionsCard,
                         const SizedBox(height: 24),
                       ],
+                      if (_buildAdminRecoveryCard(doc, provider)
+                          case final recoveryCard?)
+                        recoveryCard,
                       _buildWorkflowSection(doc, provider, userId),
                       const SizedBox(height: 24),
                       if (doc.releaseRequired) ...[
@@ -820,6 +901,7 @@ class _DocuTrackerDocumentDetailScreenState
     bool showYourTurn, {
     required String userId,
     required bool isAssignedReviewer,
+    bool hasActiveAction = false,
     List<String> assigneeNames = const [],
   }) {
     final typeName = documentTypeFromString(doc.documentType).displayName;
@@ -829,7 +911,12 @@ class _DocuTrackerDocumentDetailScreenState
         doc.status == DocumentStatus.rejected ||
         doc.status == DocumentStatus.cancelled;
     final currentStepValue = switch (doc.status) {
-      DocumentStatus.approved => 'Completed at Step ${doc.currentStep ?? 1}',
+      DocumentStatus.approved =>
+        doc.isReleased
+            ? 'Released'
+            : doc.isAwaitingRelease
+            ? 'Approved · Awaiting release'
+            : 'Completed at Step ${doc.currentStep ?? 1}',
       DocumentStatus.rejected => 'Stopped at Step ${doc.currentStep ?? 1}',
       DocumentStatus.cancelled => 'Cancelled',
       DocumentStatus.returned => 'Returned to Step ${doc.currentStep ?? 1}',
@@ -913,6 +1000,10 @@ class _DocuTrackerDocumentDetailScreenState
         : currentStepValue;
     final stepSub = isDraft
         ? 'Draft stage'
+        : doc.isReleased
+        ? 'Approved'
+        : doc.isAwaitingRelease
+        ? 'Approval complete'
         : isTerminal
         ? doc.status.displayName
         : phase.label;
@@ -924,6 +1015,10 @@ class _DocuTrackerDocumentDetailScreenState
         : currentAssigneeValue;
     final assigneeSub = isDraft
         ? 'Document owner'
+        : doc.isReleased
+        ? 'Released'
+        : doc.isAwaitingRelease
+        ? 'Awaiting release'
         : backupNames.isNotEmpty
         ? 'Backup: ${backupNames.join(', ')}'
         : (isTerminal ? 'Workflow finished' : 'Current reviewer');
@@ -936,6 +1031,7 @@ class _DocuTrackerDocumentDetailScreenState
     final actionButtons = Wrap(
       spacing: 8,
       runSpacing: 8,
+      crossAxisAlignment: WrapCrossAlignment.center,
       children: [
         if (!doc.sourceOnly)
           OutlinedButton.icon(
@@ -945,13 +1041,36 @@ class _DocuTrackerDocumentDetailScreenState
             label: const Text('Preview'),
             style: DocuTrackerStyles.outlinedButtonStyle(context),
           ),
+        if (!doc.sourceOnly) const SizedBox(width: 6),
+        if (DocuTrackerDocumentVisibility.canDeleteDraft(
+          doc,
+          userId: userId,
+          isAdmin: widget.isAdmin,
+        ))
+          OutlinedButton.icon(
+            key: const ValueKey('docutracker-detail-delete-draft'),
+            onPressed: busy
+                ? null
+                : () async {
+                    final deleted = await confirmDeleteDocuTrackerDraft(
+                      context,
+                      doc,
+                    );
+                    if (!deleted || !mounted) return;
+                    Navigator.of(context).pop();
+                  },
+            icon: const Icon(Icons.delete_outline_rounded, size: 18),
+            label: const Text('Delete draft'),
+            style: DocuTrackerStyles.outlinedButtonStyle(context),
+          ),
+        if (!doc.sourceOnly) const SizedBox(width: 6),
         FilledButton.icon(
           onPressed: busy ? null : () => _openPrimaryDocument(doc),
-          icon: const Icon(Icons.article_outlined, size: 18),
+          icon: const Icon(Icons.article_rounded, size: 19),
           label: Text(
             doc.sourceOnly ? 'Open Source Document' : 'Open Document',
           ),
-          style: DocuTrackerStyles.primaryBrandButtonStyle(),
+          style: DocuTrackerStyles.primaryBrandButtonStyle(context),
         ),
       ],
     );
@@ -1148,6 +1267,11 @@ class _DocuTrackerDocumentDetailScreenState
           ],
         ),
         const SizedBox(height: 16),
+        if (docuTrackerNativeContentLockMessage(doc)
+            case final lockMessage?) ...[
+          DocuTrackerContentLockBanner(message: lockMessage),
+          const SizedBox(height: 16),
+        ],
         Container(
           width: double.infinity,
           padding: const EdgeInsets.all(24),
@@ -1204,6 +1328,22 @@ class _DocuTrackerDocumentDetailScreenState
             },
           ),
         ),
+        if (doc.status == DocumentStatus.returned && !doc.sourceOnly) ...[
+          const SizedBox(height: 16),
+          DocuTrackerReturnedInfoCard(
+            returnEntry: docuTrackerLatestReturnEntry(
+              provider.documentHistory.where((e) => e.documentId == doc.id),
+            ),
+            returnedTo: doc.assigneeName,
+            currentStep: currentStepLabel.isNotEmpty
+                ? 'Step $currentStep - $currentStepLabel'
+                : 'Step $currentStep',
+            nextAction: docuTrackerReturnedNextAction(
+              isResponsibleReviewer: isAssignedReviewer,
+              isCreator: doc.createdBy == userId,
+            ),
+          ),
+        ],
         if (doc.status == DocumentStatus.approved ||
             doc.status == DocumentStatus.rejected) ...[
           const SizedBox(height: 16),
@@ -1218,8 +1358,11 @@ class _DocuTrackerDocumentDetailScreenState
                   : const Color(0xFFB91C1C),
             ),
             message: doc.status == DocumentStatus.approved
-                ? 'This workflow is complete.'
+                ? docuTrackerApprovedWorkflowMessage(doc)
                 : 'This document was rejected and cannot move forward.',
+            detail: doc.status == DocumentStatus.approved
+                ? docuTrackerApprovedWorkflowDetail(doc)
+                : null,
           ),
         ],
         if (showYourTurn) ...[
@@ -1229,6 +1372,19 @@ class _DocuTrackerDocumentDetailScreenState
             subtitle: phase.detail != null
                 ? 'You are the assigned reviewer for this step. ${phase.detail}'
                 : 'You are the assigned reviewer — submit your decision or add a remark.',
+          ),
+        ] else if (docuTrackerShowReleasedViewOnlyMessage(
+          document: doc,
+          userId: userId,
+          hasActiveAction: hasActiveAction || isAssignedReviewer,
+        )) ...[
+          const SizedBox(height: 20),
+          const DocuTrackerDetailActionBanner(
+            key: ValueKey('docutracker-released-view-only-banner'),
+            title: 'Released to your department — view only',
+            subtitle:
+                'You can view this released document, but no action is required from you.',
+            icon: Icons.visibility_outlined,
           ),
         ] else if (guidance != null)
           guidance,
@@ -1306,6 +1462,7 @@ class _DocuTrackerDocumentDetailScreenState
     final department = released.releasedToDepartmentName;
     _onWorkflowActionSuccess(
       department == null ? 'Document released' : 'Released to $department',
+      leaveScreen: true,
     );
   }
 
@@ -1372,50 +1529,15 @@ class _DocuTrackerDocumentDetailScreenState
     );
   }
 
-  void _showWorkflowMapDialog(List<WorkflowStep> steps, int current) {
+  void _showWorkflowMapDialog(List<DocuTrackerStepProgress> progress) {
     showDialog<void>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Workflow map'),
         content: SizedBox(
-          width: 360,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              for (final s in steps) ...[
-                Row(
-                  children: [
-                    CircleAvatar(
-                      radius: 14,
-                      backgroundColor: s.stepOrder == current
-                          ? DocuTrackerTokens.brand
-                          : s.stepOrder < current
-                          ? DocuTrackerTokens.brandSoftOf(ctx)
-                          : DocuTrackerTokens.borderSubtleOf(ctx),
-                      child: Text(
-                        '${s.stepOrder}',
-                        style: TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w800,
-                          color: s.stepOrder == current
-                              ? Colors.white
-                              : DocuTrackerTokens.textSecondaryOf(ctx),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Text(
-                        s.label ?? 'Step ${s.stepOrder}',
-                        style: const TextStyle(fontWeight: FontWeight.w600),
-                      ),
-                    ),
-                  ],
-                ),
-                if (s != steps.last) const SizedBox(height: 10),
-              ],
-            ],
+          width: 420,
+          child: SingleChildScrollView(
+            child: DocuTrackerWorkflowMapList(progress: progress),
           ),
         ),
         actions: [
@@ -1426,6 +1548,125 @@ class _DocuTrackerDocumentDetailScreenState
         ],
       ),
     );
+  }
+
+  Widget? _buildAdminRecoveryCard(
+    DocuTrackerDocument doc,
+    DocuTrackerProvider provider,
+  ) {
+    if (!docuTrackerShowAdminRecoveryNotice(doc)) return null;
+    final currentStep = doc.currentStep ?? 1;
+    final stepName =
+        (_routingConfigFor(provider, doc)?.steps ?? const <WorkflowStep>[])
+            .where((step) => step.enabled && step.stepOrder == currentStep)
+            .map((step) => step.label?.trim() ?? '')
+            .firstWhere((label) => label.isNotEmpty, orElse: () => '');
+    final reviewer = doc.assigneeName?.trim();
+    final workflowBlocked = docuTrackerReassignmentRequired(
+      _permissionExplanations,
+    );
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 24),
+      child: DocuTrackerAdminRecoveryCard(
+        showAction: docuTrackerShowAdminRecoveryAction(
+          doc: doc,
+          isAdmin: widget.isAdmin,
+        ),
+        documentNumber: doc.documentNumber?.trim() ?? '',
+        documentTitle: doc.title,
+        stepLabel: stepName.isEmpty
+            ? 'Step $currentStep'
+            : 'Step $currentStep · $stepName',
+        currentReviewer: reviewer == null || reviewer.isEmpty
+            ? 'Unassigned'
+            : reviewer,
+        body: docuTrackerAdminRecoveryBody(workflowBlocked: workflowBlocked),
+        reason: docuTrackerAdminRecoveryReason(
+          provider.documentHistory.where((entry) => entry.documentId == doc.id),
+        ),
+        loadOptions: () => _loadRecoveryOptions(doc),
+        onSubmit: (candidate, remarks) =>
+            _submitRecovery(doc, candidate, remarks),
+      ),
+    );
+  }
+
+  Future<DocuTrackerRecoveryOptions> _loadRecoveryOptions(
+    DocuTrackerDocument doc,
+  ) async {
+    final documentId = doc.id?.trim() ?? '';
+    if (documentId.isEmpty) {
+      return const DocuTrackerRecoveryOptions(
+        candidates: [],
+        message: 'This document cannot be recovered.',
+      );
+    }
+    final result = await DocuTrackerRepository.instance.getRecoveryCandidates(
+      documentId,
+    );
+    return switch (result) {
+      DocuTrackerFailure(:final message) => DocuTrackerRecoveryOptions(
+        candidates: const [],
+        message: message.isEmpty
+            ? 'Eligible reviewers could not be loaded.'
+            : message,
+      ),
+      DocuTrackerSuccess(:final value) => docuTrackerRecoveryOptionsFromJson(
+        value,
+      ),
+    };
+  }
+
+  Future<String?> _submitRecovery(
+    DocuTrackerDocument doc,
+    DocuTrackerRecoveryCandidate candidate,
+    String remarks,
+  ) async {
+    final documentId = doc.id?.trim() ?? '';
+    if (documentId.isEmpty) return 'This document cannot be recovered.';
+    final provider = context.read<DocuTrackerProvider>();
+    final error = await provider.recoverDocumentAssignment(
+      documentId: documentId,
+      assigneeId: candidate.userId,
+      remarks: remarks,
+    );
+    if (error != null) {
+      if (!mounted) return error;
+      try {
+        await provider.refreshDocument(documentId, reloadHistory: true);
+        if (!mounted) return error;
+        _routingRecords = await DocuTrackerRepository.instance
+            .getDocumentRoutingRecords(documentId);
+      } catch (_) {
+        // The dialog still shows the recovery error and reloads candidates.
+      }
+      if (mounted) setState(() {});
+      return error;
+    }
+    if (!mounted) return null;
+    final auth = context.read<AuthProvider>();
+    final isAdmin = widget.isAdmin;
+    try {
+      _routingRecords = await DocuTrackerRepository.instance
+          .getDocumentRoutingRecords(documentId);
+      if (!mounted) return null;
+      await _refreshEffectivePermissions(
+        doc: _resolveDocForView(provider),
+        auth: auth,
+        isAdmin: isAdmin,
+      );
+    } catch (refreshError) {
+      if (!mounted) return null;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Assignment recovered, but the workflow view could not refresh: $refreshError',
+          ),
+        ),
+      );
+    }
+    if (mounted) setState(() {});
+    return null;
   }
 
   Widget _buildWorkflowSection(
@@ -1460,17 +1701,21 @@ class _DocuTrackerDocumentDetailScreenState
           snapshotAssigneeIds: currentRouting?.assigneeIds ?? const [],
           singleReviewerStep: singleReviewerStep,
         );
-    final phase = _workflowPhaseFor(doc, provider);
-    final stepSubtitle = phase.detail ?? phase.label;
+    final progress = docuTrackerWorkflowProgress(
+      doc: doc,
+      steps: steps,
+      history: provider.documentHistory,
+      currentReviewerName: doc.assigneeName,
+    );
 
     return DocuTrackerDetailSectionCard(
       icon: Icons.account_tree_outlined,
       title: 'Workflow & Routing',
-      subtitle: stepSubtitle,
+      subtitle: 'Recorded progress for each workflow step',
       trailing: steps.isEmpty
           ? null
           : TextButton(
-              onPressed: () => _showWorkflowMapDialog(steps, current),
+              onPressed: () => _showWorkflowMapDialog(progress),
               style: TextButton.styleFrom(
                 foregroundColor: DocuTrackerTokens.brand,
                 textStyle: const TextStyle(
@@ -1483,12 +1728,8 @@ class _DocuTrackerDocumentDetailScreenState
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          if (steps.isNotEmpty) ...[
-            _WorkflowStepStrip(
-              steps: steps,
-              document: doc,
-              history: provider.documentHistory,
-            ),
+          if (progress.isNotEmpty) ...[
+            DocuTrackerWorkflowStepStrip(progress: progress),
             const SizedBox(height: 20),
           ],
           _CurrentAssignmentCard(
@@ -1548,8 +1789,11 @@ class _DocuTrackerDocumentDetailScreenState
                     );
                     if (!mounted) return;
                     if (ok) {
-                      _onWorkflowActionSuccess(
-                        'Document submitted successfully.',
+                      await _onWorkflowActionSuccess(
+                        docuTrackerWorkflowActionMessage(
+                          action: 'submit',
+                          document: _resolveDocForView(provider),
+                        ),
                       );
                     } else {
                       _showActionError(
@@ -1560,7 +1804,7 @@ class _DocuTrackerDocumentDetailScreenState
                   },
             icon: const Icon(Icons.play_arrow_rounded, size: 20),
             label: const Text('Submit Draft'),
-            style: DocuTrackerStyles.primaryBrandButtonStyle().copyWith(
+            style: DocuTrackerStyles.primaryBrandButtonStyle(context).copyWith(
               minimumSize: WidgetStateProperty.all(
                 const Size(double.infinity, 48),
               ),
@@ -1577,16 +1821,20 @@ class _DocuTrackerDocumentDetailScreenState
             onPressed: provider.loading
                 ? null
                 : () async {
+                    final finalCopy = isFinalStep
+                        ? docuTrackerFinalApproveConfirmCopy(
+                            typeRequiresRelease: _typeRequiresRelease,
+                          )
+                        : null;
                     final confirmed = await _confirmWorkflowAction(
-                      title: isFinalStep
-                          ? 'Approve and complete?'
-                          : 'Approve and continue?',
-                      message: isFinalStep
-                          ? 'This completes the workflow.'
-                          : 'This sends the document to the next workflow step.',
-                      confirmLabel: isFinalStep
-                          ? 'Approve and Complete'
-                          : 'Approve and Continue',
+                      title:
+                          finalCopy?.title ?? docuTrackerApproveContinueTitle,
+                      message:
+                          finalCopy?.message ??
+                          docuTrackerApproveContinueMessage,
+                      confirmLabel:
+                          finalCopy?.confirmLabel ??
+                          docuTrackerApproveContinueLabel,
                     );
                     if (!confirmed || !mounted) return;
                     final ok = await provider.approveDocument(
@@ -1596,7 +1844,12 @@ class _DocuTrackerDocumentDetailScreenState
                     );
                     if (!mounted) return;
                     if (ok) {
-                      _onWorkflowActionSuccess('Document approved.');
+                      await _onWorkflowActionSuccess(
+                        docuTrackerWorkflowActionMessage(
+                          action: 'approve',
+                          document: _resolveDocForView(provider),
+                        ),
+                      );
                     } else {
                       _showActionError(
                         provider,
@@ -1625,6 +1878,12 @@ class _DocuTrackerDocumentDetailScreenState
             onPressed: provider.loading
                 ? null
                 : () async {
+                    final confirmed = await _confirmWorkflowAction(
+                      title: docuTrackerForwardConfirmTitle,
+                      message: docuTrackerForwardConfirmMessage,
+                      confirmLabel: docuTrackerForwardConfirmLabel,
+                    );
+                    if (!confirmed || !mounted) return;
                     final ok = await provider.forwardDocument(
                       doc,
                       actionBy: userId,
@@ -1634,7 +1893,12 @@ class _DocuTrackerDocumentDetailScreenState
                     );
                     if (!mounted) return;
                     if (ok) {
-                      _onWorkflowActionSuccess('Document forwarded.');
+                      await _onWorkflowActionSuccess(
+                        docuTrackerWorkflowActionMessage(
+                          action: 'forward',
+                          document: _resolveDocForView(provider),
+                        ),
+                      );
                     } else {
                       _showActionError(
                         provider,
@@ -1649,7 +1913,7 @@ class _DocuTrackerDocumentDetailScreenState
         ),
       if (canAct && canReturn)
         Tooltip(
-          message: 'Send back to sender for corrections',
+          message: docuTrackerReturnTooltip,
           child: OutlinedButton.icon(
             onPressed: provider.loading
                 ? null
@@ -1659,15 +1923,28 @@ class _DocuTrackerDocumentDetailScreenState
                       await showDialog<void>(
                         context: context,
                         builder: (ctx) => AlertDialog(
-                          title: const Text('Return document'),
-                          content: TextField(
-                            controller: returnCtrl,
-                            decoration: DocuTrackerStyles.inputDecoration(
-                              context,
-                              'Reason for return (optional)',
-                              Icons.reply_rounded,
-                            ),
-                            maxLines: 3,
+                          title: const Text(docuTrackerReturnDialogTitle),
+                          content: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                docuTrackerReturnDialogExplanation,
+                                style: DocuTrackerTokens.subtitleStyle(
+                                  ctx,
+                                ).copyWith(fontSize: 13),
+                              ),
+                              const SizedBox(height: 12),
+                              TextField(
+                                controller: returnCtrl,
+                                decoration: DocuTrackerStyles.inputDecoration(
+                                  context,
+                                  docuTrackerReturnReasonLabel,
+                                  Icons.reply_rounded,
+                                ),
+                                maxLines: 3,
+                              ),
+                            ],
                           ),
                           actions: [
                             OutlinedButton(
@@ -1688,8 +1965,11 @@ class _DocuTrackerDocumentDetailScreenState
                                 );
                                 if (!mounted) return;
                                 if (ok) {
-                                  _onWorkflowActionSuccess(
-                                    'Document returned.',
+                                  await _onWorkflowActionSuccess(
+                                    docuTrackerWorkflowActionMessage(
+                                      action: 'return',
+                                      document: _resolveDocForView(provider),
+                                    ),
                                   );
                                 } else {
                                   _showActionError(
@@ -1709,7 +1989,7 @@ class _DocuTrackerDocumentDetailScreenState
                     }
                   },
             icon: const Icon(Icons.undo_rounded, size: 18),
-            label: const Text('Return for Changes'),
+            label: const Text(docuTrackerReturnButtonLabel),
             style: DocuTrackerStyles.warningButtonStyle(),
           ),
         ),
@@ -1720,61 +2000,34 @@ class _DocuTrackerDocumentDetailScreenState
             onPressed: provider.loading
                 ? null
                 : () async {
-                    final remarkCtrl = TextEditingController();
-                    try {
-                      await showDialog<void>(
-                        context: context,
-                        builder: (ctx) => AlertDialog(
-                          title: const Text('Reject document'),
-                          content: TextField(
-                            controller: remarkCtrl,
-                            autofocus: true,
-                            decoration: DocuTrackerStyles.inputDecoration(
-                              context,
-                              'Reason for rejection (required)',
-                              Icons.cancel_rounded,
-                            ),
-                            maxLines: 3,
-                          ),
-                          actions: [
-                            OutlinedButton(
-                              onPressed: () => Navigator.of(ctx).pop(),
-                              style: DocuTrackerStyles.outlinedButtonStyle(
-                                context,
-                              ),
-                              child: const Text('Cancel'),
-                            ),
-                            FilledButton(
-                              onPressed: () async {
-                                final remarks = remarkCtrl.text.trim();
-                                if (remarks.isEmpty) return;
-                                Navigator.of(ctx).pop();
-                                final ok = await provider.rejectDocument(
-                                  doc,
-                                  remarks: remarks,
-                                  actionBy: userId,
-                                );
-                                if (!mounted) return;
-                                if (ok) {
-                                  _onWorkflowActionSuccess(
-                                    'Document rejected.',
-                                  );
-                                } else {
-                                  _showActionError(
-                                    provider,
-                                    fallback: 'Failed to reject document.',
-                                  );
-                                }
-                              },
-                              style: DocuTrackerStyles.destructiveButtonStyle(),
-                              child: const Text('Reject'),
-                            ),
-                          ],
-                        ),
-                      );
-                    } finally {
-                      remarkCtrl.dispose();
-                    }
+                    final rejected = await showDialog<bool>(
+                      context: context,
+                      barrierDismissible: false,
+                      builder: (_) => DocuTrackerRejectDialog(
+                        onConfirm: (remarks) async {
+                          final ok = await provider.rejectDocument(
+                            doc,
+                            remarks: remarks,
+                            actionBy: userId,
+                          );
+                          if (!mounted) return false;
+                          if (!ok) {
+                            _showActionError(
+                              provider,
+                              fallback: 'Failed to reject document.',
+                            );
+                          }
+                          return ok;
+                        },
+                      ),
+                    );
+                    if (!mounted || rejected != true) return;
+                    await _onWorkflowActionSuccess(
+                      docuTrackerWorkflowActionMessage(
+                        action: 'reject',
+                        document: _resolveDocForView(provider),
+                      ),
+                    );
                   },
             icon: const Icon(Icons.cancel_rounded, size: 18),
             label: const Text('Reject and Stop'),
@@ -1928,7 +2181,7 @@ class _DocuTrackerDocumentDetailScreenState
               ),
               FilledButton(
                 onPressed: () => Navigator.of(ctx).pop(true),
-                style: DocuTrackerStyles.primaryBrandButtonStyle(),
+                style: DocuTrackerStyles.primaryBrandButtonStyle(ctx),
                 child: Text(confirmLabel),
               ),
             ],
@@ -2005,7 +2258,7 @@ class _DocuTrackerDocumentDetailScreenState
                 _showActionError(provider, fallback: 'Could not save remark.');
               }
             },
-            style: DocuTrackerStyles.primaryBrandButtonStyle(),
+            style: DocuTrackerStyles.primaryBrandButtonStyle(ctx),
             child: const Text('Save'),
           ),
         ],
@@ -2013,23 +2266,40 @@ class _DocuTrackerDocumentDetailScreenState
     ).whenComplete(remarkCtrl.dispose);
   }
 
-  List<DocumentHistoryEntry> _sortedHistory(List<DocumentHistoryEntry> raw) {
-    final copy = [...raw];
-    int key(DocumentHistoryEntry e) => e.createdAt?.millisecondsSinceEpoch ?? 0;
-    copy.sort((a, b) => key(a).compareTo(key(b)));
-    return copy;
+  Future<void> _openAllActivities({
+    String? documentId,
+    List<DocumentHistoryEntry> localEntries = const [],
+  }) {
+    return showDocuTrackerSlideInPanel<void>(
+      context: context,
+      title: 'Activity history',
+      width: 520,
+      child: DocuTrackerActivityHistoryPanel(
+        loadPage: documentId == null
+            ? null
+            : ({required limit, required offset, String? action}) {
+                return DocuTrackerRepository.instance.listDocumentHistoryPage(
+                  documentId,
+                  limit: limit,
+                  offset: offset,
+                  action: action,
+                );
+              },
+        localEntries: documentId == null ? localEntries : const [],
+      ),
+    );
   }
 
-  Future<void> _postNote(
+  Future<bool> _postNote(
     DocuTrackerProvider provider,
     DocuTrackerDocument doc,
     String userId,
   ) async {
     final remarks = _noteController.text.trim();
-    if (remarks.isEmpty || _postingNote) return;
+    if (remarks.isEmpty || _postingNote) return false;
     setState(() => _postingNote = true);
     final ok = await provider.addRemark(doc, actorId: userId, remarks: remarks);
-    if (!mounted) return;
+    if (!mounted) return false;
     setState(() => _postingNote = false);
     if (ok) {
       _noteController.clear();
@@ -2037,9 +2307,10 @@ class _DocuTrackerDocumentDetailScreenState
         context,
       ).showSnackBar(const SnackBar(content: Text('Note posted.')));
       provider.loadDocumentHistory(doc.id!);
-    } else {
-      _showActionError(provider, fallback: 'Failed to post note.');
+      return true;
     }
+    _showActionError(provider, fallback: 'Failed to post note.');
+    return false;
   }
 
   Widget _buildNoteComposer(
@@ -2047,52 +2318,10 @@ class _DocuTrackerDocumentDetailScreenState
     DocuTrackerDocument doc,
     String userId,
   ) {
-    final busy = _postingNote || provider.loading;
-    return Container(
-      key: const Key('docutracker-detail-note-composer'),
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: DocuTrackerTokens.canvasOf(context),
-        borderRadius: BorderRadius.circular(DocuTrackerTokens.radiusSm),
-        border: Border.all(color: DocuTrackerTokens.borderSubtleOf(context)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Text(
-            'ADD INTERNAL NOTE FOR REVIEWERS',
-            style: TextStyle(
-              fontSize: 10.5,
-              fontWeight: FontWeight.w700,
-              letterSpacing: 0.6,
-              color: DocuTrackerTokens.textMutedOf(context),
-            ),
-          ),
-          const SizedBox(height: 8),
-          TextField(
-            controller: _noteController,
-            enabled: !busy,
-            minLines: 2,
-            maxLines: 4,
-            decoration: DocuTrackerStyles.inputDecoration(
-              context,
-              'Write a note (logged to the audit trail)',
-              Icons.edit_note_rounded,
-            ),
-          ),
-          const SizedBox(height: 10),
-          Align(
-            alignment: Alignment.centerRight,
-            child: FilledButton.icon(
-              key: const Key('docutracker-detail-post-note'),
-              onPressed: busy ? null : () => _postNote(provider, doc, userId),
-              style: DocuTrackerStyles.primaryButtonStyle(),
-              icon: const Icon(Icons.send_rounded, size: 16),
-              label: const Text('Post Note'),
-            ),
-          ),
-        ],
-      ),
+    return DocuTrackerInternalNoteComposer(
+      controller: _noteController,
+      busy: _postingNote || provider.loading,
+      onPost: () => _postNote(provider, doc, userId),
     );
   }
 
@@ -2104,7 +2333,7 @@ class _DocuTrackerDocumentDetailScreenState
     if (_usesLinkedLeaveWorkflow(doc)) {
       return _buildLinkedLeaveHistorySection();
     }
-    final sorted = _sortedHistory(provider.documentHistory);
+    final history = provider.documentHistory;
     final showCount = !_permissionsLoading && _canViewAuditTrail;
 
     return DocuTrackerDetailSectionCard(
@@ -2113,14 +2342,16 @@ class _DocuTrackerDocumentDetailScreenState
       subtitle: 'Document updates, status changes, and decisions in order',
       trailing: showCount
           ? Text(
-              '${sorted.length} ${sorted.length == 1 ? 'event' : 'events'} logged',
+              '${history.length} ${history.length == 1 ? 'event' : 'events'} logged',
               style: DocuTrackerTokens.metaStyle(context),
             )
           : null,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          if (!_permissionsLoading && _canEdit && userId.isNotEmpty) ...[
+          if (!_permissionsLoading &&
+              _canViewAuditTrail &&
+              userId.isNotEmpty) ...[
             _buildNoteComposer(provider, doc, userId),
             const SizedBox(height: 16),
           ],
@@ -2142,21 +2373,22 @@ class _DocuTrackerDocumentDetailScreenState
                 ),
               ),
             )
-          else if (sorted.isEmpty)
+          else if (history.isEmpty)
             Padding(
-              padding: const EdgeInsets.symmetric(vertical: 16),
-              child: Center(
-                child: Text(
-                  'No history yet.',
-                  style: TextStyle(
-                    color: AppTheme.dashTextSecondaryOf(context),
-                    fontSize: 14,
-                  ),
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              child: Text(
+                'No history yet.',
+                style: TextStyle(
+                  color: AppTheme.dashTextSecondaryOf(context),
+                  fontSize: 14,
                 ),
               ),
             )
           else
-            _Timeline(entries: sorted),
+            DocuTrackerActivityPreview(
+              entries: history,
+              onViewAll: () => _openAllActivities(documentId: doc.id),
+            ),
         ],
       ),
     );
@@ -2209,10 +2441,12 @@ class _DocuTrackerDocumentDetailScreenState
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         for (var i = 0; i < steps.length; i++) ...[
-                          _WorkflowStepNode(
-                            order: steps[i].stepOrder,
-                            label: steps[i].label,
-                            indicator: steps[i].indicator,
+                          DocuTrackerWorkflowStepNode(
+                            step: DocuTrackerStepProgress(
+                              order: steps[i].stepOrder,
+                              name: steps[i].label,
+                              indicator: steps[i].indicator,
+                            ),
                           ),
                           if (i < steps.length - 1)
                             Container(
@@ -2251,9 +2485,7 @@ class _DocuTrackerDocumentDetailScreenState
 
   Widget _buildLinkedLeaveHistorySection() {
     final workflow = _linkedLeaveWorkflow;
-    final sorted = _sortedHistory(
-      workflow?.history ?? const <DocumentHistoryEntry>[],
-    );
+    final history = workflow?.history ?? const <DocumentHistoryEntry>[];
     return DocuTrackerDetailSectionCard(
       icon: Icons.history_rounded,
       title: 'Activity & Audit Trail',
@@ -2261,25 +2493,26 @@ class _DocuTrackerDocumentDetailScreenState
       trailing: workflow == null
           ? null
           : Text(
-              '${sorted.length} ${sorted.length == 1 ? 'event' : 'events'} logged',
+              '${history.length} ${history.length == 1 ? 'event' : 'events'} logged',
               style: DocuTrackerTokens.metaStyle(context),
             ),
       child: workflow == null
           ? _linkedLeaveStatusMessage(forHistory: true)
-          : sorted.isEmpty
+          : history.isEmpty
           ? Padding(
-              padding: const EdgeInsets.symmetric(vertical: 16),
-              child: Center(
-                child: Text(
-                  'No history yet.',
-                  style: TextStyle(
-                    color: AppTheme.dashTextSecondaryOf(context),
-                    fontSize: 14,
-                  ),
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              child: Text(
+                'No history yet.',
+                style: TextStyle(
+                  color: AppTheme.dashTextSecondaryOf(context),
+                  fontSize: 14,
                 ),
               ),
             )
-          : _Timeline(entries: sorted),
+          : DocuTrackerActivityPreview(
+              entries: history,
+              onViewAll: () => _openAllActivities(localEntries: history),
+            ),
     );
   }
 
@@ -2297,176 +2530,6 @@ String _getInitials(String name) {
     return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
   }
   return parts[0][0].toUpperCase();
-}
-
-class _WorkflowStepStrip extends StatelessWidget {
-  const _WorkflowStepStrip({
-    required this.steps,
-    required this.document,
-    required this.history,
-  });
-
-  final List<WorkflowStep> steps;
-  final DocuTrackerDocument document;
-  final List<DocumentHistoryEntry> history;
-
-  @override
-  Widget build(BuildContext context) {
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            for (var i = 0; i < steps.length; i++) ...[
-              _WorkflowStepNode(
-                order: steps[i].stepOrder,
-                label: steps[i].label ?? 'Step ${steps[i].stepOrder}',
-                indicator: DocuTrackerWorkflowPhase.indicatorForStep(
-                  doc: document,
-                  stepOrder: steps[i].stepOrder,
-                  history: history,
-                ),
-              ),
-              if (i < steps.length - 1)
-                Container(
-                  margin: const EdgeInsets.only(top: 14, left: 4, right: 4),
-                  width: 40,
-                  height: 2,
-                  color:
-                      DocuTrackerWorkflowPhase.indicatorForStep(
-                        doc: document,
-                        stepOrder: steps[i].stepOrder,
-                        history: history,
-                      ).isCompleted
-                      ? DocuTrackerTokens.brand
-                      : DocuTrackerTokens.borderStrongOf(context),
-                ),
-            ],
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _WorkflowStepNode extends StatelessWidget {
-  const _WorkflowStepNode({
-    required this.order,
-    required this.label,
-    required this.indicator,
-  });
-
-  final int order;
-  final String label;
-  final DocuTrackerStepIndicator indicator;
-
-  @override
-  Widget build(BuildContext context) {
-    final isCurrent = indicator.kind == DocuTrackerStepIndicatorKind.current;
-    final isDone = indicator.isCompleted;
-    final isReturned = indicator.kind == DocuTrackerStepIndicatorKind.returned;
-    final isRejected = indicator.kind == DocuTrackerStepIndicatorKind.rejected;
-    final isOverdue = indicator.kind == DocuTrackerStepIndicatorKind.overdue;
-    final isEscalated =
-        indicator.kind == DocuTrackerStepIndicatorKind.escalated;
-    final isCancelled =
-        indicator.kind == DocuTrackerStepIndicatorKind.cancelled;
-
-    final statusColor = switch (indicator.kind) {
-      DocuTrackerStepIndicatorKind.approved => const Color(0xFF047857),
-      DocuTrackerStepIndicatorKind.forwarded => DocuTrackerTokens.brand,
-      DocuTrackerStepIndicatorKind.returned => const Color(0xFFB45309),
-      DocuTrackerStepIndicatorKind.rejected => const Color(0xFFB91C1C),
-      DocuTrackerStepIndicatorKind.overdue => const Color(0xFFDC2626),
-      DocuTrackerStepIndicatorKind.escalated => const Color(0xFF7C3AED),
-      DocuTrackerStepIndicatorKind.cancelled => DocuTrackerTokens.textMutedOf(
-        context,
-      ),
-      DocuTrackerStepIndicatorKind.current => DocuTrackerTokens.brand,
-      _ => DocuTrackerTokens.textMutedOf(context),
-    };
-    final labelColor = DocuTrackerTokens.toneOf(context, statusColor);
-    final emphasized =
-        isCurrent ||
-        isDone ||
-        isReturned ||
-        isRejected ||
-        isOverdue ||
-        isEscalated ||
-        isCancelled;
-    final nodeColor = emphasized
-        ? statusColor
-        : DocuTrackerTokens.insetOf(context);
-    final borderColor = emphasized
-        ? statusColor
-        : DocuTrackerTokens.borderStrongOf(context);
-
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Container(
-          width: 34,
-          height: 34,
-          decoration: BoxDecoration(
-            color: nodeColor,
-            shape: BoxShape.circle,
-            border: Border.all(color: borderColor, width: 2),
-            boxShadow: isCurrent || isReturned || isOverdue || isEscalated
-                ? [
-                    BoxShadow(
-                      color: DocuTrackerTokens.brand.withValues(alpha: 0.35),
-                      blurRadius: 10,
-                      spreadRadius: 1,
-                    ),
-                  ]
-                : null,
-          ),
-          child: Center(
-            child: isDone
-                ? const Icon(Icons.check_rounded, size: 18, color: Colors.white)
-                : Text(
-                    order.toString(),
-                    style: TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w800,
-                      color: emphasized
-                          ? Colors.white
-                          : DocuTrackerTokens.textMutedOf(context),
-                    ),
-                  ),
-          ),
-        ),
-        const SizedBox(height: 8),
-        SizedBox(
-          width: 88,
-          child: Text(
-            label,
-            textAlign: TextAlign.center,
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(
-              fontSize: 12,
-              fontWeight: emphasized ? FontWeight.w800 : FontWeight.w600,
-              color: DocuTrackerTokens.textPrimaryOf(context),
-              height: 1.2,
-            ),
-          ),
-        ),
-        const SizedBox(height: 2),
-        Text(
-          indicator.label,
-          style: TextStyle(
-            fontSize: 10,
-            fontWeight: FontWeight.w800,
-            letterSpacing: 0.4,
-            color: labelColor,
-          ),
-        ),
-      ],
-    );
-  }
 }
 
 class _CurrentAssignmentCard extends StatelessWidget {
@@ -2753,349 +2816,6 @@ class _InfoRow extends StatelessWidget {
         ],
       ),
     );
-  }
-}
-
-class _Timeline extends StatelessWidget {
-  const _Timeline({required this.entries});
-
-  final List<DocumentHistoryEntry> entries;
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      children: [
-        for (var i = 0; i < entries.length; i++)
-          _TimelineItem(
-            entry: entries[i],
-            isFirst: i == 0,
-            isLast: i == entries.length - 1,
-          ),
-      ],
-    );
-  }
-}
-
-class _TimelineItem extends StatelessWidget {
-  const _TimelineItem({
-    required this.entry,
-    required this.isFirst,
-    required this.isLast,
-  });
-
-  final DocumentHistoryEntry entry;
-  final bool isFirst;
-  final bool isLast;
-
-  @override
-  Widget build(BuildContext context) {
-    final isSystemEvent =
-        entry.isOverdueLog ||
-        entry.isEscalationLog ||
-        entry.action == 'overdue' ||
-        entry.action == 'escalated';
-    final isPositive =
-        entry.action == 'approved' ||
-        entry.action == 'created' ||
-        entry.action == 'forwarded';
-    final isNegative = entry.action == 'rejected' || entry.action == 'returned';
-
-    final dark = DocuTrackerTokens.isDark(context);
-    Color dotColor = DocuTrackerTokens.textMutedOf(context);
-    Color bgColor = DocuTrackerTokens.insetOf(context);
-    Color borderColor = DocuTrackerTokens.borderSubtleOf(context);
-    Color titleColor = DocuTrackerTokens.textPrimaryOf(context);
-    Color timeColor = DocuTrackerTokens.textMutedOf(context);
-
-    if (isSystemEvent) {
-      dotColor = const Color(0xFFF59E0B);
-      bgColor = dark
-          ? dotColor.withValues(alpha: 0.12)
-          : const Color(0xFFFFFBEB);
-      borderColor = dark
-          ? dotColor.withValues(alpha: 0.35)
-          : const Color(0xFFFDE68A);
-      titleColor = dark ? const Color(0xFFFCD34D) : const Color(0xFF92400E);
-      timeColor = dark ? const Color(0xFFFBBF24) : const Color(0xFFB45309);
-    } else if (isPositive) {
-      dotColor = const Color(0xFF10B981);
-    } else if (isNegative) {
-      dotColor = const Color(0xFFEF4444);
-    }
-    final noteColor = DocuTrackerTokens.textSecondaryOf(context);
-
-    return IntrinsicHeight(
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          // Timeline Track
-          SizedBox(
-            width: 32,
-            child: Column(
-              children: [
-                Container(
-                  width: 32,
-                  height: 32,
-                  decoration: BoxDecoration(
-                    color: DocuTrackerTokens.surfaceOf(context),
-                    shape: BoxShape.circle,
-                    border: Border.all(
-                      color: dotColor.withValues(alpha: 0.3),
-                      width: 2,
-                    ),
-                  ),
-                  child: Center(
-                    child: isSystemEvent
-                        ? Icon(
-                            entry.isEscalationLog
-                                ? Icons.trending_up_rounded
-                                : Icons.alarm_rounded,
-                            size: 16,
-                            color: dotColor,
-                          )
-                        : CircleAvatar(
-                            radius: 14,
-                            backgroundColor: dotColor.withValues(alpha: 0.1),
-                            child: Text(
-                              _getInitials(_actorDisplayName(entry)),
-                              style: TextStyle(
-                                color: dotColor,
-                                fontSize: 9,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                          ),
-                  ),
-                ),
-                if (!isLast)
-                  Expanded(
-                    child: Container(
-                      width: 2,
-                      color: DocuTrackerTokens.borderSubtleOf(context),
-                    ),
-                  ),
-              ],
-            ),
-          ),
-          const SizedBox(width: 16),
-          // Content Card
-          Expanded(
-            child: Padding(
-              padding: const EdgeInsets.only(bottom: 24),
-              child: Container(
-                decoration: BoxDecoration(
-                  color: bgColor,
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: borderColor),
-                  boxShadow: [
-                    if (!isSystemEvent)
-                      BoxShadow(
-                        color: Colors.black.withValues(alpha: 0.02),
-                        blurRadius: 4,
-                        offset: const Offset(0, 2),
-                      ),
-                  ],
-                ),
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Expanded(
-                          child: Text(
-                            isSystemEvent
-                                ? _entryLabel(entry)
-                                : '${_entryLabel(entry)} by ${_actorDisplayName(entry)}',
-                            style: TextStyle(
-                              color: titleColor,
-                              fontSize: 14,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                        ),
-                        if (entry.createdAt != null)
-                          Text(
-                            _formatEntryTime(entry.createdAt!),
-                            style: TextStyle(
-                              color: timeColor,
-                              fontSize: 12,
-                              fontWeight: FontWeight.w500,
-                            ),
-                          ),
-                      ],
-                    ),
-                    if (entry.fromStep != null ||
-                        entry.toStep != null ||
-                        entry.fromStatus != null ||
-                        entry.toStatus != null) ...[
-                      const SizedBox(height: 12),
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 10,
-                          vertical: 8,
-                        ),
-                        decoration: BoxDecoration(
-                          color: DocuTrackerTokens.highlightPeachOf(context),
-                          borderRadius: BorderRadius.circular(8),
-                          border: Border.all(
-                            color: DocuTrackerTokens.highlightPeachBorderOf(
-                              context,
-                            ),
-                          ),
-                        ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            if (entry.fromStep != null || entry.toStep != null)
-                              Text(
-                                'Step: ${_stepLine(entry)}',
-                                style: TextStyle(
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.w700,
-                                  letterSpacing: 0.3,
-                                  color: noteColor,
-                                ),
-                              ),
-                            if ((entry.fromStep != null ||
-                                    entry.toStep != null) &&
-                                (entry.fromStatus != null ||
-                                    entry.toStatus != null))
-                              const SizedBox(height: 6),
-                            if (entry.fromStatus != null ||
-                                entry.toStatus != null)
-                              Text(
-                                'Status: ${_statusLine(entry)}',
-                                style: TextStyle(
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.w700,
-                                  letterSpacing: 0.3,
-                                  color: noteColor,
-                                ),
-                              ),
-                          ],
-                        ),
-                      ),
-                    ],
-                    if (entry.remarks != null && entry.remarks!.isNotEmpty) ...[
-                      const SizedBox(height: 12),
-                      Container(
-                        width: double.infinity,
-                        decoration: BoxDecoration(
-                          color: DocuTrackerTokens.highlightPeachOf(context),
-                          borderRadius: BorderRadius.circular(8),
-                          border: Border.all(
-                            color: DocuTrackerTokens.highlightPeachBorderOf(
-                              context,
-                            ),
-                          ),
-                        ),
-                        clipBehavior: Clip.antiAlias,
-                        child: IntrinsicHeight(
-                          child: Row(
-                            crossAxisAlignment: CrossAxisAlignment.stretch,
-                            children: [
-                              Container(
-                                width: 4,
-                                color: isSystemEvent
-                                    ? DocuTrackerTokens.alertOrange
-                                    : DocuTrackerStyles.primaryGreen,
-                              ),
-                              Expanded(
-                                child: Padding(
-                                  padding: const EdgeInsets.all(12),
-                                  child: Text(
-                                    entry.remarks!,
-                                    style: TextStyle(
-                                      color: noteColor,
-                                      fontSize: 12,
-                                      height: 1.4,
-                                      fontWeight: FontWeight.w600,
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ],
-                  ],
-                ),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  String _entryLabel(DocumentHistoryEntry entry) {
-    final department = entry.releasedToDepartmentName;
-    if (entry.action == 'released' && department != null) {
-      return 'Released to $department';
-    }
-    return _actionLabel(entry.action);
-  }
-
-  String _actionLabel(String? action) {
-    return switch (action) {
-      'created' => 'Document Created',
-      'released' => 'Released',
-      'assigned' => 'Document assigned',
-      'approved' => 'Approved',
-      'rejected' => 'Rejected',
-      'returned' => 'Returned to sender',
-      'forwarded' => 'Forwarded',
-      'overdue' => 'Overdue',
-      'escalated' => 'Escalated',
-      'remark' => 'Remark added',
-      'saved_draft' => 'Draft saved',
-      'submitted' => 'Submitted',
-      'signed' => 'Signed',
-      'signature_replaced' => 'Signature replaced',
-      'cancelled' => 'Cancelled',
-      'department_head_approved' => 'Approved by department',
-      'department_head_rejected' => 'Rejected by department',
-      'department_head_returned' => 'Returned by department',
-      _ => action ?? '—',
-    };
-  }
-
-  String _actorDisplayName(DocumentHistoryEntry entry) {
-    final name = entry.actorName?.trim();
-    if (name != null && name.isNotEmpty) return name;
-    final id = entry.actorId?.trim();
-    if (id != null && id.isNotEmpty) {
-      return 'Employee';
-    }
-    return 'Employee';
-  }
-
-  static String _formatEntryTime(DateTime dt) {
-    final local = dt.toLocal();
-    return '${local.year}-${local.month.toString().padLeft(2, '0')}-${local.day.toString().padLeft(2, '0')} • '
-        '${local.hour.toString().padLeft(2, '0')}:${local.minute.toString().padLeft(2, '0')}';
-  }
-
-  static String _stepLine(DocumentHistoryEntry e) {
-    if (e.fromStep != null && e.toStep != null) {
-      return 'Step ${e.fromStep} → ${e.toStep}';
-    }
-    if (e.toStep != null) return 'Step ${e.toStep}';
-    if (e.fromStep != null) return 'Step ${e.fromStep}';
-    return '';
-  }
-
-  static String _statusLine(DocumentHistoryEntry e) {
-    final from = e.fromStatus?.displayName;
-    final to = e.toStatus?.displayName;
-    if (from != null && to != null) return '$from → $to';
-    if (to != null) return to;
-    if (from != null) return from;
-    return '';
   }
 }
 

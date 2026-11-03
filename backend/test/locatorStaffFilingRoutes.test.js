@@ -1,9 +1,32 @@
 const test=require('node:test');const assert=require('node:assert/strict');
 const {withMockedModule,clearModule}=require('./helpers/moduleMocks');
 const EMPLOYEE='11111111-1111-4111-8111-111111111111',ACTOR='22222222-2222-4222-8222-222222222222';
+test('paper employee directory precedes date selection while dated availability remains mandatory for ordinary filing',async()=>{
+  const calls=[];
+  const controller=require('../src/modules/locator/controllers/staffFiling.controller')({
+    parseLocatorDateOnly:require('../src/services/locatorFilingRules').parseLocatorDateOnly,
+    pool:{query:async(sql,params)=>{calls.push({sql,params});return {rows:[{id:EMPLOYEE,full_name:'Alice',total:1}]};}},
+  });
+  const response=()=>({statusCode:200,status(code){this.statusCode=code;return this;},json(body){this.body=body;return this;}});
+  const res=response();
+  await controller.listFilingEmployees({user:{id:ACTOR},query:{paper:'true',search:'HR',offset:'100'}},res);
+  assert.equal(res.statusCode,200);
+  assert.equal(res.body.employees[0].id,EMPLOYEE);
+  assert.deepEqual(calls[0].params,[ACTOR,'HR',100]);
+  assert.match(calls[0].sql,/u\.id\s*<>\s*\$1::uuid/);
+  assert.match(calls[0].sql,/u\.is_active\s*=\s*true/);
+  assert.match(calls[0].sql,/u\.role\s*<>\s*'super_admin'/,'System accounts are excluded before counting, searching and pagination');
+  assert.doesNotMatch(calls[0].sql,/shift_id|\$\d::date/,'Paper employee discovery does not depend on today’s shift');
+  for(const query of [{},{paper:'true',employee_ids:JSON.stringify([EMPLOYEE])}]){
+    const invalid=response();
+    await controller.listFilingEmployees({user:{id:ACTOR},query},invalid);
+    assert.equal(invalid.statusCode,400,'Date-based validation still requires a date');
+  }
+  assert.equal(calls.length,1);
+});
 test('staff route adapts full coverage, records the server actor and reports failures',async()=>{
   const submissions=[];
-  const restoreDb=withMockedModule('../src/config/db',{pool:{connect:async()=>{},query:async sql=>({rows:String(sql).includes('FROM assignments')
+  const restoreDb=withMockedModule('../src/config/db',{pool:{connect:async()=>{},query:async sql=>({rows:String(sql).includes('FROM holidays') ? [] : String(sql).includes('FROM assignments')
     ? [{shift_id:'shift',shift_name:'Single',punch_mode:'single_session',working_days:[1,2,3,4,5]}] : [{id:EMPLOYEE}]})}});
   const restoreService=withMockedModule('../src/services/locatorSubmissionService',{createLocatorSubmissionService:()=>({submit:async input=>{submissions.push(input);return {id:'saved',status:'pending_hr'};}})});
   clearModule('../src/routes/locatorSlips');
@@ -22,4 +45,31 @@ test('staff route adapts full coverage, records the server actor and reports fai
     await route.stack.at(-1).handle({user:{id:ACTOR,role:'hr'},body:{employee_ids:[ACTOR]}},res);
     assert.equal(res.statusCode,400);assert.equal(submissions.length,1);
   }finally{clearModule('../src/routes/locatorSlips');restoreService();restoreDb();}
+});
+
+test('staff employee picker can revalidate selected IDs for a changed date without search or page limits hiding them',async()=>{
+  const {parseLocatorDateOnly}=require('../src/services/locatorFilingRules');
+  const {validateStaffBatch}=require('../src/services/locatorStaffFiling');
+  const calls=[];
+  const controller=require('../src/modules/locator/controllers/staffFiling.controller')({
+    parseLocatorDateOnly,validateStaffBatch,
+    pool:{query:async(sql,params)=>{calls.push({sql,params});return {rows:[{id:EMPLOYEE,full_name:'Alice',total:1}]};}},
+  });
+  const response=()=>({statusCode:200,status(code){this.statusCode=code;return this;},json(body){this.body=body;return this;}});
+  const res=response();
+  await controller.listFilingEmployees({user:{id:ACTOR},query:{slip_date:'2026-10-29',employee_ids:JSON.stringify([EMPLOYEE]),search:'unrelated search',offset:'200'}},res);
+  assert.equal(res.statusCode,200);
+  assert.match(calls[0].sql,/u\.id\s*=\s*ANY\(\$5::uuid\[\]\)/);
+  assert.match(calls[0].sql,/u\.role\s*<>\s*'super_admin'/,'Changing the date cannot make a system account eligible');
+  assert.deepEqual(calls[0].params,['2026-10-29',ACTOR,'',0,[EMPLOYEE]]);
+  assert.equal(res.body.employees[0].id,EMPLOYEE);
+  for(const employee_ids of ['invalid json','[]','["not-a-uuid"]']){
+    const invalid=response();
+    await controller.listFilingEmployees({user:{id:ACTOR},query:{slip_date:'2026-10-29',employee_ids}},invalid);
+    assert.equal(invalid.statusCode,400);
+  }
+  assert.equal(calls.length,1,'Invalid selected IDs never reach the database');
+  const normal=response();
+  await controller.listFilingEmployees({user:{id:ACTOR},query:{slip_date:'2026-10-29',search:'HR',offset:'100'}},normal);
+  assert.deepEqual(calls[1].params,['2026-10-29',ACTOR,'HR',100,null]);
 });

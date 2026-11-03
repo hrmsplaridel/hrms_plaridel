@@ -36,6 +36,7 @@ $$ LANGUAGE plpgsql;
 -- USERS / EMPLOYEES
 -- =========================================
 CREATE TABLE IF NOT EXISTS users (
+  attendance_tracking_start_date DATE,
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   employee_number INT UNIQUE DEFAULT nextval('users_employee_number_seq'),
 
@@ -738,6 +739,7 @@ CREATE TABLE IF NOT EXISTS leave_types (
   is_active BOOLEAN NOT NULL DEFAULT true,
   employee_can_file BOOLEAN NOT NULL DEFAULT true,
   admin_can_file BOOLEAN NOT NULL DEFAULT true,
+  allow_approved_paper_filing BOOLEAN NOT NULL DEFAULT false,
   admin_only BOOLEAN NOT NULL DEFAULT false,
   allows_past_dates BOOLEAN NOT NULL DEFAULT true,
   requires_attachment BOOLEAN NOT NULL DEFAULT false,
@@ -800,22 +802,22 @@ CREATE TABLE IF NOT EXISTS leave_types (
 );
 
 -- Seed leave types (names must match Flutter LeaveType enum .value for API lookup).
-INSERT INTO leave_types (name, description, is_active)
+INSERT INTO leave_types (name, description, is_active, allow_approved_paper_filing)
 VALUES
-  ('vacationLeave', 'Vacation Leave', true),
-  ('mandatoryForcedLeave', 'Mandatory/Forced Leave', true),
-  ('sickLeave', 'Sick Leave', true),
-  ('maternityLeave', 'Maternity Leave', true),
-  ('paternityLeave', 'Paternity Leave', true),
-  ('specialPrivilegeLeave', 'Special Privilege Leave', true),
-  ('soloParentLeave', 'Solo Parent Leave', true),
-  ('studyLeave', 'Study Leave', true),
-  ('tenDayVawcLeave', '10-Day VAWC Leave', true),
-  ('rehabilitationPrivilege', 'Rehabilitation Privilege', true),
-  ('specialLeaveBenefitsForWomen', 'Special Leave Benefits for Women', true),
-  ('specialEmergencyCalamityLeave', 'Special Emergency (Calamity) Leave', true),
-  ('adoptionLeave', 'Adoption Leave', true),
-  ('others', 'Others', true)
+  ('vacationLeave', 'Vacation Leave', true, true),
+  ('mandatoryForcedLeave', 'Mandatory/Forced Leave', true, true),
+  ('sickLeave', 'Sick Leave', true, true),
+  ('maternityLeave', 'Maternity Leave', true, true),
+  ('paternityLeave', 'Paternity Leave', true, true),
+  ('specialPrivilegeLeave', 'Special Privilege Leave', true, true),
+  ('soloParentLeave', 'Solo Parent Leave', true, true),
+  ('studyLeave', 'Study Leave', true, true),
+  ('tenDayVawcLeave', '10-Day VAWC Leave', true, true),
+  ('rehabilitationPrivilege', 'Rehabilitation Privilege', true, true),
+  ('specialLeaveBenefitsForWomen', 'Special Leave Benefits for Women', true, true),
+  ('specialEmergencyCalamityLeave', 'Special Emergency (Calamity) Leave', true, true),
+  ('adoptionLeave', 'Adoption Leave', true, true),
+  ('others', 'Others', true, true)
 ON CONFLICT (name) DO NOTHING;
 
 UPDATE leave_types
@@ -937,6 +939,7 @@ CREATE TABLE IF NOT EXISTS leave_requests (
   employee_official_snapshot JSONB NOT NULL DEFAULT '{}'::jsonb,
   -- Field labels/types frozen with the request for reliable historical display.
   employee_detail_schema_snapshot JSONB NOT NULL DEFAULT '[]'::jsonb,
+  paper_approval_record JSONB,
   workflow_snapshot JSONB,
   signature_revision INTEGER NOT NULL DEFAULT 1 CHECK (signature_revision > 0),
   status TEXT NOT NULL DEFAULT 'pending'
@@ -1152,6 +1155,25 @@ CREATE TABLE IF NOT EXISTS leave_balance_ledger (
 );
 CREATE INDEX IF NOT EXISTS idx_leave_balance_ledger_user_created
   ON leave_balance_ledger(user_id, created_at DESC);
+CREATE TABLE IF NOT EXISTS leave_opening_balance_setups (
+  user_id UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  cutoff_date DATE NOT NULL CHECK (EXTRACT(DAY FROM (cutoff_date + 1)) = 1),
+  sick_leave_days NUMERIC(10,3) NOT NULL CHECK (sick_leave_days >= 0),
+  vacation_leave_days NUMERIC(10,3) NOT NULL CHECK (vacation_leave_days >= 0),
+  reason TEXT NOT NULL CHECK (btrim(reason) <> ''),
+  created_by UUID REFERENCES users(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  qualifying_leave_days NUMERIC(10,3),
+  usage_reference TEXT,
+  usage_verified_by UUID REFERENCES users(id) ON DELETE SET NULL,
+  usage_verified_at TIMESTAMPTZ,
+  CONSTRAINT leave_opening_usage_check CHECK (
+    (qualifying_leave_days IS NULL AND usage_reference IS NULL AND usage_verified_at IS NULL)
+    OR (qualifying_leave_days IS NOT NULL AND qualifying_leave_days BETWEEN 0 AND 366
+      AND usage_reference IS NOT NULL AND btrim(usage_reference) <> '' AND usage_verified_at IS NOT NULL)
+  )
+);
+
 CREATE INDEX IF NOT EXISTS idx_leave_balance_ledger_action
   ON leave_balance_ledger(action);
 CREATE INDEX IF NOT EXISTS idx_leave_balance_ledger_leave_request
@@ -1442,6 +1464,7 @@ CREATE TABLE IF NOT EXISTS locator_slips (
   final_review_route TEXT NOT NULL DEFAULT 'hr',
   final_reviewer_user_id UUID REFERENCES users(id) ON DELETE SET NULL,
   is_retroactive_correction BOOLEAN NOT NULL DEFAULT false,
+  paper_approval_record JSONB,
   retroactive_correction_reason TEXT,
   retroactive_corrected_by UUID REFERENCES users(id) ON DELETE SET NULL,
   retroactive_corrected_at TIMESTAMPTZ,
@@ -2176,6 +2199,7 @@ CREATE TABLE IF NOT EXISTS recruitment_applications (
   final_interview_passed BOOLEAN,
   hired_user_id UUID REFERENCES users(id) ON DELETE SET NULL,
   hr_account_setup_done BOOLEAN NOT NULL DEFAULT FALSE,
+  hr_account_setup_linked_sync BOOLEAN NOT NULL DEFAULT FALSE,
   hire_credentials_email_sent_at TIMESTAMPTZ,
   hire_login_username TEXT,
   hire_login_password TEXT,
@@ -2433,6 +2457,7 @@ CREATE TABLE IF NOT EXISTS mayor_endorsement_requests (
   meeting_decided_by UUID REFERENCES users(id) ON DELETE SET NULL,
   meeting_decision_remarks TEXT,
   meeting_reschedule_proposed_at TIMESTAMPTZ,
+  is_test BOOLEAN NOT NULL DEFAULT false,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
@@ -2971,6 +2996,7 @@ CREATE TABLE IF NOT EXISTS docutracker_document_types (
   is_enabled BOOLEAN NOT NULL DEFAULT true,
   -- Approved documents of this type wait for an authorized release to a department.
   requires_release BOOLEAN NOT NULL DEFAULT false,
+  print_template_version_id UUID,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   CONSTRAINT docutracker_document_types_type_not_blank
@@ -2986,6 +3012,36 @@ VALUES
   ('memo', 'Memo', 'Internal memorandum document', 'MEMO', true),
   ('purchaseRequest', 'Purchase Request', 'Purchase request document', 'PR', false)
 ON CONFLICT (document_type) DO NOTHING;
+
+CREATE TABLE IF NOT EXISTS docutracker_print_template_versions (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  document_type TEXT NOT NULL
+    REFERENCES docutracker_document_types(document_type) ON DELETE CASCADE,
+  background_pdf BYTEA,
+  background_name TEXT,
+  print_layout JSONB,
+  created_by UUID REFERENCES users(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT docutracker_print_template_versions_layout_object_check
+    CHECK (print_layout IS NULL OR jsonb_typeof(print_layout) = 'object')
+);
+
+CREATE INDEX IF NOT EXISTS idx_docutracker_print_template_versions_type
+  ON docutracker_print_template_versions (document_type, created_at DESC);
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conname = 'docutracker_document_types_print_template_version_fkey'
+  ) THEN
+    ALTER TABLE docutracker_document_types
+      ADD CONSTRAINT docutracker_document_types_print_template_version_fkey
+      FOREIGN KEY (print_template_version_id)
+      REFERENCES docutracker_print_template_versions(id)
+      ON DELETE SET NULL;
+  END IF;
+END $$;
 
 CREATE TABLE IF NOT EXISTS docutracker_document_files (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -3698,6 +3754,12 @@ CREATE INDEX IF NOT EXISTS idx_mayor_endorsement_requests_submitted
   ON mayor_endorsement_requests(submitted_at DESC);
 CREATE INDEX IF NOT EXISTS idx_mayor_endorsement_requests_office
   ON mayor_endorsement_requests(requested_office_id, destination_office_id);
+CREATE INDEX IF NOT EXISTS idx_mayor_endorsement_requests_meeting_request_status
+  ON mayor_endorsement_requests(meeting_request_status);
+CREATE INDEX IF NOT EXISTS idx_mayor_endorsement_requests_endorsed_at
+  ON mayor_endorsement_requests(endorsed_at DESC NULLS LAST);
+CREATE INDEX IF NOT EXISTS idx_mayor_endorsement_requests_is_test
+  ON mayor_endorsement_requests(is_test) WHERE is_test = true;
 CREATE INDEX IF NOT EXISTS idx_mayor_endorsement_activity_request_created
   ON mayor_endorsement_activity_logs(request_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_selection_lineup_entries_created

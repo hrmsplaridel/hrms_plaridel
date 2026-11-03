@@ -127,6 +127,25 @@ module.exports = function createLeaveControllers({
                 endDateStr: mapped.end_date,
               }),
             );
+            const completedStep = workflowEngine.stepLabel(workflowDecision.step);
+            const nextStep = workflowEngine.stepLabel(
+              workflowDecision.snapshot.steps[workflowDecision.snapshot.current_step],
+            );
+            notifySafe(() =>
+              leaveNotifications.notifyEmployee(pool, {
+                employeeUserId: targetUserId,
+                leaveRequestId: id,
+                type: 'leave_workflow_step_approved',
+                title: 'Leave request forwarded for approval',
+                body: `${completedStep} approved. Your leave request is awaiting ${nextStep}.${remarks ? ` ${remarks}` : ''}`,
+                metadata: {
+                  reviewer_remarks: remarks,
+                  completed_step: completedStep,
+                  next_step: nextStep,
+                  workflow_version: workflowDecision.snapshot.version,
+                },
+              }),
+            );
             broadcastLeaveUpdated('workflow_step_approved', mapped);
             return res.json(mapped);
           }

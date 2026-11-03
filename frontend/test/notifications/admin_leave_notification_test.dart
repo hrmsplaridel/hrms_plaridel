@@ -6,6 +6,7 @@ void main() {
   for (final role in ['admin', 'hr']) {
     for (final type in [
       'leave_approved',
+      'leave_workflow_step_approved',
       'leave_endorsed_department_head',
       'leave_rejected_department_head',
       'leave_rejected_hr',

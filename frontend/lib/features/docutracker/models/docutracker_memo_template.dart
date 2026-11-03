@@ -95,10 +95,10 @@ String docuTrackerMemoDateText(DateTime value) {
   return '${_months[manila.month - 1]} ${manila.day}, ${manila.year}';
 }
 
-enum DocuTrackerMemoSlot { preparedBy, approvedBy }
+enum DocuTrackerMemoSlot { preparedBy, notedBy, approvedBy }
 
-/// One fixed signatory block of the official Memo (Prepared by / Approved
-/// by). Its printed name and position come only from the signer data the
+/// One fixed signatory block of the official Memo (Prepared by / Noted by /
+/// Approved by). Its printed name and position come only from the signer data the
 /// server returns, never from document text, so the builder and the PDF
 /// always print the same person.
 ///
@@ -117,6 +117,7 @@ class DocuTrackerMemoSignatory {
 
   static String labelOf(DocuTrackerMemoSlot slot) => switch (slot) {
     DocuTrackerMemoSlot.preparedBy => DocuTrackerMemoLayout.preparedFieldLabel,
+    DocuTrackerMemoSlot.notedBy => DocuTrackerMemoLayout.notedFieldLabel,
     DocuTrackerMemoSlot.approvedBy => DocuTrackerMemoLayout.approvedFieldLabel,
   };
 
@@ -138,6 +139,7 @@ class DocuTrackerMemoSignatory {
   static bool isSlotField(DocuTrackerSignatureField field) =>
       field.pageNumber == 1 &&
       (field.label == DocuTrackerMemoLayout.preparedFieldLabel ||
+          field.label == DocuTrackerMemoLayout.notedFieldLabel ||
           field.label == DocuTrackerMemoLayout.approvedFieldLabel);
 
   bool get isAssigned => field != null;
@@ -160,7 +162,8 @@ class DocuTrackerMemoSignatory {
     );
     if (name == null) return null;
     final upper = name.toUpperCase();
-    if (!isMayor || upper.startsWith('HON.') || upper.startsWith('HON ')) {
+    final mayorLine = slot == DocuTrackerMemoSlot.approvedBy && isMayor;
+    if (!mayorLine || upper.startsWith('HON.') || upper.startsWith('HON ')) {
       return upper;
     }
     return 'HON. $upper';
@@ -183,7 +186,8 @@ class DocuTrackerMemoSignatory {
 
   /// Shown instead of a name when nobody is assigned to the slot.
   String get unassignedMessage => switch (slot) {
-    DocuTrackerMemoSlot.preparedBy => 'No preparer assigned',
+    DocuTrackerMemoSlot.preparedBy => 'No HR head configured',
+    DocuTrackerMemoSlot.notedBy => "No Mayor's Office configured",
     DocuTrackerMemoSlot.approvedBy => 'No Mayor signatory configured',
   };
 }

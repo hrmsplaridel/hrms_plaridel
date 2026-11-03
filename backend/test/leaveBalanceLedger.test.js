@@ -130,3 +130,102 @@ test('admin adjustment validates a non-zero three-decimal delta and required rea
   );
   assert.throws(() => normalizeLeaveBalanceAdjustmentReason('  '), /reason is required/i);
 });
+
+for (const value of [true, false, null, undefined, [], [2], {}, '', '  ', '0x10', '0b10',
+  '1e2', '2days', NaN, Infinity, -Infinity, 1e308, -1e308, 10000000, -10000000,
+  '9999999.9995', '-9999999.9996']) {
+  test(`manual adjustment rejects invalid numeric input ${String(value)}`, async () => {
+    const queries = [];
+    await assert.rejects(applyAdminLeaveBalanceAdjustment({
+      query: async sql => { queries.push(sql); return { rows: [] }; },
+    }, { userId: USER_ID, leaveType: 'sickLeave', daysChanged: value, remarks: 'HR correction' }),
+    err => err.statusCode === 400 && /adjustment_days/i.test(err.message));
+    assert.deepEqual(queries, [], 'Invalid delta must be rejected before any balance SQL');
+  });
+}
+
+for (const [input, expected] of [
+  [' +2.000 ', 2], ['-0.500', -0.5], ['1.2504', 1.25], [-1.2504, -1.25],
+  [9999999.999, 9999999.999], [-9999999.999, -9999999.999],
+  ['9999999.9994', 9999999.999], ['-9999999.9994', -9999999.999],
+]) {
+  test(`manual adjustment preserves valid decimal normalization ${input}`, () => {
+    assert.equal(normalizeLeaveBalanceAdjustment(input), expected);
+  });
+}
+
+function adjustmentDb(current) {
+  const queries = [];
+  return {
+    queries,
+    async query(sql, params = []) {
+      queries.push({ sql, params });
+      if (sql.includes('FOR UPDATE')) return { rows: [{
+        earned_days: '0', used_days: '0', pending_days: '0', adjusted_days: String(current),
+      }] };
+      if (sql.includes('UPDATE leave_balances')) return { rows: [{
+        user_id: USER_ID, leave_type: 'sickLeave', earned_days: '0', used_days: '0', pending_days: '0',
+        adjusted_days: (Math.round(Number(current) * 1000) + Math.round(params[2] * 1000)) / 1000,
+      }] };
+      return { rows: [] };
+    },
+  };
+}
+
+for (const [current, delta] of [
+  ['9999999.999', 0.001], ['-9999999.999', -0.001], ['9999999.998', 0.002],
+  ['-9999999.998', -0.002], ['NaN', 1], ['Infinity', -1],
+]) {
+  test(`manual adjustment rejects invalid resulting bucket ${current} + ${delta}`, async () => {
+    const db = adjustmentDb(current);
+    await assert.rejects(applyAdminLeaveBalanceAdjustment(db, {
+      userId: USER_ID, leaveType: 'sickLeave', daysChanged: delta, remarks: 'Verified correction',
+    }), err => err.statusCode === 400 && /adjusted.*balance|balance.*range/i.test(err.message));
+    assert.equal(db.queries.some(q => /UPDATE leave_balances|INSERT INTO leave_balance_ledger/.test(q.sql)), false);
+  });
+}
+
+for (const [current, delta, expected] of [
+  ['9999999.998', 0.001, 9999999.999], ['-9999999.998', -0.001, -9999999.999],
+  ['9999999.999', -0.001, 9999999.998], ['0.002', -0.003, -0.001], ['0', -2.5, -2.5],
+]) {
+  test(`manual adjustment preserves in-range signed bucket ${current} + ${delta}`, async () => {
+    const db = adjustmentDb(current);
+    const result = await applyAdminLeaveBalanceAdjustment(db, {
+      userId: USER_ID, leaveType: 'sickLeave', daysChanged: delta, remarks: 'Verified correction',
+    });
+    assert.equal(Number(result.row.adjusted_days), expected);
+    const ledger = db.queries.find(q => q.sql.includes('INSERT INTO leave_balance_ledger'));
+    assert.equal(ledger.params[4], delta);
+    assert.equal(ledger.params[5], Number(current));
+    assert.equal(ledger.params[6], expected);
+    assert.equal(ledger.params[11].available_after, expected, 'Negative available balances remain supported');
+  });
+}
+
+test('adjustment controller rolls back an overflowing result without broadcasting success', async t => {
+  t.mock.method(console, 'error', () => {});
+  const db = adjustmentDb('9999999.999');
+  const query = db.query.bind(db);
+  db.query = async (sql, params) => {
+    if (sql.includes('SELECT employment_type')) {
+      db.queries.push({ sql, params });
+      return { rows: [{ employment_type: 'permanent', leave_credit_eligible: true }] };
+    }
+    return query(sql, params);
+  };
+  db.release = () => {};
+  const broadcasts = [];
+  const controller = require('../src/modules/leave/controllers/balances.controller')({
+    pool: { connect: async () => db }, applyAdminLeaveBalanceAdjustment,
+    canAdjustLeaveCredits: () => true, resolveBalanceLedgerLeaveType: async () => 'sickLeave',
+    broadcastLeaveUpdated: (...args) => broadcasts.push(args),
+  });
+  const res = { code: 200, status(n) { this.code = n; return this; }, json(body) { this.body = body; return this; } };
+  await controller.adjustBalance({ user: { id: ACTOR_ID, role: 'hr' }, params: { userId: USER_ID },
+    body: { leave_type: 'sickLeave', adjustment_days: 0.001, remarks: 'Verified correction' } }, res);
+  assert.equal(res.code, 400);
+  assert.equal(db.queries.at(-1).sql, 'ROLLBACK');
+  assert.equal(db.queries.some(q => /UPDATE leave_balances|INSERT INTO leave_balance_ledger|COMMIT/.test(q.sql)), false);
+  assert.deepEqual(broadcasts, []);
+});

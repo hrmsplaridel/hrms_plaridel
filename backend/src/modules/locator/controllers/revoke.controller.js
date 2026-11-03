@@ -26,7 +26,7 @@ module.exports = function createLocatorControllers({
         await client.query('BEGIN');
         const current = await client.query(
           `SELECT id, status, employee_id, slip_date::text AS slip_date,
-              hr_reviewed_at
+              hr_reviewed_at, paper_approval_record, created_at, workflow_snapshot, final_review_route
        FROM locator_slips
        WHERE id = $1::uuid
        FOR UPDATE`,
@@ -38,7 +38,20 @@ module.exports = function createLocatorControllers({
           return res.status(404).json({ error: 'Locator slip not found' });
         }
 
-        const policy = evaluateLocatorRevocation({
+        const paper = row.paper_approval_record;
+        if (!paper && require('../../../services/approvalWorkflows').isShared(row.workflow_snapshot)) {
+          if (!await require('../../../services/leaveRevocationAccess').canRevokeSharedLocator(client,row,req.user)) {
+            throw Object.assign(new Error('Only an eligible final workflow reviewer can revoke this approval.'),{statusCode:403});
+          }
+        } else if (!['admin','hr'].includes(req.user?.role)) {
+          throw Object.assign(new Error('HR or administrator access is required to revoke this record.'),{statusCode:403});
+        }
+        if(paper)await require('../../../services/paperApprovalRevocation').assertPaperRevocationActor(client,{
+          actor:req.user,employeeId:row.employee_id,module:'locator',
+        });
+        const policy = paper ? require('../../../services/paperApprovalRevocation').evaluatePaperRevocation({
+          status:row.status,paperRecord:paper,createdAt:row.created_at,reason,
+        }) : evaluateLocatorRevocation({
           status: row.status,
           final_review_route: row.final_review_route || 'hr',
           approvedAt: row.hr_reviewed_at,
@@ -89,7 +102,10 @@ module.exports = function createLocatorControllers({
           actorId: reviewerId,
           actorRole: req.user?.role || 'hr',
           remarks: policy.revocationReason,
-          metadata: { reconciliation_required: reconciliationRequired },
+          metadata: { reconciliation_required: reconciliationRequired,...(paper?{approval_source:'approved_paper',paper_record_preserved:true}:{}) },
+        });
+        if(paper)await require('../../../services/dtrMonthEndReconciliation').enqueueEmployeeRangeReconciliation(client,{
+          employeeId:row.employee_id,dateFrom:row.slip_date,dateTo:row.slip_date,reason:'paper_locator_approval_revoked',metadata:{locator_slip_id:id,revoked_by:reviewerId},
         });
         await client.query('COMMIT');
 
@@ -100,7 +116,7 @@ module.exports = function createLocatorControllers({
             slipId: id,
             type: 'locator_approval_revoked',
             title: 'Locator approval revoked',
-            body: `HR revoked this locator approval. ${policy.revocationReason}`,
+            body: `The reviewer revoked this locator approval. ${policy.revocationReason}`,
             metadata: {
               revocation_reason: policy.revocationReason,
               reconciliation_required: reconciliationRequired,
@@ -119,7 +135,7 @@ module.exports = function createLocatorControllers({
           await client.query('ROLLBACK');
         } catch (_) {}
         console.error('[locator PATCH /:id/revoke]', err);
-        return res.status(500).json({ error: 'Failed to revoke locator approval' });
+        return res.status(err.statusCode||500).json({ error: err.statusCode?err.message:'Failed to revoke locator approval' });
       } finally {
         client.release();
       }

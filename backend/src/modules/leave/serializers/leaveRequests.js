@@ -1,4 +1,5 @@
 'use strict';
+const {publicPaperRecord}=require('../services/paperSignatures');
 module.exports = function createLeaveComponent({
   customLeaveDetailValues,
   normalizeEmployeeDetailSchema,
@@ -72,6 +73,7 @@ module.exports = function createLeaveComponent({
         details.customLeaveTypeText ||
         systemLeaveTypeDisplayName(row.leave_type_name || row.leave_type),
       workflow_snapshot: row.workflow_snapshot || null,
+      paper_approval_record: publicPaperRecord(row.paper_approval_record),
       final_review_route: row.final_review_route || 'hr',
       final_reviewer_user_id: row.final_reviewer_user_id || null,
       attachment_name: row.attachment_name || null,

@@ -468,6 +468,69 @@ class DocuTrackerSignatureField {
   );
 }
 
+/// One official memorandum signer returned by the builder.
+class DocuTrackerMemoDepartmentHead {
+  const DocuTrackerMemoDepartmentHead({
+    required this.id,
+    required this.fullName,
+    this.position,
+    this.roleId,
+  });
+
+  final String id;
+  final String fullName;
+  final String? position;
+  final String? roleId;
+
+  static DocuTrackerMemoDepartmentHead? fromJson(dynamic json) {
+    if (json is! Map) return null;
+    final id = json['id']?.toString().trim() ?? '';
+    final name = json['full_name']?.toString().trim() ?? '';
+    if (id.isEmpty || name.isEmpty) return null;
+    final position = json['position']?.toString().trim();
+    final role = json['role']?.toString().trim();
+    return DocuTrackerMemoDepartmentHead(
+      id: id,
+      fullName: name,
+      position: position == null || position.isEmpty ? null : position,
+      roleId: role == null || role.isEmpty ? null : role,
+    );
+  }
+}
+
+/// Prepared by is the HR head, Noted by is the Mayor's Office, and Approved
+/// by is the Municipal Mayor.
+class DocuTrackerMemoSignatories {
+  const DocuTrackerMemoSignatories({
+    this.preparedBy,
+    this.notedBy,
+    this.approvedBy,
+  });
+
+  final DocuTrackerMemoDepartmentHead? preparedBy;
+  final DocuTrackerMemoDepartmentHead? notedBy;
+  final DocuTrackerMemoDepartmentHead? approvedBy;
+
+  static DocuTrackerMemoSignatories? fromJson(dynamic json) {
+    if (json is! Map) return null;
+    final preparedBy = DocuTrackerMemoDepartmentHead.fromJson(
+      json['prepared_by'],
+    );
+    final notedBy = DocuTrackerMemoDepartmentHead.fromJson(json['noted_by']);
+    final approvedBy = DocuTrackerMemoDepartmentHead.fromJson(
+      json['approved_by'],
+    );
+    if (preparedBy == null && notedBy == null && approvedBy == null) {
+      return null;
+    }
+    return DocuTrackerMemoSignatories(
+      preparedBy: preparedBy,
+      notedBy: notedBy,
+      approvedBy: approvedBy,
+    );
+  }
+}
+
 class DocuTrackerDocumentBuilderData {
   const DocuTrackerDocumentBuilderData({
     required this.documentId,
@@ -479,6 +542,7 @@ class DocuTrackerDocumentBuilderData {
     required this.canSign,
     this.canAddOwnSignature = false,
     this.formatVersion = 1,
+    this.memoSignatories,
   });
 
   final String documentId;
@@ -493,6 +557,9 @@ class DocuTrackerDocumentBuilderData {
   /// themselves even though the document layout is locked.
   final bool canAddOwnSignature;
   final int formatVersion;
+
+  /// Official memorandum lines. Null for other document types.
+  final DocuTrackerMemoSignatories? memoSignatories;
 
   factory DocuTrackerDocumentBuilderData.fromJson(Map<String, dynamic> json) {
     final rawPages = json['pages'];
@@ -521,6 +588,9 @@ class DocuTrackerDocumentBuilderData {
       canSign: json['can_sign'] == true,
       canAddOwnSignature: json['can_add_own_signature'] == true,
       formatVersion: (json['format_version'] as num?)?.toInt() ?? 1,
+      memoSignatories: DocuTrackerMemoSignatories.fromJson(
+        json['memo_signatories'],
+      ),
     );
   }
 }

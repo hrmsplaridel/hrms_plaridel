@@ -37,7 +37,7 @@ test('shared revoke capability follows final assignment, global role and adminis
     for (const [id, role, allowed] of [
       ['mayor', 'mayor', true], ['former-mayor', 'mayor', false], ['final-hr', 'hr', true], ['admin', 'admin', true],
       ['disabled-admin', 'admin', false], ['department-head', 'hr', false], ['unrelated-backup', 'hr', false],
-      ['employee-final', 'employee', false], ['applicant', 'hr', false],
+      ['employee-final', 'employee', true], ['applicant', 'hr', false],
     ]) assert.equal(await canRevokeSharedLeave({}, row, { id, role }), allowed, id);
     assert.equal(await canRevokeSharedLeave({}, { ...row, status: 'pending_mayor' }, { id: 'mayor', role: 'mayor' }), false);
   } finally { clearModule(target); restores.reverse().forEach(r => r()); }

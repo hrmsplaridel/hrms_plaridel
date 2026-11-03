@@ -6,11 +6,13 @@ import 'package:flutter/material.dart';
 ///
 /// Drag the left edge horizontally to widen/narrow the panel; double-tap the edge to toggle
 /// between max width and the initial width (same behavior as the leave filing form).
+/// Set [barrierDismissible] to false when the form requires an explicit close.
 Future<T?> openResponsiveRightSidePanel<T>({
   required BuildContext context,
   required WidgetBuilder builder,
   double breakpoint = 1100,
   String barrierLabel = 'Close panel',
+  bool barrierDismissible = true,
   double minWidth = 360,
   double initialWidthFraction = 0.52,
 }) async {
@@ -21,7 +23,7 @@ Future<T?> openResponsiveRightSidePanel<T>({
   }
   return showGeneralDialog<T>(
     context: context,
-    barrierDismissible: true,
+    barrierDismissible: barrierDismissible,
     barrierLabel: barrierLabel,
     barrierColor: Colors.black54,
     transitionDuration: const Duration(milliseconds: 220),

@@ -324,8 +324,9 @@ void main() {
     final controller = _controller(tester);
     expect(controller.document.toPlainText(), contains(_document.description!));
     expect(_memoField(tester, 'memo-field-subject'), 'Office meeting');
-    expect(find.text('Unsaved changes'), findsOneWidget);
-    expect(provider.savedPages, isNull);
+    expect(find.text('Saved'), findsOneWidget);
+    expect(provider.savedPages, hasLength(1));
+    expect(provider.savedPages!.single.memo?.subject, 'Office meeting');
     await tester.enterText(
       find.byKey(const ValueKey('memo-field-to')),
       'All employees',
@@ -371,7 +372,18 @@ void main() {
             : null,
       );
       final provider = _DraftProvider(data);
-      await _pump(tester, provider, prefill: scenario != 'not new');
+      await _pump(
+        tester,
+        provider,
+        prefill: scenario != 'not new',
+        document: scenario == 'not new'
+            ? const DocuTrackerDocument(
+                id: 'draft',
+                documentType: 'office_letter',
+                title: 'Invitation',
+              )
+            : _document,
+      );
       expect(
         _controller(tester).document.toPlainText(),
         scenario == 'existing text' ? 'Keep this text\n' : '\n',
@@ -389,7 +401,7 @@ void main() {
       await _pump(tester, provider, create: true);
       await tester.tap(find.text('New document'));
       await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const Key('docutracker-create-type-memo')));
+      await tester.tap(find.byKey(const Key('docutracker-create-use-memo')));
       await tester.pumpAndSettle();
       await tester.enterText(
         find.byKey(const Key('docutracker-create-title')),
@@ -404,7 +416,11 @@ void main() {
       final text = _controller(tester).document.toPlainText();
       expect(_memoField(tester, 'memo-field-subject'), 'Staff orientation');
       expect(text, contains('Discuss the new attendance guidelines.'));
-      expect(find.text('Unsaved changes'), findsOneWidget);
+      expect(find.text('Saved'), findsOneWidget);
+      expect(
+        provider.savedPages?.single.memo?.subject,
+        'Staff orientation',
+      );
       expect(tester.takeException(), isNull);
     },
   );
@@ -421,7 +437,18 @@ void main() {
     expect(find.text('What are you creating?'), findsOneWidget);
     await tester.tap(find.byKey(const Key('docutracker-create-type-memo')));
     await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('docutracker-create-continue')));
+    await tester.pumpAndSettle();
     expect(find.byType(TextField), findsNWidgets(2));
+    await tester.scrollUntilVisible(
+      find.byKey(const Key('docutracker-create-attach')),
+      120,
+      scrollable: find.descendant(
+        of: find.byType(BottomSheet),
+        matching: find.byType(Scrollable),
+      ).first,
+    );
+    await tester.pumpAndSettle();
     expect(find.byKey(const Key('docutracker-create-attach')), findsOneWidget);
     expect(find.byKey(const Key('docutracker-create-submit')), findsOneWidget);
     expect(tester.takeException(), isNull);

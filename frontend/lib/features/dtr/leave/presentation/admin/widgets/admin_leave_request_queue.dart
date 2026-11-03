@@ -395,17 +395,13 @@ class AdminLeaveFilterBar extends StatelessWidget {
 
   String _filterStatusLabel(LeaveRequestStatus? value) {
     if (value == null) return 'All statuses';
-    if (!isDepartmentHead) return value.displayName;
-    return switch (value) {
-      LeaveRequestStatus.pendingDepartmentHead => 'Pending',
-      LeaveRequestStatus.pendingHr => 'Forwarded to HR',
-      LeaveRequestStatus.approved => 'Approved by HR',
-      LeaveRequestStatus.rejectedByDepartmentHead => 'Rejected',
-      LeaveRequestStatus.rejectedByHr => 'Rejected by HR',
-      LeaveRequestStatus.returned => 'Returned',
-      LeaveRequestStatus.cancelled => 'Cancelled',
-      _ => value.displayName,
-    };
+    if (isDepartmentHead && value == LeaveRequestStatus.rejectedByDepartmentHead) {
+      return 'Rejected at department review';
+    }
+    if (isDepartmentHead && value == LeaveRequestStatus.rejectedByHr) {
+      return 'Rejected at final review';
+    }
+    return adminLeaveStatusLabel(value, isDepartmentHead: isDepartmentHead);
   }
 }
 
@@ -645,6 +641,7 @@ class _AdminLeaveRequestQueuePanelState
                                 widget.selectedRequest?.id,
                             statusLabel: adminLeaveStatusLabel(
                               pageRequests[index].status,
+                              paperRecorded:pageRequests[index].isPaperRecord,
                               workflowSnapshot: pageRequests[index].workflowSnapshot,
                               finalReviewRoute:
                                   pageRequests[index].finalReviewRoute,
@@ -695,6 +692,7 @@ class _AdminLeaveRequestQueuePanelState
                                       request: request,
                                       statusLabel: adminLeaveStatusLabel(
                                         request.status,
+                                        paperRecorded:request.isPaperRecord,
                                         workflowSnapshot: request.workflowSnapshot,
                                         finalReviewRoute:
                                             request.finalReviewRoute,
@@ -832,7 +830,12 @@ class _AdminLeaveMobileRequestCard extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(width: 8),
-                  LeaveStatusChip(status: request.status, label: statusLabel),
+                  Flexible(
+                    child: LeaveStatusChip(
+                      status: request.status,
+                      label: statusLabel,
+                    ),
+                  ),
                 ],
               ),
               const SizedBox(height: 4),

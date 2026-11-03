@@ -1,7 +1,7 @@
 const { pool } = require('../config/db');
 const policy = require('./rspFinalHiringPolicy');
 
-const MIGRATION = 'backend/scripts/migrations/20261008_rsp_final_hiring_gate.sql';
+const MIGRATION = 'backend/scripts/migrations/rsp/20261008_rsp_final_hiring_gate.sql';
 let schemaReady = false;
 
 class FinalHiringError extends Error {

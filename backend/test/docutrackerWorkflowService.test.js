@@ -14,6 +14,7 @@ const {
   transitionDocument,
   insertNotificationIfNotRecent,
   getEffectivePermissionExplanation,
+  updateDocumentMetadata,
   recoverDocumentAssignment,
   listDocuments,
   canUserPerformTypeAction,
@@ -161,6 +162,107 @@ test('sourceActionForRow exposes only the viewer current DTR leave action', () =
     ),
     null
   );
+});
+
+test('Required Actions omits discarded leave drafts and keeps active ones', async () => {
+  const ownerId = '22222222-2222-4222-8222-222222222222';
+  const records = [
+    {
+      source_record_id: 'active-oct-21',
+      source_module: 'dtr',
+      source_table: 'leave_requests',
+      source_title: 'Leave 2026-10-21',
+      description: 'Leave request',
+      created_by: ownerId,
+      creator_name: 'Owner',
+      created_at: '2026-10-21T00:00:00.000Z',
+      updated_at: '2026-10-21T00:00:00.000Z',
+      source_status: 'draft',
+      source_owner_id: ownerId,
+      assigned_department_head_id: null,
+      viewer_is_department_reviewer: false,
+      discarded_at: null,
+    },
+    {
+      source_record_id: 'discarded-sept',
+      source_module: 'dtr',
+      source_table: 'leave_requests',
+      source_title: 'Leave 2026-09-14 to 2026-09-15',
+      description: 'Leave request',
+      created_by: ownerId,
+      creator_name: 'Owner',
+      created_at: '2026-09-14T00:00:00.000Z',
+      updated_at: '2026-09-20T00:00:00.000Z',
+      source_status: 'draft',
+      source_owner_id: ownerId,
+      assigned_department_head_id: null,
+      viewer_is_department_reviewer: false,
+      discarded_at: '2026-09-20T00:00:00.000Z',
+    },
+    {
+      source_record_id: 'approved-leave',
+      source_module: 'dtr',
+      source_table: 'leave_requests',
+      source_title: 'Leave 2026-09-16 to 2026-09-17',
+      description: 'Leave request',
+      created_by: ownerId,
+      creator_name: 'Owner',
+      created_at: '2026-09-16T00:00:00.000Z',
+      updated_at: '2026-09-18T00:00:00.000Z',
+      source_status: 'approved',
+      source_owner_id: ownerId,
+      assigned_department_head_id: null,
+      viewer_is_department_reviewer: false,
+      discarded_at: null,
+    },
+  ];
+
+  async function listedIds(user) {
+    let leaveSql = '';
+    const pool = {
+      query: async (sql, params = []) => {
+        if (sql.includes('FROM docutracker_permissions')) {
+          return params[1] === 'dtr'
+            ? {
+                rows: [
+                  {
+                    user_id: ownerId,
+                    role_id: null,
+                    document_type: 'dtr',
+                    granted: true,
+                  },
+                ],
+              }
+            : { rows: [] };
+        }
+        if (sql.includes('FROM leave_requests')) {
+          leaveSql = sql;
+          const visible = sql.includes('l.discarded_at IS NULL')
+            ? records.filter((row) => row.discarded_at == null)
+            : records;
+          return { rows: visible };
+        }
+        return { rows: [] };
+      },
+    };
+    const result = await listDocuments(pool, user, {});
+    return { leaveSql, documents: result.documents };
+  }
+
+  for (const user of [
+    { id: ownerId, role: 'employee' },
+    { id: ownerId, role: 'admin' },
+  ]) {
+    const { leaveSql, documents } = await listedIds(user);
+    assert.match(leaveSql, /l\.discarded_at IS NULL/);
+    const leaveDocs = documents.filter((doc) => doc.source_table === 'leave_requests');
+    const ids = leaveDocs.map((doc) => doc.source_record_id);
+    assert.deepEqual(ids.sort(), ['active-oct-21', 'approved-leave']);
+    const active = leaveDocs.find((doc) => doc.source_record_id === 'active-oct-21');
+    assert.equal(active.source_status, 'draft');
+    assert.equal(active.source_action, 'complete_in_dtr');
+    assert.equal(active.source_action_label, 'Complete and submit in DTR');
+  }
 });
 
 test('sourceActionForRow points L&D admins to the owning module step', () => {
@@ -1512,4 +1614,174 @@ test('return and reject never require a signature', async () => {
     calls.some((c) => c.sql.includes('FROM docutracker_signature_fields') && c.sql.includes('signed_by')),
     false
   );
+});
+
+function lockedDocument(status, extra = {}) {
+  return {
+    id: '11111111-1111-4111-8111-111111111111',
+    document_type: 'memo',
+    status,
+    created_by: 'creator-1',
+    current_holder_id: 'holder-1',
+    current_step: 1,
+    sent_time: '2026-10-01T00:00:00.000Z',
+    title: 'Original title',
+    ...extra,
+  };
+}
+
+test('native content stays editable for the draft owner and locks after draft', async () => {
+  const admin = { id: 'admin-1', role: 'admin' };
+  const creator = { id: 'creator-1', role: 'employee' };
+  const draft = {
+    id: '22222222-2222-4222-8222-222222222222',
+    document_type: 'memo',
+    status: 'pending',
+    created_by: 'creator-1',
+    current_holder_id: null,
+    current_step: null,
+    sent_time: null,
+  };
+  const client = { query: async () => ({ rowCount: 0, rows: [] }) };
+
+  assert.equal(
+    await canUserPerformDocumentAction(client, { user: creator, document: draft, action: 'edit' }),
+    true
+  );
+  assert.equal(
+    await canUserPerformDocumentAction(client, { user: admin, document: draft, action: 'edit' }),
+    true
+  );
+
+  const lockedStatuses = ['in_review', 'overdue', 'approved', 'returned', 'rejected', 'cancelled', 'escalated'];
+  for (const status of lockedStatuses) {
+    const document = lockedDocument(status);
+    assert.equal(
+      await canUserPerformDocumentAction(client, { user: admin, document, action: 'edit' }),
+      false,
+      status
+    );
+    assert.equal(
+      await canUserPerformDocumentAction(client, { user: creator, document, action: 'edit' }),
+      false,
+      status
+    );
+  }
+
+  const awaitingRelease = lockedDocument('approved', {
+    release_required: true,
+    released_at: null,
+    current_holder_id: null,
+  });
+  const released = lockedDocument('approved', {
+    release_required: true,
+    released_at: '2026-10-19T17:43:05.729Z',
+    current_holder_id: null,
+  });
+  assert.equal(
+    await canUserPerformDocumentAction(client, { user: admin, document: awaitingRelease, action: 'edit' }),
+    false
+  );
+  assert.equal(
+    await canUserPerformDocumentAction(client, { user: admin, document: released, action: 'delete' }),
+    false
+  );
+
+  const sourceOwned = lockedDocument('in_review', { source_module: 'rsp' });
+  assert.equal(
+    await canUserPerformDocumentAction(client, { user: admin, document: sourceOwned, action: 'edit' }),
+    true
+  );
+});
+
+test('permission explanation denies edit on locked native documents before the admin override', async () => {
+  const client = { query: async () => ({ rowCount: 0, rows: [] }) };
+  const inReview = await getEffectivePermissionExplanation(client, {
+    user: { id: 'admin-1', role: 'admin' },
+    action: 'edit',
+    documentType: 'memo',
+    document: lockedDocument('in_review'),
+  });
+  assert.equal(inReview.final_decision, false);
+  assert.equal(inReview.reason, 'content_locked');
+
+  const released = await getEffectivePermissionExplanation(client, {
+    user: { id: 'admin-1', role: 'admin' },
+    action: 'edit',
+    documentType: 'memo',
+    document: lockedDocument('approved', { released_at: '2026-10-19T17:43:05.729Z' }),
+  });
+  assert.equal(released.final_decision, false);
+  assert.equal(released.reason, 'released_content_locked');
+
+  const returned = await getEffectivePermissionExplanation(client, {
+    user: { id: 'creator-1', role: 'employee' },
+    action: 'edit',
+    documentType: 'memo',
+    document: lockedDocument('returned'),
+  });
+  assert.equal(returned.final_decision, false);
+  assert.equal(returned.reason, 'content_locked');
+});
+
+test('updateDocumentMetadata lets a draft owner save and rejects a released edit without writing', async () => {
+  const documentId = '11111111-1111-4111-8111-111111111111';
+  const creatorId = '33333333-3333-4333-8333-333333333333';
+
+  async function run(document, user, title) {
+    const statements = [];
+    const client = {
+      async query(sql) {
+        statements.push(sql);
+        if (sql === 'BEGIN' || sql === 'COMMIT' || sql === 'ROLLBACK') {
+          return { rowCount: 0, rows: [] };
+        }
+        if (sql.includes('FOR UPDATE')) return { rowCount: 1, rows: [document] };
+        if (sql.includes('UPDATE docutracker_documents')) {
+          return { rowCount: 1, rows: [{ ...document, title }] };
+        }
+        if (sql.includes('INSERT INTO docutracker_document_history')) {
+          return { rowCount: 1, rows: [] };
+        }
+        return { rowCount: 0, rows: [] };
+      },
+      release() {},
+    };
+    const pool = { connect: async () => client };
+    return {
+      statements,
+      result: updateDocumentMetadata(pool, user, documentId, { title }),
+    };
+  }
+
+  const draft = {
+    id: documentId,
+    document_type: 'memo',
+    status: 'pending',
+    created_by: creatorId,
+    current_holder_id: null,
+    current_step: null,
+    sent_time: null,
+    title: 'Draft title',
+  };
+  const saved = await run(draft, { id: creatorId, role: 'employee' }, 'Updated title');
+  const savedRow = await saved.result;
+  assert.equal(savedRow.title, 'Updated title');
+  assert.equal(saved.statements.some((sql) => sql.includes('UPDATE docutracker_documents')), true);
+  assert.equal(saved.statements.some((sql) => sql.includes('metadata_updated') || sql.includes('docutracker_document_history')), true);
+
+  const released = lockedDocument('approved', {
+    id: documentId,
+    release_required: true,
+    released_at: '2026-10-19T17:43:05.729Z',
+    title: 'Released title',
+  });
+  const blocked = await run(released, { id: 'admin-1', role: 'admin' }, 'Tampered title');
+  await assert.rejects(blocked.result, (err) => {
+    assert.equal(err.code, 'FORBIDDEN');
+    assert.match(err.message, /finalized and read-only/);
+    return true;
+  });
+  assert.equal(blocked.statements.some((sql) => sql.includes('UPDATE docutracker_documents')), false);
+  assert.equal(blocked.statements.some((sql) => sql.includes('docutracker_document_history')), false);
 });

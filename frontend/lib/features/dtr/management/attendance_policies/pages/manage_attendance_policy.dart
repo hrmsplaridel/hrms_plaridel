@@ -75,6 +75,7 @@ class _ManageAttendancePolicyState extends State<ManageAttendancePolicy> {
   final _searchController = TextEditingController();
   final _nameController = TextEditingController();
   final _descriptionController = TextEditingController();
+  final _computationFormKey = GlobalKey<FormState>();
 
   // Computation settings
   final _workHoursPerDayController = TextEditingController(text: '8');
@@ -148,18 +149,15 @@ class _ManageAttendancePolicyState extends State<ManageAttendancePolicy> {
 
   final _policyRequestGuard = AttendancePolicyRequestGuard();
 
-  String? _validateForm() {
-    final workHours = double.tryParse(_workHoursPerDayController.text.trim());
-    if (workHours == null || workHours <= 0) {
-      return 'Work Hours Per Day must be greater than 0.';
-    }
-
-    final mult = double.tryParse(_deductionMultiplierController.text.trim());
-    if (mult == null || mult <= 0) {
-      return 'Deduction Multiplier must be greater than 0.';
+  String? _validatePolicyNumber(String? text, num maximum) {
+    final value = double.tryParse(text?.trim() ?? '');
+    if (value == null || !value.isFinite || value <= 0 || value > maximum) {
+      return 'Enter a number greater than 0 and at most $maximum.';
     }
     return null;
   }
+
+  bool _validateForm() => _computationFormKey.currentState?.validate() ?? false;
 
   int? _timeToMinutes(dynamic value) {
     if (value == null) return null;
@@ -400,13 +398,7 @@ class _ManageAttendancePolicyState extends State<ManageAttendancePolicy> {
       );
       return false;
     }
-    final validation = _validateForm();
-    if (validation != null) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(validation)));
-      return false;
-    }
+    if (!_validateForm()) return false;
     try {
       await ApiClient.instance.post(
         '/api/attendance-policies',
@@ -415,16 +407,17 @@ class _ManageAttendancePolicyState extends State<ManageAttendancePolicy> {
           'description': _descriptionController.text.trim().isEmpty
               ? null
               : _descriptionController.text.trim(),
-          'work_hours_per_day':
-              double.tryParse(_workHoursPerDayController.text.trim()) ?? 8,
+          'work_hours_per_day': double.parse(
+            _workHoursPerDayController.text.trim(),
+          ),
           'use_equivalent_day_conversion': _useEquivalentDayConversion,
           'deduct_late': _deductLate,
           'deduct_undertime': _deductUndertime,
           'absent_equals_full_day_deduction': _absentEqualsFullDayDeduction,
           'combine_late_and_undertime': _combineLateAndUndertime,
-          'deduction_multiplier':
-              double.tryParse(_deductionMultiplierController.text.trim()) ??
-              1.0,
+          'deduction_multiplier': double.parse(
+            _deductionMultiplierController.text.trim(),
+          ),
           'is_default': _isDefault,
           'is_active': _isActive,
         },
@@ -463,13 +456,7 @@ class _ManageAttendancePolicyState extends State<ManageAttendancePolicy> {
       );
       return false;
     }
-    final validation = _validateForm();
-    if (validation != null) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(validation)));
-      return false;
-    }
+    if (!_validateForm()) return false;
     try {
       await ApiClient.instance.put(
         '/api/attendance-policies/${p.id}',
@@ -478,16 +465,17 @@ class _ManageAttendancePolicyState extends State<ManageAttendancePolicy> {
           'description': _descriptionController.text.trim().isEmpty
               ? null
               : _descriptionController.text.trim(),
-          'work_hours_per_day':
-              double.tryParse(_workHoursPerDayController.text.trim()) ?? 8,
+          'work_hours_per_day': double.parse(
+            _workHoursPerDayController.text.trim(),
+          ),
           'use_equivalent_day_conversion': _useEquivalentDayConversion,
           'deduct_late': _deductLate,
           'deduct_undertime': _deductUndertime,
           'absent_equals_full_day_deduction': _absentEqualsFullDayDeduction,
           'combine_late_and_undertime': _combineLateAndUndertime,
-          'deduction_multiplier':
-              double.tryParse(_deductionMultiplierController.text.trim()) ??
-              1.0,
+          'deduction_multiplier': double.parse(
+            _deductionMultiplierController.text.trim(),
+          ),
           'is_default': _isDefault,
           'is_active': _isActive,
         },
@@ -1224,9 +1212,11 @@ class _ManageAttendancePolicyState extends State<ManageAttendancePolicy> {
           key: const Key('attendance-policy-work-hours'),
           controller: _workHoursPerDayController,
           enabled: !computationLocked,
+          autovalidateMode: AutovalidateMode.onUserInteraction,
+          validator: (value) => _validatePolicyNumber(value, 24),
           style: AppTheme.dashFieldTextStyle(context),
           keyboardType: const TextInputType.numberWithOptions(decimal: true),
-          decoration: _decoration('8'),
+          decoration: _decoration('8').copyWith(errorMaxLines: 2),
         ),
         const SizedBox(height: 12),
         _switchTile(
@@ -1285,8 +1275,10 @@ class _ManageAttendancePolicyState extends State<ManageAttendancePolicy> {
           key: const Key('attendance-policy-deduction-multiplier'),
           controller: _deductionMultiplierController,
           enabled: !computationLocked,
+          autovalidateMode: AutovalidateMode.onUserInteraction,
+          validator: (value) => _validatePolicyNumber(value, 999.999),
           keyboardType: const TextInputType.numberWithOptions(decimal: true),
-          decoration: _decoration('1.0'),
+          decoration: _decoration('1.0').copyWith(errorMaxLines: 2),
         ),
 
         if (showActions) ...[
@@ -1344,14 +1336,15 @@ class _ManageAttendancePolicyState extends State<ManageAttendancePolicy> {
       ],
     );
 
+    final form = Form(key: _computationFormKey, child: content);
     if (!framed) {
-      return Padding(padding: const EdgeInsets.all(24), child: content);
+      return Padding(padding: const EdgeInsets.all(24), child: form);
     }
 
     return Container(
       padding: const EdgeInsets.all(24),
       decoration: AppTheme.dashSurfaceCard(context, radius: 12),
-      child: content,
+      child: form,
     );
   }
 

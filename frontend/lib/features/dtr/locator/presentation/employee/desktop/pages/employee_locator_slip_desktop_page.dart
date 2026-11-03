@@ -7,10 +7,14 @@ class EmployeeLocatorSlipScreen extends StatefulWidget {
     super.key,
     this.tutorialHeaderKey,
     this.tutorialRequestsKey,
+    this.tutorialTabsKey,
+    this.tutorialApprovalFiltersKey,
   });
 
   final GlobalKey? tutorialHeaderKey;
   final GlobalKey? tutorialRequestsKey;
+  final GlobalKey? tutorialTabsKey;
+  final GlobalKey? tutorialApprovalFiltersKey;
 
   @override
   State<EmployeeLocatorSlipScreen> createState() =>
@@ -20,6 +24,9 @@ class EmployeeLocatorSlipScreen extends StatefulWidget {
 class EmployeeLocatorSlipScreenState extends State<EmployeeLocatorSlipScreen> {
   final GlobalKey<EmployeeLocatorSlipContentState> _contentKey =
       GlobalKey<EmployeeLocatorSlipContentState>();
+
+  void showSection({required bool approvals}) =>
+      _contentKey.currentState?.showSection(approvals: approvals);
 
   Future<void> openCreateForm({
     LocatorSlipFormInitialValues? initialValues,
@@ -35,6 +42,8 @@ class EmployeeLocatorSlipScreenState extends State<EmployeeLocatorSlipScreen> {
       key: _contentKey,
       tutorialHeaderKey: widget.tutorialHeaderKey,
       tutorialRequestsKey: widget.tutorialRequestsKey,
+      tutorialTabsKey: widget.tutorialTabsKey,
+      tutorialApprovalFiltersKey: widget.tutorialApprovalFiltersKey,
     );
   }
 }

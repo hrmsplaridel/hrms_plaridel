@@ -7,7 +7,7 @@
  * - admin_only: Only admin/HR can create; blocks employee submission
  * - allows_past_dates: Past-date filing allowed
  * - requires_attachment: Supporting document required (TODO: enforce when upload is implemented)
- * - requires_attachment_when_over_days: Supporting document required if working days >= this value
+ * - requires_attachment_when_over_days: Custom types use >=; Sick Leave uses > its five-day threshold.
  * - max_days: Maximum working days for this leave type (null = no limit)
  * - minimum_advance_days: Minimum calendar days before start date for employee filing (null = no limit)
  * - special_process_only: Not normal DTR leave; HR/admin process (e.g. monetization, terminal)
@@ -445,6 +445,7 @@ function leaveEventDateFilingError({
   startDateStr,
   endDateStr,
   eventDates = {},
+  filingDateStr,
 }) {
   const label = (leaveTypeLabel || leaveType || 'This leave type').toString().trim();
   const start = normalizeIsoDateString(startDateStr);
@@ -498,7 +499,7 @@ function leaveEventDateFilingError({
   if (leaveType === 'rehabilitationPrivilege') {
     const accident = normalizeIsoDateString(eventDates.accidentDate);
     if (!accident) return `${label} requires the accident date.`;
-    const filingDiff = calendarDaySpan(accident, todayIsoDateInTimeZone());
+    const filingDiff = calendarDaySpan(accident, filingDateStr || todayIsoDateInTimeZone());
     if (filingDiff == null) return 'Invalid accident date.';
     if (filingDiff < 0) return 'Accident date cannot be in the future.';
     if (filingDiff > 7) {
@@ -529,7 +530,7 @@ function leaveEventDateFilingError({
   if (leaveType === 'soloParentLeave') {
     const expiry = normalizeIsoDateString(eventDates.soloParentIdExpiryDate);
     if (!expiry) return `${label} requires a valid Solo Parent ID expiry date.`;
-    const today = todayIsoDateInTimeZone();
+    const today = filingDateStr || todayIsoDateInTimeZone();
     if (expiry < today) return 'Solo Parent ID is already expired.';
     if (expiry < start) {
       return 'Solo Parent ID must be valid through the start date of the leave.';
@@ -586,12 +587,12 @@ function effectiveMaxDaysForRule({ rule, leaveType, maternityDeliveryType, adopt
   return Number.isFinite(parsed) ? parsed : null;
 }
 
-function minimumAdvanceDaysFilingError({ rule, leaveType, leaveTypeLabel, startDateStr }) {
+function minimumAdvanceDaysFilingError({ rule, leaveType, leaveTypeLabel, startDateStr, filingDateStr }) {
   const raw = rule?.minimum_advance_days ?? rule?.minimumAdvanceDays;
   if (raw == null || raw === '') return null;
   const minimumDays = parseInt(raw, 10);
   if (!Number.isFinite(minimumDays) || minimumDays <= 0 || !startDateStr) return null;
-  const diff = calendarDayDifference(startDateStr);
+  const diff = calendarDayDifference(startDateStr, filingDateStr || undefined);
   if (diff == null || diff >= minimumDays) return null;
   const label = (leaveTypeLabel || rule?.display_name || leaveType || 'This leave type')
     .toString()
@@ -672,6 +673,7 @@ function validateEmployeeLeaveRequestWithRule(opts) {
     details,
     enforceEventDateRules = false,
     enforceRequiredDetails = enforceEventDateRules,
+    filingDateStr,
   } = opts;
 
   if (!rule) return { valid: true };
@@ -713,7 +715,7 @@ function validateEmployeeLeaveRequestWithRule(opts) {
     }
   }
   if (rule.allows_past_dates === false && startDateStr) {
-    const today = todayIsoDateInTimeZone();
+    const today = filingDateStr || todayIsoDateInTimeZone();
     if (startDateStr < today) {
       return {
         valid: false,
@@ -727,6 +729,7 @@ function validateEmployeeLeaveRequestWithRule(opts) {
     leaveType,
     leaveTypeLabel: rule.display_name,
     startDateStr,
+    filingDateStr,
   });
   if (advanceError) return { valid: false, error: advanceError };
 
@@ -745,6 +748,7 @@ function validateEmployeeLeaveRequestWithRule(opts) {
       startDateStr,
       endDateStr,
       eventDates,
+      filingDateStr,
     });
     if (eventDateError) return { valid: false, error: eventDateError };
   }
@@ -828,7 +832,7 @@ function mustBlockMissingAttachment(rule, leaveType, days, hasAttachment) {
     if (!Number.isFinite(requestedDays) || !Number.isFinite(threshold)) {
       return false;
     }
-    return requestedDays >= threshold;
+    return leaveType === 'sickLeave' ? requestedDays > threshold : requestedDays >= threshold;
   }
 
   return !!rule.requires_attachment;

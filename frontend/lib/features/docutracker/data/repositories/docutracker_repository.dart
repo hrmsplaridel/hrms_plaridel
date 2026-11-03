@@ -1,7 +1,7 @@
 import 'dart:convert';
-import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart';
 
 import 'package:hrms_plaridel/core/api/client.dart';
 import 'package:hrms_plaridel/features/docutracker/data/dto/docutracker_api_result.dart';
@@ -585,6 +585,41 @@ class DocuTrackerRepository implements DocuTrackerPermissionsDataSource {
     }
   }
 
+  /// Admin recovery. The body is only the current reviewer and the reason.
+  Future<DocuTrackerResult<DocuTrackerDocument>> recoverDocumentAssignment({
+    required String documentId,
+    required String currentHolderId,
+    required String remarks,
+  }) async {
+    try {
+      final res = await ApiClient.instance.patch<Map<String, dynamic>>(
+        '$_base/documents/$documentId',
+        data: {'current_holder_id': currentHolderId, 'remarks': remarks},
+      );
+      final data = res.data;
+      if (data == null) {
+        return const DocuTrackerFailure('The assignment was not recovered');
+      }
+      return DocuTrackerSuccess(DocuTrackerDocument.fromJson(data));
+    } catch (error) {
+      return DocuTrackerFailure(_apiErrorMessage(error));
+    }
+  }
+
+  /// Admin-only read of the reviewers the current step can be reassigned to.
+  Future<DocuTrackerResult<Map<String, dynamic>>> getRecoveryCandidates(
+    String documentId,
+  ) async {
+    try {
+      final res = await ApiClient.instance.get<Map<String, dynamic>>(
+        '$_base/documents/$documentId/recovery-candidates',
+      );
+      return DocuTrackerSuccess(res.data ?? const {});
+    } catch (error) {
+      return DocuTrackerFailure(_apiErrorMessage(error));
+    }
+  }
+
   Future<DocuTrackerResult<DocuTrackerDocument>> getDocument(String id) async {
     try {
       final res = await ApiClient.instance.get<Map<String, dynamic>>(
@@ -602,25 +637,47 @@ class DocuTrackerRepository implements DocuTrackerPermissionsDataSource {
     }
   }
 
-  Future<List<DocumentRoutingRecord>> getDocumentRoutingRecords(
-    String id,
-  ) async {
+  Future<({List<DocumentRoutingRecord> routing, bool? typeRequiresRelease})>
+  getDocumentRoutingView(String id) async {
     try {
       final res = await ApiClient.instance.get<Map<String, dynamic>>(
         '$_base/documents/$id',
       );
       final routing = res.data?['routing'];
-      if (routing is! List) return const [];
-      return routing
-          .map(
-            (e) => DocumentRoutingRecord.fromJson(
-              Map<String, dynamic>.from(e as Map),
-            ),
-          )
-          .toList();
+      final document = res.data?['document'];
+      bool? typeRequiresRelease;
+      if (document is Map && document.containsKey('type_requires_release')) {
+        typeRequiresRelease = document['type_requires_release'] == true;
+      }
+      if (routing is! List) {
+        return (
+          routing: const <DocumentRoutingRecord>[],
+          typeRequiresRelease: typeRequiresRelease,
+        );
+      }
+      return (
+        routing: routing
+            .map(
+              (e) => DocumentRoutingRecord.fromJson(
+                Map<String, dynamic>.from(e as Map),
+              ),
+            )
+            .toList(),
+        typeRequiresRelease: typeRequiresRelease,
+      );
     } catch (_) {
-      return const [];
+      return (
+        routing: const <DocumentRoutingRecord>[],
+        typeRequiresRelease: null,
+      );
     }
+  }
+
+  Future<List<DocumentRoutingRecord>> getDocumentRoutingRecords(
+    String id,
+  ) async {
+    final view = await getDocumentRoutingView(id);
+    return view.routing;
   }
 
   Future<DocuTrackerResult<DocuTrackerDocument>> createDocument(
@@ -644,6 +701,17 @@ class DocuTrackerRepository implements DocuTrackerPermissionsDataSource {
         );
       }
       return DocuTrackerSuccess(DocuTrackerDocument.fromJson(row));
+    } catch (e) {
+      return DocuTrackerFailure(_apiErrorMessage(e));
+    }
+  }
+
+  Future<DocuTrackerResult<bool>> deleteDocument(String documentId) async {
+    try {
+      await ApiClient.instance.delete<Map<String, dynamic>>(
+        '$_base/documents/$documentId',
+      );
+      return const DocuTrackerSuccess(true);
     } catch (e) {
       return DocuTrackerFailure(_apiErrorMessage(e));
     }
@@ -1048,6 +1116,57 @@ class DocuTrackerRepository implements DocuTrackerPermissionsDataSource {
           )
           .toList();
     } catch (error) {
+      _throwRequestError(error);
+    }
+  }
+
+  /// History page. The endpoint returns either a JSON array of every event
+  /// or `{ items, total, limit, offset }` when the server applies `limit`.
+  Future<DocumentHistoryPage> listDocumentHistoryPage(
+    String documentId, {
+    required int limit,
+    required int offset,
+    String? action,
+  }) async {
+    try {
+      final res = await ApiClient.instance.get<dynamic>(
+        '$_base/documents/$documentId/history',
+        queryParameters: {
+          'limit': limit,
+          'offset': offset,
+          if (action != null && action.isNotEmpty) 'action': action,
+        },
+      );
+      return documentHistoryPageFromResponse(
+        res.data,
+        limit: limit,
+        offset: offset,
+        action: action,
+      );
+    } catch (error) {
+      debugPrint('DocuTracker activity history failed to load: $error');
+      if (error is FormatException) {
+        throw _DocuTrackerRequestException(
+          error.message.trim().isEmpty
+              ? 'Activity history could not be loaded.'
+              : error.message.trim(),
+        );
+      }
+      if (error is DioException) {
+        final data = error.response?.data;
+        if (data is Map) {
+          final serverError = data['error'];
+          if (serverError is String && serverError.trim().isNotEmpty) {
+            throw _DocuTrackerRequestException(serverError.trim());
+          }
+        }
+        final code = error.response?.statusCode;
+        throw _DocuTrackerRequestException(
+          code == null
+              ? 'Activity history could not be loaded.'
+              : 'Activity history could not be loaded (HTTP $code).',
+        );
+      }
       _throwRequestError(error);
     }
   }

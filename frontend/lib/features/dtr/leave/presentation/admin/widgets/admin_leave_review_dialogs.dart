@@ -10,11 +10,15 @@ class AdminLeaveApproveDialog extends StatefulWidget {
   const AdminLeaveApproveDialog({
     super.key,
     required this.request,
+    this.title = 'Approve Leave Request',
+    this.confirmLabel = 'Approve',
     this.leaveBalance,
     this.creditSummary,
   });
 
   final LeaveRequest request;
+  final String title;
+  final String confirmLabel;
   final LeaveBalance? leaveBalance;
   final String? creditSummary;
 
@@ -90,7 +94,7 @@ class _AdminLeaveApproveDialogState extends State<AdminLeaveApproveDialog> {
             : 'No balance record for this leave type');
 
     return AlertDialog(
-      title: const Text('Approve Leave Request'),
+      title: Text(widget.title),
       content: SizedBox(
         width: 440,
         child: Form(
@@ -194,7 +198,7 @@ class _AdminLeaveApproveDialogState extends State<AdminLeaveApproveDialog> {
               ),
             );
           },
-          child: const Text('Approve'),
+          child: Text(widget.confirmLabel),
         ),
       ],
     );
@@ -209,6 +213,8 @@ class AdminLeaveDecisionDialog extends StatefulWidget {
     required this.confirmLabel,
     required this.requireReason,
     required this.request,
+    this.minReasonLength = 1,
+    this.maxReasonLength,
   });
 
   final String title;
@@ -216,6 +222,8 @@ class AdminLeaveDecisionDialog extends StatefulWidget {
   final String confirmLabel;
   final bool requireReason;
   final LeaveRequest request;
+  final int minReasonLength;
+  final int? maxReasonLength;
 
   @override
   State<AdminLeaveDecisionDialog> createState() =>
@@ -272,6 +280,14 @@ class _AdminLeaveDecisionDialogState extends State<AdminLeaveDecisionDialog> {
                       ? (value) {
                           if ((value ?? '').trim().isEmpty) {
                             return 'Reason is required.';
+                          }
+                          final length = (value ?? '').trim().length;
+                          if (length < widget.minReasonLength) {
+                            return 'Enter at least ${widget.minReasonLength} characters.';
+                          }
+                          if (widget.maxReasonLength != null &&
+                              length > widget.maxReasonLength!) {
+                            return 'Enter no more than ${widget.maxReasonLength} characters.';
                           }
                           return null;
                         }

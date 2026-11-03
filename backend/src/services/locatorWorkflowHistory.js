@@ -1,6 +1,7 @@
 const {completeReviewNotifications} = require('./reviewNotificationCompletion');
 const LOCATOR_HISTORY_ACTION_TITLES = Object.freeze({
   submitted: 'Submitted',
+  paper_approved_recorded: 'Approved Paper Locator Recorded',
   retroactive_correction_recorded: 'Retroactive Correction Recorded',
   cancelled: 'Cancelled',
   resubmitted: 'Corrected and Resubmitted',
@@ -109,12 +110,37 @@ async function recordLocatorWorkflowEvent(client, {
   return result.rows[0] || null;
 }
 
+function savedWorkflowEventTitle(row) {
+  const outcome = /^(?:department_head|hr|mayor)_(approved|rejected|returned)$/.exec(row.action || '')?.[1];
+  if (!outcome) return locatorHistoryTitle(row.action);
+  const title = {approved:'Approved', rejected:'Rejected', returned:'Returned'}[outcome];
+  const action = {approved:'approve', rejected:'reject', returned:'return'}[outcome];
+  const snapshot = row.workflow_snapshot;
+  if (!Array.isArray(snapshot?.steps)) {
+    return row.action.startsWith('hr_') && row.actor_role &&
+      !['hr','admin','super_admin'].includes(row.actor_role) ? title : locatorHistoryTitle(row.action);
+  }
+  const labels = new Set();
+  for (const cycle of [snapshot, ...(snapshot.cycles || [])]) {
+    for (const decision of cycle.decisions || []) {
+      if (!row.actor_id || decision.actor_id !== row.actor_id ||
+          (decision.action || 'approve') !== action) continue;
+      const step = cycle.steps?.[decision.step];
+      const label = typeof step === 'string'
+        ? {department:'Department Review', hr:'HR Review', mayor:'Mayor Approval'}[step]
+        : step?.label?.trim();
+      if (label) labels.add(label);
+    }
+  }
+  return labels.size === 1 ? `${[...labels][0]} · ${title}` : title;
+}
+
 function mapLocatorWorkflowEvent(row) {
   return {
     id: row.id,
     locator_slip_id: row.locator_slip_id,
     action: row.action,
-    title: locatorHistoryTitle(row.action),
+    title: savedWorkflowEventTitle(row),
     from_status: row.from_status || null,
     to_status: row.to_status || null,
     actor_id: row.actor_id || null,
@@ -128,10 +154,11 @@ function mapLocatorWorkflowEvent(row) {
 
 async function listLocatorWorkflowEvents(client, locatorSlipId) {
   const result = await client.query(
-    `SELECT *
-     FROM locator_slip_history
-     WHERE locator_slip_id = $1::uuid
-     ORDER BY created_at ASC, id ASC`,
+    `SELECT history.*, slip.workflow_snapshot
+     FROM locator_slip_history history
+     JOIN locator_slips slip ON slip.id = history.locator_slip_id
+     WHERE history.locator_slip_id = $1::uuid
+     ORDER BY history.created_at ASC, history.id ASC`,
     [locatorSlipId]
   );
   return result.rows.map(mapLocatorWorkflowEvent);

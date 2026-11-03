@@ -54,6 +54,7 @@ import 'package:hrms_plaridel/shared/screens/profile_page.dart'
     show DashboardProfilePanel;
 import 'package:hrms_plaridel/shared/widgets/dashboard_content_navigator.dart';
 import 'package:hrms_plaridel/shared/widgets/dashboard_header_actions.dart';
+import 'package:hrms_plaridel/shared/widgets/dashboard_mobile_bottom_nav.dart';
 import 'package:hrms_plaridel/shared/utils/time_greeting.dart';
 import 'package:hrms_plaridel/shared/widgets/collapsible_dashboard_sidebar.dart';
 import 'package:hrms_plaridel/shared/widgets/portal_sidebar_brand.dart';
@@ -97,8 +98,15 @@ class _EmployeeDashboardState extends State<EmployeeDashboardDesktopPage>
   static const int _profileNavIndex = 7;
   static const _settingsPanelKey = PageStorageKey<String>('employee_settings');
   final GlobalKey<NavigatorState> _contentNavKey = GlobalKey<NavigatorState>();
-  final GlobalKey<State<StatefulWidget>> _locatorSlipKey =
-      GlobalKey<State<StatefulWidget>>();
+
+  /// Keeps [DashboardContentNavigator] State (and open document routes) alive
+  /// when the employee chrome swaps between desktop sidebar and mobile shell.
+  final GlobalKey _contentNavigatorHostKey = GlobalKey();
+
+  /// Typed so notification taps and the locator tutorial can call
+  /// [EmployeeLocatorSlipScreenState.showSection].
+  final GlobalKey<EmployeeLocatorSlipScreenState> _locatorSlipKey =
+      GlobalKey<EmployeeLocatorSlipScreenState>();
   final GlobalKey _dashboardWelcomeKey = GlobalKey();
   final GlobalKey _dashboardAttendanceKey = GlobalKey();
   final GlobalKey _dashboardDocumentsKey = GlobalKey();
@@ -109,6 +117,8 @@ class _EmployeeDashboardState extends State<EmployeeDashboardDesktopPage>
   final GlobalKey _leaveContentKey = GlobalKey();
   final GlobalKey _locatorHeaderKey = GlobalKey();
   final GlobalKey _locatorRequestsKey = GlobalKey();
+  final GlobalKey _locatorTabsKey = GlobalKey();
+  final GlobalKey _locatorApprovalFiltersKey = GlobalKey();
   final GlobalKey _trainingReportsHeaderKey = GlobalKey();
   final GlobalKey _trainingReportsFormKey = GlobalKey();
   final GlobalKey _trainingReportsHistoryKey = GlobalKey();
@@ -258,9 +268,16 @@ class _EmployeeDashboardState extends State<EmployeeDashboardDesktopPage>
 
   List<EmployeeTutorialTarget> get _locatorTutorialTargets =>
       EmployeeLocatorTutorial.targets(
-        isDepartmentHead: _isDepartmentHead ?? false,
+        isDepartmentHead:
+            _isDepartmentHead == true || _locatorTabsKey.currentContext != null,
         headerKey: _locatorHeaderKey,
         requestsKey: _locatorRequestsKey,
+        tabsKey: _locatorTabsKey,
+        approvalFiltersKey: _locatorApprovalFiltersKey,
+        showMyRequests: () =>
+            _locatorSlipKey.currentState?.showSection(approvals: false),
+        showApprovals: () =>
+            _locatorSlipKey.currentState?.showSection(approvals: true),
       );
 
   List<EmployeeTutorialTarget> get _trainingReportsTutorialTargets =>
@@ -416,6 +433,15 @@ class _EmployeeDashboardState extends State<EmployeeDashboardDesktopPage>
       case NotificationTapKind.employeeLocatorRequests:
         setState(() => _selectedNavIndex = 3);
         DashboardContentNavigator.showHome(_contentNavKey);
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (!mounted) return;
+            _locatorSlipKey.currentState?.showSection(
+              approvals:
+                  result.kind == NotificationTapKind.employeeLocatorApprovals,
+            );
+          });
+        });
         break;
       case NotificationTapKind.docuTrackerDocuments:
         setState(() {
@@ -523,7 +549,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboardDesktopPage>
 
   Widget _buildEmployeeLeaveRequestForm() {
     return EmployeeHrmsAssistantOverlay(
-      initialBottom: 36,
+      initialBottom: 176,
       child: LeaveRequestFormScreen(
         onSaveDraft: (LeaveRequest request) async {
           final provider = context.read<LeaveProvider>();
@@ -600,6 +626,8 @@ class _EmployeeDashboardState extends State<EmployeeDashboardDesktopPage>
           key: _locatorSlipKey,
           tutorialHeaderKey: _locatorHeaderKey,
           tutorialRequestsKey: _locatorRequestsKey,
+          tutorialTabsKey: _locatorTabsKey,
+          tutorialApprovalFiltersKey: _locatorApprovalFiltersKey,
         );
       case 4:
         return TrainingDailyReportEmployeeScreen(
@@ -640,7 +668,13 @@ class _EmployeeDashboardState extends State<EmployeeDashboardDesktopPage>
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => EmployeeHrmsAssistantOverlay(
+    isDashboard: true,
+    initialBottom: 92,
+    child: _buildDashboard(context),
+  );
+
+  Widget _buildDashboard(BuildContext context) {
     final userId = context.select<AuthProvider, String?>((a) => a.user?.id);
     if (userId != null && userId.isNotEmpty) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -659,6 +693,42 @@ class _EmployeeDashboardState extends State<EmployeeDashboardDesktopPage>
     final isWide = width > 900;
     final useMobileLeaveFab = width < 600 && _selectedNavIndex == 2;
     final useMobileLocatorFab = !isWide && _selectedNavIndex == 3;
+    final Object? docuTrackerHomeRefreshKey = _selectedNavIndex == 6
+        ? Object.hash(
+            'employee-docutracker',
+            _docuTrackerDeepLinkKey,
+            displayName,
+          )
+        : null;
+    final contentNavigator = DashboardContentNavigator(
+      key: _contentNavigatorHostKey,
+      navigatorKey: _contentNavKey,
+      homeCacheKey: _selectedNavIndex,
+      homeRefreshKey:
+          docuTrackerHomeRefreshKey ??
+          Object.hash(
+            _selectedNavIndex,
+            _leaveNavKey,
+            displayName,
+            useMobileLeaveFab,
+            useMobileLocatorFab,
+          ),
+      homeBuilder: () => _employeeMainChild(
+        displayName: displayName,
+        useMobileLeaveFab: useMobileLeaveFab,
+        useMobileLocatorFab: useMobileLocatorFab,
+      ),
+      settingsPanel: _settingsPanel(),
+      homeScrollPadding: employeeMainScrollPadding(context, mobileNav: !isWide),
+      settingsScrollPadding: isWide
+          ? kDashboardSettingsScrollPadding
+          : EdgeInsets.fromLTRB(
+              16,
+              8,
+              16,
+              20 + DashboardMobileBottomNav.scrollPaddingExtra(context),
+            ),
+    );
 
     if (!isWide) {
       return EmployeeDashboardMobileShell(
@@ -666,17 +736,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboardDesktopPage>
         avatarPath: avatarPath,
         displayName: displayName,
         selectedIndex: _selectedNavIndex,
-        navigatorKey: _contentNavKey,
-        homeBuilder:
-            ({
-              required bool useMobileLeaveFab,
-              required bool useMobileLocatorFab,
-            }) => _employeeMainChild(
-              displayName: displayName,
-              useMobileLeaveFab: useMobileLeaveFab,
-              useMobileLocatorFab: useMobileLocatorFab,
-            ),
-        settingsPanel: _settingsPanel(),
+        content: contentNavigator,
         onNavSelected: _onNavSelected,
         onProfile: _openMyProfile,
         onViewAllNotifications: _handleOpenNotifications,
@@ -731,28 +791,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboardDesktopPage>
                       Expanded(
                         child: ColoredBox(
                           color: AppTheme.dashCanvasOf(context),
-                          child: DashboardContentNavigator(
-                            navigatorKey: _contentNavKey,
-                            homeCacheKey: _selectedNavIndex,
-                            homeRefreshKey: Object.hash(
-                              _selectedNavIndex,
-                              _leaveNavKey,
-                              displayName,
-                              useMobileLeaveFab,
-                              useMobileLocatorFab,
-                            ),
-                            homeBuilder: () => _employeeMainChild(
-                              displayName: displayName,
-                              useMobileLeaveFab: useMobileLeaveFab,
-                              useMobileLocatorFab: useMobileLocatorFab,
-                            ),
-                            settingsPanel: _settingsPanel(),
-                            homeScrollPadding: employeeMainScrollPadding(
-                              context,
-                            ),
-                            settingsScrollPadding:
-                                kDashboardSettingsScrollPadding,
-                          ),
+                          child: contentNavigator,
                         ),
                       ),
                     ],
@@ -1093,7 +1132,7 @@ class _EmployeeSidebar extends StatelessWidget {
           child: DashboardSidebarProfileCard(
             displayName: displayName,
             subtitle: context.select<AuthProvider, String>(
-              (auth) => dashboardAccountRoleLabel(auth.user?.role),
+              (auth) => dashboardAccountPositionLabel(auth.user),
             ),
             avatarPath: avatarPath,
             onProfile: onProfile,

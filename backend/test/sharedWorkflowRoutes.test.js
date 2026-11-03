@@ -2,6 +2,23 @@
 const test=require('node:test'),assert=require('node:assert/strict');
 const {withMockedModule,clearModule}=require('./helpers/moduleMocks');
 const id='11111111-1111-4111-8111-111111111111',backup='22222222-2222-4222-8222-222222222222';
+test('inbox route forwards bounded paging and exact-request options',async()=>{
+ let received;
+ const restores=[withMockedModule('../src/config/db',{pool:{}}),
+  withMockedModule('../src/services/sharedWorkflowInbox',{listInbox:async(_db,user,options)=>{
+   received={user,options};return {items:[],has_more:{leave:false},next_cursor:{leave:null}};
+  }})];
+ clearModule('../src/routes/approvalWorkflows');
+ try{
+  const router=require('../src/routes/approvalWorkflows');
+  const handler=router.stack.find(s=>s.route?.path==='/inbox').route.stack.at(-1).handle;
+  const req={user:{id},query:{paginated:'true',include_history:'true',kind:'leave',limit:'50',cursor:'cursor',request_id:backup}};
+  const res={json(value){this.body=value;}};
+  await handler(req,res);
+  assert.deepEqual(received,{user:req.user,options:{paginated:true,includeHistory:true,kind:'leave',limit:'50',cursor:'cursor',requestId:backup}});
+  assert.deepEqual(res.body.items,[]);
+ }finally{clearModule('../src/routes/approvalWorkflows');restores.reverse().forEach(r=>r());}
+});
 for(const scenario of ['backup','outsider','stale','not-allowed'])test(`shared inbox decision: ${scenario}`,async()=>{
  const snapshot={name:'Custom',steps:[{step_order:1,label:'Initial approval',assignee_type:'user',assignee_source:'specific_users',user_ids:[id,backup],allowed_actions:['approve','reject']}],current_step:0,decisions:[]};
  const row={id,employee_id:'applicant',status:'pending_hr',signature_revision:2,workflow_snapshot:snapshot};

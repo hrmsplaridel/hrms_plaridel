@@ -27,7 +27,8 @@ test('the complete fresh initializer runs as SQL without psql commands or other 
  const fields={
   users:['auth_version'],audit_logs:['actor_snapshot','target_snapshot'],
   auth_password_reset_otps:['assistance_request_id'],
-  recruitment_applications:['step2_gate_required','step4_gate_required','step5_gate_required','required_form_review_log','wes_status','tat_status','csc_approval_status'],
+  recruitment_applications:['step2_gate_required','step4_gate_required','step5_gate_required','required_form_review_log','wes_status','tat_status','csc_approval_status','hr_account_setup_linked_sync'],
+  mayor_endorsement_requests:['reference_number','applicant_full_name','endorsed_at','meeting_request_status','is_test'],
   bi_form_entries:['application_id'],ojt_work_immersion_evaluation_entries:['application_id'],
  };
  for(const [table,columns] of Object.entries(fields)){
@@ -37,6 +38,19 @@ test('the complete fresh initializer runs as SQL without psql commands or other 
  }
  assert.match(schema,/CREATE TABLE IF NOT EXISTS password_reset_requests\s*\(/i);
  assert.match(schema,/CREATE OR REPLACE FUNCTION (?:public\.)?rsp_storage_path_allowed\s*\(/i);
+});
+
+test('Mayor monitoring indexes are present without requiring runtime bootstrap',()=>{
+ for(const name of ['idx_mayor_endorsement_requests_meeting_request_status',
+  'idx_mayor_endorsement_requests_endorsed_at','idx_mayor_endorsement_requests_is_test']) {
+  assert.match(schema,new RegExp(`CREATE INDEX IF NOT EXISTS ${name}\\s`,'i'));
+ }
+});
+
+test('merged RSP and LD bootstrap upgrades also have explicit deployment migrations',()=>{
+ for(const file of ['20261023_rsp_hired_account_sync.sql','20261023_ld_multiple_training_records.sql','20261023_schema_support_parity.sql']) {
+  assert.ok(fs.existsSync(path.join(root,'scripts/migrations',file)),`${file} is available for existing databases`);
+ }
 });
 
 test('DTR table definitions declare the current workflow, signature, field and layout columns',()=>{
@@ -73,6 +87,16 @@ test('fresh DTR installation resolves configured reviewers and preserves current
   db=new Client({connectionString:target.toString()});await db.connect();
   // Send the complete file as SQL, just like pgAdmin Query Tool: no psql includes.
   await db.query(schema);
+  // Existing deployments can predate these support objects while already having all columns.
+  await db.query(`DROP FUNCTION public.rsp_storage_path_allowed(text);
+    DROP TRIGGER trg_user_push_tokens_updated_at ON public.user_push_tokens;
+    ALTER TABLE public.leave_requests ALTER COLUMN user_id DROP NOT NULL;
+    ALTER TABLE public.dtr_daily_summary_deletions DROP CONSTRAINT dtr_daily_summary_deletions_restoration_reason_check`);
+  const storageUpgrade=fs.readFileSync(path.join(root,'scripts/migrations/rsp/rsp-storage-attachment-policy.sql'),'utf8');
+  const supportUpgrade=fs.readFileSync(path.join(root,'scripts/migrations/20261023_schema_support_parity.sql'),'utf8');
+  await db.query(storageUpgrade);await db.query(supportUpgrade);await db.query(supportUpgrade);
+  assert.equal((await db.query("SELECT is_nullable FROM information_schema.columns WHERE table_schema='public' AND table_name='leave_requests' AND column_name='user_id'")).rows[0].is_nullable,'NO');
+  assert.equal((await db.query("SELECT convalidated FROM pg_constraint WHERE conname='dtr_daily_summary_deletions_restoration_reason_check'")).rows[0].convalidated,true);
   const printPolicyMigration=fs.readFileSync(path.join(root,'scripts/migrations/dtr/20261018_workflow_self_filing_signatories.sql'),'utf8');
   // Simulate an upgrade from the old version table in this disposable database.
   await db.query(`CREATE SCHEMA print_policy_upgrade;
@@ -120,11 +144,38 @@ test('fresh DTR installation resolves configured reviewers and preserves current
     assert.equal(protectedUpdate.body.max_days,7);assert.equal(protectedUpdate.body.minimum_service_months,6);
   } finally {clearModule('../src/routes/leaveRoutes');restorePool();}
   const reset=(await db.query("INSERT INTO users(email,password_hash,full_name) VALUES('reset@test.invalid','test-hash','Reset User') RETURNING id")).rows[0];
+  const push=(await db.query("INSERT INTO user_push_tokens(user_id,token,updated_at) VALUES($1,'test-push-token','2000-01-01') RETURNING id,updated_at",[reset.id])).rows[0];
+  const updatedPush=(await db.query("UPDATE user_push_tokens SET last_seen_at=now() WHERE id=$1 RETURNING updated_at",[push.id])).rows[0];
+  assert.ok(updatedPush.updated_at>push.updated_at,'Push-token updates advance the timestamp');
   const assistance=(await db.query('INSERT INTO password_reset_requests(user_id) VALUES($1) RETURNING id',[reset.id])).rows[0];
   await db.query("INSERT INTO auth_password_reset_otps(user_id,code_hash,expires_at,assistance_request_id) VALUES($1,'test',now()+interval '5 minutes',$2)",[reset.id,assistance.id]);
   const audit=(await db.query("INSERT INTO audit_logs(user_id,entity_id,entity_type,action) VALUES($1,$1,'auth','test') RETURNING actor_snapshot,target_snapshot",[reset.id])).rows[0];
   assert.equal(audit.actor_snapshot.name,'Reset User');assert.equal(audit.target_snapshot.name,'Reset User');
   const application=(await db.query("INSERT INTO recruitment_applications(full_name,email,attachment_path) VALUES('Applicant','recruit@test.invalid','test/resume.pdf') RETURNING *")).rows[0];
+  assert.equal(application.hr_account_setup_linked_sync,false);
+  const staff=(await db.query("INSERT INTO users(email,password_hash,full_name,role) VALUES('staff@test.invalid','test-hash','Mayor Staff','mayor_office_staff') RETURNING id")).rows[0];
+  // Exercise existing-database upgrades on disposable old table shapes.
+  await db.query('ALTER TABLE recruitment_applications DROP COLUMN hr_account_setup_linked_sync');
+  await db.query('UPDATE recruitment_applications SET hired_user_id=$1 WHERE id=$2',[staff.id,application.id]);
+  const accountUpgrade=fs.readFileSync(path.join(root,'scripts/migrations/20261023_rsp_hired_account_sync.sql'),'utf8');
+  await db.query(accountUpgrade);
+  assert.equal((await db.query('SELECT hr_account_setup_done FROM recruitment_applications WHERE id=$1',[application.id])).rows[0].hr_account_setup_done,true);
+  await db.query('UPDATE recruitment_applications SET hr_account_setup_done=false WHERE id=$1',[application.id]);
+  await db.query(accountUpgrade);
+  assert.equal((await db.query('SELECT hr_account_setup_done FROM recruitment_applications WHERE id=$1',[application.id])).rows[0].hr_account_setup_done,false,'Repeated upgrade preserves subsequent manual choices');
+  await db.query('ALTER TABLE ld_training_requirement_records ADD CONSTRAINT uq_ld_training_requirement_employee UNIQUE(employee_id)');
+  const trainingUpgrade=fs.readFileSync(path.join(root,'scripts/migrations/20261023_ld_multiple_training_records.sql'),'utf8');
+  await db.query(trainingUpgrade);await db.query(trainingUpgrade);
+  const endorsement=(await db.query('INSERT INTO mayor_endorsement_requests(application_id,submitted_by) VALUES($1,$2) RETURNING *',[application.id,staff.id])).rows[0];
+  assert.equal(endorsement.is_test,false);
+  assert.equal(endorsement.meeting_request_status,'none');
+  await db.query('INSERT INTO mayor_endorsement_requests(application_id) VALUES(NULL),(NULL)');
+  await db.query('DELETE FROM recruitment_applications WHERE id=$1',[application.id]);
+  assert.equal((await db.query('SELECT count(*)::int AS n FROM mayor_endorsement_requests WHERE id=$1',[endorsement.id])).rows[0].n,1);
+  await db.query("INSERT INTO ld_training_requirement_records(employee_id,training_title) VALUES($1,'First'),($1,'Second')",[staff.id]);
+  assert.equal((await db.query('SELECT count(*)::int AS n FROM ld_training_requirement_records WHERE employee_id=$1',[staff.id])).rows[0].n,2);
+  // Retain the recruitment row used by the remaining access-policy checks.
+  await db.query('INSERT INTO recruitment_applications(id,full_name,email,attachment_path) VALUES($1,$2,$3,$4)',[application.id,application.full_name,application.email,application.attachment_path]);
   assert.equal(application.step2_gate_required,false);assert.equal(application.step4_gate_required,false);assert.equal(application.step5_gate_required,false);
   assert.equal((await db.query("SELECT rsp_storage_path_allowed('test/resume.pdf') AS allowed")).rows[0].allowed,true);
   assert.equal((await db.query("SELECT rsp_storage_path_allowed('unrelated/file.pdf') AS allowed")).rows[0].allowed,false);

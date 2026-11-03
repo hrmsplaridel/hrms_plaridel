@@ -232,9 +232,9 @@ function currentStepSignature(row,signature) {
    d.step!==snapshot.current_step && String(d.actor_id)===String(signature.signed_by));
  return belongsToCompletedStep?null:signature;
 }
-async function decisionSignatures(db,row) {
+async function decisionSignatures(db,row,{includeLegacy=false}={}) {
  const snapshot=row.workflow_snapshot;
- if(!isShared(snapshot) || !['pending','pending_hr','pending_mayor','pending_department_head','approved'].includes(row.status))return [];
+ if(!snapshot?.steps?.length || (!includeLegacy && !isShared(snapshot)) || !['pending','pending_hr','pending_mayor','pending_department_head','approved'].includes(row.status))return [];
  const decisions=(snapshot.decisions||[]).filter(d=>d.action==='approve' && d.signature?.revision===row.signature_revision);
  if(!decisions.length)return [];
  const assets=(await db.query(`SELECT id,owner_user_id,mime_type,encode(image_bytes,'base64') AS signature_image_base64

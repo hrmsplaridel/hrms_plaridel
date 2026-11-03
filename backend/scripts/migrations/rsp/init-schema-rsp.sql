@@ -4,7 +4,7 @@
 --   psql -d hrms_plaridel -f scripts/init-schema.sql
 --
 -- After init, apply attachment storage policy (required for RSP file uploads):
---   psql -d hrms_plaridel -f scripts/rsp-storage-attachment-policy.sql
+--   psql -d hrms_plaridel -f scripts/migrations/rsp/rsp-storage-attachment-policy.sql
 --
 -- Existing databases that were created before this merge can still use the
 -- one-off migrations under scripts/migrate-*.sql if a column is missing.

@@ -1,4 +1,5 @@
 const { detectAssistantLanguage } = require('./dtrAssistantLanguage');
+const { explicitQuestionIntent, isWritingRequest, locatorPolicyKind, currentQuestion } = require('./dtrAssistantQuestion');
 const {
   isLocatorCreditRequirementQuestion,
   scoreEmployeeAssistantIntent,
@@ -65,10 +66,10 @@ const LOCALIZED_MULTI_INTENT_LABELS = {
 };
 
 function splitMessageSegments(message) {
-  const text = String(message || '').trim();
+  const text = currentQuestion(message);
   if (!text) return [];
   const parts = text
-    .split(SEGMENT_SPLIT_PATTERN)
+    .split(/,\s*(?:and\s+)?(?=(?:yesterday|today|the latest|my |leave |sick |locator |attendance |dtr\b))|\s+(?:and|ug|at|saka|then|plus)\s+|\?\s+(?=[A-Za-z])/i)
     .map((part) => part.trim())
     .filter((part) => part.length >= 8);
   if (parts.length <= 1) return [text];
@@ -87,7 +88,15 @@ function uniqueIntents(items) {
 }
 
 function detectMultipleIntents(message, options = {}) {
-  if (isLocatorCreditRequirementQuestion(message)) {
+  message = currentQuestion(message);
+  const specific = explicitQuestionIntent(message);
+  if (['request_status_overview', 'dtr_policy_guidance'].includes(specific)) return {isMulti:false, intents:[{segment:message,intent:specific,confidence:1}],segments:[message]};
+  if (isWritingRequest(message) || locatorPolicyKind(message) || ['locator_type_compare', 'leave_type_compare', 'leave_form_field_help', 'locator_form_field_help', 'system_navigation_help','assistant_action_guidance','request_policy_guidance','request_checklist','dtr_comparison'].includes(specific)) {
+    return { isMulti: false, intents: specific ? [{ segment: message, intent: specific, confidence: 1, domain: intentDomain(specific) }] : [], segments: [message] };
+  }
+  const splitSegments = splitMessageSegments(message);
+  const independentBalance = splitSegments.some(segment => /\b(?:leave|sick|vacation)\b/i.test(segment) && /\b(?:credits?|balance)\b/i.test(segment) && !/\b(?:locator|wfh|pass slip)\b/i.test(segment));
+  if (isLocatorCreditRequirementQuestion(message) && !independentBalance) {
     return {
       isMulti: false,
       intents: [
@@ -104,7 +113,16 @@ function detectMultipleIntents(message, options = {}) {
   }
   const segments = splitMessageSegments(message);
   const scoredSegments = segments.map((segment) => {
-    const scored = scoreEmployeeAssistantIntent(segment, options.explicitIntent || null);
+    let scoped = segment;
+    if (/pending days/i.test(segment) && /leave|credits|balance/i.test(message)) scoped = `${segment} leave`;
+    const scored = scoreEmployeeAssistantIntent(scoped, options.explicitIntent || null);
+    if (/\b(?:attendance|dtr)\b/i.test(segment) && !/missing|late|undertime|overtime|policy|rules|correction|export/i.test(segment)) {
+      scored.intent = 'dtr_status_explanation'; scored.confidence = 1;
+    }
+    if (/pending days/i.test(scoped)) { scored.intent='leave_pending_days_explanation'; scored.confidence=1; }
+    if (/\b(?:sick|vacation|leave)\b/i.test(segment) && /credits?|balance/i.test(segment) && !/why|explain|pending|need|deduct/i.test(segment)) {
+      scored.intent='leave_balance'; scored.confidence=1;
+    }
     return {
       segment,
       intent: scored.intent,
@@ -127,55 +145,6 @@ function detectMultipleIntents(message, options = {}) {
     };
   }
 
-  // Full-message dual-domain detection: e.g. leave balance + missing logs in one sentence.
-  if (segments.length === 1) {
-    const full = scoreEmployeeAssistantIntent(message, options.explicitIntent || null);
-    const primaryConfidence = full.confidence || 0;
-    if (primaryConfidence >= 0.92) {
-      return {
-        isMulti: false,
-        intents: unique.slice(0, 1),
-        segments,
-      };
-    }
-    const secondaryCandidates = (full.fuzzy?.scores || [])
-      .filter(
-        (item) =>
-          item.intent &&
-          item.intent !== full.intent &&
-          item.confidence >= 0.72 &&
-          primaryConfidence - item.confidence <= 0.18
-      )
-      .slice(0, 2);
-    if (full.intent && secondaryCandidates.length > 0) {
-      const primaryDomain = intentDomain(full.intent);
-      const secondary = secondaryCandidates.find(
-        (item) => intentDomain(item.intent) && intentDomain(item.intent) !== primaryDomain
-      );
-      if (secondary) {
-        return {
-          isMulti: true,
-          intents: uniqueIntents([
-            {
-              segment: message,
-              intent: full.intent,
-              confidence: full.confidence,
-              source: full.source,
-              domain: primaryDomain,
-            },
-            {
-              segment: message,
-              intent: secondary.intent,
-              confidence: secondary.confidence,
-              source: secondary.source,
-              domain: intentDomain(secondary.intent),
-            },
-          ]),
-          segments,
-        };
-      }
-    }
-  }
 
   return {
     isMulti: false,

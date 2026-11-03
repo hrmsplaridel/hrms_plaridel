@@ -16,6 +16,8 @@ import 'package:hrms_plaridel/features/dtr/leave/presentation/employee/shared/wi
 import 'package:hrms_plaridel/features/dtr/leave/presentation/employee/shared/utils/employee_leave_actions.dart';
 import 'package:hrms_plaridel/features/dtr/leave/presentation/shared/pages/leave_balance_history_screen.dart';
 import 'package:hrms_plaridel/features/dtr/leave/presentation/shared/widgets/my_leave_loading_skeleton.dart';
+import 'package:hrms_plaridel/features/dtr/leave/presentation/shared/widgets/leave_balance_card.dart';
+import 'package:hrms_plaridel/features/dtr/leave/presentation/shared/widgets/leave_usage_details_panel.dart';
 
 /// Employee-facing leave screen.
 ///
@@ -595,9 +597,7 @@ class _BalancesPanel extends StatelessWidget {
                   _SectionLoadError(message: error!, onRetry: onRetry),
                   const SizedBox(height: 12),
                 ],
-                ...balances.map(
-                  (balance) => _CompactBalanceRow(balance: balance),
-                ),
+                LeaveBalanceCards(balances: balances),
               ],
             ),
     );
@@ -619,17 +619,27 @@ class _LeaveDaysPanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final entitlementBalances = balances
-        .where((balance) => balance.isAnnualEntitlement)
+        .where((balance) => balance.isUsageSummary)
         .toList();
     if (!loading && entitlementBalances.isEmpty) {
       return const SizedBox.shrink();
     }
     return _BalanceSection(
-      title: 'Annual Leave Entitlements',
+      title: 'Leave Usage & Limits',
+      headerTrailing: entitlementBalances.length > leaveUsagePreviewLimit
+          ? TextButton(
+              onPressed: () => showLeaveUsageDetails(
+                context: context,
+                balances: entitlementBalances,
+              ),
+              child: Text('View all (${entitlementBalances.length})'),
+            )
+          : null,
       child: loading && entitlementBalances.isEmpty
           ? const _CenteredState(message: 'Loading leave days...')
           : Column(
               children: entitlementBalances
+                  .take(leaveUsagePreviewLimit)
                   .map(
                     (balance) => _CompactBalanceRow(
                       balance: balance,
@@ -714,11 +724,19 @@ class _CompactBalanceRow extends StatelessWidget {
                           fontSize: 11,
                         ),
                       ),
+                    if (annual && balance.isComplianceProgress)
+                      Text(
+                        'Includes approved Forced and Vacation Leave. Charged to VL credits.',
+                        style: TextStyle(color: AppTheme.dashTextSecondaryOf(context), fontSize: 11),
+                      ),
+                    if (annual && balance.usageStatusLabel != null)
+                      Text(balance.usageStatusLabel!,
+                        style: TextStyle(color: AppTheme.dashTextPrimaryOf(context), fontSize: 11, fontWeight: FontWeight.w600)),
                   ],
                 ),
               ),
               _BalanceAmount(
-                label: annual ? 'Entitled' : 'Earned',
+                label: annual ? (balance.isComplianceProgress ? 'Required' : 'Limit') : 'Earned',
                 value: _days(
                   annual ? balance.annualEntitlementDays : balance.earnedDays,
                 ),
@@ -728,14 +746,14 @@ class _CompactBalanceRow extends StatelessWidget {
                   label: 'Prorated',
                   value: _days(balance.earnedDays),
                 ),
-              _BalanceAmount(label: 'Used', value: _days(balance.usedDays)),
-              _BalanceAmount(
+              _BalanceAmount(label: annual ? 'Taken' : 'Used', value: _days(balance.usedDays)),
+              if (!annual) _BalanceAmount(
                 label: 'Pending',
                 value: _days(balance.pendingDays),
               ),
               _BalanceAmount(
-                label: 'Available',
-                value: _days(balance.availableDays),
+                label: annual ? (balance.isComplianceProgress ? 'Still required' : 'Remaining') : 'Available',
+                value: annual && balance.historyVerificationRequired ? '—' : _days(annual ? balance.usageRemainingDays : balance.availableDays),
                 emphasized: true,
               ),
             ],

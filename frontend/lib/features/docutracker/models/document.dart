@@ -46,6 +46,7 @@ class DocuTrackerDocument {
     this.releaseRemarks,
     this.viewerReleaseAccess = false,
     this.viewerCanRelease = false,
+    this.typeRequiresRelease,
   });
 
   final String? id;
@@ -134,6 +135,10 @@ class DocuTrackerDocument {
 
   /// The backend allows the viewer to release this document now.
   final bool viewerCanRelease;
+
+  /// Document-type release policy. Null when this payload did not include it.
+  /// This is separate from [releaseRequired], which is snapshotted at approval.
+  final bool? typeRequiresRelease;
 
   bool get isAwaitingRelease =>
       releaseRequired &&
@@ -226,6 +231,9 @@ class DocuTrackerDocument {
       releaseRemarks: json['release_remarks']?.toString(),
       viewerReleaseAccess: json['viewer_release_access'] == true,
       viewerCanRelease: json['viewer_can_release'] == true,
+      typeRequiresRelease: json.containsKey('type_requires_release')
+          ? json['type_requires_release'] == true
+          : null,
     );
   }
 
@@ -353,6 +361,7 @@ class DocuTrackerDocument {
       releaseRemarks: releaseRemarks,
       viewerReleaseAccess: viewerReleaseAccess,
       viewerCanRelease: viewerCanRelease,
+      typeRequiresRelease: typeRequiresRelease,
     );
   }
 }
