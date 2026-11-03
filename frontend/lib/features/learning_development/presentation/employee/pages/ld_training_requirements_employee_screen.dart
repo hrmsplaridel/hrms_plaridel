@@ -1,9 +1,11 @@
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import 'package:hrms_plaridel/core/api/user_facing_api_error.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
+import 'package:hrms_plaridel/core/utils/input_rules.dart';
 import 'package:hrms_plaridel/features/learning_development/models/ld_training_requirements.dart';
 
 class LdTrainingRequirementsEmployeeScreen extends StatefulWidget {
@@ -80,6 +82,16 @@ class _LdTrainingRequirementsEmployeeScreenState
       );
       return;
     }
+    if (title.length > InputRules.trainingRequirementTitleMax) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Training title must be at most ${InputRules.trainingRequirementTitleMax} characters.',
+          ),
+        ),
+      );
+      return;
+    }
     setState(() => _savingTitle = true);
     try {
       final declared = _record != null && _hasTitle(_record!);
@@ -117,6 +129,20 @@ class _LdTrainingRequirementsEmployeeScreenState
     if (result == null || result.files.isEmpty || !mounted) return;
     final f = result.files.first;
     if (f.bytes == null || f.name.isEmpty) return;
+    final size = f.size > 0 ? f.size : (f.bytes?.length ?? 0);
+    if (!InputRules.isWithinMaxBytes(
+      size,
+      InputRules.trainingRequirementPdfMaxBytes,
+    )) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'PDF must be at most ${InputRules.formatBytesLabel(InputRules.trainingRequirementPdfMaxBytes)}.',
+          ),
+        ),
+      );
+      return;
+    }
     setState(() => _picked[kind] = f);
   }
 
@@ -778,6 +804,12 @@ class _TrainingTitleCard extends StatelessWidget {
       controller: controller,
       enabled: !titleLocked,
       textInputAction: TextInputAction.done,
+      maxLength: InputRules.trainingRequirementTitleMax,
+      inputFormatters: [
+        LengthLimitingTextInputFormatter(
+          InputRules.trainingRequirementTitleMax,
+        ),
+      ],
       decoration:
           AppTheme.dashInputDecoration(
             context,
@@ -794,6 +826,7 @@ class _TrainingTitleCard extends StatelessWidget {
                 ? AppTheme.dashMutedSurfaceOf(context)
                 : const Color(0xFFF7F8FA),
             floatingLabelBehavior: FloatingLabelBehavior.never,
+            counterText: '',
           ),
       onSubmitted: (_) => onSave(),
     );
@@ -1960,7 +1993,7 @@ class _DocTile extends StatelessWidget {
                         ),
                         const SizedBox(height: 2),
                         Text(
-                          'PDF only',
+                          'PDF only • Max 15 MB',
                           style: TextStyle(fontSize: 11.5, color: secondary),
                         ),
                         const SizedBox(height: 8),

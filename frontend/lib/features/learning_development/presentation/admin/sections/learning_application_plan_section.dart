@@ -4,11 +4,13 @@ import 'package:hrms_plaridel/core/api/client.dart';
 import 'package:hrms_plaridel/core/api/user_facing_api_error.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/core/utils/form_pdf.dart';
+import 'package:hrms_plaridel/core/utils/input_rules.dart';
 import 'package:hrms_plaridel/features/learning_development/models/learning_application_plan.dart';
 import 'package:hrms_plaridel/features/recruitment/presentation/admin/widgets/rsp_records_list_table.dart';
 import 'package:hrms_plaridel/shared/widgets/read_only_saved_entry_dialog.dart';
 import 'package:hrms_plaridel/shared/widgets/form_document_preview.dart';
 import 'package:hrms_plaridel/shared/widgets/rsp_ld_form_header.dart';
+import 'package:hrms_plaridel/shared/widgets/rsp_ld_form_nav_scope.dart';
 import 'package:hrms_plaridel/shared/widgets/rsp_ld_record_actions.dart';
 import 'package:hrms_plaridel/shared/widgets/rsp_ld_saved_records_browser.dart';
 import 'package:hrms_plaridel/shared/widgets/rsp_ld_recycle_bin_dialog.dart';
@@ -169,10 +171,20 @@ class LearningApplicationPlanAdminSection extends StatefulWidget {
 }
 
 class _LearningApplicationPlanAdminSectionState
-    extends State<LearningApplicationPlanAdminSection> {
+    extends State<LearningApplicationPlanAdminSection>
+    with RspLdFormEditorNavMixin<LearningApplicationPlanAdminSection> {
   List<LearningApplicationPlanEntry> _entries = [];
   bool _loading = true;
   LearningApplicationPlanEntry? _editing;
+
+  @override
+  bool get isFormEditorOpen => _editing != null;
+
+  @override
+  void exitFormEditor() {
+    setState(() => _editing = null);
+    notifyFormEditorNav();
+  }
 
   @override
   void initState() {
@@ -198,10 +210,17 @@ class _LearningApplicationPlanAdminSectionState
     }
   }
 
-  void _startNew() =>
-      setState(() => _editing = const LearningApplicationPlanEntry());
-  void _edit(LearningApplicationPlanEntry e) => setState(() => _editing = e);
-  void _cancelEdit() => setState(() => _editing = null);
+  void _startNew() {
+    setState(() => _editing = const LearningApplicationPlanEntry());
+    notifyFormEditorNav();
+  }
+
+  void _edit(LearningApplicationPlanEntry e) {
+    setState(() => _editing = e);
+    notifyFormEditorNav();
+  }
+
+  void _cancelEdit() => exitFormEditor();
 
   Future<void> _onSave(LearningApplicationPlanEntry entry) async {
     try {
@@ -215,6 +234,7 @@ class _LearningApplicationPlanAdminSectionState
         context,
       ).showSnackBar(const SnackBar(content: Text('Learning Application Plan saved.')));
       setState(() => _editing = null);
+      notifyFormEditorNav();
       _load();
     } catch (e) {
       if (!mounted) return;
@@ -576,12 +596,14 @@ class _LearningApplicationPlanFormEditorState
   }
 
   bool _validate() {
-    _fromError = _from.text.trim().isEmpty ? 'From is required.' : null;
+    _fromError = InputRules.personNameError(_from.text, label: 'From');
     _subjectError = _subject.text.trim().isEmpty ? 'Subject is required.' : null;
     _titleError = _title.text.trim().isEmpty ? 'Title is required.' : null;
     _dateError = _date.text.trim().isEmpty ? 'Date is required.' : null;
-    _reportedError =
-        _reportedBy.text.trim().isEmpty ? 'Reported by is required.' : null;
+    _reportedError = InputRules.personNameError(
+      _reportedBy.text,
+      label: 'Reported by',
+    );
     _costError = _isValidLapCost(_cost.text)
         ? null
         : 'Enter a valid cost amount.';
@@ -816,6 +838,8 @@ class _LearningApplicationPlanFormEditorState
           controller: controller,
           focusNode: focus,
           readOnly: widget.readOnly,
+          inputFormatters: InputRules.personNameFormatters,
+          textCapitalization: TextCapitalization.words,
           onChanged: (_) => setState(() {}),
           decoration: _decoration(
             context,

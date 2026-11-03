@@ -1,10 +1,12 @@
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
 import 'package:hrms_plaridel/features/docutracker/data/providers/docutracker_provider.dart';
 import 'package:hrms_plaridel/features/learning_development/models/training_daily_report.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
+import 'package:hrms_plaridel/core/utils/input_rules.dart';
 import 'package:hrms_plaridel/shared/widgets/read_only_saved_entry_dialog.dart';
 import 'package:hrms_plaridel/shared/widgets/training_daily_report_read_only_view.dart';
 
@@ -357,9 +359,24 @@ class _TrainingDailyReportEmployeeScreenState
       allowedExtensions: ['jpg', 'jpeg', 'png', 'pdf'],
       withData: true,
     );
-    if (result != null && result.files.isNotEmpty) {
-      setState(() => _selectedFile = result.files.single);
+    if (result == null || result.files.isEmpty) return;
+    final file = result.files.single;
+    final size = file.size > 0 ? file.size : (file.bytes?.length ?? 0);
+    if (!InputRules.isWithinMaxBytes(
+      size,
+      InputRules.trainingDailyAttachmentMaxBytes,
+    )) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Attachment must be at most ${InputRules.formatBytesLabel(InputRules.trainingDailyAttachmentMaxBytes)}.',
+          ),
+        ),
+      );
+      return;
     }
+    setState(() => _selectedFile = file);
   }
 
   Future<void> _submit() async {
@@ -371,6 +388,44 @@ class _TrainingDailyReportEmployeeScreenState
         const SnackBar(content: Text('Please enter a report title')),
       );
       return;
+    }
+    if (title.length > InputRules.trainingDailyTitleMax) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Title must be at most ${InputRules.trainingDailyTitleMax} characters.',
+          ),
+        ),
+      );
+      return;
+    }
+    if (description.length > InputRules.trainingDailyDescriptionMax) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Description must be at most ${InputRules.trainingDailyDescriptionMax} characters.',
+          ),
+        ),
+      );
+      return;
+    }
+    if (_selectedFile != null) {
+      final size = _selectedFile!.size > 0
+          ? _selectedFile!.size
+          : (_selectedFile!.bytes?.length ?? 0);
+      if (!InputRules.isWithinMaxBytes(
+        size,
+        InputRules.trainingDailyAttachmentMaxBytes,
+      )) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Attachment must be at most ${InputRules.formatBytesLabel(InputRules.trainingDailyAttachmentMaxBytes)}.',
+            ),
+          ),
+        );
+        return;
+      }
     }
 
     setState(() => _submitting = true);
@@ -626,6 +681,12 @@ class _TrainingDailyReportEmployeeScreenState
             focusNode: _titleFocusNode,
             textCapitalization: TextCapitalization.sentences,
             style: AppTheme.dashFieldTextStyle(context),
+            maxLength: InputRules.trainingDailyTitleMax,
+            inputFormatters: [
+              LengthLimitingTextInputFormatter(
+                InputRules.trainingDailyTitleMax,
+              ),
+            ],
             decoration: _inputDecoration(
               context,
               hint: 'e.g. Database Configuration Training',
@@ -634,7 +695,7 @@ class _TrainingDailyReportEmployeeScreenState
                 color: secondary,
                 size: 20,
               ),
-            ),
+            ).copyWith(counterText: ''),
           ),
           const SizedBox(height: 14),
           _fieldLabel(context, 'Description'),
@@ -644,6 +705,12 @@ class _TrainingDailyReportEmployeeScreenState
             maxLines: 6,
             textCapitalization: TextCapitalization.sentences,
             style: AppTheme.dashFieldTextStyle(context),
+            maxLength: InputRules.trainingDailyDescriptionMax,
+            inputFormatters: [
+              LengthLimitingTextInputFormatter(
+                InputRules.trainingDailyDescriptionMax,
+              ),
+            ],
             decoration: _inputDecoration(
               context,
               hint:
@@ -653,7 +720,7 @@ class _TrainingDailyReportEmployeeScreenState
                 child: Icon(Icons.edit_outlined, color: secondary, size: 18),
               ),
               alignLabelWithHint: true,
-            ),
+            ).copyWith(counterText: ''),
           ),
           const SizedBox(height: 14),
           _fieldLabel(context, 'Attachment', hint: '(Optional)'),

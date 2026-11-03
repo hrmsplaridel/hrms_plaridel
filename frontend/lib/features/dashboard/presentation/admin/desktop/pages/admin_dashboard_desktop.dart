@@ -24,6 +24,7 @@ import 'package:hrms_plaridel/features/learning_development/presentation/admin/s
 import 'package:hrms_plaridel/features/learning_development/presentation/admin/widgets/ld_admin_hub.dart';
 import 'package:hrms_plaridel/features/forms/presentation/admin/pages/form_background_upload_page.dart';
 import 'package:hrms_plaridel/features/forms/presentation/admin/pages/rsp_print_background_page.dart';
+import 'package:hrms_plaridel/shared/widgets/rsp_ld_form_nav_scope.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/core/utils/form_pdf.dart';
 import 'package:hrms_plaridel/shared/screens/profile_page.dart'
@@ -2359,6 +2360,24 @@ class _LdFormsSectionState extends State<_LdFormsSection> {
       .toList(growable: false);
   _LdFormPickerItem? _selected;
   bool _showPrintBackground = false;
+  late final RspLdFormNavController _formNav = RspLdFormNavController(
+    onChanged: () {
+      if (mounted) setState(() {});
+    },
+  );
+
+  void _handleFormsBack() {
+    if (_showPrintBackground) {
+      setState(() => _showPrintBackground = false);
+      return;
+    }
+    if (_formNav.tryExitEditor()) return;
+    if (_selected != null) {
+      setState(() => _selected = null);
+      return;
+    }
+    widget.onBackToLd();
+  }
 
   Widget _buildSelectedForm(_LdFormPickerItem item) {
     switch (item.keyName) {
@@ -2380,15 +2399,12 @@ class _LdFormsSectionState extends State<_LdFormsSection> {
     final secondary = AppTheme.dashTextSecondaryOf(context);
     final selectedItem = _selected;
     final inBackground = _showPrintBackground;
+    final inEditor = _formNav.hasActiveEditor;
+    final atFormsRoot = selectedItem == null && !inBackground;
     return Row(
       children: [
         TextButton.icon(
-          onPressed: selectedItem == null && !inBackground
-              ? widget.onBackToLd
-              : () => setState(() {
-                  _selected = null;
-                  _showPrintBackground = false;
-                }),
+          onPressed: _handleFormsBack,
           icon: const Icon(Icons.arrow_back_rounded, size: 20),
           label: const Text('Back'),
           style: TextButton.styleFrom(foregroundColor: navy),
@@ -2399,11 +2415,9 @@ class _LdFormsSectionState extends State<_LdFormsSection> {
         Text(
           'Forms',
           style: TextStyle(
-            color: selectedItem == null && !inBackground ? navy : secondary,
+            color: atFormsRoot ? navy : secondary,
             fontSize: 13,
-            fontWeight: selectedItem == null && !inBackground
-                ? FontWeight.w800
-                : FontWeight.w600,
+            fontWeight: atFormsRoot ? FontWeight.w800 : FontWeight.w600,
           ),
         ),
         if (selectedItem != null) ...[
@@ -2414,7 +2428,25 @@ class _LdFormsSectionState extends State<_LdFormsSection> {
             child: Text(
               selectedItem.title,
               overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
+              style: TextStyle(
+                color: inEditor || inBackground ? secondary : navy,
+                fontSize: 13,
+                fontWeight: inEditor || inBackground
+                    ? FontWeight.w600
+                    : FontWeight.w800,
+              ),
+            ),
+          ),
+        ],
+        if (inEditor && !inBackground) ...[
+          const SizedBox(width: 2),
+          Icon(Icons.chevron_right_rounded, size: 16, color: secondary),
+          const SizedBox(width: 2),
+          const Flexible(
+            child: Text(
+              'Record',
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
                 color: AppTheme.primaryNavy,
                 fontSize: 13,
                 fontWeight: FontWeight.w800,
@@ -2518,7 +2550,10 @@ class _LdFormsSectionState extends State<_LdFormsSection> {
         children: [
           _buildBreadcrumb(),
           const SizedBox(height: 12),
-          _buildSelectedForm(_selected!),
+          RspLdFormNavScope(
+            controller: _formNav,
+            child: _buildSelectedForm(_selected!),
+          ),
         ],
       );
     }

@@ -44,6 +44,10 @@ const preDeliberation = require('../services/rspPreDeliberation');
 const finalHiring = require('../services/rspFinalHiring');
 const applicantNotices = require('../services/rspApplicantNotices');
 const { broadcastAppEvent } = require('../websockets/appEvents');
+const {
+  validateRspApplicationCreate,
+  parseScore0to100,
+} = require('../utils/inputValidation');
 const router = express.Router();
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -171,7 +175,7 @@ const recruitmentStaff = [
   requireAnyRspRecruitmentIfAdmin,
 ];
 
-/** BEI needs HR scores for every narrative answer before final pass/fail. */
+/** BEI narrative scores for UI only — pass/fail uses MCQ (General/Math/Gen.info). */
 function beiGradingComplete(answersJson) {
   if (!answersJson || typeof answersJson !== 'object') return true;
   const bei = answersJson.bei;
@@ -546,47 +550,32 @@ router.post('/', publicApplicationCreateLimiter, async (req, res) => {
   try {
     await ensureRspApplicationsTables();
     const {
-      firstName,
-      middleName,
-      lastName,
-      suffix,
-      sex,
-      course,
-      address,
       dateOfBirth,
-      civilStatus,
-      fullName, // legacy
-      email,
-      phone,
       resumeNotes,
       positionAppliedFor,
     } = req.body || {};
 
-    const optStr = (v) =>
-      typeof v === 'string' && v.trim().length ? v.trim() : null;
-
-    const fn = optStr(firstName);
-    const mn = optStr(middleName);
-    const ln = optStr(lastName);
-    const sx = optStr(sex);
-    const suf = optStr(suffix);
-
-    const legacyFull = optStr(fullName);
-    const computedFull =
-      [fn, mn, ln].filter(Boolean).join(' ') + (suf ? ` ${suf}` : '');
-    const finalFullName = (computedFull.trim().length ? computedFull.trim() : legacyFull) || '';
-
-    if (!finalFullName) {
-      return res.status(400).json({
-        error: 'firstName and lastName are required (or legacy fullName).',
-        code: 'NAME_REQUIRED',
+    const validated = validateRspApplicationCreate(req.body || {});
+    if (!validated.ok) {
+      return res.status(validated.status).json({
+        error: validated.error,
+        code: validated.code,
       });
     }
-    if (!email || typeof email !== 'string') {
-      return res.status(400).json({ error: 'email is required' });
-    }
 
-    const normalizedEmail = email.trim().toLowerCase();
+    const {
+      firstName: fn,
+      middleName: mn,
+      lastName: ln,
+      suffix: suf,
+      sex: sx,
+      course,
+      address,
+      civilStatus,
+      email: normalizedEmail,
+      phone,
+      finalFullName,
+    } = validated.data;
 
     if (rspStep1RequiresEmailOtp()) {
       const token = req.body?.emailVerificationToken;
@@ -657,14 +646,14 @@ router.post('/', publicApplicationCreateLimiter, async (req, res) => {
         ln,
         suf,
         sx,
-        optStr(course),
-        optStr(address),
+        course,
+        address,
         String(ageCheck.age),
         birthDate,
-        optStr(civilStatus),
+        civilStatus,
         normalizedEmail,
-        phone ?? null,
-        resumeNotes ?? null,
+        phone,
+        typeof resumeNotes === 'string' ? resumeNotes : null,
         position,
         'submitted',
       ]
@@ -2705,10 +2694,14 @@ router.post('/exam-results', requireApplicantProof, publicApplicationExamLimiter
     const { applicationId, scorePercent, passed, answersJson } = req.body || {};
     if (!applicationId) return res.status(400).json({ error: 'applicationId is required' });
     if (typeof passed !== 'boolean') return res.status(400).json({ error: 'passed is required (boolean)' });
-    if (scorePercent === undefined || scorePercent === null) return res.status(400).json({ error: 'scorePercent is required' });
-
-    const score = Number(scorePercent);
-    if (Number.isNaN(score)) return res.status(400).json({ error: 'scorePercent must be numeric' });
+    if (scorePercent === undefined || scorePercent === null) {
+      return res.status(400).json({ error: 'scorePercent is required' });
+    }
+    const scored = parseScore0to100(scorePercent);
+    if (!scored.ok) {
+      return res.status(400).json({ error: scored.error, code: scored.code });
+    }
+    const score = scored.value;
 
     const gate = await pool.query(
       `SELECT step2_gate_required, required_form_status
@@ -2726,9 +2719,10 @@ router.post('/exam-results', requireApplicantProof, publicApplicationExamLimiter
       });
     }
 
-    const beiComplete = beiGradingComplete(answersJson);
-    const effectivePassed = beiComplete ? !!passed : false;
-    const appStatus = beiComplete ? (effectivePassed ? 'passed' : 'failed') : 'exam_taken';
+    // Pass/fail is based on MCQ overall from the client (General+Math+Gen.info,
+    // 20/25). BEI remains gradeable separately and does not gate status.
+    const effectivePassed = !!passed;
+    const appStatus = effectivePassed ? 'passed' : 'failed';
 
     await pool.query(
       `
@@ -2798,8 +2792,12 @@ router.put('/exam-results/:applicationId', protect, async (req, res) => {
       params.push(answers_json);
     }
     if (score_percent !== undefined) {
+      const scored = parseScore0to100(score_percent);
+      if (!scored.ok) {
+        return res.status(400).json({ error: scored.error, code: scored.code });
+      }
       sets.push(`score_percent = $${i++}`);
-      params.push(Number(score_percent));
+      params.push(scored.value);
     }
     if (passed !== undefined) {
       sets.push(`passed = $${i++}`);

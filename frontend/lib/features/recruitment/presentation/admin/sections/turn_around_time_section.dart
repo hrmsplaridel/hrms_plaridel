@@ -16,6 +16,7 @@ import 'package:hrms_plaridel/shared/widgets/read_only_saved_entry_dialog.dart';
 import 'package:hrms_plaridel/shared/widgets/searchable_dropdown_field.dart';
 import 'package:hrms_plaridel/shared/widgets/form_document_preview.dart';
 import 'package:hrms_plaridel/shared/widgets/rsp_ld_form_header.dart';
+import 'package:hrms_plaridel/shared/widgets/rsp_ld_form_nav_scope.dart';
 import 'package:hrms_plaridel/shared/widgets/rsp_ld_record_actions.dart';
 import 'package:hrms_plaridel/shared/widgets/rsp_ld_saved_records_browser.dart';
 import 'package:hrms_plaridel/shared/widgets/rsp_ld_recycle_bin_dialog.dart';
@@ -328,7 +329,8 @@ class RspTurnAroundTimeSection extends StatefulWidget {
       _RspTurnAroundTimeSectionState();
 }
 
-class _RspTurnAroundTimeSectionState extends State<RspTurnAroundTimeSection> {
+class _RspTurnAroundTimeSectionState extends State<RspTurnAroundTimeSection>
+    with RspLdFormEditorNavMixin<RspTurnAroundTimeSection> {
   List<TurnAroundTimeEntry> _entries = [];
   bool _loading = true;
   TurnAroundTimeEntry? _editing;
@@ -336,6 +338,21 @@ class _RspTurnAroundTimeSectionState extends State<RspTurnAroundTimeSection> {
   String? _signatureStatus;
   bool _historyLoaded = false;
   List<Map<String, dynamic>> _edits = [];
+
+  @override
+  bool get isFormEditorOpen => _editing != null;
+
+  @override
+  void exitFormEditor() {
+    setState(() {
+      _editing = null;
+      _requirementCompleted = false;
+      _signatureStatus = null;
+      _historyLoaded = false;
+      _edits = [];
+    });
+    notifyFormEditorNav();
+  }
 
   @override
   void initState() {
@@ -376,6 +393,7 @@ class _RspTurnAroundTimeSectionState extends State<RspTurnAroundTimeSection> {
         _historyLoaded = false;
         _edits = [];
       });
+      notifyFormEditorNav();
       return;
     }
     try {
@@ -388,6 +406,7 @@ class _RspTurnAroundTimeSectionState extends State<RspTurnAroundTimeSection> {
         _historyLoaded = false;
         _edits = [];
       });
+      notifyFormEditorNav();
       final id = saved.id;
       if (id != null) _loadEditHistory(id);
       _load();
@@ -400,6 +419,7 @@ class _RspTurnAroundTimeSectionState extends State<RspTurnAroundTimeSection> {
         _historyLoaded = false;
         _edits = [];
       });
+      notifyFormEditorNav();
     }
   }
 
@@ -414,6 +434,7 @@ class _RspTurnAroundTimeSectionState extends State<RspTurnAroundTimeSection> {
         _editing = saved;
         _signatureStatus = null;
       });
+      notifyFormEditorNav();
       final id = saved.id;
       if (id != null) _loadEditHistory(id);
       _load();
@@ -461,18 +482,13 @@ class _RspTurnAroundTimeSectionState extends State<RspTurnAroundTimeSection> {
       _historyLoaded = false;
       _edits = [];
     });
+    notifyFormEditorNav();
     _refreshTatCompletion();
     final id = e.id;
     if (id != null) _loadEditHistory(id);
   }
 
-  void _cancelEdit() => setState(() {
-    _editing = null;
-    _requirementCompleted = false;
-    _signatureStatus = null;
-    _historyLoaded = false;
-    _edits = [];
-  });
+  void _cancelEdit() => exitFormEditor();
 
   void _onSignaturesChanged(DocuTrackerSourceSignatureBundle bundle) {
     if (_editing?.id == null || bundle.sourceRecordId != _editing!.id) return;
@@ -552,6 +568,7 @@ class _RspTurnAroundTimeSectionState extends State<RspTurnAroundTimeSection> {
           _historyLoaded = false;
           _edits = [];
         });
+        notifyFormEditorNav();
         _loadEditHistory(id);
       }
       await RecruitmentRepo.instance.completeTurnAroundTimeEntry(id);
@@ -885,6 +902,7 @@ class _RspTurnAroundTimeSectionState extends State<RspTurnAroundTimeSection> {
         _editing = saved;
         _signatureStatus = _signatureStatus;
       });
+      notifyFormEditorNav();
       final id = saved.id;
       if (id != null) _loadEditHistory(id);
       _load();
@@ -2631,6 +2649,16 @@ class _ApplicantEditorDialogState extends State<_ApplicantEditorDialog> {
     field.text = at == null ? '' : _formatTatDate(at);
   }
 
+  /// Initial Assessment uses the same HR deliberation schedule.
+  void _fillInitialAssessmentDate({bool onlyIfEmpty = false}) {
+    final field = _c['date_initial_assessment'];
+    if (field == null) return;
+    if (onlyIfEmpty && field.text.trim().isNotEmpty) return;
+    if ((_linkedApplicationId ?? '').trim().isEmpty) return;
+    final at = _linkedDeliberationAt;
+    field.text = at == null ? '' : _formatTatDate(at);
+  }
+
   String? get _examResultChoice {
     final raw = _c['skills_trade_exam_result']!.text.trim().toLowerCase();
     if (raw.startsWith('pass')) return 'Passed';
@@ -2756,6 +2784,7 @@ class _ApplicantEditorDialogState extends State<_ApplicantEditorDialog> {
       _c['name']!.text = match.name;
       _nameError = null;
       _fillExamTakenDate();
+      _fillInitialAssessmentDate();
       _fillDeliberationDate();
     });
     final choice = _examResultChoice;
@@ -2837,8 +2866,9 @@ class _ApplicantEditorDialogState extends State<_ApplicantEditorDialog> {
               label: m.label,
               hint: m.key == 'date_contract_exam'
                   ? 'Filled from the exam date'
-                  : m.key == 'date_deliberation'
-                  ? 'Filled from the HR schedule'
+                  : m.key == 'date_deliberation' ||
+                        m.key == 'date_initial_assessment'
+                  ? 'Filled from the HR deliberation schedule'
                   : 'Select date',
               suffixIcon: IconButton(
                 tooltip: 'Pick date',
@@ -2861,7 +2891,8 @@ class _ApplicantEditorDialogState extends State<_ApplicantEditorDialog> {
                 ),
               ),
             ),
-          if (m.key == 'date_deliberation' &&
+          if ((m.key == 'date_deliberation' ||
+                  m.key == 'date_initial_assessment') &&
               (_linkedApplicationId ?? '').trim().isNotEmpty)
             Padding(
               padding: const EdgeInsets.only(top: 6, left: 4),

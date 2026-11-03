@@ -8,6 +8,7 @@ import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:hrms_plaridel/core/api/user_facing_api_error.dart';
+import 'package:hrms_plaridel/core/utils/input_rules.dart';
 import 'package:hrms_plaridel/features/recruitment/data/exam_image_support.dart';
 import 'package:hrms_plaridel/features/recruitment/models/job_vacancy_announcement.dart';
 import 'package:hrms_plaridel/features/recruitment/models/recruitment_application.dart';
@@ -256,7 +257,7 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
   Timer? _examCountdownTimer;
   int? _examCountdownRemaining;
 
-  /// True until HR enters all BEI scores (Step 7 shows waiting, not pass/fail).
+  /// True until HR enters all BEI scores (BEI is separate; does not gate pass/fail).
   bool _examBeiGradingPending = false;
   Timer? _beiGradingPollTimer;
 
@@ -1048,6 +1049,22 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
       }
       return;
     }
+    final size = f.size > 0 ? f.size : (f.bytes?.length ?? 0);
+    if (!InputRules.isWithinMaxBytes(
+      size,
+      InputRules.rspApplicationPdfMaxBytes,
+    )) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Each PDF must be at most ${InputRules.formatBytesLabel(InputRules.rspApplicationPdfMaxBytes)}.',
+            ),
+          ),
+        );
+      }
+      return;
+    }
     setState(() => _pickedDocs[kind] = f);
   }
 
@@ -1335,20 +1352,10 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
     }
   }
 
-  static bool _isValidEmailFormat(String email) {
-    final e = email.trim();
-    if (e.isEmpty) return false;
-    // Practical check: local@domain.tld
-    return RegExp(
-      r'^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$',
-    ).hasMatch(e);
-  }
+  static bool _isValidEmailFormat(String email) => InputRules.isValidEmail(email);
 
   /// Accepts typical PH and international formats after stripping non-digits.
-  static bool _isValidPhoneDigits(String raw) {
-    final digits = raw.replaceAll(RegExp(r'\D'), '');
-    return digits.length >= 10 && digits.length <= 15;
-  }
+  static bool _isValidPhoneDigits(String raw) => InputRules.isValidPhone(raw);
 
   static String _formatDateOfBirth(DateTime date) {
     final month = date.month.toString().padLeft(2, '0');
@@ -1604,6 +1611,29 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
       );
       return;
     }
+    final firstErr = InputRules.personNameError(first, label: 'First name');
+    if (firstErr != null) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(firstErr)));
+      return;
+    }
+    if (middle.isNotEmpty) {
+      final middleErr = InputRules.personNameError(
+        middle,
+        label: 'Middle name',
+        required: false,
+      );
+      if (middleErr != null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(middleErr)),
+        );
+        return;
+      }
+    }
+    final lastErr = InputRules.personNameError(last, label: 'Last name');
+    if (lastErr != null) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(lastErr)));
+      return;
+    }
     try {
       final vacancy = await _selectedVacancyAgeRule();
       if (vacancy != null) {
@@ -1659,6 +1689,20 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
           SnackBar(
             content: Text(
               '${_docKindLabel(kind)} must be a PDF file (.pdf), not Word or other formats.',
+            ),
+          ),
+        );
+        return;
+      }
+      final size = f.size > 0 ? f.size : (f.bytes?.length ?? 0);
+      if (!InputRules.isWithinMaxBytes(
+        size,
+        InputRules.rspApplicationPdfMaxBytes,
+      )) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              '${_docKindLabel(kind)} must be at most ${InputRules.formatBytesLabel(InputRules.rspApplicationPdfMaxBytes)}.',
             ),
           ),
         );
@@ -2546,14 +2590,6 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
       correct: generalInfoCorrect,
     );
 
-    final sectionPercents = <double>[];
-    if (generalQuestions.isNotEmpty) sectionPercents.add(generalScore);
-    if (mathQuestions.isNotEmpty) sectionPercents.add(mathScore);
-    sectionPercents.add(infoScore);
-    final overallScore = sectionPercents.isEmpty
-        ? infoScore
-        : sectionPercents.reduce((a, b) => a + b) / sectionPercents.length;
-
     final answersJson = <String, dynamic>{
       if (generalQuestions.isNotEmpty)
         'general': {
@@ -2563,7 +2599,7 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
           'correct': generalCorrect,
           'selected': _generalSelected,
           'score': generalScore,
-          'passed': generalScore >= 60,
+          'passed': generalScore + 1e-9 >= RspScreeningScores.mcqPassingPercent,
         },
       if (mathQuestions.isNotEmpty)
         'math': {
@@ -2573,7 +2609,7 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
           'correct': mathCorrect,
           'selected': _mathSelected,
           'score': mathScore,
-          'passed': mathScore >= 60,
+          'passed': mathScore + 1e-9 >= RspScreeningScores.mcqPassingPercent,
         },
       'general_info': {
         'questions': generalInfoQuestions
@@ -2584,7 +2620,7 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
         'correct': generalInfoCorrect,
         'selected': _generalInfoSelected,
         'score': infoScore,
-        'passed': infoScore >= 60,
+        'passed': infoScore + 1e-9 >= RspScreeningScores.mcqPassingPercent,
       },
     };
 
@@ -2595,11 +2631,19 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
       };
     }
 
+    final fallbackOverall =
+        RspScreeningScores.weightedMcqOverallFromPercents(
+          general: generalQuestions.isEmpty ? null : generalScore,
+          math: mathQuestions.isEmpty ? null : mathScore,
+          generalInfo: infoScore,
+        ) ??
+        infoScore;
     final combinedOverall =
-        RspScreeningScores.overallPercent(answersJson) ?? overallScore;
+        RspScreeningScores.overallPercent(answersJson) ?? fallbackOverall;
     final roundedOverall = RspScreeningScores.roundOverall(combinedOverall);
     final beiFullyGraded = RspScreeningScores.isBeiFullyGraded(answersJson);
-    final storedPassed = beiFullyGraded && combinedOverall >= 60;
+    // Pass/fail is MCQ-only (20/25). BEI is graded separately and does not gate it.
+    final storedPassed = RspScreeningScores.passedOverall(answersJson);
 
     try {
       await RecruitmentRepo.instance.submitExamResult(
@@ -2726,7 +2770,6 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
   ) {
     if (app.status == 'failed') return 1;
     if (exam != null && !exam.passed) {
-      if (!exam.beiGradingComplete) return 7;
       return 1;
     }
     if (exam != null) {
@@ -2761,11 +2804,8 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
     RecruitmentApplication app,
     RecruitmentExamResult? exam,
   ) {
-    if (exam != null && !exam.passed && !exam.beiGradingComplete) {
-      return 'HR is still grading your BEI. When grading is done, Continue will open your final screening result.';
-    }
     if (exam != null && !exam.passed) {
-      return 'You did not pass the screening exam. You cannot continue to the next steps in this process.';
+      return 'You did not pass the screening exam (General + Math + Gen. info, 20/25). BEI is separate and does not change this result.';
     }
     if (app.status == 'failed') {
       return 'The screening exam was not passed. You cannot continue to the next steps in this process.';
@@ -2896,8 +2936,7 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
 
       if (nextStep == 1 && trackingOnly && mounted) {
         final hint =
-            (exam != null && !exam.passed && exam.beiGradingComplete) ||
-                app.status == 'failed'
+            (exam != null && !exam.passed) || app.status == 'failed'
             ? _trackingContinueBlockedHint(app, exam)
             : _trackingOnlyContinueStayMessage(app.status);
         ScaffoldMessenger.of(
@@ -4590,6 +4629,7 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
               prefixIcon: Icons.person_outline_rounded,
             ),
             textCapitalization: TextCapitalization.words,
+            inputFormatters: InputRules.personNameFormatters,
           ),
           TextField(
             controller: _middleNameController,
@@ -4599,6 +4639,7 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
               prefixIcon: Icons.person_outline_rounded,
             ),
             textCapitalization: TextCapitalization.words,
+            inputFormatters: InputRules.personNameFormatters,
           ),
         ),
         _step1ResponsivePair(
@@ -4611,6 +4652,7 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
               prefixIcon: Icons.person_outline_rounded,
             ),
             textCapitalization: TextCapitalization.words,
+            inputFormatters: InputRules.personNameFormatters,
           ),
           DropdownButtonFormField<String>(
             initialValue: _suffixValue,
@@ -4761,6 +4803,9 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
             ),
             keyboardType: TextInputType.emailAddress,
             autocorrect: false,
+            inputFormatters: [
+              LengthLimitingTextInputFormatter(InputRules.emailMaxLength),
+            ],
           ),
           TextField(
             controller: _phoneController,
@@ -4771,6 +4816,7 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
               prefixIcon: Icons.phone_outlined,
             ),
             keyboardType: TextInputType.phone,
+            inputFormatters: InputRules.phoneFormatters,
           ),
         ),
         _buildStep1EmailOtpSection(),
@@ -5967,7 +6013,7 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
     const stepTitle = 'General Exam for LGU-Plaridel Applicants';
     final timeNote = _mcqInstructionTimeNote('general');
     final subtitle =
-        'Answer each question. You need 60% or higher to pass.$timeNote';
+        'Answer each question. Overall pass is 20 of 25 on General, Math, and Gen. info (BEI is separate).$timeNote';
 
     if (_generalQuestionsLoaded == null) {
       return Column(
@@ -6015,8 +6061,8 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
     final timeNote = _mcqInstructionTimeNote('math');
     final narrow = MediaQuery.sizeOf(context).width < 600;
     final subtitle = narrow
-        ? 'Choose the best answer (a–d). Pass mark: 60%.$timeNote'
-        : 'Choose the best answer (a–d). You need 60% or higher to pass.$timeNote';
+        ? 'Choose the best answer (a–d). Overall pass: 20/25 on General + Math + Gen. info.$timeNote'
+        : 'Choose the best answer (a–d). Overall pass: 20/25 on General + Math + Gen. info.$timeNote';
 
     Widget wrapIntro(Widget body) {
       return Align(
@@ -6064,7 +6110,7 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
     const stepTitle = 'General Information Exam';
     final timeNote = _mcqInstructionTimeNote('general_info');
     final subtitle =
-        'Choose the best answer (a–d). You need 60% or higher to pass.$timeNote';
+        'Choose the best answer (a–d). Overall pass: 20/25 on General + Math + Gen. info.$timeNote';
 
     if (_generalInfoQuestionsLoaded == null) {
       return Column(

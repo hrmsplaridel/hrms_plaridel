@@ -932,6 +932,7 @@ class _RspJobVacanciesSectionState extends State<RspJobVacanciesSection> {
           controller: v.maxApplicants,
           onChanged: (_) => setState(() {}),
           keyboardType: TextInputType.number,
+          inputFormatters: [FilteringTextInputFormatter.digitsOnly],
           maxLines: 1,
           decoration: _vacancyInput(context, hint: 'e.g. 50'),
         ),

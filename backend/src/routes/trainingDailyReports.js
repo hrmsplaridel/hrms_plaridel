@@ -6,6 +6,11 @@ const { ensureTrainingDailyReportColumns } = require('../utils/trainingDailyRepo
 const { authMiddleware } = require('../middleware/auth');
 const { requireAdmin } = require('../middleware/rbac');
 const { requireLdAccessIfAdmin } = require('../middleware/ldAccess');
+const {
+  TRAINING_DAILY_TITLE_MAX,
+  TRAINING_DAILY_DESCRIPTION_MAX,
+  cleanBoundedText,
+} = require('../utils/inputValidation');
 
 const router = express.Router();
 const protect = [authMiddleware];
@@ -58,6 +63,29 @@ router.post('/', protect, async (req, res) => {
     if (!title || typeof title !== 'string' || !title.trim()) {
       return res.status(400).json({ error: 'title is required' });
     }
+    const cleanTitle = cleanBoundedText(title, TRAINING_DAILY_TITLE_MAX);
+    if (!cleanTitle) {
+      return res.status(400).json({ error: 'title is required' });
+    }
+    if (title.trim().length > TRAINING_DAILY_TITLE_MAX) {
+      return res.status(400).json({
+        error: `title must be at most ${TRAINING_DAILY_TITLE_MAX} characters`,
+        code: 'TITLE_TOO_LONG',
+      });
+    }
+    let cleanDescription = null;
+    if (description != null && description !== '') {
+      if (typeof description !== 'string') {
+        return res.status(400).json({ error: 'description must be a string' });
+      }
+      if (description.trim().length > TRAINING_DAILY_DESCRIPTION_MAX) {
+        return res.status(400).json({
+          error: `description must be at most ${TRAINING_DAILY_DESCRIPTION_MAX} characters`,
+          code: 'DESCRIPTION_TOO_LONG',
+        });
+      }
+      cleanDescription = cleanBoundedText(description, TRAINING_DAILY_DESCRIPTION_MAX) || null;
+    }
     if (
       attachment_path != null &&
       !/^training-reports\/[0-9a-f-]{36}\.(?:jpg|jpeg|png|pdf)$/i.test(String(attachment_path))
@@ -74,8 +102,8 @@ router.post('/', protect, async (req, res) => {
                  seen_by_admin, seen_at, reviewed_by`,
       [
         req.user.id,
-        title.trim(),
-        description?.trim() || null,
+        cleanTitle,
+        cleanDescription,
         attachment_path || null,
         attachment_name || null,
         attachment_type || null,

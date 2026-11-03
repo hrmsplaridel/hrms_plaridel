@@ -5,6 +5,7 @@ import 'package:hrms_plaridel/core/api/client.dart';
 import 'package:hrms_plaridel/core/api/user_facing_api_error.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/core/utils/form_pdf.dart';
+import 'package:hrms_plaridel/core/utils/input_rules.dart';
 import 'package:hrms_plaridel/features/docutracker/data/providers/docutracker_provider.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_rsp_signature_section.dart';
 import 'package:hrms_plaridel/features/learning_development/models/individual_development_plan.dart';
@@ -12,6 +13,7 @@ import 'package:hrms_plaridel/features/recruitment/presentation/admin/widgets/rs
 import 'package:hrms_plaridel/shared/widgets/read_only_saved_entry_dialog.dart';
 import 'package:hrms_plaridel/shared/widgets/form_document_preview.dart';
 import 'package:hrms_plaridel/shared/widgets/rsp_ld_form_header.dart';
+import 'package:hrms_plaridel/shared/widgets/rsp_ld_form_nav_scope.dart';
 import 'package:hrms_plaridel/shared/widgets/rsp_ld_record_actions.dart';
 import 'package:hrms_plaridel/shared/widgets/rsp_ld_saved_records_browser.dart';
 import 'package:hrms_plaridel/shared/widgets/rsp_ld_recycle_bin_dialog.dart';
@@ -117,10 +119,20 @@ class IdpAdminSection extends StatefulWidget {
   State<IdpAdminSection> createState() => _IdpAdminSectionState();
 }
 
-class _IdpAdminSectionState extends State<IdpAdminSection> {
+class _IdpAdminSectionState extends State<IdpAdminSection>
+    with RspLdFormEditorNavMixin<IdpAdminSection> {
   List<IdpEntry> _entries = [];
   bool _loading = true;
   IdpEntry? _editing;
+
+  @override
+  bool get isFormEditorOpen => _editing != null;
+
+  @override
+  void exitFormEditor() {
+    setState(() => _editing = null);
+    notifyFormEditorNav();
+  }
 
   @override
   void initState() {
@@ -146,9 +158,17 @@ class _IdpAdminSectionState extends State<IdpAdminSection> {
     }
   }
 
-  void _startNew() => setState(() => _editing = const IdpEntry());
-  void _edit(IdpEntry e) => setState(() => _editing = e);
-  void _cancelEdit() => setState(() => _editing = null);
+  void _startNew() {
+    setState(() => _editing = const IdpEntry());
+    notifyFormEditorNav();
+  }
+
+  void _edit(IdpEntry e) {
+    setState(() => _editing = e);
+    notifyFormEditorNav();
+  }
+
+  void _cancelEdit() => exitFormEditor();
 
   Future<void> _onSave(IdpEntry entry) async {
     try {
@@ -165,6 +185,7 @@ class _IdpAdminSectionState extends State<IdpAdminSection> {
       ).showSnackBar(const SnackBar(content: Text('IDP saved.')));
       // Keep the editor open so the DocuTracker signature panel is available.
       setState(() => _editing = saved);
+      notifyFormEditorNav();
       _load();
     } catch (e) {
       if (!mounted) return;
@@ -822,6 +843,8 @@ class _IdpFormEditorState extends State<IdpFormEditor> {
           controller: _name,
           focusNode: _nameFocus,
           readOnly: widget.readOnly,
+          inputFormatters: InputRules.personNameFormatters,
+          textCapitalization: TextCapitalization.words,
           onChanged: (_) => setState(() {}),
           decoration: _decoration(
             context,

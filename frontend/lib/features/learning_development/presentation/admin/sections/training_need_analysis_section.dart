@@ -4,11 +4,13 @@ import 'package:hrms_plaridel/core/api/client.dart';
 import 'package:hrms_plaridel/core/api/user_facing_api_error.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/core/utils/form_pdf.dart';
+import 'package:hrms_plaridel/core/utils/input_rules.dart';
 import 'package:hrms_plaridel/features/learning_development/models/training_need_analysis.dart';
 import 'package:hrms_plaridel/features/recruitment/presentation/admin/widgets/rsp_records_list_table.dart';
 import 'package:hrms_plaridel/shared/widgets/read_only_saved_entry_dialog.dart';
 import 'package:hrms_plaridel/shared/widgets/form_document_preview.dart';
 import 'package:hrms_plaridel/shared/widgets/rsp_ld_form_header.dart';
+import 'package:hrms_plaridel/shared/widgets/rsp_ld_form_nav_scope.dart';
 import 'package:hrms_plaridel/shared/widgets/rsp_ld_record_actions.dart';
 import 'package:hrms_plaridel/shared/widgets/rsp_ld_saved_records_browser.dart';
 import 'package:hrms_plaridel/shared/widgets/rsp_ld_recycle_bin_dialog.dart';
@@ -147,10 +149,20 @@ class TrainingNeedAnalysisAdminSection extends StatefulWidget {
 }
 
 class _TrainingNeedAnalysisAdminSectionState
-    extends State<TrainingNeedAnalysisAdminSection> {
+    extends State<TrainingNeedAnalysisAdminSection>
+    with RspLdFormEditorNavMixin<TrainingNeedAnalysisAdminSection> {
   List<TrainingNeedAnalysisEntry> _entries = [];
   bool _loading = true;
   TrainingNeedAnalysisEntry? _editing;
+
+  @override
+  bool get isFormEditorOpen => _editing != null;
+
+  @override
+  void exitFormEditor() {
+    setState(() => _editing = null);
+    notifyFormEditorNav();
+  }
 
   @override
   void initState() {
@@ -176,10 +188,17 @@ class _TrainingNeedAnalysisAdminSectionState
     }
   }
 
-  void _startNew() =>
-      setState(() => _editing = const TrainingNeedAnalysisEntry());
-  void _edit(TrainingNeedAnalysisEntry e) => setState(() => _editing = e);
-  void _cancelEdit() => setState(() => _editing = null);
+  void _startNew() {
+    setState(() => _editing = const TrainingNeedAnalysisEntry());
+    notifyFormEditorNav();
+  }
+
+  void _edit(TrainingNeedAnalysisEntry e) {
+    setState(() => _editing = e);
+    notifyFormEditorNav();
+  }
+
+  void _cancelEdit() => exitFormEditor();
 
   Future<void> _onSave(TrainingNeedAnalysisEntry entry) async {
     try {
@@ -193,6 +212,7 @@ class _TrainingNeedAnalysisAdminSectionState
         const SnackBar(content: Text('Training Need Analysis saved.')),
       );
       setState(() => _editing = null);
+      notifyFormEditorNav();
       _load();
     } catch (e) {
       if (!mounted) return;
@@ -1287,8 +1307,12 @@ class _TnaEmployeeEditorDialogState extends State<_TnaEmployeeEditorDialog> {
 
   void _save() {
     final name = _name.text.trim();
-    if (name.isEmpty) {
-      setState(() => _nameError = 'Please select or enter an employee name.');
+    final nameErr = InputRules.personNameError(
+      name,
+      label: 'Employee name',
+    );
+    if (nameErr != null) {
+      setState(() => _nameError = nameErr);
       return;
     }
     Navigator.of(context).pop(
@@ -1384,6 +1408,8 @@ class _TnaEmployeeEditorDialogState extends State<_TnaEmployeeEditorDialog> {
                     TextFormField(
                       controller: _name,
                       focusNode: _nameFocus,
+                      inputFormatters: InputRules.personNameFormatters,
+                      textCapitalization: TextCapitalization.words,
                       onChanged: (_) {
                         if (_nameError != null) {
                           setState(() => _nameError = null);

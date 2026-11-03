@@ -22,6 +22,7 @@ import 'package:hrms_plaridel/features/recruitment/models/recruitment_applicatio
 import 'package:hrms_plaridel/features/recruitment/models/rsp_screening_scores.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/core/utils/form_pdf.dart';
+import 'package:hrms_plaridel/core/utils/input_rules.dart';
 import 'package:hrms_plaridel/shared/widgets/form_document_preview.dart';
 import 'package:hrms_plaridel/shared/widgets/searchable_dropdown_field.dart';
 import 'package:hrms_plaridel/shared/widgets/read_only_saved_entry_dialog.dart';
@@ -42,6 +43,7 @@ import 'package:hrms_plaridel/core/services/app_realtime_provider.dart';
 import 'package:hrms_plaridel/providers/auth_provider.dart';
 import 'package:hrms_plaridel/features/recruitment/presentation/shared/widgets/rsp_attachment_actions.dart';
 import 'package:hrms_plaridel/shared/widgets/rsp_ld_form_header.dart';
+import 'package:hrms_plaridel/shared/widgets/rsp_ld_form_nav_scope.dart';
 import 'package:hrms_plaridel/shared/widgets/rsp_ld_record_actions.dart';
 import 'package:hrms_plaridel/features/recruitment/presentation/admin/widgets/rsp_admin_hub.dart';
 import 'package:hrms_plaridel/features/forms/presentation/admin/pages/form_background_upload_page.dart';
@@ -853,6 +855,24 @@ class _RspFormsSection extends StatefulWidget {
 class _RspFormsSectionState extends State<_RspFormsSection> {
   _RspExamPickerItem? _selected;
   bool _showPrintBackground = false;
+  late final RspLdFormNavController _formNav = RspLdFormNavController(
+    onChanged: () {
+      if (mounted) setState(() {});
+    },
+  );
+
+  void _handleFormsBack() {
+    if (_showPrintBackground) {
+      setState(() => _showPrintBackground = false);
+      return;
+    }
+    if (_formNav.tryExitEditor()) return;
+    if (_selected != null) {
+      setState(() => _selected = null);
+      return;
+    }
+    widget.onBackToRsp();
+  }
 
   static const _formPermissionByKey = {
     'bi': 'form_bi_allowed',
@@ -900,15 +920,12 @@ class _RspFormsSectionState extends State<_RspFormsSection> {
     final secondary = AppTheme.dashTextSecondaryOf(context);
     final selectedItem = _selected;
     final inBackground = _showPrintBackground;
+    final inEditor = _formNav.hasActiveEditor;
+    final atFormsRoot = selectedItem == null && !inBackground;
     return Row(
       children: [
         TextButton.icon(
-          onPressed: selectedItem == null && !inBackground
-              ? widget.onBackToRsp
-              : () => setState(() {
-                  _selected = null;
-                  _showPrintBackground = false;
-                }),
+          onPressed: _handleFormsBack,
           icon: const Icon(Icons.arrow_back_rounded, size: 20),
           label: const Text('Back'),
           style: TextButton.styleFrom(foregroundColor: navy),
@@ -919,11 +936,9 @@ class _RspFormsSectionState extends State<_RspFormsSection> {
         Text(
           'Forms',
           style: TextStyle(
-            color: selectedItem == null && !inBackground ? navy : secondary,
+            color: atFormsRoot ? navy : secondary,
             fontSize: 13,
-            fontWeight: selectedItem == null && !inBackground
-                ? FontWeight.w800
-                : FontWeight.w600,
+            fontWeight: atFormsRoot ? FontWeight.w800 : FontWeight.w600,
           ),
         ),
         if (selectedItem != null) ...[
@@ -934,7 +949,25 @@ class _RspFormsSectionState extends State<_RspFormsSection> {
             child: Text(
               selectedItem.title,
               overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
+              style: TextStyle(
+                color: inEditor || inBackground ? secondary : navy,
+                fontSize: 13,
+                fontWeight: inEditor || inBackground
+                    ? FontWeight.w600
+                    : FontWeight.w800,
+              ),
+            ),
+          ),
+        ],
+        if (inEditor && !inBackground) ...[
+          const SizedBox(width: 2),
+          Icon(Icons.chevron_right_rounded, size: 16, color: secondary),
+          const SizedBox(width: 2),
+          const Flexible(
+            child: Text(
+              'Record',
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
                 color: AppTheme.primaryNavy,
                 fontSize: 13,
                 fontWeight: FontWeight.w800,
@@ -1037,7 +1070,10 @@ class _RspFormsSectionState extends State<_RspFormsSection> {
         children: [
           _buildBreadcrumb(),
           const SizedBox(height: 12),
-          _buildSelectedForm(_selected!),
+          RspLdFormNavScope(
+            controller: _formNav,
+            child: _buildSelectedForm(_selected!),
+          ),
         ],
       );
     }
@@ -2821,10 +2857,20 @@ class _RspBiFormSection extends StatefulWidget {
   State<_RspBiFormSection> createState() => _RspBiFormSectionState();
 }
 
-class _RspBiFormSectionState extends State<_RspBiFormSection> {
+class _RspBiFormSectionState extends State<_RspBiFormSection>
+    with RspLdFormEditorNavMixin<_RspBiFormSection> {
   List<BiFormEntry> _entries = [];
   bool _loading = true;
   BiFormEntry? _editing;
+
+  @override
+  bool get isFormEditorOpen => _editing != null;
+
+  @override
+  void exitFormEditor() {
+    setState(() => _editing = null);
+    notifyFormEditorNav();
+  }
 
   @override
   void initState() {
@@ -2860,15 +2906,15 @@ class _RspBiFormSectionState extends State<_RspBiFormSection> {
         respondentRelationship: 'supervisor',
       ),
     );
+    notifyFormEditorNav();
   }
 
   void _edit(BiFormEntry e) {
     setState(() => _editing = e);
+    notifyFormEditorNav();
   }
 
-  void _cancelEdit() {
-    setState(() => _editing = null);
-  }
+  void _cancelEdit() => exitFormEditor();
 
   void _openRecycleBin() {
     showRspLdRecycleBin(
@@ -3049,6 +3095,7 @@ class _RspBiFormSectionState extends State<_RspBiFormSection> {
           context,
         ).showSnackBar(const SnackBar(content: Text('BI entry saved.')));
         setState(() => _editing = null);
+        notifyFormEditorNav();
         _load();
       }
     } catch (e) {
@@ -3296,18 +3343,24 @@ class _BiFormEditorState extends State<_BiFormEditor> {
   }
 
   bool _validateStep1() {
-    final nameMissing = _applicantName.text.trim().isEmpty;
-    final respondentMissing = _respondentName.text.trim().isEmpty;
+    final applicantErr = InputRules.personNameError(
+      _applicantName.text,
+      label: 'Applicant name',
+    );
+    final respondentErr = InputRules.personNameError(
+      _respondentName.text,
+      label: 'Respondent name',
+    );
     setState(() {
-      _applicantError = nameMissing ? 'Required' : null;
-      _respondentError = respondentMissing ? 'Required' : null;
+      _applicantError = applicantErr;
+      _respondentError = respondentErr;
     });
-    if (nameMissing) {
+    if (applicantErr != null) {
       _revealField(_applicantFieldKey);
-    } else if (respondentMissing) {
+    } else if (respondentErr != null) {
       _revealField(_respondentFieldKey);
     }
-    return !nameMissing && !respondentMissing;
+    return applicantErr == null && respondentErr == null;
   }
 
   void _revealField(GlobalKey key) {
@@ -3757,6 +3810,7 @@ class _BiFormEditorState extends State<_BiFormEditor> {
     int maxLines = 1,
     String? hint,
     Key? anchorKey,
+    List<TextInputFormatter>? inputFormatters,
   }) {
     return KeyedSubtree(
       key: anchorKey,
@@ -3765,6 +3819,7 @@ class _BiFormEditorState extends State<_BiFormEditor> {
         readOnly: readOnly,
         maxLines: maxLines,
         minLines: maxLines > 1 ? 4 : 1,
+        inputFormatters: inputFormatters,
         style: AppTheme.dashFieldTextStyle(context),
         onChanged: (_) {
           if (errorText != null) {
@@ -3797,6 +3852,7 @@ class _BiFormEditorState extends State<_BiFormEditor> {
                       errorText: _applicantError,
                       hint: 'Enter applicant name',
                       anchorKey: _applicantFieldKey,
+                      inputFormatters: InputRules.personNameFormatters,
                     ),
                   ),
                   const SizedBox(width: 16),
@@ -3840,6 +3896,7 @@ class _BiFormEditorState extends State<_BiFormEditor> {
                 errorText: _applicantError,
                 hint: 'Enter applicant name',
                 anchorKey: _applicantFieldKey,
+                inputFormatters: InputRules.personNameFormatters,
               ),
               const SizedBox(height: 14),
               _labeledField(
@@ -3897,6 +3954,7 @@ class _BiFormEditorState extends State<_BiFormEditor> {
                         readOnly: ro,
                         errorText: _respondentError,
                         anchorKey: _respondentFieldKey,
+                        inputFormatters: InputRules.personNameFormatters,
                       ),
                     ),
                     const SizedBox(width: 16),
@@ -3916,6 +3974,7 @@ class _BiFormEditorState extends State<_BiFormEditor> {
                   readOnly: ro,
                   errorText: _respondentError,
                   anchorKey: _respondentFieldKey,
+                  inputFormatters: InputRules.personNameFormatters,
                 ),
                 const SizedBox(height: 14),
                 _labeledField(
@@ -4625,13 +4684,27 @@ const _kApplicantsProfileLockedMessage =
     'Applicants Profile is locked because all required signatures have been completed.';
 
 class _RspApplicantsProfileSectionState
-    extends State<_RspApplicantsProfileSection> {
+    extends State<_RspApplicantsProfileSection>
+    with RspLdFormEditorNavMixin<_RspApplicantsProfileSection> {
   List<ApplicantsProfileEntry> _entries = [];
   bool _loading = true;
   ApplicantsProfileEntry? _editing;
   bool _recordReadOnly = false;
   bool _requirementCompleted = false;
   String? _signatureStatus;
+
+  @override
+  bool get isFormEditorOpen => _editing != null;
+
+  @override
+  void exitFormEditor() {
+    setState(() {
+      _editing = null;
+      _recordReadOnly = false;
+      _signatureStatus = null;
+    });
+    notifyFormEditorNav();
+  }
 
   bool _isProfileLocked(ApplicantsProfileEntry? entry) {
     return entry?.signaturesLocked == true ||
@@ -5139,6 +5212,7 @@ class _RspApplicantsProfileSectionState
         _requirementCompleted = false;
         _signatureStatus = saved.signatureStatus;
       });
+      notifyFormEditorNav();
       _load();
     } catch (_) {
       if (!mounted) return;
@@ -5148,6 +5222,7 @@ class _RspApplicantsProfileSectionState
         _requirementCompleted = false;
         _signatureStatus = null;
       });
+      notifyFormEditorNav();
     }
   }
 
@@ -5190,6 +5265,7 @@ class _RspApplicantsProfileSectionState
       _recordReadOnly = readOnly || locked;
       _requirementCompleted = false;
     });
+    notifyFormEditorNav();
     final id = e.id;
     if (id != null) {
       RecruitmentRepo.instance.applicantsProfileCompletion(id).then((payload) {
@@ -5247,6 +5323,7 @@ class _RspApplicantsProfileSectionState
           _signatureStatus = working.signatureStatus;
           _recordReadOnly = working.signaturesLocked;
         });
+        notifyFormEditorNav();
       }
       final payload = await RecruitmentRepo.instance
           .completeApplicantsProfileEntry(id);
@@ -5271,11 +5348,7 @@ class _RspApplicantsProfileSectionState
     }
   }
 
-  void _cancelEdit() => setState(() {
-    _editing = null;
-    _recordReadOnly = false;
-    _signatureStatus = null;
-  });
+  void _cancelEdit() => exitFormEditor();
 
   Future<void> _onSave(ApplicantsProfileEntry entry) async {
     try {
@@ -5297,6 +5370,7 @@ class _RspApplicantsProfileSectionState
         _signatureStatus = saved.signatureStatus ?? _signatureStatus;
         _recordReadOnly = saved.signaturesLocked;
       });
+      notifyFormEditorNav();
       _load();
     } catch (e) {
       if (mounted) {
@@ -7287,13 +7361,27 @@ class _RspSelectionLineupSection extends StatefulWidget {
 }
 
 class _RspSelectionLineupSectionState
-    extends State<_RspSelectionLineupSection> {
+    extends State<_RspSelectionLineupSection>
+    with RspLdFormEditorNavMixin<_RspSelectionLineupSection> {
   List<SelectionLineupEntry> _entries = [];
   bool _loading = true;
   SelectionLineupEntry? _editing;
   bool _recordReadOnly = false;
   bool _requirementCompleted = false;
   String? _signatureStatus;
+
+  @override
+  bool get isFormEditorOpen => _editing != null;
+
+  @override
+  void exitFormEditor() {
+    setState(() {
+      _editing = null;
+      _recordReadOnly = false;
+      _signatureStatus = null;
+    });
+    notifyFormEditorNav();
+  }
 
   @override
   void initState() {
@@ -7356,6 +7444,7 @@ class _RspSelectionLineupSectionState
         _requirementCompleted = false;
         _signatureStatus = null;
       });
+      notifyFormEditorNav();
       _load();
     } catch (_) {
       if (!mounted) return;
@@ -7365,6 +7454,7 @@ class _RspSelectionLineupSectionState
         _requirementCompleted = false;
         _signatureStatus = null;
       });
+      notifyFormEditorNav();
     }
   }
 
@@ -7631,6 +7721,7 @@ class _RspSelectionLineupSectionState
       _requirementCompleted = false;
       _signatureStatus = null;
     });
+    notifyFormEditorNav();
     final id = entry.id;
     if (id != null) {
       RecruitmentRepo.instance.selectionLineupCompletion(id).then((payload) {
@@ -7661,6 +7752,7 @@ class _RspSelectionLineupSectionState
           _signatureStatus = null;
           _recordReadOnly = false;
         });
+        notifyFormEditorNav();
       }
       final payload = await RecruitmentRepo.instance
           .completeSelectionLineupEntry(id);
@@ -7685,11 +7777,7 @@ class _RspSelectionLineupSectionState
     }
   }
 
-  void _cancelEdit() => setState(() {
-    _editing = null;
-    _recordReadOnly = false;
-    _signatureStatus = null;
-  });
+  void _cancelEdit() => exitFormEditor();
 
   void _onSignaturesChanged(DocuTrackerSourceSignatureBundle bundle) {
     if (_editing?.id == null || bundle.sourceRecordId != _editing!.id) return;
@@ -7818,6 +7906,7 @@ class _RspSelectionLineupSectionState
         _editing = saved;
         _recordReadOnly = false;
       });
+      notifyFormEditorNav();
       _load();
     } catch (e) {
       if (mounted) {
@@ -10561,11 +10650,12 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
       final overall = usePerfect
           ? 100.0
           : RspScreeningScores.roundOverall(
-              (choice.generalScore +
-                      choice.mathScore +
-                      choice.generalInfoScore +
-                      choice.beiScore) /
-                  4.0,
+              RspScreeningScores.weightedMcqOverallFromPercents(
+                    general: choice.generalScore,
+                    math: choice.mathScore,
+                    generalInfo: choice.generalInfoScore,
+                  ) ??
+                  0,
             );
 
       await RecruitmentRepo.instance.submitExamResult(
@@ -10582,8 +10672,8 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
         SnackBar(
           content: Text(
             usePerfect
-                ? '${app.fullName.trim().isEmpty ? 'Applicant' : app.fullName.trim()} marked passed - 100% on all four exams.'
-                : '${app.fullName.trim().isEmpty ? 'Applicant' : app.fullName.trim()} marked passed with custom scores.',
+                ? '${app.fullName.trim().isEmpty ? 'Applicant' : app.fullName.trim()} marked passed — 100% on General, Math, and Gen. info (BEI separate).'
+                : '${app.fullName.trim().isEmpty ? 'Applicant' : app.fullName.trim()} marked passed with custom MCQ scores (BEI recorded separately).',
           ),
         ),
       );
@@ -10610,6 +10700,7 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
     BuildContext context, {
     required bool isNA,
     double? value,
+    bool applyPassFailColor = true,
   }) {
     final tabular = [const FontFeature.tabularFigures()];
     if (isNA) {
@@ -10620,7 +10711,16 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
         fontStyle: FontStyle.italic,
       );
     }
-    final passSection = value != null && value >= 60;
+    if (!applyPassFailColor) {
+      return TextStyle(
+        fontSize: 14,
+        fontWeight: FontWeight.w700,
+        fontFeatures: tabular,
+        color: AppTheme.dashTextPrimaryOf(context),
+      );
+    }
+    final passSection =
+        value != null && value + 1e-9 >= RspScreeningScores.mcqPassingPercent;
     final dark = AppTheme.dashIsDark(context);
     final passFg = dark ? const Color(0xFF81C784) : _kPassFg;
     final failFg = dark ? const Color(0xFFEF9A9A) : _kFailFg;
@@ -10860,13 +10960,17 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                 ? AppTheme.dashMutedSurfaceOf(dialogContext)
                 : AppTheme.dashPanelOf(dialogContext);
 
-            Widget scoreCell(double? value) => Text(
+            Widget scoreCell(
+              double? value, {
+              bool applyPassFailColor = true,
+            }) => Text(
               scoreLabel(value),
               textAlign: TextAlign.end,
               style: _scoreBreakdownScoreStyle(
                 dialogContext,
                 isNA: value == null,
                 value: value,
+                applyPassFailColor: applyPassFailColor,
               ),
             );
 
@@ -10919,7 +11023,10 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                   scoreCell(infoScore),
                   background: rowBg,
                 ),
-                _scoreBreakdownBodyCell(scoreCell(beiScore), background: rowBg),
+                _scoreBreakdownBodyCell(
+                  scoreCell(beiScore, applyPassFailColor: false),
+                  background: rowBg,
+                ),
                 _scoreBreakdownBodyCell(
                   Center(
                     child: canGradeBei
@@ -12152,7 +12259,7 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
     final isApplicationsView = !isExamView;
     final pageTitle = isExamView ? 'Exam Results' : 'Applications';
     final pageSubtitle = isExamView
-        ? 'Section scores and pass/fail below. Use Mark passed in the Result column to choose perfect 100% or encode custom pass scores. Use Grade BEI to score real BEI responses.'
+        ? 'Pass/fail uses General (10) + Math (10) + Gen. info (5) = 25 items; pass at 20. BEI is graded separately and is not in the overall. Use Mark passed to override, or Grade BEI for narrative scores.'
         : 'Monitor applicant submissions, attachments, and document review status.';
     final pageIcon = isExamView
         ? Icons.fact_check_outlined
@@ -13648,12 +13755,12 @@ class _AdminExamBypassDialogState extends State<_AdminExamBypassDialog> {
     super.dispose();
   }
 
-  double? _parseScore(TextEditingController c) {
+  double? _parseScore(TextEditingController c, {double min = 0}) {
     final s = c.text.trim();
     if (s.isEmpty) return null;
     final v = double.tryParse(s);
     if (v == null) return null;
-    if (v < 60 || v > 100) return null;
+    if (v < min || v > 100) return null;
     return v;
   }
 
@@ -13669,7 +13776,23 @@ class _AdminExamBypassDialogState extends State<_AdminExamBypassDialog> {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text(
-            'Enter valid scores from 60 to 100 for General, Math, Gen. info, and BEI.',
+            'Enter valid scores from 0 to 100 for General, Math, Gen. info, and BEI.',
+          ),
+        ),
+      );
+      return null;
+    }
+    final mcqOverall = RspScreeningScores.weightedMcqOverallFromPercents(
+      general: g,
+      math: m,
+      generalInfo: i,
+    );
+    if (mcqOverall == null ||
+        mcqOverall + 1e-9 < RspScreeningScores.mcqPassingPercent) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Mark passed requires MCQ overall of at least 20/25 (80%) on General + Math + Gen. info. BEI is not counted.',
           ),
         ),
       );
@@ -13804,8 +13927,8 @@ class _AdminExamBypassDialogState extends State<_AdminExamBypassDialog> {
                         const SizedBox(height: 6),
                         Text(
                           alreadyPassed
-                              ? 'Overwrite the current passing record with perfect scores on all four screening sections.'
-                              : 'Record this applicant as passed with 100% on every exam section — even without taking the screening exam.',
+                              ? 'Overwrite the current passing record. Pass/fail uses General + Math + Gen. info (20/25); BEI is stored separately.'
+                              : 'Record this applicant as passed. Overall uses General + Math + Gen. info only (pass at 20/25); BEI is optional/separate.',
                           style: TextStyle(
                             color: secondary,
                             fontSize: 13.5,
@@ -13964,7 +14087,7 @@ class _AdminExamBypassDialogState extends State<_AdminExamBypassDialog> {
                       if (_mode == _AdminPassScoreMode.custom) ...[
                         const SizedBox(height: 8),
                         Text(
-                          'Allowed range: 60 to 100 (Mark passed mode).',
+                          'Scores 0–100. MCQ overall must reach 20/25 (80%). BEI is recorded but not counted in pass/fail.',
                           style: TextStyle(
                             color: secondary,
                             fontSize: 12,

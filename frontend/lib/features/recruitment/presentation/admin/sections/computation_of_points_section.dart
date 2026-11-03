@@ -11,6 +11,7 @@ import 'package:hrms_plaridel/features/recruitment/presentation/admin/widgets/rs
 import 'package:hrms_plaridel/shared/widgets/form_document_preview.dart';
 import 'package:hrms_plaridel/shared/widgets/read_only_saved_entry_dialog.dart';
 import 'package:hrms_plaridel/shared/widgets/rsp_ld_form_header.dart';
+import 'package:hrms_plaridel/shared/widgets/rsp_ld_form_nav_scope.dart';
 import 'package:hrms_plaridel/shared/widgets/rsp_ld_record_actions.dart';
 import 'package:hrms_plaridel/shared/widgets/rsp_ld_saved_records_browser.dart';
 import 'package:hrms_plaridel/shared/widgets/rsp_ld_recycle_bin_dialog.dart';
@@ -91,11 +92,24 @@ class RspComputationOfPointsSection extends StatefulWidget {
 }
 
 class _RspComputationOfPointsSectionState
-    extends State<RspComputationOfPointsSection> {
+    extends State<RspComputationOfPointsSection>
+    with RspLdFormEditorNavMixin<RspComputationOfPointsSection> {
   List<ComputationOfPointsEntry> _entries = [];
   bool _loading = true;
   ComputationOfPointsEntry? _editing;
   String? _signatureStatus;
+
+  @override
+  bool get isFormEditorOpen => _editing != null;
+
+  @override
+  void exitFormEditor() {
+    setState(() {
+      _editing = null;
+      _signatureStatus = null;
+    });
+    notifyFormEditorNav();
+  }
 
   @override
   void initState() {
@@ -121,18 +135,23 @@ class _RspComputationOfPointsSectionState
     }
   }
 
-  void _startNew() => setState(() {
-    _editing = const ComputationOfPointsEntry();
-    _signatureStatus = null;
-  });
-  void _edit(ComputationOfPointsEntry e) => setState(() {
-    _editing = e;
-    _signatureStatus = null;
-  });
-  void _cancelEdit() => setState(() {
-    _editing = null;
-    _signatureStatus = null;
-  });
+  void _startNew() {
+    setState(() {
+      _editing = const ComputationOfPointsEntry();
+      _signatureStatus = null;
+    });
+    notifyFormEditorNav();
+  }
+
+  void _edit(ComputationOfPointsEntry e) {
+    setState(() {
+      _editing = e;
+      _signatureStatus = null;
+    });
+    notifyFormEditorNav();
+  }
+
+  void _cancelEdit() => exitFormEditor();
 
   void _onSignaturesChanged(DocuTrackerSourceSignatureBundle bundle) {
     if (_editing?.id == null || bundle.sourceRecordId != _editing!.id) return;
@@ -187,6 +206,7 @@ class _RspComputationOfPointsSectionState
         _editing = null;
         _signatureStatus = null;
       });
+      notifyFormEditorNav();
       _load();
     } catch (e) {
       if (!mounted) return;

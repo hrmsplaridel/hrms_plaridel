@@ -6,7 +6,6 @@ int resumeStepForTrackingOnlyEntry(
 ) {
   if (app.status == 'failed') return 1;
   if (exam != null && !exam.passed) {
-    if (!exam.beiGradingComplete) return 7;
     return 1;
   }
   if (exam != null) {
@@ -39,11 +38,8 @@ String trackingContinueBlockedHint(
   RecruitmentApplication app,
   RecruitmentExamResult? exam,
 ) {
-  if (exam != null && !exam.passed && !exam.beiGradingComplete) {
-    return 'HR is still grading your BEI. When grading is done, Continue will open your final screening result.';
-  }
   if (exam != null && !exam.passed) {
-    return 'You did not pass the screening exam. You cannot continue to the next steps in this process.';
+    return 'You did not pass the screening exam (General + Math + Gen. info, 20/25). BEI is separate and does not change this result.';
   }
   if (app.status == 'failed') {
     return 'The screening exam was not passed. You cannot continue to the next steps in this process.';

@@ -9,6 +9,7 @@ import 'package:hrms_plaridel/features/recruitment/presentation/admin/widgets/rs
 import 'package:hrms_plaridel/shared/widgets/read_only_saved_entry_dialog.dart';
 import 'package:hrms_plaridel/shared/widgets/form_document_preview.dart';
 import 'package:hrms_plaridel/shared/widgets/rsp_ld_form_header.dart';
+import 'package:hrms_plaridel/shared/widgets/rsp_ld_form_nav_scope.dart';
 import 'package:hrms_plaridel/shared/widgets/rsp_ld_saved_records_browser.dart';
 import 'package:hrms_plaridel/shared/widgets/rsp_ld_recycle_bin_dialog.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_rsp_signature_section.dart';
@@ -24,10 +25,20 @@ class RspWorkExperienceSheetSection extends StatefulWidget {
 }
 
 class _RspWorkExperienceSheetSectionState
-    extends State<RspWorkExperienceSheetSection> {
+    extends State<RspWorkExperienceSheetSection>
+    with RspLdFormEditorNavMixin<RspWorkExperienceSheetSection> {
   List<WorkExperienceSheetEntry> _entries = [];
   bool _loading = true;
   WorkExperienceSheetEntry? _editing;
+
+  @override
+  bool get isFormEditorOpen => _editing != null;
+
+  @override
+  void exitFormEditor() {
+    setState(() => _editing = null);
+    notifyFormEditorNav();
+  }
 
   @override
   void initState() {
@@ -53,10 +64,17 @@ class _RspWorkExperienceSheetSectionState
     }
   }
 
-  void _startNew() =>
-      setState(() => _editing = const WorkExperienceSheetEntry());
-  void _edit(WorkExperienceSheetEntry e) => setState(() => _editing = e);
-  void _cancelEdit() => setState(() => _editing = null);
+  void _startNew() {
+    setState(() => _editing = const WorkExperienceSheetEntry());
+    notifyFormEditorNav();
+  }
+
+  void _edit(WorkExperienceSheetEntry e) {
+    setState(() => _editing = e);
+    notifyFormEditorNav();
+  }
+
+  void _cancelEdit() => exitFormEditor();
 
   Future<void> _onSave(WorkExperienceSheetEntry entry) async {
     try {
@@ -70,6 +88,7 @@ class _RspWorkExperienceSheetSectionState
         const SnackBar(content: Text('Work experience sheet saved.')),
       );
       setState(() => _editing = null);
+      notifyFormEditorNav();
       _load();
     } catch (e) {
       if (!mounted) return;
