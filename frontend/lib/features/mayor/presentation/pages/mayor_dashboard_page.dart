@@ -1,4 +1,3 @@
-import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:hrms_plaridel/features/dtr/leave/presentation/admin/admin_leave_screen.dart';
 import 'package:hrms_plaridel/features/dtr/locator/presentation/admin/pages/admin_locator_management_screen.dart';
@@ -3210,7 +3209,7 @@ class _MayorEndorsementIntakeDialog extends StatefulWidget {
 
 class _MayorEndorsementIntakeDialogState
     extends State<_MayorEndorsementIntakeDialog> {
-  String _priority = 'normal';
+  final String _priority = 'normal';
   String? _requestedOfficeName;
   final _lastNameCtrl = TextEditingController();
   final _firstNameCtrl = TextEditingController();
@@ -4800,12 +4799,10 @@ class _MayorSectionCard extends StatelessWidget {
   const _MayorSectionCard({
     required this.title,
     required this.child,
-    this.trailing,
   });
 
   final String title;
   final Widget child;
-  final Widget? trailing;
 
   @override
   Widget build(BuildContext context) {
@@ -4841,7 +4838,6 @@ class _MayorSectionCard extends StatelessWidget {
                     ),
                   ),
                 ),
-                if (trailing != null) trailing!,
               ],
             ),
             const SizedBox(height: 12),
@@ -5254,12 +5250,6 @@ String _fmtShortDate(DateTime d) {
     'Dec',
   ];
   return '${months[d.month - 1]} ${d.day}';
-}
-
-bool _isMayorOfficeLabel(String? value) {
-  final t = (value ?? '').trim().toLowerCase();
-  if (t.isEmpty) return true;
-  return t.contains('mayor');
 }
 
 class MayorEndorsementRepo {
